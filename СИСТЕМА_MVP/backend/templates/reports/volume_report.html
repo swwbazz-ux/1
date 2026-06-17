@@ -39,6 +39,15 @@
         <h2>Фильтры</h2>
         <form method="get" class="filters">
             <div>
+                <label for="template">Шаблон отчета</label>
+                <select id="template" name="template">
+                    <option value="">Стандартный</option>
+                    {% for template in report_templates %}
+                        <option value="{{ template.id }}" {% if filters.template == template.id|stringformat:"s" %}selected{% endif %}>{{ template.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
                 <label for="loading_shift_type">Смена загрузки</label>
                 <select id="loading_shift_type" name="loading_shift_type">
                     <option value="">Все</option>
@@ -72,34 +81,20 @@
         <table>
             <thead>
             <tr>
-                <th>Самосвал</th>
-                <th>Экскаватор</th>
-                <th>Порода</th>
-                <th>Разгрузка</th>
-                <th>Объем</th>
-                <th>Тоннаж</th>
-                <th>Смена загрузки</th>
-                <th>Смена разгрузки</th>
-                <th>Переходящий</th>
-                <th>Выполнен</th>
+                {% for header in report_headers %}
+                    <th>{{ header }}</th>
+                {% endfor %}
             </tr>
             </thead>
             <tbody>
-            {% for trip in trips %}
+            {% for row in report_rows %}
                 <tr>
-                    <td>{{ trip.truck }}</td>
-                    <td>{{ trip.excavator }}</td>
-                    <td>{{ trip.rock_type }}</td>
-                    <td>{{ trip.dump_point }}</td>
-                    <td>{{ trip.volume_m3|default:"-" }}</td>
-                    <td>{{ trip.tonnage|default:"-" }}</td>
-                    <td>{% if trip.loading_shift %}{{ trip.loading_shift.get_shift_type_display }}{% else %}-{% endif %}</td>
-                    <td>{% if trip.unloading_shift %}{{ trip.unloading_shift.get_shift_type_display }}{% else %}-{% endif %}</td>
-                    <td>{% if trip.is_carryover %}Да{% else %}Нет{% endif %}</td>
-                    <td>{{ trip.completed_at }}</td>
+                    {% for cell in row %}
+                        <td>{{ cell|default:"-" }}</td>
+                    {% endfor %}
                 </tr>
             {% empty %}
-                <tr><td colspan="10">Выполненных рейсов пока нет.</td></tr>
+                <tr><td colspan="{{ report_headers|length }}">Выполненных рейсов пока нет.</td></tr>
             {% endfor %}
             </tbody>
         </table>

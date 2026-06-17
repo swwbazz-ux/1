@@ -15,6 +15,7 @@ from references.models import (
     RockType,
     TruckCapacityRule,
 )
+from reports.models import ReportTemplate, ReportType
 from shifts.models import EmployeeShift
 from trips.models import Trip, TripStatus
 
@@ -440,5 +441,39 @@ class AccessLoginTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, '11')
         self.assertNotContains(response, '22,00')
+
+    def test_volume_report_uses_selected_report_template_columns(self):
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        truck = Equipment.objects.create(equipment_type=truck_type, garage_number='10')
+        excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='1')
+        rock = RockType.objects.create(name='Руда')
+        dump_point = DumpPoint.objects.create(name='ККД')
+        dispatcher_role = Role.objects.create(code='dispatcher', name='Диспетчер')
+        dispatcher = Employee.objects.create(full_name='Тестовый диспетчер')
+        EmployeeAccess.objects.create(employee=dispatcher, role=dispatcher_role, access_code='5000')
+        template = ReportTemplate.objects.create(
+            name='Короткий отчет',
+            report_type=ReportType.SHIFT_VOLUME,
+            columns=['truck', 'volume_m3'],
+        )
+        Trip.objects.create(
+            excavator=excavator,
+            truck=truck,
+            rock_type=rock,
+            dump_point=dump_point,
+            status=TripStatus.COMPLETED,
+            volume_m3='11.00',
+            completed_at=timezone.now(),
+        )
+
+        self.client.post('/', {'access_code': '5000'}, follow=True, HTTP_HOST='localhost')
+        response = self.client.get(f'/reports/volume/?template={template.id}', HTTP_HOST='localhost')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, '<th>Самосвал</th>', html=True)
+        self.assertContains(response, '<th>Объем, м3</th>', html=True)
+        self.assertNotContains(response, '<th>Экскаватор</th>', html=True)
+        self.assertContains(response, '11')
 
 # Create your tests here.
