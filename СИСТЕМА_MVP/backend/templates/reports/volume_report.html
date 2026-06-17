@@ -1,40 +1,37 @@
-<!doctype html>
-<html lang="ru">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Отчет по объемам</title>
-    <style>
-        body { margin: 0; font-family: Arial, sans-serif; background: #f4f7f9; color: #13202a; }
-        header { background: #101820; color: #ffffff; padding: 22px 28px; }
-        main { padding: 28px; max-width: 1000px; margin: 0 auto; }
-        .card { background: #ffffff; border-radius: 18px; padding: 24px; box-shadow: 0 12px 40px rgba(16, 24, 32, .08); margin-bottom: 18px; }
-        .metric { font-size: 34px; font-weight: 700; }
-        table { width: 100%; border-collapse: collapse; }
-        th, td { padding: 10px; border-bottom: 1px solid #e5edf2; text-align: left; }
-        .filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; align-items: end; }
-        label { display: block; margin-bottom: 6px; font-weight: 700; }
-        select, button { width: 100%; box-sizing: border-box; padding: 12px; border: 1px solid #ccd7df; border-radius: 12px; background: #ffffff; }
-        button { background: #28c7b7; color: #081216; font-weight: 700; cursor: pointer; }
-    </style>
-</head>
-<body>
-<header>
-    <div>{{ access.employee.full_name }}</div>
-    <h1>Отчет по объемам</h1>
+{% extends "base.html" %}
+
+{% block title %}Отчет по объемам{% endblock %}
+
+{% block body %}
+<header class="app-header">
+    <div class="header-inner">
+        <div class="topline">
+            <span>{{ access.employee.full_name }}</span>
+            <a href="{% url 'logout' %}">Выйти</a>
+        </div>
+        <h1>Отчет по объемам</h1>
+        <p>Итоги по выполненным рейсам, фильтры по сменам, переходящие рейсы и выгрузка в Excel.</p>
+    </div>
 </header>
-<main>
-    <section class="card">
-        <div>Общий объем по выполненным рейсам</div>
-        <div class="metric">{{ total_volume }} м3</div>
-        <div>Общий тоннаж по выполненным рейсам</div>
-        <div class="metric">{{ total_tonnage }} т</div>
-        <p>
-            <a href="{% url 'volume_report_export' %}{% if filters.query_string %}?{{ filters.query_string }}{% endif %}">Выгрузить в Excel</a>
-            |
-            <a href="{% url 'dispatcher_control' %}">Вернуться на диспетчерский пульт</a>
-        </p>
+<main class="page">
+    <section class="metric-grid">
+        <div class="metric-card success">
+            <div>Общий объем по выполненным рейсам</div>
+            <div class="metric">{{ total_volume }} м3</div>
+        </div>
+        <div class="metric-card">
+            <div>Общий тоннаж по выполненным рейсам</div>
+            <div class="metric">{{ total_tonnage }} т</div>
+        </div>
     </section>
+
+    <section class="card">
+        <div class="actions">
+            <a class="button-link" href="{% url 'volume_report_export' %}{% if filters.query_string %}?{{ filters.query_string }}{% endif %}">Выгрузить в Excel</a>
+            <a class="button-link button-secondary" href="{% url 'dispatcher_control' %}">Вернуться на диспетчерский пульт</a>
+        </div>
+    </section>
+
     <section class="card">
         <h2>Фильтры</h2>
         <form method="get" class="filters">
@@ -76,29 +73,31 @@
             </div>
         </form>
     </section>
+
     <section class="card">
         <h2>Выполненные рейсы</h2>
-        <table>
-            <thead>
-            <tr>
-                {% for header in report_headers %}
-                    <th>{{ header }}</th>
-                {% endfor %}
-            </tr>
-            </thead>
-            <tbody>
-            {% for row in report_rows %}
+        <div class="table-wrap">
+            <table>
+                <thead>
                 <tr>
-                    {% for cell in row %}
-                        <td>{{ cell|default:"-" }}</td>
+                    {% for header in report_headers %}
+                        <th>{{ header }}</th>
                     {% endfor %}
                 </tr>
-            {% empty %}
-                <tr><td colspan="{{ report_headers|length }}">Выполненных рейсов пока нет.</td></tr>
-            {% endfor %}
-            </tbody>
-        </table>
+                </thead>
+                <tbody>
+                {% for row in report_rows %}
+                    <tr>
+                        {% for cell in row %}
+                            <td>{{ cell|default:"-" }}</td>
+                        {% endfor %}
+                    </tr>
+                {% empty %}
+                    <tr><td colspan="{{ report_headers|length }}">Выполненных рейсов пока нет.</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
     </section>
 </main>
-</body>
-</html>
+{% endblock %}

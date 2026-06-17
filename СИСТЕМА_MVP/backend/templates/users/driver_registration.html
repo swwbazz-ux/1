@@ -1,76 +1,22 @@
-<!doctype html>
-<html lang="ru">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Первичная регистрация водителя</title>
-    <style>
-        body {
-            margin: 0;
-            font-family: Arial, sans-serif;
-            background: #f4f7f9;
-            color: #13202a;
-        }
-        header {
-            background: #101820;
-            color: #ffffff;
-            padding: 22px 28px;
-        }
-        main {
-            padding: 28px;
-            max-width: 720px;
-            margin: 0 auto;
-        }
-        .card {
-            background: #ffffff;
-            border-radius: 18px;
-            padding: 24px;
-            box-shadow: 0 12px 40px rgba(16, 24, 32, .08);
-        }
-        label {
-            display: block;
-            margin: 16px 0 6px;
-            font-weight: 700;
-        }
-        select {
-            width: 100%;
-            box-sizing: border-box;
-            padding: 13px;
-            border: 1px solid #ccd7df;
-            border-radius: 12px;
-            font-size: 16px;
-            background: #ffffff;
-        }
-        button {
-            margin-top: 22px;
-            width: 100%;
-            padding: 16px;
-            border: 0;
-            border-radius: 12px;
-            background: #28c7b7;
-            color: #081216;
-            font-weight: 700;
-            cursor: pointer;
-        }
-        .errors {
-            margin: 16px 0;
-            padding: 14px;
-            border-radius: 12px;
-            background: #ffe9e5;
-            color: #8b1d10;
-        }
-    </style>
-</head>
-<body>
-<header>
-    <div>{{ access.employee.full_name }}</div>
-    <h1>Первичная регистрация водителя</h1>
-</header>
-<main>
-    <section class="card">
+{% extends "base.html" %}
+
+{% block title %}Первичная регистрация водителя{% endblock %}
+
+{% block body %}
+<header class="app-header">
+    <div class="header-inner">
+        <div class="topline">
+            <span>{{ access.employee.full_name }}</span>
+            <a href="{% url 'logout' %}">Выйти</a>
+        </div>
+        <h1>Первичная регистрация водителя</h1>
         <p>Выберите смену, самосвал и место проживания. После сохранения система закрепит эти данные и откроет рабочий экран.</p>
+    </div>
+</header>
+<main class="page compact-page">
+    <section class="card">
         {% if form.errors %}
-            <div class="errors">{{ form.non_field_errors }}</div>
+            <div class="message error">{{ form.non_field_errors }}</div>
         {% endif %}
         <form method="post">
             {% csrf_token %}
@@ -83,5 +29,4 @@
         </form>
     </section>
 </main>
-</body>
-</html>
+{% endblock %}

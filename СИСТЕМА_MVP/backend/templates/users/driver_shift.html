@@ -1,101 +1,43 @@
-<!doctype html>
-<html lang="ru">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Смена водителя</title>
-    <style>
-        body {
-            margin: 0;
-            font-family: Arial, sans-serif;
-            background: #f4f7f9;
-            color: #13202a;
-        }
-        header {
-            background: #101820;
-            color: #ffffff;
-            padding: 22px 28px;
-        }
-        main {
-            padding: 28px;
-            max-width: 760px;
-            margin: 0 auto;
-        }
-        .card {
-            background: #ffffff;
-            border-radius: 18px;
-            padding: 24px;
-            box-shadow: 0 12px 40px rgba(16, 24, 32, .08);
-            margin-bottom: 18px;
-        }
-        .grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-            gap: 12px;
-        }
-        .tile {
-            background: #eef5f7;
-            border-radius: 14px;
-            padding: 14px;
-        }
-        label {
-            display: block;
-            margin: 16px 0 6px;
-            font-weight: 700;
-        }
-        input {
-            width: 100%;
-            box-sizing: border-box;
-            padding: 13px;
-            border: 1px solid #ccd7df;
-            border-radius: 12px;
-            font-size: 16px;
-        }
-        button {
-            margin-top: 22px;
-            width: 100%;
-            padding: 16px;
-            border: 0;
-            border-radius: 12px;
-            background: #28c7b7;
-            color: #081216;
-            font-weight: 700;
-            cursor: pointer;
-        }
-        .success {
-            padding: 12px;
-            border-radius: 12px;
-            background: #ddfff8;
-            color: #075a52;
-        }
-    </style>
-</head>
-<body>
-<header>
-    <div>{{ access.employee.full_name }}</div>
-    <h1>Смена водителя</h1>
+{% extends "base.html" %}
+
+{% block title %}Смена водителя{% endblock %}
+
+{% block body %}
+<header class="app-header">
+    <div class="header-inner">
+        <div class="topline">
+            <span>{{ access.employee.full_name }}</span>
+            <a href="{% url 'logout' %}">Выйти</a>
+        </div>
+        <h1>Смена водителя</h1>
+        <p>Рабочий экран водителя: открыть смену, принять назначение, выполнить рейс и закрыть смену.</p>
+    </div>
 </header>
-<main>
+<main class="page compact-page">
     {% for message in messages %}
-        <div class="card success">{{ message }}</div>
+        <div class="message success">{{ message }}</div>
     {% endfor %}
+
     <section class="card">
         <h2>Закрепленные данные</h2>
         <div class="grid">
-            <div class="tile"><strong>Смена</strong><br>{{ registration.get_shift_type_display }}</div>
-            <div class="tile"><strong>Самосвал</strong><br>{{ registration.truck }}</div>
-            <div class="tile"><strong>Проживание</strong><br>{{ registration.dormitory_section }}</div>
+            <div class="tile"><strong>Смена</strong>{{ registration.get_shift_type_display }}</div>
+            <div class="tile"><strong>Самосвал</strong>{{ registration.truck }}</div>
+            <div class="tile"><strong>Проживание</strong>{{ registration.dormitory_section }}</div>
         </div>
     </section>
+
     <section class="card">
         {% if open_shift %}
             <h2>Смена открыта</h2>
-            <p><strong>Открыта:</strong> {{ open_shift.opened_at }}</p>
-            <p><strong>Топливо:</strong> {{ open_shift.start_fuel }}</p>
-            <p><strong>Пробег:</strong> {{ open_shift.start_mileage }}</p>
-            <p><strong>Моточасы:</strong> {{ open_shift.start_engine_hours }}</p>
+            <div class="grid">
+                <div class="tile"><strong>Открыта</strong>{{ open_shift.opened_at|date:"d.m.Y H:i" }}</div>
+                <div class="tile"><strong>Топливо</strong>{{ open_shift.start_fuel }}</div>
+                <div class="tile"><strong>Пробег</strong>{{ open_shift.start_mileage }}</div>
+                <div class="tile"><strong>Моточасы</strong>{{ open_shift.start_engine_hours }}</div>
+            </div>
             {% if active_trip %}
-                <p><strong>Важно:</strong> есть активный рейс. Смена может быть закрыта, а состояние рейса останется в системе для следующей смены.</p>
+                <p class="muted">Есть активный рейс. Смена может быть закрыта, а состояние рейса останется в системе для следующей смены.</p>
             {% endif %}
             <form method="post" action="{% url 'driver_close_shift' %}">
                 {% csrf_token %}
@@ -108,9 +50,9 @@
             </form>
         {% else %}
             <h2>Открыть смену</h2>
-            <p>Проверьте показатели техники на начало смены. Если фактические значения отличаются, укажите фактические.</p>
+            <p class="muted">Проверьте показатели техники на начало смены. Если фактические значения отличаются, укажите фактические.</p>
             {% if last_closed_shift %}
-                <p>По умолчанию подставлены показатели на конец предыдущей закрытой смены по этому самосвалу.</p>
+                <div class="message success">По умолчанию подставлены показатели на конец предыдущей закрытой смены по этому самосвалу.</div>
             {% endif %}
             <form method="post">
                 {% csrf_token %}
@@ -123,24 +65,30 @@
             </form>
         {% endif %}
     </section>
+
     {% if pending_assignment %}
-        <section class="card" style="border: 2px solid #f2c94c;">
+        <section class="card highlight-warning">
             <h2>Новое назначение</h2>
-            <p><strong>Самосвал:</strong> {{ pending_assignment.truck }}</p>
-            <p><strong>Экскаватор:</strong> {{ pending_assignment.excavator }}</p>
+            <div class="grid">
+                <div class="tile"><strong>Самосвал</strong>{{ pending_assignment.truck }}</div>
+                <div class="tile"><strong>Экскаватор</strong>{{ pending_assignment.excavator }}</div>
+            </div>
             <form method="post" action="{% url 'driver_accept_assignment' pending_assignment.id %}">
                 {% csrf_token %}
                 <button type="submit">Принял</button>
             </form>
         </section>
     {% endif %}
+
     {% if active_trip %}
-        <section class="card" style="border: 2px solid #28c7b7;">
+        <section class="card highlight-success">
             <h2>Активный рейс</h2>
-            <p><strong>От экскаватора:</strong> {{ active_trip.excavator }}</p>
-            <p><strong>Порода:</strong> {{ active_trip.rock_type }}</p>
-            <p><strong>Точка разгрузки:</strong> {{ active_trip.dump_point }}</p>
-            <p><strong>Объем:</strong> {{ active_trip.volume_m3|default:"-" }}</p>
+            <div class="grid">
+                <div class="tile"><strong>От экскаватора</strong>{{ active_trip.excavator }}</div>
+                <div class="tile"><strong>Порода</strong>{{ active_trip.rock_type }}</div>
+                <div class="tile"><strong>Точка разгрузки</strong>{{ active_trip.dump_point }}</div>
+                <div class="tile"><strong>Объем</strong>{{ active_trip.volume_m3|default:"-" }}</div>
+            </div>
             <form method="post" action="{% url 'driver_complete_trip' active_trip.id %}">
                 {% csrf_token %}
                 <button type="submit">Выполнено</button>
@@ -148,5 +96,4 @@
         </section>
     {% endif %}
 </main>
-</body>
-</html>
+{% endblock %}

@@ -1,56 +1,37 @@
-<!doctype html>
-<html lang="ru">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>{{ interface_name }}</title>
-    <style>
-        body {
-            margin: 0;
-            font-family: Arial, sans-serif;
-            background: #f4f7f9;
-            color: #13202a;
-        }
-        header {
-            background: #101820;
-            color: #ffffff;
-            padding: 22px 28px;
-        }
-        main {
-            padding: 28px;
-            max-width: 900px;
-            margin: 0 auto;
-        }
-        .card {
-            background: #ffffff;
-            border-radius: 18px;
-            padding: 24px;
-            box-shadow: 0 12px 40px rgba(16, 24, 32, .08);
-        }
-        .badge {
-            display: inline-block;
-            padding: 8px 12px;
-            border-radius: 999px;
-            background: #28c7b7;
-            font-weight: 700;
-        }
-        a {
-            color: #0a746c;
-        }
-    </style>
-</head>
-<body>
-<header>
-    <div>{{ access.employee.full_name }}</div>
-    <h1>{{ interface_name }}</h1>
-</header>
-<main>
+{% extends "base.html" %}
+
+{% block title %}{{ interface_name }}{% endblock %}
+
+{% block header_title %}{{ interface_name }}{% endblock %}
+{% block header_subtitle %}
+    {{ access.employee.full_name }} · {{ access.role.name }}
+{% endblock %}
+{% block header_actions %}
+    <a class="btn btn-secondary" href="{% url 'logout' %}">Выйти</a>
+{% endblock %}
+
+{% block content %}
     <section class="card">
-        <p class="badge">{{ access.role.name }}</p>
-        <p>Это первая техническая страница после единого входа. Следующий шаг - подключить сюда рабочий экран роли.</p>
-        <p><strong>Код роли:</strong> {{ access.role.code }}</p>
-        <p><a href="{% url 'logout' %}">Выйти</a></p>
+        <span class="badge">{{ access.role.name }}</span>
+        <h2>Рабочий интерфейс роли</h2>
+        <p class="muted">
+            Это запасная стартовая страница единого входа. Основные роли уже перенаправляются
+            на свои рабочие экраны: водитель, машинист экскаватора, горный мастер, диспетчер и отчет по объемам.
+        </p>
+
+        <div class="info-grid">
+            <div class="info-tile">
+                <span class="label">Сотрудник</span>
+                <strong>{{ access.employee.full_name }}</strong>
+            </div>
+            <div class="info-tile">
+                <span class="label">Роль</span>
+                <strong>{{ access.role.name }}</strong>
+            </div>
+            <div class="info-tile">
+                <span class="label">Код роли</span>
+                <strong>{{ access.role.code }}</strong>
+            </div>
+        </div>
     </section>
-</main>
-</body>
-</html>
+{% endblock %}

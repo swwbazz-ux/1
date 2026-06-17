@@ -1,31 +1,23 @@
-<!doctype html>
-<html lang="ru">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Работа экскаватора</title>
-    <style>
-        body { margin: 0; font-family: Arial, sans-serif; background: #f4f7f9; color: #13202a; }
-        header { background: #101820; color: #ffffff; padding: 22px 28px; }
-        main { padding: 28px; max-width: 900px; margin: 0 auto; }
-        .card { background: #ffffff; border-radius: 18px; padding: 24px; box-shadow: 0 12px 40px rgba(16, 24, 32, .08); margin-bottom: 18px; }
-        label { display: block; margin: 16px 0 6px; font-weight: 700; }
-        select { width: 100%; box-sizing: border-box; padding: 13px; border: 1px solid #ccd7df; border-radius: 12px; font-size: 16px; background: #ffffff; }
-        button { margin-top: 22px; width: 100%; padding: 16px; border: 0; border-radius: 12px; background: #28c7b7; color: #081216; font-weight: 700; cursor: pointer; }
-        table { width: 100%; border-collapse: collapse; }
-        th, td { padding: 10px; border-bottom: 1px solid #e5edf2; text-align: left; }
-        .success { padding: 12px; border-radius: 12px; background: #ddfff8; color: #075a52; }
-    </style>
-</head>
-<body>
-<header>
-    <div>{{ access.employee.full_name }}</div>
-    <h1>Работа экскаватора</h1>
+{% extends "base.html" %}
+
+{% block title %}Работа экскаватора{% endblock %}
+
+{% block body %}
+<header class="app-header">
+    <div class="header-inner">
+        <div class="topline">
+            <span>{{ access.employee.full_name }}</span>
+            <a href="{% url 'logout' %}">Выйти</a>
+        </div>
+        <h1>Работа экскаватора</h1>
+        <p>Создание рейса в момент загрузки: выбрать самосвал, породу и точку разгрузки.</p>
+    </div>
 </header>
-<main>
+<main class="page">
     {% for message in messages %}
-        <div class="card success">{{ message }}</div>
+        <div class="message success">{{ message }}</div>
     {% endfor %}
+
     <section class="card">
         <h2>Создать рейс</h2>
         <form method="post">
@@ -38,33 +30,35 @@
             <button type="submit">Отправить самосвал в рейс</button>
         </form>
     </section>
+
     <section class="card">
         <h2>Активные рейсы</h2>
-        <table>
-            <thead>
-            <tr>
-                <th>Самосвал</th>
-                <th>Экскаватор</th>
-                <th>Порода</th>
-                <th>Разгрузка</th>
-                <th>Объем</th>
-            </tr>
-            </thead>
-            <tbody>
-            {% for trip in active_trips %}
+        <div class="table-wrap">
+            <table>
+                <thead>
                 <tr>
-                    <td>{{ trip.truck }}</td>
-                    <td>{{ trip.excavator }}</td>
-                    <td>{{ trip.rock_type }}</td>
-                    <td>{{ trip.dump_point }}</td>
-                    <td>{{ trip.volume_m3|default:"-" }}</td>
+                    <th>Самосвал</th>
+                    <th>Экскаватор</th>
+                    <th>Порода</th>
+                    <th>Разгрузка</th>
+                    <th>Объем</th>
                 </tr>
-            {% empty %}
-                <tr><td colspan="5">Активных рейсов пока нет.</td></tr>
-            {% endfor %}
-            </tbody>
-        </table>
+                </thead>
+                <tbody>
+                {% for trip in active_trips %}
+                    <tr>
+                        <td>{{ trip.truck }}</td>
+                        <td>{{ trip.excavator }}</td>
+                        <td>{{ trip.rock_type }}</td>
+                        <td>{{ trip.dump_point }}</td>
+                        <td>{{ trip.volume_m3|default:"-" }}</td>
+                    </tr>
+                {% empty %}
+                    <tr><td colspan="5">Активных рейсов пока нет.</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
     </section>
 </main>
-</body>
-</html>
+{% endblock %}

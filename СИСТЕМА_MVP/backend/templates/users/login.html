@@ -1,65 +1,11 @@
-<!doctype html>
-<html lang="ru">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Вход в систему</title>
-    <style>
-        body {
-            margin: 0;
-            font-family: Arial, sans-serif;
-            background: #101820;
-            color: #ffffff;
-            min-height: 100vh;
-            display: grid;
-            place-items: center;
-        }
-        .card {
-            width: min(420px, calc(100vw - 32px));
-            background: #17232e;
-            border: 1px solid #2f4354;
-            border-radius: 18px;
-            padding: 28px;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, .3);
-        }
-        h1 {
-            margin: 0 0 10px;
-            font-size: 28px;
-        }
-        p {
-            color: #b8c7d3;
-            line-height: 1.45;
-        }
-        input {
-            width: 100%;
-            box-sizing: border-box;
-            margin: 18px 0 12px;
-            padding: 16px;
-            border: 1px solid #4b647a;
-            border-radius: 12px;
-            font-size: 22px;
-            text-align: center;
-            background: #0d151c;
-            color: #ffffff;
-        }
-        button {
-            width: 100%;
-            padding: 16px;
-            border: 0;
-            border-radius: 12px;
-            background: #28c7b7;
-            color: #081216;
-            font-weight: 700;
-            cursor: pointer;
-        }
-        .error {
-            margin-top: 12px;
-            color: #ffb4a8;
-        }
-    </style>
-</head>
-<body>
-<main class="card">
+{% extends "base.html" %}
+
+{% block title %}Вход в систему{% endblock %}
+{% block body_class %}login-page{% endblock %}
+
+{% block body %}
+<main class="login-card">
+    <div class="muted">Производственный контур MVP</div>
     <h1>Единый вход</h1>
     <p>Введите личный код доступа. Система сама откроет интерфейс по вашей роли.</p>
     <form method="post">
@@ -68,8 +14,7 @@
         <button type="submit">Войти</button>
     </form>
     {% for message in messages %}
-        <div class="error">{{ message }}</div>
+        <div class="message error">{{ message }}</div>
     {% endfor %}
 </main>
-</body>
-</html>
+{% endblock %}
