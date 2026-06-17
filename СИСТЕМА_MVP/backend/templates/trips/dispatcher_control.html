@@ -72,6 +72,40 @@
             flex-wrap: wrap;
             margin-top: 12px;
         }
+        .filters {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+            gap: 12px;
+            align-items: end;
+        }
+        label {
+            display: block;
+            margin-bottom: 6px;
+            font-weight: 700;
+        }
+        select, button {
+            width: 100%;
+            box-sizing: border-box;
+            padding: 12px;
+            border: 1px solid #ccd7df;
+            border-radius: 12px;
+            background: #ffffff;
+        }
+        button {
+            background: #28c7b7;
+            color: #081216;
+            font-weight: 700;
+            cursor: pointer;
+        }
+        .checkline {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            font-weight: 700;
+        }
+        .checkline input {
+            width: auto;
+        }
         @media (max-width: 850px) {
             .grid {
                 grid-template-columns: 1fr;
@@ -89,6 +123,43 @@
     <p>Контроль текущей смены: активные рейсы, назначения и быстрый переход к отчету.</p>
 </header>
 <main>
+    <section class="card">
+        <h2>Фильтры пульта</h2>
+        <form method="get" class="filters">
+            <div>
+                <label for="truck">Самосвал</label>
+                <select id="truck" name="truck">
+                    <option value="">Все</option>
+                    {% for truck in trucks %}
+                        <option value="{{ truck.id }}" {% if filters.truck == truck.id|stringformat:"s" %}selected{% endif %}>{{ truck }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label for="excavator">Экскаватор</label>
+                <select id="excavator" name="excavator">
+                    <option value="">Все</option>
+                    {% for excavator in excavators %}
+                        <option value="{{ excavator.id }}" {% if filters.excavator == excavator.id|stringformat:"s" %}selected{% endif %}>{{ excavator }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="checkline">
+                <input type="hidden" name="show_active_trips" value="0">
+                <input id="show_active_trips" type="checkbox" name="show_active_trips" value="1" {% if filters.show_active_trips %}checked{% endif %}>
+                <label for="show_active_trips">Показывать активные рейсы</label>
+            </div>
+            <div class="checkline">
+                <input type="hidden" name="show_pending_assignments" value="0">
+                <input id="show_pending_assignments" type="checkbox" name="show_pending_assignments" value="1" {% if filters.show_pending_assignments %}checked{% endif %}>
+                <label for="show_pending_assignments">Показывать неподтвержденные назначения</label>
+            </div>
+            <div>
+                <button type="submit">Обновить пульт</button>
+            </div>
+        </form>
+    </section>
+
     <section class="grid">
         <div class="card danger">
             <div>Активные незакрытые рейсы</div>

@@ -401,6 +401,41 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, '57')
         self.assertContains(response, 'Открыть отчет по объемам')
 
+    def test_dispatcher_control_panel_can_filter_by_truck(self):
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        truck = Equipment.objects.create(equipment_type=truck_type, garage_number='10')
+        second_truck = Equipment.objects.create(equipment_type=truck_type, garage_number='11')
+        excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='1')
+        rock = RockType.objects.create(name='Руда')
+        dump_point = DumpPoint.objects.create(name='ККД')
+        dispatcher_role = Role.objects.create(code='dispatcher', name='Диспетчер')
+        dispatcher = Employee.objects.create(full_name='Тестовый диспетчер')
+        EmployeeAccess.objects.create(employee=dispatcher, role=dispatcher_role, access_code='5000')
+        Trip.objects.create(
+            excavator=excavator,
+            truck=truck,
+            rock_type=rock,
+            dump_point=dump_point,
+            status=TripStatus.ACTIVE,
+            volume_m3='11.00',
+        )
+        Trip.objects.create(
+            excavator=excavator,
+            truck=second_truck,
+            rock_type=rock,
+            dump_point=dump_point,
+            status=TripStatus.ACTIVE,
+            volume_m3='22.00',
+        )
+
+        self.client.post('/', {'access_code': '5000'}, follow=True, HTTP_HOST='localhost')
+        response = self.client.get(f'/dispatcher/control/?truck={truck.id}', HTTP_HOST='localhost')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, '11')
+        self.assertNotContains(response, '22,00')
+
     def test_volume_report_can_filter_by_loading_shift_type(self):
         truck_type = EquipmentType.objects.create(name='Самосвал')
         excavator_type = EquipmentType.objects.create(name='Экскаватор')
