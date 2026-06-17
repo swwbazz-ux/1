@@ -6,6 +6,7 @@
             <th>Экскаватор</th>
             <th>План, м3</th>
             <th>Факт, м3</th>
+            <th>Отклонение, м3</th>
             <th>Горизонт</th>
             <th>Блок</th>
             <th>Место разгрузки</th>
@@ -21,6 +22,7 @@
                 <td>{{ row.excavator }}</td>
                 <td>{{ row.planned_volume|default:"не задано" }}</td>
                 <td>{{ row.volume_m3 }}</td>
+                <td>{{ row.volume_deviation|default:"-" }}</td>
                 <td>{{ row.horizon|default:"не задано" }}</td>
                 <td>{{ row.block|default:"не задано" }}</td>
                 <td>{{ row.dump_point }}</td>
@@ -29,7 +31,7 @@
                 <td>{{ row.note|default:"-" }}</td>
             </tr>
         {% empty %}
-            <tr><td colspan="10">Данных по смене пока нет.</td></tr>
+            <tr><td colspan="11">Данных по смене пока нет.</td></tr>
         {% endfor %}
         </tbody>
     </table>

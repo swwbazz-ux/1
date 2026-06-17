@@ -581,6 +581,8 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, 'ККД')
         self.assertContains(response, '57')
         self.assertContains(response, '7000')
+        self.assertContains(response, 'Отклонение')
+        self.assertContains(response, '-6943')
         self.assertContains(response, '75')
         self.assertContains(response, '52')
         self.assertContains(response, '3,10')

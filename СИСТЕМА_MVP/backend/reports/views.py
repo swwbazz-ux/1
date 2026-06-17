@@ -291,6 +291,7 @@ def build_customer_daily_report(selected_date):
             'excavator': excavator,
             'planned_volume': planned_volume_m3,
             'volume_m3': values['volume_m3'],
+            'volume_deviation': values['volume_m3'] - planned_volume_m3 if planned_volume_m3 is not None else None,
             'horizon': loading_horizon,
             'block': loading_block,
             'dump_point': dump_point,
@@ -306,6 +307,8 @@ def build_customer_daily_report(selected_date):
 
     day_total = sum(row['volume_m3'] for row in rows_by_shift['day'])
     night_total = sum(row['volume_m3'] for row in rows_by_shift['night'])
+    day_plan_total = sum(row['planned_volume'] or 0 for row in rows_by_shift['day'])
+    night_plan_total = sum(row['planned_volume'] or 0 for row in rows_by_shift['night'])
     day_tonnage = sum(row['tonnage'] for row in rows_by_shift['day'])
     night_tonnage = sum(row['tonnage'] for row in rows_by_shift['night'])
     day_trip_count = sum(row['trip_count'] for row in rows_by_shift['day'])
@@ -324,6 +327,12 @@ def build_customer_daily_report(selected_date):
         'day_total': day_total,
         'night_total': night_total,
         'total_volume': day_total + night_total,
+        'day_plan_total': day_plan_total,
+        'night_plan_total': night_plan_total,
+        'total_plan': day_plan_total + night_plan_total,
+        'day_deviation': day_total - day_plan_total,
+        'night_deviation': night_total - night_plan_total,
+        'total_deviation': (day_total + night_total) - (day_plan_total + night_plan_total),
         'day_tonnage': day_tonnage,
         'night_tonnage': night_tonnage,
         'total_tonnage': day_tonnage + night_tonnage,
@@ -365,6 +374,7 @@ def append_customer_shift_table(sheet, title, start_row, start_col, rows):
         'Экскаватор',
         'План, м3',
         'Факт, м3',
+        'Отклонение, м3',
         'Горизонт',
         'Блок',
         'Место разгрузки',
@@ -386,6 +396,7 @@ def append_customer_shift_table(sheet, title, start_row, start_col, rows):
             row['excavator'],
             row['planned_volume'] or 'не задано',
             row['volume_m3'],
+            row['volume_deviation'] if row['volume_deviation'] is not None else '-',
             row['horizon'] or 'не задано',
             row['block'] or 'не задано',
             row['dump_point'],
@@ -416,7 +427,9 @@ def customer_daily_report_export_view(request):
     sheet['A4'].font = Font(bold=True)
     summary_rows = [
         ['Показатель', 'День', 'Ночь', 'Сутки'],
-        ['Объем, м3', context['day_total'], context['night_total'], context['total_volume']],
+        ['План, м3', context['day_plan_total'], context['night_plan_total'], context['total_plan']],
+        ['Факт, м3', context['day_total'], context['night_total'], context['total_volume']],
+        ['Отклонение, м3', context['day_deviation'], context['night_deviation'], context['total_deviation']],
         ['Тоннаж', context['day_tonnage'], context['night_tonnage'], context['total_tonnage']],
         ['Рейсы', context['day_trip_count'], context['night_trip_count'], context['total_trip_count']],
     ]
@@ -426,10 +439,10 @@ def customer_daily_report_export_view(request):
     append_customer_shift_table(sheet, 'I смена (дневная 08:00 - 20:00)', 10, 1, context['rows_by_shift']['day'])
     append_customer_shift_table(sheet, 'II смена (ночная 20:00 - 08:00)', 10, 12, context['rows_by_shift']['night'])
 
-    for column_index in range(1, 22):
+    for column_index in range(1, 23):
         sheet.column_dimensions[get_column_letter(column_index)].width = 16
-    sheet.column_dimensions['J'].width = 36
-    sheet.column_dimensions['U'].width = 36
+    sheet.column_dimensions['K'].width = 36
+    sheet.column_dimensions['V'].width = 36
 
     response = HttpResponse(
         content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',

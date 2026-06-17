@@ -20,6 +20,14 @@
             <div class="metric">{{ total_volume }} м3</div>
         </div>
         <div class="metric-card">
+            <div>План за сутки</div>
+            <div class="metric">{{ total_plan }} м3</div>
+        </div>
+        <div class="metric-card {% if total_deviation < 0 %}warning{% else %}success{% endif %}">
+            <div>Отклонение от плана</div>
+            <div class="metric">{{ total_deviation }} м3</div>
+        </div>
+        <div class="metric-card">
             <div>Тоннаж за сутки</div>
             <div class="metric">{{ total_tonnage }} т</div>
         </div>
@@ -59,10 +67,22 @@
                 </thead>
                 <tbody>
                 <tr>
-                    <td>Объем, м3</td>
+                    <td>План, м3</td>
+                    <td>{{ day_plan_total }}</td>
+                    <td>{{ night_plan_total }}</td>
+                    <td>{{ total_plan }}</td>
+                </tr>
+                <tr>
+                    <td>Факт, м3</td>
                     <td>{{ day_total }}</td>
                     <td>{{ night_total }}</td>
                     <td>{{ total_volume }}</td>
+                </tr>
+                <tr>
+                    <td>Отклонение, м3</td>
+                    <td>{{ day_deviation }}</td>
+                    <td>{{ night_deviation }}</td>
+                    <td>{{ total_deviation }}</td>
                 </tr>
                 <tr>
                     <td>Тоннаж</td>
@@ -118,7 +138,7 @@
                 </tbody>
             </table>
         </div>
-        <p class="muted">Поля `план`, `горизонт`, `блок`, `плечо` и `простои` пока выводятся как незаданные, потому что их нужно добавить в ядро отдельным шагом.</p>
+        <p class="muted">План/факт/отклонение пока считаются по плановым заданиям, указанным в рейсах. Полноценный месячный план будет добавлен отдельным шагом.</p>
     </section>
 </main>
 {% endblock %}
