@@ -100,10 +100,16 @@ def driver_complete_trip_view(request, trip_id):
         return redirect('driver_registration')
     trip = Trip.objects.filter(id=trip_id, truck=registration.truck, status=TripStatus.ACTIVE).first()
     if trip and request.method == 'POST':
+        unloading_shift = EmployeeShift.objects.filter(employee=access.employee, closed_at__isnull=True).order_by('-opened_at').first()
         trip.status = TripStatus.COMPLETED
         trip.driver = access.employee
         trip.completed_at = timezone.now()
-        trip.unloading_shift = EmployeeShift.objects.filter(employee=access.employee, closed_at__isnull=True).order_by('-opened_at').first()
-        trip.save(update_fields=['status', 'driver', 'completed_at', 'unloading_shift'])
+        trip.unloading_shift = unloading_shift
+        trip.is_carryover = bool(
+            trip.loading_shift
+            and unloading_shift
+            and trip.loading_shift.shift_type != unloading_shift.shift_type
+        )
+        trip.save(update_fields=['status', 'driver', 'completed_at', 'unloading_shift', 'is_carryover'])
         messages.success(request, 'Рейс выполнен.')
     return redirect('driver_shift')

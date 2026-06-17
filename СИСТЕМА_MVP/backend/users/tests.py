@@ -183,6 +183,12 @@ class AccessLoginTests(TestCase):
         excavator_role = Role.objects.create(code='excavator_operator', name='Машинист экскаватора')
         excavator_operator = Employee.objects.create(full_name='Тестовый машинист')
         EmployeeAccess.objects.create(employee=excavator_operator, role=excavator_role, access_code='3000')
+        operator_shift = EmployeeShift.objects.create(
+            employee=excavator_operator,
+            shift_type='day',
+            equipment=excavator,
+            opened_at=timezone.now(),
+        )
 
         driver_client = self.client
         driver_client.post('/', {'access_code': '2000'}, follow=True, HTTP_HOST='localhost')
@@ -211,6 +217,7 @@ class AccessLoginTests(TestCase):
         self.assertEqual(trip_response.status_code, 200)
         trip = Trip.objects.get()
         self.assertEqual(trip.status, TripStatus.ACTIVE)
+        self.assertEqual(trip.loading_shift, operator_shift)
 
         driver_shift_response = driver_client.get('/driver/shift/', HTTP_HOST='localhost')
         self.assertContains(driver_shift_response, 'Активный рейс')
@@ -227,6 +234,57 @@ class AccessLoginTests(TestCase):
         self.assertEqual(trip.status, TripStatus.COMPLETED)
         self.assertEqual(trip.driver, self.employee)
         self.assertIsNotNone(trip.completed_at)
+        self.assertFalse(trip.is_carryover)
+
+    def test_trip_becomes_carryover_when_loading_and_unloading_shift_types_differ(self):
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        truck = Equipment.objects.create(equipment_type=truck_type, garage_number='10')
+        excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='1')
+        rock = RockType.objects.create(name='Руда')
+        dump_point = DumpPoint.objects.create(name='ККД')
+        dormitory = Dormitory.objects.create(number='5')
+        block = DormitoryBlock.objects.create(dormitory=dormitory, name='Блок 1')
+        section = DormitorySection.objects.create(block=block, name='А')
+        excavator_operator = Employee.objects.create(full_name='Тестовый машинист')
+        loading_shift = EmployeeShift.objects.create(
+            employee=excavator_operator,
+            shift_type='day',
+            equipment=excavator,
+            opened_at=timezone.now(),
+            closed_at=timezone.now(),
+        )
+
+        self.client.post('/', {'access_code': '2000'}, follow=True, HTTP_HOST='localhost')
+        self.client.post(
+            '/driver/registration/',
+            {'shift_type': 'night', 'truck': truck.id, 'dormitory_section': section.id},
+            follow=True,
+            HTTP_HOST='localhost',
+        )
+        self.client.post(
+            '/driver/shift/',
+            {'start_fuel': '100', 'start_mileage': '2500', 'start_engine_hours': '700'},
+            follow=True,
+            HTTP_HOST='localhost',
+        )
+        trip = Trip.objects.create(
+            excavator=excavator,
+            truck=truck,
+            excavator_operator=excavator_operator,
+            loading_shift=loading_shift,
+            rock_type=rock,
+            dump_point=dump_point,
+            status=TripStatus.ACTIVE,
+            volume_m3='57.00',
+        )
+
+        self.client.post(f'/driver/trip/{trip.id}/complete/', follow=True, HTTP_HOST='localhost')
+        trip.refresh_from_db()
+
+        self.assertEqual(trip.status, TripStatus.COMPLETED)
+        self.assertTrue(trip.is_carryover)
+        self.assertEqual(trip.unloading_shift.shift_type, 'night')
 
     def test_dispatcher_can_see_volume_report(self):
         truck_type = EquipmentType.objects.create(name='Самосвал')

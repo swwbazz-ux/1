@@ -2,6 +2,7 @@ from django import forms
 
 from assignments.models import AssignmentStatus, HaulAssignment
 from references.models import DumpPoint, RockType, TruckCapacityRule
+from shifts.models import EmployeeShift
 
 from .models import Trip
 
@@ -22,6 +23,10 @@ class TripCreateForm(forms.Form):
         assignment = self.cleaned_data['assignment']
         rock_type = self.cleaned_data['rock_type']
         dump_point = self.cleaned_data['dump_point']
+        loading_shift = EmployeeShift.objects.filter(
+            employee=excavator_operator,
+            closed_at__isnull=True,
+        ).order_by('-opened_at').first()
         volume = None
         if assignment.truck.model:
             rule = TruckCapacityRule.objects.filter(equipment_model=assignment.truck.model, rock_type=rock_type).first()
@@ -31,6 +36,7 @@ class TripCreateForm(forms.Form):
             excavator=assignment.excavator,
             truck=assignment.truck,
             excavator_operator=excavator_operator,
+            loading_shift=loading_shift,
             rock_type=rock_type,
             dump_point=dump_point,
             volume_m3=volume,
