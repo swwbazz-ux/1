@@ -209,8 +209,12 @@ class AccessLoginTests(TestCase):
         response = self.client.post('/', {'access_code': '5000'}, follow=True, HTTP_HOST='localhost')
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'Отчет по объемам')
-        self.assertContains(response, '57')
+        self.assertContains(response, 'Диспетчерский пульт')
+
+        report_response = self.client.get('/reports/volume/', HTTP_HOST='localhost')
+        self.assertEqual(report_response.status_code, 200)
+        self.assertContains(report_response, 'Отчет по объемам')
+        self.assertContains(report_response, '57')
 
         export_response = self.client.get('/reports/volume/export/', HTTP_HOST='localhost')
         self.assertEqual(export_response.status_code, 200)
@@ -218,5 +222,39 @@ class AccessLoginTests(TestCase):
             export_response['Content-Type'],
             'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         )
+
+    def test_dispatcher_opens_control_panel_with_active_trips_and_pending_assignments(self):
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        truck = Equipment.objects.create(equipment_type=truck_type, garage_number='10')
+        second_truck = Equipment.objects.create(equipment_type=truck_type, garage_number='11')
+        excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='1')
+        rock = RockType.objects.create(name='Руда')
+        dump_point = DumpPoint.objects.create(name='ККД')
+        dispatcher_role = Role.objects.create(code='dispatcher', name='Диспетчер')
+        dispatcher = Employee.objects.create(full_name='Тестовый диспетчер')
+        EmployeeAccess.objects.create(employee=dispatcher, role=dispatcher_role, access_code='5000')
+        Trip.objects.create(
+            excavator=excavator,
+            truck=truck,
+            rock_type=rock,
+            dump_point=dump_point,
+            status=TripStatus.ACTIVE,
+            volume_m3='57.00',
+        )
+        HaulAssignment.objects.create(
+            truck=second_truck,
+            excavator=excavator,
+            status=AssignmentStatus.PENDING,
+        )
+
+        response = self.client.post('/', {'access_code': '5000'}, follow=True, HTTP_HOST='localhost')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Диспетчерский пульт')
+        self.assertContains(response, 'Активные рейсы')
+        self.assertContains(response, 'Назначения ждут подтверждения')
+        self.assertContains(response, '57')
+        self.assertContains(response, 'Открыть отчет по объемам')
 
 # Create your tests here.

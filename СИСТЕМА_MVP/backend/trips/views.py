@@ -2,6 +2,7 @@ from django.contrib import messages
 from django.shortcuts import redirect, render
 from django.utils import timezone
 
+from assignments.models import AssignmentStatus, HaulAssignment
 from shifts.models import EmployeeShift
 from users.models import EmployeeAccess
 
@@ -34,6 +35,55 @@ def excavator_work_view(request):
             'access': access,
             'form': form,
             'active_trips': active_trips,
+        },
+    )
+
+
+def dispatcher_control_view(request):
+    access_id = request.session.get('employee_access_id')
+    if not access_id:
+        return redirect('login')
+    access = EmployeeAccess.objects.select_related('employee', 'role').filter(id=access_id, is_active=True).first()
+    if not access or access.role.code not in {'dispatcher', 'admin', 'manager'}:
+        return redirect('role_home')
+
+    active_trips = (
+        Trip.objects
+        .filter(status=TripStatus.ACTIVE)
+        .select_related('truck', 'excavator', 'rock_type', 'dump_point', 'excavator_operator')
+        .order_by('created_at')
+    )
+    pending_assignments = (
+        HaulAssignment.objects
+        .filter(status=AssignmentStatus.PENDING, ended_at__isnull=True)
+        .select_related('truck', 'excavator', 'assigned_by')
+        .order_by('assigned_at')
+    )
+    accepted_assignments = (
+        HaulAssignment.objects
+        .filter(status=AssignmentStatus.ACCEPTED, ended_at__isnull=True)
+        .select_related('truck', 'excavator', 'assigned_by')
+        .order_by('-accepted_at')[:30]
+    )
+    recent_completed_trips = (
+        Trip.objects
+        .filter(status=TripStatus.COMPLETED)
+        .select_related('truck', 'excavator', 'rock_type', 'dump_point', 'driver')
+        .order_by('-completed_at')[:30]
+    )
+
+    return render(
+        request,
+        'trips/dispatcher_control.html',
+        {
+            'access': access,
+            'active_trips': active_trips,
+            'pending_assignments': pending_assignments,
+            'accepted_assignments': accepted_assignments,
+            'recent_completed_trips': recent_completed_trips,
+            'active_trips_count': active_trips.count(),
+            'pending_assignments_count': pending_assignments.count(),
+            'accepted_assignments_count': len(accepted_assignments),
         },
     )
 

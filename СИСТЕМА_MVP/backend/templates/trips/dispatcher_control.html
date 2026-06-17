@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Диспетчерский пульт</title>
+    <style>
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+            background: #f4f7f9;
+            color: #13202a;
+        }
+        header {
+            background: #101820;
+            color: #ffffff;
+            padding: 22px 28px;
+        }
+        main {
+            padding: 28px;
+            max-width: 1180px;
+            margin: 0 auto;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 16px;
+            margin-bottom: 18px;
+        }
+        .card {
+            background: #ffffff;
+            border-radius: 18px;
+            padding: 22px;
+            box-shadow: 0 12px 40px rgba(16, 24, 32, .08);
+        }
+        .metric {
+            font-size: 34px;
+            font-weight: 800;
+            margin-top: 8px;
+        }
+        .danger {
+            border-left: 8px solid #e84b4b;
+        }
+        .warning {
+            border-left: 8px solid #f3b43f;
+        }
+        .success {
+            border-left: 8px solid #28c7b7;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 12px;
+        }
+        th, td {
+            padding: 10px 8px;
+            border-bottom: 1px solid #e7edf2;
+            text-align: left;
+            vertical-align: top;
+        }
+        th {
+            font-size: 13px;
+            color: #52616c;
+        }
+        a {
+            color: #0a746c;
+            font-weight: 700;
+        }
+        .actions {
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+            margin-top: 12px;
+        }
+        @media (max-width: 850px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+            main {
+                padding: 18px;
+            }
+        }
+    </style>
+</head>
+<body>
+<header>
+    <div>{{ access.employee.full_name }}</div>
+    <h1>Диспетчерский пульт</h1>
+    <p>Контроль текущей смены: активные рейсы, назначения и быстрый переход к отчету.</p>
+</header>
+<main>
+    <section class="grid">
+        <div class="card danger">
+            <div>Активные незакрытые рейсы</div>
+            <div class="metric">{{ active_trips_count }}</div>
+        </div>
+        <div class="card warning">
+            <div>Назначения ждут подтверждения</div>
+            <div class="metric">{{ pending_assignments_count }}</div>
+        </div>
+        <div class="card success">
+            <div>Принятые назначения в работе</div>
+            <div class="metric">{{ accepted_assignments_count }}</div>
+        </div>
+    </section>
+
+    <section class="card">
+        <h2>Активные рейсы</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Создан</th>
+                    <th>Самосвал</th>
+                    <th>Экскаватор</th>
+                    <th>Порода</th>
+                    <th>Точка разгрузки</th>
+                    <th>Объем</th>
+                    <th>Машинист</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for trip in active_trips %}
+                    <tr>
+                        <td>{{ trip.created_at|date:"d.m.Y H:i" }}</td>
+                        <td>{{ trip.truck }}</td>
+                        <td>{{ trip.excavator }}</td>
+                        <td>{{ trip.rock_type }}</td>
+                        <td>{{ trip.dump_point }}</td>
+                        <td>{{ trip.volume_m3|default:"-" }}</td>
+                        <td>{{ trip.excavator_operator|default:"-" }}</td>
+                    </tr>
+                {% empty %}
+                    <tr><td colspan="7">Активных рейсов сейчас нет.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </section>
+
+    <section class="card">
+        <h2>Назначения, ожидающие подтверждения водителем</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Назначено</th>
+                    <th>Самосвал</th>
+                    <th>Экскаватор</th>
+                    <th>Кто назначил</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for assignment in pending_assignments %}
+                    <tr>
+                        <td>{{ assignment.assigned_at|date:"d.m.Y H:i" }}</td>
+                        <td>{{ assignment.truck }}</td>
+                        <td>{{ assignment.excavator }}</td>
+                        <td>{{ assignment.assigned_by|default:"-" }}</td>
+                    </tr>
+                {% empty %}
+                    <tr><td colspan="4">Ожидающих подтверждения назначений нет.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </section>
+
+    <section class="card">
+        <h2>Последние выполненные рейсы</h2>
+        <div class="actions">
+            <a href="{% url 'volume_report' %}">Открыть отчет по объемам</a>
+            <a href="{% url 'logout' %}">Выйти</a>
+        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th>Выполнен</th>
+                    <th>Самосвал</th>
+                    <th>Экскаватор</th>
+                    <th>Порода</th>
+                    <th>Точка разгрузки</th>
+                    <th>Объем</th>
+                    <th>Водитель</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for trip in recent_completed_trips %}
+                    <tr>
+                        <td>{{ trip.completed_at|date:"d.m.Y H:i" }}</td>
+                        <td>{{ trip.truck }}</td>
+                        <td>{{ trip.excavator }}</td>
+                        <td>{{ trip.rock_type }}</td>
+                        <td>{{ trip.dump_point }}</td>
+                        <td>{{ trip.volume_m3|default:"-" }}</td>
+                        <td>{{ trip.driver|default:"-" }}</td>
+                    </tr>
+                {% empty %}
+                    <tr><td colspan="7">Выполненных рейсов пока нет.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </section>
+</main>
+</body>
+</html>

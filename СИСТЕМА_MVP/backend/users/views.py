@@ -58,7 +58,9 @@ def role_home_view(request):
         return redirect('mining_master_assignments')
     if access.role.code == 'excavator_operator':
         return redirect('excavator_work')
-    if access.role.code in {'dispatcher', 'manager'}:
+    if access.role.code == 'dispatcher':
+        return redirect('dispatcher_control')
+    if access.role.code == 'manager':
         return redirect('volume_report')
     interface_name = ROLE_INTERFACE_NAMES.get(access.role.code, f'Интерфейс роли: {access.role.name}')
     return render(
