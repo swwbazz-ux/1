@@ -20,13 +20,13 @@ def excavator_work_view(request):
         return redirect('role_home')
 
     if request.method == 'POST':
-        form = TripCreateForm(request.POST)
+        form = TripCreateForm(request.POST, excavator_operator=access.employee)
         if form.is_valid():
             form.create_trip(excavator_operator=access.employee)
             messages.success(request, 'Рейс создан. У водителя появился активный рейс.')
             return redirect('excavator_work')
     else:
-        form = TripCreateForm()
+        form = TripCreateForm(excavator_operator=access.employee)
 
     active_trips = Trip.objects.filter(status=TripStatus.ACTIVE).select_related('truck', 'excavator', 'rock_type', 'dump_point').order_by('-created_at')[:20]
     return render(

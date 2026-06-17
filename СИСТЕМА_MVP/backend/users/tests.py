@@ -249,6 +249,12 @@ class AccessLoginTests(TestCase):
         self.assertEqual(trip.downtime_text, 'зачистка забоя')
         self.assertEqual(trip.note, 'проверка параметров отчета')
 
+        next_trip_form_response = operator_client.get('/excavator/work/', HTTP_HOST='localhost')
+        self.assertContains(next_trip_form_response, 'value="7000')
+        self.assertContains(next_trip_form_response, 'value="75"')
+        self.assertContains(next_trip_form_response, 'value="52"')
+        self.assertContains(next_trip_form_response, 'value="3.10"')
+
         driver_shift_response = driver_client.get('/driver/shift/', HTTP_HOST='localhost')
         self.assertContains(driver_shift_response, 'Активный рейс')
         self.assertContains(driver_shift_response, 'Выполнено')

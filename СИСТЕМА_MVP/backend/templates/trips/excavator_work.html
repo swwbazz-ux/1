@@ -22,11 +22,59 @@
         <h2>Создать рейс</h2>
         <form method="post">
             {% csrf_token %}
-            {% for field in form %}
-                <label for="{{ field.id_for_label }}">{{ field.label }}</label>
-                {{ field }}
-                {{ field.errors }}
-            {% endfor %}
+            <h3>Основные данные рейса</h3>
+            <div class="filters">
+                <div>
+                    <label for="{{ form.assignment.id_for_label }}">{{ form.assignment.label }}</label>
+                    {{ form.assignment }}
+                    {{ form.assignment.errors }}
+                </div>
+                <div>
+                    <label for="{{ form.rock_type.id_for_label }}">{{ form.rock_type.label }}</label>
+                    {{ form.rock_type }}
+                    {{ form.rock_type.errors }}
+                </div>
+                <div>
+                    <label for="{{ form.dump_point.id_for_label }}">{{ form.dump_point.label }}</label>
+                    {{ form.dump_point }}
+                    {{ form.dump_point.errors }}
+                </div>
+            </div>
+
+            <h3>Параметры для отчета заказчику</h3>
+            <p class="muted">Система подставляет последние введенные параметры этого машиниста. Если экскаватор переехал или изменилась работа, достаточно поправить только изменившиеся поля.</p>
+            <div class="filters">
+                <div>
+                    <label for="{{ form.planned_volume_m3.id_for_label }}">{{ form.planned_volume_m3.label }}</label>
+                    {{ form.planned_volume_m3 }}
+                    {{ form.planned_volume_m3.errors }}
+                </div>
+                <div>
+                    <label for="{{ form.loading_horizon.id_for_label }}">{{ form.loading_horizon.label }}</label>
+                    {{ form.loading_horizon }}
+                    {{ form.loading_horizon.errors }}
+                </div>
+                <div>
+                    <label for="{{ form.loading_block.id_for_label }}">{{ form.loading_block.label }}</label>
+                    {{ form.loading_block }}
+                    {{ form.loading_block.errors }}
+                </div>
+                <div>
+                    <label for="{{ form.transport_distance_km.id_for_label }}">{{ form.transport_distance_km.label }}</label>
+                    {{ form.transport_distance_km }}
+                    {{ form.transport_distance_km.errors }}
+                </div>
+                <div>
+                    <label for="{{ form.downtime_text.id_for_label }}">{{ form.downtime_text.label }}</label>
+                    {{ form.downtime_text }}
+                    {{ form.downtime_text.errors }}
+                </div>
+                <div>
+                    <label for="{{ form.note.id_for_label }}">{{ form.note.label }}</label>
+                    {{ form.note }}
+                    {{ form.note.errors }}
+                </div>
+            </div>
             <button type="submit">Отправить самосвал в рейс</button>
         </form>
     </section>

@@ -20,11 +20,31 @@ class TripCreateForm(forms.Form):
     note = forms.CharField(label='Примечание', required=False, widget=forms.Textarea(attrs={'rows': 3}))
 
     def __init__(self, *args, **kwargs):
+        self.excavator_operator = kwargs.pop('excavator_operator', None)
         super().__init__(*args, **kwargs)
         self.fields['assignment'].queryset = HaulAssignment.objects.filter(
             status=AssignmentStatus.ACCEPTED,
             ended_at__isnull=True,
         ).select_related('truck', 'excavator').order_by('excavator__garage_number', 'truck__garage_number')
+        if not self.is_bound:
+            self.apply_last_trip_initials()
+
+    def apply_last_trip_initials(self):
+        if not self.excavator_operator:
+            return
+        last_trip = (
+            Trip.objects
+            .filter(excavator_operator=self.excavator_operator)
+            .exclude(planned_volume_m3__isnull=True, loading_horizon='', loading_block='', transport_distance_km__isnull=True)
+            .order_by('-created_at')
+            .first()
+        )
+        if not last_trip:
+            return
+        self.fields['planned_volume_m3'].initial = last_trip.planned_volume_m3
+        self.fields['loading_horizon'].initial = last_trip.loading_horizon
+        self.fields['loading_block'].initial = last_trip.loading_block
+        self.fields['transport_distance_km'].initial = last_trip.transport_distance_km
 
     def create_trip(self, excavator_operator):
         assignment = self.cleaned_data['assignment']
