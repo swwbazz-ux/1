@@ -47,6 +47,14 @@
                 </select>
             </div>
             <div>
+                <label for="date_from">Дата с</label>
+                <input id="date_from" type="date" name="date_from" value="{{ filters.date_from }}">
+            </div>
+            <div>
+                <label for="date_to">Дата по</label>
+                <input id="date_to" type="date" name="date_to" value="{{ filters.date_to }}">
+            </div>
+            <div>
                 <label for="loading_shift_type">Смена загрузки</label>
                 <select id="loading_shift_type" name="loading_shift_type">
                     <option value="">Все</option>
@@ -68,6 +76,42 @@
                     <option value="">Все</option>
                     <option value="yes" {% if filters.carryover == 'yes' %}selected{% endif %}>Только переходящие</option>
                     <option value="no" {% if filters.carryover == 'no' %}selected{% endif %}>Без переходящих</option>
+                </select>
+            </div>
+            <div>
+                <label for="truck">Самосвал</label>
+                <select id="truck" name="truck">
+                    <option value="">Все</option>
+                    {% for truck in trucks %}
+                        <option value="{{ truck.id }}" {% if filters.truck == truck.id|stringformat:"s" %}selected{% endif %}>{{ truck }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label for="excavator">Экскаватор</label>
+                <select id="excavator" name="excavator">
+                    <option value="">Все</option>
+                    {% for excavator in excavators %}
+                        <option value="{{ excavator.id }}" {% if filters.excavator == excavator.id|stringformat:"s" %}selected{% endif %}>{{ excavator }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label for="rock_type">Порода/груз</label>
+                <select id="rock_type" name="rock_type">
+                    <option value="">Все</option>
+                    {% for rock_type in rock_types %}
+                        <option value="{{ rock_type.id }}" {% if filters.rock_type == rock_type.id|stringformat:"s" %}selected{% endif %}>{{ rock_type }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label for="dump_point">Точка разгрузки</label>
+                <select id="dump_point" name="dump_point">
+                    <option value="">Все</option>
+                    {% for dump_point in dump_points %}
+                        <option value="{{ dump_point.id }}" {% if filters.dump_point == dump_point.id|stringformat:"s" %}selected{% endif %}>{{ dump_point }}</option>
+                    {% endfor %}
                 </select>
             </div>
             <div>

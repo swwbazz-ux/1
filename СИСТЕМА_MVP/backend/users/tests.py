@@ -539,6 +539,7 @@ class AccessLoginTests(TestCase):
         truck_type = EquipmentType.objects.create(name='Самосвал')
         excavator_type = EquipmentType.objects.create(name='Экскаватор')
         truck = Equipment.objects.create(equipment_type=truck_type, garage_number='10')
+        second_truck = Equipment.objects.create(equipment_type=truck_type, garage_number='11')
         excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='1')
         rock = RockType.objects.create(name='Руда')
         dump_point = DumpPoint.objects.create(name='ККД')
@@ -554,6 +555,15 @@ class AccessLoginTests(TestCase):
             volume_m3='11.00',
             completed_at=timezone.now(),
         )
+        Trip.objects.create(
+            excavator=excavator,
+            truck=second_truck,
+            rock_type=rock,
+            dump_point=dump_point,
+            status=TripStatus.COMPLETED,
+            volume_m3='22.00',
+            completed_at=timezone.now(),
+        )
 
         self.client.post('/', {'access_code': '5000'}, follow=True, HTTP_HOST='localhost')
         builder_response = self.client.get('/reports/templates/', HTTP_HOST='localhost')
@@ -566,6 +576,7 @@ class AccessLoginTests(TestCase):
             {
                 'name': 'Шаблон для заказчика',
                 'columns': ['truck', 'volume_m3'],
+                'truck': str(truck.id),
                 'is_active': 'on',
             },
             follow=True,
@@ -576,6 +587,7 @@ class AccessLoginTests(TestCase):
         self.assertEqual(create_response.status_code, 200)
         self.assertEqual(template.report_type, ReportType.SHIFT_VOLUME)
         self.assertEqual(template.columns, ['truck', 'volume_m3'])
+        self.assertEqual(template.filters, {'truck': str(truck.id)})
         self.assertEqual(template.created_by, dispatcher)
         self.assertEqual(template.updated_by, dispatcher)
 
@@ -586,6 +598,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(report_response, '<th>Объем, м3</th>', html=True)
         self.assertNotContains(report_response, '<th>Экскаватор</th>', html=True)
         self.assertContains(report_response, '11')
+        self.assertNotContains(report_response, '22,00')
 
     def test_dispatcher_can_open_customer_daily_report_and_export_it(self):
         truck_type = EquipmentType.objects.create(name='Самосвал')

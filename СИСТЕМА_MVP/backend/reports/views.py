@@ -10,6 +10,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
+from references.models import DumpPoint, Equipment, RockType
 from trips.models import Trip, TripStatus
 from users.models import EmployeeAccess
 
@@ -52,6 +53,18 @@ DEFAULT_VOLUME_REPORT_COLUMNS = [
     'completed_at',
 ]
 
+REPORT_TEMPLATE_FILTER_FIELDS = [
+    'date_from',
+    'date_to',
+    'loading_shift_type',
+    'unloading_shift_type',
+    'carryover',
+    'truck',
+    'excavator',
+    'rock_type',
+    'dump_point',
+]
+
 
 def get_volume_report_templates():
     return ReportTemplate.objects.filter(is_active=True).order_by('name')
@@ -82,6 +95,35 @@ def report_template_column_options(selected_columns):
     ]
 
 
+def get_template_filters(template):
+    if not template:
+        return {}
+    return template.filters or {}
+
+
+def get_effective_filter_value(request, template, key):
+    request_value = request.GET.get(key, '').strip()
+    if request_value:
+        return request_value
+    return str(get_template_filters(template).get(key, '')).strip()
+
+
+def get_volume_report_filters(request, template=None):
+    return {
+        key: get_effective_filter_value(request, template, key)
+        for key in REPORT_TEMPLATE_FILTER_FIELDS
+    }
+
+
+def parse_filter_date(value):
+    if not value:
+        return None
+    try:
+        return datetime.strptime(value, '%Y-%m-%d').date()
+    except ValueError:
+        return None
+
+
 def build_report_table(trips, selected_columns):
     headers = [VOLUME_REPORT_COLUMNS[column][0] for column in selected_columns]
     rows = [
@@ -91,11 +133,21 @@ def build_report_table(trips, selected_columns):
     return headers, rows
 
 
-def apply_volume_report_filters(queryset, request):
-    loading_shift_type = request.GET.get('loading_shift_type', '').strip()
-    unloading_shift_type = request.GET.get('unloading_shift_type', '').strip()
-    carryover = request.GET.get('carryover', '').strip()
+def apply_volume_report_filters(queryset, filters):
+    date_from = parse_filter_date(filters.get('date_from'))
+    date_to = parse_filter_date(filters.get('date_to'))
+    loading_shift_type = filters.get('loading_shift_type', '')
+    unloading_shift_type = filters.get('unloading_shift_type', '')
+    carryover = filters.get('carryover', '')
+    truck = filters.get('truck', '')
+    excavator = filters.get('excavator', '')
+    rock_type = filters.get('rock_type', '')
+    dump_point = filters.get('dump_point', '')
 
+    if date_from:
+        queryset = queryset.filter(completed_at__date__gte=date_from)
+    if date_to:
+        queryset = queryset.filter(completed_at__date__lte=date_to)
     if loading_shift_type:
         queryset = queryset.filter(loading_shift__shift_type=loading_shift_type)
     if unloading_shift_type:
@@ -104,16 +156,32 @@ def apply_volume_report_filters(queryset, request):
         queryset = queryset.filter(is_carryover=True)
     elif carryover == 'no':
         queryset = queryset.filter(is_carryover=False)
+    if truck.isdigit():
+        queryset = queryset.filter(truck_id=truck)
+    if excavator.isdigit():
+        queryset = queryset.filter(excavator_id=excavator)
+    if rock_type.isdigit():
+        queryset = queryset.filter(rock_type_id=rock_type)
+    if dump_point.isdigit():
+        queryset = queryset.filter(dump_point_id=dump_point)
     return queryset
 
 
-def volume_report_filter_context(request):
+def volume_report_filter_context(request, selected_template):
+    filters = get_volume_report_filters(request, selected_template)
     return {
-        'loading_shift_type': request.GET.get('loading_shift_type', '').strip(),
-        'unloading_shift_type': request.GET.get('unloading_shift_type', '').strip(),
-        'carryover': request.GET.get('carryover', '').strip(),
+        **filters,
         'template': request.GET.get('template', '').strip(),
         'query_string': request.GET.urlencode(),
+    }
+
+
+def report_filter_choices():
+    return {
+        'trucks': Equipment.objects.filter(is_active=True, equipment_type__name__icontains='Самосвал').order_by('garage_number'),
+        'excavators': Equipment.objects.filter(is_active=True, equipment_type__name__icontains='Экскаватор').order_by('garage_number'),
+        'rock_types': RockType.objects.filter(is_active=True).order_by('name'),
+        'dump_points': DumpPoint.objects.filter(is_active=True).order_by('name'),
     }
 
 
@@ -133,8 +201,9 @@ def volume_report_view(request):
         'loading_shift',
         'unloading_shift',
     ).order_by('-completed_at')
-    trips = apply_volume_report_filters(trips, request)
     selected_template = get_selected_report_template(request)
+    filters = get_volume_report_filters(request, selected_template)
+    trips = apply_volume_report_filters(trips, filters)
     selected_columns = get_selected_columns(selected_template)
     headers, rows = build_report_table(trips[:100], selected_columns)
     total_volume = trips.aggregate(total=Sum('volume_m3'))['total'] or 0
@@ -148,9 +217,10 @@ def volume_report_view(request):
             'report_rows': rows,
             'total_volume': total_volume,
             'total_tonnage': total_tonnage,
-            'filters': volume_report_filter_context(request),
+            'filters': volume_report_filter_context(request, selected_template),
             'report_templates': get_volume_report_templates(),
             'selected_template': selected_template,
+            **report_filter_choices(),
         },
     )
 
@@ -171,8 +241,9 @@ def volume_report_export_view(request):
         'loading_shift',
         'unloading_shift',
     ).order_by('-completed_at')
-    trips = apply_volume_report_filters(trips, request)
     selected_template = get_selected_report_template(request)
+    filters = get_volume_report_filters(request, selected_template)
+    trips = apply_volume_report_filters(trips, filters)
     selected_columns = get_selected_columns(selected_template)
     headers, rows = build_report_table(trips, selected_columns)
 
@@ -219,6 +290,11 @@ def report_template_builder_view(request):
             for column in request.POST.getlist('columns')
             if column in VOLUME_REPORT_COLUMNS
         ]
+        filters = {
+            key: request.POST.get(key, '').strip()
+            for key in REPORT_TEMPLATE_FILTER_FIELDS
+            if request.POST.get(key, '').strip()
+        }
         is_active = request.POST.get('is_active') == 'on'
 
         template = None
@@ -244,6 +320,7 @@ def report_template_builder_view(request):
             template.name = name
             template.report_type = ReportType.SHIFT_VOLUME
             template.columns = columns
+            template.filters = filters
             template.is_active = is_active
             template.updated_by = access.employee
             template.save()
@@ -253,6 +330,7 @@ def report_template_builder_view(request):
         edit_template = template
 
     selected_columns = get_selected_columns(edit_template) if edit_template else DEFAULT_VOLUME_REPORT_COLUMNS
+    template_filters = get_template_filters(edit_template)
     return render(
         request,
         'reports/report_template_builder.html',
@@ -261,6 +339,8 @@ def report_template_builder_view(request):
             'report_templates': ReportTemplate.objects.order_by('name'),
             'edit_template': edit_template,
             'column_options': report_template_column_options(selected_columns),
+            'template_filters': template_filters,
+            **report_filter_choices(),
         },
     )
 
