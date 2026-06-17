@@ -10,11 +10,93 @@
             <a href="{% url 'logout' %}">Выйти</a>
         </div>
         <h1>Витрина руководства</h1>
-        <p>Крупная сводка по производственному контуру: объемы, тоннаж, активные рейсы, переходящие рейсы и лидирующие направления работы.</p>
+        <p>Крупная сводка по производственному контуру: суточный срез, общий накопленный объем, активные рейсы и лидирующие направления работы.</p>
     </div>
 </header>
 
 <main class="page">
+    <section class="card">
+        <form method="get" class="filters">
+            <div>
+                <label for="date">Дата суточного среза</label>
+                <input id="date" type="date" name="date" value="{{ selected_date|date:'Y-m-d' }}">
+            </div>
+            <div class="actions">
+                <button type="submit">Показать дату</button>
+                <a class="button-link button-secondary" href="{% url 'customer_daily_report' %}?date={{ selected_date|date:'Y-m-d' }}">Открыть суточный отчет заказчику</a>
+            </div>
+        </form>
+    </section>
+
+    <section class="metric-grid">
+        <div class="metric-card success">
+            <div>Факт за сутки</div>
+            <div class="metric">{{ daily_total_volume }} м3</div>
+            <div class="muted">Дата: {{ selected_date|date:"d.m.Y" }}</div>
+        </div>
+        <div class="metric-card">
+            <div>План за сутки</div>
+            <div class="metric">{{ daily_plan_total }} м3</div>
+            <div class="muted">По плановым заданиям в рейсах</div>
+        </div>
+        <div class="metric-card {% if daily_deviation < 0 %}danger{% else %}success{% endif %}">
+            <div>Отклонение за сутки</div>
+            <div class="metric">{{ daily_deviation }} м3</div>
+            <div class="muted">Факт минус план</div>
+        </div>
+        <div class="metric-card">
+            <div>Тоннаж за сутки</div>
+            <div class="metric">{{ daily_total_tonnage }} т</div>
+            <div class="muted">Если плотность породы заполнена</div>
+        </div>
+        <div class="metric-card">
+            <div>Рейсы за сутки</div>
+            <div class="metric">{{ daily_trip_count }}</div>
+            <div class="muted">Завершенные рейсы выбранной даты</div>
+        </div>
+    </section>
+
+    <section class="dashboard-grid">
+        <div class="card">
+            <h2>Экскаваторы за сутки</h2>
+            {% for item in daily_top_excavators %}
+                <div class="bar-row">
+                    <div class="bar-row-title">
+                        <strong>{{ item.name }}</strong>
+                        <span>{{ item.volume }} м3 · {{ item.trip_count }} рейс.</span>
+                    </div>
+                    <div class="bar-track">
+                        <div class="bar-fill" style="width: {% widthratio item.volume daily_max_excavator_volume 100 %}%"></div>
+                    </div>
+                </div>
+            {% empty %}
+                <p class="muted">За выбранную дату завершенных рейсов пока нет.</p>
+            {% endfor %}
+        </div>
+
+        <div class="card">
+            <h2>Породы и грузы за сутки</h2>
+            {% for item in daily_top_rocks %}
+                <div class="bar-row">
+                    <div class="bar-row-title">
+                        <strong>{{ item.name }}</strong>
+                        <span>{{ item.volume }} м3 · {{ item.trip_count }} рейс.</span>
+                    </div>
+                    <div class="bar-track">
+                        <div class="bar-fill brand-2" style="width: {% widthratio item.volume daily_max_rock_volume 100 %}%"></div>
+                    </div>
+                </div>
+            {% empty %}
+                <p class="muted">За выбранную дату данных по породам пока нет.</p>
+            {% endfor %}
+        </div>
+    </section>
+
+    <section class="card">
+        <h2>Общая накопленная картина</h2>
+        <p class="muted">Ниже показаны показатели по всем завершенным рейсам в системе.</p>
+    </section>
+
     <section class="metric-grid">
         <div class="metric-card success">
             <div>Выполненный объем</div>

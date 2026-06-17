@@ -763,23 +763,48 @@ class AccessLoginTests(TestCase):
         manager_role = Role.objects.create(code='manager', name='Руководство')
         manager = Employee.objects.create(full_name='Тестовое руководство')
         EmployeeAccess.objects.create(employee=manager, role=manager_role, access_code='6000')
+        report_datetime = timezone.make_aware(datetime(2026, 6, 17, 10, 0))
+        previous_datetime = report_datetime - timedelta(days=1)
         Trip.objects.create(
             excavator=excavator,
             truck=truck,
             rock_type=rock,
             dump_point=dump_point,
             status=TripStatus.COMPLETED,
+            planned_volume_m3='60.00',
             volume_m3='57.00',
             tonnage='142.50',
-            completed_at=timezone.now(),
+            completed_at=report_datetime,
+        )
+        Trip.objects.create(
+            excavator=excavator,
+            truck=truck,
+            rock_type=rock,
+            dump_point=dump_point,
+            status=TripStatus.COMPLETED,
+            planned_volume_m3='20.00',
+            volume_m3='22.00',
+            tonnage='55.00',
+            completed_at=previous_datetime,
         )
 
         login_response = self.client.post('/', {'access_code': '6000'}, follow=True, HTTP_HOST='localhost')
-        dashboard_response = self.client.get('/reports/management/', HTTP_HOST='localhost')
+        dashboard_response = self.client.get('/reports/management/?date=2026-06-17', HTTP_HOST='localhost')
 
         self.assertRedirects(login_response, '/reports/management/', target_status_code=200)
         self.assertEqual(dashboard_response.status_code, 200)
         self.assertContains(dashboard_response, 'Витрина руководства')
+        self.assertContains(dashboard_response, 'Факт за сутки')
+        self.assertContains(dashboard_response, 'План за сутки')
+        self.assertContains(dashboard_response, 'Отклонение за сутки')
+        self.assertContains(dashboard_response, '57,00')
+        self.assertContains(dashboard_response, '60,00')
+        self.assertContains(dashboard_response, '-3,00')
+        self.assertContains(dashboard_response, 'Рейсы за сутки')
+        self.assertContains(dashboard_response, 'Экскаваторы за сутки')
+        self.assertContains(dashboard_response, 'Породы и грузы за сутки')
+        self.assertContains(dashboard_response, 'Общая накопленная картина')
+        self.assertContains(dashboard_response, '79 м3')
         self.assertContains(dashboard_response, '57,00')
         self.assertContains(dashboard_response, '142,50')
 

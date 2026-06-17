@@ -987,6 +987,16 @@ def management_dashboard_view(request):
         'unloading_shift',
     )
     active_trips = Trip.objects.filter(status=TripStatus.ACTIVE)
+    selected_date = parse_customer_report_date(request)
+    daily_trips = [
+        trip
+        for trip in completed_trips
+        if trip_report_date(trip) == selected_date
+    ]
+    daily_total_volume = sum((trip.volume_m3 or 0) for trip in daily_trips)
+    daily_total_tonnage = sum((trip.tonnage or 0) for trip in daily_trips)
+    daily_plan_total = sum((trip.planned_volume_m3 or 0) for trip in daily_trips)
+    daily_deviation = daily_total_volume - daily_plan_total
     completed_summary = completed_trips.aggregate(
         total_volume=Sum('volume_m3'),
         total_tonnage=Sum('tonnage'),
@@ -1004,16 +1014,53 @@ def management_dashboard_view(request):
         .annotate(total_volume=Sum('volume_m3'), trip_count=Count('id'))
         .order_by('-total_volume')[:5]
     )
+    daily_excavator_totals = defaultdict(lambda: {'volume': 0, 'trip_count': 0})
+    daily_rock_totals = defaultdict(lambda: {'volume': 0, 'trip_count': 0})
+    for trip in daily_trips:
+        excavator_name = f'Экскаватор {trip.excavator.garage_number}' if trip.excavator else '-'
+        rock_name = str(trip.rock_type) if trip.rock_type else '-'
+        daily_excavator_totals[excavator_name]['volume'] += trip.volume_m3 or 0
+        daily_excavator_totals[excavator_name]['trip_count'] += 1
+        daily_rock_totals[rock_name]['volume'] += trip.volume_m3 or 0
+        daily_rock_totals[rock_name]['trip_count'] += 1
+    daily_top_excavators = sorted(
+        [
+            {'name': name, **values}
+            for name, values in daily_excavator_totals.items()
+        ],
+        key=lambda item: item['volume'],
+        reverse=True,
+    )[:5]
+    daily_top_rocks = sorted(
+        [
+            {'name': name, **values}
+            for name, values in daily_rock_totals.items()
+        ],
+        key=lambda item: item['volume'],
+        reverse=True,
+    )[:5]
     recent_completed_trips = completed_trips.order_by('-completed_at')[:8]
 
     max_excavator_volume = max((item['total_volume'] or 0 for item in top_excavators), default=0)
     max_rock_volume = max((item['total_volume'] or 0 for item in top_rocks), default=0)
+    daily_max_excavator_volume = max((item['volume'] or 0 for item in daily_top_excavators), default=0)
+    daily_max_rock_volume = max((item['volume'] or 0 for item in daily_top_rocks), default=0)
 
     return render(
         request,
         'reports/management_dashboard.html',
         {
             'access': access,
+            'selected_date': selected_date,
+            'daily_plan_total': daily_plan_total,
+            'daily_total_volume': daily_total_volume,
+            'daily_deviation': daily_deviation,
+            'daily_total_tonnage': daily_total_tonnage,
+            'daily_trip_count': len(daily_trips),
+            'daily_top_excavators': daily_top_excavators,
+            'daily_top_rocks': daily_top_rocks,
+            'daily_max_excavator_volume': daily_max_excavator_volume,
+            'daily_max_rock_volume': daily_max_rock_volume,
             'total_volume': completed_summary['total_volume'] or 0,
             'total_tonnage': completed_summary['total_tonnage'] or 0,
             'completed_trip_count': completed_summary['trip_count'] or 0,
