@@ -578,6 +578,8 @@ class AccessLoginTests(TestCase):
             {
                 'name': 'Шаблон для заказчика',
                 'columns': ['truck', 'volume_m3'],
+                'column_label_truck': 'БелАЗ',
+                'column_label_volume_m3': 'Факт, м3',
                 'group_by': 'truck',
                 'truck': str(truck.id),
                 'is_active': 'on',
@@ -590,6 +592,7 @@ class AccessLoginTests(TestCase):
         self.assertEqual(create_response.status_code, 200)
         self.assertEqual(template.report_type, ReportType.SHIFT_VOLUME)
         self.assertEqual(template.columns, ['truck', 'volume_m3'])
+        self.assertEqual(template.column_labels, {'truck': 'БелАЗ', 'volume_m3': 'Факт, м3'})
         self.assertEqual(template.filters, {'truck': str(truck.id)})
         self.assertEqual(template.group_by, 'truck')
         self.assertEqual(template.created_by, dispatcher)
@@ -598,8 +601,8 @@ class AccessLoginTests(TestCase):
         report_response = self.client.get(f'/reports/volume/?template={template.id}', HTTP_HOST='localhost')
 
         self.assertEqual(report_response.status_code, 200)
-        self.assertContains(report_response, '<th>Самосвал</th>', html=True)
-        self.assertContains(report_response, '<th>Объем, м3</th>', html=True)
+        self.assertContains(report_response, '<th>БелАЗ</th>', html=True)
+        self.assertContains(report_response, '<th>Факт, м3</th>', html=True)
         self.assertContains(report_response, '<th>Тоннаж</th>', html=True)
         self.assertContains(report_response, '<th>Рейсы</th>', html=True)
         self.assertNotContains(report_response, '<th>Экскаватор</th>', html=True)
@@ -619,7 +622,8 @@ class AccessLoginTests(TestCase):
         self.assertEqual(export_response.status_code, 200)
         self.assertIn('Отчет по объемам', values)
         self.assertIn('Шаблон для заказчика', values)
-        self.assertIn('Самосвал', values)
+        self.assertIn('БелАЗ', values)
+        self.assertIn('Факт, м3', values)
         self.assertIn('Итого', values)
         self.assertNotIn(Decimal('22.00'), values)
 

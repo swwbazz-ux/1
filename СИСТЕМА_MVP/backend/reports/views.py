@@ -156,11 +156,26 @@ def get_selected_columns(template):
     return columns or DEFAULT_VOLUME_REPORT_COLUMNS
 
 
-def report_template_column_options(selected_columns):
+def get_template_column_labels(template):
+    if not template:
+        return {}
+    return template.column_labels or {}
+
+
+def get_column_label(column, column_labels=None):
+    default_label = VOLUME_REPORT_COLUMNS[column][0]
+    if not column_labels:
+        return default_label
+    custom_label = str(column_labels.get(column, '')).strip()
+    return custom_label or default_label
+
+
+def report_template_column_options(selected_columns, column_labels=None):
     return [
         {
             'code': code,
             'label': label,
+            'custom_label': str((column_labels or {}).get(code, '')).strip(),
             'checked': code in selected_columns,
         }
         for code, (label, _getter) in VOLUME_REPORT_COLUMNS.items()
@@ -219,8 +234,8 @@ def parse_filter_date(value):
         return None
 
 
-def build_report_table(trips, selected_columns):
-    headers = [VOLUME_REPORT_COLUMNS[column][0] for column in selected_columns]
+def build_report_table(trips, selected_columns, column_labels=None):
+    headers = [get_column_label(column, column_labels) for column in selected_columns]
     rows = [
         [VOLUME_REPORT_COLUMNS[column][1](trip) for column in selected_columns]
         for trip in trips
@@ -228,8 +243,12 @@ def build_report_table(trips, selected_columns):
     return headers, rows
 
 
-def build_grouped_report_table(trips, group_by):
+def build_grouped_report_table(trips, group_by, column_labels=None):
     group_label, group_getter = VOLUME_REPORT_GROUPS[group_by]
+    if group_by in VOLUME_REPORT_COLUMNS:
+        group_label = get_column_label(group_by, column_labels)
+    volume_label = get_column_label('volume_m3', column_labels)
+    tonnage_label = get_column_label('tonnage', column_labels)
     grouped = defaultdict(lambda: {
         'volume_m3': 0,
         'tonnage': 0,
@@ -242,7 +261,7 @@ def build_grouped_report_table(trips, group_by):
         grouped[key]['tonnage'] += trip.tonnage or 0
         grouped[key]['trip_count'] += 1
 
-    headers = [group_label, 'Объем, м3', 'Тоннаж', 'Рейсы']
+    headers = [group_label, volume_label, tonnage_label, 'Рейсы']
     rows = [
         [group_name, values['volume_m3'], values['tonnage'], values['trip_count']]
         for group_name, values in grouped.items()
@@ -255,15 +274,13 @@ def is_number(value):
     return isinstance(value, (int, float)) or hasattr(value, 'as_tuple')
 
 
-def append_total_row(sheet, headers, rows, row_index):
+def append_total_row(sheet, headers, rows, row_index, total_column_indexes):
     if not rows:
         return row_index
 
     total_row = [''] * len(headers)
     total_row[0] = 'Итого'
-    for column_index, header in enumerate(headers):
-        if header not in {'План, м3', 'Объем, м3', 'Тоннаж', 'Рейсы'}:
-            continue
+    for column_index in total_column_indexes:
         total = sum(row[column_index] for row in rows if is_number(row[column_index]))
         total_row[column_index] = total
 
@@ -308,7 +325,7 @@ def style_volume_report_workbook(sheet, table_header_row, total_columns):
         sheet.column_dimensions[column_letter].width = min(max(max_length + 2, 14), 42)
 
 
-def write_volume_report_excel(sheet, headers, rows, selected_template, selected_group_by, filters, access):
+def write_volume_report_excel(sheet, headers, rows, selected_template, selected_group_by, filters, access, total_column_indexes):
     total_columns = max(len(headers), 4)
     generated_at = timezone.localtime(timezone.now()).strftime('%d.%m.%Y %H:%M')
     template_name = selected_template.name if selected_template else 'Стандартный отчет'
@@ -345,7 +362,7 @@ def write_volume_report_excel(sheet, headers, rows, selected_template, selected_
     sheet.append(headers)
     for row in rows:
         sheet.append(row)
-    append_total_row(sheet, headers, rows, sheet.max_row + 1)
+    append_total_row(sheet, headers, rows, sheet.max_row + 1, total_column_indexes)
 
     for row in range(2, table_header_row):
         sheet.cell(row=row, column=1).font = Font(bold=True)
@@ -406,6 +423,19 @@ def report_filter_choices():
     }
 
 
+def get_detail_total_column_indexes(selected_columns):
+    total_columns = {'planned_volume_m3', 'volume_m3', 'tonnage'}
+    return [
+        index
+        for index, column in enumerate(selected_columns)
+        if column in total_columns
+    ]
+
+
+def get_grouped_total_column_indexes():
+    return [1, 2, 3]
+
+
 def volume_report_view(request):
     access_id = request.session.get('employee_access_id')
     if not access_id:
@@ -426,11 +456,12 @@ def volume_report_view(request):
     filters = get_volume_report_filters(request, selected_template)
     trips = apply_volume_report_filters(trips, filters)
     selected_columns = get_selected_columns(selected_template)
+    column_labels = get_template_column_labels(selected_template)
     selected_group_by = get_selected_group_by(request, selected_template)
     if selected_group_by:
-        headers, rows = build_grouped_report_table(trips, selected_group_by)
+        headers, rows = build_grouped_report_table(trips, selected_group_by, column_labels)
     else:
-        headers, rows = build_report_table(trips[:100], selected_columns)
+        headers, rows = build_report_table(trips[:100], selected_columns, column_labels)
     total_volume = trips.aggregate(total=Sum('volume_m3'))['total'] or 0
     total_tonnage = trips.aggregate(total=Sum('tonnage'))['total'] or 0
     return render(
@@ -472,16 +503,19 @@ def volume_report_export_view(request):
     filters = get_volume_report_filters(request, selected_template)
     trips = apply_volume_report_filters(trips, filters)
     selected_columns = get_selected_columns(selected_template)
+    column_labels = get_template_column_labels(selected_template)
     selected_group_by = get_selected_group_by(request, selected_template)
     if selected_group_by:
-        headers, rows = build_grouped_report_table(trips, selected_group_by)
+        headers, rows = build_grouped_report_table(trips, selected_group_by, column_labels)
+        total_column_indexes = get_grouped_total_column_indexes()
     else:
-        headers, rows = build_report_table(trips, selected_columns)
+        headers, rows = build_report_table(trips, selected_columns, column_labels)
+        total_column_indexes = get_detail_total_column_indexes(selected_columns)
 
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = 'Объемы'
-    write_volume_report_excel(sheet, headers, rows, selected_template, selected_group_by, filters, access)
+    write_volume_report_excel(sheet, headers, rows, selected_template, selected_group_by, filters, access, total_column_indexes)
 
     response = HttpResponse(
         content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -519,6 +553,12 @@ def report_template_builder_view(request):
             for column in request.POST.getlist('columns')
             if column in VOLUME_REPORT_COLUMNS
         ]
+        column_labels = {}
+        for column in VOLUME_REPORT_COLUMNS:
+            custom_label = request.POST.get(f'column_label_{column}', '').strip()
+            default_label = VOLUME_REPORT_COLUMNS[column][0]
+            if custom_label and custom_label != default_label:
+                column_labels[column] = custom_label
         filters = {
             key: request.POST.get(key, '').strip()
             for key in REPORT_TEMPLATE_FILTER_FIELDS
@@ -552,6 +592,7 @@ def report_template_builder_view(request):
             template.name = name
             template.report_type = ReportType.SHIFT_VOLUME
             template.columns = columns
+            template.column_labels = column_labels
             template.filters = filters
             template.group_by = group_by
             template.is_active = is_active
@@ -563,6 +604,7 @@ def report_template_builder_view(request):
         edit_template = template
 
     selected_columns = get_selected_columns(edit_template) if edit_template else DEFAULT_VOLUME_REPORT_COLUMNS
+    column_labels = get_template_column_labels(edit_template)
     template_filters = get_template_filters(edit_template)
     selected_group_by = edit_template.group_by if edit_template and edit_template.group_by in VOLUME_REPORT_GROUPS else ''
     return render(
@@ -572,7 +614,7 @@ def report_template_builder_view(request):
             'access': access,
             'report_templates': ReportTemplate.objects.order_by('name'),
             'edit_template': edit_template,
-            'column_options': report_template_column_options(selected_columns),
+            'column_options': report_template_column_options(selected_columns, column_labels),
             'template_filters': template_filters,
             'selected_group_by': selected_group_by,
             'group_options': report_template_group_options(selected_group_by),

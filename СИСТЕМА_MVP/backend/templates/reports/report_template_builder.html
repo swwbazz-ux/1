@@ -42,13 +42,17 @@
                 <label for="name">Название шаблона</label>
                 <input id="name" type="text" name="name" value="{{ edit_template.name|default:'' }}" placeholder="Например: Отчет заказчику короткий">
 
-                <label>Столбцы отчета</label>
+                <label>Столбцы отчета и названия в выгрузке</label>
+                <p class="muted">Галочка включает столбец. Поле названия можно оставить пустым - тогда будет использовано стандартное название.</p>
                 <div class="checkbox-grid">
                     {% for column in column_options %}
-                        <label class="checkline">
-                            <input type="checkbox" name="columns" value="{{ column.code }}" {% if column.checked %}checked{% endif %}>
-                            <span>{{ column.label }}</span>
-                        </label>
+                        <div class="checkline">
+                            <label>
+                                <input type="checkbox" name="columns" value="{{ column.code }}" {% if column.checked %}checked{% endif %}>
+                                <span>{{ column.label }}</span>
+                            </label>
+                            <input type="text" name="column_label_{{ column.code }}" value="{{ column.custom_label }}" placeholder="Название: {{ column.label }}">
+                        </div>
                     {% endfor %}
                 </div>
 
