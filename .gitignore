@@ -1,0 +1,28 @@
+# Python / Django
+__pycache__/
+*.py[cod]
+*.sqlite3
+db.sqlite3
+
+# Local environment
+.venv/
+venv/
+.env
+
+# MVP local data
+СИСТЕМА_MVP/.venv/
+СИСТЕМА_MVP/backend/db.sqlite3
+СИСТЕМА_MVP/backend/.env
+СИСТЕМА_MVP/backend/staticfiles/
+СИСТЕМА_MVP/exports/
+СИСТЕМА_MVP/local_data/
+
+# Generated / heavy presentation outputs
+outputs/
+*.pdf
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

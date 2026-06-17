@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Отчет по объемам</title>
+    <style>
+        body { margin: 0; font-family: Arial, sans-serif; background: #f4f7f9; color: #13202a; }
+        header { background: #101820; color: #ffffff; padding: 22px 28px; }
+        main { padding: 28px; max-width: 1000px; margin: 0 auto; }
+        .card { background: #ffffff; border-radius: 18px; padding: 24px; box-shadow: 0 12px 40px rgba(16, 24, 32, .08); margin-bottom: 18px; }
+        .metric { font-size: 34px; font-weight: 700; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 10px; border-bottom: 1px solid #e5edf2; text-align: left; }
+    </style>
+</head>
+<body>
+<header>
+    <div>{{ access.employee.full_name }}</div>
+    <h1>Отчет по объемам</h1>
+</header>
+<main>
+    <section class="card">
+        <div>Общий объем по выполненным рейсам</div>
+        <div class="metric">{{ total_volume }} м3</div>
+        <p><a href="{% url 'volume_report_export' %}">Выгрузить в Excel</a></p>
+    </section>
+    <section class="card">
+        <h2>Выполненные рейсы</h2>
+        <table>
+            <thead>
+            <tr>
+                <th>Самосвал</th>
+                <th>Экскаватор</th>
+                <th>Порода</th>
+                <th>Разгрузка</th>
+                <th>Объем</th>
+                <th>Выполнен</th>
+            </tr>
+            </thead>
+            <tbody>
+            {% for trip in trips %}
+                <tr>
+                    <td>{{ trip.truck }}</td>
+                    <td>{{ trip.excavator }}</td>
+                    <td>{{ trip.rock_type }}</td>
+                    <td>{{ trip.dump_point }}</td>
+                    <td>{{ trip.volume_m3|default:"-" }}</td>
+                    <td>{{ trip.completed_at }}</td>
+                </tr>
+            {% empty %}
+                <tr><td colspan="6">Выполненных рейсов пока нет.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </section>
+</main>
+</body>
+</html>

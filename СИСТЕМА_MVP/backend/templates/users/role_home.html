@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ interface_name }}</title>
+    <style>
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+            background: #f4f7f9;
+            color: #13202a;
+        }
+        header {
+            background: #101820;
+            color: #ffffff;
+            padding: 22px 28px;
+        }
+        main {
+            padding: 28px;
+            max-width: 900px;
+            margin: 0 auto;
+        }
+        .card {
+            background: #ffffff;
+            border-radius: 18px;
+            padding: 24px;
+            box-shadow: 0 12px 40px rgba(16, 24, 32, .08);
+        }
+        .badge {
+            display: inline-block;
+            padding: 8px 12px;
+            border-radius: 999px;
+            background: #28c7b7;
+            font-weight: 700;
+        }
+        a {
+            color: #0a746c;
+        }
+    </style>
+</head>
+<body>
+<header>
+    <div>{{ access.employee.full_name }}</div>
+    <h1>{{ interface_name }}</h1>
+</header>
+<main>
+    <section class="card">
+        <p class="badge">{{ access.role.name }}</p>
+        <p>Это первая техническая страница после единого входа. Следующий шаг - подключить сюда рабочий экран роли.</p>
+        <p><strong>Код роли:</strong> {{ access.role.code }}</p>
+        <p><a href="{% url 'logout' %}">Выйти</a></p>
+    </section>
+</main>
+</body>
+</html>

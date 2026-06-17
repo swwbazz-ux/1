@@ -1,0 +1,4 @@
+﻿report_date;shift_code;truck_number;reason_code;reason_name_ru;event_class;reason_group;culprit_side_default;is_loss_time;is_loss_volume;is_wear_event;downtime_minutes
+2026-04-07 00:00:00;1;59;DT_WAIT_LOAD;Ожидание погрузки;waiting;production;undefined;1;1;0;20
+2026-04-08 00:00:00;2;30;DT_FUEL;Заправка;service;operational_service;ours;1;0;0;30
+2026-04-08 00:00:00;2;30;DT_WAIT_UNLOAD;Ожидание разгрузки;waiting;production;undefined;1;1;0;20

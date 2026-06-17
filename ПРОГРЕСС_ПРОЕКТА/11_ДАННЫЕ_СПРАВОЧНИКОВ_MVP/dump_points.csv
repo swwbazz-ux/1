@@ -1,0 +1,7 @@
+﻿dump_point_sk;dump_point_code;dump_point_name;area_name;is_active;source_system_code;valid_from;valid_to
+1;ККД;ККД;Дробильный контур;True;driver_form;46112;
+2;СКДР;СКДР;Дробильный контур;True;driver_form;46112;
+3;Отвал;Отвал;Внешняя разгрузка;True;driver_form;46112;
+4;Склад негабарита;Склад негабарита;Складские зоны;True;driver_form;46112;
+5;Склад окисленной руды;Склад окисленной руды;Складские зоны;True;driver_form;46112;
+6;Подсыпка;Подсыпка;Технологические работы;True;driver_form;46112;

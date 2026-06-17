@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Расстановка техники</title>
+    <style>
+        body { margin: 0; font-family: Arial, sans-serif; background: #f4f7f9; color: #13202a; }
+        header { background: #101820; color: #ffffff; padding: 22px 28px; }
+        main { padding: 28px; max-width: 900px; margin: 0 auto; }
+        .card { background: #ffffff; border-radius: 18px; padding: 24px; box-shadow: 0 12px 40px rgba(16, 24, 32, .08); margin-bottom: 18px; }
+        label { display: block; margin: 16px 0 6px; font-weight: 700; }
+        select { width: 100%; box-sizing: border-box; padding: 13px; border: 1px solid #ccd7df; border-radius: 12px; font-size: 16px; background: #ffffff; }
+        button { margin-top: 22px; width: 100%; padding: 16px; border: 0; border-radius: 12px; background: #28c7b7; color: #081216; font-weight: 700; cursor: pointer; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 10px; border-bottom: 1px solid #e5edf2; text-align: left; }
+        .success { padding: 12px; border-radius: 12px; background: #ddfff8; color: #075a52; }
+    </style>
+</head>
+<body>
+<header>
+    <div>{{ access.employee.full_name }}</div>
+    <h1>Расстановка техники</h1>
+</header>
+<main>
+    {% for message in messages %}
+        <div class="card success">{{ message }}</div>
+    {% endfor %}
+    <section class="card">
+        <h2>Назначить самосвал под экскаватор</h2>
+        <form method="post">
+            {% csrf_token %}
+            {% for field in form %}
+                <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                {{ field }}
+                {{ field.errors }}
+            {% endfor %}
+            <button type="submit">Создать назначение</button>
+        </form>
+    </section>
+    <section class="card">
+        <h2>Последние назначения</h2>
+        <table>
+            <thead>
+            <tr>
+                <th>Самосвал</th>
+                <th>Экскаватор</th>
+                <th>Статус</th>
+                <th>Назначено</th>
+            </tr>
+            </thead>
+            <tbody>
+            {% for assignment in assignments %}
+                <tr>
+                    <td>{{ assignment.truck }}</td>
+                    <td>{{ assignment.excavator }}</td>
+                    <td>{{ assignment.get_status_display }}</td>
+                    <td>{{ assignment.assigned_at }}</td>
+                </tr>
+            {% empty %}
+                <tr><td colspan="4">Назначений пока нет.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </section>
+</main>
+</body>
+</html>
