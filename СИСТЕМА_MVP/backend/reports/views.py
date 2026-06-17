@@ -1,6 +1,7 @@
 from collections import defaultdict
 from datetime import datetime
 
+from django.contrib import messages
 from django.db.models import Count, Sum
 from django.http import HttpResponse
 from django.shortcuts import redirect, render
@@ -12,7 +13,7 @@ from openpyxl.utils import get_column_letter
 from trips.models import Trip, TripStatus
 from users.models import EmployeeAccess
 
-from .models import ReportTemplate
+from .models import ReportTemplate, ReportType
 
 
 VOLUME_REPORT_COLUMNS = {
@@ -68,6 +69,17 @@ def get_selected_columns(template):
         return DEFAULT_VOLUME_REPORT_COLUMNS
     columns = [column for column in template.columns if column in VOLUME_REPORT_COLUMNS]
     return columns or DEFAULT_VOLUME_REPORT_COLUMNS
+
+
+def report_template_column_options(selected_columns):
+    return [
+        {
+            'code': code,
+            'label': label,
+            'checked': code in selected_columns,
+        }
+        for code, (label, _getter) in VOLUME_REPORT_COLUMNS.items()
+    ]
 
 
 def build_report_table(trips, selected_columns):
@@ -187,6 +199,70 @@ def get_reports_access(request, allowed_roles):
     if not access or access.role.code not in allowed_roles:
         return None
     return access
+
+
+def report_template_builder_view(request):
+    access = get_reports_access(request, {'admin', 'dispatcher'})
+    if not access:
+        return redirect('login' if not request.session.get('employee_access_id') else 'role_home')
+
+    edit_template = None
+    edit_template_id = request.GET.get('edit', '').strip()
+    if edit_template_id:
+        edit_template = ReportTemplate.objects.filter(id=edit_template_id).first()
+
+    if request.method == 'POST':
+        template_id = request.POST.get('template_id', '').strip()
+        name = request.POST.get('name', '').strip()
+        columns = [
+            column
+            for column in request.POST.getlist('columns')
+            if column in VOLUME_REPORT_COLUMNS
+        ]
+        is_active = request.POST.get('is_active') == 'on'
+
+        template = None
+        if template_id:
+            template = ReportTemplate.objects.filter(id=template_id).first()
+            if not template:
+                messages.error(request, 'Шаблон отчета не найден.')
+                return redirect('report_template_builder')
+
+        duplicate_query = ReportTemplate.objects.filter(name=name)
+        if template:
+            duplicate_query = duplicate_query.exclude(id=template.id)
+
+        if not name:
+            messages.error(request, 'Укажи название шаблона отчета.')
+        elif not columns:
+            messages.error(request, 'Выбери хотя бы один столбец отчета.')
+        elif duplicate_query.exists():
+            messages.error(request, 'Шаблон с таким названием уже существует.')
+        else:
+            if not template:
+                template = ReportTemplate(created_by=access.employee)
+            template.name = name
+            template.report_type = ReportType.SHIFT_VOLUME
+            template.columns = columns
+            template.is_active = is_active
+            template.updated_by = access.employee
+            template.save()
+            messages.success(request, 'Шаблон отчета сохранен.')
+            return redirect('report_template_builder')
+
+        edit_template = template
+
+    selected_columns = get_selected_columns(edit_template) if edit_template else DEFAULT_VOLUME_REPORT_COLUMNS
+    return render(
+        request,
+        'reports/report_template_builder.html',
+        {
+            'access': access,
+            'report_templates': ReportTemplate.objects.order_by('name'),
+            'edit_template': edit_template,
+            'column_options': report_template_column_options(selected_columns),
+        },
+    )
 
 
 def parse_customer_report_date(request):

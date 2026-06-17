@@ -535,6 +535,58 @@ class AccessLoginTests(TestCase):
         self.assertNotContains(response, '<th>Экскаватор</th>', html=True)
         self.assertContains(response, '11')
 
+    def test_dispatcher_can_create_report_template_in_builder(self):
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        truck = Equipment.objects.create(equipment_type=truck_type, garage_number='10')
+        excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='1')
+        rock = RockType.objects.create(name='Руда')
+        dump_point = DumpPoint.objects.create(name='ККД')
+        dispatcher_role = Role.objects.create(code='dispatcher', name='Диспетчер')
+        dispatcher = Employee.objects.create(full_name='Тестовый диспетчер')
+        EmployeeAccess.objects.create(employee=dispatcher, role=dispatcher_role, access_code='5000')
+        Trip.objects.create(
+            excavator=excavator,
+            truck=truck,
+            rock_type=rock,
+            dump_point=dump_point,
+            status=TripStatus.COMPLETED,
+            volume_m3='11.00',
+            completed_at=timezone.now(),
+        )
+
+        self.client.post('/', {'access_code': '5000'}, follow=True, HTTP_HOST='localhost')
+        builder_response = self.client.get('/reports/templates/', HTTP_HOST='localhost')
+
+        self.assertEqual(builder_response.status_code, 200)
+        self.assertContains(builder_response, 'Конструктор шаблонов отчетов')
+
+        create_response = self.client.post(
+            '/reports/templates/',
+            {
+                'name': 'Шаблон для заказчика',
+                'columns': ['truck', 'volume_m3'],
+                'is_active': 'on',
+            },
+            follow=True,
+            HTTP_HOST='localhost',
+        )
+        template = ReportTemplate.objects.get(name='Шаблон для заказчика')
+
+        self.assertEqual(create_response.status_code, 200)
+        self.assertEqual(template.report_type, ReportType.SHIFT_VOLUME)
+        self.assertEqual(template.columns, ['truck', 'volume_m3'])
+        self.assertEqual(template.created_by, dispatcher)
+        self.assertEqual(template.updated_by, dispatcher)
+
+        report_response = self.client.get(f'/reports/volume/?template={template.id}', HTTP_HOST='localhost')
+
+        self.assertEqual(report_response.status_code, 200)
+        self.assertContains(report_response, '<th>Самосвал</th>', html=True)
+        self.assertContains(report_response, '<th>Объем, м3</th>', html=True)
+        self.assertNotContains(report_response, '<th>Экскаватор</th>', html=True)
+        self.assertContains(report_response, '11')
+
     def test_dispatcher_can_open_customer_daily_report_and_export_it(self):
         truck_type = EquipmentType.objects.create(name='Самосвал')
         excavator_type = EquipmentType.objects.create(name='Экскаватор')

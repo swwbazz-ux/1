@@ -296,6 +296,25 @@ th {
     width: auto;
 }
 
+.checkbox-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    gap: 10px;
+    margin: 10px 0 18px;
+}
+
+.checkbox-grid .checkline {
+    background: #eef5f7;
+    border: 1px solid #d8e5ec;
+    border-radius: 14px;
+    margin: 0;
+    padding: 12px;
+}
+
+.form-switch {
+    margin-top: 16px;
+}
+
 .compact-page {
     max-width: 780px;
 }

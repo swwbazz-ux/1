@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+
+{% block title %}Конструктор шаблонов отчетов{% endblock %}
+
+{% block body %}
+<header class="app-header">
+    <div class="header-inner">
+        <div class="topline">
+            <span>{{ access.employee.full_name }}</span>
+            <a href="{% url 'logout' %}">Выйти</a>
+        </div>
+        <h1>Конструктор шаблонов отчетов</h1>
+        <p>Первый рабочий конструктор: выбираем нужные столбцы отчета по объемам, сохраняем шаблон и выгружаем данные в Excel.</p>
+    </div>
+</header>
+
+<main class="page">
+    {% if messages %}
+        {% for message in messages %}
+            <div class="message {{ message.tags }}">{{ message }}</div>
+        {% endfor %}
+    {% endif %}
+
+    <section class="card">
+        <div class="actions">
+            <a class="button-link button-secondary" href="{% url 'volume_report' %}">Вернуться в отчет по объемам</a>
+            {% if edit_template %}
+                <a class="button-link button-secondary" href="{% url 'report_template_builder' %}">Создать новый шаблон</a>
+            {% endif %}
+        </div>
+    </section>
+
+    <section class="dashboard-grid">
+        <div class="card">
+            <h2>{% if edit_template %}Редактирование шаблона{% else %}Новый шаблон{% endif %}</h2>
+            <form method="post">
+                {% csrf_token %}
+                {% if edit_template %}
+                    <input type="hidden" name="template_id" value="{{ edit_template.id }}">
+                {% endif %}
+
+                <label for="name">Название шаблона</label>
+                <input id="name" type="text" name="name" value="{{ edit_template.name|default:'' }}" placeholder="Например: Отчет заказчику короткий">
+
+                <label>Столбцы отчета</label>
+                <div class="checkbox-grid">
+                    {% for column in column_options %}
+                        <label class="checkline">
+                            <input type="checkbox" name="columns" value="{{ column.code }}" {% if column.checked %}checked{% endif %}>
+                            <span>{{ column.label }}</span>
+                        </label>
+                    {% endfor %}
+                </div>
+
+                <label class="checkline form-switch">
+                    <input type="checkbox" name="is_active" {% if not edit_template or edit_template.is_active %}checked{% endif %}>
+                    <span>Шаблон активен и доступен в отчете</span>
+                </label>
+
+                <div class="actions">
+                    <button type="submit">Сохранить шаблон</button>
+                </div>
+            </form>
+            <p class="muted">Сейчас конструктор управляет составом столбцов. Фильтры, группировки, итоговые строки и специальные формы заказчика будут добавляться следующими шагами.</p>
+        </div>
+
+        <div class="card">
+            <h2>Сохраненные шаблоны</h2>
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                    <tr>
+                        <th>Название</th>
+                        <th>Столбцов</th>
+                        <th>Статус</th>
+                        <th>Действия</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    {% for template in report_templates %}
+                        <tr>
+                            <td>{{ template.name }}</td>
+                            <td>{{ template.columns|length }}</td>
+                            <td>{% if template.is_active %}активен{% else %}выключен{% endif %}</td>
+                            <td>
+                                <a href="{% url 'report_template_builder' %}?edit={{ template.id }}">Изменить</a>
+                                {% if template.is_active %}
+                                    · <a href="{% url 'volume_report' %}?template={{ template.id }}">Использовать</a>
+                                {% endif %}
+                            </td>
+                        </tr>
+                    {% empty %}
+                        <tr><td colspan="4">Шаблонов пока нет.</td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+</main>
+{% endblock %}
