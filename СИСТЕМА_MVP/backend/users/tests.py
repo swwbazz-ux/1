@@ -1,5 +1,6 @@
 from decimal import Decimal
 
+from django.core.management import call_command
 from django.test import TestCase
 from django.utils import timezone
 
@@ -510,5 +511,16 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, '<th>Объем, м3</th>', html=True)
         self.assertNotContains(response, '<th>Экскаватор</th>', html=True)
         self.assertContains(response, '11')
+
+    def test_seed_demo_scenario_command_creates_ready_demo_data(self):
+        call_command('seed_demo_scenario')
+
+        self.assertTrue(EmployeeAccess.objects.filter(access_code='2000', is_active=True).exists())
+        self.assertTrue(EmployeeAccess.objects.filter(access_code='5000', is_active=True).exists())
+        self.assertTrue(DriverPrimaryRegistration.objects.exists())
+        self.assertTrue(EmployeeShift.objects.filter(closed_at__isnull=True).exists())
+        self.assertTrue(HaulAssignment.objects.filter(status=AssignmentStatus.ACCEPTED).exists())
+        self.assertTrue(Trip.objects.filter(status=TripStatus.ACTIVE).exists())
+        self.assertTrue(ReportTemplate.objects.filter(name='Демо отчет по объемам', is_active=True).exists())
 
 # Create your tests here.
