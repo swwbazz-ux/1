@@ -7,6 +7,31 @@ from trips.models import Trip, TripStatus
 from users.models import EmployeeAccess
 
 
+def apply_volume_report_filters(queryset, request):
+    loading_shift_type = request.GET.get('loading_shift_type', '').strip()
+    unloading_shift_type = request.GET.get('unloading_shift_type', '').strip()
+    carryover = request.GET.get('carryover', '').strip()
+
+    if loading_shift_type:
+        queryset = queryset.filter(loading_shift__shift_type=loading_shift_type)
+    if unloading_shift_type:
+        queryset = queryset.filter(unloading_shift__shift_type=unloading_shift_type)
+    if carryover == 'yes':
+        queryset = queryset.filter(is_carryover=True)
+    elif carryover == 'no':
+        queryset = queryset.filter(is_carryover=False)
+    return queryset
+
+
+def volume_report_filter_context(request):
+    return {
+        'loading_shift_type': request.GET.get('loading_shift_type', '').strip(),
+        'unloading_shift_type': request.GET.get('unloading_shift_type', '').strip(),
+        'carryover': request.GET.get('carryover', '').strip(),
+        'query_string': request.GET.urlencode(),
+    }
+
+
 def volume_report_view(request):
     access_id = request.session.get('employee_access_id')
     if not access_id:
@@ -23,7 +48,9 @@ def volume_report_view(request):
         'loading_shift',
         'unloading_shift',
     ).order_by('-completed_at')
+    trips = apply_volume_report_filters(trips, request)
     total_volume = trips.aggregate(total=Sum('volume_m3'))['total'] or 0
+    total_tonnage = trips.aggregate(total=Sum('tonnage'))['total'] or 0
     return render(
         request,
         'reports/volume_report.html',
@@ -31,6 +58,8 @@ def volume_report_view(request):
             'access': access,
             'trips': trips[:100],
             'total_volume': total_volume,
+            'total_tonnage': total_tonnage,
+            'filters': volume_report_filter_context(request),
         },
     )
 
@@ -51,6 +80,7 @@ def volume_report_export_view(request):
         'loading_shift',
         'unloading_shift',
     ).order_by('-completed_at')
+    trips = apply_volume_report_filters(trips, request)
 
     workbook = Workbook()
     sheet = workbook.active

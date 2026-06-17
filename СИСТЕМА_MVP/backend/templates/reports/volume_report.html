@@ -12,6 +12,10 @@
         .metric { font-size: 34px; font-weight: 700; }
         table { width: 100%; border-collapse: collapse; }
         th, td { padding: 10px; border-bottom: 1px solid #e5edf2; text-align: left; }
+        .filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; align-items: end; }
+        label { display: block; margin-bottom: 6px; font-weight: 700; }
+        select, button { width: 100%; box-sizing: border-box; padding: 12px; border: 1px solid #ccd7df; border-radius: 12px; background: #ffffff; }
+        button { background: #28c7b7; color: #081216; font-weight: 700; cursor: pointer; }
     </style>
 </head>
 <body>
@@ -23,7 +27,45 @@
     <section class="card">
         <div>Общий объем по выполненным рейсам</div>
         <div class="metric">{{ total_volume }} м3</div>
-        <p><a href="{% url 'volume_report_export' %}">Выгрузить в Excel</a></p>
+        <div>Общий тоннаж по выполненным рейсам</div>
+        <div class="metric">{{ total_tonnage }} т</div>
+        <p>
+            <a href="{% url 'volume_report_export' %}{% if filters.query_string %}?{{ filters.query_string }}{% endif %}">Выгрузить в Excel</a>
+            |
+            <a href="{% url 'dispatcher_control' %}">Вернуться на диспетчерский пульт</a>
+        </p>
+    </section>
+    <section class="card">
+        <h2>Фильтры</h2>
+        <form method="get" class="filters">
+            <div>
+                <label for="loading_shift_type">Смена загрузки</label>
+                <select id="loading_shift_type" name="loading_shift_type">
+                    <option value="">Все</option>
+                    <option value="day" {% if filters.loading_shift_type == 'day' %}selected{% endif %}>Дневная</option>
+                    <option value="night" {% if filters.loading_shift_type == 'night' %}selected{% endif %}>Ночная</option>
+                </select>
+            </div>
+            <div>
+                <label for="unloading_shift_type">Смена разгрузки</label>
+                <select id="unloading_shift_type" name="unloading_shift_type">
+                    <option value="">Все</option>
+                    <option value="day" {% if filters.unloading_shift_type == 'day' %}selected{% endif %}>Дневная</option>
+                    <option value="night" {% if filters.unloading_shift_type == 'night' %}selected{% endif %}>Ночная</option>
+                </select>
+            </div>
+            <div>
+                <label for="carryover">Переходящий рейс</label>
+                <select id="carryover" name="carryover">
+                    <option value="">Все</option>
+                    <option value="yes" {% if filters.carryover == 'yes' %}selected{% endif %}>Только переходящие</option>
+                    <option value="no" {% if filters.carryover == 'no' %}selected{% endif %}>Без переходящих</option>
+                </select>
+            </div>
+            <div>
+                <button type="submit">Показать</button>
+            </div>
+        </form>
     </section>
     <section class="card">
         <h2>Выполненные рейсы</h2>
