@@ -97,10 +97,31 @@ class Command(BaseCommand):
                 loading_shift=excavator_shift,
                 rock_type=rock,
                 dump_point=dump_point,
+                planned_volume_m3=Decimal('7000.00'),
                 volume_m3=volume,
                 tonnage=tonnage,
+                loading_horizon='75',
+                loading_block='52',
+                transport_distance_km=Decimal('3.10'),
+                downtime_text='зачистка забоя',
+                note='демо активный рейс',
                 status=TripStatus.ACTIVE,
             )
+        else:
+            active_trip.planned_volume_m3 = Decimal('7000.00')
+            active_trip.loading_horizon = '75'
+            active_trip.loading_block = '52'
+            active_trip.transport_distance_km = Decimal('3.10')
+            active_trip.downtime_text = 'зачистка забоя'
+            active_trip.note = 'демо активный рейс'
+            active_trip.save(update_fields=[
+                'planned_volume_m3',
+                'loading_horizon',
+                'loading_block',
+                'transport_distance_km',
+                'downtime_text',
+                'note',
+            ])
 
         completed_truck = self.get_or_create_equipment(
             equipment_type_name='Самосвал',
@@ -119,10 +140,25 @@ class Command(BaseCommand):
                 unloading_shift=driver_shift,
                 rock_type=rock,
                 dump_point=dump_point,
+                planned_volume_m3=Decimal('7000.00'),
                 volume_m3=volume,
                 tonnage=tonnage,
+                loading_horizon='75',
+                loading_block='52',
+                transport_distance_km=Decimal('3.10'),
+                downtime_text='ожидание разгрузки',
+                note='демо завершенный рейс для отчета заказчику',
                 status=TripStatus.COMPLETED,
                 completed_at=timezone.now(),
+            )
+        else:
+            Trip.objects.filter(truck=completed_truck, status=TripStatus.COMPLETED).update(
+                planned_volume_m3=Decimal('7000.00'),
+                loading_horizon='75',
+                loading_block='52',
+                transport_distance_km=Decimal('3.10'),
+                downtime_text='ожидание разгрузки',
+                note='демо завершенный рейс для отчета заказчику',
             )
 
         ReportTemplate.objects.update_or_create(
@@ -134,8 +170,12 @@ class Command(BaseCommand):
                     'excavator',
                     'rock_type',
                     'dump_point',
+                    'planned_volume_m3',
                     'volume_m3',
                     'tonnage',
+                    'loading_horizon',
+                    'loading_block',
+                    'transport_distance_km',
                     'loading_shift',
                     'unloading_shift',
                     'is_carryover',

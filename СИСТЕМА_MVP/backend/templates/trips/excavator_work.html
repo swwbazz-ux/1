@@ -10,7 +10,7 @@
             <a href="{% url 'logout' %}">Выйти</a>
         </div>
         <h1>Работа экскаватора</h1>
-        <p>Создание рейса в момент загрузки: выбрать самосвал, породу и точку разгрузки.</p>
+        <p>Создание рейса в момент загрузки: выбрать самосвал, породу, точку разгрузки и при необходимости указать параметры для отчета заказчику.</p>
     </div>
 </header>
 <main class="page">
@@ -41,6 +41,9 @@
                     <th>Экскаватор</th>
                     <th>Порода</th>
                     <th>Разгрузка</th>
+                    <th>Горизонт</th>
+                    <th>Блок</th>
+                    <th>Плечо</th>
                     <th>Объем</th>
                 </tr>
                 </thead>
@@ -51,10 +54,13 @@
                         <td>{{ trip.excavator }}</td>
                         <td>{{ trip.rock_type }}</td>
                         <td>{{ trip.dump_point }}</td>
+                        <td>{{ trip.loading_horizon|default:"-" }}</td>
+                        <td>{{ trip.loading_block|default:"-" }}</td>
+                        <td>{{ trip.transport_distance_km|default:"-" }}</td>
                         <td>{{ trip.volume_m3|default:"-" }}</td>
                     </tr>
                 {% empty %}
-                    <tr><td colspan="5">Активных рейсов пока нет.</td></tr>
+                    <tr><td colspan="8">Активных рейсов пока нет.</td></tr>
                 {% endfor %}
                 </tbody>
             </table>

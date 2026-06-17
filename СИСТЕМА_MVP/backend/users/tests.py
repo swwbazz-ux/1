@@ -224,7 +224,17 @@ class AccessLoginTests(TestCase):
         operator_client.post('/', {'access_code': '3000'}, follow=True, HTTP_HOST='localhost')
         trip_response = operator_client.post(
             '/excavator/work/',
-            {'assignment': assignment.id, 'rock_type': rock.id, 'dump_point': dump_point.id},
+            {
+                'assignment': assignment.id,
+                'rock_type': rock.id,
+                'dump_point': dump_point.id,
+                'planned_volume_m3': '7000',
+                'loading_horizon': '75',
+                'loading_block': '52',
+                'transport_distance_km': '3.10',
+                'downtime_text': 'зачистка забоя',
+                'note': 'проверка параметров отчета',
+            },
             follow=True,
             HTTP_HOST='localhost',
         )
@@ -232,6 +242,12 @@ class AccessLoginTests(TestCase):
         trip = Trip.objects.get()
         self.assertEqual(trip.status, TripStatus.ACTIVE)
         self.assertEqual(trip.loading_shift, operator_shift)
+        self.assertEqual(trip.planned_volume_m3, Decimal('7000.00'))
+        self.assertEqual(trip.loading_horizon, '75')
+        self.assertEqual(trip.loading_block, '52')
+        self.assertEqual(trip.transport_distance_km, Decimal('3.10'))
+        self.assertEqual(trip.downtime_text, 'зачистка забоя')
+        self.assertEqual(trip.note, 'проверка параметров отчета')
 
         driver_shift_response = driver_client.get('/driver/shift/', HTTP_HOST='localhost')
         self.assertContains(driver_shift_response, 'Активный рейс')
@@ -536,8 +552,14 @@ class AccessLoginTests(TestCase):
             dump_point=dump_point,
             loading_shift=loading_shift,
             status=TripStatus.COMPLETED,
+            planned_volume_m3='7000.00',
             volume_m3='57.00',
             tonnage='142.50',
+            loading_horizon='75',
+            loading_block='52',
+            transport_distance_km='3.10',
+            downtime_text='зачистка забоя',
+            note='ожидание разгрузки',
             completed_at=timezone.now(),
         )
 
@@ -552,6 +574,12 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, 'Первичная сульфидная')
         self.assertContains(response, 'ККД')
         self.assertContains(response, '57')
+        self.assertContains(response, '7000')
+        self.assertContains(response, '75')
+        self.assertContains(response, '52')
+        self.assertContains(response, '3,10')
+        self.assertContains(response, 'зачистка забоя')
+        self.assertContains(response, 'ожидание разгрузки')
 
         export_response = self.client.get(
             f'/reports/customer-daily/export/?date={timezone.localdate():%Y-%m-%d}',

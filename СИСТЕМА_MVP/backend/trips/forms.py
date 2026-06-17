@@ -12,6 +12,12 @@ class TripCreateForm(forms.Form):
     assignment = forms.ModelChoiceField(label='Самосвал под экскаватором', queryset=HaulAssignment.objects.none())
     rock_type = forms.ModelChoiceField(label='Порода', queryset=RockType.objects.filter(is_active=True).order_by('name'))
     dump_point = forms.ModelChoiceField(label='Точка разгрузки', queryset=DumpPoint.objects.filter(is_active=True).order_by('name'))
+    planned_volume_m3 = forms.DecimalField(label='Плановое задание, м3', required=False, min_value=0)
+    loading_horizon = forms.CharField(label='Горизонт погрузки', required=False, max_length=64)
+    loading_block = forms.CharField(label='Блок', required=False, max_length=64)
+    transport_distance_km = forms.DecimalField(label='Плечо транспортировки, км', required=False, min_value=0)
+    downtime_text = forms.CharField(label='Простои', required=False, max_length=255)
+    note = forms.CharField(label='Примечание', required=False, widget=forms.Textarea(attrs={'rows': 3}))
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -37,8 +43,14 @@ class TripCreateForm(forms.Form):
             loading_shift=loading_shift,
             rock_type=rock_type,
             dump_point=dump_point,
+            planned_volume_m3=self.cleaned_data.get('planned_volume_m3'),
             volume_m3=volume,
             tonnage=tonnage,
+            loading_horizon=self.cleaned_data.get('loading_horizon', ''),
+            loading_block=self.cleaned_data.get('loading_block', ''),
+            transport_distance_km=self.cleaned_data.get('transport_distance_km'),
+            downtime_text=self.cleaned_data.get('downtime_text', ''),
+            note=self.cleaned_data.get('note', ''),
         )
 
     def get_trip_volume(self, assignment, rock_type):

@@ -20,8 +20,14 @@ VOLUME_REPORT_COLUMNS = {
     'excavator': ('Экскаватор', lambda trip: str(trip.excavator)),
     'rock_type': ('Порода', lambda trip: str(trip.rock_type)),
     'dump_point': ('Точка разгрузки', lambda trip: str(trip.dump_point)),
+    'planned_volume_m3': ('План, м3', lambda trip: trip.planned_volume_m3 or ''),
     'volume_m3': ('Объем, м3', lambda trip: trip.volume_m3 or ''),
     'tonnage': ('Тоннаж', lambda trip: trip.tonnage or ''),
+    'loading_horizon': ('Горизонт', lambda trip: trip.loading_horizon),
+    'loading_block': ('Блок', lambda trip: trip.loading_block),
+    'transport_distance_km': ('Плечо, км', lambda trip: trip.transport_distance_km or ''),
+    'downtime_text': ('Простои', lambda trip: trip.downtime_text),
+    'note': ('Примечание', lambda trip: trip.note),
     'loading_shift': ('Смена загрузки', lambda trip: trip.loading_shift.get_shift_type_display() if trip.loading_shift else ''),
     'unloading_shift': ('Смена разгрузки', lambda trip: trip.unloading_shift.get_shift_type_display() if trip.unloading_shift else ''),
     'is_carryover': ('Переходящий рейс', lambda trip: 'Да' if trip.is_carryover else 'Нет'),
@@ -33,8 +39,12 @@ DEFAULT_VOLUME_REPORT_COLUMNS = [
     'excavator',
     'rock_type',
     'dump_point',
+    'planned_volume_m3',
     'volume_m3',
     'tonnage',
+    'loading_horizon',
+    'loading_block',
+    'transport_distance_km',
     'loading_shift',
     'unloading_shift',
     'is_carryover',
@@ -233,6 +243,8 @@ def build_customer_daily_report(selected_date):
         'trip_count': 0,
         'carryover_count': 0,
         'trucks': set(),
+        'downtimes': set(),
+        'notes': set(),
     })
 
     for trip in trips:
@@ -241,30 +253,49 @@ def build_customer_daily_report(selected_date):
             str(trip.rock_type),
             str(trip.excavator),
             str(trip.dump_point),
+            trip.loading_horizon,
+            trip.loading_block,
+            trip.transport_distance_km,
+            trip.planned_volume_m3,
         )
         grouped[key]['volume_m3'] += trip.volume_m3 or 0
         grouped[key]['tonnage'] += trip.tonnage or 0
         grouped[key]['trip_count'] += 1
         grouped[key]['carryover_count'] += 1 if trip.is_carryover else 0
         grouped[key]['trucks'].add(str(trip.truck))
+        if trip.downtime_text:
+            grouped[key]['downtimes'].add(trip.downtime_text)
+        if trip.note:
+            grouped[key]['notes'].add(trip.note)
 
     rows_by_shift = {'day': [], 'night': []}
-    for (shift_type, rock_type, excavator, dump_point), values in grouped.items():
+    for (
+        shift_type,
+        rock_type,
+        excavator,
+        dump_point,
+        loading_horizon,
+        loading_block,
+        transport_distance_km,
+        planned_volume_m3,
+    ), values in grouped.items():
         note_parts = []
         if values['carryover_count']:
             note_parts.append(f"переходящих рейсов: {values['carryover_count']}")
         if values['trucks']:
             note_parts.append('самосвалы: ' + ', '.join(sorted(values['trucks'])))
+        if values['notes']:
+            note_parts.extend(sorted(values['notes']))
         rows_by_shift[shift_type].append({
             'rock_type': rock_type,
             'excavator': excavator,
-            'planned_volume': '',
+            'planned_volume': planned_volume_m3,
             'volume_m3': values['volume_m3'],
-            'horizon': '',
-            'block': '',
+            'horizon': loading_horizon,
+            'block': loading_block,
             'dump_point': dump_point,
-            'distance_km': '',
-            'downtime': '',
+            'distance_km': transport_distance_km,
+            'downtime': '; '.join(sorted(values['downtimes'])),
             'note': '; '.join(note_parts),
             'tonnage': values['tonnage'],
             'trip_count': values['trip_count'],
