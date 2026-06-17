@@ -300,6 +300,46 @@ th {
     max-width: 780px;
 }
 
+.dashboard-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 18px;
+}
+
+.bar-row {
+    margin: 0 0 18px;
+}
+
+.bar-row-title {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 8px;
+    color: var(--muted);
+}
+
+.bar-row-title strong {
+    color: var(--ink);
+}
+
+.bar-track {
+    height: 14px;
+    background: #e8f0f4;
+    border-radius: 999px;
+    overflow: hidden;
+}
+
+.bar-fill {
+    height: 100%;
+    min-width: 8px;
+    background: linear-gradient(90deg, var(--brand), var(--brand-dark));
+    border-radius: 999px;
+}
+
+.bar-fill.brand-2 {
+    background: linear-gradient(90deg, #f3b43f, #f98b24);
+}
+
 @media (max-width: 760px) {
     .app-header {
         padding: 20px 16px 26px;
@@ -313,5 +353,9 @@ th {
     .actions .button-link,
     .actions button {
         width: 100%;
+    }
+
+    .bar-row-title {
+        display: block;
     }
 }

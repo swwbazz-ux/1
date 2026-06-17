@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+
+{% block title %}Витрина руководства{% endblock %}
+
+{% block body %}
+<header class="app-header">
+    <div class="header-inner">
+        <div class="topline">
+            <span>{{ access.employee.full_name }}</span>
+            <a href="{% url 'logout' %}">Выйти</a>
+        </div>
+        <h1>Витрина руководства</h1>
+        <p>Крупная сводка по производственному контуру: объемы, тоннаж, активные рейсы, переходящие рейсы и лидирующие направления работы.</p>
+    </div>
+</header>
+
+<main class="page">
+    <section class="metric-grid">
+        <div class="metric-card success">
+            <div>Выполненный объем</div>
+            <div class="metric">{{ total_volume }} м3</div>
+            <div class="muted">По завершенным рейсам</div>
+        </div>
+        <div class="metric-card">
+            <div>Тоннаж</div>
+            <div class="metric">{{ total_tonnage }} т</div>
+            <div class="muted">Если плотность породы заполнена</div>
+        </div>
+        <div class="metric-card">
+            <div>Завершенные рейсы</div>
+            <div class="metric">{{ completed_trip_count }}</div>
+            <div class="muted">Попадают в отчетность</div>
+        </div>
+        <div class="metric-card warning">
+            <div>Активные рейсы сейчас</div>
+            <div class="metric">{{ active_trip_count }}</div>
+            <div class="muted">Еще не разгружены</div>
+        </div>
+        <div class="metric-card danger">
+            <div>Переходящие рейсы</div>
+            <div class="metric">{{ carryover_trip_count }}</div>
+            <div class="muted">Загрузка и разгрузка в разных сменах</div>
+        </div>
+    </section>
+
+    <section class="card">
+        <div class="actions">
+            <a class="button-link" href="{% url 'volume_report' %}">Открыть отчет по объемам</a>
+            <a class="button-link button-secondary" href="{% url 'dispatcher_control' %}">Открыть диспетчерский пульт</a>
+        </div>
+    </section>
+
+    <section class="dashboard-grid">
+        <div class="card">
+            <h2>Экскаваторы по объему</h2>
+            {% for item in top_excavators %}
+                <div class="bar-row">
+                    <div class="bar-row-title">
+                        <strong>Экскаватор {{ item.excavator__garage_number|default:"-" }}</strong>
+                        <span>{{ item.total_volume|default:"0" }} м3 · {{ item.trip_count }} рейс.</span>
+                    </div>
+                    <div class="bar-track">
+                        <div class="bar-fill" style="width: {% widthratio item.total_volume max_excavator_volume 100 %}%"></div>
+                    </div>
+                </div>
+            {% empty %}
+                <p class="muted">Завершенных рейсов пока нет.</p>
+            {% endfor %}
+        </div>
+
+        <div class="card">
+            <h2>Породы и грузы</h2>
+            {% for item in top_rocks %}
+                <div class="bar-row">
+                    <div class="bar-row-title">
+                        <strong>{{ item.rock_type__name|default:"-" }}</strong>
+                        <span>{{ item.total_volume|default:"0" }} м3 · {{ item.trip_count }} рейс.</span>
+                    </div>
+                    <div class="bar-track">
+                        <div class="bar-fill brand-2" style="width: {% widthratio item.total_volume max_rock_volume 100 %}%"></div>
+                    </div>
+                </div>
+            {% empty %}
+                <p class="muted">Данных по породам пока нет.</p>
+            {% endfor %}
+        </div>
+    </section>
+
+    <section class="card">
+        <h2>Последние завершенные рейсы</h2>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                <tr>
+                    <th>Самосвал</th>
+                    <th>Экскаватор</th>
+                    <th>Порода</th>
+                    <th>Точка разгрузки</th>
+                    <th>Объем</th>
+                    <th>Тоннаж</th>
+                    <th>Выполнен</th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for trip in recent_completed_trips %}
+                    <tr>
+                        <td>{{ trip.truck }}</td>
+                        <td>{{ trip.excavator }}</td>
+                        <td>{{ trip.rock_type }}</td>
+                        <td>{{ trip.dump_point }}</td>
+                        <td>{{ trip.volume_m3|default:"-" }}</td>
+                        <td>{{ trip.tonnage|default:"-" }}</td>
+                        <td>{{ trip.completed_at|date:"d.m.Y H:i" }}</td>
+                    </tr>
+                {% empty %}
+                    <tr><td colspan="7">Завершенных рейсов пока нет.</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+</main>
+{% endblock %}

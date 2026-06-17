@@ -517,10 +517,41 @@ class AccessLoginTests(TestCase):
 
         self.assertTrue(EmployeeAccess.objects.filter(access_code='2000', is_active=True).exists())
         self.assertTrue(EmployeeAccess.objects.filter(access_code='5000', is_active=True).exists())
+        self.assertTrue(EmployeeAccess.objects.filter(access_code='6000', is_active=True).exists())
         self.assertTrue(DriverPrimaryRegistration.objects.exists())
         self.assertTrue(EmployeeShift.objects.filter(closed_at__isnull=True).exists())
         self.assertTrue(HaulAssignment.objects.filter(status=AssignmentStatus.ACCEPTED).exists())
         self.assertTrue(Trip.objects.filter(status=TripStatus.ACTIVE).exists())
         self.assertTrue(ReportTemplate.objects.filter(name='Демо отчет по объемам', is_active=True).exists())
+
+    def test_manager_opens_management_dashboard(self):
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        truck = Equipment.objects.create(equipment_type=truck_type, garage_number='10')
+        excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='1')
+        rock = RockType.objects.create(name='Руда')
+        dump_point = DumpPoint.objects.create(name='ККД')
+        manager_role = Role.objects.create(code='manager', name='Руководство')
+        manager = Employee.objects.create(full_name='Тестовое руководство')
+        EmployeeAccess.objects.create(employee=manager, role=manager_role, access_code='6000')
+        Trip.objects.create(
+            excavator=excavator,
+            truck=truck,
+            rock_type=rock,
+            dump_point=dump_point,
+            status=TripStatus.COMPLETED,
+            volume_m3='57.00',
+            tonnage='142.50',
+            completed_at=timezone.now(),
+        )
+
+        login_response = self.client.post('/', {'access_code': '6000'}, follow=True, HTTP_HOST='localhost')
+        dashboard_response = self.client.get('/reports/management/', HTTP_HOST='localhost')
+
+        self.assertRedirects(login_response, '/reports/management/', target_status_code=200)
+        self.assertEqual(dashboard_response.status_code, 200)
+        self.assertContains(dashboard_response, 'Витрина руководства')
+        self.assertContains(dashboard_response, '57,00')
+        self.assertContains(dashboard_response, '142,50')
 
 # Create your tests here.

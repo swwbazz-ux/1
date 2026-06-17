@@ -1,4 +1,4 @@
-from django.db.models import Sum
+from django.db.models import Count, Sum
 from django.http import HttpResponse
 from django.shortcuts import redirect, render
 from openpyxl import Workbook
@@ -161,3 +161,61 @@ def volume_report_export_view(request):
     response['Content-Disposition'] = 'attachment; filename=\"volume_report.xlsx\"'
     workbook.save(response)
     return response
+
+
+def management_dashboard_view(request):
+    access_id = request.session.get('employee_access_id')
+    if not access_id:
+        return redirect('login')
+    access = EmployeeAccess.objects.select_related('employee', 'role').filter(id=access_id, is_active=True).first()
+    if not access or access.role.code not in {'manager', 'admin', 'dispatcher'}:
+        return redirect('role_home')
+
+    completed_trips = Trip.objects.filter(status=TripStatus.COMPLETED).select_related(
+        'truck',
+        'excavator',
+        'rock_type',
+        'dump_point',
+        'loading_shift',
+        'unloading_shift',
+    )
+    active_trips = Trip.objects.filter(status=TripStatus.ACTIVE)
+    completed_summary = completed_trips.aggregate(
+        total_volume=Sum('volume_m3'),
+        total_tonnage=Sum('tonnage'),
+        trip_count=Count('id'),
+    )
+    top_excavators = (
+        completed_trips
+        .values('excavator__garage_number')
+        .annotate(total_volume=Sum('volume_m3'), trip_count=Count('id'))
+        .order_by('-total_volume')[:5]
+    )
+    top_rocks = (
+        completed_trips
+        .values('rock_type__name')
+        .annotate(total_volume=Sum('volume_m3'), trip_count=Count('id'))
+        .order_by('-total_volume')[:5]
+    )
+    recent_completed_trips = completed_trips.order_by('-completed_at')[:8]
+
+    max_excavator_volume = max((item['total_volume'] or 0 for item in top_excavators), default=0)
+    max_rock_volume = max((item['total_volume'] or 0 for item in top_rocks), default=0)
+
+    return render(
+        request,
+        'reports/management_dashboard.html',
+        {
+            'access': access,
+            'total_volume': completed_summary['total_volume'] or 0,
+            'total_tonnage': completed_summary['total_tonnage'] or 0,
+            'completed_trip_count': completed_summary['trip_count'] or 0,
+            'active_trip_count': active_trips.count(),
+            'carryover_trip_count': completed_trips.filter(is_carryover=True).count(),
+            'top_excavators': top_excavators,
+            'top_rocks': top_rocks,
+            'max_excavator_volume': max_excavator_volume,
+            'max_rock_volume': max_rock_volume,
+            'recent_completed_trips': recent_completed_trips,
+        },
+    )
