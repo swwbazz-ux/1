@@ -1,7 +1,13 @@
+from collections import defaultdict
+from datetime import datetime
+
 from django.db.models import Count, Sum
 from django.http import HttpResponse
 from django.shortcuts import redirect, render
+from django.utils import timezone
 from openpyxl import Workbook
+from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.utils import get_column_letter
 
 from trips.models import Trip, TripStatus
 from users.models import EmployeeAccess
@@ -159,6 +165,245 @@ def volume_report_export_view(request):
         content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     )
     response['Content-Disposition'] = 'attachment; filename=\"volume_report.xlsx\"'
+    workbook.save(response)
+    return response
+
+
+def get_reports_access(request, allowed_roles):
+    access_id = request.session.get('employee_access_id')
+    if not access_id:
+        return None
+    access = EmployeeAccess.objects.select_related('employee', 'role').filter(id=access_id, is_active=True).first()
+    if not access or access.role.code not in allowed_roles:
+        return None
+    return access
+
+
+def parse_customer_report_date(request):
+    date_value = request.GET.get('date', '').strip()
+    if date_value:
+        try:
+            return datetime.strptime(date_value, '%Y-%m-%d').date()
+        except ValueError:
+            pass
+
+    latest_trip = (
+        Trip.objects
+        .filter(status=TripStatus.COMPLETED)
+        .order_by('-completed_at', '-created_at')
+        .first()
+    )
+    if latest_trip and latest_trip.completed_at:
+        return timezone.localtime(latest_trip.completed_at).date()
+    if latest_trip:
+        return timezone.localtime(latest_trip.created_at).date()
+    return timezone.localdate()
+
+
+def trip_report_date(trip):
+    if trip.loading_shift:
+        return timezone.localtime(trip.loading_shift.opened_at).date()
+    if trip.completed_at:
+        return timezone.localtime(trip.completed_at).date()
+    return timezone.localtime(trip.created_at).date()
+
+
+def trip_shift_type(trip):
+    if trip.loading_shift:
+        return trip.loading_shift.shift_type
+    if trip.unloading_shift:
+        return trip.unloading_shift.shift_type
+    return 'day'
+
+
+def build_customer_daily_report(selected_date):
+    trips = Trip.objects.filter(status=TripStatus.COMPLETED).select_related(
+        'truck',
+        'excavator',
+        'rock_type',
+        'dump_point',
+        'loading_shift',
+        'unloading_shift',
+    )
+    trips = [trip for trip in trips if trip_report_date(trip) == selected_date]
+
+    grouped = defaultdict(lambda: {
+        'volume_m3': 0,
+        'tonnage': 0,
+        'trip_count': 0,
+        'carryover_count': 0,
+        'trucks': set(),
+    })
+
+    for trip in trips:
+        key = (
+            trip_shift_type(trip),
+            str(trip.rock_type),
+            str(trip.excavator),
+            str(trip.dump_point),
+        )
+        grouped[key]['volume_m3'] += trip.volume_m3 or 0
+        grouped[key]['tonnage'] += trip.tonnage or 0
+        grouped[key]['trip_count'] += 1
+        grouped[key]['carryover_count'] += 1 if trip.is_carryover else 0
+        grouped[key]['trucks'].add(str(trip.truck))
+
+    rows_by_shift = {'day': [], 'night': []}
+    for (shift_type, rock_type, excavator, dump_point), values in grouped.items():
+        note_parts = []
+        if values['carryover_count']:
+            note_parts.append(f"переходящих рейсов: {values['carryover_count']}")
+        if values['trucks']:
+            note_parts.append('самосвалы: ' + ', '.join(sorted(values['trucks'])))
+        rows_by_shift[shift_type].append({
+            'rock_type': rock_type,
+            'excavator': excavator,
+            'planned_volume': '',
+            'volume_m3': values['volume_m3'],
+            'horizon': '',
+            'block': '',
+            'dump_point': dump_point,
+            'distance_km': '',
+            'downtime': '',
+            'note': '; '.join(note_parts),
+            'tonnage': values['tonnage'],
+            'trip_count': values['trip_count'],
+        })
+
+    for shift_rows in rows_by_shift.values():
+        shift_rows.sort(key=lambda row: (row['excavator'], row['rock_type'], row['dump_point']))
+
+    day_total = sum(row['volume_m3'] for row in rows_by_shift['day'])
+    night_total = sum(row['volume_m3'] for row in rows_by_shift['night'])
+    day_tonnage = sum(row['tonnage'] for row in rows_by_shift['day'])
+    night_tonnage = sum(row['tonnage'] for row in rows_by_shift['night'])
+    day_trip_count = sum(row['trip_count'] for row in rows_by_shift['day'])
+    night_trip_count = sum(row['trip_count'] for row in rows_by_shift['night'])
+
+    rock_summary = (
+        Trip.objects
+        .filter(id__in=[trip.id for trip in trips])
+        .values('rock_type__name')
+        .annotate(total_volume=Sum('volume_m3'), total_tonnage=Sum('tonnage'), trip_count=Count('id'))
+        .order_by('-total_volume')
+    )
+
+    return {
+        'rows_by_shift': rows_by_shift,
+        'day_total': day_total,
+        'night_total': night_total,
+        'total_volume': day_total + night_total,
+        'day_tonnage': day_tonnage,
+        'night_tonnage': night_tonnage,
+        'total_tonnage': day_tonnage + night_tonnage,
+        'day_trip_count': day_trip_count,
+        'night_trip_count': night_trip_count,
+        'total_trip_count': day_trip_count + night_trip_count,
+        'rock_summary': rock_summary,
+    }
+
+
+def customer_daily_report_context(request):
+    selected_date = parse_customer_report_date(request)
+    report = build_customer_daily_report(selected_date)
+    return {
+        **report,
+        'selected_date': selected_date,
+        'date_input': selected_date.strftime('%Y-%m-%d'),
+    }
+
+
+def customer_daily_report_view(request):
+    access = get_reports_access(request, {'dispatcher', 'admin', 'manager'})
+    if not access:
+        return redirect('login' if not request.session.get('employee_access_id') else 'role_home')
+
+    return render(
+        request,
+        'reports/customer_daily_report.html',
+        {
+            'access': access,
+            **customer_daily_report_context(request),
+        },
+    )
+
+
+def append_customer_shift_table(sheet, title, start_row, start_col, rows):
+    headers = [
+        'Тип грунта',
+        'Экскаватор',
+        'План, м3',
+        'Факт, м3',
+        'Горизонт',
+        'Блок',
+        'Место разгрузки',
+        'Плечо, км',
+        'Простои, час',
+        'Примечание',
+    ]
+    sheet.cell(start_row, start_col, title)
+    sheet.cell(start_row, start_col).font = Font(bold=True, size=13)
+    for offset, header in enumerate(headers):
+        cell = sheet.cell(start_row + 1, start_col + offset, header)
+        cell.font = Font(bold=True, color='FFFFFF')
+        cell.fill = PatternFill('solid', fgColor='17232E')
+        cell.alignment = Alignment(wrap_text=True, vertical='top')
+
+    for row_index, row in enumerate(rows, start=start_row + 2):
+        values = [
+            row['rock_type'],
+            row['excavator'],
+            row['planned_volume'] or 'не задано',
+            row['volume_m3'],
+            row['horizon'] or 'не задано',
+            row['block'] or 'не задано',
+            row['dump_point'],
+            row['distance_km'] or 'не задано',
+            row['downtime'] or 'не задано',
+            row['note'],
+        ]
+        for offset, value in enumerate(values):
+            cell = sheet.cell(row_index, start_col + offset, value)
+            cell.alignment = Alignment(wrap_text=True, vertical='top')
+
+    return start_row + max(len(rows), 1) + 3
+
+
+def customer_daily_report_export_view(request):
+    access = get_reports_access(request, {'dispatcher', 'admin', 'manager'})
+    if not access:
+        return redirect('login' if not request.session.get('employee_access_id') else 'role_home')
+
+    context = customer_daily_report_context(request)
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = 'Суточный отчет'
+    sheet['A1'] = 'Отчет о работе ООО "Коппер Рисорсез" на ООО "Амур Минералс"'
+    sheet['A1'].font = Font(bold=True, size=14)
+    sheet['A2'] = f"Дата отчета: {context['selected_date']:%d.%m.%Y}"
+    sheet['A4'] = 'Суточная сводка'
+    sheet['A4'].font = Font(bold=True)
+    summary_rows = [
+        ['Показатель', 'День', 'Ночь', 'Сутки'],
+        ['Объем, м3', context['day_total'], context['night_total'], context['total_volume']],
+        ['Тоннаж', context['day_tonnage'], context['night_tonnage'], context['total_tonnage']],
+        ['Рейсы', context['day_trip_count'], context['night_trip_count'], context['total_trip_count']],
+    ]
+    for row in summary_rows:
+        sheet.append(row)
+
+    append_customer_shift_table(sheet, 'I смена (дневная 08:00 - 20:00)', 10, 1, context['rows_by_shift']['day'])
+    append_customer_shift_table(sheet, 'II смена (ночная 20:00 - 08:00)', 10, 12, context['rows_by_shift']['night'])
+
+    for column_index in range(1, 22):
+        sheet.column_dimensions[get_column_letter(column_index)].width = 16
+    sheet.column_dimensions['J'].width = 36
+    sheet.column_dimensions['U'].width = 36
+
+    response = HttpResponse(
+        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    )
+    response['Content-Disposition'] = 'attachment; filename=\"customer_daily_report.xlsx\"'
     workbook.save(response)
     return response
 

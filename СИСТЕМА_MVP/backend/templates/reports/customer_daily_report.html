@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+
+{% block title %}Суточный отчет заказчику{% endblock %}
+
+{% block body %}
+<header class="app-header">
+    <div class="header-inner">
+        <div class="topline">
+            <span>{{ access.employee.full_name }}</span>
+            <a href="{% url 'logout' %}">Выйти</a>
+        </div>
+        <h1>Суточный отчет заказчику</h1>
+        <p>Первая веб-версия отчета по структуре Excel: день, ночь, суточная сводка и выгрузка для заказчика.</p>
+    </div>
+</header>
+<main class="page">
+    <section class="metric-grid">
+        <div class="metric-card success">
+            <div>Факт за сутки</div>
+            <div class="metric">{{ total_volume }} м3</div>
+        </div>
+        <div class="metric-card">
+            <div>Тоннаж за сутки</div>
+            <div class="metric">{{ total_tonnage }} т</div>
+        </div>
+        <div class="metric-card">
+            <div>Рейсы за сутки</div>
+            <div class="metric">{{ total_trip_count }}</div>
+        </div>
+    </section>
+
+    <section class="card">
+        <form method="get" class="filters">
+            <div>
+                <label for="date">Дата отчета</label>
+                <input id="date" type="date" name="date" value="{{ date_input }}">
+            </div>
+            <div>
+                <button type="submit">Показать</button>
+            </div>
+        </form>
+        <div class="actions">
+            <a class="button-link" href="{% url 'customer_daily_report_export' %}?date={{ date_input }}">Выгрузить в Excel</a>
+            <a class="button-link button-secondary" href="{% url 'volume_report' %}">Отчет по объемам</a>
+        </div>
+    </section>
+
+    <section class="card">
+        <h2>Суточная сводка за {{ selected_date|date:"d.m.Y" }}</h2>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                <tr>
+                    <th>Показатель</th>
+                    <th>День</th>
+                    <th>Ночь</th>
+                    <th>Сутки</th>
+                </tr>
+                </thead>
+                <tbody>
+                <tr>
+                    <td>Объем, м3</td>
+                    <td>{{ day_total }}</td>
+                    <td>{{ night_total }}</td>
+                    <td>{{ total_volume }}</td>
+                </tr>
+                <tr>
+                    <td>Тоннаж</td>
+                    <td>{{ day_tonnage }}</td>
+                    <td>{{ night_tonnage }}</td>
+                    <td>{{ total_tonnage }}</td>
+                </tr>
+                <tr>
+                    <td>Рейсы</td>
+                    <td>{{ day_trip_count }}</td>
+                    <td>{{ night_trip_count }}</td>
+                    <td>{{ total_trip_count }}</td>
+                </tr>
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="dashboard-grid">
+        <div class="card">
+            <h2>I смена, дневная</h2>
+            {% include "reports/includes/customer_shift_table.html" with rows=rows_by_shift.day %}
+        </div>
+        <div class="card">
+            <h2>II смена, ночная</h2>
+            {% include "reports/includes/customer_shift_table.html" with rows=rows_by_shift.night %}
+        </div>
+    </section>
+
+    <section class="card">
+        <h2>Итоги по породам</h2>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                <tr>
+                    <th>Порода/груз</th>
+                    <th>Объем, м3</th>
+                    <th>Тоннаж</th>
+                    <th>Рейсы</th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for item in rock_summary %}
+                    <tr>
+                        <td>{{ item.rock_type__name }}</td>
+                        <td>{{ item.total_volume|default:"0" }}</td>
+                        <td>{{ item.total_tonnage|default:"0" }}</td>
+                        <td>{{ item.trip_count }}</td>
+                    </tr>
+                {% empty %}
+                    <tr><td colspan="4">За выбранную дату выполненных рейсов пока нет.</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <p class="muted">Поля `план`, `горизонт`, `блок`, `плечо` и `простои` пока выводятся как незаданные, потому что их нужно добавить в ядро отдельным шагом.</p>
+    </section>
+</main>
+{% endblock %}

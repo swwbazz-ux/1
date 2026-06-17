@@ -512,6 +512,57 @@ class AccessLoginTests(TestCase):
         self.assertNotContains(response, '<th>Экскаватор</th>', html=True)
         self.assertContains(response, '11')
 
+    def test_dispatcher_can_open_customer_daily_report_and_export_it(self):
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        truck = Equipment.objects.create(equipment_type=truck_type, garage_number='10')
+        excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='1')
+        rock = RockType.objects.create(name='Первичная сульфидная')
+        dump_point = DumpPoint.objects.create(name='ККД')
+        dispatcher_role = Role.objects.create(code='dispatcher', name='Диспетчер')
+        dispatcher = Employee.objects.create(full_name='Тестовый диспетчер')
+        EmployeeAccess.objects.create(employee=dispatcher, role=dispatcher_role, access_code='5000')
+        operator = Employee.objects.create(full_name='Машинист')
+        loading_shift = EmployeeShift.objects.create(
+            employee=operator,
+            shift_type='day',
+            equipment=excavator,
+            opened_at=timezone.now(),
+        )
+        Trip.objects.create(
+            excavator=excavator,
+            truck=truck,
+            rock_type=rock,
+            dump_point=dump_point,
+            loading_shift=loading_shift,
+            status=TripStatus.COMPLETED,
+            volume_m3='57.00',
+            tonnage='142.50',
+            completed_at=timezone.now(),
+        )
+
+        self.client.post('/', {'access_code': '5000'}, follow=True, HTTP_HOST='localhost')
+        response = self.client.get(
+            f'/reports/customer-daily/?date={timezone.localdate():%Y-%m-%d}',
+            HTTP_HOST='localhost',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Суточный отчет заказчику')
+        self.assertContains(response, 'Первичная сульфидная')
+        self.assertContains(response, 'ККД')
+        self.assertContains(response, '57')
+
+        export_response = self.client.get(
+            f'/reports/customer-daily/export/?date={timezone.localdate():%Y-%m-%d}',
+            HTTP_HOST='localhost',
+        )
+        self.assertEqual(export_response.status_code, 200)
+        self.assertEqual(
+            export_response['Content-Type'],
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+
     def test_seed_demo_scenario_command_creates_ready_demo_data(self):
         call_command('seed_demo_scenario')
 

@@ -28,6 +28,7 @@
     <section class="card">
         <div class="actions">
             <a class="button-link" href="{% url 'volume_report_export' %}{% if filters.query_string %}?{{ filters.query_string }}{% endif %}">Выгрузить в Excel</a>
+            <a class="button-link button-secondary" href="{% url 'customer_daily_report' %}">Суточный отчет заказчику</a>
             <a class="button-link button-secondary" href="{% url 'dispatcher_control' %}">Вернуться на диспетчерский пульт</a>
         </div>
     </section>
