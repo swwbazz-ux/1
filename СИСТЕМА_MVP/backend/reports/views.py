@@ -7,7 +7,7 @@ from django.http import HttpResponse
 from django.shortcuts import redirect, render
 from django.utils import timezone
 from openpyxl import Workbook
-from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 from references.models import DumpPoint, Equipment, RockType
@@ -65,6 +65,28 @@ REPORT_TEMPLATE_FILTER_FIELDS = [
     'dump_point',
 ]
 
+VOLUME_REPORT_FILTER_LABELS = {
+    'date_from': 'Дата с',
+    'date_to': 'Дата по',
+    'loading_shift_type': 'Смена загрузки',
+    'unloading_shift_type': 'Смена разгрузки',
+    'carryover': 'Переходящий рейс',
+    'truck': 'Самосвал',
+    'excavator': 'Экскаватор',
+    'rock_type': 'Порода/груз',
+    'dump_point': 'Точка разгрузки',
+}
+
+SHIFT_TYPE_LABELS = {
+    'day': 'Дневная',
+    'night': 'Ночная',
+}
+
+CARRYOVER_LABELS = {
+    'yes': 'Да',
+    'no': 'Нет',
+}
+
 VOLUME_REPORT_GROUPS = {
     'truck': ('Самосвал', lambda trip: str(trip.truck)),
     'excavator': ('Экскаватор', lambda trip: str(trip.excavator)),
@@ -73,6 +95,47 @@ VOLUME_REPORT_GROUPS = {
     'loading_shift': ('Смена загрузки', lambda trip: trip.loading_shift.get_shift_type_display() if trip.loading_shift else 'не задано'),
     'unloading_shift': ('Смена разгрузки', lambda trip: trip.unloading_shift.get_shift_type_display() if trip.unloading_shift else 'не задано'),
 }
+
+
+def get_object_label(model, object_id):
+    if not str(object_id).isdigit():
+        return str(object_id)
+    instance = model.objects.filter(id=object_id).first()
+    return str(instance) if instance else str(object_id)
+
+
+def get_filter_display_value(key, value):
+    value = str(value or '').strip()
+    if not value:
+        return ''
+    if key in {'loading_shift_type', 'unloading_shift_type'}:
+        return SHIFT_TYPE_LABELS.get(value, value)
+    if key == 'carryover':
+        return CARRYOVER_LABELS.get(value, value)
+    if key == 'truck':
+        return get_object_label(Equipment, value)
+    if key == 'excavator':
+        return get_object_label(Equipment, value)
+    if key == 'rock_type':
+        return get_object_label(RockType, value)
+    if key == 'dump_point':
+        return get_object_label(DumpPoint, value)
+    return value
+
+
+def get_active_filter_rows(filters):
+    rows = []
+    for key in REPORT_TEMPLATE_FILTER_FIELDS:
+        display_value = get_filter_display_value(key, filters.get(key, ''))
+        if display_value:
+            rows.append([VOLUME_REPORT_FILTER_LABELS[key], display_value])
+    return rows
+
+
+def get_group_by_label(group_by):
+    if group_by in VOLUME_REPORT_GROUPS:
+        return VOLUME_REPORT_GROUPS[group_by][0]
+    return 'Без группировки'
 
 
 def get_volume_report_templates():
@@ -186,6 +249,108 @@ def build_grouped_report_table(trips, group_by):
     ]
     rows.sort(key=lambda row: str(row[0]))
     return headers, rows
+
+
+def is_number(value):
+    return isinstance(value, (int, float)) or hasattr(value, 'as_tuple')
+
+
+def append_total_row(sheet, headers, rows, row_index):
+    if not rows:
+        return row_index
+
+    total_row = [''] * len(headers)
+    total_row[0] = 'Итого'
+    for column_index, header in enumerate(headers):
+        if header not in {'План, м3', 'Объем, м3', 'Тоннаж', 'Рейсы'}:
+            continue
+        total = sum(row[column_index] for row in rows if is_number(row[column_index]))
+        total_row[column_index] = total
+
+    sheet.append(total_row)
+    for cell in sheet[row_index]:
+        cell.font = Font(bold=True)
+        cell.fill = PatternFill('solid', fgColor='EAF4FF')
+        cell.border = Border(top=Side(style='thin', color='9DBAD5'))
+    return row_index + 1
+
+
+def style_volume_report_workbook(sheet, table_header_row, total_columns):
+    header_fill = PatternFill('solid', fgColor='12232E')
+    header_font = Font(color='FFFFFF', bold=True)
+    thin_border = Border(bottom=Side(style='thin', color='D9E2EC'))
+
+    for cell in sheet[table_header_row]:
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+
+    for row in sheet.iter_rows(min_row=table_header_row + 1):
+        for cell in row:
+            cell.alignment = Alignment(vertical='top', wrap_text=True)
+            cell.border = thin_border
+            if is_number(cell.value):
+                cell.number_format = '#,##0.00'
+
+    for row in range(1, table_header_row):
+        sheet.row_dimensions[row].height = 22
+
+    sheet.freeze_panes = f'A{table_header_row + 1}'
+    sheet.auto_filter.ref = f'A{table_header_row}:{get_column_letter(total_columns)}{sheet.max_row}'
+
+    for column_index in range(1, total_columns + 1):
+        column_letter = get_column_letter(column_index)
+        max_length = 0
+        for cell in sheet[column_letter]:
+            if cell.value is None:
+                continue
+            max_length = max(max_length, len(str(cell.value)))
+        sheet.column_dimensions[column_letter].width = min(max(max_length + 2, 14), 42)
+
+
+def write_volume_report_excel(sheet, headers, rows, selected_template, selected_group_by, filters, access):
+    total_columns = max(len(headers), 4)
+    generated_at = timezone.localtime(timezone.now()).strftime('%d.%m.%Y %H:%M')
+    template_name = selected_template.name if selected_template else 'Стандартный отчет'
+    employee_name = access.employee.full_name if access and access.employee else ''
+    active_filter_rows = get_active_filter_rows(filters)
+
+    sheet.merge_cells(start_row=1, start_column=1, end_row=1, end_column=total_columns)
+    sheet['A1'] = 'Отчет по объемам'
+    sheet['A1'].font = Font(size=16, bold=True, color='12232E')
+    sheet['A1'].alignment = Alignment(horizontal='left')
+
+    metadata_rows = [
+        ['Сформирован', generated_at],
+        ['Шаблон', template_name],
+        ['Группировка', get_group_by_label(selected_group_by)],
+    ]
+    if employee_name:
+        metadata_rows.append(['Сформировал', employee_name])
+
+    for metadata_row in metadata_rows:
+        sheet.append(metadata_row)
+
+    sheet.append([])
+    sheet.append(['Активные фильтры'])
+    sheet.cell(row=sheet.max_row, column=1).font = Font(bold=True)
+    if active_filter_rows:
+        for filter_row in active_filter_rows:
+            sheet.append(filter_row)
+    else:
+        sheet.append(['Нет'])
+
+    sheet.append([])
+    table_header_row = sheet.max_row + 1
+    sheet.append(headers)
+    for row in rows:
+        sheet.append(row)
+    append_total_row(sheet, headers, rows, sheet.max_row + 1)
+
+    for row in range(2, table_header_row):
+        sheet.cell(row=row, column=1).font = Font(bold=True)
+
+    style_volume_report_workbook(sheet, table_header_row, total_columns)
 
 
 def apply_volume_report_filters(queryset, filters):
@@ -316,9 +481,7 @@ def volume_report_export_view(request):
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = 'Объемы'
-    sheet.append(headers)
-    for row in rows:
-        sheet.append(row)
+    write_volume_report_excel(sheet, headers, rows, selected_template, selected_group_by, filters, access)
 
     response = HttpResponse(
         content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',

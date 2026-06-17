@@ -1,9 +1,11 @@
 from datetime import datetime, timedelta
 from decimal import Decimal
+from io import BytesIO
 
 from django.core.management import call_command
 from django.test import TestCase
 from django.utils import timezone
+from openpyxl import load_workbook
 
 from assignments.models import AssignmentStatus, HaulAssignment
 from references.models import (
@@ -603,6 +605,23 @@ class AccessLoginTests(TestCase):
         self.assertNotContains(report_response, '<th>Экскаватор</th>', html=True)
         self.assertContains(report_response, '11')
         self.assertNotContains(report_response, '22,00')
+
+        export_response = self.client.get(f'/reports/volume/export/?template={template.id}', HTTP_HOST='localhost')
+        workbook = load_workbook(BytesIO(export_response.content))
+        sheet = workbook.active
+        values = [
+            cell
+            for row in sheet.iter_rows(values_only=True)
+            for cell in row
+            if cell not in {None, ''}
+        ]
+
+        self.assertEqual(export_response.status_code, 200)
+        self.assertIn('Отчет по объемам', values)
+        self.assertIn('Шаблон для заказчика', values)
+        self.assertIn('Самосвал', values)
+        self.assertIn('Итого', values)
+        self.assertNotIn(Decimal('22.00'), values)
 
     def test_dispatcher_can_open_customer_daily_report_and_export_it(self):
         truck_type = EquipmentType.objects.create(name='Самосвал')
