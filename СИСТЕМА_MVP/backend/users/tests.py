@@ -1,8 +1,20 @@
+from decimal import Decimal
+
 from django.test import TestCase
 from django.utils import timezone
 
 from assignments.models import AssignmentStatus, HaulAssignment
-from references.models import Dormitory, DormitoryBlock, DormitorySection, DumpPoint, Equipment, EquipmentType, RockType
+from references.models import (
+    Dormitory,
+    DormitoryBlock,
+    DormitorySection,
+    DumpPoint,
+    Equipment,
+    EquipmentModel,
+    EquipmentType,
+    RockType,
+    TruckCapacityRule,
+)
 from shifts.models import EmployeeShift
 from trips.models import Trip, TripStatus
 
@@ -285,6 +297,37 @@ class AccessLoginTests(TestCase):
         self.assertEqual(trip.status, TripStatus.COMPLETED)
         self.assertTrue(trip.is_carryover)
         self.assertEqual(trip.unloading_shift.shift_type, 'night')
+
+    def test_trip_volume_and_tonnage_are_calculated_from_capacity_rule_and_density(self):
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        truck_model = EquipmentModel.objects.create(
+            equipment_type=truck_type,
+            name='БЕЛАЗ тест',
+            body_volume_m3='40.00',
+        )
+        truck = Equipment.objects.create(equipment_type=truck_type, model=truck_model, garage_number='10')
+        excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='1')
+        rock = RockType.objects.create(name='Руда', density='2.50')
+        dump_point = DumpPoint.objects.create(name='ККД')
+        excavator_role = Role.objects.create(code='excavator_operator', name='Машинист экскаватора')
+        excavator_operator = Employee.objects.create(full_name='Тестовый машинист')
+        EmployeeAccess.objects.create(employee=excavator_operator, role=excavator_role, access_code='3000')
+        assignment = HaulAssignment.objects.create(truck=truck, excavator=excavator, status=AssignmentStatus.ACCEPTED)
+        TruckCapacityRule.objects.create(equipment_model=truck_model, rock_type=rock, volume_m3='38.00')
+
+        operator_client = self.client_class(HTTP_HOST='localhost')
+        operator_client.post('/', {'access_code': '3000'}, follow=True, HTTP_HOST='localhost')
+        operator_client.post(
+            '/excavator/work/',
+            {'assignment': assignment.id, 'rock_type': rock.id, 'dump_point': dump_point.id},
+            follow=True,
+            HTTP_HOST='localhost',
+        )
+        trip = Trip.objects.get()
+
+        self.assertEqual(trip.volume_m3, Decimal('38.00'))
+        self.assertEqual(trip.tonnage, Decimal('95.00'))
 
     def test_dispatcher_can_see_volume_report(self):
         truck_type = EquipmentType.objects.create(name='Самосвал')

@@ -1,4 +1,5 @@
 from django import forms
+from decimal import Decimal
 
 from assignments.models import AssignmentStatus, HaulAssignment
 from references.models import DumpPoint, RockType, TruckCapacityRule
@@ -27,11 +28,8 @@ class TripCreateForm(forms.Form):
             employee=excavator_operator,
             closed_at__isnull=True,
         ).order_by('-opened_at').first()
-        volume = None
-        if assignment.truck.model:
-            rule = TruckCapacityRule.objects.filter(equipment_model=assignment.truck.model, rock_type=rock_type).first()
-            if rule:
-                volume = rule.volume_m3
+        volume = self.get_trip_volume(assignment, rock_type)
+        tonnage = self.get_trip_tonnage(volume, rock_type)
         return Trip.objects.create(
             excavator=assignment.excavator,
             truck=assignment.truck,
@@ -40,4 +38,19 @@ class TripCreateForm(forms.Form):
             rock_type=rock_type,
             dump_point=dump_point,
             volume_m3=volume,
+            tonnage=tonnage,
         )
+
+    def get_trip_volume(self, assignment, rock_type):
+        if assignment.truck.model:
+            rule = TruckCapacityRule.objects.filter(equipment_model=assignment.truck.model, rock_type=rock_type).first()
+            if rule:
+                return rule.volume_m3
+            if assignment.truck.model.body_volume_m3:
+                return assignment.truck.model.body_volume_m3
+        return None
+
+    def get_trip_tonnage(self, volume, rock_type):
+        if not volume or not rock_type.density:
+            return None
+        return (Decimal(volume) * Decimal(rock_type.density)).quantize(Decimal('0.01'))

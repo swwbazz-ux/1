@@ -35,6 +35,7 @@
                 <th>Порода</th>
                 <th>Разгрузка</th>
                 <th>Объем</th>
+                <th>Тоннаж</th>
                 <th>Смена загрузки</th>
                 <th>Смена разгрузки</th>
                 <th>Переходящий</th>
@@ -49,13 +50,14 @@
                     <td>{{ trip.rock_type }}</td>
                     <td>{{ trip.dump_point }}</td>
                     <td>{{ trip.volume_m3|default:"-" }}</td>
+                    <td>{{ trip.tonnage|default:"-" }}</td>
                     <td>{% if trip.loading_shift %}{{ trip.loading_shift.get_shift_type_display }}{% else %}-{% endif %}</td>
                     <td>{% if trip.unloading_shift %}{{ trip.unloading_shift.get_shift_type_display }}{% else %}-{% endif %}</td>
                     <td>{% if trip.is_carryover %}Да{% else %}Нет{% endif %}</td>
                     <td>{{ trip.completed_at }}</td>
                 </tr>
             {% empty %}
-                <tr><td colspan="9">Выполненных рейсов пока нет.</td></tr>
+                <tr><td colspan="10">Выполненных рейсов пока нет.</td></tr>
             {% endfor %}
             </tbody>
         </table>
