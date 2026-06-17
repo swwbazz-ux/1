@@ -576,6 +576,7 @@ class AccessLoginTests(TestCase):
             {
                 'name': 'Шаблон для заказчика',
                 'columns': ['truck', 'volume_m3'],
+                'group_by': 'truck',
                 'truck': str(truck.id),
                 'is_active': 'on',
             },
@@ -588,6 +589,7 @@ class AccessLoginTests(TestCase):
         self.assertEqual(template.report_type, ReportType.SHIFT_VOLUME)
         self.assertEqual(template.columns, ['truck', 'volume_m3'])
         self.assertEqual(template.filters, {'truck': str(truck.id)})
+        self.assertEqual(template.group_by, 'truck')
         self.assertEqual(template.created_by, dispatcher)
         self.assertEqual(template.updated_by, dispatcher)
 
@@ -596,6 +598,8 @@ class AccessLoginTests(TestCase):
         self.assertEqual(report_response.status_code, 200)
         self.assertContains(report_response, '<th>Самосвал</th>', html=True)
         self.assertContains(report_response, '<th>Объем, м3</th>', html=True)
+        self.assertContains(report_response, '<th>Тоннаж</th>', html=True)
+        self.assertContains(report_response, '<th>Рейсы</th>', html=True)
         self.assertNotContains(report_response, '<th>Экскаватор</th>', html=True)
         self.assertContains(report_response, '11')
         self.assertNotContains(report_response, '22,00')

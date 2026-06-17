@@ -65,6 +65,15 @@ REPORT_TEMPLATE_FILTER_FIELDS = [
     'dump_point',
 ]
 
+VOLUME_REPORT_GROUPS = {
+    'truck': ('Самосвал', lambda trip: str(trip.truck)),
+    'excavator': ('Экскаватор', lambda trip: str(trip.excavator)),
+    'rock_type': ('Порода/груз', lambda trip: str(trip.rock_type)),
+    'dump_point': ('Точка разгрузки', lambda trip: str(trip.dump_point)),
+    'loading_shift': ('Смена загрузки', lambda trip: trip.loading_shift.get_shift_type_display() if trip.loading_shift else 'не задано'),
+    'unloading_shift': ('Смена разгрузки', lambda trip: trip.unloading_shift.get_shift_type_display() if trip.unloading_shift else 'не задано'),
+}
+
 
 def get_volume_report_templates():
     return ReportTemplate.objects.filter(is_active=True).order_by('name')
@@ -95,6 +104,17 @@ def report_template_column_options(selected_columns):
     ]
 
 
+def report_template_group_options(selected_group_by):
+    return [
+        {
+            'code': code,
+            'label': label,
+            'selected': code == selected_group_by,
+        }
+        for code, (label, _getter) in VOLUME_REPORT_GROUPS.items()
+    ]
+
+
 def get_template_filters(template):
     if not template:
         return {}
@@ -106,6 +126,18 @@ def get_effective_filter_value(request, template, key):
     if request_value:
         return request_value
     return str(get_template_filters(template).get(key, '')).strip()
+
+
+def get_selected_group_by(request, template):
+    request_value = request.GET.get('group_by')
+    if request_value is not None:
+        request_value = request_value.strip()
+        if request_value == 'none':
+            return ''
+        return request_value if request_value in VOLUME_REPORT_GROUPS else ''
+    if template and template.group_by in VOLUME_REPORT_GROUPS:
+        return template.group_by
+    return ''
 
 
 def get_volume_report_filters(request, template=None):
@@ -130,6 +162,29 @@ def build_report_table(trips, selected_columns):
         [VOLUME_REPORT_COLUMNS[column][1](trip) for column in selected_columns]
         for trip in trips
     ]
+    return headers, rows
+
+
+def build_grouped_report_table(trips, group_by):
+    group_label, group_getter = VOLUME_REPORT_GROUPS[group_by]
+    grouped = defaultdict(lambda: {
+        'volume_m3': 0,
+        'tonnage': 0,
+        'trip_count': 0,
+    })
+
+    for trip in trips:
+        key = group_getter(trip) or 'не задано'
+        grouped[key]['volume_m3'] += trip.volume_m3 or 0
+        grouped[key]['tonnage'] += trip.tonnage or 0
+        grouped[key]['trip_count'] += 1
+
+    headers = [group_label, 'Объем, м3', 'Тоннаж', 'Рейсы']
+    rows = [
+        [group_name, values['volume_m3'], values['tonnage'], values['trip_count']]
+        for group_name, values in grouped.items()
+    ]
+    rows.sort(key=lambda row: str(row[0]))
     return headers, rows
 
 
@@ -172,6 +227,7 @@ def volume_report_filter_context(request, selected_template):
     return {
         **filters,
         'template': request.GET.get('template', '').strip(),
+        'group_by': request.GET.get('group_by', '').strip(),
         'query_string': request.GET.urlencode(),
     }
 
@@ -205,7 +261,11 @@ def volume_report_view(request):
     filters = get_volume_report_filters(request, selected_template)
     trips = apply_volume_report_filters(trips, filters)
     selected_columns = get_selected_columns(selected_template)
-    headers, rows = build_report_table(trips[:100], selected_columns)
+    selected_group_by = get_selected_group_by(request, selected_template)
+    if selected_group_by:
+        headers, rows = build_grouped_report_table(trips, selected_group_by)
+    else:
+        headers, rows = build_report_table(trips[:100], selected_columns)
     total_volume = trips.aggregate(total=Sum('volume_m3'))['total'] or 0
     total_tonnage = trips.aggregate(total=Sum('tonnage'))['total'] or 0
     return render(
@@ -220,6 +280,8 @@ def volume_report_view(request):
             'filters': volume_report_filter_context(request, selected_template),
             'report_templates': get_volume_report_templates(),
             'selected_template': selected_template,
+            'selected_group_by': selected_group_by,
+            'group_options': report_template_group_options(selected_group_by),
             **report_filter_choices(),
         },
     )
@@ -245,7 +307,11 @@ def volume_report_export_view(request):
     filters = get_volume_report_filters(request, selected_template)
     trips = apply_volume_report_filters(trips, filters)
     selected_columns = get_selected_columns(selected_template)
-    headers, rows = build_report_table(trips, selected_columns)
+    selected_group_by = get_selected_group_by(request, selected_template)
+    if selected_group_by:
+        headers, rows = build_grouped_report_table(trips, selected_group_by)
+    else:
+        headers, rows = build_report_table(trips, selected_columns)
 
     workbook = Workbook()
     sheet = workbook.active
@@ -295,6 +361,9 @@ def report_template_builder_view(request):
             for key in REPORT_TEMPLATE_FILTER_FIELDS
             if request.POST.get(key, '').strip()
         }
+        group_by = request.POST.get('group_by', '').strip()
+        if group_by not in VOLUME_REPORT_GROUPS:
+            group_by = ''
         is_active = request.POST.get('is_active') == 'on'
 
         template = None
@@ -321,6 +390,7 @@ def report_template_builder_view(request):
             template.report_type = ReportType.SHIFT_VOLUME
             template.columns = columns
             template.filters = filters
+            template.group_by = group_by
             template.is_active = is_active
             template.updated_by = access.employee
             template.save()
@@ -331,6 +401,7 @@ def report_template_builder_view(request):
 
     selected_columns = get_selected_columns(edit_template) if edit_template else DEFAULT_VOLUME_REPORT_COLUMNS
     template_filters = get_template_filters(edit_template)
+    selected_group_by = edit_template.group_by if edit_template and edit_template.group_by in VOLUME_REPORT_GROUPS else ''
     return render(
         request,
         'reports/report_template_builder.html',
@@ -340,6 +411,8 @@ def report_template_builder_view(request):
             'edit_template': edit_template,
             'column_options': report_template_column_options(selected_columns),
             'template_filters': template_filters,
+            'selected_group_by': selected_group_by,
+            'group_options': report_template_group_options(selected_group_by),
             **report_filter_choices(),
         },
     )

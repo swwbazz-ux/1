@@ -47,6 +47,15 @@
                 </select>
             </div>
             <div>
+                <label for="group_by">Группировка</label>
+                <select id="group_by" name="group_by">
+                    <option value="none" {% if not selected_group_by %}selected{% endif %}>Без группировки</option>
+                    {% for group in group_options %}
+                        <option value="{{ group.code }}" {% if group.selected %}selected{% endif %}>{{ group.label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
                 <label for="date_from">Дата с</label>
                 <input id="date_from" type="date" name="date_from" value="{{ filters.date_from }}">
             </div>
@@ -121,7 +130,10 @@
     </section>
 
     <section class="card">
-        <h2>Выполненные рейсы</h2>
+        <h2>{% if selected_group_by %}Сводный отчет{% else %}Выполненные рейсы{% endif %}</h2>
+        {% if selected_group_by %}
+            <p class="muted">Данные сгруппированы по выбранному признаку. В строках показаны итоговый объем, тоннаж и количество рейсов.</p>
+        {% endif %}
         <div class="table-wrap">
             <table>
                 <thead>
