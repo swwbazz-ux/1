@@ -1,5 +1,6 @@
 from collections import defaultdict
 from datetime import datetime
+from decimal import Decimal
 
 from django.contrib import messages
 from django.db.models import Count, Sum
@@ -17,6 +18,18 @@ from users.models import EmployeeAccess
 from .models import ReportTemplate, ReportType
 
 
+def calculate_trip_deviation(trip):
+    if trip.planned_volume_m3 is None and trip.volume_m3 is None:
+        return ''
+    return (trip.volume_m3 or 0) - (trip.planned_volume_m3 or 0)
+
+
+def calculate_trip_plan_completion_percent(trip):
+    if not trip.planned_volume_m3 or trip.volume_m3 is None:
+        return ''
+    return ((trip.volume_m3 / trip.planned_volume_m3) * Decimal('100')).quantize(Decimal('0.01'))
+
+
 VOLUME_REPORT_COLUMNS = {
     'truck': ('Самосвал', lambda trip: str(trip.truck)),
     'excavator': ('Экскаватор', lambda trip: str(trip.excavator)),
@@ -24,6 +37,8 @@ VOLUME_REPORT_COLUMNS = {
     'dump_point': ('Точка разгрузки', lambda trip: str(trip.dump_point)),
     'planned_volume_m3': ('План, м3', lambda trip: trip.planned_volume_m3 or ''),
     'volume_m3': ('Объем, м3', lambda trip: trip.volume_m3 or ''),
+    'deviation_m3': ('Отклонение, м3', calculate_trip_deviation),
+    'plan_completion_percent': ('Выполнение, %', calculate_trip_plan_completion_percent),
     'tonnage': ('Тоннаж', lambda trip: trip.tonnage or ''),
     'loading_horizon': ('Горизонт', lambda trip: trip.loading_horizon),
     'loading_block': ('Блок', lambda trip: trip.loading_block),
@@ -43,6 +58,8 @@ DEFAULT_VOLUME_REPORT_COLUMNS = [
     'dump_point',
     'planned_volume_m3',
     'volume_m3',
+    'deviation_m3',
+    'plan_completion_percent',
     'tonnage',
     'loading_horizon',
     'loading_block',
@@ -424,7 +441,7 @@ def report_filter_choices():
 
 
 def get_detail_total_column_indexes(selected_columns):
-    total_columns = {'planned_volume_m3', 'volume_m3', 'tonnage'}
+    total_columns = {'planned_volume_m3', 'volume_m3', 'deviation_m3', 'tonnage'}
     return [
         index
         for index, column in enumerate(selected_columns)

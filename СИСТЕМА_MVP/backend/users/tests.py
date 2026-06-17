@@ -516,7 +516,7 @@ class AccessLoginTests(TestCase):
         template = ReportTemplate.objects.create(
             name='Короткий отчет',
             report_type=ReportType.SHIFT_VOLUME,
-            columns=['truck', 'volume_m3'],
+            columns=['truck', 'planned_volume_m3', 'volume_m3', 'deviation_m3', 'plan_completion_percent'],
         )
         Trip.objects.create(
             excavator=excavator,
@@ -524,6 +524,7 @@ class AccessLoginTests(TestCase):
             rock_type=rock,
             dump_point=dump_point,
             status=TripStatus.COMPLETED,
+            planned_volume_m3='10.00',
             volume_m3='11.00',
             completed_at=timezone.now(),
         )
@@ -533,9 +534,29 @@ class AccessLoginTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, '<th>Самосвал</th>', html=True)
+        self.assertContains(response, '<th>План, м3</th>', html=True)
         self.assertContains(response, '<th>Объем, м3</th>', html=True)
+        self.assertContains(response, '<th>Отклонение, м3</th>', html=True)
+        self.assertContains(response, '<th>Выполнение, %</th>', html=True)
         self.assertNotContains(response, '<th>Экскаватор</th>', html=True)
         self.assertContains(response, '11')
+        self.assertContains(response, '1,00')
+        self.assertContains(response, '110,00')
+
+        export_response = self.client.get(f'/reports/volume/export/?template={template.id}', HTTP_HOST='localhost')
+        workbook = load_workbook(BytesIO(export_response.content))
+        values = [
+            cell
+            for row in workbook.active.iter_rows(values_only=True)
+            for cell in row
+            if cell not in {None, ''}
+        ]
+
+        self.assertEqual(export_response.status_code, 200)
+        self.assertIn('Отклонение, м3', values)
+        self.assertIn('Выполнение, %', values)
+        self.assertIn(Decimal('1.00'), values)
+        self.assertIn(Decimal('110.00'), values)
 
     def test_dispatcher_can_create_report_template_in_builder(self):
         truck_type = EquipmentType.objects.create(name='Самосвал')
