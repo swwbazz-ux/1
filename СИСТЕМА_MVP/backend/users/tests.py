@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta
 from decimal import Decimal
 
 from django.core.management import call_command
@@ -545,11 +546,14 @@ class AccessLoginTests(TestCase):
         dispatcher = Employee.objects.create(full_name='Тестовый диспетчер')
         EmployeeAccess.objects.create(employee=dispatcher, role=dispatcher_role, access_code='5000')
         operator = Employee.objects.create(full_name='Машинист')
+        report_date = datetime(2026, 6, 17, 10, 0)
+        report_datetime = timezone.make_aware(report_date)
+        previous_datetime = report_datetime - timedelta(days=1)
         loading_shift = EmployeeShift.objects.create(
             employee=operator,
             shift_type='day',
             equipment=excavator,
-            opened_at=timezone.now(),
+            opened_at=report_datetime,
         )
         Trip.objects.create(
             excavator=excavator,
@@ -566,12 +570,33 @@ class AccessLoginTests(TestCase):
             transport_distance_km='3.10',
             downtime_text='зачистка забоя',
             note='ожидание разгрузки',
-            completed_at=timezone.now(),
+            completed_at=report_datetime,
+        )
+        previous_shift = EmployeeShift.objects.create(
+            employee=operator,
+            shift_type='day',
+            equipment=excavator,
+            opened_at=previous_datetime,
+        )
+        Trip.objects.create(
+            excavator=excavator,
+            truck=truck,
+            rock_type=rock,
+            dump_point=dump_point,
+            loading_shift=previous_shift,
+            status=TripStatus.COMPLETED,
+            planned_volume_m3='1000.00',
+            volume_m3='100.00',
+            tonnage='250.00',
+            loading_horizon='75',
+            loading_block='52',
+            transport_distance_km='3.10',
+            completed_at=previous_datetime,
         )
 
         self.client.post('/', {'access_code': '5000'}, follow=True, HTTP_HOST='localhost')
         response = self.client.get(
-            f'/reports/customer-daily/?date={timezone.localdate():%Y-%m-%d}',
+            f'/reports/customer-daily/?date={report_datetime:%Y-%m-%d}',
             HTTP_HOST='localhost',
         )
 
@@ -588,9 +613,13 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, '3,10')
         self.assertContains(response, 'зачистка забоя')
         self.assertContains(response, 'ожидание разгрузки')
+        self.assertContains(response, 'С начала месяца')
+        self.assertContains(response, '8000')
+        self.assertContains(response, '157')
+        self.assertContains(response, '-7843')
 
         export_response = self.client.get(
-            f'/reports/customer-daily/export/?date={timezone.localdate():%Y-%m-%d}',
+            f'/reports/customer-daily/export/?date={report_datetime:%Y-%m-%d}',
             HTTP_HOST='localhost',
         )
         self.assertEqual(export_response.status_code, 200)

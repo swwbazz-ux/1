@@ -226,6 +226,51 @@ def trip_shift_type(trip):
     return 'day'
 
 
+def customer_report_group_key(trip, include_report_date=False):
+    key = (
+        trip_shift_type(trip),
+        str(trip.rock_type),
+        str(trip.excavator),
+        str(trip.dump_point),
+        trip.loading_horizon,
+        trip.loading_block,
+        trip.transport_distance_km,
+        trip.planned_volume_m3,
+    )
+    if include_report_date:
+        return (trip_report_date(trip), *key)
+    return key
+
+
+def calculate_customer_accumulated_totals(trips):
+    grouped = defaultdict(lambda: {
+        'planned_volume': 0,
+        'volume_m3': 0,
+        'tonnage': 0,
+        'trip_count': 0,
+    })
+
+    for trip in trips:
+        key = customer_report_group_key(trip, include_report_date=True)
+        grouped[key]['planned_volume'] = trip.planned_volume_m3 or 0
+        grouped[key]['volume_m3'] += trip.volume_m3 or 0
+        grouped[key]['tonnage'] += trip.tonnage or 0
+        grouped[key]['trip_count'] += 1
+
+    total_plan = sum(values['planned_volume'] for values in grouped.values())
+    total_volume = sum(values['volume_m3'] for values in grouped.values())
+    total_tonnage = sum(values['tonnage'] for values in grouped.values())
+    total_trip_count = sum(values['trip_count'] for values in grouped.values())
+
+    return {
+        'plan': total_plan,
+        'volume': total_volume,
+        'deviation': total_volume - total_plan,
+        'tonnage': total_tonnage,
+        'trip_count': total_trip_count,
+    }
+
+
 def build_customer_daily_report(selected_date):
     trips = Trip.objects.filter(status=TripStatus.COMPLETED).select_related(
         'truck',
@@ -235,7 +280,15 @@ def build_customer_daily_report(selected_date):
         'loading_shift',
         'unloading_shift',
     )
-    trips = [trip for trip in trips if trip_report_date(trip) == selected_date]
+    all_trips = list(trips)
+    trips = [trip for trip in all_trips if trip_report_date(trip) == selected_date]
+    month_start = selected_date.replace(day=1)
+    month_trips = [
+        trip
+        for trip in all_trips
+        if month_start <= trip_report_date(trip) <= selected_date
+    ]
+    month_totals = calculate_customer_accumulated_totals(month_trips)
 
     grouped = defaultdict(lambda: {
         'volume_m3': 0,
@@ -248,16 +301,7 @@ def build_customer_daily_report(selected_date):
     })
 
     for trip in trips:
-        key = (
-            trip_shift_type(trip),
-            str(trip.rock_type),
-            str(trip.excavator),
-            str(trip.dump_point),
-            trip.loading_horizon,
-            trip.loading_block,
-            trip.transport_distance_km,
-            trip.planned_volume_m3,
-        )
+        key = customer_report_group_key(trip)
         grouped[key]['volume_m3'] += trip.volume_m3 or 0
         grouped[key]['tonnage'] += trip.tonnage or 0
         grouped[key]['trip_count'] += 1
@@ -339,6 +383,12 @@ def build_customer_daily_report(selected_date):
         'day_trip_count': day_trip_count,
         'night_trip_count': night_trip_count,
         'total_trip_count': day_trip_count + night_trip_count,
+        'month_start': month_start,
+        'month_plan_total': month_totals['plan'],
+        'month_total_volume': month_totals['volume'],
+        'month_total_deviation': month_totals['deviation'],
+        'month_total_tonnage': month_totals['tonnage'],
+        'month_total_trip_count': month_totals['trip_count'],
         'rock_summary': rock_summary,
     }
 
@@ -436,8 +486,25 @@ def customer_daily_report_export_view(request):
     for row in summary_rows:
         sheet.append(row)
 
-    append_customer_shift_table(sheet, 'I смена (дневная 08:00 - 20:00)', 10, 1, context['rows_by_shift']['day'])
-    append_customer_shift_table(sheet, 'II смена (ночная 20:00 - 08:00)', 10, 12, context['rows_by_shift']['night'])
+    sheet['F4'] = f"С начала месяца ({context['month_start']:%d.%m.%Y} - {context['selected_date']:%d.%m.%Y})"
+    sheet['F4'].font = Font(bold=True)
+    month_rows = [
+        ['Показатель', 'Значение'],
+        ['План, м3', context['month_plan_total']],
+        ['Факт, м3', context['month_total_volume']],
+        ['Отклонение, м3', context['month_total_deviation']],
+        ['Тоннаж', context['month_total_tonnage']],
+        ['Рейсы', context['month_total_trip_count']],
+    ]
+    for row_index, row in enumerate(month_rows, start=5):
+        for column_offset, value in enumerate(row, start=6):
+            cell = sheet.cell(row_index, column_offset, value)
+            if row_index == 5:
+                cell.font = Font(bold=True, color='FFFFFF')
+                cell.fill = PatternFill('solid', fgColor='17232E')
+
+    append_customer_shift_table(sheet, 'I смена (дневная 08:00 - 20:00)', 13, 1, context['rows_by_shift']['day'])
+    append_customer_shift_table(sheet, 'II смена (ночная 20:00 - 08:00)', 13, 12, context['rows_by_shift']['night'])
 
     for column_index in range(1, 23):
         sheet.column_dimensions[get_column_letter(column_index)].width = 16

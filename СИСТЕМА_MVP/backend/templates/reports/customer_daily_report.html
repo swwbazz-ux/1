@@ -101,6 +101,42 @@
         </div>
     </section>
 
+    <section class="card">
+        <h2>С начала месяца: {{ month_start|date:"d.m.Y" }} - {{ selected_date|date:"d.m.Y" }}</h2>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                <tr>
+                    <th>Показатель</th>
+                    <th>Значение</th>
+                </tr>
+                </thead>
+                <tbody>
+                <tr>
+                    <td>План, м3</td>
+                    <td>{{ month_plan_total }}</td>
+                </tr>
+                <tr>
+                    <td>Факт, м3</td>
+                    <td>{{ month_total_volume }}</td>
+                </tr>
+                <tr>
+                    <td>Отклонение, м3</td>
+                    <td>{{ month_total_deviation }}</td>
+                </tr>
+                <tr>
+                    <td>Тоннаж</td>
+                    <td>{{ month_total_tonnage }}</td>
+                </tr>
+                <tr>
+                    <td>Рейсы</td>
+                    <td>{{ month_total_trip_count }}</td>
+                </tr>
+                </tbody>
+            </table>
+        </div>
+    </section>
+
     <section class="dashboard-grid">
         <div class="card">
             <h2>I смена, дневная</h2>
@@ -138,7 +174,7 @@
                 </tbody>
             </table>
         </div>
-        <p class="muted">План/факт/отклонение пока считаются по плановым заданиям, указанным в рейсах. Полноценный месячный план будет добавлен отдельным шагом.</p>
+        <p class="muted">План/факт/отклонение пока считаются по плановым заданиям, указанным в рейсах. Полноценная отдельная модель месячного плана будет добавлена отдельным шагом.</p>
     </section>
 </main>
 {% endblock %}
