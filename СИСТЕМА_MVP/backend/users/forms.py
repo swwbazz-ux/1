@@ -67,3 +67,19 @@ class DriverOpenShiftForm(forms.ModelForm):
             'start_mileage': forms.NumberInput(attrs={'step': '0.01', 'min': '0'}),
             'start_engine_hours': forms.NumberInput(attrs={'step': '0.01', 'min': '0'}),
         }
+
+
+class DriverCloseShiftForm(forms.ModelForm):
+    class Meta:
+        model = EmployeeShift
+        fields = ['end_fuel', 'end_mileage', 'end_engine_hours']
+        labels = {
+            'end_fuel': 'Топливо на конец смены',
+            'end_mileage': 'Пробег на конец смены',
+            'end_engine_hours': 'Моточасы на конец смены',
+        }
+        widgets = {
+            'end_fuel': forms.NumberInput(attrs={'step': '0.01', 'min': '0'}),
+            'end_mileage': forms.NumberInput(attrs={'step': '0.01', 'min': '0'}),
+            'end_engine_hours': forms.NumberInput(attrs={'step': '0.01', 'min': '0'}),
+        }

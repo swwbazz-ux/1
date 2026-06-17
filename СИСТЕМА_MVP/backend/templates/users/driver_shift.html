@@ -94,10 +94,24 @@
             <p><strong>Топливо:</strong> {{ open_shift.start_fuel }}</p>
             <p><strong>Пробег:</strong> {{ open_shift.start_mileage }}</p>
             <p><strong>Моточасы:</strong> {{ open_shift.start_engine_hours }}</p>
-            <p>Следующий шаг разработки: назначение под экскаватор и активный рейс.</p>
+            {% if active_trip %}
+                <p><strong>Важно:</strong> есть активный рейс. Смена может быть закрыта, а состояние рейса останется в системе для следующей смены.</p>
+            {% endif %}
+            <form method="post" action="{% url 'driver_close_shift' %}">
+                {% csrf_token %}
+                {% for field in close_form %}
+                    <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                    {{ field }}
+                    {{ field.errors }}
+                {% endfor %}
+                <button type="submit">Закрыть смену</button>
+            </form>
         {% else %}
             <h2>Открыть смену</h2>
             <p>Проверьте показатели техники на начало смены. Если фактические значения отличаются, укажите фактические.</p>
+            {% if last_closed_shift %}
+                <p>По умолчанию подставлены показатели на конец предыдущей закрытой смены по этому самосвалу.</p>
+            {% endif %}
             <form method="post">
                 {% csrf_token %}
                 {% for field in form %}

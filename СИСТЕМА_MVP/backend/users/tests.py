@@ -3,6 +3,7 @@ from django.utils import timezone
 
 from assignments.models import AssignmentStatus, HaulAssignment
 from references.models import Dormitory, DormitoryBlock, DormitorySection, DumpPoint, Equipment, EquipmentType, RockType
+from shifts.models import EmployeeShift
 from trips.models import Trip, TripStatus
 
 from .models import DriverPrimaryRegistration, Employee, EmployeeAccess, Role
@@ -94,6 +95,47 @@ class AccessLoginTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'Смена открыта')
         self.assertTrue(self.employee.employeeshift_set.filter(closed_at__isnull=True).exists())
+
+    def test_driver_can_close_shift_and_next_opening_uses_last_end_values(self):
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        truck = Equipment.objects.create(equipment_type=truck_type, garage_number='10')
+        dormitory = Dormitory.objects.create(number='5')
+        block = DormitoryBlock.objects.create(dormitory=dormitory, name='Блок 1')
+        section = DormitorySection.objects.create(block=block, name='А')
+
+        self.client.post('/', {'access_code': '2000'}, follow=True, HTTP_HOST='localhost')
+        self.client.post(
+            '/driver/registration/',
+            {'shift_type': 'day', 'truck': truck.id, 'dormitory_section': section.id},
+            follow=True,
+            HTTP_HOST='localhost',
+        )
+        self.client.post(
+            '/driver/shift/',
+            {'start_fuel': '100', 'start_mileage': '2500', 'start_engine_hours': '700'},
+            follow=True,
+            HTTP_HOST='localhost',
+        )
+
+        close_response = self.client.post(
+            '/driver/shift/close/',
+            {'end_fuel': '90', 'end_mileage': '2600', 'end_engine_hours': '712'},
+            follow=True,
+            HTTP_HOST='localhost',
+        )
+        shift = EmployeeShift.objects.get(employee=self.employee)
+
+        self.assertEqual(close_response.status_code, 200)
+        self.assertContains(close_response, 'Смена закрыта')
+        self.assertIsNotNone(shift.closed_at)
+        self.assertEqual(shift.end_fuel, 90)
+        self.assertEqual(shift.end_mileage, 2600)
+        self.assertEqual(shift.end_engine_hours, 712)
+
+        next_open_response = self.client.get('/driver/shift/', HTTP_HOST='localhost')
+        self.assertContains(next_open_response, 'value="90')
+        self.assertContains(next_open_response, 'value="2600')
+        self.assertContains(next_open_response, 'value="712')
 
     def test_driver_can_accept_haul_assignment(self):
         truck_type = EquipmentType.objects.create(name='Самосвал')

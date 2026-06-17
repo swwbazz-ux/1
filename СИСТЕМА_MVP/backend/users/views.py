@@ -6,7 +6,7 @@ from assignments.models import AssignmentStatus, HaulAssignment
 from shifts.models import EmployeeShift
 from trips.models import Trip, TripStatus
 
-from .forms import DriverOpenShiftForm, DriverPrimaryRegistrationForm
+from .forms import DriverCloseShiftForm, DriverOpenShiftForm, DriverPrimaryRegistrationForm
 from .models import DriverPrimaryRegistration, EmployeeAccess
 
 
@@ -119,6 +119,11 @@ def driver_shift_view(request):
         status=TripStatus.ACTIVE,
     ).select_related('truck', 'excavator', 'rock_type', 'dump_point').order_by('-created_at').first()
 
+    last_closed_shift = EmployeeShift.objects.filter(
+        equipment=registration.truck,
+        closed_at__isnull=False,
+    ).order_by('-closed_at').first()
+
     if request.method == 'POST' and not open_shift:
         form = DriverOpenShiftForm(request.POST)
         if form.is_valid():
@@ -132,7 +137,14 @@ def driver_shift_view(request):
             messages.success(request, 'Смена открыта.')
             return redirect('driver_shift')
     else:
-        form = DriverOpenShiftForm()
+        form_initial = {}
+        if last_closed_shift:
+            form_initial = {
+                'start_fuel': last_closed_shift.end_fuel,
+                'start_mileage': last_closed_shift.end_mileage,
+                'start_engine_hours': last_closed_shift.end_engine_hours,
+            }
+        form = DriverOpenShiftForm(initial=form_initial)
 
     return render(
         request,
@@ -144,8 +156,37 @@ def driver_shift_view(request):
             'pending_assignment': pending_assignment,
             'active_trip': active_trip,
             'form': form,
+            'close_form': DriverCloseShiftForm(instance=open_shift) if open_shift else None,
+            'last_closed_shift': last_closed_shift,
         },
     )
+
+
+def driver_close_shift_view(request):
+    access_id = request.session.get('employee_access_id')
+    if not access_id:
+        return redirect('login')
+    access = EmployeeAccess.objects.select_related('employee', 'role').filter(id=access_id, is_active=True).first()
+    if not access or access.role.code != 'driver':
+        return redirect('role_home')
+    registration = getattr(access.employee, 'driver_registration', None)
+    if not registration:
+        return redirect('driver_registration')
+
+    open_shift = EmployeeShift.objects.filter(employee=access.employee, closed_at__isnull=True).order_by('-opened_at').first()
+    if not open_shift:
+        messages.error(request, 'Открытая смена не найдена.')
+        return redirect('driver_shift')
+
+    if request.method == 'POST':
+        form = DriverCloseShiftForm(request.POST, instance=open_shift)
+        if form.is_valid():
+            shift = form.save(commit=False)
+            shift.closed_at = timezone.now()
+            shift.closed_by = access.employee
+            shift.save(update_fields=['end_fuel', 'end_mileage', 'end_engine_hours', 'closed_at', 'closed_by'])
+            messages.success(request, 'Смена закрыта.')
+    return redirect('driver_shift')
 
 
 def driver_accept_assignment_view(request, assignment_id):
