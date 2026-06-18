@@ -89,7 +89,7 @@ class AccessLoginTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'Чеклист пилотной проверки отчетов')
         self.assertContains(response, '9 из 10')
-        self.assertContains(response, '97%')
+        self.assertContains(response, '98%')
         self.assertContains(response, 'Сверка со старыми Excel-формами')
         self.assertContains(response, 'Отчет_Коппер. Рисорсез_Март.xlsx')
         self.assertContains(response, 'почасовой Март.xlsx')
@@ -1410,6 +1410,51 @@ class AccessLoginTests(TestCase):
         self.assertContains(critical_response, 'Critical engine')
         self.assertContains(critical_response, 'Critical only')
         self.assertNotContains(critical_response, 'Visible open event 199')
+
+    def test_downtime_report_shows_unloading_waiting_reconciliation(self):
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        truck_10 = Equipment.objects.create(equipment_type=truck_type, garage_number='10')
+        truck_25 = Equipment.objects.create(equipment_type=truck_type, garage_number='25')
+        dispatcher_role = Role.objects.create(code='dispatcher', name='Диспетчер')
+        dispatcher = Employee.objects.create(full_name='Тестовый диспетчер')
+        EmployeeAccess.objects.create(employee=dispatcher, role=dispatcher_role, access_code='5000')
+        kkd_reason = DowntimeReason.objects.create(name='Ожидание разгрузки ККД', equipment_type=truck_type)
+        skdr_reason = DowntimeReason.objects.create(name='Ожидание разгрузки СКДР', equipment_type=truck_type)
+        started_at = timezone.make_aware(datetime(2026, 6, 17, 9, 0))
+        DowntimeEvent.objects.create(
+            equipment=truck_10,
+            employee=dispatcher,
+            reason=kkd_reason,
+            started_at=started_at,
+            ended_at=started_at + timedelta(minutes=45),
+            comment='Очередь на ККД',
+        )
+        DowntimeEvent.objects.create(
+            equipment=truck_25,
+            employee=dispatcher,
+            reason=skdr_reason,
+            started_at=started_at + timedelta(hours=1),
+            ended_at=started_at + timedelta(hours=1, minutes=30),
+            comment='Очередь на СКДР',
+        )
+
+        self.client.post('/', {'access_code': '5000'}, follow=True, HTTP_HOST='localhost')
+        response = self.client.get('/reports/downtimes/?date_from=2026-06-17&date_to=2026-06-17', HTTP_HOST='localhost')
+        export_response = self.client.get('/reports/downtimes/export/?date_from=2026-06-17&date_to=2026-06-17', HTTP_HOST='localhost')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Сверка ОР ККД/СКДР')
+        self.assertContains(response, 'Покрытие старой формы ОР ККД/СКДР')
+        self.assertContains(response, 'Ожидание разгрузки ККД')
+        self.assertContains(response, 'Ожидание разгрузки СКДР')
+        self.assertContains(response, '75,00 мин')
+        workbook = load_workbook(BytesIO(export_response.content))
+        self.assertIn('ОР ККД СКДР', workbook.sheetnames)
+        values = [cell.value for row in workbook['ОР ККД СКДР'].iter_rows() for cell in row]
+        self.assertIn('Сверка ожидания разгрузки ККД/СКДР', values)
+        self.assertIn('Ожидание разгрузки ККД', values)
+        self.assertIn('Ожидание разгрузки СКДР', values)
+        self.assertIn('Источник старой формы: ОР ККД СКДР март.xlsx', values)
 
     def test_dispatcher_control_shows_open_mechanic_downtimes(self):
         excavator_type = EquipmentType.objects.create(name='Excavator')

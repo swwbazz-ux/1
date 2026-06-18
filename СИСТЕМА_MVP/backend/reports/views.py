@@ -100,6 +100,11 @@ SHIFT_TYPE_LABELS = {
     'night': 'Ночная',
 }
 
+UNLOADING_WAITING_REASONS = {
+    'ожидание разгрузки ккд': 'ККД',
+    'ожидание разгрузки скдр': 'СКДР',
+}
+
 CARRYOVER_LABELS = {
     'yes': 'Да',
     'no': 'Нет',
@@ -371,6 +376,51 @@ def downtime_daily_summary(rows):
         item['duration_hours'] = item['duration_hours'].quantize(Decimal('0.01'))
         result.append(item)
     return sorted(result, key=lambda item: item['date'], reverse=True)
+
+
+def get_unloading_waiting_destination(reason):
+    normalized = str(reason or '').strip().lower()
+    for marker, destination in UNLOADING_WAITING_REASONS.items():
+        if marker in normalized:
+            return destination
+    return ''
+
+
+def downtime_unloading_waiting_summary(rows):
+    summary = {}
+    for row in rows:
+        destination = get_unloading_waiting_destination(row['reason'])
+        if not destination:
+            continue
+        if destination not in summary:
+            summary[destination] = {
+                'destination': destination,
+                'reason': f'Ожидание разгрузки {destination}',
+                'event_count': 0,
+                'open_count': 0,
+                'equipment_names': set(),
+                'duration_hours': Decimal('0'),
+            }
+        summary[destination]['event_count'] += 1
+        if row['ended_at'] is None:
+            summary[destination]['open_count'] += 1
+        summary[destination]['equipment_names'].add(str(row['equipment']))
+        summary[destination]['duration_hours'] += row['duration_hours']
+
+    result = []
+    for item in summary.values():
+        duration_hours = item['duration_hours'].quantize(Decimal('0.01'))
+        duration_minutes = (item['duration_hours'] * Decimal('60')).quantize(Decimal('0.01'))
+        event_count = item['event_count']
+        item['duration_hours'] = duration_hours
+        item['duration_minutes'] = duration_minutes
+        item['equipment_count'] = len(item['equipment_names'])
+        item['avg_minutes_per_event'] = (
+            duration_minutes / Decimal(event_count)
+        ).quantize(Decimal('0.01')) if event_count else Decimal('0')
+        del item['equipment_names']
+        result.append(item)
+    return sorted(result, key=lambda item: item['destination'])
 
 
 def build_report_table(trips, selected_columns, column_labels=None):
@@ -679,6 +729,13 @@ def downtime_report_context(request):
     open_count = sum(1 for row in all_rows if row['ended_at'] is None)
     closed_count = len(all_rows) - open_count
     critical_count = sum(1 for row in all_rows if row['is_critical'])
+    unloading_waiting_summary = downtime_unloading_waiting_summary(all_rows)
+    unloading_waiting_total_minutes = sum(
+        (item['duration_minutes'] for item in unloading_waiting_summary),
+        Decimal('0'),
+    ).quantize(Decimal('0.01'))
+    unloading_waiting_event_count = sum(item['event_count'] for item in unloading_waiting_summary)
+    unloading_waiting_equipment_count = sum(item['equipment_count'] for item in unloading_waiting_summary)
     return {
         'filters': filters,
         'selected_single_date': selected_single_date,
@@ -693,6 +750,11 @@ def downtime_report_context(request):
         'daily_summary': downtime_daily_summary(all_rows),
         'equipment_summary': downtime_summary_by(all_rows, 'equipment'),
         'reason_summary': downtime_summary_by(all_rows, 'reason'),
+        'unloading_waiting_summary': unloading_waiting_summary,
+        'unloading_waiting_total_minutes': unloading_waiting_total_minutes,
+        'unloading_waiting_event_count': unloading_waiting_event_count,
+        'unloading_waiting_equipment_count': unloading_waiting_equipment_count,
+        'unloading_waiting_reconciliation': UNLOADING_WAITING_EXCEL_RECONCILIATION,
         'equipment_choices': Equipment.objects.filter(is_active=True).order_by('equipment_type__name', 'garage_number'),
         'reason_choices': DowntimeReason.objects.filter(is_active=True).order_by('name'),
         'status_choices': [
@@ -730,7 +792,7 @@ def downtime_report_export_view(request):
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = 'Простои'
-    sheet['A1'] = 'Отчет по механическим простоям'
+    sheet['A1'] = 'Отчет по простоям техники'
     sheet['A1'].font = Font(bold=True, size=14)
     sheet['A2'] = f"Сформировал: {access.employee.full_name}"
     sheet['A3'] = f"Дата формирования: {timezone.localtime(timezone.now()):%d.%m.%Y %H:%M}"
@@ -804,6 +866,54 @@ def downtime_report_export_view(request):
     sheet.column_dimensions['I'].width = 36
     sheet.auto_filter.ref = f'A{table_start}:I{table_start + max(len(context["export_rows"]), 1)}'
     sheet.freeze_panes = f'A{table_start + 1}'
+
+    unloading_sheet = workbook.create_sheet('ОР ККД СКДР')
+    unloading_sheet['A1'] = 'Сверка ожидания разгрузки ККД/СКДР'
+    unloading_sheet['A1'].font = Font(bold=True, size=14)
+    unloading_sheet['A2'] = 'Источник старой формы: ОР ККД СКДР март.xlsx'
+    unloading_sheet['A3'] = 'Принцип MVP: ожидание разгрузки фиксируется как событие простоя самосвала.'
+    reconciliation_headers = ['Старый блок', 'Старые поля', 'Блок MVP', 'Статус', 'Примечание']
+    for column_index, header in enumerate(reconciliation_headers, start=1):
+        cell = unloading_sheet.cell(5, column_index, header)
+        cell.font = Font(bold=True, color='FFFFFF')
+        cell.fill = PatternFill('solid', fgColor='17232E')
+        cell.alignment = Alignment(wrap_text=True, vertical='top')
+    for row_index, item in enumerate(context['unloading_waiting_reconciliation'], start=6):
+        values = [item['old_block'], item['old_fields'], item['mvp_block'], item['status'], item['note']]
+        for column_index, value in enumerate(values, start=1):
+            cell = unloading_sheet.cell(row_index, column_index, value)
+            cell.alignment = Alignment(wrap_text=True, vertical='top')
+
+    summary_start = 6 + len(context['unloading_waiting_reconciliation']) + 2
+    unloading_sheet.cell(summary_start, 1, 'Сводка по выбранным фильтрам')
+    unloading_sheet.cell(summary_start, 1).font = Font(bold=True, size=12)
+    summary_headers = ['Направление', 'Причина', 'События', 'Открытые', 'Техника', 'Минуты', 'Часы', 'Среднее мин/событие']
+    for column_index, header in enumerate(summary_headers, start=1):
+        cell = unloading_sheet.cell(summary_start + 1, column_index, header)
+        cell.font = Font(bold=True, color='FFFFFF')
+        cell.fill = PatternFill('solid', fgColor='17232E')
+        cell.alignment = Alignment(wrap_text=True, vertical='top')
+    for row_index, item in enumerate(context['unloading_waiting_summary'], start=summary_start + 2):
+        values = [
+            item['destination'],
+            item['reason'],
+            item['event_count'],
+            item['open_count'],
+            item['equipment_count'],
+            item['duration_minutes'],
+            item['duration_hours'],
+            item['avg_minutes_per_event'],
+        ]
+        for column_index, value in enumerate(values, start=1):
+            unloading_sheet.cell(row_index, column_index, value)
+    if not context['unloading_waiting_summary']:
+        unloading_sheet.cell(summary_start + 2, 1, 'По выбранным фильтрам ожидания разгрузки ККД/СКДР нет.')
+
+    for column_index in range(1, len(summary_headers) + 1):
+        unloading_sheet.column_dimensions[get_column_letter(column_index)].width = 22
+    unloading_sheet.column_dimensions['B'].width = 30
+    unloading_sheet.column_dimensions['E'].width = 40
+    unloading_sheet.freeze_panes = 'A6'
 
     response = HttpResponse(
         content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -940,9 +1050,9 @@ PILOT_REPORT_EXCEL_COVERAGE = [
     {
         'file': 'ОР ККД СКДР март.xlsx',
         'purpose': 'Ожидание разгрузки ККД/СКДР',
-        'coverage': 'частично покрывается простоями',
+        'coverage': 'частично покрыт отдельной сводкой простоев',
         'system_link': '/reports/downtimes/',
-        'next_step': 'Выделить ожидание разгрузки как отдельный тип события.',
+        'next_step': 'На пилоте определить, кто фиксирует ожидание разгрузки: водитель, диспетчер или автоматический контроль рейса.',
     },
     {
         'file': 'СВОД Простоев на ККД Март.xlsx',
@@ -1042,6 +1152,38 @@ CUSTOMER_DAILY_EXCEL_RECONCILIATION = [
 ]
 
 
+UNLOADING_WAITING_EXCEL_RECONCILIATION = [
+    {
+        'old_block': 'Дневные листы по датам',
+        'old_fields': 'Дата, смена, направление ККД/СКДР',
+        'mvp_block': 'Фильтры отчета по простоям и сводка ожидания разгрузки',
+        'status': 'покрыто частично',
+        'note': 'Дата берется по началу события простоя. Разделение по сменам нужно уточнить после решения, кто фиксирует событие.',
+    },
+    {
+        'old_block': 'Строки по самосвалам',
+        'old_fields': 'Номер самосвала, причина ожидания, минуты ожидания',
+        'mvp_block': 'События простоев по технике',
+        'status': 'покрыто',
+        'note': 'Каждое ожидание разгрузки хранится как событие простоя самосвала с началом, окончанием, причиной и длительностью.',
+    },
+    {
+        'old_block': 'Итоги по направлению',
+        'old_fields': 'Количество машин/событий, всего минут, среднее минут на 1 а/с',
+        'mvp_block': 'Сводка ОР ККД/СКДР',
+        'status': 'покрыто частично',
+        'note': 'Система считает события, технику, минуты, часы и среднее минут на событие. Формулировку среднего нужно сверить с диспетчерской.',
+    },
+    {
+        'old_block': 'Форма Excel для передачи',
+        'old_fields': 'Отдельная таблица ожидания разгрузки ККД/СКДР',
+        'mvp_block': 'Лист "ОР ККД СКДР" в Excel-выгрузке простоев',
+        'status': 'покрыто частично',
+        'note': 'Выгрузка уже содержит отдельный лист сверки. Точную старую раскладку по листам дат можно делать после пилотной проверки.',
+    },
+]
+
+
 def pilot_report_checklist_view(request):
     access = get_reports_access(request, {'admin', 'dispatcher', 'manager'})
     if not access:
@@ -1055,7 +1197,7 @@ def pilot_report_checklist_view(request):
             'sections': PILOT_REPORT_CHECKLIST_SECTIONS,
             'excel_coverage': PILOT_REPORT_EXCEL_COVERAGE,
             'progress_stage': '9 из 10',
-            'progress_percent': 97,
+            'progress_percent': 98,
             'remaining_stages': 1,
         },
     )

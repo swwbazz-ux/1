@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Отчет по механическим простоям{% endblock %}
+{% block title %}Отчет по простоям техники{% endblock %}
 
 {% block body %}
 <header class="app-header">
@@ -9,8 +9,8 @@
             <span>{{ access.employee.full_name }}</span>
             <a href="{% url 'logout' %}">Выйти</a>
         </div>
-        <h1>Отчет по механическим простоям</h1>
-        <p>Отдельный разбор событий механической службы: открытые и закрытые простои, причины, техника, длительность и выгрузка в Excel.</p>
+        <h1>Отчет по простоям техники</h1>
+        <p>Разбор событий простоев: механика, ожидание разгрузки, открытые и закрытые события, причины, техника, длительность и выгрузка в Excel.</p>
     </div>
 </header>
 
@@ -35,6 +35,11 @@
         <div class="metric-card">
             <div>Длительность</div>
             <div class="metric">{{ total_duration_hours }} ч</div>
+        </div>
+        <div class="metric-card warning">
+            <div>Ожидание разгрузки</div>
+            <div class="metric">{{ unloading_waiting_total_minutes }} мин</div>
+            <div class="muted">{{ unloading_waiting_event_count }} событий</div>
         </div>
     </section>
 
@@ -99,6 +104,71 @@
                 <button type="submit">Показать</button>
             </div>
         </form>
+    </section>
+
+    <section class="card">
+        <h2>Сверка ОР ККД/СКДР</h2>
+        <p class="muted">Старая форма ОР ККД СКДР март.xlsx ведет ожидание разгрузки по самосвалам, ККД/СКДР и минутам. В MVP это отражается как события простоя самосвала с отдельной сводкой.</p>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Направление</th>
+                        <th>Причина</th>
+                        <th>События</th>
+                        <th>Открытые</th>
+                        <th>Техника</th>
+                        <th>Минуты</th>
+                        <th>Часы</th>
+                        <th>Среднее мин/событие</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in unloading_waiting_summary %}
+                        <tr>
+                            <td>{{ item.destination }}</td>
+                            <td>{{ item.reason }}</td>
+                            <td>{{ item.event_count }}</td>
+                            <td>{{ item.open_count }}</td>
+                            <td>{{ item.equipment_count }}</td>
+                            <td>{{ item.duration_minutes }}</td>
+                            <td>{{ item.duration_hours }}</td>
+                            <td>{{ item.avg_minutes_per_event }}</td>
+                        </tr>
+                    {% empty %}
+                        <tr><td colspan="8">По выбранным фильтрам ожидания разгрузки ККД/СКДР нет.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="card">
+        <h2>Покрытие старой формы ОР ККД/СКДР</h2>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Старый блок</th>
+                        <th>Старые поля</th>
+                        <th>Блок MVP</th>
+                        <th>Статус</th>
+                        <th>Примечание</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in unloading_waiting_reconciliation %}
+                        <tr>
+                            <td>{{ item.old_block }}</td>
+                            <td>{{ item.old_fields }}</td>
+                            <td>{{ item.mvp_block }}</td>
+                            <td>{{ item.status }}</td>
+                            <td>{{ item.note }}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
     </section>
 
     <section class="dashboard-grid">
