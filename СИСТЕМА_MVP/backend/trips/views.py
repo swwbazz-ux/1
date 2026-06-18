@@ -188,6 +188,34 @@ def dispatcher_service_close_shift_view(request, shift_id):
     return redirect('dispatcher_control')
 
 
+def dispatcher_cancel_assignment_view(request, assignment_id):
+    access_id = request.session.get('employee_access_id')
+    if not access_id:
+        return redirect('login')
+    access = EmployeeAccess.objects.select_related('employee', 'role').filter(id=access_id, is_active=True).first()
+    if not access or access.role.code not in {'dispatcher', 'admin'}:
+        return redirect('role_home')
+
+    if request.method != 'POST':
+        return redirect('dispatcher_control')
+
+    assignment = (
+        HaulAssignment.objects
+        .select_related('truck', 'excavator')
+        .filter(id=assignment_id, ended_at__isnull=True, status__in={AssignmentStatus.PENDING, AssignmentStatus.ACCEPTED})
+        .first()
+    )
+    if not assignment:
+        messages.error(request, 'Активное назначение для отмены не найдено.')
+        return redirect('dispatcher_control')
+
+    assignment.status = AssignmentStatus.CANCELLED
+    assignment.ended_at = timezone.now()
+    assignment.save(update_fields=['status', 'ended_at'])
+    messages.success(request, f'Назначение {assignment.truck} под {assignment.excavator} отменено.')
+    return redirect('dispatcher_control')
+
+
 def driver_complete_trip_view(request, trip_id):
     access_id = request.session.get('employee_access_id')
     if not access_id:

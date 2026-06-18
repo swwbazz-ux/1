@@ -569,6 +569,61 @@ class AccessLoginTests(TestCase):
         self.assertIsNone(shift.closed_at)
         self.assertFalse(shift.is_service_closed)
 
+    def test_dispatcher_can_cancel_pending_assignment_from_control_panel(self):
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        truck = Equipment.objects.create(equipment_type=truck_type, garage_number='10')
+        excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='1')
+        dispatcher_role = Role.objects.create(code='dispatcher', name='Диспетчер')
+        dispatcher = Employee.objects.create(full_name='Тестовый диспетчер')
+        EmployeeAccess.objects.create(employee=dispatcher, role=dispatcher_role, access_code='5000')
+        assignment = HaulAssignment.objects.create(
+            truck=truck,
+            excavator=excavator,
+            status=AssignmentStatus.PENDING,
+        )
+
+        self.client.post('/', {'access_code': '5000'}, follow=True, HTTP_HOST='localhost')
+        response = self.client.post(
+            f'/dispatcher/assignments/{assignment.id}/cancel/',
+            follow=True,
+            HTTP_HOST='localhost',
+        )
+        assignment.refresh_from_db()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(assignment.status, AssignmentStatus.CANCELLED)
+        self.assertIsNotNone(assignment.ended_at)
+        self.assertContains(response, 'Ожидающих подтверждения назначений нет.')
+
+    def test_dispatcher_can_cancel_accepted_assignment_from_control_panel(self):
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        truck = Equipment.objects.create(equipment_type=truck_type, garage_number='10')
+        excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='1')
+        dispatcher_role = Role.objects.create(code='dispatcher', name='Диспетчер')
+        dispatcher = Employee.objects.create(full_name='Тестовый диспетчер')
+        EmployeeAccess.objects.create(employee=dispatcher, role=dispatcher_role, access_code='5000')
+        assignment = HaulAssignment.objects.create(
+            truck=truck,
+            excavator=excavator,
+            status=AssignmentStatus.ACCEPTED,
+            accepted_at=timezone.now(),
+        )
+
+        self.client.post('/', {'access_code': '5000'}, follow=True, HTTP_HOST='localhost')
+        response = self.client.post(
+            f'/dispatcher/assignments/{assignment.id}/cancel/',
+            follow=True,
+            HTTP_HOST='localhost',
+        )
+        assignment.refresh_from_db()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(assignment.status, AssignmentStatus.CANCELLED)
+        self.assertIsNotNone(assignment.ended_at)
+        self.assertContains(response, 'Принятых назначений в работе сейчас нет.')
+
     def test_volume_report_can_filter_by_loading_shift_type(self):
         truck_type = EquipmentType.objects.create(name='Самосвал')
         excavator_type = EquipmentType.objects.create(name='Экскаватор')

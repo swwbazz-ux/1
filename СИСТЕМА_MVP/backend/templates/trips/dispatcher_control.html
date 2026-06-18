@@ -119,6 +119,7 @@
                         <th>Самосвал</th>
                         <th>Экскаватор</th>
                         <th>Кто назначил</th>
+                        <th>Действие</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -128,9 +129,19 @@
                             <td>{{ assignment.truck }}</td>
                             <td>{{ assignment.excavator }}</td>
                             <td>{{ assignment.assigned_by|default:"-" }}</td>
+                            <td>
+                                {% if access.role.code == 'dispatcher' or access.role.code == 'admin' %}
+                                    <form method="post" action="{% url 'dispatcher_cancel_assignment' assignment.id %}">
+                                        {% csrf_token %}
+                                        <button type="submit">Снять</button>
+                                    </form>
+                                {% else %}
+                                    -
+                                {% endif %}
+                            </td>
                         </tr>
                     {% empty %}
-                        <tr><td colspan="4">Ожидающих подтверждения назначений нет.</td></tr>
+                        <tr><td colspan="5">Ожидающих подтверждения назначений нет.</td></tr>
                     {% endfor %}
                 </tbody>
             </table>
@@ -147,6 +158,7 @@
                         <th>Самосвал</th>
                         <th>Экскаватор</th>
                         <th>Кто назначил</th>
+                        <th>Действие</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -156,9 +168,19 @@
                             <td>{{ assignment.truck }}</td>
                             <td>{{ assignment.excavator }}</td>
                             <td>{{ assignment.assigned_by|default:"-" }}</td>
+                            <td>
+                                {% if access.role.code == 'dispatcher' or access.role.code == 'admin' %}
+                                    <form method="post" action="{% url 'dispatcher_cancel_assignment' assignment.id %}">
+                                        {% csrf_token %}
+                                        <button type="submit">Снять</button>
+                                    </form>
+                                {% else %}
+                                    -
+                                {% endif %}
+                            </td>
                         </tr>
                     {% empty %}
-                        <tr><td colspan="4">Принятых назначений в работе сейчас нет.</td></tr>
+                        <tr><td colspan="5">Принятых назначений в работе сейчас нет.</td></tr>
                     {% endfor %}
                 </tbody>
             </table>
