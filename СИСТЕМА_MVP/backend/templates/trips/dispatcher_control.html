@@ -69,6 +69,10 @@
             <div>Принятые назначения в работе</div>
             <div class="metric">{{ accepted_assignments_count }}</div>
         </div>
+        <div class="metric-card">
+            <div>Незакрытые смены</div>
+            <div class="metric">{{ open_shifts_count }}</div>
+        </div>
     </section>
 
     <section class="card">
@@ -194,6 +198,47 @@
                         </tr>
                     {% empty %}
                         <tr><td colspan="7">Выполненных рейсов пока нет.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="card">
+        <h2>Незакрытые смены</h2>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Открыта</th>
+                        <th>Сотрудник</th>
+                        <th>Роль</th>
+                        <th>Техника</th>
+                        <th>Кто открыл</th>
+                        <th>Действие</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for shift in open_shifts %}
+                        <tr>
+                            <td>{{ shift.opened_at|date:"d.m.Y H:i" }}</td>
+                            <td>{{ shift.employee }}</td>
+                            <td>{{ shift.role_name }}</td>
+                            <td>{{ shift.equipment|default:"-" }}</td>
+                            <td>{{ shift.opened_by|default:"-" }}</td>
+                            <td>
+                                {% if access.role.code == 'dispatcher' or access.role.code == 'admin' %}
+                                    <form method="post" action="{% url 'dispatcher_service_close_shift' shift.id %}">
+                                        {% csrf_token %}
+                                        <button type="submit">Закрыть служебно</button>
+                                    </form>
+                                {% else %}
+                                    -
+                                {% endif %}
+                            </td>
+                        </tr>
+                    {% empty %}
+                        <tr><td colspan="6">Открытых смен сейчас нет.</td></tr>
                     {% endfor %}
                 </tbody>
             </table>

@@ -104,6 +104,31 @@ def dispatcher_control_view(request):
     if excavator_id:
         recent_completed_trips = recent_completed_trips.filter(excavator_id=excavator_id)
 
+    open_shifts = (
+        EmployeeShift.objects
+        .filter(closed_at__isnull=True)
+        .select_related('employee', 'equipment', 'opened_by')
+        .order_by('opened_at')
+    )
+    if truck_id:
+        open_shifts = open_shifts.filter(equipment_id=truck_id)
+    if excavator_id:
+        open_shifts = open_shifts.filter(equipment_id=excavator_id)
+    open_shifts = list(open_shifts[:40])
+
+    employee_ids = [shift.employee_id for shift in open_shifts]
+    role_by_employee_id = {
+        access.employee_id: access.role.name
+        for access in (
+            EmployeeAccess.objects
+            .filter(employee_id__in=employee_ids, is_active=True, role__is_active=True)
+            .select_related('role')
+            .order_by('employee_id', 'id')
+        )
+    }
+    for shift in open_shifts:
+        shift.role_name = role_by_employee_id.get(shift.employee_id, '-')
+
     trucks = Equipment.objects.filter(equipment_type__name='Самосвал', is_active=True).order_by('garage_number')
     excavators = Equipment.objects.filter(equipment_type__name='Экскаватор', is_active=True).order_by('garage_number')
 
@@ -116,9 +141,11 @@ def dispatcher_control_view(request):
             'pending_assignments': pending_assignments,
             'accepted_assignments': accepted_assignments[:30],
             'recent_completed_trips': recent_completed_trips[:30],
+            'open_shifts': open_shifts,
             'active_trips_count': active_trips.count(),
             'pending_assignments_count': pending_assignments.count(),
             'accepted_assignments_count': accepted_assignments.count(),
+            'open_shifts_count': len(open_shifts),
             'trucks': trucks,
             'excavators': excavators,
             'filters': {
@@ -130,6 +157,35 @@ def dispatcher_control_view(request):
             },
         },
     )
+
+
+def dispatcher_service_close_shift_view(request, shift_id):
+    access_id = request.session.get('employee_access_id')
+    if not access_id:
+        return redirect('login')
+    access = EmployeeAccess.objects.select_related('employee', 'role').filter(id=access_id, is_active=True).first()
+    if not access or access.role.code not in {'dispatcher', 'admin'}:
+        return redirect('role_home')
+
+    if request.method != 'POST':
+        return redirect('dispatcher_control')
+
+    shift = (
+        EmployeeShift.objects
+        .select_related('employee', 'equipment')
+        .filter(id=shift_id, closed_at__isnull=True)
+        .first()
+    )
+    if not shift:
+        messages.error(request, 'Открытая смена для служебного закрытия не найдена.')
+        return redirect('dispatcher_control')
+
+    shift.closed_at = timezone.now()
+    shift.closed_by = access.employee
+    shift.is_service_closed = True
+    shift.save(update_fields=['closed_at', 'closed_by', 'is_service_closed'])
+    messages.success(request, f'Смена сотрудника {shift.employee} закрыта служебно.')
+    return redirect('dispatcher_control')
 
 
 def driver_complete_trip_view(request, trip_id):

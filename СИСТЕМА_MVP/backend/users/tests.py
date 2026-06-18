@@ -501,6 +501,74 @@ class AccessLoginTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'Принятых назначений в работе сейчас нет.')
 
+    def test_dispatcher_sees_open_shifts_and_can_service_close_driver_shift(self):
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        truck = Equipment.objects.create(equipment_type=truck_type, garage_number='10')
+        dispatcher_role = Role.objects.create(code='dispatcher', name='Диспетчер')
+        driver_role, _ = Role.objects.get_or_create(code='driver', defaults={'name': 'Водитель самосвала'})
+        dispatcher = Employee.objects.create(full_name='Тестовый диспетчер')
+        driver = Employee.objects.create(full_name='Тестовый водитель')
+        EmployeeAccess.objects.create(employee=dispatcher, role=dispatcher_role, access_code='5000')
+        EmployeeAccess.objects.create(employee=driver, role=driver_role, access_code='2100')
+        shift = EmployeeShift.objects.create(
+            employee=driver,
+            shift_type='day',
+            equipment=truck,
+            opened_at=timezone.now(),
+            opened_by=driver,
+        )
+
+        self.client.post('/', {'access_code': '5000'}, follow=True, HTTP_HOST='localhost')
+        response = self.client.get('/dispatcher/control/', HTTP_HOST='localhost')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Незакрытые смены')
+        self.assertContains(response, 'Тестовый водитель')
+        self.assertContains(response, 'Водитель самосвала')
+        self.assertContains(response, 'Закрыть служебно')
+
+        close_response = self.client.post(
+            f'/dispatcher/shifts/{shift.id}/service-close/',
+            follow=True,
+            HTTP_HOST='localhost',
+        )
+        shift.refresh_from_db()
+
+        self.assertEqual(close_response.status_code, 200)
+        self.assertIsNotNone(shift.closed_at)
+        self.assertTrue(shift.is_service_closed)
+        self.assertEqual(shift.closed_by, dispatcher)
+        self.assertContains(close_response, 'Открытых смен сейчас нет.')
+
+    def test_manager_cannot_service_close_shift(self):
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        truck = Equipment.objects.create(equipment_type=truck_type, garage_number='10')
+        manager_role = Role.objects.create(code='manager', name='Руководство')
+        driver_role, _ = Role.objects.get_or_create(code='driver', defaults={'name': 'Водитель самосвала'})
+        manager = Employee.objects.create(full_name='Тестовый руководитель')
+        driver = Employee.objects.create(full_name='Тестовый водитель')
+        EmployeeAccess.objects.create(employee=manager, role=manager_role, access_code='6000')
+        EmployeeAccess.objects.create(employee=driver, role=driver_role, access_code='2101')
+        shift = EmployeeShift.objects.create(
+            employee=driver,
+            shift_type='day',
+            equipment=truck,
+            opened_at=timezone.now(),
+            opened_by=driver,
+        )
+
+        self.client.post('/', {'access_code': '6000'}, follow=True, HTTP_HOST='localhost')
+        response = self.client.post(
+            f'/dispatcher/shifts/{shift.id}/service-close/',
+            follow=True,
+            HTTP_HOST='localhost',
+        )
+        shift.refresh_from_db()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(shift.closed_at)
+        self.assertFalse(shift.is_service_closed)
+
     def test_volume_report_can_filter_by_loading_shift_type(self):
         truck_type = EquipmentType.objects.create(name='Самосвал')
         excavator_type = EquipmentType.objects.create(name='Экскаватор')
