@@ -52,6 +52,7 @@ def dispatcher_control_view(request):
     excavator_id = request.GET.get('excavator', '').strip()
     show_active_trips = request.GET.get('show_active_trips', '1') == '1'
     show_pending_assignments = request.GET.get('show_pending_assignments', '1') == '1'
+    show_accepted_assignments = request.GET.get('show_accepted_assignments', '1') == '1'
 
     active_trips = (
         Trip.objects
@@ -89,6 +90,8 @@ def dispatcher_control_view(request):
         accepted_assignments = accepted_assignments.filter(truck_id=truck_id)
     if excavator_id:
         accepted_assignments = accepted_assignments.filter(excavator_id=excavator_id)
+    if not show_accepted_assignments:
+        accepted_assignments = accepted_assignments.none()
 
     recent_completed_trips = (
         Trip.objects
@@ -123,6 +126,7 @@ def dispatcher_control_view(request):
                 'excavator': excavator_id,
                 'show_active_trips': show_active_trips,
                 'show_pending_assignments': show_pending_assignments,
+                'show_accepted_assignments': show_accepted_assignments,
             },
         },
     )

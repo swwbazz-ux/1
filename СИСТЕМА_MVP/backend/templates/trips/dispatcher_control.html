@@ -45,6 +45,11 @@
                 <input id="show_pending_assignments" type="checkbox" name="show_pending_assignments" value="1" {% if filters.show_pending_assignments %}checked{% endif %}>
                 <label for="show_pending_assignments">Показывать неподтвержденные назначения</label>
             </div>
+            <div class="checkline">
+                <input type="hidden" name="show_accepted_assignments" value="0">
+                <input id="show_accepted_assignments" type="checkbox" name="show_accepted_assignments" value="1" {% if filters.show_accepted_assignments %}checked{% endif %}>
+                <label for="show_accepted_assignments">Показывать принятые назначения</label>
+            </div>
             <div>
                 <button type="submit">Обновить пульт</button>
             </div>
@@ -129,9 +134,38 @@
     </section>
 
     <section class="card">
+        <h2>Принятые назначения в работе</h2>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Принято</th>
+                        <th>Самосвал</th>
+                        <th>Экскаватор</th>
+                        <th>Кто назначил</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for assignment in accepted_assignments %}
+                        <tr>
+                            <td>{{ assignment.accepted_at|date:"d.m.Y H:i" }}</td>
+                            <td>{{ assignment.truck }}</td>
+                            <td>{{ assignment.excavator }}</td>
+                            <td>{{ assignment.assigned_by|default:"-" }}</td>
+                        </tr>
+                    {% empty %}
+                        <tr><td colspan="4">Принятых назначений в работе сейчас нет.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="card">
         <h2>Последние выполненные рейсы</h2>
         <div class="actions">
             <a class="button-link" href="{% url 'volume_report' %}">Открыть отчет по объемам</a>
+            <a class="button-link button-secondary" href="{% url 'customer_daily_report' %}">Суточный отчет заказчику</a>
             <a class="button-link button-secondary" href="{% url 'logout' %}">Выйти</a>
         </div>
         <div class="table-wrap">

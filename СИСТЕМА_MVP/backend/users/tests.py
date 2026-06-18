@@ -427,6 +427,12 @@ class AccessLoginTests(TestCase):
             excavator=excavator,
             status=AssignmentStatus.PENDING,
         )
+        HaulAssignment.objects.create(
+            truck=truck,
+            excavator=excavator,
+            status=AssignmentStatus.ACCEPTED,
+            accepted_at=timezone.now(),
+        )
 
         response = self.client.post('/', {'access_code': '5000'}, follow=True, HTTP_HOST='localhost')
 
@@ -434,8 +440,10 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, 'Диспетчерский пульт')
         self.assertContains(response, 'Активные рейсы')
         self.assertContains(response, 'Назначения ждут подтверждения')
+        self.assertContains(response, 'Принятые назначения в работе')
         self.assertContains(response, '57')
         self.assertContains(response, 'Открыть отчет по объемам')
+        self.assertContains(response, 'Суточный отчет заказчику')
 
     def test_dispatcher_control_panel_can_filter_by_truck(self):
         truck_type = EquipmentType.objects.create(name='Самосвал')
@@ -471,6 +479,27 @@ class AccessLoginTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, '11')
         self.assertNotContains(response, '22,00')
+
+    def test_dispatcher_control_panel_can_hide_accepted_assignments(self):
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        truck = Equipment.objects.create(equipment_type=truck_type, garage_number='10')
+        excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='1')
+        dispatcher_role = Role.objects.create(code='dispatcher', name='Диспетчер')
+        dispatcher = Employee.objects.create(full_name='Тестовый диспетчер')
+        EmployeeAccess.objects.create(employee=dispatcher, role=dispatcher_role, access_code='5000')
+        HaulAssignment.objects.create(
+            truck=truck,
+            excavator=excavator,
+            status=AssignmentStatus.ACCEPTED,
+            accepted_at=timezone.now(),
+        )
+
+        self.client.post('/', {'access_code': '5000'}, follow=True, HTTP_HOST='localhost')
+        response = self.client.get('/dispatcher/control/?show_accepted_assignments=0', HTTP_HOST='localhost')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Принятых назначений в работе сейчас нет.')
 
     def test_volume_report_can_filter_by_loading_shift_type(self):
         truck_type = EquipmentType.objects.create(name='Самосвал')
