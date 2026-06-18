@@ -14,6 +14,12 @@
     </div>
 </header>
 <main class="page">
+    {% if messages %}
+        {% for message in messages %}
+            <div class="message {% if message.tags %}{{ message.tags }}{% else %}success{% endif %}">{{ message }}</div>
+        {% endfor %}
+    {% endif %}
+
     <section class="card">
         <h2>Фильтры пульта</h2>
         <form method="get" class="filters">
@@ -85,6 +91,7 @@
                         <th>Кто</th>
                         <th>Действие</th>
                         <th>Объект</th>
+                        <th>Причина</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -94,9 +101,10 @@
                             <td>{{ action.actor }}</td>
                             <td>{{ action.get_action_type_display }}</td>
                             <td>{{ action.target_summary }}</td>
+                            <td>{{ action.reason|default:"-" }}</td>
                         </tr>
                     {% empty %}
-                        <tr><td colspan="4">Диспетчерских действий пока нет.</td></tr>
+                        <tr><td colspan="5">Диспетчерских действий пока нет.</td></tr>
                     {% endfor %}
                 </tbody>
             </table>
@@ -133,10 +141,12 @@
                                 {% if access.role.code == 'dispatcher' or access.role.code == 'admin' %}
                                     <form method="post" action="{% url 'dispatcher_complete_trip' trip.id %}">
                                         {% csrf_token %}
+                                        <input type="text" name="reason" placeholder="Причина действия">
                                         <button type="submit">Завершить служебно</button>
                                     </form>
                                     <form method="post" action="{% url 'dispatcher_cancel_trip' trip.id %}">
                                         {% csrf_token %}
+                                        <input type="text" name="reason" placeholder="Причина действия">
                                         <button type="submit">Отменить</button>
                                     </form>
                                 {% else %}
@@ -176,6 +186,7 @@
                                 {% if access.role.code == 'dispatcher' or access.role.code == 'admin' %}
                                     <form method="post" action="{% url 'dispatcher_cancel_assignment' assignment.id %}">
                                         {% csrf_token %}
+                                        <input type="text" name="reason" placeholder="Причина действия">
                                         <button type="submit">Снять</button>
                                     </form>
                                 {% else %}
@@ -215,6 +226,7 @@
                                 {% if access.role.code == 'dispatcher' or access.role.code == 'admin' %}
                                     <form method="post" action="{% url 'dispatcher_cancel_assignment' assignment.id %}">
                                         {% csrf_token %}
+                                        <input type="text" name="reason" placeholder="Причина действия">
                                         <button type="submit">Снять</button>
                                     </form>
                                 {% else %}
@@ -295,6 +307,7 @@
                                 {% if access.role.code == 'dispatcher' or access.role.code == 'admin' %}
                                     <form method="post" action="{% url 'dispatcher_service_close_shift' shift.id %}">
                                         {% csrf_token %}
+                                        <input type="text" name="reason" placeholder="Причина действия">
                                         <button type="submit">Закрыть служебно</button>
                                     </form>
                                 {% else %}

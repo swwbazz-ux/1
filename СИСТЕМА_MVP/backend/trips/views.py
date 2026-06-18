@@ -11,7 +11,7 @@ from .forms import TripCreateForm
 from .models import DispatcherActionLog, DispatcherActionType, Trip, TripStatus
 
 
-def log_dispatcher_action(*, actor, action_type, target_summary, trip=None, shift=None, haul_assignment=None):
+def log_dispatcher_action(*, actor, action_type, target_summary, trip=None, shift=None, haul_assignment=None, reason=''):
     DispatcherActionLog.objects.create(
         actor=actor,
         action_type=action_type,
@@ -19,6 +19,7 @@ def log_dispatcher_action(*, actor, action_type, target_summary, trip=None, shif
         shift=shift,
         haul_assignment=haul_assignment,
         target_summary=target_summary,
+        reason=str(reason or '').strip(),
     )
 
 
@@ -186,6 +187,7 @@ def dispatcher_service_close_shift_view(request, shift_id):
 
     if request.method != 'POST':
         return redirect('dispatcher_control')
+    reason = request.POST.get('reason', '').strip()
 
     shift = (
         EmployeeShift.objects
@@ -206,6 +208,7 @@ def dispatcher_service_close_shift_view(request, shift_id):
         action_type=DispatcherActionType.SERVICE_CLOSE_SHIFT,
         shift=shift,
         target_summary=f'{shift.employee} / {shift.equipment or "-"} / {shift.get_shift_type_display()}',
+        reason=reason,
     )
     messages.success(request, f'Смена сотрудника {shift.employee} закрыта служебно.')
     return redirect('dispatcher_control')
@@ -221,6 +224,7 @@ def dispatcher_cancel_assignment_view(request, assignment_id):
 
     if request.method != 'POST':
         return redirect('dispatcher_control')
+    reason = request.POST.get('reason', '').strip()
 
     assignment = (
         HaulAssignment.objects
@@ -240,6 +244,7 @@ def dispatcher_cancel_assignment_view(request, assignment_id):
         action_type=DispatcherActionType.CANCEL_ASSIGNMENT,
         haul_assignment=assignment,
         target_summary=f'{assignment.truck} под {assignment.excavator}',
+        reason=reason,
     )
     messages.success(request, f'Назначение {assignment.truck} под {assignment.excavator} отменено.')
     return redirect('dispatcher_control')
@@ -255,6 +260,7 @@ def dispatcher_cancel_trip_view(request, trip_id):
 
     if request.method != 'POST':
         return redirect('dispatcher_control')
+    reason = request.POST.get('reason', '').strip()
 
     trip = (
         Trip.objects
@@ -273,6 +279,7 @@ def dispatcher_cancel_trip_view(request, trip_id):
         action_type=DispatcherActionType.CANCEL_TRIP,
         trip=trip,
         target_summary=f'{trip.truck} -> {trip.dump_point}',
+        reason=reason,
     )
     messages.success(request, f'Рейс {trip.truck} -> {trip.dump_point} отменен.')
     return redirect('dispatcher_control')
@@ -288,6 +295,7 @@ def dispatcher_complete_trip_view(request, trip_id):
 
     if request.method != 'POST':
         return redirect('dispatcher_control')
+    reason = request.POST.get('reason', '').strip()
 
     trip = (
         Trip.objects
@@ -324,6 +332,7 @@ def dispatcher_complete_trip_view(request, trip_id):
         action_type=DispatcherActionType.COMPLETE_TRIP,
         trip=trip,
         target_summary=f'{trip.truck} -> {trip.dump_point}',
+        reason=reason,
     )
     messages.success(request, f'Рейс {trip.truck} завершен служебно.')
     return redirect('dispatcher_control')

@@ -529,6 +529,7 @@ class AccessLoginTests(TestCase):
 
         close_response = self.client.post(
             f'/dispatcher/shifts/{shift.id}/service-close/',
+            {'reason': 'Сотрудник не смог закрыть смену'},
             follow=True,
             HTTP_HOST='localhost',
         )
@@ -542,6 +543,7 @@ class AccessLoginTests(TestCase):
         action = DispatcherActionLog.objects.get()
         self.assertEqual(action.actor, dispatcher)
         self.assertEqual(action.action_type, DispatcherActionType.SERVICE_CLOSE_SHIFT)
+        self.assertEqual(action.reason, 'Сотрудник не смог закрыть смену')
 
     def test_manager_cannot_service_close_shift(self):
         truck_type = EquipmentType.objects.create(name='Самосвал')
@@ -589,6 +591,7 @@ class AccessLoginTests(TestCase):
         self.client.post('/', {'access_code': '5000'}, follow=True, HTTP_HOST='localhost')
         response = self.client.post(
             f'/dispatcher/assignments/{assignment.id}/cancel/',
+            {'reason': 'Переназначение техники'},
             follow=True,
             HTTP_HOST='localhost',
         )
@@ -600,6 +603,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, 'Ожидающих подтверждения назначений нет.')
         action = DispatcherActionLog.objects.get()
         self.assertEqual(action.action_type, DispatcherActionType.CANCEL_ASSIGNMENT)
+        self.assertEqual(action.reason, 'Переназначение техники')
 
     def test_dispatcher_can_cancel_accepted_assignment_from_control_panel(self):
         truck_type = EquipmentType.objects.create(name='Самосвал')
@@ -661,6 +665,7 @@ class AccessLoginTests(TestCase):
         self.client.post('/', {'access_code': '5000'}, follow=True, HTTP_HOST='localhost')
         response = self.client.post(
             f'/dispatcher/trips/{trip.id}/complete/',
+            {'reason': 'Водитель потерял связь'},
             follow=True,
             HTTP_HOST='localhost',
         )
@@ -674,6 +679,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, 'Выполненных рейсов пока нет.', count=0)
         action = DispatcherActionLog.objects.get()
         self.assertEqual(action.action_type, DispatcherActionType.COMPLETE_TRIP)
+        self.assertEqual(action.reason, 'Водитель потерял связь')
 
     def test_dispatcher_cannot_service_complete_active_trip_without_open_shift(self):
         truck_type = EquipmentType.objects.create(name='Самосвал')
@@ -728,6 +734,7 @@ class AccessLoginTests(TestCase):
         self.client.post('/', {'access_code': '5000'}, follow=True, HTTP_HOST='localhost')
         response = self.client.post(
             f'/dispatcher/trips/{trip.id}/cancel/',
+            {'reason': 'Ошибочно созданный рейс'},
             follow=True,
             HTTP_HOST='localhost',
         )
@@ -738,6 +745,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, 'Активных рейсов сейчас нет.')
         action = DispatcherActionLog.objects.get()
         self.assertEqual(action.action_type, DispatcherActionType.CANCEL_TRIP)
+        self.assertEqual(action.reason, 'Ошибочно созданный рейс')
 
     def test_volume_report_can_filter_by_loading_shift_type(self):
         truck_type = EquipmentType.objects.create(name='Самосвал')

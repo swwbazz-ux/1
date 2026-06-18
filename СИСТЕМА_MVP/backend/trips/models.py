@@ -52,6 +52,7 @@ class DispatcherActionLog(models.Model):
     shift = models.ForeignKey('shifts.EmployeeShift', verbose_name='Смена', on_delete=models.SET_NULL, null=True, blank=True, related_name='dispatcher_action_logs')
     haul_assignment = models.ForeignKey('assignments.HaulAssignment', verbose_name='Назначение', on_delete=models.SET_NULL, null=True, blank=True, related_name='dispatcher_action_logs')
     target_summary = models.CharField('Краткое описание объекта', max_length=255)
+    reason = models.CharField('Причина действия', max_length=255, blank=True)
     created_at = models.DateTimeField('Когда выполнено', auto_now_add=True)
 
     class Meta:

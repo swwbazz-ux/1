@@ -26,6 +26,6 @@ class TripAdmin(admin.ModelAdmin):
 
 @admin.register(DispatcherActionLog)
 class DispatcherActionLogAdmin(admin.ModelAdmin):
-    list_display = ('created_at', 'actor', 'action_type', 'target_summary')
-    search_fields = ('actor__full_name', 'target_summary')
+    list_display = ('created_at', 'actor', 'action_type', 'target_summary', 'reason')
+    search_fields = ('actor__full_name', 'target_summary', 'reason')
     list_filter = ('action_type',)
