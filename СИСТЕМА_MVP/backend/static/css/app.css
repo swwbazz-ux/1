@@ -489,6 +489,40 @@ th {
     margin-bottom: 4px;
 }
 
+.trend-summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 14px;
+    margin-top: 18px;
+}
+
+.trend-summary-card {
+    background: #ffffff;
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    padding: 16px;
+}
+
+.trend-summary-card.success {
+    border-left: 8px solid var(--ok);
+}
+
+.trend-summary-card.danger {
+    border-left: 8px solid var(--danger);
+}
+
+.trend-summary-card span,
+.trend-summary-card small {
+    color: var(--muted);
+    display: block;
+}
+
+.trend-summary-card strong {
+    display: block;
+    font-size: 24px;
+    margin: 8px 0 6px;
+}
+
 .success-text {
     color: var(--ok);
 }

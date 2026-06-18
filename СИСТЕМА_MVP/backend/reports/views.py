@@ -1424,6 +1424,17 @@ def management_dashboard_view(request):
     daily_trend = build_management_daily_trend(completed_trip_list, selected_date)
     max_daily_trend_volume = max((item['volume'] for item in daily_trend), default=Decimal('0'))
     max_daily_trend_plan = max((item['plan'] for item in daily_trend), default=Decimal('0'))
+    trend_total_volume = sum((item['volume'] for item in daily_trend), Decimal('0'))
+    trend_total_plan = sum((item['plan'] for item in daily_trend), Decimal('0'))
+    trend_total_deviation = trend_total_volume - trend_total_plan
+    trend_trip_count = sum(item['trip_count'] for item in daily_trend)
+    trend_completion_percent = calculate_plan_completion_percent(trend_total_volume, trend_total_plan)
+    trend_best_day = max(daily_trend, key=lambda item: item['volume']) if trend_trip_count else None
+    trend_worst_day = min(
+        (item for item in daily_trend if item['has_plan'] or item['trip_count']),
+        key=lambda item: item['deviation'],
+        default=None,
+    )
     completed_summary = completed_trips.aggregate(
         total_volume=Sum('volume_m3'),
         total_tonnage=Sum('tonnage'),
@@ -1496,6 +1507,13 @@ def management_dashboard_view(request):
             'daily_trend': daily_trend,
             'max_daily_trend_volume': max_daily_trend_volume,
             'max_daily_trend_plan': max_daily_trend_plan,
+            'trend_total_volume': trend_total_volume,
+            'trend_total_plan': trend_total_plan,
+            'trend_total_deviation': trend_total_deviation,
+            'trend_trip_count': trend_trip_count,
+            'trend_completion_percent': trend_completion_percent,
+            'trend_best_day': trend_best_day,
+            'trend_worst_day': trend_worst_day,
             'total_volume': completed_summary['total_volume'] or 0,
             'total_tonnage': completed_summary['total_tonnage'] or 0,
             'completed_trip_count': completed_summary['trip_count'] or 0,

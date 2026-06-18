@@ -107,6 +107,55 @@
                 <p class="muted">За выбранную дату сменных данных пока нет.</p>
             {% endfor %}
         </div>
+        <div class="trend-summary-grid">
+            <div class="trend-summary-card success">
+                <span>Итог за 7 дней</span>
+                <strong>{{ trend_total_volume }} м3</strong>
+                <small>{{ trend_trip_count }} рейс.</small>
+            </div>
+            <div class="trend-summary-card">
+                <span>План за 7 дней</span>
+                <strong>{{ trend_total_plan }} м3</strong>
+                <small class="{% if trend_total_deviation < 0 %}danger-text{% else %}success-text{% endif %}">
+                    Отклонение {{ trend_total_deviation }} м3
+                </small>
+            </div>
+            <div class="trend-summary-card {% if trend_completion_percent is not None and trend_completion_percent >= 100 %}success{% else %}danger{% endif %}">
+                <span>Выполнение за неделю</span>
+                <strong>
+                    {% if trend_completion_percent is not None %}
+                        {{ trend_completion_percent }}%
+                    {% else %}
+                        Нет плана
+                    {% endif %}
+                </strong>
+                <small>Факт относительно плана</small>
+            </div>
+            <div class="trend-summary-card">
+                <span>Лучший день</span>
+                <strong>
+                    {% if trend_best_day %}
+                        {{ trend_best_day.date|date:"d.m" }}
+                    {% else %}
+                        -
+                    {% endif %}
+                </strong>
+                <small>{% if trend_best_day %}{{ trend_best_day.volume }} м3{% else %}Нет рейсов{% endif %}</small>
+            </div>
+            <div class="trend-summary-card">
+                <span>Самая сильная просадка</span>
+                <strong>
+                    {% if trend_worst_day %}
+                        {{ trend_worst_day.date|date:"d.m" }}
+                    {% else %}
+                        -
+                    {% endif %}
+                </strong>
+                <small class="{% if trend_worst_day and trend_worst_day.deviation < 0 %}danger-text{% else %}success-text{% endif %}">
+                    {% if trend_worst_day %}{{ trend_worst_day.deviation }} м3{% else %}Нет данных{% endif %}
+                </small>
+            </div>
+        </div>
     </section>
 
     <section class="card">
