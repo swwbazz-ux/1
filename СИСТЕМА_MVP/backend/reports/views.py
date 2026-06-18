@@ -978,6 +978,66 @@ PILOT_REPORT_EXCEL_COVERAGE = [
 ]
 
 
+CUSTOMER_DAILY_EXCEL_RECONCILIATION = [
+    {
+        'old_block': 'Заголовок отчета заказчику',
+        'old_fields': 'Дата, заказчик, подрядчик, дневная и ночная смена',
+        'mvp_block': 'Шапка страницы и Excel-лист "Суточный отчет"',
+        'status': 'покрыто',
+        'note': 'Название отчета и выбранная дата выводятся на экран и в Excel-выгрузку.',
+    },
+    {
+        'old_block': 'Работа выемочного оборудования',
+        'old_fields': 'Тип грунта, экскаватор, план, факт, горизонт, блок, место разгрузки, плечо, простои, примечание',
+        'mvp_block': 'Таблицы I смена и II смена',
+        'status': 'покрыто частично',
+        'note': 'Базовые поля уже есть. Перед пилотом нужно сверить точные названия пород и порядок строк с действующей формой.',
+    },
+    {
+        'old_block': 'Суточная сводка',
+        'old_fields': 'План, факт, отклонение, день, ночь, сутки',
+        'mvp_block': 'Блок "Суточная сводка"',
+        'status': 'покрыто',
+        'note': 'План/факт/отклонение считаются по рейсам и плановым заданиям, внесенным в систему.',
+    },
+    {
+        'old_block': 'С начала месяца',
+        'old_fields': 'План с начала месяца, факт с начала месяца, отклонение',
+        'mvp_block': 'Блок "С начала месяца"',
+        'status': 'покрыто частично',
+        'note': 'Факт берется из рейсов с начала месяца. Отдельную модель месячного плана нужно уточнить перед промышленным запуском.',
+    },
+    {
+        'old_block': 'Итоги по породам',
+        'old_fields': 'Горная масса, добыча руды, сульфидная, переходная, вскрыша, окисленная, рыхлая, скальная, ПСП, ППСП',
+        'mvp_block': 'Блок "Итоги по породам"',
+        'status': 'покрыто частично',
+        'note': 'Система группирует по справочнику пород. Нужно сверить справочник пород с действующими названиями заказчика.',
+    },
+    {
+        'old_block': 'Средневзвешенное плечо',
+        'old_fields': 'Среднее плечо по породам, сменам, суткам и с начала месяца',
+        'mvp_block': 'Плечо в строках сменных таблиц',
+        'status': 'требует доработки',
+        'note': 'В рейсах хранится плечо, но отдельный расчет средневзвешенного плеча пока не вынесен в сводку.',
+    },
+    {
+        'old_block': 'Расчет выполненных работ по самосвалам',
+        'old_fields': '№ самосвала, рейсы, км, объем, итог, м3*км, простои',
+        'mvp_block': 'Отчет по объемам и конструктор отчетов',
+        'status': 'покрыто частично',
+        'note': 'Рейсы, объем, тоннаж, самосвал и плечо есть в данных. М3*км и группировку точно как в старой расчетной вкладке нужно добавить отдельным шаблоном.',
+    },
+    {
+        'old_block': 'Простои и примечания',
+        'old_fields': 'Простои в сменных строках и комментарии по технике',
+        'mvp_block': 'Простои в рейсах и механические простои',
+        'status': 'покрыто частично',
+        'note': 'Механические простои уже выделены отдельно. Производственные простои экскаватора нужно довести через справочник статусов экскаватора.',
+    },
+]
+
+
 def pilot_report_checklist_view(request):
     access = get_reports_access(request, {'admin', 'dispatcher', 'manager'})
     if not access:
@@ -991,7 +1051,7 @@ def pilot_report_checklist_view(request):
             'sections': PILOT_REPORT_CHECKLIST_SECTIONS,
             'excel_coverage': PILOT_REPORT_EXCEL_COVERAGE,
             'progress_stage': '9 из 10',
-            'progress_percent': 95,
+            'progress_percent': 96,
             'remaining_stages': 1,
         },
     )
@@ -1366,6 +1426,7 @@ def customer_daily_report_context(request):
         **report,
         'selected_date': selected_date,
         'date_input': selected_date.strftime('%Y-%m-%d'),
+        'excel_reconciliation': CUSTOMER_DAILY_EXCEL_RECONCILIATION,
     }
 
 
@@ -1425,6 +1486,39 @@ def append_customer_shift_table(sheet, title, start_row, start_col, rows):
             cell.alignment = Alignment(wrap_text=True, vertical='top')
 
     return start_row + max(len(rows), 1) + 3
+
+
+def append_customer_reconciliation_sheet(workbook, reconciliation_rows):
+    sheet = workbook.create_sheet('Сверка с Excel')
+    sheet['A1'] = 'Сверка суточного отчета с действующей Excel-формой заказчика'
+    sheet['A1'].font = Font(bold=True, size=14)
+    sheet['A2'] = 'Эталон для сверки: Отчет_Коппер. Рисорсез_Март.xlsx'
+    sheet['A2'].alignment = Alignment(wrap_text=True)
+
+    headers = ['Блок старой формы', 'Поля старой формы', 'Где в MVP', 'Статус', 'Комментарий']
+    for offset, header in enumerate(headers, start=1):
+        cell = sheet.cell(4, offset, header)
+        cell.font = Font(bold=True, color='FFFFFF')
+        cell.fill = PatternFill('solid', fgColor='17232E')
+        cell.alignment = Alignment(wrap_text=True, vertical='top')
+
+    for row_index, row in enumerate(reconciliation_rows, start=5):
+        values = [
+            row['old_block'],
+            row['old_fields'],
+            row['mvp_block'],
+            row['status'],
+            row['note'],
+        ]
+        for offset, value in enumerate(values, start=1):
+            cell = sheet.cell(row_index, offset, value)
+            cell.alignment = Alignment(wrap_text=True, vertical='top')
+
+    widths = [28, 42, 34, 20, 58]
+    for column_index, width in enumerate(widths, start=1):
+        sheet.column_dimensions[get_column_letter(column_index)].width = width
+
+    return sheet
 
 
 def customer_daily_report_export_view(request):
@@ -1505,6 +1599,7 @@ def customer_daily_report_export_view(request):
         sheet.column_dimensions[get_column_letter(column_index)].width = 16
     sheet.column_dimensions['K'].width = 36
     sheet.column_dimensions['V'].width = 36
+    append_customer_reconciliation_sheet(workbook, context['excel_reconciliation'])
 
     response = HttpResponse(
         content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',

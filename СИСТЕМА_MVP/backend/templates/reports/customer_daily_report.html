@@ -184,6 +184,35 @@
     </section>
 
     <section class="card">
+        <h2>Сверка со старой Excel-формой заказчика</h2>
+        <p class="muted">Эта таблица показывает, какие блоки из файла Отчет_Коппер. Рисорсез_Март.xlsx уже закрывает текущий MVP, а какие нужно доработать перед пилотом или после него.</p>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                <tr>
+                    <th>Блок старой формы</th>
+                    <th>Поля старой формы</th>
+                    <th>Где в MVP</th>
+                    <th>Статус</th>
+                    <th>Комментарий</th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for item in excel_reconciliation %}
+                    <tr>
+                        <td>{{ item.old_block }}</td>
+                        <td>{{ item.old_fields }}</td>
+                        <td>{{ item.mvp_block }}</td>
+                        <td>{{ item.status }}</td>
+                        <td>{{ item.note }}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="card">
         <h2>Механические простои за дату</h2>
         <div class="table-wrap">
             <table>

@@ -89,7 +89,7 @@ class AccessLoginTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'Чеклист пилотной проверки отчетов')
         self.assertContains(response, '9 из 10')
-        self.assertContains(response, '95%')
+        self.assertContains(response, '96%')
         self.assertContains(response, 'Сверка со старыми Excel-формами')
         self.assertContains(response, 'Отчет_Коппер. Рисорсез_Март.xlsx')
         self.assertContains(response, 'почасовой Март.xlsx')
@@ -1099,6 +1099,10 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, '8000')
         self.assertContains(response, '157')
         self.assertContains(response, '-7843')
+        self.assertContains(response, 'Сверка со старой Excel-формой заказчика')
+        self.assertContains(response, 'Работа выемочного оборудования')
+        self.assertContains(response, 'Средневзвешенное плечо')
+        self.assertContains(response, 'Расчет выполненных работ по самосвалам')
 
         export_response = self.client.get(
             f'/reports/customer-daily/export/?date={report_datetime:%Y-%m-%d}',
@@ -1109,6 +1113,16 @@ class AccessLoginTests(TestCase):
             export_response['Content-Type'],
             'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         )
+        workbook = load_workbook(BytesIO(export_response.content))
+        self.assertIn('Сверка с Excel', workbook.sheetnames)
+        reconciliation_values = [
+            cell.value
+            for row in workbook['Сверка с Excel'].iter_rows()
+            for cell in row
+        ]
+        self.assertIn('Эталон для сверки: Отчет_Коппер. Рисорсез_Март.xlsx', reconciliation_values)
+        self.assertIn('Работа выемочного оборудования', reconciliation_values)
+        self.assertIn('Средневзвешенное плечо', reconciliation_values)
 
     def test_seed_demo_scenario_command_creates_ready_demo_data(self):
         call_command('seed_demo_scenario')
