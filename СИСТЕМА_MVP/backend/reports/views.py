@@ -1,5 +1,5 @@
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 
 from django.contrib import messages
@@ -944,6 +944,37 @@ def trip_shift_type(trip):
     return 'day'
 
 
+def build_management_daily_trend(trips, selected_date):
+    trend_start = selected_date - timedelta(days=6)
+    trend_by_date = {}
+    for day_offset in range(7):
+        report_date = trend_start + timedelta(days=day_offset)
+        trend_by_date[report_date] = {
+            'date': report_date,
+            'volume': Decimal('0'),
+            'plan': Decimal('0'),
+            'tonnage': Decimal('0'),
+            'trip_count': 0,
+        }
+
+    for trip in trips:
+        report_date = trip_report_date(trip)
+        if report_date not in trend_by_date:
+            continue
+        trend_by_date[report_date]['volume'] += trip.volume_m3 or 0
+        trend_by_date[report_date]['plan'] += trip.planned_volume_m3 or 0
+        trend_by_date[report_date]['tonnage'] += trip.tonnage or 0
+        trend_by_date[report_date]['trip_count'] += 1
+
+    daily_trend = []
+    for values in trend_by_date.values():
+        daily_trend.append({
+            **values,
+            'deviation': values['volume'] - values['plan'],
+        })
+    return daily_trend
+
+
 def customer_report_group_key(trip, include_report_date=False):
     key = (
         trip_shift_type(trip),
@@ -1320,9 +1351,10 @@ def management_dashboard_view(request):
         .order_by('started_at')[:8]
     )
     selected_date = parse_customer_report_date(request)
+    completed_trip_list = list(completed_trips)
     daily_trips = [
         trip
-        for trip in completed_trips
+        for trip in completed_trip_list
         if trip_report_date(trip) == selected_date
     ]
     daily_total_volume = sum((trip.volume_m3 or 0) for trip in daily_trips)
@@ -1374,6 +1406,9 @@ def management_dashboard_view(request):
             **item,
             'deviation': item['volume'] - item['plan'],
         })
+    daily_trend = build_management_daily_trend(completed_trip_list, selected_date)
+    max_daily_trend_volume = max((item['volume'] for item in daily_trend), default=Decimal('0'))
+    max_daily_trend_plan = max((item['plan'] for item in daily_trend), default=Decimal('0'))
     completed_summary = completed_trips.aggregate(
         total_volume=Sum('volume_m3'),
         total_tonnage=Sum('tonnage'),
@@ -1441,6 +1476,9 @@ def management_dashboard_view(request):
             'daily_shift_comparison': daily_shift_comparison,
             'max_daily_shift_volume': max_daily_shift_volume,
             'max_daily_shift_plan': max_daily_shift_plan,
+            'daily_trend': daily_trend,
+            'max_daily_trend_volume': max_daily_trend_volume,
+            'max_daily_trend_plan': max_daily_trend_plan,
             'total_volume': completed_summary['total_volume'] or 0,
             'total_tonnage': completed_summary['total_tonnage'] or 0,
             'completed_trip_count': completed_summary['trip_count'] or 0,

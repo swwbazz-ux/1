@@ -98,6 +98,52 @@
         </div>
     </section>
 
+    <section class="card">
+        <h2>Динамика за 7 дней</h2>
+        <p class="muted">Короткая управленческая картина: факт, план, отклонение и количество рейсов по дням до выбранной даты.</p>
+        <div class="trend-grid">
+            {% for item in daily_trend %}
+                <div class="trend-card {% if item.date == selected_date %}active{% endif %}">
+                    <div class="trend-date">{{ item.date|date:"d.m" }}</div>
+                    <div class="trend-values">
+                        <div>
+                            <span>Факт</span>
+                            <strong>{{ item.volume }} м3</strong>
+                        </div>
+                        <div>
+                            <span>План</span>
+                            <strong>{{ item.plan }} м3</strong>
+                        </div>
+                    </div>
+                    <div class="trend-meta">
+                        <span>{{ item.trip_count }} рейс.</span>
+                        <span class="{% if item.deviation < 0 %}danger-text{% else %}success-text{% endif %}">
+                            {{ item.deviation }} м3
+                        </span>
+                    </div>
+                    <div class="bar-row compact">
+                        <div class="bar-row-title">
+                            <span>Факт</span>
+                            <span>{{ item.volume }} м3</span>
+                        </div>
+                        <div class="bar-track">
+                            <div class="bar-fill" style="width: {% widthratio item.volume max_daily_trend_volume 100 %}%"></div>
+                        </div>
+                    </div>
+                    <div class="bar-row compact">
+                        <div class="bar-row-title">
+                            <span>План</span>
+                            <span>{{ item.plan }} м3</span>
+                        </div>
+                        <div class="bar-track">
+                            <div class="bar-fill plan" style="width: {% widthratio item.plan max_daily_trend_plan 100 %}%"></div>
+                        </div>
+                    </div>
+                </div>
+            {% endfor %}
+        </div>
+    </section>
+
     <section class="dashboard-grid">
         <div class="card">
             <h2>Экскаваторы за сутки</h2>
