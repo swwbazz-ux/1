@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+
+{% block title %}Чеклист пилотной проверки отчетов{% endblock %}
+
+{% block body %}
+<header class="app-header">
+    <div class="header-inner">
+        <div class="topline">
+            <span>{{ access.employee.full_name }}</span>
+            <a href="{% url 'logout' %}">Выйти</a>
+        </div>
+        <h1>Чеклист пилотной проверки отчетов</h1>
+        <p>Рабочая навигация перед переходом к пилотному запуску: что открыть, что выгрузить и что сверить с текущими Excel-формами.</p>
+    </div>
+</header>
+
+<main class="page">
+    <section class="metric-grid">
+        <div class="metric-card">
+            <div>Текущий этап</div>
+            <div class="metric">{{ progress_stage }}</div>
+            <div class="muted">Отчеты первой очереди и витрина перед пилотом</div>
+        </div>
+        <div class="metric-card success">
+            <div>Готовность этапа</div>
+            <div class="metric">{{ progress_percent }}%</div>
+            <div class="muted">По основной 10-этапной MVP-шкале</div>
+        </div>
+        <div class="metric-card warning">
+            <div>Осталось этапов</div>
+            <div class="metric">{{ remaining_stages }}</div>
+            <div class="muted">Следующий шаг: пилотный запуск</div>
+        </div>
+    </section>
+
+    <section class="card">
+        <h2>Как пользоваться</h2>
+        <p class="muted">Идем по разделам сверху вниз. Если экран или Excel-выгрузка расходится с текущими отчетами диспетчерской, фиксируем это как задачу перед пилотом или как ограничение первой версии.</p>
+        <div class="actions">
+            <a class="button-link" href="{% url 'pilot_launch_scenario' %}">Сценарий пилота</a>
+            <a class="button-link" href="{% url 'pilot_feedback' %}">Журнал замечаний</a>
+            <a class="button-link" href="{% url 'management_dashboard' %}">Витрина руководства</a>
+            <a class="button-link button-secondary" href="{% url 'volume_report' %}">Отчет по объемам</a>
+            <a class="button-link button-secondary" href="{% url 'customer_daily_report' %}">Суточный отчет</a>
+        </div>
+    </section>
+
+    <section class="card">
+        <h2>Сверка со старыми Excel-формами</h2>
+        <p class="muted">Предварительная карта покрытия: какие текущие формы уже закрываются MVP, а какие нужно проверить или оставить на следующий этап.</p>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                <tr>
+                    <th>Excel-файл</th>
+                    <th>Назначение</th>
+                    <th>Покрытие MVP</th>
+                    <th>Экран системы</th>
+                    <th>Следующий шаг</th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for item in excel_coverage %}
+                    <tr>
+                        <td>{{ item.file }}</td>
+                        <td>{{ item.purpose }}</td>
+                        <td>{{ item.coverage }}</td>
+                        <td>
+                            {% if item.system_link %}
+                                <a href="{{ item.system_link }}">{{ item.system_link }}</a>
+                            {% else %}
+                                <span class="muted">Пока нет отдельного экрана</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ item.next_step }}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="checklist-grid">
+        {% for section in sections %}
+            <article class="card checklist-section">
+                <h2>{{ section.title }}</h2>
+                <div class="checklist-items">
+                    {% for item in section.items %}
+                        <div class="checklist-item">
+                            <div class="check-mark">□</div>
+                            <div>
+                                <p>{{ item.text }}</p>
+                                {% if item.url %}
+                                    <a href="{{ item.url }}">{{ item.url_text }}</a>
+                                    <span class="muted">{{ item.url }}</span>
+                                {% else %}
+                                    <span class="muted">Проверяется совместно с действующими отчетами и требованиями диспетчерской.</span>
+                                {% endif %}
+                            </div>
+                        </div>
+                    {% endfor %}
+                </div>
+            </article>
+        {% endfor %}
+    </section>
+</main>
+{% endblock %}

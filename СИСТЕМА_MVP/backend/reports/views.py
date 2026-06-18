@@ -1,5 +1,5 @@
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 
 from django.contrib import messages
@@ -11,11 +11,13 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
+from downtimes.models import DowntimeEvent, DowntimeReason
 from references.models import DumpPoint, Equipment, RockType
 from trips.models import Trip, TripStatus
 from users.models import EmployeeAccess
 
-from .models import ReportTemplate, ReportType
+from .forms import PilotFeedbackForm
+from .models import PilotFeedback, ReportTemplate, ReportType
 
 
 def calculate_trip_deviation(trip):
@@ -99,6 +101,11 @@ SHIFT_TYPE_LABELS = {
     'night': 'Ночная',
 }
 
+UNLOADING_WAITING_REASONS = {
+    'ожидание разгрузки ккд': 'ККД',
+    'ожидание разгрузки скдр': 'СКДР',
+}
+
 CARRYOVER_LABELS = {
     'yes': 'Да',
     'no': 'Нет',
@@ -109,6 +116,10 @@ VOLUME_REPORT_GROUPS = {
     'excavator': ('Экскаватор', lambda trip: str(trip.excavator)),
     'rock_type': ('Порода/груз', lambda trip: str(trip.rock_type)),
     'dump_point': ('Точка разгрузки', lambda trip: str(trip.dump_point)),
+    'completed_hour': (
+        'Час выполнения рейса',
+        lambda trip: timezone.localtime(trip.completed_at).strftime('%H:00') if trip.completed_at else 'не задано',
+    ),
     'loading_shift': ('Смена загрузки', lambda trip: trip.loading_shift.get_shift_type_display() if trip.loading_shift else 'не задано'),
     'unloading_shift': ('Смена разгрузки', lambda trip: trip.unloading_shift.get_shift_type_display() if trip.unloading_shift else 'не задано'),
 }
@@ -249,6 +260,168 @@ def parse_filter_date(value):
         return datetime.strptime(value, '%Y-%m-%d').date()
     except ValueError:
         return None
+
+
+def get_downtime_report_filters(request):
+    return {
+        'date_from': request.GET.get('date_from', '').strip(),
+        'date_to': request.GET.get('date_to', '').strip(),
+        'status': request.GET.get('status', '').strip(),
+        'critical': request.GET.get('critical', '').strip(),
+        'equipment': request.GET.get('equipment', '').strip(),
+        'reason': request.GET.get('reason', '').strip(),
+        'query_string': request.GET.urlencode(),
+    }
+
+
+def apply_downtime_report_filters(queryset, filters):
+    date_from = parse_filter_date(filters.get('date_from'))
+    date_to = parse_filter_date(filters.get('date_to'))
+    status = filters.get('status')
+    critical = filters.get('critical')
+    equipment = filters.get('equipment', '')
+    reason = filters.get('reason', '')
+
+    if date_from:
+        queryset = queryset.filter(started_at__date__gte=date_from)
+    if date_to:
+        queryset = queryset.filter(started_at__date__lte=date_to)
+    if status == 'open':
+        queryset = queryset.filter(ended_at__isnull=True)
+    elif status == 'closed':
+        queryset = queryset.filter(ended_at__isnull=False)
+    if critical == 'yes':
+        queryset = queryset.filter(reason__is_critical=True)
+    elif critical == 'no':
+        queryset = queryset.filter(reason__is_critical=False)
+    if equipment.isdigit():
+        queryset = queryset.filter(equipment_id=equipment)
+    if reason.isdigit():
+        queryset = queryset.filter(reason_id=reason)
+    return queryset
+
+
+def downtime_duration_hours(event):
+    end_time = event.ended_at or timezone.now()
+    seconds = max((end_time - event.started_at).total_seconds(), 0)
+    return (Decimal(str(seconds)) / Decimal('3600')).quantize(Decimal('0.01'))
+
+
+def downtime_status_label(event):
+    return 'Открыт' if event.ended_at is None else 'Закрыт'
+
+
+def downtime_report_rows(events):
+    rows = []
+    for event in events:
+        rows.append({
+            'started_at': event.started_at,
+            'ended_at': event.ended_at,
+            'equipment': event.equipment,
+            'reason': event.reason,
+            'is_critical': event.reason.is_critical,
+            'status': downtime_status_label(event),
+            'duration_hours': downtime_duration_hours(event),
+            'employee': event.employee,
+            'comment': event.comment,
+        })
+    return rows
+
+
+def downtime_summary_by(rows, key):
+    summary = {}
+    for row in rows:
+        name = str(row[key]) if row[key] else '-'
+        if name not in summary:
+            summary[name] = {
+                'name': name,
+                'count': 0,
+                'open_count': 0,
+                'critical_count': 0,
+                'duration_hours': Decimal('0'),
+            }
+        summary[name]['count'] += 1
+        if row['ended_at'] is None:
+            summary[name]['open_count'] += 1
+        if row['is_critical']:
+            summary[name]['critical_count'] += 1
+        summary[name]['duration_hours'] += row['duration_hours']
+    result = []
+    for item in summary.values():
+        item['duration_hours'] = item['duration_hours'].quantize(Decimal('0.01'))
+        result.append(item)
+    return sorted(result, key=lambda item: (item['open_count'], item['duration_hours'], item['count']), reverse=True)
+
+
+def downtime_daily_summary(rows):
+    summary = {}
+    for row in rows:
+        day = timezone.localtime(row['started_at']).date()
+        key = day.isoformat()
+        if key not in summary:
+            summary[key] = {
+                'date': day,
+                'count': 0,
+                'open_count': 0,
+                'critical_count': 0,
+                'duration_hours': Decimal('0'),
+            }
+        summary[key]['count'] += 1
+        if row['ended_at'] is None:
+            summary[key]['open_count'] += 1
+        if row['is_critical']:
+            summary[key]['critical_count'] += 1
+        summary[key]['duration_hours'] += row['duration_hours']
+    result = []
+    for item in summary.values():
+        item['duration_hours'] = item['duration_hours'].quantize(Decimal('0.01'))
+        result.append(item)
+    return sorted(result, key=lambda item: item['date'], reverse=True)
+
+
+def get_unloading_waiting_destination(reason):
+    normalized = str(reason or '').strip().lower()
+    for marker, destination in UNLOADING_WAITING_REASONS.items():
+        if marker in normalized:
+            return destination
+    return ''
+
+
+def downtime_unloading_waiting_summary(rows):
+    summary = {}
+    for row in rows:
+        destination = get_unloading_waiting_destination(row['reason'])
+        if not destination:
+            continue
+        if destination not in summary:
+            summary[destination] = {
+                'destination': destination,
+                'reason': f'Ожидание разгрузки {destination}',
+                'event_count': 0,
+                'open_count': 0,
+                'equipment_names': set(),
+                'duration_hours': Decimal('0'),
+            }
+        summary[destination]['event_count'] += 1
+        if row['ended_at'] is None:
+            summary[destination]['open_count'] += 1
+        summary[destination]['equipment_names'].add(str(row['equipment']))
+        summary[destination]['duration_hours'] += row['duration_hours']
+
+    result = []
+    for item in summary.values():
+        duration_hours = item['duration_hours'].quantize(Decimal('0.01'))
+        duration_minutes = (item['duration_hours'] * Decimal('60')).quantize(Decimal('0.01'))
+        event_count = item['event_count']
+        item['duration_hours'] = duration_hours
+        item['duration_minutes'] = duration_minutes
+        item['equipment_count'] = len(item['equipment_names'])
+        item['avg_minutes_per_event'] = (
+            duration_minutes / Decimal(event_count)
+        ).quantize(Decimal('0.01')) if event_count else Decimal('0')
+        del item['equipment_names']
+        result.append(item)
+    return sorted(result, key=lambda item: item['destination'])
 
 
 def build_report_table(trips, selected_columns, column_labels=None):
@@ -542,6 +715,215 @@ def volume_report_export_view(request):
     return response
 
 
+def downtime_report_context(request):
+    filters = get_downtime_report_filters(request)
+    selected_single_date = filters['date_from'] if filters['date_from'] and filters['date_from'] == filters['date_to'] else ''
+    events = (
+        DowntimeEvent.objects
+        .select_related('equipment', 'equipment__equipment_type', 'reason', 'employee')
+        .order_by('-started_at')
+    )
+    events = apply_downtime_report_filters(events, filters)
+    all_rows = downtime_report_rows(events)
+    visible_rows = all_rows[:200]
+    total_duration_hours = sum((row['duration_hours'] for row in all_rows), Decimal('0')).quantize(Decimal('0.01'))
+    open_count = sum(1 for row in all_rows if row['ended_at'] is None)
+    closed_count = len(all_rows) - open_count
+    critical_count = sum(1 for row in all_rows if row['is_critical'])
+    unloading_waiting_summary = downtime_unloading_waiting_summary(all_rows)
+    unloading_waiting_total_minutes = sum(
+        (item['duration_minutes'] for item in unloading_waiting_summary),
+        Decimal('0'),
+    ).quantize(Decimal('0.01'))
+    unloading_waiting_event_count = sum(item['event_count'] for item in unloading_waiting_summary)
+    unloading_waiting_equipment_count = sum(item['equipment_count'] for item in unloading_waiting_summary)
+    return {
+        'filters': filters,
+        'selected_single_date': selected_single_date,
+        'rows': visible_rows,
+        'export_rows': all_rows,
+        'visible_count': len(visible_rows),
+        'total_count': len(all_rows),
+        'open_count': open_count,
+        'closed_count': closed_count,
+        'critical_count': critical_count,
+        'total_duration_hours': total_duration_hours,
+        'daily_summary': downtime_daily_summary(all_rows),
+        'equipment_summary': downtime_summary_by(all_rows, 'equipment'),
+        'reason_summary': downtime_summary_by(all_rows, 'reason'),
+        'unloading_waiting_summary': unloading_waiting_summary,
+        'unloading_waiting_total_minutes': unloading_waiting_total_minutes,
+        'unloading_waiting_event_count': unloading_waiting_event_count,
+        'unloading_waiting_equipment_count': unloading_waiting_equipment_count,
+        'unloading_waiting_reconciliation': UNLOADING_WAITING_EXCEL_RECONCILIATION,
+        'equipment_choices': Equipment.objects.filter(is_active=True).order_by('equipment_type__name', 'garage_number'),
+        'reason_choices': DowntimeReason.objects.filter(is_active=True).order_by('name'),
+        'status_choices': [
+            {'code': '', 'label': 'Все'},
+            {'code': 'open', 'label': 'Открытые'},
+            {'code': 'closed', 'label': 'Закрытые'},
+        ],
+        'critical_choices': [
+            {'code': '', 'label': 'Все'},
+            {'code': 'yes', 'label': 'Только критические'},
+            {'code': 'no', 'label': 'Только обычные'},
+        ],
+    }
+
+
+def downtime_report_view(request):
+    access = get_reports_access(request, {'admin', 'dispatcher', 'manager', 'mechanic'})
+    if not access:
+        return redirect('login' if not request.session.get('employee_access_id') else 'role_home')
+    return render(
+        request,
+        'reports/downtime_report.html',
+        {
+            'access': access,
+            **downtime_report_context(request),
+        },
+    )
+
+
+def downtime_report_export_view(request):
+    access = get_reports_access(request, {'admin', 'dispatcher', 'manager', 'mechanic'})
+    if not access:
+        return redirect('login' if not request.session.get('employee_access_id') else 'role_home')
+    context = downtime_report_context(request)
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = 'Простои'
+    sheet['A1'] = 'Отчет по простоям техники'
+    sheet['A1'].font = Font(bold=True, size=14)
+    sheet['A2'] = f"Сформировал: {access.employee.full_name}"
+    sheet['A3'] = f"Дата формирования: {timezone.localtime(timezone.now()):%d.%m.%Y %H:%M}"
+    summary_rows = [
+        ['Показатель', 'Значение'],
+        ['Всего событий', context['total_count']],
+        ['Открытые', context['open_count']],
+        ['Закрытые', context['closed_count']],
+        ['Критические', context['critical_count']],
+        ['Длительность, ч', context['total_duration_hours']],
+    ]
+    for row_index, row in enumerate(summary_rows, start=5):
+        for column_index, value in enumerate(row, start=1):
+            cell = sheet.cell(row_index, column_index, value)
+            if row_index == 5:
+                cell.font = Font(bold=True, color='FFFFFF')
+                cell.fill = PatternFill('solid', fgColor='17232E')
+
+    def write_downtime_summary(title, rows, start_row, start_col):
+        sheet.cell(start_row, start_col, title)
+        sheet.cell(start_row, start_col).font = Font(bold=True, size=12)
+        headers = ['Название', 'События', 'Открытые', 'Критические', 'Длительность, ч']
+        for offset, header in enumerate(headers):
+            cell = sheet.cell(start_row + 1, start_col + offset, header)
+            cell.font = Font(bold=True, color='FFFFFF')
+            cell.fill = PatternFill('solid', fgColor='17232E')
+        for row_index, item in enumerate(rows[:10], start=start_row + 2):
+            values = [item['name'], item['count'], item['open_count'], item['critical_count'], item['duration_hours']]
+            for offset, value in enumerate(values):
+                sheet.cell(row_index, start_col + offset, value)
+
+    write_downtime_summary('Сводка по технике', context['equipment_summary'], 5, 4)
+    write_downtime_summary('Сводка по причинам', context['reason_summary'], 5, 10)
+    write_downtime_summary(
+        'Сводка по датам',
+        [
+            {
+                **item,
+                'name': item['date'].strftime('%d.%m.%Y'),
+            }
+            for item in context['daily_summary']
+        ],
+        12,
+        4,
+    )
+
+    headers = ['Начало', 'Окончание', 'Статус', 'Техника', 'Причина', 'Критичность', 'Длительность, ч', 'Кто зафиксировал', 'Комментарий']
+    table_start = 25
+    for column_index, header in enumerate(headers, start=1):
+        cell = sheet.cell(table_start, column_index, header)
+        cell.font = Font(bold=True, color='FFFFFF')
+        cell.fill = PatternFill('solid', fgColor='17232E')
+        cell.alignment = Alignment(wrap_text=True, vertical='top')
+    for row_index, row in enumerate(context['export_rows'], start=table_start + 1):
+        values = [
+            timezone.localtime(row['started_at']).strftime('%d.%m.%Y %H:%M'),
+            timezone.localtime(row['ended_at']).strftime('%d.%m.%Y %H:%M') if row['ended_at'] else 'открыт',
+            row['status'],
+            str(row['equipment']),
+            str(row['reason']),
+            'Критический' if row['is_critical'] else 'Обычный',
+            row['duration_hours'],
+            str(row['employee']) if row['employee'] else '-',
+            row['comment'] or '-',
+        ]
+        for column_index, value in enumerate(values, start=1):
+            cell = sheet.cell(row_index, column_index, value)
+            cell.alignment = Alignment(wrap_text=True, vertical='top')
+    for column_index in range(1, len(headers) + 1):
+        sheet.column_dimensions[get_column_letter(column_index)].width = 18
+    sheet.column_dimensions['I'].width = 36
+    sheet.auto_filter.ref = f'A{table_start}:I{table_start + max(len(context["export_rows"]), 1)}'
+    sheet.freeze_panes = f'A{table_start + 1}'
+
+    unloading_sheet = workbook.create_sheet('ОР ККД СКДР')
+    unloading_sheet['A1'] = 'Сверка ожидания разгрузки ККД/СКДР'
+    unloading_sheet['A1'].font = Font(bold=True, size=14)
+    unloading_sheet['A2'] = 'Источник старой формы: ОР ККД СКДР март.xlsx'
+    unloading_sheet['A3'] = 'Принцип MVP: ожидание разгрузки фиксируется как событие простоя самосвала.'
+    reconciliation_headers = ['Старый блок', 'Старые поля', 'Блок MVP', 'Статус', 'Примечание']
+    for column_index, header in enumerate(reconciliation_headers, start=1):
+        cell = unloading_sheet.cell(5, column_index, header)
+        cell.font = Font(bold=True, color='FFFFFF')
+        cell.fill = PatternFill('solid', fgColor='17232E')
+        cell.alignment = Alignment(wrap_text=True, vertical='top')
+    for row_index, item in enumerate(context['unloading_waiting_reconciliation'], start=6):
+        values = [item['old_block'], item['old_fields'], item['mvp_block'], item['status'], item['note']]
+        for column_index, value in enumerate(values, start=1):
+            cell = unloading_sheet.cell(row_index, column_index, value)
+            cell.alignment = Alignment(wrap_text=True, vertical='top')
+
+    summary_start = 6 + len(context['unloading_waiting_reconciliation']) + 2
+    unloading_sheet.cell(summary_start, 1, 'Сводка по выбранным фильтрам')
+    unloading_sheet.cell(summary_start, 1).font = Font(bold=True, size=12)
+    summary_headers = ['Направление', 'Причина', 'События', 'Открытые', 'Техника', 'Минуты', 'Часы', 'Среднее мин/событие']
+    for column_index, header in enumerate(summary_headers, start=1):
+        cell = unloading_sheet.cell(summary_start + 1, column_index, header)
+        cell.font = Font(bold=True, color='FFFFFF')
+        cell.fill = PatternFill('solid', fgColor='17232E')
+        cell.alignment = Alignment(wrap_text=True, vertical='top')
+    for row_index, item in enumerate(context['unloading_waiting_summary'], start=summary_start + 2):
+        values = [
+            item['destination'],
+            item['reason'],
+            item['event_count'],
+            item['open_count'],
+            item['equipment_count'],
+            item['duration_minutes'],
+            item['duration_hours'],
+            item['avg_minutes_per_event'],
+        ]
+        for column_index, value in enumerate(values, start=1):
+            unloading_sheet.cell(row_index, column_index, value)
+    if not context['unloading_waiting_summary']:
+        unloading_sheet.cell(summary_start + 2, 1, 'По выбранным фильтрам ожидания разгрузки ККД/СКДР нет.')
+
+    for column_index in range(1, len(summary_headers) + 1):
+        unloading_sheet.column_dimensions[get_column_letter(column_index)].width = 22
+    unloading_sheet.column_dimensions['B'].width = 30
+    unloading_sheet.column_dimensions['E'].width = 40
+    unloading_sheet.freeze_panes = 'A6'
+
+    response = HttpResponse(
+        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    )
+    response['Content-Disposition'] = 'attachment; filename=\"downtime_report.xlsx\"'
+    workbook.save(response)
+    return response
+
+
 def get_reports_access(request, allowed_roles):
     access_id = request.session.get('employee_access_id')
     if not access_id:
@@ -550,6 +932,517 @@ def get_reports_access(request, allowed_roles):
     if not access or access.role.code not in allowed_roles:
         return None
     return access
+
+
+PILOT_REPORT_CHECKLIST_SECTIONS = [
+    {
+        'title': '1. Витрина руководства',
+        'items': [
+            {
+                'text': 'Открыть управленческую витрину и проверить суточные KPI, выполнение плана, день/ночь и динамику за 7 дней.',
+                'url': '/reports/management/',
+                'url_text': 'Открыть витрину',
+            },
+            {
+                'text': 'Выгрузить витрину в Excel и сверить листы: Сводка, Динамика 7 дней, День ночь.',
+                'url': '/reports/management/export/',
+                'url_text': 'Выгрузить Excel',
+            },
+        ],
+    },
+    {
+        'title': '2. Диспетчерский контроль',
+        'items': [
+            {
+                'text': 'Проверить активные рейсы, неподтвержденные назначения, открытые механические простои и последние завершенные рейсы.',
+                'url': '/dispatcher/control/',
+                'url_text': 'Открыть пульт',
+            },
+        ],
+    },
+    {
+        'title': '3. Отчет по объемам',
+        'items': [
+            {
+                'text': 'Проверить фильтры, группировки, переходящие рейсы и выбранный шаблон отчета.',
+                'url': '/reports/volume/',
+                'url_text': 'Открыть отчет',
+            },
+            {
+                'text': 'Проверить Excel-выгрузку отчета по объемам с теми же фильтрами и столбцами.',
+                'url': '/reports/volume/export/',
+                'url_text': 'Выгрузить Excel',
+            },
+            {
+                'text': 'Проверить конструктор шаблонов: состав столбцов, подписи, фильтры и группировку.',
+                'url': '/reports/templates/',
+                'url_text': 'Открыть конструктор',
+            },
+        ],
+    },
+    {
+        'title': '4. Суточный отчет заказчику',
+        'items': [
+            {
+                'text': 'Открыть суточный отчет и проверить смены, объемы, месячную сводку и механические простои.',
+                'url': '/reports/customer-daily/',
+                'url_text': 'Открыть отчет',
+            },
+            {
+                'text': 'Выгрузить суточный отчет в Excel и сверить структуру с текущей формой заказчика.',
+                'url': '/reports/customer-daily/export/',
+                'url_text': 'Выгрузить Excel',
+            },
+        ],
+    },
+    {
+        'title': '5. Механические простои',
+        'items': [
+            {
+                'text': 'Проверить отчет по простоям: открытые/закрытые события, критичность, причины, техника и длительность.',
+                'url': '/reports/downtimes/',
+                'url_text': 'Открыть отчет',
+            },
+            {
+                'text': 'Выгрузить отчет по простоям в Excel и проверить, что полная история попадает в файл.',
+                'url': '/reports/downtimes/export/',
+                'url_text': 'Выгрузить Excel',
+            },
+        ],
+    },
+    {
+        'title': '6. Вопросы перед пилотом',
+        'items': [
+            {
+                'text': 'Сверить, какие текущие Excel-формы диспетчерская обязана сдавать каждый день.',
+                'url': '',
+                'url_text': '',
+            },
+            {
+                'text': 'Отметить расхождения между системой и действующими отчетами: недостающие столбцы, названия, формулы и порядок строк.',
+                'url': '',
+                'url_text': '',
+            },
+            {
+                'text': 'Решить, что исправляем до пилота, а что фиксируем как ограничение первой версии.',
+                'url': '',
+                'url_text': '',
+            },
+        ],
+    },
+]
+
+
+PILOT_LAUNCH_SCENARIO_STEPS = [
+    {
+        'title': '1. Вход и карта интерфейсов',
+        'role': 'Диспетчер / руководство',
+        'access_code': '5000 / 6000',
+        'url': '/interfaces/',
+        'checks': [
+            'Открыть карту интерфейсов.',
+            'Проверить ссылки на рабочие экраны и отчеты.',
+            'Убедиться, что вход по коду открывает интерфейс по роли.',
+        ],
+        'expected_result': 'Пользователь быстро находит нужный экран и не ищет адреса вручную.',
+    },
+    {
+        'title': '2. Расстановка техники',
+        'role': 'Горный мастер',
+        'access_code': '4000',
+        'url': '/master/assignments/',
+        'checks': [
+            'Выбрать экскаватор.',
+            'Выбрать самосвал.',
+            'Создать назначение.',
+            'Проверить, что назначение видно водителю и диспетчеру.',
+        ],
+        'expected_result': 'Рабочая связка экскаватор - самосвал появляется в системе.',
+    },
+    {
+        'title': '3. Работа водителя',
+        'role': 'Водитель самосвала',
+        'access_code': '2000',
+        'url': '/driver/shift/',
+        'checks': [
+            'Открыть смену.',
+            'Проверить стартовые показатели техники.',
+            'Подтвердить назначение кнопкой Принял.',
+            'Завершить активный рейс кнопкой Выполнено.',
+        ],
+        'expected_result': 'Водитель выполняет минимум действий, а рейс попадает в отчет.',
+    },
+    {
+        'title': '4. Создание рейса',
+        'role': 'Машинист экскаватора',
+        'access_code': '3000',
+        'url': '/excavator/shift/',
+        'checks': [
+            'Выбрать назначенный самосвал.',
+            'Выбрать породу или груз.',
+            'Выбрать точку разгрузки.',
+            'Создать рейс.',
+        ],
+        'expected_result': 'Система считает объем и тоннаж, рейс становится активным у водителя и диспетчера.',
+    },
+    {
+        'title': '5. Диспетчерский контроль',
+        'role': 'Диспетчер',
+        'access_code': '5000',
+        'url': '/dispatcher/control/',
+        'checks': [
+            'Проверить активные рейсы.',
+            'Проверить назначения без подтверждения.',
+            'Проверить незакрытые смены.',
+            'Проверить открытые простои и журнал действий.',
+        ],
+        'expected_result': 'Диспетчер видит текущую смену в процессе, а не собирает ее вручную после факта.',
+    },
+    {
+        'title': '6. Простои техники',
+        'role': 'Механик',
+        'access_code': '7000',
+        'url': '/mechanic/downtimes/',
+        'checks': [
+            'Проверить открытые простои.',
+            'Создать или закрыть простой.',
+            'Открыть отчет по простоям.',
+            'Проверить сводку ОР ККД/СКДР и Excel-выгрузку.',
+        ],
+        'expected_result': 'Простои фиксируются как события техники и попадают в отчетность.',
+    },
+    {
+        'title': '7. Отчеты и витрина',
+        'role': 'Диспетчер / руководство',
+        'access_code': '5000 / 6000',
+        'url': '/reports/pilot-checklist/',
+        'checks': [
+            'Открыть отчет по объемам и группировку по часу.',
+            'Открыть суточный отчет заказчику.',
+            'Открыть витрину руководства.',
+            'Выгрузить основные Excel-файлы.',
+        ],
+        'expected_result': 'Отчеты формируются из данных системы и готовы к сверке со старыми Excel-формами.',
+    },
+]
+
+
+PILOT_FEEDBACK_QUESTIONS = [
+    'Достаточно ли группировки по часу вместо старой почасовой матрицы?',
+    'Кто должен фиксировать ожидание разгрузки ККД/СКДР?',
+    'Как считать среднее мин на 1 а/с?',
+    'Как связать укрупненные грузы с точными породами заказчика?',
+    'Какие действия в интерфейсах лишние или неудобные?',
+    'Какие данные невозможно вводить стабильно в карьере?',
+]
+
+
+PILOT_REPORT_EXCEL_COVERAGE = [
+    {
+        'file': 'Отчет_Коппер. Рисорсез_Март.xlsx',
+        'purpose': 'Суточный отчет заказчику',
+        'coverage': 'частично покрыт',
+        'system_link': '/reports/customer-daily/',
+        'next_step': 'Сверить форму, порядок блоков и обязательные итоговые строки.',
+    },
+    {
+        'file': 'почасовой Март.xlsx',
+        'purpose': 'Почасовой отчет диспетчерской',
+        'coverage': 'частично покрыт группировкой по часу',
+        'system_link': '/reports/volume/?group_by=completed_hour',
+        'next_step': 'Проверить с диспетчерской, нужна ли точная старая почасовая матрица после первого пилота.',
+    },
+    {
+        'file': 'ОР ККД СКДР март.xlsx',
+        'purpose': 'Ожидание разгрузки ККД/СКДР',
+        'coverage': 'частично покрыт отдельной сводкой простоев',
+        'system_link': '/reports/downtimes/',
+        'next_step': 'На пилоте определить, кто фиксирует ожидание разгрузки: водитель, диспетчер или автоматический контроль рейса.',
+    },
+    {
+        'file': 'СВОД Простоев на ККД Март.xlsx',
+        'purpose': 'Свод простоев и невыполненного объема',
+        'coverage': 'частично покрыт',
+        'system_link': '/reports/downtimes/',
+        'next_step': 'Решить, нужен ли расчет невыполненного объема в MVP.',
+    },
+    {
+        'file': 'Работа экс Март (1).xlsx',
+        'purpose': 'Работа экскаваторов',
+        'coverage': 'частично покрыто',
+        'system_link': '/reports/management/',
+        'next_step': 'Проверить группировку по экскаваторам, объемам, рейсам и плечу.',
+    },
+    {
+        'file': 'Работа экс Март ПЕРЕГОНЫ ПРИЧИНЫ.xlsx',
+        'purpose': 'Перегоны и смена фронта работ',
+        'coverage': 'не покрыт',
+        'system_link': '',
+        'next_step': 'Нужен модуль статусов и перегонов экскаватора.',
+    },
+    {
+        'file': 'КИП/КТГ и КИО/КТГ',
+        'purpose': 'Показатели использования и технической готовности',
+        'coverage': 'не покрыт',
+        'system_link': '',
+        'next_step': 'Определить формулы, источники рабочего времени, простоев и ремонтов.',
+    },
+    {
+        'file': 'График ТО.xlsx',
+        'purpose': 'Планирование технического обслуживания',
+        'coverage': 'не покрыт',
+        'system_link': '',
+        'next_step': 'Отнести к развитию механического модуля после первого пилота.',
+    },
+    {
+        'file': 'удельный_веса_руд_и_пород_Малмыжского_местородения.xlsx',
+        'purpose': 'Справочник пород, плотностей и коэффициентов разрыхления',
+        'coverage': 'структурно сверено',
+        'system_link': '/admin/references/rocktype/',
+        'next_step': 'На пилоте уточнить соответствие укрупненных рабочих названий точным породам заказчика.',
+    },
+]
+
+
+CUSTOMER_DAILY_EXCEL_RECONCILIATION = [
+    {
+        'old_block': 'Заголовок отчета заказчику',
+        'old_fields': 'Дата, заказчик, подрядчик, дневная и ночная смена',
+        'mvp_block': 'Шапка страницы и Excel-лист "Суточный отчет"',
+        'status': 'покрыто',
+        'note': 'Название отчета и выбранная дата выводятся на экран и в Excel-выгрузку.',
+    },
+    {
+        'old_block': 'Работа выемочного оборудования',
+        'old_fields': 'Тип грунта, экскаватор, план, факт, горизонт, блок, место разгрузки, плечо, простои, примечание',
+        'mvp_block': 'Таблицы I смена и II смена',
+        'status': 'покрыто частично',
+        'note': 'Базовые поля уже есть. Перед пилотом нужно сверить точные названия пород и порядок строк с действующей формой.',
+    },
+    {
+        'old_block': 'Суточная сводка',
+        'old_fields': 'План, факт, отклонение, день, ночь, сутки',
+        'mvp_block': 'Блок "Суточная сводка"',
+        'status': 'покрыто',
+        'note': 'План/факт/отклонение считаются по рейсам и плановым заданиям, внесенным в систему.',
+    },
+    {
+        'old_block': 'С начала месяца',
+        'old_fields': 'План с начала месяца, факт с начала месяца, отклонение',
+        'mvp_block': 'Блок "С начала месяца"',
+        'status': 'покрыто частично',
+        'note': 'Факт берется из рейсов с начала месяца. Отдельную модель месячного плана нужно уточнить перед промышленным запуском.',
+    },
+    {
+        'old_block': 'Итоги по породам',
+        'old_fields': 'Горная масса, добыча руды, сульфидная, переходная, вскрыша, окисленная, рыхлая, скальная, ПСП, ППСП',
+        'mvp_block': 'Блок "Итоги по породам"',
+        'status': 'покрыто частично',
+        'note': 'Система группирует по справочнику пород. Нужно сверить справочник пород с действующими названиями заказчика.',
+    },
+    {
+        'old_block': 'Средневзвешенное плечо',
+        'old_fields': 'Среднее плечо по породам, сменам, суткам и с начала месяца',
+        'mvp_block': 'Плечо в строках сменных таблиц',
+        'status': 'требует доработки',
+        'note': 'В рейсах хранится плечо, но отдельный расчет средневзвешенного плеча пока не вынесен в сводку.',
+    },
+    {
+        'old_block': 'Расчет выполненных работ по самосвалам',
+        'old_fields': '№ самосвала, рейсы, км, объем, итог, м3*км, простои',
+        'mvp_block': 'Отчет по объемам и конструктор отчетов',
+        'status': 'покрыто частично',
+        'note': 'Рейсы, объем, тоннаж, самосвал и плечо есть в данных. М3*км и группировку точно как в старой расчетной вкладке нужно добавить отдельным шаблоном.',
+    },
+    {
+        'old_block': 'Простои и примечания',
+        'old_fields': 'Простои в сменных строках и комментарии по технике',
+        'mvp_block': 'Простои в рейсах и механические простои',
+        'status': 'покрыто частично',
+        'note': 'Механические простои уже выделены отдельно. Производственные простои экскаватора нужно довести через справочник статусов экскаватора.',
+    },
+]
+
+
+UNLOADING_WAITING_EXCEL_RECONCILIATION = [
+    {
+        'old_block': 'Дневные листы по датам',
+        'old_fields': 'Дата, смена, направление ККД/СКДР',
+        'mvp_block': 'Фильтры отчета по простоям и сводка ожидания разгрузки',
+        'status': 'покрыто частично',
+        'note': 'Дата берется по началу события простоя. Разделение по сменам нужно уточнить после решения, кто фиксирует событие.',
+    },
+    {
+        'old_block': 'Строки по самосвалам',
+        'old_fields': 'Номер самосвала, причина ожидания, минуты ожидания',
+        'mvp_block': 'События простоев по технике',
+        'status': 'покрыто',
+        'note': 'Каждое ожидание разгрузки хранится как событие простоя самосвала с началом, окончанием, причиной и длительностью.',
+    },
+    {
+        'old_block': 'Итоги по направлению',
+        'old_fields': 'Количество машин/событий, всего минут, среднее минут на 1 а/с',
+        'mvp_block': 'Сводка ОР ККД/СКДР',
+        'status': 'покрыто частично',
+        'note': 'Система считает события, технику, минуты, часы и среднее минут на событие. Формулировку среднего нужно сверить с диспетчерской.',
+    },
+    {
+        'old_block': 'Форма Excel для передачи',
+        'old_fields': 'Отдельная таблица ожидания разгрузки ККД/СКДР',
+        'mvp_block': 'Лист "ОР ККД СКДР" в Excel-выгрузке простоев',
+        'status': 'покрыто частично',
+        'note': 'Выгрузка уже содержит отдельный лист сверки. Точную старую раскладку по листам дат можно делать после пилотной проверки.',
+    },
+]
+
+
+def pilot_report_checklist_view(request):
+    access = get_reports_access(request, {'admin', 'dispatcher', 'manager'})
+    if not access:
+        return redirect('login' if not request.session.get('employee_access_id') else 'role_home')
+
+    return render(
+        request,
+        'reports/pilot_checklist.html',
+        {
+            'access': access,
+            'sections': PILOT_REPORT_CHECKLIST_SECTIONS,
+            'excel_coverage': PILOT_REPORT_EXCEL_COVERAGE,
+            'progress_stage': '9 из 10',
+            'progress_percent': 99,
+            'remaining_stages': 1,
+        },
+    )
+
+
+def pilot_launch_scenario_view(request):
+    access = get_reports_access(request, {'admin', 'dispatcher', 'manager'})
+    if not access:
+        return redirect('login' if not request.session.get('employee_access_id') else 'role_home')
+
+    return render(
+        request,
+        'reports/pilot_scenario.html',
+        {
+            'access': access,
+            'steps': PILOT_LAUNCH_SCENARIO_STEPS,
+            'feedback_questions': PILOT_FEEDBACK_QUESTIONS,
+            'progress_stage': '9 из 10',
+            'progress_percent': 99,
+            'remaining_stages': 1,
+        },
+    )
+
+
+def pilot_feedback_view(request):
+    access = get_reports_access(request, {'admin', 'dispatcher', 'manager'})
+    if not access:
+        return redirect('login' if not request.session.get('employee_access_id') else 'role_home')
+
+    if request.method == 'POST':
+        action = request.POST.get('action', '').strip()
+        feedback_id = request.POST.get('feedback_id', '').strip()
+        next_status = request.POST.get('status', '').strip()
+        if action == 'change_status' and feedback_id and next_status in {'in_work', 'decided', 'rejected'}:
+            feedback = PilotFeedback.objects.filter(id=feedback_id).first()
+            if feedback:
+                feedback.status = next_status
+                feedback.save(update_fields=['status', 'updated_at'])
+                messages.success(request, 'Статус замечания обновлен.')
+            return redirect('pilot_feedback')
+        else:
+            form = PilotFeedbackForm(request.POST)
+            if form.is_valid():
+                feedback = form.save(commit=False)
+                feedback.created_by = access.employee
+                feedback.save()
+                messages.success(request, 'Замечание пилота зафиксировано.')
+                return redirect('pilot_feedback')
+    else:
+        form = PilotFeedbackForm()
+
+    feedback_items = (
+        PilotFeedback.objects
+        .select_related('created_by')
+        .order_by('priority', '-created_at')
+    )
+    feedback_summary = {
+        'total': feedback_items.count(),
+        'p0': feedback_items.filter(priority='p0').count(),
+        'p1': feedback_items.filter(priority='p1').count(),
+        'open': feedback_items.exclude(status__in=['decided', 'rejected']).count(),
+    }
+    return render(
+        request,
+        'reports/pilot_feedback.html',
+        {
+            'access': access,
+            'form': form,
+            'feedback_items': feedback_items,
+            'feedback_summary': feedback_summary,
+            'progress_stage': '9 из 10',
+            'progress_percent': 99,
+            'remaining_stages': 1,
+        },
+    )
+
+
+def pilot_feedback_export_view(request):
+    access = get_reports_access(request, {'admin', 'dispatcher', 'manager'})
+    if not access:
+        return redirect('login' if not request.session.get('employee_access_id') else 'role_home')
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = 'Замечания пилота'
+    sheet.append(['Журнал замечаний пилотного запуска'])
+    sheet.append([f'Сформировал: {access.employee.full_name}'])
+    sheet.append([])
+    headers = [
+        'Дата',
+        'Приоритет',
+        'Статус',
+        'Категория',
+        'Экран или процесс',
+        'Краткое замечание',
+        'Описание',
+        'Решение',
+        'Кто зафиксировал',
+    ]
+    sheet.append(headers)
+    for cell in sheet[4]:
+        cell.font = Font(bold=True, color='FFFFFF')
+        cell.fill = PatternFill('solid', fgColor='17232E')
+        cell.alignment = Alignment(wrap_text=True, vertical='top')
+
+    feedback_items = PilotFeedback.objects.select_related('created_by').order_by('priority', '-created_at')
+    for feedback in feedback_items:
+        sheet.append([
+            timezone.localtime(feedback.created_at).strftime('%d.%m.%Y %H:%M'),
+            feedback.get_priority_display(),
+            feedback.get_status_display(),
+            feedback.get_category_display(),
+            feedback.screen,
+            feedback.title,
+            feedback.description,
+            feedback.decision,
+            feedback.created_by.full_name,
+        ])
+
+    widths = [18, 24, 20, 22, 28, 42, 56, 56, 28]
+    for column_index, width in enumerate(widths, start=1):
+        sheet.column_dimensions[get_column_letter(column_index)].width = width
+    for row in sheet.iter_rows():
+        for cell in row:
+            cell.alignment = Alignment(wrap_text=True, vertical='top')
+    sheet.freeze_panes = 'A5'
+
+    response = HttpResponse(
+        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    )
+    response['Content-Disposition'] = 'attachment; filename=\"pilot_feedback.xlsx\"'
+    workbook.save(response)
+    return response
 
 
 def report_template_builder_view(request):
@@ -677,6 +1570,46 @@ def trip_shift_type(trip):
     return 'day'
 
 
+def calculate_plan_completion_percent(volume, plan):
+    if not plan:
+        return None
+    return (((volume or Decimal('0')) / plan) * Decimal('100')).quantize(Decimal('0.1'))
+
+
+def build_management_daily_trend(trips, selected_date):
+    trend_start = selected_date - timedelta(days=6)
+    trend_by_date = {}
+    for day_offset in range(7):
+        report_date = trend_start + timedelta(days=day_offset)
+        trend_by_date[report_date] = {
+            'date': report_date,
+            'volume': Decimal('0'),
+            'plan': Decimal('0'),
+            'tonnage': Decimal('0'),
+            'trip_count': 0,
+        }
+
+    for trip in trips:
+        report_date = trip_report_date(trip)
+        if report_date not in trend_by_date:
+            continue
+        trend_by_date[report_date]['volume'] += trip.volume_m3 or 0
+        trend_by_date[report_date]['plan'] += trip.planned_volume_m3 or 0
+        trend_by_date[report_date]['tonnage'] += trip.tonnage or 0
+        trend_by_date[report_date]['trip_count'] += 1
+
+    daily_trend = []
+    for values in trend_by_date.values():
+        completion_percent = calculate_plan_completion_percent(values['volume'], values['plan'])
+        daily_trend.append({
+            **values,
+            'deviation': values['volume'] - values['plan'],
+            'completion_percent': completion_percent,
+            'has_plan': completion_percent is not None,
+        })
+    return daily_trend
+
+
 def customer_report_group_key(trip, include_report_date=False):
     key = (
         trip_shift_type(trip),
@@ -720,6 +1653,31 @@ def calculate_customer_accumulated_totals(trips):
         'tonnage': total_tonnage,
         'trip_count': total_trip_count,
     }
+
+
+def build_mechanic_downtime_rows(selected_date):
+    events = (
+        DowntimeEvent.objects
+        .filter(started_at__date=selected_date)
+        .select_related('equipment', 'reason', 'employee')
+        .order_by('started_at')
+    )
+    rows = []
+    for event in events:
+        end_time = event.ended_at or timezone.now()
+        duration_minutes = max(int((end_time - event.started_at).total_seconds() // 60), 0)
+        rows.append({
+            'started_at': event.started_at,
+            'ended_at': event.ended_at,
+            'equipment': event.equipment,
+            'reason': event.reason,
+            'employee': event.employee,
+            'comment': event.comment,
+            'duration_minutes': duration_minutes,
+            'duration_hours': Decimal(duration_minutes) / Decimal('60'),
+            'is_open': event.ended_at is None,
+        })
+    return rows
 
 
 def build_customer_daily_report(selected_date):
@@ -816,6 +1774,7 @@ def build_customer_daily_report(selected_date):
         .annotate(total_volume=Sum('volume_m3'), total_tonnage=Sum('tonnage'), trip_count=Count('id'))
         .order_by('-total_volume')
     )
+    mechanic_downtime_rows = build_mechanic_downtime_rows(selected_date)
 
     return {
         'rows_by_shift': rows_by_shift,
@@ -841,6 +1800,10 @@ def build_customer_daily_report(selected_date):
         'month_total_tonnage': month_totals['tonnage'],
         'month_total_trip_count': month_totals['trip_count'],
         'rock_summary': rock_summary,
+        'mechanic_downtime_rows': mechanic_downtime_rows,
+        'mechanic_downtime_count': len(mechanic_downtime_rows),
+        'mechanic_open_downtime_count': sum(1 for row in mechanic_downtime_rows if row['is_open']),
+        'mechanic_downtime_hours': sum((row['duration_hours'] for row in mechanic_downtime_rows), Decimal('0')).quantize(Decimal('0.01')),
     }
 
 
@@ -851,6 +1814,7 @@ def customer_daily_report_context(request):
         **report,
         'selected_date': selected_date,
         'date_input': selected_date.strftime('%Y-%m-%d'),
+        'excel_reconciliation': CUSTOMER_DAILY_EXCEL_RECONCILIATION,
     }
 
 
@@ -912,6 +1876,39 @@ def append_customer_shift_table(sheet, title, start_row, start_col, rows):
     return start_row + max(len(rows), 1) + 3
 
 
+def append_customer_reconciliation_sheet(workbook, reconciliation_rows):
+    sheet = workbook.create_sheet('Сверка с Excel')
+    sheet['A1'] = 'Сверка суточного отчета с действующей Excel-формой заказчика'
+    sheet['A1'].font = Font(bold=True, size=14)
+    sheet['A2'] = 'Эталон для сверки: Отчет_Коппер. Рисорсез_Март.xlsx'
+    sheet['A2'].alignment = Alignment(wrap_text=True)
+
+    headers = ['Блок старой формы', 'Поля старой формы', 'Где в MVP', 'Статус', 'Комментарий']
+    for offset, header in enumerate(headers, start=1):
+        cell = sheet.cell(4, offset, header)
+        cell.font = Font(bold=True, color='FFFFFF')
+        cell.fill = PatternFill('solid', fgColor='17232E')
+        cell.alignment = Alignment(wrap_text=True, vertical='top')
+
+    for row_index, row in enumerate(reconciliation_rows, start=5):
+        values = [
+            row['old_block'],
+            row['old_fields'],
+            row['mvp_block'],
+            row['status'],
+            row['note'],
+        ]
+        for offset, value in enumerate(values, start=1):
+            cell = sheet.cell(row_index, offset, value)
+            cell.alignment = Alignment(wrap_text=True, vertical='top')
+
+    widths = [28, 42, 34, 20, 58]
+    for column_index, width in enumerate(widths, start=1):
+        sheet.column_dimensions[get_column_letter(column_index)].width = width
+
+    return sheet
+
+
 def customer_daily_report_export_view(request):
     access = get_reports_access(request, {'dispatcher', 'admin', 'manager'})
     if not access:
@@ -933,6 +1930,9 @@ def customer_daily_report_export_view(request):
         ['Отклонение, м3', context['day_deviation'], context['night_deviation'], context['total_deviation']],
         ['Тоннаж', context['day_tonnage'], context['night_tonnage'], context['total_tonnage']],
         ['Рейсы', context['day_trip_count'], context['night_trip_count'], context['total_trip_count']],
+        ['Механические простои', '', '', context['mechanic_downtime_count']],
+        ['Открытые механические простои', '', '', context['mechanic_open_downtime_count']],
+        ['Механические простои, ч', '', '', context['mechanic_downtime_hours']],
     ]
     for row in summary_rows:
         sheet.append(row)
@@ -954,13 +1954,40 @@ def customer_daily_report_export_view(request):
                 cell.font = Font(bold=True, color='FFFFFF')
                 cell.fill = PatternFill('solid', fgColor='17232E')
 
-    append_customer_shift_table(sheet, 'I смена (дневная 08:00 - 20:00)', 13, 1, context['rows_by_shift']['day'])
-    append_customer_shift_table(sheet, 'II смена (ночная 20:00 - 08:00)', 13, 12, context['rows_by_shift']['night'])
+    day_end_row = append_customer_shift_table(sheet, 'I смена (дневная 08:00 - 20:00)', 13, 1, context['rows_by_shift']['day'])
+    night_end_row = append_customer_shift_table(sheet, 'II смена (ночная 20:00 - 08:00)', 13, 12, context['rows_by_shift']['night'])
+
+    downtime_start_row = max(day_end_row, night_end_row) + 1
+    sheet.cell(downtime_start_row, 1, 'Механические простои за дату')
+    sheet.cell(downtime_start_row, 1).font = Font(bold=True, size=13)
+    downtime_headers = ['Начало', 'Окончание', 'Техника', 'Причина', 'Длительность, ч', 'Кто зафиксировал', 'Комментарий']
+    for offset, header in enumerate(downtime_headers, start=1):
+        cell = sheet.cell(downtime_start_row + 1, offset, header)
+        cell.font = Font(bold=True, color='FFFFFF')
+        cell.fill = PatternFill('solid', fgColor='17232E')
+        cell.alignment = Alignment(wrap_text=True, vertical='top')
+    if context['mechanic_downtime_rows']:
+        for row_index, downtime in enumerate(context['mechanic_downtime_rows'], start=downtime_start_row + 2):
+            values = [
+                timezone.localtime(downtime['started_at']).strftime('%d.%m.%Y %H:%M'),
+                timezone.localtime(downtime['ended_at']).strftime('%d.%m.%Y %H:%M') if downtime['ended_at'] else 'открыт',
+                str(downtime['equipment']),
+                str(downtime['reason']),
+                downtime['duration_hours'],
+                str(downtime['employee']) if downtime['employee'] else '-',
+                downtime['comment'] or '-',
+            ]
+            for offset, value in enumerate(values, start=1):
+                cell = sheet.cell(row_index, offset, value)
+                cell.alignment = Alignment(wrap_text=True, vertical='top')
+    else:
+        sheet.cell(downtime_start_row + 2, 1, 'Механических простоев за выбранную дату нет.')
 
     for column_index in range(1, 23):
         sheet.column_dimensions[get_column_letter(column_index)].width = 16
     sheet.column_dimensions['K'].width = 36
     sheet.column_dimensions['V'].width = 36
+    append_customer_reconciliation_sheet(workbook, context['excel_reconciliation'])
 
     response = HttpResponse(
         content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -970,14 +1997,7 @@ def customer_daily_report_export_view(request):
     return response
 
 
-def management_dashboard_view(request):
-    access_id = request.session.get('employee_access_id')
-    if not access_id:
-        return redirect('login')
-    access = EmployeeAccess.objects.select_related('employee', 'role').filter(id=access_id, is_active=True).first()
-    if not access or access.role.code not in {'manager', 'admin', 'dispatcher'}:
-        return redirect('role_home')
-
+def management_dashboard_context(request, access):
     completed_trips = Trip.objects.filter(status=TripStatus.COMPLETED).select_related(
         'truck',
         'excavator',
@@ -987,16 +2007,88 @@ def management_dashboard_view(request):
         'unloading_shift',
     )
     active_trips = Trip.objects.filter(status=TripStatus.ACTIVE)
+    open_mechanic_downtimes = (
+        DowntimeEvent.objects
+        .filter(ended_at__isnull=True)
+        .select_related('equipment', 'reason', 'employee')
+        .order_by('started_at')[:8]
+    )
     selected_date = parse_customer_report_date(request)
+    completed_trip_list = list(completed_trips)
     daily_trips = [
         trip
-        for trip in completed_trips
+        for trip in completed_trip_list
         if trip_report_date(trip) == selected_date
     ]
     daily_total_volume = sum((trip.volume_m3 or 0) for trip in daily_trips)
     daily_total_tonnage = sum((trip.tonnage or 0) for trip in daily_trips)
     daily_plan_total = sum((trip.planned_volume_m3 or 0) for trip in daily_trips)
     daily_deviation = daily_total_volume - daily_plan_total
+    daily_plan_completion_percent = calculate_plan_completion_percent(daily_total_volume, daily_plan_total)
+    daily_plan_completion_class = (
+        'success'
+        if daily_plan_completion_percent is not None and daily_plan_completion_percent >= Decimal('100')
+        else 'danger'
+    )
+    daily_shift_totals = {
+        'day': {
+            'label': 'Дневная смена',
+            'css_class': 'day',
+            'volume': Decimal('0'),
+            'plan': Decimal('0'),
+            'tonnage': Decimal('0'),
+            'trip_count': 0,
+        },
+        'night': {
+            'label': 'Ночная смена',
+            'css_class': 'night',
+            'volume': Decimal('0'),
+            'plan': Decimal('0'),
+            'tonnage': Decimal('0'),
+            'trip_count': 0,
+        },
+        'unknown': {
+            'label': 'Смена не указана',
+            'css_class': 'unknown',
+            'volume': Decimal('0'),
+            'plan': Decimal('0'),
+            'tonnage': Decimal('0'),
+            'trip_count': 0,
+        },
+    }
+    for trip in daily_trips:
+        shift_type = trip_shift_type(trip) or 'unknown'
+        if shift_type not in daily_shift_totals:
+            shift_type = 'unknown'
+        daily_shift_totals[shift_type]['volume'] += trip.volume_m3 or 0
+        daily_shift_totals[shift_type]['plan'] += trip.planned_volume_m3 or 0
+        daily_shift_totals[shift_type]['tonnage'] += trip.tonnage or 0
+        daily_shift_totals[shift_type]['trip_count'] += 1
+    daily_shift_comparison = []
+    max_daily_shift_volume = max((item['volume'] for item in daily_shift_totals.values()), default=Decimal('0'))
+    max_daily_shift_plan = max((item['plan'] for item in daily_shift_totals.values()), default=Decimal('0'))
+    for key in ('day', 'night', 'unknown'):
+        item = daily_shift_totals[key]
+        if key == 'unknown' and item['trip_count'] == 0:
+            continue
+        daily_shift_comparison.append({
+            **item,
+            'deviation': item['volume'] - item['plan'],
+        })
+    daily_trend = build_management_daily_trend(completed_trip_list, selected_date)
+    max_daily_trend_volume = max((item['volume'] for item in daily_trend), default=Decimal('0'))
+    max_daily_trend_plan = max((item['plan'] for item in daily_trend), default=Decimal('0'))
+    trend_total_volume = sum((item['volume'] for item in daily_trend), Decimal('0'))
+    trend_total_plan = sum((item['plan'] for item in daily_trend), Decimal('0'))
+    trend_total_deviation = trend_total_volume - trend_total_plan
+    trend_trip_count = sum(item['trip_count'] for item in daily_trend)
+    trend_completion_percent = calculate_plan_completion_percent(trend_total_volume, trend_total_plan)
+    trend_best_day = max(daily_trend, key=lambda item: item['volume']) if trend_trip_count else None
+    trend_worst_day = min(
+        (item for item in daily_trend if item['has_plan'] or item['trip_count']),
+        key=lambda item: item['deviation'],
+        default=None,
+    )
     completed_summary = completed_trips.aggregate(
         total_volume=Sum('volume_m3'),
         total_tonnage=Sum('tonnage'),
@@ -1046,30 +2138,146 @@ def management_dashboard_view(request):
     daily_max_excavator_volume = max((item['volume'] or 0 for item in daily_top_excavators), default=0)
     daily_max_rock_volume = max((item['volume'] or 0 for item in daily_top_rocks), default=0)
 
-    return render(
-        request,
-        'reports/management_dashboard.html',
-        {
-            'access': access,
-            'selected_date': selected_date,
-            'daily_plan_total': daily_plan_total,
-            'daily_total_volume': daily_total_volume,
-            'daily_deviation': daily_deviation,
-            'daily_total_tonnage': daily_total_tonnage,
-            'daily_trip_count': len(daily_trips),
-            'daily_top_excavators': daily_top_excavators,
-            'daily_top_rocks': daily_top_rocks,
-            'daily_max_excavator_volume': daily_max_excavator_volume,
-            'daily_max_rock_volume': daily_max_rock_volume,
-            'total_volume': completed_summary['total_volume'] or 0,
-            'total_tonnage': completed_summary['total_tonnage'] or 0,
-            'completed_trip_count': completed_summary['trip_count'] or 0,
-            'active_trip_count': active_trips.count(),
-            'carryover_trip_count': completed_trips.filter(is_carryover=True).count(),
-            'top_excavators': top_excavators,
-            'top_rocks': top_rocks,
-            'max_excavator_volume': max_excavator_volume,
-            'max_rock_volume': max_rock_volume,
-            'recent_completed_trips': recent_completed_trips,
-        },
+    return {
+        'access': access,
+        'selected_date': selected_date,
+        'daily_plan_total': daily_plan_total,
+        'daily_total_volume': daily_total_volume,
+        'daily_deviation': daily_deviation,
+        'daily_plan_completion_percent': daily_plan_completion_percent,
+        'daily_plan_completion_class': daily_plan_completion_class,
+        'daily_total_tonnage': daily_total_tonnage,
+        'daily_trip_count': len(daily_trips),
+        'daily_top_excavators': daily_top_excavators,
+        'daily_top_rocks': daily_top_rocks,
+        'daily_max_excavator_volume': daily_max_excavator_volume,
+        'daily_max_rock_volume': daily_max_rock_volume,
+        'daily_shift_comparison': daily_shift_comparison,
+        'max_daily_shift_volume': max_daily_shift_volume,
+        'max_daily_shift_plan': max_daily_shift_plan,
+        'daily_trend': daily_trend,
+        'max_daily_trend_volume': max_daily_trend_volume,
+        'max_daily_trend_plan': max_daily_trend_plan,
+        'trend_total_volume': trend_total_volume,
+        'trend_total_plan': trend_total_plan,
+        'trend_total_deviation': trend_total_deviation,
+        'trend_trip_count': trend_trip_count,
+        'trend_completion_percent': trend_completion_percent,
+        'trend_best_day': trend_best_day,
+        'trend_worst_day': trend_worst_day,
+        'total_volume': completed_summary['total_volume'] or 0,
+        'total_tonnage': completed_summary['total_tonnage'] or 0,
+        'completed_trip_count': completed_summary['trip_count'] or 0,
+        'active_trip_count': active_trips.count(),
+        'open_mechanic_downtime_count': DowntimeEvent.objects.filter(ended_at__isnull=True).count(),
+        'carryover_trip_count': completed_trips.filter(is_carryover=True).count(),
+        'mechanic_downtime_count': len(build_mechanic_downtime_rows(selected_date)),
+        'open_mechanic_downtimes': open_mechanic_downtimes,
+        'top_excavators': top_excavators,
+        'top_rocks': top_rocks,
+        'max_excavator_volume': max_excavator_volume,
+        'max_rock_volume': max_rock_volume,
+        'recent_completed_trips': recent_completed_trips,
+    }
+
+
+def management_dashboard_view(request):
+    access = get_reports_access(request, {'manager', 'admin', 'dispatcher'})
+    if not access:
+        return redirect('login' if not request.session.get('employee_access_id') else 'role_home')
+    return render(request, 'reports/management_dashboard.html', management_dashboard_context(request, access))
+
+
+def write_key_value_rows(sheet, start_row, rows):
+    for offset, (label, value) in enumerate(rows):
+        row = start_row + offset
+        sheet.cell(row=row, column=1, value=label)
+        sheet.cell(row=row, column=2, value=value)
+    return start_row + len(rows)
+
+
+def style_management_export_sheet(sheet):
+    header_fill = PatternFill('solid', fgColor='12232E')
+    header_font = Font(color='FFFFFF', bold=True)
+    for row in sheet.iter_rows():
+        for cell in row:
+            cell.alignment = Alignment(vertical='top', wrap_text=True)
+            if cell.row == 1:
+                cell.font = Font(bold=True, size=14)
+    for row in sheet.iter_rows():
+        if row[0].value and all(cell.value for cell in row[:2]):
+            if row[0].row > 1 and str(row[0].value).startswith(('Показатель', 'Дата', 'Смена')):
+                for cell in row:
+                    cell.fill = header_fill
+                    cell.font = header_font
+    for column in range(1, sheet.max_column + 1):
+        sheet.column_dimensions[get_column_letter(column)].width = 22
+
+
+def management_dashboard_export_view(request):
+    access = get_reports_access(request, {'manager', 'admin', 'dispatcher'})
+    if not access:
+        return redirect('login' if not request.session.get('employee_access_id') else 'role_home')
+
+    context = management_dashboard_context(request, access)
+    workbook = Workbook()
+    summary_sheet = workbook.active
+    summary_sheet.title = 'Сводка'
+    summary_sheet['A1'] = 'Витрина руководства'
+    summary_sheet['A2'] = f"Дата среза: {context['selected_date']:%d.%m.%Y}"
+    summary_sheet['A3'] = f"Сформировал: {access.employee.full_name}"
+
+    rows = [
+        ('Факт за сутки, м3', context['daily_total_volume']),
+        ('План за сутки, м3', context['daily_plan_total']),
+        ('Выполнение плана, %', context['daily_plan_completion_percent'] or 'Нет плана'),
+        ('Отклонение за сутки, м3', context['daily_deviation']),
+        ('Тоннаж за сутки, т', context['daily_total_tonnage']),
+        ('Рейсы за сутки', context['daily_trip_count']),
+        ('Активные рейсы', context['active_trip_count']),
+        ('Открытые механические простои', context['open_mechanic_downtime_count']),
+        ('Переходящие рейсы', context['carryover_trip_count']),
+        ('Факт за 7 дней, м3', context['trend_total_volume']),
+        ('План за 7 дней, м3', context['trend_total_plan']),
+        ('Выполнение за неделю, %', context['trend_completion_percent'] or 'Нет плана'),
+        ('Отклонение за неделю, м3', context['trend_total_deviation']),
+        ('Рейсы за 7 дней', context['trend_trip_count']),
+    ]
+    summary_sheet.append([])
+    summary_sheet.append(['Показатель', 'Значение'])
+    write_key_value_rows(summary_sheet, 6, rows)
+
+    trend_sheet = workbook.create_sheet('Динамика 7 дней')
+    trend_sheet.append(['Дата', 'Факт, м3', 'План, м3', 'Выполнение, %', 'Отклонение, м3', 'Рейсы', 'Тоннаж, т'])
+    for item in context['daily_trend']:
+        trend_sheet.append([
+            item['date'].strftime('%d.%m.%Y'),
+            item['volume'],
+            item['plan'],
+            item['completion_percent'] if item['has_plan'] else 'Нет плана',
+            item['deviation'],
+            item['trip_count'],
+            item['tonnage'],
+        ])
+
+    shifts_sheet = workbook.create_sheet('День ночь')
+    shifts_sheet.append(['Смена', 'Факт, м3', 'План, м3', 'Отклонение, м3', 'Рейсы', 'Тоннаж, т'])
+    for item in context['daily_shift_comparison']:
+        shifts_sheet.append([
+            item['label'],
+            item['volume'],
+            item['plan'],
+            item['deviation'],
+            item['trip_count'],
+            item['tonnage'],
+        ])
+
+    for sheet in workbook.worksheets:
+        style_management_export_sheet(sheet)
+
+    response = HttpResponse(
+        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     )
+    response['Content-Disposition'] = 'attachment; filename="management_dashboard.xlsx"'
+    workbook.save(response)
+    return response

@@ -79,6 +79,10 @@
             <div>Незакрытые смены</div>
             <div class="metric">{{ open_shifts_count }}</div>
         </div>
+        <div class="metric-card danger">
+            <div>Открытые механические простои</div>
+            <div class="metric">{{ open_mechanic_downtimes_count }}</div>
+        </div>
     </section>
 
     <section class="card">
@@ -105,6 +109,40 @@
                         </tr>
                     {% empty %}
                         <tr><td colspan="5">Диспетчерских действий пока нет.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="card">
+        <h2>Открытые механические простои</h2>
+        <div class="actions">
+            <a class="button-link button-secondary" href="{% url 'mechanic_dashboard' %}">Открыть экран механиков</a>
+            <a class="button-link button-secondary" href="{% url 'downtime_report' %}">Отчет по простоям</a>
+        </div>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Начало</th>
+                        <th>Техника</th>
+                        <th>Причина</th>
+                        <th>Кто зафиксировал</th>
+                        <th>Комментарий</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for downtime in open_mechanic_downtimes %}
+                        <tr>
+                            <td>{{ downtime.started_at|date:"d.m.Y H:i" }}</td>
+                            <td>{{ downtime.equipment }}</td>
+                            <td>{{ downtime.reason }}</td>
+                            <td>{{ downtime.employee|default:"-" }}</td>
+                            <td>{{ downtime.comment|default:"-" }}</td>
+                        </tr>
+                    {% empty %}
+                        <tr><td colspan="5">Открытых механических простоев сейчас нет.</td></tr>
                     {% endfor %}
                 </tbody>
             </table>
@@ -141,11 +179,17 @@
                                 {% if access.role.code == 'dispatcher' or access.role.code == 'admin' %}
                                     <form method="post" action="{% url 'dispatcher_complete_trip' trip.id %}">
                                         {% csrf_token %}
+                                        {% for filter_name, filter_value in dispatcher_filter_items %}
+                                            <input type="hidden" name="{{ filter_name }}" value="{{ filter_value }}">
+                                        {% endfor %}
                                         <input type="text" name="reason" placeholder="Причина действия">
                                         <button type="submit">Завершить служебно</button>
                                     </form>
                                     <form method="post" action="{% url 'dispatcher_cancel_trip' trip.id %}">
                                         {% csrf_token %}
+                                        {% for filter_name, filter_value in dispatcher_filter_items %}
+                                            <input type="hidden" name="{{ filter_name }}" value="{{ filter_value }}">
+                                        {% endfor %}
                                         <input type="text" name="reason" placeholder="Причина действия">
                                         <button type="submit">Отменить</button>
                                     </form>
@@ -186,6 +230,9 @@
                                 {% if access.role.code == 'dispatcher' or access.role.code == 'admin' %}
                                     <form method="post" action="{% url 'dispatcher_cancel_assignment' assignment.id %}">
                                         {% csrf_token %}
+                                        {% for filter_name, filter_value in dispatcher_filter_items %}
+                                            <input type="hidden" name="{{ filter_name }}" value="{{ filter_value }}">
+                                        {% endfor %}
                                         <input type="text" name="reason" placeholder="Причина действия">
                                         <button type="submit">Снять</button>
                                     </form>
@@ -226,6 +273,9 @@
                                 {% if access.role.code == 'dispatcher' or access.role.code == 'admin' %}
                                     <form method="post" action="{% url 'dispatcher_cancel_assignment' assignment.id %}">
                                         {% csrf_token %}
+                                        {% for filter_name, filter_value in dispatcher_filter_items %}
+                                            <input type="hidden" name="{{ filter_name }}" value="{{ filter_value }}">
+                                        {% endfor %}
                                         <input type="text" name="reason" placeholder="Причина действия">
                                         <button type="submit">Снять</button>
                                     </form>
@@ -307,6 +357,9 @@
                                 {% if access.role.code == 'dispatcher' or access.role.code == 'admin' %}
                                     <form method="post" action="{% url 'dispatcher_service_close_shift' shift.id %}">
                                         {% csrf_token %}
+                                        {% for filter_name, filter_value in dispatcher_filter_items %}
+                                            <input type="hidden" name="{{ filter_name }}" value="{{ filter_value }}">
+                                        {% endfor %}
                                         <input type="text" name="reason" placeholder="Причина действия">
                                         <button type="submit">Закрыть служебно</button>
                                     </form>

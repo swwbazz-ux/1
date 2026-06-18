@@ -172,6 +172,7 @@ label {
 
 input,
 select,
+textarea,
 button {
     width: 100%;
     padding: 14px;
@@ -180,10 +181,16 @@ button {
 }
 
 input,
-select {
+select,
+textarea {
     border: 1px solid #ccd7df;
     background: #ffffff;
     color: var(--ink);
+}
+
+textarea {
+    font-family: inherit;
+    resize: vertical;
 }
 
 .login-card input {
@@ -215,6 +222,21 @@ button:hover,
 .button-secondary {
     background: #e9f0f4;
     color: var(--ink);
+}
+
+.button-small {
+    border-radius: 10px;
+    font-size: 13px;
+    padding: 8px 10px;
+}
+
+.button-muted {
+    background: #e9f0f4;
+    color: var(--ink);
+}
+
+.inline-action {
+    margin: 0 0 6px;
 }
 
 .actions {
@@ -326,6 +348,54 @@ th {
     font-size: 14px;
 }
 
+.checklist-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+    gap: 18px;
+}
+
+.checklist-section {
+    margin-bottom: 0;
+}
+
+.checklist-items {
+    display: grid;
+    gap: 12px;
+}
+
+.checklist-item {
+    display: grid;
+    grid-template-columns: 34px 1fr;
+    gap: 12px;
+    align-items: start;
+    background: #f6fafc;
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 14px;
+}
+
+.checklist-item p {
+    margin: 0 0 8px;
+    line-height: 1.45;
+}
+
+.checklist-item a {
+    display: inline-block;
+    margin-right: 10px;
+}
+
+.check-mark {
+    display: grid;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    border-radius: 10px;
+    background: #ffffff;
+    border: 2px solid var(--brand);
+    color: var(--brand-dark);
+    font-weight: 900;
+}
+
 .form-switch {
     margin-top: 16px;
 }
@@ -374,6 +444,163 @@ th {
     background: linear-gradient(90deg, #f3b43f, #f98b24);
 }
 
+.bar-fill.plan {
+    background: linear-gradient(90deg, #9fb1bf, #657481);
+}
+
+.bar-fill.shift-day {
+    background: linear-gradient(90deg, var(--brand), var(--brand-dark));
+}
+
+.bar-fill.shift-night {
+    background: linear-gradient(90deg, #f3b43f, #f98b24);
+}
+
+.bar-fill.shift-unknown {
+    background: linear-gradient(90deg, #9fb1bf, #657481);
+}
+
+.bar-row.compact {
+    margin-bottom: 12px;
+}
+
+.shift-compare-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 16px;
+}
+
+.shift-card {
+    background: #f6fafc;
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    padding: 16px;
+}
+
+.shift-card.day {
+    border-left: 8px solid var(--brand);
+}
+
+.shift-card.night {
+    border-left: 8px solid var(--warn);
+}
+
+.shift-card.unknown {
+    border-left: 8px solid #9fb1bf;
+}
+
+.shift-metrics {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    margin: 12px 0 14px;
+}
+
+.shift-metrics div {
+    background: #ffffff;
+    border-radius: 14px;
+    padding: 10px;
+}
+
+.shift-metrics span {
+    display: block;
+    color: var(--muted);
+    font-size: 13px;
+    margin-bottom: 4px;
+}
+
+.trend-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    gap: 14px;
+}
+
+.trend-card {
+    background: #f6fafc;
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    padding: 14px;
+}
+
+.trend-card.active {
+    border-color: var(--brand);
+    box-shadow: inset 0 0 0 2px rgba(33, 168, 154, 0.18);
+}
+
+.trend-date {
+    font-size: 20px;
+    font-weight: 800;
+    margin-bottom: 10px;
+}
+
+.trend-values,
+.trend-meta {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+.trend-values div {
+    background: #ffffff;
+    border-radius: 14px;
+    flex: 1;
+    padding: 10px;
+}
+
+.trend-values span,
+.trend-meta {
+    color: var(--muted);
+    font-size: 13px;
+}
+
+.trend-values span {
+    display: block;
+    margin-bottom: 4px;
+}
+
+.trend-summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 14px;
+    margin-top: 18px;
+}
+
+.trend-summary-card {
+    background: #ffffff;
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    padding: 16px;
+}
+
+.trend-summary-card.success {
+    border-left: 8px solid var(--ok);
+}
+
+.trend-summary-card.danger {
+    border-left: 8px solid var(--danger);
+}
+
+.trend-summary-card span,
+.trend-summary-card small {
+    color: var(--muted);
+    display: block;
+}
+
+.trend-summary-card strong {
+    display: block;
+    font-size: 24px;
+    margin: 8px 0 6px;
+}
+
+.success-text {
+    color: var(--ok);
+}
+
+.danger-text {
+    color: var(--danger);
+}
+
 @media (max-width: 760px) {
     .app-header {
         padding: 20px 16px 26px;
@@ -391,5 +618,9 @@ th {
 
     .bar-row-title {
         display: block;
+    }
+
+    .shift-metrics {
+        grid-template-columns: 1fr;
     }
 }

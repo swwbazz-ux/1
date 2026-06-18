@@ -21,6 +21,7 @@ DEMO_USERS = [
     ('Горный мастер MVP', 'mining_master', '4000'),
     ('Диспетчер MVP', 'dispatcher', '5000'),
     ('Руководство MVP', 'manager', '6000'),
+    ('Механик MVP', 'mechanic', '7000'),
 ]
 
 
@@ -47,6 +48,6 @@ class Command(BaseCommand):
                     access_code=access_code,
                     defaults={'employee': employee, 'role': role, 'is_active': True},
                 )
-            self.stdout.write('Демо-доступы созданы: 1000, 2000, 3000, 4000, 5000, 6000')
+            self.stdout.write('Демо-доступы созданы: 1000, 2000, 3000, 4000, 5000, 6000, 7000')
 
         self.stdout.write(self.style.SUCCESS('Готово.'))

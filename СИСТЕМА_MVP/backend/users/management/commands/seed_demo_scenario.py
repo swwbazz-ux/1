@@ -1,3 +1,4 @@
+from datetime import timedelta
 from decimal import Decimal
 
 from django.core.management import call_command
@@ -5,6 +6,7 @@ from django.core.management.base import BaseCommand
 from django.utils import timezone
 
 from assignments.models import AssignmentStatus, HaulAssignment
+from downtimes.models import DowntimeEvent, DowntimeReason
 from references.models import (
     Dormitory,
     DormitoryBlock,
@@ -16,7 +18,7 @@ from references.models import (
     RockType,
     TruckCapacityRule,
 )
-from reports.models import ReportTemplate, ReportType
+from reports.models import PilotFeedback, ReportTemplate, ReportType
 from shifts.models import EmployeeShift
 from trips.models import Trip, TripStatus
 from users.models import DriverPrimaryRegistration, Employee, EmployeeAccess, Role
@@ -186,9 +188,18 @@ class Command(BaseCommand):
                 'is_active': True,
             },
         )
+        self.seed_demo_downtimes(
+            equipment=excavator,
+            employee=employees['mechanic'],
+            source_text=active_trip.downtime_text,
+        )
+        self.seed_demo_pilot_feedback(employees['dispatcher'])
 
         self.stdout.write(self.style.SUCCESS('Демо-сценарий MVP подготовлен.'))
-        self.stdout.write('Коды доступа: 1000 админ, 2000 водитель, 3000 машинист, 4000 горный мастер, 5000 диспетчер.')
+        self.stdout.write(
+            'Коды доступа: 1000 админ, 2000 водитель, 3000 машинист, 4000 горный мастер, '
+            '5000 диспетчер, 6000 руководство, 7000 механик.'
+        )
         self.stdout.write(f'Активный рейс: {active_trip}')
 
     def get_demo_employees(self):
@@ -199,6 +210,8 @@ class Command(BaseCommand):
             'excavator_operator': ('Машинист экскаватора MVP', 'excavator_operator', '3000'),
             'mining_master': ('Горный мастер MVP', 'mining_master', '4000'),
             'dispatcher': ('Диспетчер MVP', 'dispatcher', '5000'),
+            'manager': ('Руководство MVP', 'manager', '6000'),
+            'mechanic': ('Механик MVP', 'mechanic', '7000'),
         }
         employees = {}
         for key, (full_name, role_code, access_code) in demo.items():
@@ -289,6 +302,76 @@ class Command(BaseCommand):
             defaults={'day_capacity': 3, 'night_capacity': 3},
         )
         return section
+
+    def seed_demo_downtimes(self, equipment, employee, source_text):
+        now = timezone.now()
+        open_reason, _ = DowntimeReason.objects.update_or_create(
+            name='Демо диагностика механической службы',
+            defaults={
+                'equipment_type': equipment.equipment_type,
+                'is_critical': True,
+                'is_active': True,
+            },
+        )
+        closed_reason, _ = DowntimeReason.objects.update_or_create(
+            name='Демо плановое обслуживание завершено',
+            defaults={
+                'equipment_type': equipment.equipment_type,
+                'is_critical': False,
+                'is_active': True,
+            },
+        )
+        self.upsert_demo_downtime(
+            equipment=equipment,
+            employee=employee,
+            reason=open_reason,
+            started_at=now - timedelta(minutes=80),
+            ended_at=None,
+            comment=source_text or 'Демо-простой: механическая служба ведет диагностику',
+        )
+        self.upsert_demo_downtime(
+            equipment=equipment,
+            employee=employee,
+            reason=closed_reason,
+            started_at=now - timedelta(hours=5),
+            ended_at=now - timedelta(hours=3, minutes=20),
+            comment='Демо-простой: плановое обслуживание завершено',
+        )
+
+    def upsert_demo_downtime(self, equipment, employee, reason, started_at, ended_at, comment):
+        event = DowntimeEvent.objects.filter(
+            equipment=equipment,
+            reason=reason,
+            comment=comment,
+        ).first()
+        if event:
+            event.employee = employee
+            event.started_at = started_at
+            event.ended_at = ended_at
+            event.save(update_fields=['employee', 'started_at', 'ended_at'])
+            return event
+        return DowntimeEvent.objects.create(
+            equipment=equipment,
+            employee=employee,
+            reason=reason,
+            started_at=started_at,
+            ended_at=ended_at,
+            comment=comment,
+        )
+
+    def seed_demo_pilot_feedback(self, employee):
+        PilotFeedback.objects.update_or_create(
+            title='Демо-замечание: сверить почасовую группировку с диспетчерской',
+            defaults={
+                'category': 'report',
+                'priority': 'p2',
+                'status': 'new',
+                'screen': 'Отчет по объемам',
+                'description': 'На пилоте нужно проверить, достаточно ли группировки по часу вместо старой широкой почасовой матрицы.',
+                'decision': 'Решение принять после сверки с диспетчерской службой.',
+                'created_by': employee,
+            },
+        )
 
     def get_open_shift(self, employee, equipment, shift_type, start_fuel, start_mileage, start_engine_hours):
         shift = EmployeeShift.objects.filter(employee=employee, closed_at__isnull=True).order_by('-opened_at').first()

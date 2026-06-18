@@ -20,9 +20,11 @@ venv/
 # Generated / heavy presentation outputs
 outputs/
 *.pdf
+.tmp_analysis/
 
 # OS / editor
 .DS_Store
 Thumbs.db
 .vscode/
 .idea/
+.claude/settings.local.json
