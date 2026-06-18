@@ -11,6 +11,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
+from downtimes.models import DowntimeEvent, DowntimeReason
 from references.models import DumpPoint, Equipment, RockType
 from trips.models import Trip, TripStatus
 from users.models import EmployeeAccess
@@ -249,6 +250,123 @@ def parse_filter_date(value):
         return datetime.strptime(value, '%Y-%m-%d').date()
     except ValueError:
         return None
+
+
+def get_downtime_report_filters(request):
+    return {
+        'date_from': request.GET.get('date_from', '').strip(),
+        'date_to': request.GET.get('date_to', '').strip(),
+        'status': request.GET.get('status', '').strip(),
+        'critical': request.GET.get('critical', '').strip(),
+        'equipment': request.GET.get('equipment', '').strip(),
+        'reason': request.GET.get('reason', '').strip(),
+        'query_string': request.GET.urlencode(),
+    }
+
+
+def apply_downtime_report_filters(queryset, filters):
+    date_from = parse_filter_date(filters.get('date_from'))
+    date_to = parse_filter_date(filters.get('date_to'))
+    status = filters.get('status')
+    critical = filters.get('critical')
+    equipment = filters.get('equipment', '')
+    reason = filters.get('reason', '')
+
+    if date_from:
+        queryset = queryset.filter(started_at__date__gte=date_from)
+    if date_to:
+        queryset = queryset.filter(started_at__date__lte=date_to)
+    if status == 'open':
+        queryset = queryset.filter(ended_at__isnull=True)
+    elif status == 'closed':
+        queryset = queryset.filter(ended_at__isnull=False)
+    if critical == 'yes':
+        queryset = queryset.filter(reason__is_critical=True)
+    elif critical == 'no':
+        queryset = queryset.filter(reason__is_critical=False)
+    if equipment.isdigit():
+        queryset = queryset.filter(equipment_id=equipment)
+    if reason.isdigit():
+        queryset = queryset.filter(reason_id=reason)
+    return queryset
+
+
+def downtime_duration_hours(event):
+    end_time = event.ended_at or timezone.now()
+    seconds = max((end_time - event.started_at).total_seconds(), 0)
+    return (Decimal(str(seconds)) / Decimal('3600')).quantize(Decimal('0.01'))
+
+
+def downtime_status_label(event):
+    return 'Открыт' if event.ended_at is None else 'Закрыт'
+
+
+def downtime_report_rows(events):
+    rows = []
+    for event in events:
+        rows.append({
+            'started_at': event.started_at,
+            'ended_at': event.ended_at,
+            'equipment': event.equipment,
+            'reason': event.reason,
+            'is_critical': event.reason.is_critical,
+            'status': downtime_status_label(event),
+            'duration_hours': downtime_duration_hours(event),
+            'employee': event.employee,
+            'comment': event.comment,
+        })
+    return rows
+
+
+def downtime_summary_by(rows, key):
+    summary = {}
+    for row in rows:
+        name = str(row[key]) if row[key] else '-'
+        if name not in summary:
+            summary[name] = {
+                'name': name,
+                'count': 0,
+                'open_count': 0,
+                'critical_count': 0,
+                'duration_hours': Decimal('0'),
+            }
+        summary[name]['count'] += 1
+        if row['ended_at'] is None:
+            summary[name]['open_count'] += 1
+        if row['is_critical']:
+            summary[name]['critical_count'] += 1
+        summary[name]['duration_hours'] += row['duration_hours']
+    result = []
+    for item in summary.values():
+        item['duration_hours'] = item['duration_hours'].quantize(Decimal('0.01'))
+        result.append(item)
+    return sorted(result, key=lambda item: (item['open_count'], item['duration_hours'], item['count']), reverse=True)
+
+
+def downtime_daily_summary(rows):
+    summary = {}
+    for row in rows:
+        day = timezone.localtime(row['started_at']).date()
+        key = day.isoformat()
+        if key not in summary:
+            summary[key] = {
+                'date': day,
+                'count': 0,
+                'open_count': 0,
+                'critical_count': 0,
+                'duration_hours': Decimal('0'),
+            }
+        summary[key]['count'] += 1
+        if row['ended_at'] is None:
+            summary[key]['open_count'] += 1
+        if row['is_critical']:
+            summary[key]['critical_count'] += 1
+        summary[key]['duration_hours'] += row['duration_hours']
+    result = []
+    for item in summary.values():
+        item['duration_hours'] = item['duration_hours'].quantize(Decimal('0.01'))
+        result.append(item)
+    return sorted(result, key=lambda item: item['date'], reverse=True)
 
 
 def build_report_table(trips, selected_columns, column_labels=None):
@@ -542,6 +660,155 @@ def volume_report_export_view(request):
     return response
 
 
+def downtime_report_context(request):
+    filters = get_downtime_report_filters(request)
+    selected_single_date = filters['date_from'] if filters['date_from'] and filters['date_from'] == filters['date_to'] else ''
+    events = (
+        DowntimeEvent.objects
+        .select_related('equipment', 'equipment__equipment_type', 'reason', 'employee')
+        .order_by('-started_at')
+    )
+    events = apply_downtime_report_filters(events, filters)
+    all_rows = downtime_report_rows(events)
+    visible_rows = all_rows[:200]
+    total_duration_hours = sum((row['duration_hours'] for row in all_rows), Decimal('0')).quantize(Decimal('0.01'))
+    open_count = sum(1 for row in all_rows if row['ended_at'] is None)
+    closed_count = len(all_rows) - open_count
+    critical_count = sum(1 for row in all_rows if row['is_critical'])
+    return {
+        'filters': filters,
+        'selected_single_date': selected_single_date,
+        'rows': visible_rows,
+        'export_rows': all_rows,
+        'visible_count': len(visible_rows),
+        'total_count': len(all_rows),
+        'open_count': open_count,
+        'closed_count': closed_count,
+        'critical_count': critical_count,
+        'total_duration_hours': total_duration_hours,
+        'daily_summary': downtime_daily_summary(all_rows),
+        'equipment_summary': downtime_summary_by(all_rows, 'equipment'),
+        'reason_summary': downtime_summary_by(all_rows, 'reason'),
+        'equipment_choices': Equipment.objects.filter(is_active=True).order_by('equipment_type__name', 'garage_number'),
+        'reason_choices': DowntimeReason.objects.filter(is_active=True).order_by('name'),
+        'status_choices': [
+            {'code': '', 'label': 'Все'},
+            {'code': 'open', 'label': 'Открытые'},
+            {'code': 'closed', 'label': 'Закрытые'},
+        ],
+        'critical_choices': [
+            {'code': '', 'label': 'Все'},
+            {'code': 'yes', 'label': 'Только критические'},
+            {'code': 'no', 'label': 'Только обычные'},
+        ],
+    }
+
+
+def downtime_report_view(request):
+    access = get_reports_access(request, {'admin', 'dispatcher', 'manager', 'mechanic'})
+    if not access:
+        return redirect('login' if not request.session.get('employee_access_id') else 'role_home')
+    return render(
+        request,
+        'reports/downtime_report.html',
+        {
+            'access': access,
+            **downtime_report_context(request),
+        },
+    )
+
+
+def downtime_report_export_view(request):
+    access = get_reports_access(request, {'admin', 'dispatcher', 'manager', 'mechanic'})
+    if not access:
+        return redirect('login' if not request.session.get('employee_access_id') else 'role_home')
+    context = downtime_report_context(request)
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = 'Простои'
+    sheet['A1'] = 'Отчет по механическим простоям'
+    sheet['A1'].font = Font(bold=True, size=14)
+    sheet['A2'] = f"Сформировал: {access.employee.full_name}"
+    sheet['A3'] = f"Дата формирования: {timezone.localtime(timezone.now()):%d.%m.%Y %H:%M}"
+    summary_rows = [
+        ['Показатель', 'Значение'],
+        ['Всего событий', context['total_count']],
+        ['Открытые', context['open_count']],
+        ['Закрытые', context['closed_count']],
+        ['Критические', context['critical_count']],
+        ['Длительность, ч', context['total_duration_hours']],
+    ]
+    for row_index, row in enumerate(summary_rows, start=5):
+        for column_index, value in enumerate(row, start=1):
+            cell = sheet.cell(row_index, column_index, value)
+            if row_index == 5:
+                cell.font = Font(bold=True, color='FFFFFF')
+                cell.fill = PatternFill('solid', fgColor='17232E')
+
+    def write_downtime_summary(title, rows, start_row, start_col):
+        sheet.cell(start_row, start_col, title)
+        sheet.cell(start_row, start_col).font = Font(bold=True, size=12)
+        headers = ['Название', 'События', 'Открытые', 'Критические', 'Длительность, ч']
+        for offset, header in enumerate(headers):
+            cell = sheet.cell(start_row + 1, start_col + offset, header)
+            cell.font = Font(bold=True, color='FFFFFF')
+            cell.fill = PatternFill('solid', fgColor='17232E')
+        for row_index, item in enumerate(rows[:10], start=start_row + 2):
+            values = [item['name'], item['count'], item['open_count'], item['critical_count'], item['duration_hours']]
+            for offset, value in enumerate(values):
+                sheet.cell(row_index, start_col + offset, value)
+
+    write_downtime_summary('Сводка по технике', context['equipment_summary'], 5, 4)
+    write_downtime_summary('Сводка по причинам', context['reason_summary'], 5, 10)
+    write_downtime_summary(
+        'Сводка по датам',
+        [
+            {
+                **item,
+                'name': item['date'].strftime('%d.%m.%Y'),
+            }
+            for item in context['daily_summary']
+        ],
+        12,
+        4,
+    )
+
+    headers = ['Начало', 'Окончание', 'Статус', 'Техника', 'Причина', 'Критичность', 'Длительность, ч', 'Кто зафиксировал', 'Комментарий']
+    table_start = 25
+    for column_index, header in enumerate(headers, start=1):
+        cell = sheet.cell(table_start, column_index, header)
+        cell.font = Font(bold=True, color='FFFFFF')
+        cell.fill = PatternFill('solid', fgColor='17232E')
+        cell.alignment = Alignment(wrap_text=True, vertical='top')
+    for row_index, row in enumerate(context['export_rows'], start=table_start + 1):
+        values = [
+            timezone.localtime(row['started_at']).strftime('%d.%m.%Y %H:%M'),
+            timezone.localtime(row['ended_at']).strftime('%d.%m.%Y %H:%M') if row['ended_at'] else 'открыт',
+            row['status'],
+            str(row['equipment']),
+            str(row['reason']),
+            'Критический' if row['is_critical'] else 'Обычный',
+            row['duration_hours'],
+            str(row['employee']) if row['employee'] else '-',
+            row['comment'] or '-',
+        ]
+        for column_index, value in enumerate(values, start=1):
+            cell = sheet.cell(row_index, column_index, value)
+            cell.alignment = Alignment(wrap_text=True, vertical='top')
+    for column_index in range(1, len(headers) + 1):
+        sheet.column_dimensions[get_column_letter(column_index)].width = 18
+    sheet.column_dimensions['I'].width = 36
+    sheet.auto_filter.ref = f'A{table_start}:I{table_start + max(len(context["export_rows"]), 1)}'
+    sheet.freeze_panes = f'A{table_start + 1}'
+
+    response = HttpResponse(
+        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    )
+    response['Content-Disposition'] = 'attachment; filename=\"downtime_report.xlsx\"'
+    workbook.save(response)
+    return response
+
+
 def get_reports_access(request, allowed_roles):
     access_id = request.session.get('employee_access_id')
     if not access_id:
@@ -722,6 +989,31 @@ def calculate_customer_accumulated_totals(trips):
     }
 
 
+def build_mechanic_downtime_rows(selected_date):
+    events = (
+        DowntimeEvent.objects
+        .filter(started_at__date=selected_date)
+        .select_related('equipment', 'reason', 'employee')
+        .order_by('started_at')
+    )
+    rows = []
+    for event in events:
+        end_time = event.ended_at or timezone.now()
+        duration_minutes = max(int((end_time - event.started_at).total_seconds() // 60), 0)
+        rows.append({
+            'started_at': event.started_at,
+            'ended_at': event.ended_at,
+            'equipment': event.equipment,
+            'reason': event.reason,
+            'employee': event.employee,
+            'comment': event.comment,
+            'duration_minutes': duration_minutes,
+            'duration_hours': Decimal(duration_minutes) / Decimal('60'),
+            'is_open': event.ended_at is None,
+        })
+    return rows
+
+
 def build_customer_daily_report(selected_date):
     trips = Trip.objects.filter(status=TripStatus.COMPLETED).select_related(
         'truck',
@@ -816,6 +1108,7 @@ def build_customer_daily_report(selected_date):
         .annotate(total_volume=Sum('volume_m3'), total_tonnage=Sum('tonnage'), trip_count=Count('id'))
         .order_by('-total_volume')
     )
+    mechanic_downtime_rows = build_mechanic_downtime_rows(selected_date)
 
     return {
         'rows_by_shift': rows_by_shift,
@@ -841,6 +1134,10 @@ def build_customer_daily_report(selected_date):
         'month_total_tonnage': month_totals['tonnage'],
         'month_total_trip_count': month_totals['trip_count'],
         'rock_summary': rock_summary,
+        'mechanic_downtime_rows': mechanic_downtime_rows,
+        'mechanic_downtime_count': len(mechanic_downtime_rows),
+        'mechanic_open_downtime_count': sum(1 for row in mechanic_downtime_rows if row['is_open']),
+        'mechanic_downtime_hours': sum((row['duration_hours'] for row in mechanic_downtime_rows), Decimal('0')).quantize(Decimal('0.01')),
     }
 
 
@@ -933,6 +1230,9 @@ def customer_daily_report_export_view(request):
         ['Отклонение, м3', context['day_deviation'], context['night_deviation'], context['total_deviation']],
         ['Тоннаж', context['day_tonnage'], context['night_tonnage'], context['total_tonnage']],
         ['Рейсы', context['day_trip_count'], context['night_trip_count'], context['total_trip_count']],
+        ['Механические простои', '', '', context['mechanic_downtime_count']],
+        ['Открытые механические простои', '', '', context['mechanic_open_downtime_count']],
+        ['Механические простои, ч', '', '', context['mechanic_downtime_hours']],
     ]
     for row in summary_rows:
         sheet.append(row)
@@ -954,8 +1254,34 @@ def customer_daily_report_export_view(request):
                 cell.font = Font(bold=True, color='FFFFFF')
                 cell.fill = PatternFill('solid', fgColor='17232E')
 
-    append_customer_shift_table(sheet, 'I смена (дневная 08:00 - 20:00)', 13, 1, context['rows_by_shift']['day'])
-    append_customer_shift_table(sheet, 'II смена (ночная 20:00 - 08:00)', 13, 12, context['rows_by_shift']['night'])
+    day_end_row = append_customer_shift_table(sheet, 'I смена (дневная 08:00 - 20:00)', 13, 1, context['rows_by_shift']['day'])
+    night_end_row = append_customer_shift_table(sheet, 'II смена (ночная 20:00 - 08:00)', 13, 12, context['rows_by_shift']['night'])
+
+    downtime_start_row = max(day_end_row, night_end_row) + 1
+    sheet.cell(downtime_start_row, 1, 'Механические простои за дату')
+    sheet.cell(downtime_start_row, 1).font = Font(bold=True, size=13)
+    downtime_headers = ['Начало', 'Окончание', 'Техника', 'Причина', 'Длительность, ч', 'Кто зафиксировал', 'Комментарий']
+    for offset, header in enumerate(downtime_headers, start=1):
+        cell = sheet.cell(downtime_start_row + 1, offset, header)
+        cell.font = Font(bold=True, color='FFFFFF')
+        cell.fill = PatternFill('solid', fgColor='17232E')
+        cell.alignment = Alignment(wrap_text=True, vertical='top')
+    if context['mechanic_downtime_rows']:
+        for row_index, downtime in enumerate(context['mechanic_downtime_rows'], start=downtime_start_row + 2):
+            values = [
+                timezone.localtime(downtime['started_at']).strftime('%d.%m.%Y %H:%M'),
+                timezone.localtime(downtime['ended_at']).strftime('%d.%m.%Y %H:%M') if downtime['ended_at'] else 'открыт',
+                str(downtime['equipment']),
+                str(downtime['reason']),
+                downtime['duration_hours'],
+                str(downtime['employee']) if downtime['employee'] else '-',
+                downtime['comment'] or '-',
+            ]
+            for offset, value in enumerate(values, start=1):
+                cell = sheet.cell(row_index, offset, value)
+                cell.alignment = Alignment(wrap_text=True, vertical='top')
+    else:
+        sheet.cell(downtime_start_row + 2, 1, 'Механических простоев за выбранную дату нет.')
 
     for column_index in range(1, 23):
         sheet.column_dimensions[get_column_letter(column_index)].width = 16
@@ -987,6 +1313,12 @@ def management_dashboard_view(request):
         'unloading_shift',
     )
     active_trips = Trip.objects.filter(status=TripStatus.ACTIVE)
+    open_mechanic_downtimes = (
+        DowntimeEvent.objects
+        .filter(ended_at__isnull=True)
+        .select_related('equipment', 'reason', 'employee')
+        .order_by('started_at')[:8]
+    )
     selected_date = parse_customer_report_date(request)
     daily_trips = [
         trip
@@ -997,6 +1329,51 @@ def management_dashboard_view(request):
     daily_total_tonnage = sum((trip.tonnage or 0) for trip in daily_trips)
     daily_plan_total = sum((trip.planned_volume_m3 or 0) for trip in daily_trips)
     daily_deviation = daily_total_volume - daily_plan_total
+    daily_shift_totals = {
+        'day': {
+            'label': 'Дневная смена',
+            'css_class': 'day',
+            'volume': Decimal('0'),
+            'plan': Decimal('0'),
+            'tonnage': Decimal('0'),
+            'trip_count': 0,
+        },
+        'night': {
+            'label': 'Ночная смена',
+            'css_class': 'night',
+            'volume': Decimal('0'),
+            'plan': Decimal('0'),
+            'tonnage': Decimal('0'),
+            'trip_count': 0,
+        },
+        'unknown': {
+            'label': 'Смена не указана',
+            'css_class': 'unknown',
+            'volume': Decimal('0'),
+            'plan': Decimal('0'),
+            'tonnage': Decimal('0'),
+            'trip_count': 0,
+        },
+    }
+    for trip in daily_trips:
+        shift_type = trip_shift_type(trip) or 'unknown'
+        if shift_type not in daily_shift_totals:
+            shift_type = 'unknown'
+        daily_shift_totals[shift_type]['volume'] += trip.volume_m3 or 0
+        daily_shift_totals[shift_type]['plan'] += trip.planned_volume_m3 or 0
+        daily_shift_totals[shift_type]['tonnage'] += trip.tonnage or 0
+        daily_shift_totals[shift_type]['trip_count'] += 1
+    daily_shift_comparison = []
+    max_daily_shift_volume = max((item['volume'] for item in daily_shift_totals.values()), default=Decimal('0'))
+    max_daily_shift_plan = max((item['plan'] for item in daily_shift_totals.values()), default=Decimal('0'))
+    for key in ('day', 'night', 'unknown'):
+        item = daily_shift_totals[key]
+        if key == 'unknown' and item['trip_count'] == 0:
+            continue
+        daily_shift_comparison.append({
+            **item,
+            'deviation': item['volume'] - item['plan'],
+        })
     completed_summary = completed_trips.aggregate(
         total_volume=Sum('volume_m3'),
         total_tonnage=Sum('tonnage'),
@@ -1061,11 +1438,17 @@ def management_dashboard_view(request):
             'daily_top_rocks': daily_top_rocks,
             'daily_max_excavator_volume': daily_max_excavator_volume,
             'daily_max_rock_volume': daily_max_rock_volume,
+            'daily_shift_comparison': daily_shift_comparison,
+            'max_daily_shift_volume': max_daily_shift_volume,
+            'max_daily_shift_plan': max_daily_shift_plan,
             'total_volume': completed_summary['total_volume'] or 0,
             'total_tonnage': completed_summary['total_tonnage'] or 0,
             'completed_trip_count': completed_summary['trip_count'] or 0,
             'active_trip_count': active_trips.count(),
+            'open_mechanic_downtime_count': DowntimeEvent.objects.filter(ended_at__isnull=True).count(),
             'carryover_trip_count': completed_trips.filter(is_carryover=True).count(),
+            'mechanic_downtime_count': len(build_mechanic_downtime_rows(selected_date)),
+            'open_mechanic_downtimes': open_mechanic_downtimes,
             'top_excavators': top_excavators,
             'top_rocks': top_rocks,
             'max_excavator_volume': max_excavator_volume,

@@ -1,0 +1,233 @@
+{% extends "base.html" %}
+
+{% block title %}Отчет по механическим простоям{% endblock %}
+
+{% block body %}
+<header class="app-header">
+    <div class="header-inner">
+        <div class="topline">
+            <span>{{ access.employee.full_name }}</span>
+            <a href="{% url 'logout' %}">Выйти</a>
+        </div>
+        <h1>Отчет по механическим простоям</h1>
+        <p>Отдельный разбор событий механической службы: открытые и закрытые простои, причины, техника, длительность и выгрузка в Excel.</p>
+    </div>
+</header>
+
+<main class="page">
+    <section class="metric-grid">
+        <div class="metric-card">
+            <div>Всего событий</div>
+            <div class="metric">{{ total_count }}</div>
+        </div>
+        <div class="metric-card danger">
+            <div>Открытые</div>
+            <div class="metric">{{ open_count }}</div>
+        </div>
+        <div class="metric-card success">
+            <div>Закрытые</div>
+            <div class="metric">{{ closed_count }}</div>
+        </div>
+        <div class="metric-card warning">
+            <div>Критические</div>
+            <div class="metric">{{ critical_count }}</div>
+        </div>
+        <div class="metric-card">
+            <div>Длительность</div>
+            <div class="metric">{{ total_duration_hours }} ч</div>
+        </div>
+    </section>
+
+    <section class="card">
+        <div class="actions">
+            <a class="button-link" href="{% url 'downtime_report_export' %}{% if filters.query_string %}?{{ filters.query_string }}{% endif %}">Выгрузить в Excel</a>
+            <a class="button-link button-secondary" href="{% url 'mechanic_dashboard' %}">Экран механиков</a>
+            <a class="button-link button-secondary" href="{% url 'dispatcher_control' %}">Диспетчерский пульт</a>
+            <a class="button-link button-secondary" href="{% url 'management_dashboard' %}">Витрина руководства</a>
+            {% if selected_single_date %}
+                <a class="button-link button-secondary" href="{% url 'customer_daily_report' %}?date={{ selected_single_date }}">Суточный отчет за дату</a>
+            {% endif %}
+        </div>
+    </section>
+
+    <section class="card">
+        <h2>Фильтры</h2>
+        <form method="get" class="filters">
+            <div>
+                <label for="date_from">Дата с</label>
+                <input id="date_from" type="date" name="date_from" value="{{ filters.date_from }}">
+            </div>
+            <div>
+                <label for="date_to">Дата по</label>
+                <input id="date_to" type="date" name="date_to" value="{{ filters.date_to }}">
+            </div>
+            <div>
+                <label for="status">Статус</label>
+                <select id="status" name="status">
+                    {% for status in status_choices %}
+                        <option value="{{ status.code }}" {% if filters.status == status.code %}selected{% endif %}>{{ status.label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label for="critical">Критичность</label>
+                <select id="critical" name="critical">
+                    {% for critical in critical_choices %}
+                        <option value="{{ critical.code }}" {% if filters.critical == critical.code %}selected{% endif %}>{{ critical.label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label for="equipment">Техника</label>
+                <select id="equipment" name="equipment">
+                    <option value="">Вся</option>
+                    {% for equipment in equipment_choices %}
+                        <option value="{{ equipment.id }}" {% if filters.equipment == equipment.id|stringformat:"s" %}selected{% endif %}>{{ equipment }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label for="reason">Причина</label>
+                <select id="reason" name="reason">
+                    <option value="">Все</option>
+                    {% for reason in reason_choices %}
+                        <option value="{{ reason.id }}" {% if filters.reason == reason.id|stringformat:"s" %}selected{% endif %}>{{ reason }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <button type="submit">Показать</button>
+            </div>
+        </form>
+    </section>
+
+    <section class="dashboard-grid">
+        <div class="card">
+            <h2>Сводка по датам</h2>
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Дата</th>
+                            <th>События</th>
+                            <th>Открытые</th>
+                            <th>Критические</th>
+                            <th>Длительность, ч</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in daily_summary %}
+                            <tr>
+                                <td>{{ item.date|date:"d.m.Y" }}</td>
+                                <td>{{ item.count }}</td>
+                                <td>{{ item.open_count }}</td>
+                                <td>{{ item.critical_count }}</td>
+                                <td>{{ item.duration_hours }}</td>
+                            </tr>
+                        {% empty %}
+                            <tr><td colspan="5">Нет данных для сводки.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <div class="card">
+            <h2>Сводка по технике</h2>
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Техника</th>
+                            <th>События</th>
+                            <th>Открытые</th>
+                            <th>Критические</th>
+                            <th>Длительность, ч</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in equipment_summary %}
+                            <tr>
+                                <td>{{ item.name }}</td>
+                                <td>{{ item.count }}</td>
+                                <td>{{ item.open_count }}</td>
+                                <td>{{ item.critical_count }}</td>
+                                <td>{{ item.duration_hours }}</td>
+                            </tr>
+                        {% empty %}
+                            <tr><td colspan="5">Нет данных для сводки.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <div class="card">
+            <h2>Сводка по причинам</h2>
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Причина</th>
+                            <th>События</th>
+                            <th>Открытые</th>
+                            <th>Критические</th>
+                            <th>Длительность, ч</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in reason_summary %}
+                            <tr>
+                                <td>{{ item.name }}</td>
+                                <td>{{ item.count }}</td>
+                                <td>{{ item.open_count }}</td>
+                                <td>{{ item.critical_count }}</td>
+                                <td>{{ item.duration_hours }}</td>
+                            </tr>
+                        {% empty %}
+                            <tr><td colspan="5">Нет данных для сводки.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+
+    <section class="card">
+        <h2>События простоев</h2>
+        <p class="muted">На экране показано {{ visible_count }} из {{ total_count }} событий по выбранным фильтрам. Для полного списка используйте Excel-выгрузку.</p>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Начало</th>
+                        <th>Окончание</th>
+                        <th>Статус</th>
+                        <th>Техника</th>
+                        <th>Причина</th>
+                        <th>Критичность</th>
+                        <th>Длительность, ч</th>
+                        <th>Кто зафиксировал</th>
+                        <th>Комментарий</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in rows %}
+                        <tr>
+                            <td>{{ row.started_at|date:"d.m.Y H:i" }}</td>
+                            <td>{% if row.ended_at %}{{ row.ended_at|date:"d.m.Y H:i" }}{% else %}открыт{% endif %}</td>
+                            <td>{{ row.status }}</td>
+                            <td>{{ row.equipment }}</td>
+                            <td>{{ row.reason }}</td>
+                            <td>{% if row.is_critical %}Критический{% else %}Обычный{% endif %}</td>
+                            <td>{{ row.duration_hours }}</td>
+                            <td>{{ row.employee|default:"-" }}</td>
+                            <td>{{ row.comment|default:"-" }}</td>
+                        </tr>
+                    {% empty %}
+                        <tr><td colspan="9">По выбранным фильтрам простоев нет.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+</main>
+{% endblock %}

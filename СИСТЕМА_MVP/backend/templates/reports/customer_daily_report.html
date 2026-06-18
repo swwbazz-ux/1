@@ -35,6 +35,11 @@
             <div>Рейсы за сутки</div>
             <div class="metric">{{ total_trip_count }}</div>
         </div>
+        <div class="metric-card warning">
+            <div>Механические простои</div>
+            <div class="metric">{{ mechanic_downtime_count }}</div>
+            <div class="muted">Открыто: {{ mechanic_open_downtime_count }} · {{ mechanic_downtime_hours }} ч</div>
+        </div>
     </section>
 
     <section class="card">
@@ -50,6 +55,7 @@
         <div class="actions">
             <a class="button-link" href="{% url 'customer_daily_report_export' %}?date={{ date_input }}">Выгрузить в Excel</a>
             <a class="button-link button-secondary" href="{% url 'volume_report' %}">Отчет по объемам</a>
+            <a class="button-link button-secondary" href="{% url 'downtime_report' %}?date_from={{ date_input }}&date_to={{ date_input }}">Отчет по простоям</a>
         </div>
     </section>
 
@@ -175,6 +181,41 @@
             </table>
         </div>
         <p class="muted">План/факт/отклонение пока считаются по плановым заданиям, указанным в рейсах. Полноценная отдельная модель месячного плана будет добавлена отдельным шагом.</p>
+    </section>
+
+    <section class="card">
+        <h2>Механические простои за дату</h2>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                <tr>
+                    <th>Начало</th>
+                    <th>Окончание</th>
+                    <th>Техника</th>
+                    <th>Причина</th>
+                    <th>Длительность, ч</th>
+                    <th>Кто зафиксировал</th>
+                    <th>Комментарий</th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for downtime in mechanic_downtime_rows %}
+                    <tr>
+                        <td>{{ downtime.started_at|date:"d.m.Y H:i" }}</td>
+                        <td>{% if downtime.ended_at %}{{ downtime.ended_at|date:"d.m.Y H:i" }}{% else %}открыт{% endif %}</td>
+                        <td>{{ downtime.equipment }}</td>
+                        <td>{{ downtime.reason }}</td>
+                        <td>{{ downtime.duration_hours|floatformat:2 }}</td>
+                        <td>{{ downtime.employee|default:"-" }}</td>
+                        <td>{{ downtime.comment|default:"-" }}</td>
+                    </tr>
+                {% empty %}
+                    <tr><td colspan="7">Механических простоев за выбранную дату нет.</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <p class="muted">В первой версии простой относится к дате его открытия. Более точное распределение по сменам добавим отдельным шагом, если это понадобится для отчетности.</p>
     </section>
 </main>
 {% endblock %}

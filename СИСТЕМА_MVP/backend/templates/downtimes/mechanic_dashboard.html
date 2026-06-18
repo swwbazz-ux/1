@@ -1,0 +1,168 @@
+{% extends "base.html" %}
+
+{% block title %}Механическая служба{% endblock %}
+
+{% block body %}
+<header class="app-header">
+    <div class="header-inner">
+        <div class="topline">
+            <span>{{ access.employee.full_name }}</span>
+            <a href="{% url 'logout' %}">Выйти</a>
+        </div>
+        <h1>Механическая служба</h1>
+        <p>Первый рабочий экран механиков: открытие и закрытие механических простоев по технике, где простой уже зафиксирован в смене.</p>
+    </div>
+</header>
+<main class="page">
+    {% if messages %}
+        {% for message in messages %}
+            <div class="message {% if message.tags %}{{ message.tags }}{% else %}success{% endif %}">{{ message }}</div>
+        {% endfor %}
+    {% endif %}
+
+    <section class="metric-grid">
+        <div class="metric-card warning">
+            <div>Ожидают механика</div>
+            <div class="metric">{{ pending_count }}</div>
+        </div>
+        <div class="metric-card danger">
+            <div>Открытые простои</div>
+            <div class="metric">{{ open_count }}</div>
+        </div>
+        <div class="metric-card danger">
+            <div>Критические открытые</div>
+            <div class="metric">{{ critical_open_count }}</div>
+        </div>
+        <div class="metric-card success">
+            <div>Недавно закрыты</div>
+            <div class="metric">{{ closed_count }}</div>
+        </div>
+    </section>
+
+    <section class="card">
+        <h2>Техника, где уже виден простой</h2>
+        <p class="muted">Источник списка — активные рейсы, в которых уже указан текст простоя, но отдельное событие механической службы еще не открыто.</p>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Когда замечено</th>
+                        <th>Техника</th>
+                        <th>Источник</th>
+                        <th>Порода</th>
+                        <th>Точка разгрузки</th>
+                        <th>Текст простоя</th>
+                        <th>Действие механика</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in pending_downtimes %}
+                        <tr>
+                            <td>{{ item.trip.created_at|date:"d.m.Y H:i" }}</td>
+                            <td>{{ item.equipment }}</td>
+                            <td>{{ item.trip.excavator_operator|default:"-" }}</td>
+                            <td>{{ item.trip.rock_type|default:"-" }}</td>
+                            <td>{{ item.trip.dump_point|default:"-" }}</td>
+                            <td>{{ item.source_text }}</td>
+                            <td>
+                                <form method="post" action="{% url 'mechanic_create_downtime' item.trip.id %}">
+                                    {% csrf_token %}
+                                    <label for="{{ item.form.reason.id_for_label }}">Причина</label>
+                                    {{ item.form.reason }}
+                                    {{ item.form.reason.errors }}
+                                    <label for="{{ item.form.comment.id_for_label }}">Комментарий</label>
+                                    {{ item.form.comment }}
+                                    {{ item.form.comment.errors }}
+                                    <button type="submit">Открыть простой</button>
+                                </form>
+                            </td>
+                        </tr>
+                    {% empty %}
+                        <tr><td colspan="7">Техники, ожидающей механического сопровождения, сейчас нет.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="card">
+        <h2>Открытые механические простои</h2>
+        <div class="actions">
+            <a class="button-link" href="{% url 'downtime_report' %}">Отчет по простоям</a>
+            <a class="button-link button-secondary" href="{% url 'dispatcher_control' %}">Открыть диспетчерский пульт</a>
+            <a class="button-link button-secondary" href="{% url 'interface_map' %}">Карта интерфейсов</a>
+        </div>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Начало</th>
+                        <th>Длительность</th>
+                        <th>Техника</th>
+                        <th>Причина</th>
+                        <th>Критичность</th>
+                        <th>Кто открыл</th>
+                        <th>Комментарий</th>
+                        <th>Действие</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for event in open_events %}
+                        <tr>
+                            <td>{{ event.started_at|date:"d.m.Y H:i" }}</td>
+                            <td>{{ event.duration_text }}</td>
+                            <td>{{ event.equipment }}</td>
+                            <td>{{ event.reason }}</td>
+                            <td>{% if event.reason.is_critical %}Критический{% else %}Обычный{% endif %}</td>
+                            <td>{{ event.employee|default:"-" }}</td>
+                            <td>{{ event.comment|default:"-" }}</td>
+                            <td>
+                                <form method="post" action="{% url 'mechanic_close_downtime' event.id %}">
+                                    {% csrf_token %}
+                                    <button type="submit">Закрыть простой</button>
+                                </form>
+                            </td>
+                        </tr>
+                    {% empty %}
+                        <tr><td colspan="8">Открытых механических простоев сейчас нет.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="card">
+        <h2>Недавно закрытые механические простои</h2>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Начало</th>
+                        <th>Окончание</th>
+                        <th>Длительность</th>
+                        <th>Техника</th>
+                        <th>Причина</th>
+                        <th>Кто фиксировал</th>
+                        <th>Комментарий</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for event in recent_closed_events %}
+                        <tr>
+                            <td>{{ event.started_at|date:"d.m.Y H:i" }}</td>
+                            <td>{{ event.ended_at|date:"d.m.Y H:i" }}</td>
+                            <td>{{ event.duration_text }}</td>
+                            <td>{{ event.equipment }}</td>
+                            <td>{{ event.reason }}</td>
+                            <td>{{ event.employee|default:"-" }}</td>
+                            <td>{{ event.comment|default:"-" }}</td>
+                        </tr>
+                    {% empty %}
+                        <tr><td colspan="7">Закрытых механических простоев пока нет.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+</main>
+{% endblock %}

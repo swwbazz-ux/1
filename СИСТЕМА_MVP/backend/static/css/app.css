@@ -374,6 +374,79 @@ th {
     background: linear-gradient(90deg, #f3b43f, #f98b24);
 }
 
+.bar-fill.plan {
+    background: linear-gradient(90deg, #9fb1bf, #657481);
+}
+
+.bar-fill.shift-day {
+    background: linear-gradient(90deg, var(--brand), var(--brand-dark));
+}
+
+.bar-fill.shift-night {
+    background: linear-gradient(90deg, #f3b43f, #f98b24);
+}
+
+.bar-fill.shift-unknown {
+    background: linear-gradient(90deg, #9fb1bf, #657481);
+}
+
+.bar-row.compact {
+    margin-bottom: 12px;
+}
+
+.shift-compare-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 16px;
+}
+
+.shift-card {
+    background: #f6fafc;
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    padding: 16px;
+}
+
+.shift-card.day {
+    border-left: 8px solid var(--brand);
+}
+
+.shift-card.night {
+    border-left: 8px solid var(--warn);
+}
+
+.shift-card.unknown {
+    border-left: 8px solid #9fb1bf;
+}
+
+.shift-metrics {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    margin: 12px 0 14px;
+}
+
+.shift-metrics div {
+    background: #ffffff;
+    border-radius: 14px;
+    padding: 10px;
+}
+
+.shift-metrics span {
+    display: block;
+    color: var(--muted);
+    font-size: 13px;
+    margin-bottom: 4px;
+}
+
+.success-text {
+    color: var(--ok);
+}
+
+.danger-text {
+    color: var(--danger);
+}
+
 @media (max-width: 760px) {
     .app-header {
         padding: 20px 16px 26px;
@@ -391,5 +464,9 @@ th {
 
     .bar-row-title {
         display: block;
+    }
+
+    .shift-metrics {
+        grid-template-columns: 1fr;
     }
 }

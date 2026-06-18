@@ -38,6 +38,7 @@ INTERFACE_MAP = [
             {'title': 'Машинист экскаватора', 'url': '/excavator/shift/', 'code': '3000', 'note': 'Создание рейса и параметры для отчета заказчику'},
             {'title': 'Горный мастер', 'url': '/master/assignments/', 'code': '4000', 'note': 'Назначение самосвалов под экскаваторы'},
             {'title': 'Диспетчерский пульт', 'url': '/dispatcher/control/', 'code': '5000', 'note': 'Контроль активных рейсов и назначений'},
+            {'title': 'Механическая служба', 'url': '/mechanic/downtimes/', 'code': '7000 / роль механика', 'note': 'Открытие и закрытие механических простоев по технике'},
         ],
     },
     {
@@ -46,6 +47,7 @@ INTERFACE_MAP = [
             {'title': 'Отчет по объемам', 'url': '/reports/volume/', 'code': '5000 / 6000', 'note': 'Фильтры, шаблоны, группировки и Excel'},
             {'title': 'Конструктор шаблонов отчетов', 'url': '/reports/templates/', 'code': '5000 / 1000', 'note': 'Столбцы, названия, фильтры, группировки, расчетные поля'},
             {'title': 'Суточный отчет заказчику', 'url': '/reports/customer-daily/', 'code': '5000 / 6000', 'note': 'Суточный отчет к 08:00 и Excel-выгрузка'},
+            {'title': 'Отчет по механическим простоям', 'url': '/reports/downtimes/', 'code': '5000 / 6000 / 7000', 'note': 'Фильтры по датам, технике, причине, статусу и Excel'},
             {'title': 'Витрина руководства', 'url': '/reports/management/', 'code': '6000', 'note': 'Суточный срез, накопленная картина и показатели'},
         ],
     },
@@ -58,6 +60,7 @@ DEMO_ACCESS_CODES = [
     ('3000', 'Машинист экскаватора'),
     ('4000', 'Горный мастер'),
     ('5000', 'Диспетчер'),
+    ('7000', 'Механик'),
     ('6000', 'Руководство'),
 ]
 
@@ -112,6 +115,8 @@ def role_home_view(request):
         return redirect('excavator_work')
     if access.role.code == 'dispatcher':
         return redirect('dispatcher_control')
+    if access.role.code == 'mechanic':
+        return redirect('mechanic_dashboard')
     if access.role.code == 'manager':
         return redirect('management_dashboard')
     interface_name = ROLE_INTERFACE_NAMES.get(access.role.code, f'Интерфейс роли: {access.role.name}')

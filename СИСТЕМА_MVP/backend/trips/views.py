@@ -1,14 +1,25 @@
 from django.contrib import messages
 from django.shortcuts import redirect, render
+from django.urls import reverse
 from django.utils import timezone
 
 from assignments.models import AssignmentStatus, HaulAssignment
+from downtimes.models import DowntimeEvent
 from references.models import Equipment
 from shifts.models import EmployeeShift
 from users.models import EmployeeAccess
 
 from .forms import TripCreateForm
 from .models import DispatcherActionLog, DispatcherActionType, Trip, TripStatus
+
+
+DISPATCHER_FILTER_KEYS = (
+    'truck',
+    'excavator',
+    'show_active_trips',
+    'show_pending_assignments',
+    'show_accepted_assignments',
+)
 
 
 def log_dispatcher_action(*, actor, action_type, target_summary, trip=None, shift=None, haul_assignment=None, reason=''):
@@ -21,6 +32,20 @@ def log_dispatcher_action(*, actor, action_type, target_summary, trip=None, shif
         target_summary=target_summary,
         reason=str(reason or '').strip(),
     )
+
+
+def get_dispatcher_control_url(request):
+    query_parts = []
+    for key in DISPATCHER_FILTER_KEYS:
+        value = request.POST.get(key, '').strip()
+        if value == '':
+            value = request.GET.get(key, '').strip()
+        if value != '':
+            query_parts.append(f'{key}={value}')
+    base_url = reverse('dispatcher_control')
+    if not query_parts:
+        return base_url
+    return f"{base_url}?{'&'.join(query_parts)}"
 
 
 def excavator_work_view(request):
@@ -148,6 +173,16 @@ def dispatcher_control_view(request):
         .select_related('actor')
         .order_by('-created_at')[:12]
     )
+    open_mechanic_downtimes = (
+        DowntimeEvent.objects
+        .filter(ended_at__isnull=True)
+        .select_related('equipment', 'reason', 'employee')
+        .order_by('started_at')
+    )
+    downtime_equipment_ids = [equipment_id for equipment_id in [truck_id, excavator_id] if equipment_id]
+    if downtime_equipment_ids:
+        open_mechanic_downtimes = open_mechanic_downtimes.filter(equipment_id__in=downtime_equipment_ids)
+    open_mechanic_downtimes_count = open_mechanic_downtimes.count()
 
     return render(
         request,
@@ -159,10 +194,12 @@ def dispatcher_control_view(request):
             'accepted_assignments': accepted_assignments[:30],
             'recent_completed_trips': recent_completed_trips[:30],
             'open_shifts': open_shifts,
+            'open_mechanic_downtimes': open_mechanic_downtimes[:30],
             'active_trips_count': active_trips.count(),
             'pending_assignments_count': pending_assignments.count(),
             'accepted_assignments_count': accepted_assignments.count(),
             'open_shifts_count': len(open_shifts),
+            'open_mechanic_downtimes_count': open_mechanic_downtimes_count,
             'trucks': trucks,
             'excavators': excavators,
             'recent_dispatcher_actions': recent_dispatcher_actions,
@@ -173,6 +210,13 @@ def dispatcher_control_view(request):
                 'show_pending_assignments': show_pending_assignments,
                 'show_accepted_assignments': show_accepted_assignments,
             },
+            'dispatcher_filter_items': [
+                ('truck', truck_id),
+                ('excavator', excavator_id),
+                ('show_active_trips', '1' if show_active_trips else '0'),
+                ('show_pending_assignments', '1' if show_pending_assignments else '0'),
+                ('show_accepted_assignments', '1' if show_accepted_assignments else '0'),
+            ],
         },
     )
 
@@ -184,9 +228,10 @@ def dispatcher_service_close_shift_view(request, shift_id):
     access = EmployeeAccess.objects.select_related('employee', 'role').filter(id=access_id, is_active=True).first()
     if not access or access.role.code not in {'dispatcher', 'admin'}:
         return redirect('role_home')
+    redirect_url = get_dispatcher_control_url(request)
 
     if request.method != 'POST':
-        return redirect('dispatcher_control')
+        return redirect(redirect_url)
     reason = request.POST.get('reason', '').strip()
 
     shift = (
@@ -197,7 +242,7 @@ def dispatcher_service_close_shift_view(request, shift_id):
     )
     if not shift:
         messages.error(request, 'Открытая смена для служебного закрытия не найдена.')
-        return redirect('dispatcher_control')
+        return redirect(redirect_url)
 
     shift.closed_at = timezone.now()
     shift.closed_by = access.employee
@@ -211,7 +256,7 @@ def dispatcher_service_close_shift_view(request, shift_id):
         reason=reason,
     )
     messages.success(request, f'Смена сотрудника {shift.employee} закрыта служебно.')
-    return redirect('dispatcher_control')
+    return redirect(redirect_url)
 
 
 def dispatcher_cancel_assignment_view(request, assignment_id):
@@ -221,9 +266,10 @@ def dispatcher_cancel_assignment_view(request, assignment_id):
     access = EmployeeAccess.objects.select_related('employee', 'role').filter(id=access_id, is_active=True).first()
     if not access or access.role.code not in {'dispatcher', 'admin'}:
         return redirect('role_home')
+    redirect_url = get_dispatcher_control_url(request)
 
     if request.method != 'POST':
-        return redirect('dispatcher_control')
+        return redirect(redirect_url)
     reason = request.POST.get('reason', '').strip()
 
     assignment = (
@@ -234,7 +280,7 @@ def dispatcher_cancel_assignment_view(request, assignment_id):
     )
     if not assignment:
         messages.error(request, 'Активное назначение для отмены не найдено.')
-        return redirect('dispatcher_control')
+        return redirect(redirect_url)
 
     assignment.status = AssignmentStatus.CANCELLED
     assignment.ended_at = timezone.now()
@@ -247,7 +293,7 @@ def dispatcher_cancel_assignment_view(request, assignment_id):
         reason=reason,
     )
     messages.success(request, f'Назначение {assignment.truck} под {assignment.excavator} отменено.')
-    return redirect('dispatcher_control')
+    return redirect(redirect_url)
 
 
 def dispatcher_cancel_trip_view(request, trip_id):
@@ -257,9 +303,10 @@ def dispatcher_cancel_trip_view(request, trip_id):
     access = EmployeeAccess.objects.select_related('employee', 'role').filter(id=access_id, is_active=True).first()
     if not access or access.role.code not in {'dispatcher', 'admin'}:
         return redirect('role_home')
+    redirect_url = get_dispatcher_control_url(request)
 
     if request.method != 'POST':
-        return redirect('dispatcher_control')
+        return redirect(redirect_url)
     reason = request.POST.get('reason', '').strip()
 
     trip = (
@@ -270,7 +317,7 @@ def dispatcher_cancel_trip_view(request, trip_id):
     )
     if not trip:
         messages.error(request, 'Активный рейс для отмены не найден.')
-        return redirect('dispatcher_control')
+        return redirect(redirect_url)
 
     trip.status = TripStatus.CANCELLED
     trip.save(update_fields=['status'])
@@ -282,7 +329,7 @@ def dispatcher_cancel_trip_view(request, trip_id):
         reason=reason,
     )
     messages.success(request, f'Рейс {trip.truck} -> {trip.dump_point} отменен.')
-    return redirect('dispatcher_control')
+    return redirect(redirect_url)
 
 
 def dispatcher_complete_trip_view(request, trip_id):
@@ -292,9 +339,10 @@ def dispatcher_complete_trip_view(request, trip_id):
     access = EmployeeAccess.objects.select_related('employee', 'role').filter(id=access_id, is_active=True).first()
     if not access or access.role.code not in {'dispatcher', 'admin'}:
         return redirect('role_home')
+    redirect_url = get_dispatcher_control_url(request)
 
     if request.method != 'POST':
-        return redirect('dispatcher_control')
+        return redirect(redirect_url)
     reason = request.POST.get('reason', '').strip()
 
     trip = (
@@ -305,7 +353,7 @@ def dispatcher_complete_trip_view(request, trip_id):
     )
     if not trip:
         messages.error(request, 'Активный рейс для служебного завершения не найден.')
-        return redirect('dispatcher_control')
+        return redirect(redirect_url)
 
     unloading_shift = (
         EmployeeShift.objects
@@ -315,7 +363,7 @@ def dispatcher_complete_trip_view(request, trip_id):
     )
     if not unloading_shift:
         messages.error(request, 'Нельзя служебно завершить рейс: не найдена открытая смена по этому самосвалу.')
-        return redirect('dispatcher_control')
+        return redirect(redirect_url)
 
     trip.status = TripStatus.COMPLETED
     trip.driver = unloading_shift.employee
@@ -335,7 +383,7 @@ def dispatcher_complete_trip_view(request, trip_id):
         reason=reason,
     )
     messages.success(request, f'Рейс {trip.truck} завершен служебно.')
-    return redirect('dispatcher_control')
+    return redirect(redirect_url)
 
 
 def driver_complete_trip_view(request, trip_id):
