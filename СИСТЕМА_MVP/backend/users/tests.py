@@ -624,6 +624,112 @@ class AccessLoginTests(TestCase):
         self.assertIsNotNone(assignment.ended_at)
         self.assertContains(response, 'Принятых назначений в работе сейчас нет.')
 
+    def test_dispatcher_can_service_complete_active_trip_from_control_panel(self):
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        truck = Equipment.objects.create(equipment_type=truck_type, garage_number='10')
+        excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='1')
+        rock = RockType.objects.create(name='Руда')
+        dump_point = DumpPoint.objects.create(name='ККД')
+        dispatcher_role = Role.objects.create(code='dispatcher', name='Диспетчер')
+        driver_role, _ = Role.objects.get_or_create(code='driver', defaults={'name': 'Водитель самосвала'})
+        dispatcher = Employee.objects.create(full_name='Тестовый диспетчер')
+        driver = Employee.objects.create(full_name='Тестовый водитель')
+        EmployeeAccess.objects.create(employee=dispatcher, role=dispatcher_role, access_code='5000')
+        EmployeeAccess.objects.create(employee=driver, role=driver_role, access_code='2102')
+        unloading_shift = EmployeeShift.objects.create(
+            employee=driver,
+            shift_type='day',
+            equipment=truck,
+            opened_at=timezone.now(),
+            opened_by=driver,
+        )
+        trip = Trip.objects.create(
+            excavator=excavator,
+            truck=truck,
+            rock_type=rock,
+            dump_point=dump_point,
+            status=TripStatus.ACTIVE,
+            volume_m3='11.00',
+        )
+
+        self.client.post('/', {'access_code': '5000'}, follow=True, HTTP_HOST='localhost')
+        response = self.client.post(
+            f'/dispatcher/trips/{trip.id}/complete/',
+            follow=True,
+            HTTP_HOST='localhost',
+        )
+        trip.refresh_from_db()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(trip.status, TripStatus.COMPLETED)
+        self.assertEqual(trip.driver, driver)
+        self.assertEqual(trip.unloading_shift, unloading_shift)
+        self.assertIsNotNone(trip.completed_at)
+        self.assertContains(response, 'Выполненных рейсов пока нет.', count=0)
+
+    def test_dispatcher_cannot_service_complete_active_trip_without_open_shift(self):
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        truck = Equipment.objects.create(equipment_type=truck_type, garage_number='10')
+        excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='1')
+        rock = RockType.objects.create(name='Руда')
+        dump_point = DumpPoint.objects.create(name='ККД')
+        dispatcher_role = Role.objects.create(code='dispatcher', name='Диспетчер')
+        dispatcher = Employee.objects.create(full_name='Тестовый диспетчер')
+        EmployeeAccess.objects.create(employee=dispatcher, role=dispatcher_role, access_code='5000')
+        trip = Trip.objects.create(
+            excavator=excavator,
+            truck=truck,
+            rock_type=rock,
+            dump_point=dump_point,
+            status=TripStatus.ACTIVE,
+            volume_m3='11.00',
+        )
+
+        self.client.post('/', {'access_code': '5000'}, follow=True, HTTP_HOST='localhost')
+        response = self.client.post(
+            f'/dispatcher/trips/{trip.id}/complete/',
+            follow=True,
+            HTTP_HOST='localhost',
+        )
+        trip.refresh_from_db()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(trip.status, TripStatus.ACTIVE)
+        self.assertIsNone(trip.completed_at)
+
+    def test_dispatcher_can_cancel_active_trip_from_control_panel(self):
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        truck = Equipment.objects.create(equipment_type=truck_type, garage_number='10')
+        excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='1')
+        rock = RockType.objects.create(name='Руда')
+        dump_point = DumpPoint.objects.create(name='ККД')
+        dispatcher_role = Role.objects.create(code='dispatcher', name='Диспетчер')
+        dispatcher = Employee.objects.create(full_name='Тестовый диспетчер')
+        EmployeeAccess.objects.create(employee=dispatcher, role=dispatcher_role, access_code='5000')
+        trip = Trip.objects.create(
+            excavator=excavator,
+            truck=truck,
+            rock_type=rock,
+            dump_point=dump_point,
+            status=TripStatus.ACTIVE,
+            volume_m3='11.00',
+        )
+
+        self.client.post('/', {'access_code': '5000'}, follow=True, HTTP_HOST='localhost')
+        response = self.client.post(
+            f'/dispatcher/trips/{trip.id}/cancel/',
+            follow=True,
+            HTTP_HOST='localhost',
+        )
+        trip.refresh_from_db()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(trip.status, TripStatus.CANCELLED)
+        self.assertContains(response, 'Активных рейсов сейчас нет.')
+
     def test_volume_report_can_filter_by_loading_shift_type(self):
         truck_type = EquipmentType.objects.create(name='Самосвал')
         excavator_type = EquipmentType.objects.create(name='Экскаватор')

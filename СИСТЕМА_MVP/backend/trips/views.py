@@ -216,6 +216,78 @@ def dispatcher_cancel_assignment_view(request, assignment_id):
     return redirect('dispatcher_control')
 
 
+def dispatcher_cancel_trip_view(request, trip_id):
+    access_id = request.session.get('employee_access_id')
+    if not access_id:
+        return redirect('login')
+    access = EmployeeAccess.objects.select_related('employee', 'role').filter(id=access_id, is_active=True).first()
+    if not access or access.role.code not in {'dispatcher', 'admin'}:
+        return redirect('role_home')
+
+    if request.method != 'POST':
+        return redirect('dispatcher_control')
+
+    trip = (
+        Trip.objects
+        .select_related('truck', 'excavator')
+        .filter(id=trip_id, status=TripStatus.ACTIVE)
+        .first()
+    )
+    if not trip:
+        messages.error(request, 'Активный рейс для отмены не найден.')
+        return redirect('dispatcher_control')
+
+    trip.status = TripStatus.CANCELLED
+    trip.save(update_fields=['status'])
+    messages.success(request, f'Рейс {trip.truck} -> {trip.dump_point} отменен.')
+    return redirect('dispatcher_control')
+
+
+def dispatcher_complete_trip_view(request, trip_id):
+    access_id = request.session.get('employee_access_id')
+    if not access_id:
+        return redirect('login')
+    access = EmployeeAccess.objects.select_related('employee', 'role').filter(id=access_id, is_active=True).first()
+    if not access or access.role.code not in {'dispatcher', 'admin'}:
+        return redirect('role_home')
+
+    if request.method != 'POST':
+        return redirect('dispatcher_control')
+
+    trip = (
+        Trip.objects
+        .select_related('truck', 'excavator', 'loading_shift')
+        .filter(id=trip_id, status=TripStatus.ACTIVE)
+        .first()
+    )
+    if not trip:
+        messages.error(request, 'Активный рейс для служебного завершения не найден.')
+        return redirect('dispatcher_control')
+
+    unloading_shift = (
+        EmployeeShift.objects
+        .filter(equipment=trip.truck, closed_at__isnull=True)
+        .order_by('-opened_at')
+        .first()
+    )
+    if not unloading_shift:
+        messages.error(request, 'Нельзя служебно завершить рейс: не найдена открытая смена по этому самосвалу.')
+        return redirect('dispatcher_control')
+
+    trip.status = TripStatus.COMPLETED
+    trip.driver = unloading_shift.employee
+    trip.completed_at = timezone.now()
+    trip.unloading_shift = unloading_shift
+    trip.is_carryover = bool(
+        trip.loading_shift
+        and unloading_shift
+        and trip.loading_shift.shift_type != unloading_shift.shift_type
+    )
+    trip.save(update_fields=['status', 'driver', 'completed_at', 'unloading_shift', 'is_carryover'])
+    messages.success(request, f'Рейс {trip.truck} завершен служебно.')
+    return redirect('dispatcher_control')
+
+
 def driver_complete_trip_view(request, trip_id):
     access_id = request.session.get('employee_access_id')
     if not access_id:
