@@ -72,6 +72,8 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, '/reports/volume/')
         self.assertContains(response, '/reports/templates/')
         self.assertContains(response, '/reports/management/')
+        self.assertContains(response, '/reports/management/export/')
+        self.assertContains(response, 'Excel-выгрузка витрины руководства')
         self.assertContains(response, '6000')
 
     def test_driver_primary_registration_flow(self):
