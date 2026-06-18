@@ -43,6 +43,41 @@
         </div>
     </section>
 
+    <section class="card">
+        <h2>Сверка со старыми Excel-формами</h2>
+        <p class="muted">Предварительная карта покрытия: какие текущие формы уже закрываются MVP, а какие нужно проверить или оставить на следующий этап.</p>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                <tr>
+                    <th>Excel-файл</th>
+                    <th>Назначение</th>
+                    <th>Покрытие MVP</th>
+                    <th>Экран системы</th>
+                    <th>Следующий шаг</th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for item in excel_coverage %}
+                    <tr>
+                        <td>{{ item.file }}</td>
+                        <td>{{ item.purpose }}</td>
+                        <td>{{ item.coverage }}</td>
+                        <td>
+                            {% if item.system_link %}
+                                <a href="{{ item.system_link }}">{{ item.system_link }}</a>
+                            {% else %}
+                                <span class="muted">Пока нет отдельного экрана</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ item.next_step }}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+
     <section class="checklist-grid">
         {% for section in sections %}
             <article class="card checklist-section">

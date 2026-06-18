@@ -918,6 +918,66 @@ PILOT_REPORT_CHECKLIST_SECTIONS = [
 ]
 
 
+PILOT_REPORT_EXCEL_COVERAGE = [
+    {
+        'file': 'Отчет_Коппер. Рисорсез_Март.xlsx',
+        'purpose': 'Суточный отчет заказчику',
+        'coverage': 'частично покрыт',
+        'system_link': '/reports/customer-daily/',
+        'next_step': 'Сверить форму, порядок блоков и обязательные итоговые строки.',
+    },
+    {
+        'file': 'почасовой Март.xlsx',
+        'purpose': 'Почасовой отчет диспетчерской',
+        'coverage': 'не покрыт отдельной формой',
+        'system_link': '/reports/volume/',
+        'next_step': 'Решить, нужен ли отдельный почасовой отчет или хватит группировки рейсов по часу.',
+    },
+    {
+        'file': 'ОР ККД СКДР март.xlsx',
+        'purpose': 'Ожидание разгрузки ККД/СКДР',
+        'coverage': 'частично покрывается простоями',
+        'system_link': '/reports/downtimes/',
+        'next_step': 'Выделить ожидание разгрузки как отдельный тип события.',
+    },
+    {
+        'file': 'СВОД Простоев на ККД Март.xlsx',
+        'purpose': 'Свод простоев и невыполненного объема',
+        'coverage': 'частично покрыт',
+        'system_link': '/reports/downtimes/',
+        'next_step': 'Решить, нужен ли расчет невыполненного объема в MVP.',
+    },
+    {
+        'file': 'Работа экс Март (1).xlsx',
+        'purpose': 'Работа экскаваторов',
+        'coverage': 'частично покрыто',
+        'system_link': '/reports/management/',
+        'next_step': 'Проверить группировку по экскаваторам, объемам, рейсам и плечу.',
+    },
+    {
+        'file': 'Работа экс Март ПЕРЕГОНЫ ПРИЧИНЫ.xlsx',
+        'purpose': 'Перегоны и смена фронта работ',
+        'coverage': 'не покрыт',
+        'system_link': '',
+        'next_step': 'Нужен модуль статусов и перегонов экскаватора.',
+    },
+    {
+        'file': 'КИП/КТГ и КИО/КТГ',
+        'purpose': 'Показатели использования и технической готовности',
+        'coverage': 'не покрыт',
+        'system_link': '',
+        'next_step': 'Определить формулы, источники рабочего времени, простоев и ремонтов.',
+    },
+    {
+        'file': 'График ТО.xlsx',
+        'purpose': 'Планирование технического обслуживания',
+        'coverage': 'не покрыт',
+        'system_link': '',
+        'next_step': 'Отнести к развитию механического модуля после первого пилота.',
+    },
+]
+
+
 def pilot_report_checklist_view(request):
     access = get_reports_access(request, {'admin', 'dispatcher', 'manager'})
     if not access:
@@ -929,6 +989,7 @@ def pilot_report_checklist_view(request):
         {
             'access': access,
             'sections': PILOT_REPORT_CHECKLIST_SECTIONS,
+            'excel_coverage': PILOT_REPORT_EXCEL_COVERAGE,
             'progress_stage': '9 из 10',
             'progress_percent': 95,
             'remaining_stages': 1,
