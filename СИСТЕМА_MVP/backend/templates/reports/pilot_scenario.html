@@ -37,6 +37,7 @@
         <h2>Как пользоваться</h2>
         <p class="muted">Идем по шагам сверху вниз. Если на шаге появляется ошибка, лишнее действие или расхождение со старой Excel-формой, фиксируем это в журнале замечаний пилота.</p>
         <div class="actions">
+            <a class="button-link" href="{% url 'pilot_feedback' %}">Журнал замечаний</a>
             <a class="button-link" href="{% url 'pilot_report_checklist' %}">Чеклист отчетов</a>
             <a class="button-link button-secondary" href="{% url 'interface_map' %}">Карта интерфейсов</a>
             <a class="button-link button-secondary" href="{% url 'management_dashboard' %}">Витрина руководства</a>
@@ -73,7 +74,7 @@
                 </div>
             {% endfor %}
         </div>
-        <p class="muted">Итоги и замечания фиксируются в документе ПРОГРЕСС_ПРОЕКТА/31_ЖУРНАЛ_ЗАМЕЧАНИЙ_ПИЛОТА.md.</p>
+        <p class="muted">Итоги и замечания фиксируются на странице /reports/pilot-feedback/ и в документе ПРОГРЕСС_ПРОЕКТА/31_ЖУРНАЛ_ЗАМЕЧАНИЙ_ПИЛОТА.md.</p>
     </section>
 </main>
 {% endblock %}

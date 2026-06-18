@@ -20,7 +20,7 @@ from references.models import (
     RockType,
     TruckCapacityRule,
 )
-from reports.models import ReportTemplate, ReportType
+from reports.models import PilotFeedback, ReportTemplate, ReportType
 from shifts.models import EmployeeShift
 from trips.models import DispatcherActionLog, DispatcherActionType, Trip, TripStatus
 
@@ -75,9 +75,11 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, '/reports/management/export/')
         self.assertContains(response, '/reports/pilot-checklist/')
         self.assertContains(response, '/reports/pilot-scenario/')
+        self.assertContains(response, '/reports/pilot-feedback/')
         self.assertContains(response, 'Excel-выгрузка витрины руководства')
         self.assertContains(response, 'Чеклист пилотной проверки отчетов')
         self.assertContains(response, 'Сценарий пилотного запуска')
+        self.assertContains(response, 'Журнал замечаний пилота')
         self.assertContains(response, '6000')
 
     def test_manager_can_open_pilot_report_checklist(self):
@@ -111,6 +113,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, '/reports/downtimes/')
         self.assertContains(response, '/reports/downtimes/export/')
         self.assertContains(response, '/reports/pilot-scenario/')
+        self.assertContains(response, '/reports/pilot-feedback/')
 
     def test_manager_can_open_pilot_launch_scenario(self):
         manager_role = Role.objects.create(code='manager', name='Руководство')
@@ -128,7 +131,50 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, 'Работа водителя')
         self.assertContains(response, 'Диспетчерский контроль')
         self.assertContains(response, 'Вопросы для фиксации во время пилота')
+        self.assertContains(response, '/reports/pilot-feedback/')
         self.assertContains(response, '31_ЖУРНАЛ_ЗАМЕЧАНИЙ_ПИЛОТА.md')
+
+    def test_manager_can_create_pilot_feedback_and_export_it(self):
+        manager_role = Role.objects.create(code='manager', name='Руководство')
+        manager = Employee.objects.create(full_name='Тестовое руководство')
+        EmployeeAccess.objects.create(employee=manager, role=manager_role, access_code='6000')
+
+        self.client.post('/', {'access_code': '6000'}, follow=True, HTTP_HOST='localhost')
+        response = self.client.post(
+            '/reports/pilot-feedback/',
+            {
+                'title': 'Не хватает столбца для сверки',
+                'category': 'report',
+                'priority': 'p1',
+                'status': 'new',
+                'screen': 'Суточный отчет',
+                'description': 'На пилоте нужно сверить старую форму заказчика.',
+                'decision': 'Добавить в список доработок после проверки.',
+            },
+            follow=True,
+            HTTP_HOST='localhost',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Журнал замечаний пилота')
+        self.assertContains(response, 'Не хватает столбца для сверки')
+        self.assertContains(response, 'P1 - исправить до запуска')
+        self.assertEqual(PilotFeedback.objects.count(), 1)
+        feedback = PilotFeedback.objects.first()
+        self.assertEqual(feedback.created_by, manager)
+
+        export_response = self.client.get('/reports/pilot-feedback/export/', HTTP_HOST='localhost')
+
+        self.assertEqual(export_response.status_code, 200)
+        self.assertEqual(
+            export_response['Content-Type'],
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+        workbook = load_workbook(BytesIO(export_response.content))
+        self.assertIn('Замечания пилота', workbook.sheetnames)
+        sheet = workbook['Замечания пилота']
+        self.assertEqual(sheet['A1'].value, 'Журнал замечаний пилотного запуска')
+        self.assertEqual(sheet['F5'].value, 'Не хватает столбца для сверки')
 
     def test_driver_primary_registration_flow(self):
         truck_type = EquipmentType.objects.create(name='Самосвал')

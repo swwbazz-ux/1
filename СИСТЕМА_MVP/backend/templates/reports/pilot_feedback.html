@@ -1,0 +1,146 @@
+{% extends "base.html" %}
+
+{% block title %}Журнал замечаний пилота{% endblock %}
+
+{% block body %}
+<header class="app-header">
+    <div class="header-inner">
+        <div class="topline">
+            <span>{{ access.employee.full_name }}</span>
+            <a href="{% url 'logout' %}">Выйти</a>
+        </div>
+        <h1>Журнал замечаний пилота</h1>
+        <p>Рабочий список замечаний, решений и переносов по пилотной проверке производственного MVP.</p>
+    </div>
+</header>
+
+<main class="page">
+    <section class="metric-grid">
+        <div class="metric-card">
+            <div>Текущий этап</div>
+            <div class="metric">{{ progress_stage }}</div>
+            <div class="muted">Пилотный запуск</div>
+        </div>
+        <div class="metric-card danger">
+            <div>P0 блокеры</div>
+            <div class="metric">{{ feedback_summary.p0 }}</div>
+            <div class="muted">Нужно закрыть до успешного пилота</div>
+        </div>
+        <div class="metric-card warning">
+            <div>P1 до запуска</div>
+            <div class="metric">{{ feedback_summary.p1 }}</div>
+            <div class="muted">Важные исправления перед запуском</div>
+        </div>
+        <div class="metric-card success">
+            <div>Открытые вопросы</div>
+            <div class="metric">{{ feedback_summary.open }}</div>
+            <div class="muted">Не закрыты решением или отклонением</div>
+        </div>
+    </section>
+
+    <section class="card">
+        <h2>Навигация пилота</h2>
+        <p class="muted">Замечания фиксируются здесь сразу по ходу проверки. После пилота этот список превращается в план доработок: критично до запуска, желательно до запуска, после запуска или отдельный модуль.</p>
+        <div class="actions">
+            <a class="button-link" href="{% url 'pilot_launch_scenario' %}">Сценарий пилота</a>
+            <a class="button-link button-secondary" href="{% url 'pilot_report_checklist' %}">Чеклист отчетов</a>
+            <a class="button-link button-secondary" href="{% url 'pilot_feedback_export' %}">Выгрузить Excel</a>
+        </div>
+    </section>
+
+    {% if messages %}
+        {% for message in messages %}
+            <div class="message {{ message.tags }}">{{ message }}</div>
+        {% endfor %}
+    {% endif %}
+
+    <section class="card">
+        <h2>Добавить замечание</h2>
+        <form method="post">
+            {% csrf_token %}
+            {% if form.errors %}
+                <div class="errors">{{ form.errors }}</div>
+            {% endif %}
+            <div class="filters">
+                <div>
+                    {{ form.title.label_tag }}
+                    {{ form.title }}
+                </div>
+                <div>
+                    {{ form.category.label_tag }}
+                    {{ form.category }}
+                </div>
+                <div>
+                    {{ form.priority.label_tag }}
+                    {{ form.priority }}
+                </div>
+                <div>
+                    {{ form.status.label_tag }}
+                    {{ form.status }}
+                </div>
+                <div>
+                    {{ form.screen.label_tag }}
+                    {{ form.screen }}
+                </div>
+            </div>
+            <div>
+                {{ form.description.label_tag }}
+                {{ form.description }}
+            </div>
+            <div>
+                {{ form.decision.label_tag }}
+                {{ form.decision }}
+            </div>
+            <div class="actions">
+                <button type="submit">Зафиксировать замечание</button>
+            </div>
+        </form>
+    </section>
+
+    <section class="card">
+        <h2>Список замечаний</h2>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                <tr>
+                    <th>Приоритет</th>
+                    <th>Статус</th>
+                    <th>Категория</th>
+                    <th>Экран</th>
+                    <th>Замечание</th>
+                    <th>Описание и решение</th>
+                    <th>Кто и когда</th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for item in feedback_items %}
+                    <tr>
+                        <td><strong>{{ item.get_priority_display }}</strong></td>
+                        <td>{{ item.get_status_display }}</td>
+                        <td>{{ item.get_category_display }}</td>
+                        <td>{{ item.screen|default:"-" }}</td>
+                        <td>{{ item.title }}</td>
+                        <td>
+                            {% if item.description %}
+                                <p>{{ item.description }}</p>
+                            {% endif %}
+                            {% if item.decision %}
+                                <p><strong>Решение:</strong> {{ item.decision }}</p>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {{ item.created_by.full_name }}<br>
+                            <span class="muted">{{ item.created_at|date:"d.m.Y H:i" }}</span>
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="7" class="muted">Замечаний пока нет. Во время пилота фиксируем здесь все, что мешает работе или требует решения.</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+</main>
+{% endblock %}

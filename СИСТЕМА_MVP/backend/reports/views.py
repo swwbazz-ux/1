@@ -16,7 +16,8 @@ from references.models import DumpPoint, Equipment, RockType
 from trips.models import Trip, TripStatus
 from users.models import EmployeeAccess
 
-from .models import ReportTemplate, ReportType
+from .forms import PilotFeedbackForm
+from .models import PilotFeedback, ReportTemplate, ReportType
 
 
 def calculate_trip_deviation(trip):
@@ -1331,6 +1332,106 @@ def pilot_launch_scenario_view(request):
             'remaining_stages': 1,
         },
     )
+
+
+def pilot_feedback_view(request):
+    access = get_reports_access(request, {'admin', 'dispatcher', 'manager'})
+    if not access:
+        return redirect('login' if not request.session.get('employee_access_id') else 'role_home')
+
+    if request.method == 'POST':
+        form = PilotFeedbackForm(request.POST)
+        if form.is_valid():
+            feedback = form.save(commit=False)
+            feedback.created_by = access.employee
+            feedback.save()
+            messages.success(request, 'Замечание пилота зафиксировано.')
+            return redirect('pilot_feedback')
+    else:
+        form = PilotFeedbackForm()
+
+    feedback_items = (
+        PilotFeedback.objects
+        .select_related('created_by')
+        .order_by('priority', '-created_at')
+    )
+    feedback_summary = {
+        'total': feedback_items.count(),
+        'p0': feedback_items.filter(priority='p0').count(),
+        'p1': feedback_items.filter(priority='p1').count(),
+        'open': feedback_items.exclude(status__in=['decided', 'rejected']).count(),
+    }
+    return render(
+        request,
+        'reports/pilot_feedback.html',
+        {
+            'access': access,
+            'form': form,
+            'feedback_items': feedback_items,
+            'feedback_summary': feedback_summary,
+            'progress_stage': '9 из 10',
+            'progress_percent': 99,
+            'remaining_stages': 1,
+        },
+    )
+
+
+def pilot_feedback_export_view(request):
+    access = get_reports_access(request, {'admin', 'dispatcher', 'manager'})
+    if not access:
+        return redirect('login' if not request.session.get('employee_access_id') else 'role_home')
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = 'Замечания пилота'
+    sheet.append(['Журнал замечаний пилотного запуска'])
+    sheet.append([f'Сформировал: {access.employee.full_name}'])
+    sheet.append([])
+    headers = [
+        'Дата',
+        'Приоритет',
+        'Статус',
+        'Категория',
+        'Экран или процесс',
+        'Краткое замечание',
+        'Описание',
+        'Решение',
+        'Кто зафиксировал',
+    ]
+    sheet.append(headers)
+    for cell in sheet[4]:
+        cell.font = Font(bold=True, color='FFFFFF')
+        cell.fill = PatternFill('solid', fgColor='17232E')
+        cell.alignment = Alignment(wrap_text=True, vertical='top')
+
+    feedback_items = PilotFeedback.objects.select_related('created_by').order_by('priority', '-created_at')
+    for feedback in feedback_items:
+        sheet.append([
+            timezone.localtime(feedback.created_at).strftime('%d.%m.%Y %H:%M'),
+            feedback.get_priority_display(),
+            feedback.get_status_display(),
+            feedback.get_category_display(),
+            feedback.screen,
+            feedback.title,
+            feedback.description,
+            feedback.decision,
+            feedback.created_by.full_name,
+        ])
+
+    widths = [18, 24, 20, 22, 28, 42, 56, 56, 28]
+    for column_index, width in enumerate(widths, start=1):
+        sheet.column_dimensions[get_column_letter(column_index)].width = width
+    for row in sheet.iter_rows():
+        for cell in row:
+            cell.alignment = Alignment(wrap_text=True, vertical='top')
+    sheet.freeze_panes = 'A5'
+
+    response = HttpResponse(
+        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    )
+    response['Content-Disposition'] = 'attachment; filename=\"pilot_feedback.xlsx\"'
+    workbook.save(response)
+    return response
 
 
 def report_template_builder_view(request):
