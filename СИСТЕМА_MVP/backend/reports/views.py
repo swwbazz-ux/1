@@ -110,6 +110,10 @@ VOLUME_REPORT_GROUPS = {
     'excavator': ('Экскаватор', lambda trip: str(trip.excavator)),
     'rock_type': ('Порода/груз', lambda trip: str(trip.rock_type)),
     'dump_point': ('Точка разгрузки', lambda trip: str(trip.dump_point)),
+    'completed_hour': (
+        'Час выполнения рейса',
+        lambda trip: timezone.localtime(trip.completed_at).strftime('%H:00') if trip.completed_at else 'не задано',
+    ),
     'loading_shift': ('Смена загрузки', lambda trip: trip.loading_shift.get_shift_type_display() if trip.loading_shift else 'не задано'),
     'unloading_shift': ('Смена разгрузки', lambda trip: trip.unloading_shift.get_shift_type_display() if trip.unloading_shift else 'не задано'),
 }
@@ -929,9 +933,9 @@ PILOT_REPORT_EXCEL_COVERAGE = [
     {
         'file': 'почасовой Март.xlsx',
         'purpose': 'Почасовой отчет диспетчерской',
-        'coverage': 'не покрыт отдельной формой',
-        'system_link': '/reports/volume/',
-        'next_step': 'Решить, нужен ли отдельный почасовой отчет или хватит группировки рейсов по часу.',
+        'coverage': 'частично покрыт группировкой по часу',
+        'system_link': '/reports/volume/?group_by=completed_hour',
+        'next_step': 'Проверить с диспетчерской, нужна ли точная старая почасовая матрица после первого пилота.',
     },
     {
         'file': 'ОР ККД СКДР март.xlsx',
@@ -1051,7 +1055,7 @@ def pilot_report_checklist_view(request):
             'sections': PILOT_REPORT_CHECKLIST_SECTIONS,
             'excel_coverage': PILOT_REPORT_EXCEL_COVERAGE,
             'progress_stage': '9 из 10',
-            'progress_percent': 96,
+            'progress_percent': 97,
             'remaining_stages': 1,
         },
     )

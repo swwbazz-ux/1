@@ -89,10 +89,11 @@ class AccessLoginTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'Чеклист пилотной проверки отчетов')
         self.assertContains(response, '9 из 10')
-        self.assertContains(response, '96%')
+        self.assertContains(response, '97%')
         self.assertContains(response, 'Сверка со старыми Excel-формами')
         self.assertContains(response, 'Отчет_Коппер. Рисорсез_Март.xlsx')
         self.assertContains(response, 'почасовой Март.xlsx')
+        self.assertContains(response, '/reports/volume/?group_by=completed_hour')
         self.assertContains(response, 'ОР ККД СКДР март.xlsx')
         self.assertContains(response, 'КИП/КТГ и КИО/КТГ')
         self.assertContains(response, '/reports/management/')
@@ -871,6 +872,64 @@ class AccessLoginTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, '11')
         self.assertNotContains(response, '22,00')
+
+    def test_volume_report_can_group_by_completed_hour_and_export_excel(self):
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        truck = Equipment.objects.create(equipment_type=truck_type, garage_number='10')
+        excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='1')
+        rock = RockType.objects.create(name='Руда')
+        dump_point = DumpPoint.objects.create(name='ККД')
+        dispatcher_role = Role.objects.create(code='dispatcher', name='Диспетчер')
+        dispatcher = Employee.objects.create(full_name='Тестовый диспетчер')
+        EmployeeAccess.objects.create(employee=dispatcher, role=dispatcher_role, access_code='5000')
+        first_hour = timezone.make_aware(datetime(2026, 6, 17, 10, 15))
+        second_hour = timezone.make_aware(datetime(2026, 6, 17, 11, 20))
+        Trip.objects.create(
+            excavator=excavator,
+            truck=truck,
+            rock_type=rock,
+            dump_point=dump_point,
+            status=TripStatus.COMPLETED,
+            volume_m3='11.00',
+            tonnage='25.00',
+            completed_at=first_hour,
+        )
+        Trip.objects.create(
+            excavator=excavator,
+            truck=truck,
+            rock_type=rock,
+            dump_point=dump_point,
+            status=TripStatus.COMPLETED,
+            volume_m3='22.00',
+            tonnage='50.00',
+            completed_at=second_hour,
+        )
+
+        self.client.post('/', {'access_code': '5000'}, follow=True, HTTP_HOST='localhost')
+        response = self.client.get('/reports/volume/?group_by=completed_hour', HTTP_HOST='localhost')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, '<th>Час выполнения рейса</th>', html=True)
+        self.assertContains(response, 'первая MVP-замена старой формы')
+        self.assertContains(response, '10:00')
+        self.assertContains(response, '11:00')
+        self.assertContains(response, '<th>Рейсы</th>', html=True)
+
+        export_response = self.client.get('/reports/volume/export/?group_by=completed_hour', HTTP_HOST='localhost')
+        workbook = load_workbook(BytesIO(export_response.content))
+        values = [
+            cell
+            for row in workbook.active.iter_rows(values_only=True)
+            for cell in row
+            if cell not in {None, ''}
+        ]
+
+        self.assertEqual(export_response.status_code, 200)
+        self.assertIn('Час выполнения рейса', values)
+        self.assertIn('10:00', values)
+        self.assertIn('11:00', values)
+        self.assertIn('Итого', values)
 
     def test_volume_report_uses_selected_report_template_columns(self):
         truck_type = EquipmentType.objects.create(name='Самосвал')
