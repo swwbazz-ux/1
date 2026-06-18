@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+
+{% block title %}Сценарий пилотного запуска{% endblock %}
+
+{% block body %}
+<header class="app-header">
+    <div class="header-inner">
+        <div class="topline">
+            <span>{{ access.employee.full_name }}</span>
+            <a href="{% url 'logout' %}">Выйти</a>
+        </div>
+        <h1>Сценарий пилотного запуска</h1>
+        <p>Пошаговая проверка производственного MVP по ролям: от расстановки и рейса до отчетов, Excel-выгрузок и витрины руководства.</p>
+    </div>
+</header>
+
+<main class="page">
+    <section class="metric-grid">
+        <div class="metric-card">
+            <div>Текущий этап</div>
+            <div class="metric">{{ progress_stage }}</div>
+            <div class="muted">Отчеты и подготовка к пилоту</div>
+        </div>
+        <div class="metric-card success">
+            <div>Готовность этапа</div>
+            <div class="metric">{{ progress_percent }}%</div>
+            <div class="muted">Осталась фактическая пилотная проверка</div>
+        </div>
+        <div class="metric-card warning">
+            <div>Осталось этапов</div>
+            <div class="metric">{{ remaining_stages }}</div>
+            <div class="muted">Следующий этап: пилотный запуск</div>
+        </div>
+    </section>
+
+    <section class="card">
+        <h2>Как пользоваться</h2>
+        <p class="muted">Идем по шагам сверху вниз. Если на шаге появляется ошибка, лишнее действие или расхождение со старой Excel-формой, фиксируем это в журнале замечаний пилота.</p>
+        <div class="actions">
+            <a class="button-link" href="{% url 'pilot_report_checklist' %}">Чеклист отчетов</a>
+            <a class="button-link button-secondary" href="{% url 'interface_map' %}">Карта интерфейсов</a>
+            <a class="button-link button-secondary" href="{% url 'management_dashboard' %}">Витрина руководства</a>
+        </div>
+    </section>
+
+    <section class="checklist-grid">
+        {% for step in steps %}
+            <article class="card checklist-section">
+                <h2>{{ step.title }}</h2>
+                <p><strong>Роль:</strong> {{ step.role }}</p>
+                <p><strong>Код:</strong> {{ step.access_code }}</p>
+                <p><strong>Экран:</strong> <a href="{{ step.url }}">{{ step.url }}</a></p>
+                <div class="checklist-items">
+                    {% for check in step.checks %}
+                        <div class="checklist-item">
+                            <div class="check-mark">□</div>
+                            <div><p>{{ check }}</p></div>
+                        </div>
+                    {% endfor %}
+                </div>
+                <p class="muted"><strong>Ожидаемый результат:</strong> {{ step.expected_result }}</p>
+            </article>
+        {% endfor %}
+    </section>
+
+    <section class="card">
+        <h2>Вопросы для фиксации во время пилота</h2>
+        <div class="checklist-items">
+            {% for question in feedback_questions %}
+                <div class="checklist-item">
+                    <div class="check-mark">□</div>
+                    <div><p>{{ question }}</p></div>
+                </div>
+            {% endfor %}
+        </div>
+        <p class="muted">Итоги и замечания фиксируются в документе ПРОГРЕСС_ПРОЕКТА/31_ЖУРНАЛ_ЗАМЕЧАНИЙ_ПИЛОТА.md.</p>
+    </section>
+</main>
+{% endblock %}

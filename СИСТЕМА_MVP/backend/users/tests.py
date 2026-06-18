@@ -74,8 +74,10 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, '/reports/management/')
         self.assertContains(response, '/reports/management/export/')
         self.assertContains(response, '/reports/pilot-checklist/')
+        self.assertContains(response, '/reports/pilot-scenario/')
         self.assertContains(response, 'Excel-выгрузка витрины руководства')
         self.assertContains(response, 'Чеклист пилотной проверки отчетов')
+        self.assertContains(response, 'Сценарий пилотного запуска')
         self.assertContains(response, '6000')
 
     def test_manager_can_open_pilot_report_checklist(self):
@@ -108,6 +110,25 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, '/reports/customer-daily/export/')
         self.assertContains(response, '/reports/downtimes/')
         self.assertContains(response, '/reports/downtimes/export/')
+        self.assertContains(response, '/reports/pilot-scenario/')
+
+    def test_manager_can_open_pilot_launch_scenario(self):
+        manager_role = Role.objects.create(code='manager', name='Руководство')
+        manager = Employee.objects.create(full_name='Тестовое руководство')
+        EmployeeAccess.objects.create(employee=manager, role=manager_role, access_code='6000')
+
+        self.client.post('/', {'access_code': '6000'}, follow=True, HTTP_HOST='localhost')
+        response = self.client.get('/reports/pilot-scenario/', HTTP_HOST='localhost')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Сценарий пилотного запуска')
+        self.assertContains(response, '9 из 10')
+        self.assertContains(response, '99%')
+        self.assertContains(response, 'Расстановка техники')
+        self.assertContains(response, 'Работа водителя')
+        self.assertContains(response, 'Диспетчерский контроль')
+        self.assertContains(response, 'Вопросы для фиксации во время пилота')
+        self.assertContains(response, '31_ЖУРНАЛ_ЗАМЕЧАНИЙ_ПИЛОТА.md')
 
     def test_driver_primary_registration_flow(self):
         truck_type = EquipmentType.objects.create(name='Самосвал')
