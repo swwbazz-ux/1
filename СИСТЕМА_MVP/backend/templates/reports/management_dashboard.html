@@ -26,6 +26,7 @@
                 <a class="button-link button-secondary" href="{% url 'customer_daily_report' %}?date={{ selected_date|date:'Y-m-d' }}">Открыть суточный отчет заказчику</a>
                 <a class="button-link button-secondary" href="{% url 'management_dashboard_export' %}?date={{ selected_date|date:'Y-m-d' }}">Выгрузить витрину в Excel</a>
                 <a class="button-link button-secondary" href="{% url 'pilot_report_checklist' %}">Чеклист пилотной проверки</a>
+                <a class="button-link button-secondary" href="{% url 'pilot_feedback' %}">Журнал замечаний пилота</a>
             </div>
         </form>
     </section>

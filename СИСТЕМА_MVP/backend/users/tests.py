@@ -1667,6 +1667,8 @@ class AccessLoginTests(TestCase):
         self.assertContains(dashboard_response, 'Выгрузить витрину в Excel')
         self.assertContains(dashboard_response, 'Чеклист пилотной проверки')
         self.assertContains(dashboard_response, '/reports/pilot-checklist/')
+        self.assertContains(dashboard_response, 'Журнал замечаний пилота')
+        self.assertContains(dashboard_response, '/reports/pilot-feedback/')
         self.assertContains(dashboard_response, 'Факт за сутки')
         self.assertContains(dashboard_response, 'План за сутки')
         self.assertContains(dashboard_response, 'Выполнение плана')
