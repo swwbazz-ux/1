@@ -1340,13 +1340,24 @@ def pilot_feedback_view(request):
         return redirect('login' if not request.session.get('employee_access_id') else 'role_home')
 
     if request.method == 'POST':
-        form = PilotFeedbackForm(request.POST)
-        if form.is_valid():
-            feedback = form.save(commit=False)
-            feedback.created_by = access.employee
-            feedback.save()
-            messages.success(request, 'Замечание пилота зафиксировано.')
+        action = request.POST.get('action', '').strip()
+        feedback_id = request.POST.get('feedback_id', '').strip()
+        next_status = request.POST.get('status', '').strip()
+        if action == 'change_status' and feedback_id and next_status in {'in_work', 'decided', 'rejected'}:
+            feedback = PilotFeedback.objects.filter(id=feedback_id).first()
+            if feedback:
+                feedback.status = next_status
+                feedback.save(update_fields=['status', 'updated_at'])
+                messages.success(request, 'Статус замечания обновлен.')
             return redirect('pilot_feedback')
+        else:
+            form = PilotFeedbackForm(request.POST)
+            if form.is_valid():
+                feedback = form.save(commit=False)
+                feedback.created_by = access.employee
+                feedback.save()
+                messages.success(request, 'Замечание пилота зафиксировано.')
+                return redirect('pilot_feedback')
     else:
         form = PilotFeedbackForm()
 

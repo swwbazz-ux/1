@@ -110,6 +110,7 @@
                     <th>Замечание</th>
                     <th>Описание и решение</th>
                     <th>Кто и когда</th>
+                    <th>Действия</th>
                 </tr>
                 </thead>
                 <tbody>
@@ -132,10 +133,33 @@
                             {{ item.created_by.full_name }}<br>
                             <span class="muted">{{ item.created_at|date:"d.m.Y H:i" }}</span>
                         </td>
+                        <td>
+                            <form method="post" class="inline-action">
+                                {% csrf_token %}
+                                <input type="hidden" name="action" value="change_status">
+                                <input type="hidden" name="feedback_id" value="{{ item.id }}">
+                                <input type="hidden" name="status" value="in_work">
+                                <button type="submit" class="button-small">В работу</button>
+                            </form>
+                            <form method="post" class="inline-action">
+                                {% csrf_token %}
+                                <input type="hidden" name="action" value="change_status">
+                                <input type="hidden" name="feedback_id" value="{{ item.id }}">
+                                <input type="hidden" name="status" value="decided">
+                                <button type="submit" class="button-small">Решено</button>
+                            </form>
+                            <form method="post" class="inline-action">
+                                {% csrf_token %}
+                                <input type="hidden" name="action" value="change_status">
+                                <input type="hidden" name="feedback_id" value="{{ item.id }}">
+                                <input type="hidden" name="status" value="rejected">
+                                <button type="submit" class="button-small button-muted">Отклонено</button>
+                            </form>
+                        </td>
                     </tr>
                 {% empty %}
                     <tr>
-                        <td colspan="7" class="muted">Замечаний пока нет. Во время пилота фиксируем здесь все, что мешает работе или требует решения.</td>
+                        <td colspan="8" class="muted">Замечаний пока нет. Во время пилота фиксируем здесь все, что мешает работе или требует решения.</td>
                     </tr>
                 {% endfor %}
                 </tbody>

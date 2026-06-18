@@ -159,9 +159,28 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, 'Журнал замечаний пилота')
         self.assertContains(response, 'Не хватает столбца для сверки')
         self.assertContains(response, 'P1 - исправить до запуска')
+        self.assertContains(response, 'В работу')
+        self.assertContains(response, 'Решено')
+        self.assertContains(response, 'Отклонено')
         self.assertEqual(PilotFeedback.objects.count(), 1)
         feedback = PilotFeedback.objects.first()
         self.assertEqual(feedback.created_by, manager)
+
+        status_response = self.client.post(
+            '/reports/pilot-feedback/',
+            {
+                'action': 'change_status',
+                'feedback_id': str(feedback.id),
+                'status': 'decided',
+            },
+            follow=True,
+            HTTP_HOST='localhost',
+        )
+
+        self.assertEqual(status_response.status_code, 200)
+        feedback.refresh_from_db()
+        self.assertEqual(feedback.status, 'decided')
+        self.assertContains(status_response, 'Решение принято')
 
         export_response = self.client.get('/reports/pilot-feedback/export/', HTTP_HOST='localhost')
 

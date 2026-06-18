@@ -224,6 +224,21 @@ button:hover,
     color: var(--ink);
 }
 
+.button-small {
+    border-radius: 10px;
+    font-size: 13px;
+    padding: 8px 10px;
+}
+
+.button-muted {
+    background: #e9f0f4;
+    color: var(--ink);
+}
+
+.inline-action {
+    margin: 0 0 6px;
+}
+
 .actions {
     display: flex;
     gap: 12px;
