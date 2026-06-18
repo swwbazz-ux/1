@@ -73,8 +73,33 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, '/reports/templates/')
         self.assertContains(response, '/reports/management/')
         self.assertContains(response, '/reports/management/export/')
+        self.assertContains(response, '/reports/pilot-checklist/')
         self.assertContains(response, 'Excel-выгрузка витрины руководства')
+        self.assertContains(response, 'Чеклист пилотной проверки отчетов')
         self.assertContains(response, '6000')
+
+    def test_manager_can_open_pilot_report_checklist(self):
+        manager_role = Role.objects.create(code='manager', name='Руководство')
+        manager = Employee.objects.create(full_name='Тестовое руководство')
+        EmployeeAccess.objects.create(employee=manager, role=manager_role, access_code='6000')
+
+        self.client.post('/', {'access_code': '6000'}, follow=True, HTTP_HOST='localhost')
+        response = self.client.get('/reports/pilot-checklist/', HTTP_HOST='localhost')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Чеклист пилотной проверки отчетов')
+        self.assertContains(response, '9 из 10')
+        self.assertContains(response, '95%')
+        self.assertContains(response, '/reports/management/')
+        self.assertContains(response, '/reports/management/export/')
+        self.assertContains(response, '/dispatcher/control/')
+        self.assertContains(response, '/reports/volume/')
+        self.assertContains(response, '/reports/volume/export/')
+        self.assertContains(response, '/reports/templates/')
+        self.assertContains(response, '/reports/customer-daily/')
+        self.assertContains(response, '/reports/customer-daily/export/')
+        self.assertContains(response, '/reports/downtimes/')
+        self.assertContains(response, '/reports/downtimes/export/')
 
     def test_driver_primary_registration_flow(self):
         truck_type = EquipmentType.objects.create(name='Самосвал')
@@ -1447,6 +1472,8 @@ class AccessLoginTests(TestCase):
         )
         self.assertContains(dashboard_response, 'Витрина руководства')
         self.assertContains(dashboard_response, 'Выгрузить витрину в Excel')
+        self.assertContains(dashboard_response, 'Чеклист пилотной проверки')
+        self.assertContains(dashboard_response, '/reports/pilot-checklist/')
         self.assertContains(dashboard_response, 'Факт за сутки')
         self.assertContains(dashboard_response, 'План за сутки')
         self.assertContains(dashboard_response, 'Выполнение плана')

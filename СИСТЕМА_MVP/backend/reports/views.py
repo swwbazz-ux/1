@@ -819,6 +819,123 @@ def get_reports_access(request, allowed_roles):
     return access
 
 
+PILOT_REPORT_CHECKLIST_SECTIONS = [
+    {
+        'title': '1. Витрина руководства',
+        'items': [
+            {
+                'text': 'Открыть управленческую витрину и проверить суточные KPI, выполнение плана, день/ночь и динамику за 7 дней.',
+                'url': '/reports/management/',
+                'url_text': 'Открыть витрину',
+            },
+            {
+                'text': 'Выгрузить витрину в Excel и сверить листы: Сводка, Динамика 7 дней, День ночь.',
+                'url': '/reports/management/export/',
+                'url_text': 'Выгрузить Excel',
+            },
+        ],
+    },
+    {
+        'title': '2. Диспетчерский контроль',
+        'items': [
+            {
+                'text': 'Проверить активные рейсы, неподтвержденные назначения, открытые механические простои и последние завершенные рейсы.',
+                'url': '/dispatcher/control/',
+                'url_text': 'Открыть пульт',
+            },
+        ],
+    },
+    {
+        'title': '3. Отчет по объемам',
+        'items': [
+            {
+                'text': 'Проверить фильтры, группировки, переходящие рейсы и выбранный шаблон отчета.',
+                'url': '/reports/volume/',
+                'url_text': 'Открыть отчет',
+            },
+            {
+                'text': 'Проверить Excel-выгрузку отчета по объемам с теми же фильтрами и столбцами.',
+                'url': '/reports/volume/export/',
+                'url_text': 'Выгрузить Excel',
+            },
+            {
+                'text': 'Проверить конструктор шаблонов: состав столбцов, подписи, фильтры и группировку.',
+                'url': '/reports/templates/',
+                'url_text': 'Открыть конструктор',
+            },
+        ],
+    },
+    {
+        'title': '4. Суточный отчет заказчику',
+        'items': [
+            {
+                'text': 'Открыть суточный отчет и проверить смены, объемы, месячную сводку и механические простои.',
+                'url': '/reports/customer-daily/',
+                'url_text': 'Открыть отчет',
+            },
+            {
+                'text': 'Выгрузить суточный отчет в Excel и сверить структуру с текущей формой заказчика.',
+                'url': '/reports/customer-daily/export/',
+                'url_text': 'Выгрузить Excel',
+            },
+        ],
+    },
+    {
+        'title': '5. Механические простои',
+        'items': [
+            {
+                'text': 'Проверить отчет по простоям: открытые/закрытые события, критичность, причины, техника и длительность.',
+                'url': '/reports/downtimes/',
+                'url_text': 'Открыть отчет',
+            },
+            {
+                'text': 'Выгрузить отчет по простоям в Excel и проверить, что полная история попадает в файл.',
+                'url': '/reports/downtimes/export/',
+                'url_text': 'Выгрузить Excel',
+            },
+        ],
+    },
+    {
+        'title': '6. Вопросы перед пилотом',
+        'items': [
+            {
+                'text': 'Сверить, какие текущие Excel-формы диспетчерская обязана сдавать каждый день.',
+                'url': '',
+                'url_text': '',
+            },
+            {
+                'text': 'Отметить расхождения между системой и действующими отчетами: недостающие столбцы, названия, формулы и порядок строк.',
+                'url': '',
+                'url_text': '',
+            },
+            {
+                'text': 'Решить, что исправляем до пилота, а что фиксируем как ограничение первой версии.',
+                'url': '',
+                'url_text': '',
+            },
+        ],
+    },
+]
+
+
+def pilot_report_checklist_view(request):
+    access = get_reports_access(request, {'admin', 'dispatcher', 'manager'})
+    if not access:
+        return redirect('login' if not request.session.get('employee_access_id') else 'role_home')
+
+    return render(
+        request,
+        'reports/pilot_checklist.html',
+        {
+            'access': access,
+            'sections': PILOT_REPORT_CHECKLIST_SECTIONS,
+            'progress_stage': '9 из 10',
+            'progress_percent': 95,
+            'remaining_stages': 1,
+        },
+    )
+
+
 def report_template_builder_view(request):
     access = get_reports_access(request, {'admin', 'dispatcher'})
     if not access:
