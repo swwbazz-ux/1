@@ -21,7 +21,7 @@ from references.models import (
 )
 from reports.models import ReportTemplate, ReportType
 from shifts.models import EmployeeShift
-from trips.models import Trip, TripStatus
+from trips.models import DispatcherActionLog, DispatcherActionType, Trip, TripStatus
 
 from .models import DriverPrimaryRegistration, Employee, EmployeeAccess, Role
 
@@ -539,6 +539,9 @@ class AccessLoginTests(TestCase):
         self.assertTrue(shift.is_service_closed)
         self.assertEqual(shift.closed_by, dispatcher)
         self.assertContains(close_response, 'Открытых смен сейчас нет.')
+        action = DispatcherActionLog.objects.get()
+        self.assertEqual(action.actor, dispatcher)
+        self.assertEqual(action.action_type, DispatcherActionType.SERVICE_CLOSE_SHIFT)
 
     def test_manager_cannot_service_close_shift(self):
         truck_type = EquipmentType.objects.create(name='Самосвал')
@@ -595,6 +598,8 @@ class AccessLoginTests(TestCase):
         self.assertEqual(assignment.status, AssignmentStatus.CANCELLED)
         self.assertIsNotNone(assignment.ended_at)
         self.assertContains(response, 'Ожидающих подтверждения назначений нет.')
+        action = DispatcherActionLog.objects.get()
+        self.assertEqual(action.action_type, DispatcherActionType.CANCEL_ASSIGNMENT)
 
     def test_dispatcher_can_cancel_accepted_assignment_from_control_panel(self):
         truck_type = EquipmentType.objects.create(name='Самосвал')
@@ -667,6 +672,8 @@ class AccessLoginTests(TestCase):
         self.assertEqual(trip.unloading_shift, unloading_shift)
         self.assertIsNotNone(trip.completed_at)
         self.assertContains(response, 'Выполненных рейсов пока нет.', count=0)
+        action = DispatcherActionLog.objects.get()
+        self.assertEqual(action.action_type, DispatcherActionType.COMPLETE_TRIP)
 
     def test_dispatcher_cannot_service_complete_active_trip_without_open_shift(self):
         truck_type = EquipmentType.objects.create(name='Самосвал')
@@ -729,6 +736,8 @@ class AccessLoginTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(trip.status, TripStatus.CANCELLED)
         self.assertContains(response, 'Активных рейсов сейчас нет.')
+        action = DispatcherActionLog.objects.get()
+        self.assertEqual(action.action_type, DispatcherActionType.CANCEL_TRIP)
 
     def test_volume_report_can_filter_by_loading_shift_type(self):
         truck_type = EquipmentType.objects.create(name='Самосвал')

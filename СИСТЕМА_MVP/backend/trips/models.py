@@ -7,6 +7,13 @@ class TripStatus(models.TextChoices):
     CANCELLED = 'cancelled', 'Отменен'
 
 
+class DispatcherActionType(models.TextChoices):
+    SERVICE_CLOSE_SHIFT = 'service_close_shift', 'Служебное закрытие смены'
+    CANCEL_ASSIGNMENT = 'cancel_assignment', 'Снятие назначения'
+    CANCEL_TRIP = 'cancel_trip', 'Отмена рейса'
+    COMPLETE_TRIP = 'complete_trip', 'Служебное завершение рейса'
+
+
 class Trip(models.Model):
     excavator = models.ForeignKey('references.Equipment', verbose_name='Экскаватор', on_delete=models.PROTECT, related_name='excavator_trips')
     truck = models.ForeignKey('references.Equipment', verbose_name='Самосвал', on_delete=models.PROTECT, related_name='truck_trips')
@@ -37,4 +44,20 @@ class Trip(models.Model):
     def __str__(self):
         return f'{self.truck} -> {self.dump_point} ({self.rock_type})'
 
-# Create your models here.
+
+class DispatcherActionLog(models.Model):
+    actor = models.ForeignKey('users.Employee', verbose_name='Кто выполнил действие', on_delete=models.PROTECT, related_name='dispatcher_action_logs')
+    action_type = models.CharField('Тип действия', max_length=64, choices=DispatcherActionType.choices)
+    trip = models.ForeignKey('trips.Trip', verbose_name='Рейс', on_delete=models.SET_NULL, null=True, blank=True, related_name='dispatcher_action_logs')
+    shift = models.ForeignKey('shifts.EmployeeShift', verbose_name='Смена', on_delete=models.SET_NULL, null=True, blank=True, related_name='dispatcher_action_logs')
+    haul_assignment = models.ForeignKey('assignments.HaulAssignment', verbose_name='Назначение', on_delete=models.SET_NULL, null=True, blank=True, related_name='dispatcher_action_logs')
+    target_summary = models.CharField('Краткое описание объекта', max_length=255)
+    created_at = models.DateTimeField('Когда выполнено', auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Диспетчерское действие'
+        verbose_name_plural = 'Диспетчерские действия'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'{self.get_action_type_display()}: {self.target_summary}'

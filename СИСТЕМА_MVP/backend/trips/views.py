@@ -8,7 +8,18 @@ from shifts.models import EmployeeShift
 from users.models import EmployeeAccess
 
 from .forms import TripCreateForm
-from .models import Trip, TripStatus
+from .models import DispatcherActionLog, DispatcherActionType, Trip, TripStatus
+
+
+def log_dispatcher_action(*, actor, action_type, target_summary, trip=None, shift=None, haul_assignment=None):
+    DispatcherActionLog.objects.create(
+        actor=actor,
+        action_type=action_type,
+        trip=trip,
+        shift=shift,
+        haul_assignment=haul_assignment,
+        target_summary=target_summary,
+    )
 
 
 def excavator_work_view(request):
@@ -131,6 +142,11 @@ def dispatcher_control_view(request):
 
     trucks = Equipment.objects.filter(equipment_type__name='Самосвал', is_active=True).order_by('garage_number')
     excavators = Equipment.objects.filter(equipment_type__name='Экскаватор', is_active=True).order_by('garage_number')
+    recent_dispatcher_actions = (
+        DispatcherActionLog.objects
+        .select_related('actor')
+        .order_by('-created_at')[:12]
+    )
 
     return render(
         request,
@@ -148,6 +164,7 @@ def dispatcher_control_view(request):
             'open_shifts_count': len(open_shifts),
             'trucks': trucks,
             'excavators': excavators,
+            'recent_dispatcher_actions': recent_dispatcher_actions,
             'filters': {
                 'truck': truck_id,
                 'excavator': excavator_id,
@@ -184,6 +201,12 @@ def dispatcher_service_close_shift_view(request, shift_id):
     shift.closed_by = access.employee
     shift.is_service_closed = True
     shift.save(update_fields=['closed_at', 'closed_by', 'is_service_closed'])
+    log_dispatcher_action(
+        actor=access.employee,
+        action_type=DispatcherActionType.SERVICE_CLOSE_SHIFT,
+        shift=shift,
+        target_summary=f'{shift.employee} / {shift.equipment or "-"} / {shift.get_shift_type_display()}',
+    )
     messages.success(request, f'Смена сотрудника {shift.employee} закрыта служебно.')
     return redirect('dispatcher_control')
 
@@ -212,6 +235,12 @@ def dispatcher_cancel_assignment_view(request, assignment_id):
     assignment.status = AssignmentStatus.CANCELLED
     assignment.ended_at = timezone.now()
     assignment.save(update_fields=['status', 'ended_at'])
+    log_dispatcher_action(
+        actor=access.employee,
+        action_type=DispatcherActionType.CANCEL_ASSIGNMENT,
+        haul_assignment=assignment,
+        target_summary=f'{assignment.truck} под {assignment.excavator}',
+    )
     messages.success(request, f'Назначение {assignment.truck} под {assignment.excavator} отменено.')
     return redirect('dispatcher_control')
 
@@ -239,6 +268,12 @@ def dispatcher_cancel_trip_view(request, trip_id):
 
     trip.status = TripStatus.CANCELLED
     trip.save(update_fields=['status'])
+    log_dispatcher_action(
+        actor=access.employee,
+        action_type=DispatcherActionType.CANCEL_TRIP,
+        trip=trip,
+        target_summary=f'{trip.truck} -> {trip.dump_point}',
+    )
     messages.success(request, f'Рейс {trip.truck} -> {trip.dump_point} отменен.')
     return redirect('dispatcher_control')
 
@@ -284,6 +319,12 @@ def dispatcher_complete_trip_view(request, trip_id):
         and trip.loading_shift.shift_type != unloading_shift.shift_type
     )
     trip.save(update_fields=['status', 'driver', 'completed_at', 'unloading_shift', 'is_carryover'])
+    log_dispatcher_action(
+        actor=access.employee,
+        action_type=DispatcherActionType.COMPLETE_TRIP,
+        trip=trip,
+        target_summary=f'{trip.truck} -> {trip.dump_point}',
+    )
     messages.success(request, f'Рейс {trip.truck} завершен служебно.')
     return redirect('dispatcher_control')
 
