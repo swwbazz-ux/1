@@ -18,7 +18,7 @@ from references.models import (
     RockType,
     TruckCapacityRule,
 )
-from reports.models import ReportTemplate, ReportType
+from reports.models import PilotFeedback, ReportTemplate, ReportType
 from shifts.models import EmployeeShift
 from trips.models import Trip, TripStatus
 from users.models import DriverPrimaryRegistration, Employee, EmployeeAccess, Role
@@ -193,6 +193,7 @@ class Command(BaseCommand):
             employee=employees['mechanic'],
             source_text=active_trip.downtime_text,
         )
+        self.seed_demo_pilot_feedback(employees['dispatcher'])
 
         self.stdout.write(self.style.SUCCESS('Демо-сценарий MVP подготовлен.'))
         self.stdout.write(
@@ -356,6 +357,20 @@ class Command(BaseCommand):
             started_at=started_at,
             ended_at=ended_at,
             comment=comment,
+        )
+
+    def seed_demo_pilot_feedback(self, employee):
+        PilotFeedback.objects.update_or_create(
+            title='Демо-замечание: сверить почасовую группировку с диспетчерской',
+            defaults={
+                'category': 'report',
+                'priority': 'p2',
+                'status': 'new',
+                'screen': 'Отчет по объемам',
+                'description': 'На пилоте нужно проверить, достаточно ли группировки по часу вместо старой широкой почасовой матрицы.',
+                'decision': 'Решение принять после сверки с диспетчерской службой.',
+                'created_by': employee,
+            },
         )
 
     def get_open_shift(self, employee, equipment, shift_type, start_fuel, start_mileage, start_engine_hours):

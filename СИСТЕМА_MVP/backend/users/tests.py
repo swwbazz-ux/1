@@ -1268,6 +1268,7 @@ class AccessLoginTests(TestCase):
         self.assertTrue(DowntimeEvent.objects.filter(reason__is_critical=True, ended_at__isnull=True).exists())
         self.assertTrue(DowntimeEvent.objects.filter(reason__is_critical=False, ended_at__isnull=False).exists())
         self.assertTrue(ReportTemplate.objects.filter(name='Демо отчет по объемам', is_active=True).exists())
+        self.assertTrue(PilotFeedback.objects.filter(title__startswith='Демо-замечание').exists())
 
     def test_mechanic_opens_dashboard_and_creates_downtime_event(self):
         excavator_type = EquipmentType.objects.create(name='Р­РєСЃРєР°РІР°С‚РѕСЂ')
