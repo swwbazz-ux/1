@@ -1336,14 +1336,7 @@ def customer_daily_report_export_view(request):
     return response
 
 
-def management_dashboard_view(request):
-    access_id = request.session.get('employee_access_id')
-    if not access_id:
-        return redirect('login')
-    access = EmployeeAccess.objects.select_related('employee', 'role').filter(id=access_id, is_active=True).first()
-    if not access or access.role.code not in {'manager', 'admin', 'dispatcher'}:
-        return redirect('role_home')
-
+def management_dashboard_context(request, access):
     completed_trips = Trip.objects.filter(status=TripStatus.COMPLETED).select_related(
         'truck',
         'excavator',
@@ -1484,48 +1477,146 @@ def management_dashboard_view(request):
     daily_max_excavator_volume = max((item['volume'] or 0 for item in daily_top_excavators), default=0)
     daily_max_rock_volume = max((item['volume'] or 0 for item in daily_top_rocks), default=0)
 
-    return render(
-        request,
-        'reports/management_dashboard.html',
-        {
-            'access': access,
-            'selected_date': selected_date,
-            'daily_plan_total': daily_plan_total,
-            'daily_total_volume': daily_total_volume,
-            'daily_deviation': daily_deviation,
-            'daily_plan_completion_percent': daily_plan_completion_percent,
-            'daily_plan_completion_class': daily_plan_completion_class,
-            'daily_total_tonnage': daily_total_tonnage,
-            'daily_trip_count': len(daily_trips),
-            'daily_top_excavators': daily_top_excavators,
-            'daily_top_rocks': daily_top_rocks,
-            'daily_max_excavator_volume': daily_max_excavator_volume,
-            'daily_max_rock_volume': daily_max_rock_volume,
-            'daily_shift_comparison': daily_shift_comparison,
-            'max_daily_shift_volume': max_daily_shift_volume,
-            'max_daily_shift_plan': max_daily_shift_plan,
-            'daily_trend': daily_trend,
-            'max_daily_trend_volume': max_daily_trend_volume,
-            'max_daily_trend_plan': max_daily_trend_plan,
-            'trend_total_volume': trend_total_volume,
-            'trend_total_plan': trend_total_plan,
-            'trend_total_deviation': trend_total_deviation,
-            'trend_trip_count': trend_trip_count,
-            'trend_completion_percent': trend_completion_percent,
-            'trend_best_day': trend_best_day,
-            'trend_worst_day': trend_worst_day,
-            'total_volume': completed_summary['total_volume'] or 0,
-            'total_tonnage': completed_summary['total_tonnage'] or 0,
-            'completed_trip_count': completed_summary['trip_count'] or 0,
-            'active_trip_count': active_trips.count(),
-            'open_mechanic_downtime_count': DowntimeEvent.objects.filter(ended_at__isnull=True).count(),
-            'carryover_trip_count': completed_trips.filter(is_carryover=True).count(),
-            'mechanic_downtime_count': len(build_mechanic_downtime_rows(selected_date)),
-            'open_mechanic_downtimes': open_mechanic_downtimes,
-            'top_excavators': top_excavators,
-            'top_rocks': top_rocks,
-            'max_excavator_volume': max_excavator_volume,
-            'max_rock_volume': max_rock_volume,
-            'recent_completed_trips': recent_completed_trips,
-        },
+    return {
+        'access': access,
+        'selected_date': selected_date,
+        'daily_plan_total': daily_plan_total,
+        'daily_total_volume': daily_total_volume,
+        'daily_deviation': daily_deviation,
+        'daily_plan_completion_percent': daily_plan_completion_percent,
+        'daily_plan_completion_class': daily_plan_completion_class,
+        'daily_total_tonnage': daily_total_tonnage,
+        'daily_trip_count': len(daily_trips),
+        'daily_top_excavators': daily_top_excavators,
+        'daily_top_rocks': daily_top_rocks,
+        'daily_max_excavator_volume': daily_max_excavator_volume,
+        'daily_max_rock_volume': daily_max_rock_volume,
+        'daily_shift_comparison': daily_shift_comparison,
+        'max_daily_shift_volume': max_daily_shift_volume,
+        'max_daily_shift_plan': max_daily_shift_plan,
+        'daily_trend': daily_trend,
+        'max_daily_trend_volume': max_daily_trend_volume,
+        'max_daily_trend_plan': max_daily_trend_plan,
+        'trend_total_volume': trend_total_volume,
+        'trend_total_plan': trend_total_plan,
+        'trend_total_deviation': trend_total_deviation,
+        'trend_trip_count': trend_trip_count,
+        'trend_completion_percent': trend_completion_percent,
+        'trend_best_day': trend_best_day,
+        'trend_worst_day': trend_worst_day,
+        'total_volume': completed_summary['total_volume'] or 0,
+        'total_tonnage': completed_summary['total_tonnage'] or 0,
+        'completed_trip_count': completed_summary['trip_count'] or 0,
+        'active_trip_count': active_trips.count(),
+        'open_mechanic_downtime_count': DowntimeEvent.objects.filter(ended_at__isnull=True).count(),
+        'carryover_trip_count': completed_trips.filter(is_carryover=True).count(),
+        'mechanic_downtime_count': len(build_mechanic_downtime_rows(selected_date)),
+        'open_mechanic_downtimes': open_mechanic_downtimes,
+        'top_excavators': top_excavators,
+        'top_rocks': top_rocks,
+        'max_excavator_volume': max_excavator_volume,
+        'max_rock_volume': max_rock_volume,
+        'recent_completed_trips': recent_completed_trips,
+    }
+
+
+def management_dashboard_view(request):
+    access = get_reports_access(request, {'manager', 'admin', 'dispatcher'})
+    if not access:
+        return redirect('login' if not request.session.get('employee_access_id') else 'role_home')
+    return render(request, 'reports/management_dashboard.html', management_dashboard_context(request, access))
+
+
+def write_key_value_rows(sheet, start_row, rows):
+    for offset, (label, value) in enumerate(rows):
+        row = start_row + offset
+        sheet.cell(row=row, column=1, value=label)
+        sheet.cell(row=row, column=2, value=value)
+    return start_row + len(rows)
+
+
+def style_management_export_sheet(sheet):
+    header_fill = PatternFill('solid', fgColor='12232E')
+    header_font = Font(color='FFFFFF', bold=True)
+    for row in sheet.iter_rows():
+        for cell in row:
+            cell.alignment = Alignment(vertical='top', wrap_text=True)
+            if cell.row == 1:
+                cell.font = Font(bold=True, size=14)
+    for row in sheet.iter_rows():
+        if row[0].value and all(cell.value for cell in row[:2]):
+            if row[0].row > 1 and str(row[0].value).startswith(('Показатель', 'Дата', 'Смена')):
+                for cell in row:
+                    cell.fill = header_fill
+                    cell.font = header_font
+    for column in range(1, sheet.max_column + 1):
+        sheet.column_dimensions[get_column_letter(column)].width = 22
+
+
+def management_dashboard_export_view(request):
+    access = get_reports_access(request, {'manager', 'admin', 'dispatcher'})
+    if not access:
+        return redirect('login' if not request.session.get('employee_access_id') else 'role_home')
+
+    context = management_dashboard_context(request, access)
+    workbook = Workbook()
+    summary_sheet = workbook.active
+    summary_sheet.title = 'Сводка'
+    summary_sheet['A1'] = 'Витрина руководства'
+    summary_sheet['A2'] = f"Дата среза: {context['selected_date']:%d.%m.%Y}"
+    summary_sheet['A3'] = f"Сформировал: {access.employee.full_name}"
+
+    rows = [
+        ('Факт за сутки, м3', context['daily_total_volume']),
+        ('План за сутки, м3', context['daily_plan_total']),
+        ('Выполнение плана, %', context['daily_plan_completion_percent'] or 'Нет плана'),
+        ('Отклонение за сутки, м3', context['daily_deviation']),
+        ('Тоннаж за сутки, т', context['daily_total_tonnage']),
+        ('Рейсы за сутки', context['daily_trip_count']),
+        ('Активные рейсы', context['active_trip_count']),
+        ('Открытые механические простои', context['open_mechanic_downtime_count']),
+        ('Переходящие рейсы', context['carryover_trip_count']),
+        ('Факт за 7 дней, м3', context['trend_total_volume']),
+        ('План за 7 дней, м3', context['trend_total_plan']),
+        ('Выполнение за неделю, %', context['trend_completion_percent'] or 'Нет плана'),
+        ('Отклонение за неделю, м3', context['trend_total_deviation']),
+        ('Рейсы за 7 дней', context['trend_trip_count']),
+    ]
+    summary_sheet.append([])
+    summary_sheet.append(['Показатель', 'Значение'])
+    write_key_value_rows(summary_sheet, 6, rows)
+
+    trend_sheet = workbook.create_sheet('Динамика 7 дней')
+    trend_sheet.append(['Дата', 'Факт, м3', 'План, м3', 'Выполнение, %', 'Отклонение, м3', 'Рейсы', 'Тоннаж, т'])
+    for item in context['daily_trend']:
+        trend_sheet.append([
+            item['date'].strftime('%d.%m.%Y'),
+            item['volume'],
+            item['plan'],
+            item['completion_percent'] if item['has_plan'] else 'Нет плана',
+            item['deviation'],
+            item['trip_count'],
+            item['tonnage'],
+        ])
+
+    shifts_sheet = workbook.create_sheet('День ночь')
+    shifts_sheet.append(['Смена', 'Факт, м3', 'План, м3', 'Отклонение, м3', 'Рейсы', 'Тоннаж, т'])
+    for item in context['daily_shift_comparison']:
+        shifts_sheet.append([
+            item['label'],
+            item['volume'],
+            item['plan'],
+            item['deviation'],
+            item['trip_count'],
+            item['tonnage'],
+        ])
+
+    for sheet in workbook.worksheets:
+        style_management_export_sheet(sheet)
+
+    response = HttpResponse(
+        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     )
+    response['Content-Disposition'] = 'attachment; filename="management_dashboard.xlsx"'
+    workbook.save(response)
+    return response

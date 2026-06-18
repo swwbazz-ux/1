@@ -1434,10 +1434,17 @@ class AccessLoginTests(TestCase):
 
         login_response = self.client.post('/', {'access_code': '6000'}, follow=True, HTTP_HOST='localhost')
         dashboard_response = self.client.get('/reports/management/?date=2026-06-17', HTTP_HOST='localhost')
+        export_response = self.client.get('/reports/management/export/?date=2026-06-17', HTTP_HOST='localhost')
 
         self.assertRedirects(login_response, '/reports/management/', target_status_code=200)
         self.assertEqual(dashboard_response.status_code, 200)
+        self.assertEqual(export_response.status_code, 200)
+        self.assertEqual(
+            export_response['Content-Type'],
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
         self.assertContains(dashboard_response, 'Витрина руководства')
+        self.assertContains(dashboard_response, 'Выгрузить витрину в Excel')
         self.assertContains(dashboard_response, 'Факт за сутки')
         self.assertContains(dashboard_response, 'План за сутки')
         self.assertContains(dashboard_response, 'Выполнение плана')
@@ -1468,5 +1475,16 @@ class AccessLoginTests(TestCase):
         self.assertContains(dashboard_response, '98,8%')
         self.assertContains(dashboard_response, '57,00')
         self.assertContains(dashboard_response, '142,50')
+        workbook = load_workbook(BytesIO(export_response.content))
+        self.assertIn('Сводка', workbook.sheetnames)
+        self.assertIn('Динамика 7 дней', workbook.sheetnames)
+        self.assertIn('День ночь', workbook.sheetnames)
+        values = [cell.value for sheet in workbook.worksheets for row in sheet.iter_rows() for cell in row]
+        self.assertIn('Витрина руководства', values)
+        self.assertIn('Факт за 7 дней, м3', values)
+        self.assertIn('Выполнение за неделю, %', values)
+        self.assertIn('Дневная смена', values)
+        self.assertIn(Decimal('79.00'), values)
+        self.assertIn(98.8, values)
 
 # Create your tests here.
