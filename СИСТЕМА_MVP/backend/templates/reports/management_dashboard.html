@@ -39,6 +39,17 @@
             <div class="metric">{{ daily_plan_total }} м3</div>
             <div class="muted">По плановым заданиям в рейсах</div>
         </div>
+        <div class="metric-card {{ daily_plan_completion_class }}">
+            <div>Выполнение плана</div>
+            <div class="metric">
+                {% if daily_plan_completion_percent is not None %}
+                    {{ daily_plan_completion_percent }}%
+                {% else %}
+                    Нет плана
+                {% endif %}
+            </div>
+            <div class="muted">Факт относительно плана за сутки</div>
+        </div>
         <div class="metric-card {% if daily_deviation < 0 %}danger{% else %}success{% endif %}">
             <div>Отклонение за сутки</div>
             <div class="metric">{{ daily_deviation }} м3</div>
@@ -120,6 +131,16 @@
                         <span class="{% if item.deviation < 0 %}danger-text{% else %}success-text{% endif %}">
                             {{ item.deviation }} м3
                         </span>
+                    </div>
+                    <div class="trend-meta">
+                        <span>Выполнение</span>
+                        <strong>
+                            {% if item.has_plan %}
+                                {{ item.completion_percent }}%
+                            {% else %}
+                                Нет плана
+                            {% endif %}
+                        </strong>
                     </div>
                     <div class="bar-row compact">
                         <div class="bar-row-title">

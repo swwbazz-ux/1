@@ -944,6 +944,12 @@ def trip_shift_type(trip):
     return 'day'
 
 
+def calculate_plan_completion_percent(volume, plan):
+    if not plan:
+        return None
+    return (((volume or Decimal('0')) / plan) * Decimal('100')).quantize(Decimal('0.1'))
+
+
 def build_management_daily_trend(trips, selected_date):
     trend_start = selected_date - timedelta(days=6)
     trend_by_date = {}
@@ -968,9 +974,12 @@ def build_management_daily_trend(trips, selected_date):
 
     daily_trend = []
     for values in trend_by_date.values():
+        completion_percent = calculate_plan_completion_percent(values['volume'], values['plan'])
         daily_trend.append({
             **values,
             'deviation': values['volume'] - values['plan'],
+            'completion_percent': completion_percent,
+            'has_plan': completion_percent is not None,
         })
     return daily_trend
 
@@ -1361,6 +1370,12 @@ def management_dashboard_view(request):
     daily_total_tonnage = sum((trip.tonnage or 0) for trip in daily_trips)
     daily_plan_total = sum((trip.planned_volume_m3 or 0) for trip in daily_trips)
     daily_deviation = daily_total_volume - daily_plan_total
+    daily_plan_completion_percent = calculate_plan_completion_percent(daily_total_volume, daily_plan_total)
+    daily_plan_completion_class = (
+        'success'
+        if daily_plan_completion_percent is not None and daily_plan_completion_percent >= Decimal('100')
+        else 'danger'
+    )
     daily_shift_totals = {
         'day': {
             'label': 'Дневная смена',
@@ -1467,6 +1482,8 @@ def management_dashboard_view(request):
             'daily_plan_total': daily_plan_total,
             'daily_total_volume': daily_total_volume,
             'daily_deviation': daily_deviation,
+            'daily_plan_completion_percent': daily_plan_completion_percent,
+            'daily_plan_completion_class': daily_plan_completion_class,
             'daily_total_tonnage': daily_total_tonnage,
             'daily_trip_count': len(daily_trips),
             'daily_top_excavators': daily_top_excavators,
