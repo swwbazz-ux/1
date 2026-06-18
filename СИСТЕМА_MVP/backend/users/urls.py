@@ -5,6 +5,7 @@ from .views import (
     driver_close_shift_view,
     driver_registration_view,
     driver_shift_view,
+    interface_map_view,
     login_view,
     logout_view,
     role_home_view,
@@ -12,6 +13,7 @@ from .views import (
 
 urlpatterns = [
     path('', login_view, name='login'),
+    path('interfaces/', interface_map_view, name='interface_map'),
     path('home/', role_home_view, name='role_home'),
     path('driver/registration/', driver_registration_view, name='driver_registration'),
     path('driver/shift/', driver_shift_view, name='driver_shift'),

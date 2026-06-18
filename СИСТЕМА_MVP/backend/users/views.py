@@ -21,6 +21,58 @@ ROLE_INTERFACE_NAMES = {
 }
 
 
+INTERFACE_MAP = [
+    {
+        'section': 'Вход и администрирование',
+        'items': [
+            {'title': 'Единый вход', 'url': '/', 'code': 'любой демо-код', 'note': 'Открывает интерфейс по роли'},
+            {'title': 'Карта интерфейсов', 'url': '/interfaces/', 'code': '-', 'note': 'Все готовые экраны MVP в одном месте'},
+            {'title': 'Django-админка', 'url': '/admin/', 'code': 'администратор Django', 'note': 'Управление справочниками и данными через стандартную админку'},
+        ],
+    },
+    {
+        'section': 'Рабочие интерфейсы',
+        'items': [
+            {'title': 'Водитель самосвала', 'url': '/driver/shift/', 'code': '2000', 'note': 'Открытие/закрытие смены, активный рейс, подтверждение назначения'},
+            {'title': 'Первичная регистрация водителя', 'url': '/driver/registration/', 'code': '2000', 'note': 'Первичный выбор смены, техники и проживания'},
+            {'title': 'Машинист экскаватора', 'url': '/excavator/shift/', 'code': '3000', 'note': 'Создание рейса и параметры для отчета заказчику'},
+            {'title': 'Горный мастер', 'url': '/master/assignments/', 'code': '4000', 'note': 'Назначение самосвалов под экскаваторы'},
+            {'title': 'Диспетчерский пульт', 'url': '/dispatcher/control/', 'code': '5000', 'note': 'Контроль активных рейсов и назначений'},
+        ],
+    },
+    {
+        'section': 'Отчеты и руководство',
+        'items': [
+            {'title': 'Отчет по объемам', 'url': '/reports/volume/', 'code': '5000 / 6000', 'note': 'Фильтры, шаблоны, группировки и Excel'},
+            {'title': 'Конструктор шаблонов отчетов', 'url': '/reports/templates/', 'code': '5000 / 1000', 'note': 'Столбцы, названия, фильтры, группировки, расчетные поля'},
+            {'title': 'Суточный отчет заказчику', 'url': '/reports/customer-daily/', 'code': '5000 / 6000', 'note': 'Суточный отчет к 08:00 и Excel-выгрузка'},
+            {'title': 'Витрина руководства', 'url': '/reports/management/', 'code': '6000', 'note': 'Суточный срез, накопленная картина и показатели'},
+        ],
+    },
+]
+
+
+DEMO_ACCESS_CODES = [
+    ('1000', 'Администратор'),
+    ('2000', 'Водитель самосвала'),
+    ('3000', 'Машинист экскаватора'),
+    ('4000', 'Горный мастер'),
+    ('5000', 'Диспетчер'),
+    ('6000', 'Руководство'),
+]
+
+
+def interface_map_view(request):
+    return render(
+        request,
+        'users/interface_map.html',
+        {
+            'interface_sections': INTERFACE_MAP,
+            'demo_access_codes': DEMO_ACCESS_CODES,
+        },
+    )
+
+
 def login_view(request):
     if request.method == 'POST':
         access_code = request.POST.get('access_code', '').strip()

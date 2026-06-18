@@ -63,6 +63,16 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, 'Доступ не найден или отключен.')
         self.assertIsNone(self.client.session.get('employee_access_id'))
 
+    def test_interface_map_opens_without_login(self):
+        response = self.client.get('/interfaces/', HTTP_HOST='localhost')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Карта интерфейсов MVP')
+        self.assertContains(response, '/reports/volume/')
+        self.assertContains(response, '/reports/templates/')
+        self.assertContains(response, '/reports/management/')
+        self.assertContains(response, '6000')
+
     def test_driver_primary_registration_flow(self):
         truck_type = EquipmentType.objects.create(name='Самосвал')
         truck = Equipment.objects.create(equipment_type=truck_type, garage_number='10')

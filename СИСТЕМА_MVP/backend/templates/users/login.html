@@ -13,6 +13,9 @@
         <input name="access_code" inputmode="numeric" autocomplete="one-time-code" placeholder="Код доступа" autofocus>
         <button type="submit">Войти</button>
     </form>
+    <p class="muted">
+        <a href="{% url 'interface_map' %}">Открыть карту готовых интерфейсов</a>
+    </p>
     {% for message in messages %}
         <div class="message error">{{ message }}</div>
     {% endfor %}

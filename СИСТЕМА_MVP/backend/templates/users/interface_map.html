@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+
+{% block title %}Карта интерфейсов MVP{% endblock %}
+
+{% block body %}
+<header class="app-header">
+    <div class="header-inner">
+        <div class="topline">
+            <span>Производственный контур MVP</span>
+            <a href="{% url 'login' %}">Единый вход</a>
+        </div>
+        <h1>Карта интерфейсов MVP</h1>
+        <p>Все готовые веб-интерфейсы текущей версии в одном месте: рабочие кабинеты, отчеты, витрина руководства и админка.</p>
+    </div>
+</header>
+
+<main class="page">
+    <section class="card">
+        <h2>Демо-коды входа</h2>
+        <div class="grid">
+            {% for code, role_name in demo_access_codes %}
+                <div class="tile">
+                    <strong>{{ code }}</strong>
+                    <span class="muted">{{ role_name }}</span>
+                </div>
+            {% endfor %}
+        </div>
+        <p class="muted">Надежнее всего начинать с единого входа: система сама откроет нужный интерфейс по роли.</p>
+        <div class="actions">
+            <a class="button-link" href="{% url 'login' %}">Открыть единый вход</a>
+        </div>
+    </section>
+
+    {% for section in interface_sections %}
+        <section class="card">
+            <h2>{{ section.section }}</h2>
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                    <tr>
+                        <th>Интерфейс</th>
+                        <th>Адрес</th>
+                        <th>Код</th>
+                        <th>Что проверять</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    {% for item in section.items %}
+                        <tr>
+                            <td><a href="{{ item.url }}">{{ item.title }}</a></td>
+                            <td><code>{{ item.url }}</code></td>
+                            <td>{{ item.code }}</td>
+                            <td>{{ item.note }}</td>
+                        </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    {% endfor %}
+</main>
+{% endblock %}
