@@ -1089,6 +1089,13 @@ PILOT_REPORT_EXCEL_COVERAGE = [
         'system_link': '',
         'next_step': 'Отнести к развитию механического модуля после первого пилота.',
     },
+    {
+        'file': 'удельный_веса_руд_и_пород_Малмыжского_местородения.xlsx',
+        'purpose': 'Справочник пород, плотностей и коэффициентов разрыхления',
+        'coverage': 'структурно сверено',
+        'system_link': '/admin/references/rocktype/',
+        'next_step': 'На пилоте уточнить соответствие укрупненных рабочих названий точным породам заказчика.',
+    },
 ]
 
 
@@ -1197,7 +1204,7 @@ def pilot_report_checklist_view(request):
             'sections': PILOT_REPORT_CHECKLIST_SECTIONS,
             'excel_coverage': PILOT_REPORT_EXCEL_COVERAGE,
             'progress_stage': '9 из 10',
-            'progress_percent': 98,
+            'progress_percent': 99,
             'remaining_stages': 1,
         },
     )
