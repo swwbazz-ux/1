@@ -320,6 +320,7 @@ a {
 
 .muted {
     color: var(--muted);
+    overflow-wrap: anywhere;
 }
 
 label {
