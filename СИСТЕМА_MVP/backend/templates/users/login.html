@@ -7,10 +7,15 @@
 <main class="login-card">
     <div class="muted">Производственный контур MVP</div>
     <h1>Единый вход</h1>
-    <p>Введите личный код доступа. Система сама откроет интерфейс по вашей роли.</p>
-    <form method="post">
+    <p>Введите номер телефона из личного дела и свой пинкод. Система откроет интерфейс по вашей роли.</p>
+    <form method="post" data-validated-login>
         {% csrf_token %}
-        <input name="access_code" inputmode="numeric" autocomplete="one-time-code" placeholder="Код доступа" autofocus>
+        <label for="login-phone">Телефон</label>
+        <input id="login-phone" name="phone" inputmode="numeric" autocomplete="tel" placeholder="Например 79000000000" maxlength="11" pattern="[0-9]{11}" data-phone-input data-hint="Введите 11 цифр российского мобильного номера, например 79000000000." autofocus>
+        <small class="input-hint" data-input-hint-for="login-phone">Только цифры. Формат: 79000000000 или 89000000000.</small>
+        <label for="login-pin">Пинкод</label>
+        <input id="login-pin" name="access_code" inputmode="numeric" autocomplete="one-time-code" placeholder="6 цифр" maxlength="6" pattern="[0-9]{6}" data-pin-input data-hint="Пинкод должен состоять ровно из 6 цифр.">
+        <small class="input-hint" data-input-hint-for="login-pin">Только цифры, ровно 6 знаков.</small>
         <button type="submit">Войти</button>
     </form>
     <p class="muted">
@@ -20,4 +25,53 @@
         <div class="message error">{{ message }}</div>
     {% endfor %}
 </main>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    var form = document.querySelector('[data-validated-login]');
+    var submitButton = form ? form.querySelector('button[type="submit"]') : null;
+
+    function refreshSubmitState() {
+        if (!form || !submitButton) return;
+        var inputs = Array.from(form.querySelectorAll('[data-phone-input], [data-pin-input]'));
+        submitButton.disabled = inputs.some(function (input) { return !input.classList.contains('is-valid'); });
+    }
+
+    document.querySelectorAll('[data-phone-input], [data-pin-input]').forEach(function (input) {
+        var hint = document.querySelector('[data-input-hint-for="' + input.id + '"]');
+        var maxLength = Number(input.getAttribute('maxlength') || 0);
+        var isPhone = input.hasAttribute('data-phone-input');
+        var isPin = input.hasAttribute('data-pin-input');
+
+        function validate() {
+            var value = input.value.replace(/\D/g, '').slice(0, maxLength);
+            if (input.value !== value) input.value = value;
+
+            var valid = false;
+            var message = input.dataset.hint || '';
+            if (isPhone) {
+                valid = value.length === 11 && (value.indexOf('79') === 0 || value.indexOf('89') === 0);
+                if (value && value.length < 11) message = 'Нужно 11 цифр. Сейчас введено: ' + value.length + '.';
+                if (value.length === 11 && !valid) message = 'Российский мобильный номер должен начинаться с 79 или 89.';
+            }
+            if (isPin) {
+                valid = value.length === 6;
+                if (value && value.length < 6) message = 'Нужно ровно 6 цифр. Сейчас введено: ' + value.length + '.';
+            }
+
+            input.classList.toggle('is-invalid', Boolean(value) && !valid);
+            input.classList.toggle('is-valid', valid);
+            if (hint) {
+                hint.textContent = valid ? 'Введено правильно.' : message;
+                hint.classList.toggle('is-invalid', Boolean(value) && !valid);
+                hint.classList.toggle('is-valid', valid);
+            }
+            refreshSubmitState();
+        }
+
+        input.addEventListener('input', validate);
+        input.addEventListener('blur', validate);
+        validate();
+    });
+});
+</script>
 {% endblock %}

@@ -5,9 +5,198 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% block title %}MVP учетной системы{% endblock %}</title>
-    <link rel="stylesheet" href="{% static 'css/app.css' %}">
+    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=20260620-ux1">
 </head>
 <body class="{% block body_class %}{% endblock %}">
 {% block body %}{% endblock %}
+
+<div class="app-confirm-modal" id="app-confirm-modal" hidden>
+    <div class="app-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="app-confirm-title">
+        <div class="app-confirm-icon">!</div>
+        <div class="app-confirm-content">
+            <h2 id="app-confirm-title">Подтвердите действие</h2>
+            <p id="app-confirm-message">Выполнить действие?</p>
+        </div>
+        <div class="app-confirm-actions">
+            <button class="secondary" type="button" data-confirm-cancel>Отмена</button>
+            <button class="danger" type="button" data-confirm-accept>Подтвердить</button>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    var logoutPath = "{% url 'logout' %}";
+    var roleHomePath = "{% url 'role_home' %}";
+    var confirmModal = document.getElementById("app-confirm-modal");
+    var confirmMessage = document.getElementById("app-confirm-message");
+    var confirmAccept = confirmModal ? confirmModal.querySelector("[data-confirm-accept]") : null;
+    var confirmCancel = confirmModal ? confirmModal.querySelector("[data-confirm-cancel]") : null;
+    var pendingConfirmAction = null;
+    var backTargets = [
+        {pattern: /^\/system-admin\/employees\/create\/?$/, target: "{% url 'system_admin_employees' %}"},
+        {pattern: /^\/system-admin\/employees\/\d+\/?$/, target: "{% url 'system_admin_employees' %}"},
+        {pattern: /^\/system-admin\/employees\/?$/, target: "{% url 'system_admin_dashboard' %}"},
+        {pattern: /^\/system-admin\/references\/?$/, target: "{% url 'system_admin_dashboard' %}"},
+        {pattern: /^\/system-admin\/conflicts\/?$/, target: "{% url 'system_admin_dashboard' %}"},
+        {pattern: /^\/system-admin\/logs\/?$/, target: "{% url 'system_admin_dashboard' %}"},
+        {pattern: /^\/system-admin\/?$/, target: roleHomePath},
+        {pattern: /^\/reports\/pilot-scenario\/?$/, target: "{% url 'interface_map' %}"},
+        {pattern: /^\/reports\/pilot-feedback\/?$/, target: "{% url 'pilot_launch_scenario' %}"},
+        {pattern: /^\/reports\/pilot-checklist\/?$/, target: "{% url 'pilot_launch_scenario' %}"},
+        {pattern: /^\/reports\/management\/?$/, target: roleHomePath},
+        {pattern: /^\/reports\/customer-daily\/?$/, target: "{% url 'management_dashboard' %}"},
+        {pattern: /^\/reports\/volume\/?$/, target: "{% url 'management_dashboard' %}"},
+        {pattern: /^\/reports\/downtimes\/?$/, target: "{% url 'management_dashboard' %}"},
+        {pattern: /^\/driver\/registration\/?$/, target: roleHomePath},
+        {pattern: /^\/driver\/shift\/?$/, target: roleHomePath},
+        {pattern: /^\/dispatcher\/control\/?$/, target: roleHomePath},
+        {pattern: /^\/mining-master\/assignments\/?$/, target: roleHomePath},
+        {pattern: /^\/excavator\/work\/?$/, target: roleHomePath},
+        {pattern: /^\/mechanic\/downtimes\/?$/, target: roleHomePath},
+        {pattern: /^\/interfaces\/?$/, target: roleHomePath}
+    ];
+
+    function getBackTarget() {
+        var currentPath = window.location.pathname;
+        for (var index = 0; index < backTargets.length; index += 1) {
+            if (backTargets[index].pattern.test(currentPath)) {
+                return backTargets[index].target;
+            }
+        }
+        return roleHomePath;
+    }
+
+    function openConfirmDialog(message, action) {
+        if (!confirmModal || !confirmMessage || !confirmAccept || !confirmCancel) {
+            return;
+        }
+        pendingConfirmAction = action;
+        confirmMessage.textContent = message || "Выполнить действие?";
+        confirmModal.hidden = false;
+        document.body.classList.add("modal-open");
+        confirmAccept.focus();
+    }
+
+    function closeConfirmDialog() {
+        if (!confirmModal) {
+            return;
+        }
+        confirmModal.hidden = true;
+        document.body.classList.remove("modal-open");
+        pendingConfirmAction = null;
+    }
+
+    if (confirmAccept) {
+        confirmAccept.addEventListener("click", function () {
+            var action = pendingConfirmAction;
+            closeConfirmDialog();
+            if (action) {
+                action();
+            }
+        });
+    }
+
+    if (confirmCancel) {
+        confirmCancel.addEventListener("click", closeConfirmDialog);
+    }
+
+    if (confirmModal) {
+        confirmModal.addEventListener("click", function (event) {
+            if (event.target === confirmModal) {
+                closeConfirmDialog();
+            }
+        });
+    }
+
+    document.addEventListener("keydown", function (event) {
+        if (event.key === "Escape" && confirmModal && !confirmModal.hidden) {
+            closeConfirmDialog();
+        }
+    });
+
+    document.querySelectorAll(".topline").forEach(function (topline) {
+        if (topline.querySelector(".topline-nav")) {
+            return;
+        }
+
+        var existingLinks = Array.from(topline.querySelectorAll(":scope > a"));
+        if (!existingLinks.length) {
+            return;
+        }
+
+        var nav = document.createElement("span");
+        nav.className = "topline-nav";
+
+        var backButton = document.createElement("button");
+        backButton.type = "button";
+        backButton.className = "link-button";
+        backButton.textContent = "Назад";
+        backButton.addEventListener("click", function () {
+            window.location.href = getBackTarget();
+        });
+
+        nav.appendChild(backButton);
+        if (window.location.pathname !== roleHomePath && window.location.pathname !== "/system-admin/") {
+            var homeLink = document.createElement("a");
+            homeLink.href = roleHomePath;
+            homeLink.textContent = "Главная";
+            nav.appendChild(homeLink);
+        }
+        existingLinks.forEach(function (link) {
+            nav.appendChild(link);
+        });
+        topline.appendChild(nav);
+    });
+
+    document.addEventListener("click", function (event) {
+        var link = event.target.closest("a");
+        if (!link) {
+            return;
+        }
+        var message = link.dataset.confirm;
+        if (!message && link.getAttribute("href") === logoutPath) {
+            message = "Выйти из системы?";
+        }
+        if (message) {
+            event.preventDefault();
+            openConfirmDialog(message, function () {
+                window.location.href = link.href;
+            });
+        }
+    });
+
+    document.querySelectorAll("form").forEach(function (form) {
+        form.addEventListener("submit", function (event) {
+            if (form.dataset.confirmed === "1") {
+                delete form.dataset.confirmed;
+                return;
+            }
+
+            var submitter = event.submitter;
+            var message = submitter && submitter.dataset ? submitter.dataset.confirm : "";
+            if (!message && form.dataset.confirm) {
+                message = form.dataset.confirm;
+            }
+            if (!message) {
+                return;
+            }
+
+            event.preventDefault();
+            openConfirmDialog(message, function () {
+                form.dataset.confirmed = "1";
+                if (submitter && submitter.name) {
+                    var hidden = document.createElement("input");
+                    hidden.type = "hidden";
+                    hidden.name = submitter.name;
+                    hidden.value = submitter.value || "1";
+                    form.appendChild(hidden);
+                }
+                form.submit();
+            });
+        });
+    });
+});
+</script>
 </body>
 </html>

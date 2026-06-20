@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+
+{% block title %}Журнал действий админки{% endblock %}
+
+{% block body %}
+<header class="app-header">
+    <div class="header-inner wide-shell">
+        <div class="topline">
+            <span>{{ access.employee.full_name }}</span>
+            <a href="{% url 'system_admin_dashboard' %}">Админка</a>
+        </div>
+        <h1>Журнал действий админки</h1>
+        <p>История важных действий администратора: создание сотрудников, выдача пинкодов, блокировки, архив и удаления.</p>
+    </div>
+</header>
+
+<main class="page wide-page">
+    <section class="card">
+        <h2>Поиск</h2>
+        <form method="get" class="filter-form">
+            <label>
+                Что найти
+                <input type="search" name="q" value="{{ query }}" placeholder="ФИО, действие, объект или комментарий">
+            </label>
+            <button type="submit">Найти</button>
+            <a class="button-link" href="{% url 'system_admin_log_export' %}">Выгрузить в Excel</a>
+        </form>
+    </section>
+
+    <section class="card">
+        <h2>Последние действия</h2>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                <tr>
+                    <th>Дата</th>
+                    <th>Кто</th>
+                    <th>Действие</th>
+                    <th>Тип объекта</th>
+                    <th>Объект</th>
+                    <th>Комментарий</th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for log in logs %}
+                    <tr>
+                        <td>{{ log.created_at|date:"d.m.Y H:i" }}</td>
+                        <td>{{ log.actor.full_name|default:"-" }}</td>
+                        <td>{{ log.action }}</td>
+                        <td>{{ log.object_type }}</td>
+                        <td>{{ log.object_repr }}</td>
+                        <td>{{ log.comment|default:"-" }}</td>
+                    </tr>
+                {% empty %}
+                    <tr><td colspan="6">Действий по выбранному поиску нет.</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+</main>
+{% endblock %}

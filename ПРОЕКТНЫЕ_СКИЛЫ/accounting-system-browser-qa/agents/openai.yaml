@@ -1,0 +1,3 @@
+display_name: "Accounting System Browser QA"
+short_description: "Verifies local project UI in browser after visual or interaction changes."
+default_prompt: "Run browser QA for the changed accounting-system screen. Start the server by the standard bat file, check desktop and mobile, inspect visible issues, and report observed results."

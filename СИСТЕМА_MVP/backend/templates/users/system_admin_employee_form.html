@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block body %}
+<header class="app-header">
+    <div class="header-inner wide-shell">
+        <div class="topline">
+            <span>{{ access.employee.full_name }}</span>
+            <a href="{% url 'system_admin_employees' %}">Сотрудники</a>
+        </div>
+        <h1>{{ title }}</h1>
+        <p>Создание карточки сотрудника и первичного доступа.</p>
+    </div>
+</header>
+
+<main class="page wide-page">
+    <section class="card">
+        <form method="post" enctype="multipart/form-data">
+            {% csrf_token %}
+            {% for field in form %}
+                <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                {{ field }}
+                {{ field.errors }}
+            {% endfor %}
+            <button type="submit">Сохранить</button>
+        </form>
+    </section>
+</main>
+{% endblock %}

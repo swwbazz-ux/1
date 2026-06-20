@@ -19,11 +19,10 @@
     {% endfor %}
 
     <section class="card">
-        <h2>Закрепленные данные</h2>
+        <h2>Регистрационные данные</h2>
         <div class="grid">
-            <div class="tile"><strong>Смена</strong>{{ registration.get_shift_type_display }}</div>
-            <div class="tile"><strong>Самосвал</strong>{{ registration.truck }}</div>
             <div class="tile"><strong>Проживание</strong>{{ registration.dormitory_section }}</div>
+            <div class="tile"><strong>Текущий самосвал</strong>{{ current_truck|default:"Смена не открыта" }}</div>
         </div>
     </section>
 
@@ -32,6 +31,8 @@
             <h2>Смена открыта</h2>
             <div class="grid">
                 <div class="tile"><strong>Открыта</strong>{{ open_shift.opened_at|date:"d.m.Y H:i" }}</div>
+                <div class="tile"><strong>Смена</strong>{{ open_shift.get_shift_type_display }}</div>
+                <div class="tile"><strong>Самосвал</strong>{{ open_shift.equipment }}</div>
                 <div class="tile"><strong>Топливо</strong>{{ open_shift.start_fuel }}</div>
                 <div class="tile"><strong>Пробег</strong>{{ open_shift.start_mileage }}</div>
                 <div class="tile"><strong>Моточасы</strong>{{ open_shift.start_engine_hours }}</div>
@@ -50,7 +51,7 @@
             </form>
         {% else %}
             <h2>Открыть смену</h2>
-            <p class="muted">Проверьте показатели техники на начало смены. Если фактические значения отличаются, укажите фактические.</p>
+            <p class="muted">Выберите смену и самосвал, затем укажите фактические показатели техники на начало смены.</p>
             {% if last_closed_shift %}
                 <div class="message success">По умолчанию подставлены показатели на конец предыдущей закрытой смены по этому самосвалу.</div>
             {% endif %}

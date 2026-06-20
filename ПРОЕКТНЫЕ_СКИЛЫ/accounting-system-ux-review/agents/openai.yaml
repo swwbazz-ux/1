@@ -1,0 +1,3 @@
+display_name: "Accounting System UX Review"
+short_description: "Reviews role-based workplace UI for the accounting-system project."
+default_prompt: "Review this accounting-system screen as a real workplace interface. Identify the user role, main workflow risk, concrete layout/control fixes, and browser checks."

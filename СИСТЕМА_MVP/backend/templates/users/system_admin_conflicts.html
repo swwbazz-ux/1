@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+
+{% block title %}Конфликты админки{% endblock %}
+
+{% block body %}
+<header class="app-header">
+    <div class="header-inner wide-shell">
+        <div class="topline">
+            <span>{{ access.employee.full_name }}</span>
+            <a href="{% url 'system_admin_dashboard' %}">Админка</a>
+        </div>
+        <h1>Конфликты админки</h1>
+        <p>Ситуации, где система не дала выполнить рискованное действие и сохранила причину для разбора.</p>
+    </div>
+</header>
+
+<main class="page wide-page">
+    <section class="card">
+        <h2>Фильтр</h2>
+        <form method="get" class="filter-form">
+            <label>
+                Статус
+                <select name="status">
+                    <option value="">Все статусы</option>
+                    {% for value, label in statuses %}
+                        <option value="{{ value }}" {% if selected_status == value %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <button type="submit">Показать</button>
+            <a class="button-link" href="{% url 'system_admin_conflict_export' %}">Выгрузить в Excel</a>
+        </form>
+    </section>
+
+    <section class="card">
+        <h2>Журнал конфликтов</h2>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                <tr>
+                    <th>Дата</th>
+                    <th>Статус</th>
+                    <th>Тип</th>
+                    <th>Сотрудник</th>
+                    <th>Роль</th>
+                    <th>Процесс</th>
+                    <th>Описание</th>
+                    <th>Действия</th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for conflict in conflicts %}
+                    <tr>
+                        <td>{{ conflict.created_at|date:"d.m.Y H:i" }}</td>
+                        <td>{{ conflict.get_status_display }}</td>
+                        <td>{{ conflict.conflict_type }}</td>
+                        <td>{{ conflict.employee.full_name|default:"-" }}</td>
+                        <td>{{ conflict.role.name|default:"-" }}</td>
+                        <td>{{ conflict.process }}</td>
+                        <td>{{ conflict.description }}</td>
+                        <td>
+                            <form method="post" action="{% url 'system_admin_conflict_action' conflict.id 'in-progress' %}" class="inline-form">
+                                {% csrf_token %}
+                                <button type="submit">В работу</button>
+                            </form>
+                            <form method="post" action="{% url 'system_admin_conflict_action' conflict.id 'resolved' %}" class="inline-form">
+                                {% csrf_token %}
+                                <button type="submit">Решен</button>
+                            </form>
+                            <form method="post" action="{% url 'system_admin_conflict_action' conflict.id 'rejected' %}" class="inline-form">
+                                {% csrf_token %}
+                                <button type="submit">Отклонен</button>
+                            </form>
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr><td colspan="8">Конфликтов по выбранному фильтру нет.</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+</main>
+{% endblock %}

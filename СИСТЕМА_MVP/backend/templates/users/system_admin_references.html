@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+
+{% block title %}Справочники админки{% endblock %}
+
+{% block body %}
+<header class="app-header">
+    <div class="header-inner wide-shell">
+        <div class="topline">
+            <span>{{ access.employee.full_name }}</span>
+            <a href="{% url 'system_admin_dashboard' %}">Админка</a>
+        </div>
+        <h1>Справочники админки</h1>
+        <p>Единый реестр справочников первого этапа: техника, породы, точки разгрузки, проживание, роли и доступы.</p>
+    </div>
+</header>
+
+<main class="page wide-page">
+    {% for section in reference_sections %}
+        <section class="card">
+            <h2>{{ section.title }}</h2>
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                    <tr>
+                        <th>Справочник</th>
+                        <th>Записей</th>
+                        <th>Открыть</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    {% for item in section.items %}
+                        <tr>
+                            <td>{{ item.name }}</td>
+                            <td>{{ item.count }}</td>
+                            <td>
+                                {% if item.url %}
+                                    <a href="{% url item.url %}">Открыть</a>
+                                {% elif item.external_url %}
+                                    <a href="{{ item.external_url }}">Открыть</a>
+                                {% else %}
+                                    -
+                                {% endif %}
+                            </td>
+                        </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    {% endfor %}
+</main>
+{% endblock %}
