@@ -88,3 +88,17 @@
 `C:\Users\swwba\.codex\skills`
 
 После этого Codex должен видеть их как обычные пользовательские скилы.
+
+## Проверка подключения после переноса
+
+После ручного копирования папок в `C:\Users\swwba\.codex\skills` выполнена проверка через официальный debug-путь Codex:
+
+`codex.exe debug prompt-input`
+
+С явным `CODEX_HOME=C:\Users\swwba\.codex` в model-visible prompt появились все три скила:
+
+- `accounting-system-browser-qa`;
+- `accounting-system-design-system`;
+- `accounting-system-ux-review`.
+
+Вывод: папки перенесены правильно, Codex умеет их подхватывать из глобальной папки. Если старый уже открытый чат показывает старый список skills, нужно открыть новый чат или дождаться пересборки стартового контекста; новые prompt-сессии уже получают эти скилы.
