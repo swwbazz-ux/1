@@ -1,0 +1,184 @@
+{% extends "base.html" %}
+
+{% block title %}Админка MVP{% endblock %}
+
+{% block body %}
+<header class="app-header">
+    <div class="header-inner wide-shell">
+        <div class="topline">
+            <span>{{ access.employee.full_name }}</span>
+            <a href="{% url 'logout' %}">Выйти</a>
+        </div>
+        <h1>Админка MVP</h1>
+        <p>Сотрудники, доступы, справочники, конфликты и выгрузки первого этапа.</p>
+    </div>
+</header>
+
+<main class="page wide-page">
+    {% for message in messages %}
+        <div class="message success">{{ message }}</div>
+    {% endfor %}
+
+    <section class="card">
+        <h2>Состояние системы</h2>
+        <div class="grid">
+            <a class="tile tile-link" href="{% url 'system_admin_employees' %}">
+                <strong>{{ employee_total }}</strong>
+                <span>Сотрудников всего</span>
+            </a>
+            <a class="tile tile-link" href="{% url 'system_admin_employees' %}?status=active">
+                <strong>{{ active_total }}</strong>
+                <span>Активных</span>
+            </a>
+            <a class="tile tile-link" href="{% url 'system_admin_employees' %}?access_status=not_activated">
+                <strong>{{ not_activated_total }}</strong>
+                <span>Не активировали доступ</span>
+            </a>
+            <a class="tile tile-link" href="{% url 'system_admin_employees' %}?access_status=blocked">
+                <strong>{{ blocked_total }}</strong>
+                <span>Заблокированных доступов</span>
+            </a>
+            <a class="tile tile-link" href="{% url 'system_admin_employees' %}?access_status=deactivated">
+                <strong>{{ deactivated_total }}</strong>
+                <span>Деактивированных доступов</span>
+            </a>
+        </div>
+        <div class="actions">
+            <a class="button-link" href="{% url 'system_admin_employee_create' %}">Создать сотрудника</a>
+            <a class="button-link" href="{% url 'system_admin_references' %}">Справочники</a>
+            <a class="button-link" href="{% url 'system_admin_conflicts' %}">Конфликты</a>
+            <a class="button-link" href="{% url 'system_admin_logs' %}">Журнал действий</a>
+            <a class="button-link" href="{% url 'system_admin_employee_export' %}">Выгрузить сотрудников</a>
+            <a class="button-link" href="{% url 'system_admin_access_export' %}">Выгрузить доступы</a>
+        </div>
+    </section>
+
+    <section class="card">
+        <h2>Справочники</h2>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                <tr>
+                    <th>Справочник</th>
+                    <th>Записей</th>
+                    <th>Открыть</th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for title, count, url in reference_counts %}
+                    <tr>
+                        <td>{{ title }}</td>
+                        <td>{{ count }}</td>
+                        <td><a href="{{ url }}">Перейти</a></td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="card">
+        <h2>Последние сотрудники</h2>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                <tr>
+                    <th>ФИО</th>
+                    <th>Статус</th>
+                    <th>Телефон</th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for employee in recent_employees %}
+                    <tr>
+                        <td><a href="{% url 'system_admin_employee_detail' employee.id %}">{{ employee.full_name }}</a></td>
+                        <td>{{ employee.get_status_display }}</td>
+                        <td>{{ employee.phone|default:"-" }}</td>
+                    </tr>
+                {% empty %}
+                    <tr><td colspan="3">Сотрудников пока нет.</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="card">
+        <h2>Последние входы</h2>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                <tr>
+                    <th>Сотрудник</th>
+                    <th>Роль</th>
+                    <th>Статус доступа</th>
+                    <th>Последний вход</th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for item in recent_accesses %}
+                    <tr>
+                        <td>{{ item.employee.full_name }}</td>
+                        <td>{{ item.role.name }}</td>
+                        <td>{{ item.get_status_display }}</td>
+                        <td>{{ item.last_login_at|date:"d.m.Y H:i"|default:"-" }}</td>
+                    </tr>
+                {% empty %}
+                    <tr><td colspan="4">Входов пока нет.</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="card">
+        <h2>Открытые конфликты</h2>
+        <div class="actions">
+            <a class="button-link" href="{% url 'system_admin_conflicts' %}">Открыть конфликты</a>
+            <a class="button-link" href="{% url 'system_admin_logs' %}">Открыть журнал действий</a>
+            <a class="button-link" href="{% url 'system_admin_conflict_export' %}">Выгрузить конфликты</a>
+            <a class="button-link" href="{% url 'system_admin_log_export' %}">Выгрузить журнал действий</a>
+        </div>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                <tr>
+                    <th>Тип</th>
+                    <th>Сотрудник</th>
+                    <th>Описание</th>
+                    <th>Действия</th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for conflict in open_conflicts %}
+                    <tr>
+                        <td>{{ conflict.conflict_type }}</td>
+                        <td>{{ conflict.employee.full_name|default:"-" }}</td>
+                        <td>{{ conflict.description }}</td>
+                        <td>
+                            <form method="post" action="{% url 'system_admin_conflict_action' conflict.id 'in-progress' %}" class="inline-form">
+                                {% csrf_token %}
+                                <input type="hidden" name="next" value="dashboard">
+                                <button type="submit">В работу</button>
+                            </form>
+                            <form method="post" action="{% url 'system_admin_conflict_action' conflict.id 'resolved' %}" class="inline-form">
+                                {% csrf_token %}
+                                <input type="hidden" name="next" value="dashboard">
+                                <button type="submit">Решен</button>
+                            </form>
+                            <form method="post" action="{% url 'system_admin_conflict_action' conflict.id 'rejected' %}" class="inline-form">
+                                {% csrf_token %}
+                                <input type="hidden" name="next" value="dashboard">
+                                <button type="submit">Отклонен</button>
+                            </form>
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr><td colspan="4">Открытых конфликтов нет.</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+</main>
+{% endblock %}

@@ -1,0 +1,3 @@
+display_name: "Accounting System Design System"
+short_description: "Keeps project UI components, colors, spacing, and layouts consistent."
+default_prompt: "Align this accounting-system interface with the project design system. Reuse existing patterns, flag consistency risks, and list browser or Figma verification needed."

@@ -1,11 +1,15 @@
 from datetime import datetime, timedelta
 from decimal import Decimal
 from io import BytesIO
+from tempfile import TemporaryDirectory
 
+from django.core.files.base import ContentFile
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 from openpyxl import load_workbook
+from PIL import Image
 
 from assignments.models import AssignmentStatus, HaulAssignment
 from downtimes.models import DowntimeEvent, DowntimeReason
@@ -24,7 +28,8 @@ from reports.models import PilotFeedback, ReportTemplate, ReportType
 from shifts.models import EmployeeShift
 from trips.models import DispatcherActionLog, DispatcherActionType, Trip, TripStatus
 
-from .models import DriverPrimaryRegistration, Employee, EmployeeAccess, Role
+from .forms import AdminEmployeeEditForm
+from .models import AdminActionLog, AdminConflict, DriverPrimaryRegistration, Employee, EmployeeAccess, Role
 
 
 class AccessLoginTests(TestCase):
@@ -45,8 +50,6 @@ class AccessLoginTests(TestCase):
         section = DormitorySection.objects.create(block=block, name='А')
         DriverPrimaryRegistration.objects.create(
             employee=self.employee,
-            shift_type='day',
-            truck=truck,
             dormitory_section=section,
         )
 
@@ -57,17 +60,637 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, 'Открыть смену')
         self.assertEqual(self.client.session.get('employee_access_id'), self.access.id)
 
+    def test_admin_opens_system_admin_dashboard(self):
+        admin_role = Role.objects.create(code='admin', name='Администратор')
+        admin_employee = Employee.objects.create(full_name='Администратор MVP', status=Employee.Status.ACTIVE)
+        EmployeeAccess.objects.create(
+            employee=admin_employee,
+            role=admin_role,
+            access_code='1000',
+            status=EmployeeAccess.Status.ACTIVATED,
+        )
+
+        login_response = self.client.post('/', {'access_code': '1000'}, follow=True, HTTP_HOST='localhost')
+        dashboard_response = self.client.get('/system-admin/', HTTP_HOST='localhost')
+
+        self.assertRedirects(login_response, '/system-admin/', target_status_code=200)
+        self.assertEqual(dashboard_response.status_code, 200)
+        self.assertContains(dashboard_response, 'Админка MVP')
+        self.assertContains(dashboard_response, 'Создать сотрудника')
+        self.assertContains(dashboard_response, 'Справочники')
+        self.assertContains(dashboard_response, 'href="/system-admin/employees/"')
+        self.assertContains(dashboard_response, 'href="/system-admin/employees/?status=active"')
+        self.assertContains(dashboard_response, 'href="/system-admin/employees/?access_status=not_activated"')
+        self.assertContains(dashboard_response, 'href="/system-admin/employees/?access_status=blocked"')
+        self.assertContains(dashboard_response, 'href="/system-admin/employees/?access_status=deactivated"')
+        self.assertNotContains(dashboard_response, '>Сотрудники</a>')
+
+    def test_admin_employee_list_can_filter_by_access_status(self):
+        admin_role = Role.objects.create(code='admin', name='Администратор')
+        driver_role = Role.objects.create(code='driver_access_filter', name='Водитель самосвала')
+        admin_employee = Employee.objects.create(full_name='Администратор MVP', status=Employee.Status.ACTIVE)
+        waiting_employee = Employee.objects.create(full_name='Ожидает активации', status=Employee.Status.NOT_ACTIVATED)
+        active_employee = Employee.objects.create(full_name='Активный водитель', status=Employee.Status.ACTIVE)
+        EmployeeAccess.objects.create(
+            employee=admin_employee,
+            role=admin_role,
+            access_code='1000',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+        EmployeeAccess.objects.create(
+            employee=waiting_employee,
+            role=driver_role,
+            access_code='200001',
+            status=EmployeeAccess.Status.NOT_ACTIVATED,
+            is_active=True,
+        )
+        EmployeeAccess.objects.create(
+            employee=active_employee,
+            role=driver_role,
+            access_code='200002',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+
+        self.client.post('/', {'access_code': '1000'}, follow=True, HTTP_HOST='localhost')
+        response = self.client.get('/system-admin/employees/?access_status=not_activated', HTTP_HOST='localhost')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Ожидает активации')
+        self.assertNotContains(response, 'Активный водитель')
+        self.assertContains(response, 'name="access_status"')
+
+    def test_admin_cannot_block_own_access(self):
+        admin_role = Role.objects.create(code='admin', name='Администратор')
+        admin_employee = Employee.objects.create(full_name='Администратор MVP', status=Employee.Status.ACTIVE)
+        admin_access = EmployeeAccess.objects.create(
+            employee=admin_employee,
+            role=admin_role,
+            access_code='1000',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+
+        self.client.post('/', {'access_code': '1000'}, follow=True, HTTP_HOST='localhost')
+        response = self.client.post(
+            f'/system-admin/accesses/{admin_access.id}/block/',
+            {'reason': 'Случайная самоблокировка'},
+            follow=True,
+            HTTP_HOST='localhost',
+        )
+        admin_access.refresh_from_db()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(admin_access.status, EmployeeAccess.Status.ACTIVATED)
+        self.assertTrue(admin_access.is_active)
+
+    def test_admin_cannot_deactivate_own_employee_card(self):
+        admin_role = Role.objects.create(code='admin', name='Администратор')
+        admin_employee = Employee.objects.create(full_name='Администратор MVP', status=Employee.Status.ACTIVE)
+        EmployeeAccess.objects.create(
+            employee=admin_employee,
+            role=admin_role,
+            access_code='1000',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+
+        self.client.post('/', {'access_code': '1000'}, follow=True, HTTP_HOST='localhost')
+        response = self.client.post(
+            f'/system-admin/employees/{admin_employee.id}/deactivate/',
+            follow=True,
+            HTTP_HOST='localhost',
+        )
+        admin_employee.refresh_from_db()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(admin_employee.status, Employee.Status.ACTIVE)
+        self.assertTrue(admin_employee.is_active)
+
+    def test_admin_employee_card_has_photo_upload_block(self):
+        admin_role = Role.objects.create(code='admin', name='Admin')
+        admin_employee = Employee.objects.create(full_name='Admin MVP', status=Employee.Status.ACTIVE)
+        employee = Employee.objects.create(full_name='Employee With Photo')
+        EmployeeAccess.objects.create(
+            employee=admin_employee,
+            role=admin_role,
+            access_code='1000',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+
+        self.client.post('/', {'access_code': '1000'}, follow=True, HTTP_HOST='localhost')
+        response = self.client.get(f'/system-admin/employees/{employee.id}/', HTTP_HOST='localhost')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'employee-profile-head')
+        self.assertContains(response, 'employee-photo-card')
+        self.assertContains(response, 'employee-photo-plus')
+        self.assertContains(response, 'employee-photo-controls')
+        self.assertContains(response, 'name="position"')
+        self.assertContains(response, 'Должность')
+        self.assertContains(response, 'type="file"')
+
+    def test_admin_employee_card_keeps_selected_role_and_primary_pin_status(self):
+        admin_role = Role.objects.create(code='admin', name='Администратор')
+        driver_role = Role.objects.create(code='driver_primary_pin', name='Водитель самосвала')
+        admin_employee = Employee.objects.create(full_name='Администратор MVP', status=Employee.Status.ACTIVE)
+        employee = Employee.objects.create(full_name='Водитель с доступом', status=Employee.Status.ACTIVE)
+        employee_access = EmployeeAccess.objects.create(
+            employee=employee,
+            role=driver_role,
+            access_code='246824',
+            status=EmployeeAccess.Status.NOT_ACTIVATED,
+            primary_code_issued_at=timezone.now(),
+            is_active=True,
+        )
+        EmployeeAccess.objects.create(
+            employee=admin_employee,
+            role=admin_role,
+            access_code='1000',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+
+        self.client.post('/', {'access_code': '1000'}, follow=True, HTTP_HOST='localhost')
+        response = self.client.get(f'/system-admin/employees/{employee.id}/', HTTP_HOST='localhost')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, f'<option value="{driver_role.id}" selected>', html=False)
+        self.assertContains(response, '2468')
+        self.assertContains(response, 'ожидает первого входа')
+
+        employee_access.access_code = '8642'
+        employee_access.status = EmployeeAccess.Status.ACTIVATED
+        employee_access.activated_at = timezone.now()
+        employee_access.last_login_at = timezone.now()
+        employee_access.save(update_fields=['access_code', 'status', 'activated_at', 'last_login_at'])
+
+        activated_response = self.client.get(f'/system-admin/employees/{employee.id}/', HTTP_HOST='localhost')
+
+        self.assertContains(activated_response, f'<option value="{driver_role.id}" selected>', html=False)
+        self.assertContains(activated_response, 'Пинкод активирован')
+        self.assertNotContains(activated_response, '8642')
+
+        reset_response = self.client.post(
+            f'/system-admin/employees/{employee.id}/generate-access/',
+            {'role': driver_role.id},
+            follow=True,
+            HTTP_HOST='localhost',
+        )
+        employee_access.refresh_from_db()
+
+        self.assertEqual(reset_response.status_code, 200)
+        self.assertEqual(employee_access.status, EmployeeAccess.Status.NOT_ACTIVATED)
+        self.assertIsNone(employee_access.activated_at)
+        self.assertNotEqual(employee_access.access_code, '8642')
+        self.assertContains(reset_response, employee_access.access_code)
+        self.assertContains(reset_response, 'ожидает первого входа')
+        self.assertNotContains(reset_response, '8642')
+
+    def test_admin_employee_card_with_photo_has_remove_confirmation_and_modal(self):
+        with TemporaryDirectory() as media_root:
+            with override_settings(MEDIA_ROOT=media_root):
+                admin_role = Role.objects.create(code='admin', name='Admin')
+                admin_employee = Employee.objects.create(full_name='Admin MVP', status=Employee.Status.ACTIVE)
+                employee = Employee.objects.create(full_name='Employee With Photo', status=Employee.Status.ACTIVE)
+                employee.photo.save('employee_photos/current.jpg', ContentFile(b'photo'), save=True)
+                EmployeeAccess.objects.create(
+                    employee=admin_employee,
+                    role=admin_role,
+                    access_code='1000',
+                    status=EmployeeAccess.Status.ACTIVATED,
+                    is_active=True,
+                )
+
+                self.client.post('/', {'access_code': '1000'}, follow=True, HTTP_HOST='localhost')
+                response = self.client.get(f'/system-admin/employees/{employee.id}/', HTTP_HOST='localhost')
+
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, 'employee-photo-control add')
+                self.assertContains(response, 'employee-photo-control remove')
+                self.assertContains(response, 'data-confirm="Удалить фото сотрудника?"')
+                self.assertContains(response, 'app-confirm-modal')
+                self.assertContains(response, 'data-confirm-accept')
+                self.assertContains(response, 'data-confirm-cancel')
+                self.assertNotContains(response, 'onclick="return window.confirm')
+                self.assertContains(response, 'employee-photo-modal')
+
+    def test_employee_photo_rejects_non_image_file(self):
+        employee = Employee.objects.create(full_name='Employee Photo Validation')
+        upload = SimpleUploadedFile('note.txt', b'not-image', content_type='text/plain')
+
+        form = AdminEmployeeEditForm(
+            data={'full_name': employee.full_name, 'status': Employee.Status.ACTIVE},
+            files={'photo': upload},
+            instance=employee,
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn('photo', form.errors)
+
+    def test_employee_photo_upload_is_converted_to_jpeg(self):
+        employee = Employee.objects.create(full_name='Employee Photo Compression')
+        image_buffer = BytesIO()
+        image = Image.new('RGB', (900, 700), color=(40, 180, 150))
+        image.save(image_buffer, format='PNG')
+        upload = SimpleUploadedFile('photo.png', image_buffer.getvalue(), content_type='image/png')
+
+        form = AdminEmployeeEditForm(
+            data={'full_name': employee.full_name, 'status': Employee.Status.ACTIVE},
+            files={'photo': upload},
+            instance=employee,
+        )
+
+        self.assertTrue(form.is_valid(), form.errors)
+        photo = form.cleaned_data['photo']
+        self.assertTrue(photo.name.endswith('.jpg'))
+        self.assertLessEqual(photo.size, 5 * 1024 * 1024)
+
+    def test_admin_can_replace_existing_employee_photo(self):
+        with TemporaryDirectory() as media_root:
+            with override_settings(MEDIA_ROOT=media_root):
+                admin_role = Role.objects.create(code='admin', name='Admin')
+                admin_employee = Employee.objects.create(full_name='Admin MVP', status=Employee.Status.ACTIVE)
+                employee = Employee.objects.create(full_name='Employee Replace Photo', status=Employee.Status.ACTIVE)
+                employee.photo.save('employee_photos/old.jpg', ContentFile(b'old-photo'), save=True)
+                old_photo_name = employee.photo.name
+                EmployeeAccess.objects.create(
+                    employee=admin_employee,
+                    role=admin_role,
+                    access_code='1000',
+                    status=EmployeeAccess.Status.ACTIVATED,
+                    is_active=True,
+                )
+                image_buffer = BytesIO()
+                Image.new('RGB', (700, 700), color=(120, 80, 40)).save(image_buffer, format='PNG')
+                upload = SimpleUploadedFile('new-photo.png', image_buffer.getvalue(), content_type='image/png')
+
+                self.client.post('/', {'access_code': '1000'}, follow=True, HTTP_HOST='localhost')
+                response = self.client.post(
+                    f'/system-admin/employees/{employee.id}/',
+                    {'full_name': employee.full_name, 'status': Employee.Status.ACTIVE, 'photo': upload},
+                    follow=True,
+                    HTTP_HOST='localhost',
+                )
+                employee.refresh_from_db()
+
+                self.assertEqual(response.status_code, 200)
+                self.assertNotEqual(employee.photo.name, old_photo_name)
+                self.assertTrue(employee.photo.name.endswith('.jpg'))
+                self.assertFalse(employee.photo.storage.exists(old_photo_name))
+                self.assertTrue(employee.photo.storage.exists(employee.photo.name))
+
+    def test_admin_can_remove_existing_employee_photo(self):
+        with TemporaryDirectory() as media_root:
+            with override_settings(MEDIA_ROOT=media_root):
+                admin_role = Role.objects.create(code='admin', name='Admin')
+                admin_employee = Employee.objects.create(full_name='Admin MVP', status=Employee.Status.ACTIVE)
+                employee = Employee.objects.create(full_name='Employee Remove Photo', status=Employee.Status.ACTIVE)
+                employee.photo.save('employee_photos/remove.jpg', ContentFile(b'old-photo'), save=True)
+                old_photo_name = employee.photo.name
+                EmployeeAccess.objects.create(
+                    employee=admin_employee,
+                    role=admin_role,
+                    access_code='1000',
+                    status=EmployeeAccess.Status.ACTIVATED,
+                    is_active=True,
+                )
+
+                self.client.post('/', {'access_code': '1000'}, follow=True, HTTP_HOST='localhost')
+                response = self.client.post(
+                    f'/system-admin/employees/{employee.id}/',
+                    {'remove_photo': '1'},
+                    follow=True,
+                    HTTP_HOST='localhost',
+                )
+                employee.refresh_from_db()
+
+                self.assertEqual(response.status_code, 200)
+                self.assertFalse(employee.photo)
+                self.assertFalse(employee.photo.storage.exists(old_photo_name))
+                self.assertTrue(
+                    AdminActionLog.objects.filter(
+                        object_repr=str(employee),
+                        action='Удалено фото сотрудника',
+                    ).exists()
+                )
+
+    def test_admin_opens_references_registry(self):
+        admin_role = Role.objects.create(code='admin', name='Администратор')
+        admin_employee = Employee.objects.create(full_name='Администратор MVP', status=Employee.Status.ACTIVE)
+        EmployeeAccess.objects.create(
+            employee=admin_employee,
+            role=admin_role,
+            access_code='1000',
+            status=EmployeeAccess.Status.ACTIVATED,
+        )
+        EquipmentType.objects.create(name='Самосвал')
+        RockType.objects.create(name='Руда')
+        DumpPoint.objects.create(name='ККД')
+
+        self.client.post('/', {'access_code': '1000'}, follow=True, HTTP_HOST='localhost')
+        response = self.client.get('/system-admin/references/', HTTP_HOST='localhost')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Справочники админки')
+        self.assertContains(response, 'Виды техники')
+        self.assertContains(response, 'Породы')
+        self.assertContains(response, 'Точки разгрузки')
+        self.assertContains(response, '/admin/references/equipmenttype/')
+
+    def test_admin_opens_conflicts_registry(self):
+        admin_role = Role.objects.create(code='admin', name='Администратор')
+        admin_employee = Employee.objects.create(full_name='Администратор MVP', status=Employee.Status.ACTIVE)
+        EmployeeAccess.objects.create(
+            employee=admin_employee,
+            role=admin_role,
+            access_code='1000',
+            status=EmployeeAccess.Status.ACTIVATED,
+        )
+        employee = Employee.objects.create(full_name='Сотрудник с конфликтом')
+        AdminConflict.objects.create(
+            employee=employee,
+            role=admin_role,
+            conflict_type='Тестовый конфликт',
+            process='Админка MVP',
+            description='Проверка журнала конфликтов',
+        )
+
+        self.client.post('/', {'access_code': '1000'}, follow=True, HTTP_HOST='localhost')
+        response = self.client.get('/system-admin/conflicts/', HTTP_HOST='localhost')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Конфликты админки')
+        self.assertContains(response, 'Тестовый конфликт')
+        self.assertContains(response, 'Сотрудник с конфликтом')
+        self.assertContains(response, 'Выгрузить в Excel')
+
+    def test_admin_updates_conflict_status(self):
+        admin_role = Role.objects.create(code='admin', name='Администратор')
+        admin_employee = Employee.objects.create(full_name='Администратор MVP', status=Employee.Status.ACTIVE)
+        EmployeeAccess.objects.create(
+            employee=admin_employee,
+            role=admin_role,
+            access_code='1000',
+            status=EmployeeAccess.Status.ACTIVATED,
+        )
+        conflict = AdminConflict.objects.create(
+            employee=admin_employee,
+            role=admin_role,
+            conflict_type='Проверка статуса',
+            process='Админка MVP',
+            description='Проверка смены статуса конфликта',
+        )
+
+        self.client.post('/', {'access_code': '1000'}, follow=True, HTTP_HOST='localhost')
+        response = self.client.post(
+            f'/system-admin/conflicts/{conflict.id}/in-progress/',
+            follow=True,
+            HTTP_HOST='localhost',
+        )
+        conflict.refresh_from_db()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(conflict.status, AdminConflict.Status.IN_PROGRESS)
+        self.assertEqual(conflict.resolved_by, admin_employee)
+        self.assertIsNotNone(conflict.resolved_at)
+        self.assertTrue(AdminActionLog.objects.filter(action='Изменен статус административного конфликта').exists())
+
+    def test_admin_opens_action_log_registry(self):
+        admin_role = Role.objects.create(code='admin', name='Администратор')
+        admin_employee = Employee.objects.create(full_name='Администратор MVP', status=Employee.Status.ACTIVE)
+        EmployeeAccess.objects.create(
+            employee=admin_employee,
+            role=admin_role,
+            access_code='1000',
+            status=EmployeeAccess.Status.ACTIVATED,
+        )
+        AdminActionLog.objects.create(
+            actor=admin_employee,
+            action='Тестовое действие',
+            object_type='Employee',
+            object_repr='Тестовый объект',
+            comment='Проверка журнала действий',
+        )
+
+        self.client.post('/', {'access_code': '1000'}, follow=True, HTTP_HOST='localhost')
+        response = self.client.get('/system-admin/logs/?q=Тестовое', HTTP_HOST='localhost')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Журнал действий админки')
+        self.assertContains(response, 'Тестовое действие')
+        self.assertContains(response, 'Тестовый объект')
+        self.assertContains(response, 'Выгрузить в Excel')
+
+    def test_admin_creates_employee_with_primary_pin_and_exports_accesses(self):
+        admin_role = Role.objects.create(code='admin', name='Администратор')
+        driver_role = self.role
+        admin_employee = Employee.objects.create(full_name='Администратор MVP', status=Employee.Status.ACTIVE)
+        EmployeeAccess.objects.create(
+            employee=admin_employee,
+            role=admin_role,
+            access_code='1000',
+            status=EmployeeAccess.Status.ACTIVATED,
+        )
+
+        self.client.post('/', {'access_code': '1000'}, follow=True, HTTP_HOST='localhost')
+        create_response = self.client.post(
+            '/system-admin/employees/create/',
+            {
+                'full_name': 'Новый водитель',
+                'personnel_number': '001',
+                'phone': '+79990000000',
+                'status': Employee.Status.NOT_ACTIVATED,
+                'comment': 'Первичная загрузка',
+                'role': driver_role.id,
+                'generate_access': 'on',
+            },
+            follow=True,
+            HTTP_HOST='localhost',
+        )
+
+        employee = Employee.objects.get(full_name='Новый водитель')
+        access = EmployeeAccess.objects.get(employee=employee)
+
+        self.assertEqual(create_response.status_code, 200)
+        self.assertEqual(access.role, driver_role)
+        self.assertEqual(access.status, EmployeeAccess.Status.NOT_ACTIVATED)
+        self.assertEqual(len(access.access_code), 6)
+        self.assertTrue(access.access_code.isdigit())
+        self.assertTrue(AdminActionLog.objects.filter(action='Создан сотрудник и выдан первичный пинкод').exists())
+
+        block_response = self.client.post(
+            f'/system-admin/accesses/{access.id}/block/',
+            {'reason': 'Проверка блокировки'},
+            follow=True,
+            HTTP_HOST='localhost',
+        )
+        access.refresh_from_db()
+
+        self.assertEqual(block_response.status_code, 200)
+        self.assertEqual(access.status, EmployeeAccess.Status.BLOCKED)
+        self.assertFalse(access.is_active)
+
+        export_response = self.client.get('/system-admin/export/accesses/', HTTP_HOST='localhost')
+        self.assertEqual(export_response.status_code, 200)
+        workbook = load_workbook(BytesIO(export_response.content))
+        self.assertIn('Доступы', workbook.sheetnames)
+        values = [cell.value for row in workbook['Доступы'].iter_rows() for cell in row]
+        self.assertIn('Новый водитель', values)
+        self.assertIn('Водитель самосвала', values)
+
+    def test_primary_pin_requires_activation_and_becomes_invalid(self):
+        driver_role = self.role
+        employee = Employee.objects.create(full_name='Водитель с первичным пинкодом', phone='+79000001111')
+        access = EmployeeAccess.objects.create(
+            employee=employee,
+            role=driver_role,
+            access_code='246824',
+            status=EmployeeAccess.Status.NOT_ACTIVATED,
+            primary_code_issued_at=timezone.now(),
+        )
+
+        login_response = self.client.post(
+            '/',
+            {'phone': '+79000001111', 'access_code': '246824'},
+            follow=True,
+            HTTP_HOST='localhost',
+        )
+        self.assertRedirects(login_response, '/activate-access/', target_status_code=200)
+        self.assertContains(login_response, 'Активировать доступ')
+        self.assertContains(login_response, 'name="phone"')
+        self.assertContains(login_response, 'name="new_access_code"')
+
+        activation_response = self.client.post(
+            '/activate-access/',
+            {'phone': '+7 (900) 000-11-11', 'new_access_code': '864286', 'confirm_access_code': '864286'},
+            follow=True,
+            HTTP_HOST='localhost',
+        )
+        access.refresh_from_db()
+        employee.refresh_from_db()
+
+        self.assertEqual(activation_response.status_code, 200)
+        self.assertEqual(access.access_code, '864286')
+        self.assertEqual(access.status, EmployeeAccess.Status.ACTIVATED)
+        self.assertEqual(employee.status, Employee.Status.ACTIVE)
+        self.assertIsNone(EmployeeAccess.objects.filter(access_code='246824').first())
+
+        self.client.get('/logout/', follow=True, HTTP_HOST='localhost')
+        old_code_response = self.client.post('/', {'access_code': '246824'}, follow=True, HTTP_HOST='localhost')
+        self.assertContains(old_code_response, 'Телефон или пинкод указаны неверно.')
+
+        new_code_response = self.client.post(
+            '/',
+            {'phone': '+79000001111', 'access_code': access.access_code},
+            follow=True,
+            HTTP_HOST='localhost',
+        )
+        self.assertEqual(new_code_response.status_code, 200)
+        self.assertEqual(self.client.session.get('employee_access_id'), access.id)
+
+    def test_activation_allows_same_pin_for_different_phone_numbers(self):
+        driver_role = self.role
+        first_employee = Employee.objects.create(full_name='Водитель с постоянным пинкодом', phone='+79000001111')
+        EmployeeAccess.objects.create(
+            employee=first_employee,
+            role=driver_role,
+            access_code='864286',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+        second_employee = Employee.objects.create(full_name='Водитель с первичным пинкодом', phone='+79000002222')
+        EmployeeAccess.objects.create(
+            employee=second_employee,
+            role=driver_role,
+            access_code='246824',
+            status=EmployeeAccess.Status.NOT_ACTIVATED,
+            primary_code_issued_at=timezone.now(),
+            is_active=True,
+        )
+
+        self.client.post('/', {'phone': '+79000002222', 'access_code': '246824'}, follow=True, HTTP_HOST='localhost')
+        response = self.client.post(
+            '/activate-access/',
+            {'phone': '+7 900 000-22-22', 'new_access_code': '864286', 'confirm_access_code': '864286'},
+            follow=True,
+            HTTP_HOST='localhost',
+        )
+        second_access = EmployeeAccess.objects.get(employee=second_employee)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, 'Этот пинкод нельзя использовать')
+        self.assertNotContains(response, 'Такой пинкод уже используется')
+        self.assertEqual(second_access.access_code, '864286')
+        self.assertEqual(second_access.status, EmployeeAccess.Status.ACTIVATED)
+
+    def test_admin_can_delete_employee_without_production_history(self):
+        admin_role = Role.objects.create(code='admin', name='Администратор')
+        admin_employee = Employee.objects.create(full_name='Администратор MVP', status=Employee.Status.ACTIVE)
+        EmployeeAccess.objects.create(
+            employee=admin_employee,
+            role=admin_role,
+            access_code='1000',
+            status=EmployeeAccess.Status.ACTIVATED,
+        )
+        employee = Employee.objects.create(full_name='Сотрудник без истории')
+
+        self.client.post('/', {'access_code': '1000'}, follow=True, HTTP_HOST='localhost')
+        response = self.client.post(
+            f'/system-admin/employees/{employee.id}/delete/',
+            follow=True,
+            HTTP_HOST='localhost',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Employee.objects.filter(id=employee.id).exists())
+        self.assertContains(response, 'удален')
+
+    def test_admin_cannot_delete_employee_with_production_history(self):
+        admin_role = Role.objects.create(code='admin', name='Администратор')
+        admin_employee = Employee.objects.create(full_name='Администратор MVP', status=Employee.Status.ACTIVE)
+        EmployeeAccess.objects.create(
+            employee=admin_employee,
+            role=admin_role,
+            access_code='1000',
+            status=EmployeeAccess.Status.ACTIVATED,
+        )
+        employee = Employee.objects.create(full_name='Сотрудник с историей')
+        EmployeeShift.objects.create(
+            employee=employee,
+            shift_type='day',
+            opened_at=timezone.now(),
+        )
+
+        self.client.post('/', {'access_code': '1000'}, follow=True, HTTP_HOST='localhost')
+        response = self.client.post(
+            f'/system-admin/employees/{employee.id}/delete/',
+            follow=True,
+            HTTP_HOST='localhost',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(Employee.objects.filter(id=employee.id).exists())
+        self.assertTrue(AdminConflict.objects.filter(employee=employee, conflict_type='Попытка удаления сотрудника с историей').exists())
+        self.assertContains(response, 'Удаление запрещено')
+
     def test_wrong_access_code_stays_on_login(self):
         response = self.client.post('/', {'access_code': 'wrong'}, follow=True, HTTP_HOST='localhost')
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'Доступ не найден или отключен.')
+        self.assertContains(response, 'Телефон или пинкод указаны неверно.')
         self.assertIsNone(self.client.session.get('employee_access_id'))
+        self.assertContains(response, 'login-page')
 
     def test_interface_map_opens_without_login(self):
         response = self.client.get('/interfaces/', HTTP_HOST='localhost')
 
         self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Назад')
+        self.assertContains(response, 'Главная')
+        self.assertContains(response, 'Карта интерфейсов')
         self.assertContains(response, 'Карта интерфейсов MVP')
         self.assertContains(response, '/reports/volume/')
         self.assertContains(response, '/reports/templates/')
@@ -76,6 +699,10 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, '/reports/pilot-checklist/')
         self.assertContains(response, '/reports/pilot-scenario/')
         self.assertContains(response, '/reports/pilot-feedback/')
+        self.assertContains(response, '/system-admin/employees/')
+        self.assertContains(response, '/system-admin/references/')
+        self.assertContains(response, '/system-admin/conflicts/')
+        self.assertContains(response, '/system-admin/logs/')
         self.assertContains(response, 'Excel-выгрузка витрины руководства')
         self.assertContains(response, 'Чеклист пилотной проверки отчетов')
         self.assertContains(response, 'Сценарий пилотного запуска')
@@ -208,8 +835,6 @@ class AccessLoginTests(TestCase):
         registration_response = self.client.post(
             '/driver/registration/',
             {
-                'shift_type': 'day',
-                'truck': truck.id,
                 'dormitory_section': section.id,
             },
             follow=True,
@@ -230,13 +855,13 @@ class AccessLoginTests(TestCase):
         self.client.post('/', {'access_code': '2000'}, follow=True, HTTP_HOST='localhost')
         self.client.post(
             '/driver/registration/',
-            {'shift_type': 'day', 'truck': truck.id, 'dormitory_section': section.id},
+            {'dormitory_section': section.id},
             follow=True,
             HTTP_HOST='localhost',
         )
         response = self.client.post(
             '/driver/shift/',
-            {'start_fuel': '100', 'start_mileage': '2500', 'start_engine_hours': '700'},
+            {'shift_type': 'day', 'truck': truck.id, 'start_fuel': '100', 'start_mileage': '2500', 'start_engine_hours': '700'},
             follow=True,
             HTTP_HOST='localhost',
         )
@@ -255,13 +880,13 @@ class AccessLoginTests(TestCase):
         self.client.post('/', {'access_code': '2000'}, follow=True, HTTP_HOST='localhost')
         self.client.post(
             '/driver/registration/',
-            {'shift_type': 'day', 'truck': truck.id, 'dormitory_section': section.id},
+            {'dormitory_section': section.id},
             follow=True,
             HTTP_HOST='localhost',
         )
         self.client.post(
             '/driver/shift/',
-            {'start_fuel': '100', 'start_mileage': '2500', 'start_engine_hours': '700'},
+            {'shift_type': 'day', 'truck': truck.id, 'start_fuel': '100', 'start_mileage': '2500', 'start_engine_hours': '700'},
             follow=True,
             HTTP_HOST='localhost',
         )
@@ -281,7 +906,7 @@ class AccessLoginTests(TestCase):
         self.assertEqual(shift.end_mileage, 2600)
         self.assertEqual(shift.end_engine_hours, 712)
 
-        next_open_response = self.client.get('/driver/shift/', HTTP_HOST='localhost')
+        next_open_response = self.client.get(f'/driver/shift/?truck={truck.id}', HTTP_HOST='localhost')
         self.assertContains(next_open_response, 'value="90')
         self.assertContains(next_open_response, 'value="2600')
         self.assertContains(next_open_response, 'value="712')
@@ -298,7 +923,13 @@ class AccessLoginTests(TestCase):
         self.client.post('/', {'access_code': '2000'}, follow=True, HTTP_HOST='localhost')
         self.client.post(
             '/driver/registration/',
-            {'shift_type': 'day', 'truck': truck.id, 'dormitory_section': section.id},
+            {'dormitory_section': section.id},
+            follow=True,
+            HTTP_HOST='localhost',
+        )
+        self.client.post(
+            '/driver/shift/',
+            {'shift_type': 'day', 'truck': truck.id, 'start_fuel': '100', 'start_mileage': '2500', 'start_engine_hours': '700'},
             follow=True,
             HTTP_HOST='localhost',
         )
@@ -343,13 +974,13 @@ class AccessLoginTests(TestCase):
         driver_client.post('/', {'access_code': '2000'}, follow=True, HTTP_HOST='localhost')
         driver_client.post(
             '/driver/registration/',
-            {'shift_type': 'day', 'truck': truck.id, 'dormitory_section': section.id},
+            {'dormitory_section': section.id},
             follow=True,
             HTTP_HOST='localhost',
         )
         driver_client.post(
             '/driver/shift/',
-            {'start_fuel': '100', 'start_mileage': '2500', 'start_engine_hours': '700'},
+            {'shift_type': 'day', 'truck': truck.id, 'start_fuel': '100', 'start_mileage': '2500', 'start_engine_hours': '700'},
             follow=True,
             HTTP_HOST='localhost',
         )
@@ -429,13 +1060,13 @@ class AccessLoginTests(TestCase):
         self.client.post('/', {'access_code': '2000'}, follow=True, HTTP_HOST='localhost')
         self.client.post(
             '/driver/registration/',
-            {'shift_type': 'night', 'truck': truck.id, 'dormitory_section': section.id},
+            {'dormitory_section': section.id},
             follow=True,
             HTTP_HOST='localhost',
         )
         self.client.post(
             '/driver/shift/',
-            {'start_fuel': '100', 'start_mileage': '2500', 'start_engine_hours': '700'},
+            {'shift_type': 'night', 'truck': truck.id, 'start_fuel': '100', 'start_mileage': '2500', 'start_engine_hours': '700'},
             follow=True,
             HTTP_HOST='localhost',
         )
@@ -1274,10 +1905,10 @@ class AccessLoginTests(TestCase):
     def test_seed_demo_scenario_command_creates_ready_demo_data(self):
         call_command('seed_demo_scenario')
 
-        self.assertTrue(EmployeeAccess.objects.filter(access_code='2000', is_active=True).exists())
-        self.assertTrue(EmployeeAccess.objects.filter(access_code='5000', is_active=True).exists())
-        self.assertTrue(EmployeeAccess.objects.filter(access_code='6000', is_active=True).exists())
-        self.assertTrue(EmployeeAccess.objects.filter(access_code='7000', is_active=True).exists())
+        self.assertTrue(EmployeeAccess.objects.filter(access_code='200000', is_active=True).exists())
+        self.assertTrue(EmployeeAccess.objects.filter(access_code='500000', is_active=True).exists())
+        self.assertTrue(EmployeeAccess.objects.filter(access_code='600000', is_active=True).exists())
+        self.assertTrue(EmployeeAccess.objects.filter(access_code='700000', is_active=True).exists())
         self.assertTrue(DriverPrimaryRegistration.objects.exists())
         self.assertTrue(EmployeeShift.objects.filter(closed_at__isnull=True).exists())
         self.assertTrue(HaulAssignment.objects.filter(status=AssignmentStatus.ACCEPTED).exists())

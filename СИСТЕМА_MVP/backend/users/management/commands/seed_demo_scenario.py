@@ -39,8 +39,6 @@ class Command(BaseCommand):
         DriverPrimaryRegistration.objects.update_or_create(
             employee=employees['driver'],
             defaults={
-                'shift_type': 'day',
-                'truck': truck,
                 'dormitory_section': dormitory_section,
             },
         )
@@ -197,28 +195,33 @@ class Command(BaseCommand):
 
         self.stdout.write(self.style.SUCCESS('Демо-сценарий MVP подготовлен.'))
         self.stdout.write(
-            'Коды доступа: 1000 админ, 2000 водитель, 3000 машинист, 4000 горный мастер, '
-            '5000 диспетчер, 6000 руководство, 7000 механик.'
+            'Коды доступа: 100000 админ, 200000 водитель, 300000 машинист, 400000 горный мастер, '
+            '500000 диспетчер, 600000 руководство, 700000 механик.'
         )
         self.stdout.write(f'Активный рейс: {active_trip}')
 
     def get_demo_employees(self):
         role_by_code = {role.code: role for role in Role.objects.all()}
         demo = {
-            'admin': ('Администратор MVP', 'admin', '1000'),
-            'driver': ('Водитель MVP', 'driver', '2000'),
-            'excavator_operator': ('Машинист экскаватора MVP', 'excavator_operator', '3000'),
-            'mining_master': ('Горный мастер MVP', 'mining_master', '4000'),
-            'dispatcher': ('Диспетчер MVP', 'dispatcher', '5000'),
-            'manager': ('Руководство MVP', 'manager', '6000'),
-            'mechanic': ('Механик MVP', 'mechanic', '7000'),
+            'admin': ('Администратор MVP', 'admin', '100000', '+79000000001'),
+            'driver': ('Водитель MVP', 'driver', '200000', '+79000000002'),
+            'excavator_operator': ('Машинист экскаватора MVP', 'excavator_operator', '300000', '+79000000003'),
+            'mining_master': ('Горный мастер MVP', 'mining_master', '400000', '+79000000004'),
+            'dispatcher': ('Диспетчер MVP', 'dispatcher', '500000', '+79000000005'),
+            'manager': ('Руководство MVP', 'manager', '600000', '+79000000006'),
+            'mechanic': ('Механик MVP', 'mechanic', '700000', '+79000000007'),
         }
         employees = {}
-        for key, (full_name, role_code, access_code) in demo.items():
-            employee, _ = Employee.objects.update_or_create(full_name=full_name, defaults={'is_active': True})
+        for key, (full_name, role_code, access_code, phone) in demo.items():
+            employee, _ = Employee.objects.update_or_create(full_name=full_name, defaults={'is_active': True, 'phone': phone})
             EmployeeAccess.objects.update_or_create(
-                access_code=access_code,
-                defaults={'employee': employee, 'role': role_by_code[role_code], 'is_active': True},
+                employee=employee,
+                role=role_by_code[role_code],
+                defaults={
+                    'access_code': access_code,
+                    'is_active': True,
+                    'status': EmployeeAccess.Status.ACTIVATED,
+                },
             )
             employees[key] = employee
         return employees

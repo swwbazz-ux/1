@@ -22,6 +22,17 @@ outputs/
 *.pdf
 .tmp_analysis/
 
+# Uploaded local media
+СИСТЕМА_MVP/backend/media/
+СИСТЕМА_MVP/backend/employee_photos/
+
+# Local server logs
+ENV_BACKUP_*/
+server-*.log
+server-supervisor*.log
+*/backend/runserver*.log
+*/backend/.server-stop
+
 # OS / editor
 .DS_Store
 Thumbs.db

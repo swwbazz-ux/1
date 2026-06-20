@@ -393,12 +393,14 @@ def driver_complete_trip_view(request, trip_id):
     access = EmployeeAccess.objects.select_related('employee', 'role').filter(id=access_id, is_active=True).first()
     if not access or access.role.code != 'driver':
         return redirect('role_home')
-    registration = getattr(access.employee, 'driver_registration', None)
-    if not registration:
+    if not hasattr(access.employee, 'driver_registration'):
         return redirect('driver_registration')
-    trip = Trip.objects.filter(id=trip_id, truck=registration.truck, status=TripStatus.ACTIVE).first()
+    unloading_shift = EmployeeShift.objects.filter(employee=access.employee, closed_at__isnull=True).order_by('-opened_at').first()
+    if not unloading_shift or not unloading_shift.equipment:
+        messages.error(request, 'Нельзя завершить рейс: открытая смена с самосвалом не найдена.')
+        return redirect('driver_shift')
+    trip = Trip.objects.filter(id=trip_id, truck=unloading_shift.equipment, status=TripStatus.ACTIVE).first()
     if trip and request.method == 'POST':
-        unloading_shift = EmployeeShift.objects.filter(employee=access.employee, closed_at__isnull=True).order_by('-opened_at').first()
         trip.status = TripStatus.COMPLETED
         trip.driver = access.employee
         trip.completed_at = timezone.now()

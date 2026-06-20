@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+
+{% block title %}Сотрудники{% endblock %}
+
+{% block body %}
+<header class="app-header">
+    <div class="header-inner wide-shell">
+        <div class="topline">
+            <span>{{ access.employee.full_name }}</span>
+            <a href="{% url 'system_admin_dashboard' %}">Админка</a>
+        </div>
+        <h1>Сотрудники</h1>
+        <p>Список сотрудников, статусы и быстрый переход в карточку.</p>
+    </div>
+</header>
+
+<main class="page wide-page">
+    {% for message in messages %}
+        <div class="message success">{{ message }}</div>
+    {% endfor %}
+
+    <section class="card">
+        <div class="employee-list-toolbar">
+            <div>
+                <h2>Управление сотрудниками</h2>
+                <p>Поиск, фильтры и быстрые действия по базе сотрудников.</p>
+            </div>
+            <div class="employee-list-actions">
+                <a class="button-link" href="{% url 'system_admin_employee_create' %}">Создать сотрудника</a>
+                <a class="button-link button-secondary" href="{% url 'system_admin_employee_export' %}">Выгрузить в Excel</a>
+            </div>
+        </div>
+        <form method="get" class="employee-list-filters">
+            <div class="field">
+                <label for="employee-search">Поиск по ФИО</label>
+                <input id="employee-search" name="q" value="{{ query }}" placeholder="Введите ФИО">
+            </div>
+            <div class="field">
+                <label for="employee-status">Статус</label>
+                <select id="employee-status" name="status">
+                    <option value="">Все</option>
+                    {% for value, label in statuses %}
+                        <option value="{{ value }}" {% if selected_status == value %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="field">
+                <label for="employee-access-status">Статус доступа</label>
+                <select id="employee-access-status" name="access_status">
+                    <option value="">Все</option>
+                    {% for value, label in access_statuses %}
+                        <option value="{{ value }}" {% if selected_access_status == value %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="field field-submit">
+                <button type="submit">Показать</button>
+            </div>
+        </form>
+    </section>
+
+    <section class="card">
+        <h2>Список сотрудников</h2>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                <tr>
+                    <th>ФИО</th>
+                    <th>Роли/доступы</th>
+                    <th>Телефон</th>
+                    <th>Статус</th>
+                    <th>Место проживания</th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for employee in employees %}
+                    <tr>
+                        <td><a href="{% url 'system_admin_employee_detail' employee.id %}">{{ employee.full_name }}</a></td>
+                        <td>
+                            {% for access_item in employee.accesses.all %}
+                                <span class="badge">{{ access_item.role.name }}: {{ access_item.get_status_display }}</span>
+                            {% empty %}
+                                -
+                            {% endfor %}
+                        </td>
+                        <td>{{ employee.phone|default:"-" }}</td>
+                        <td>{{ employee.get_status_display }}</td>
+                        <td>{{ employee.residence_text|default:"-" }}</td>
+                    </tr>
+                {% empty %}
+                    <tr><td colspan="5">Сотрудников не найдено.</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+</main>
+{% endblock %}
