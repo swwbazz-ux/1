@@ -1,118 +1,162 @@
 {% extends "base.html" %}
 
 {% block title %}Работа экскаватора{% endblock %}
+{% block body_class %}excavator-work-screen{% endblock %}
 
 {% block body %}
-<header class="app-header">
+<header class="app-header excavator-work-header">
     <div class="header-inner">
         <div class="topline">
             <span>{{ access.employee.full_name }}</span>
             <a href="{% url 'logout' %}">Выйти</a>
         </div>
         <h1>Работа экскаватора</h1>
-        <p>Создание рейса в момент загрузки: выбрать самосвал, породу, точку разгрузки и при необходимости указать параметры для отчета заказчику.</p>
+        <p>Выберите самосвал под погрузкой, проверьте породу и точку разгрузки, затем отправьте рейс водителю.</p>
     </div>
 </header>
-<main class="page">
+<main class="page excavator-work-page">
     {% for message in messages %}
         <div class="message success">{{ message }}</div>
     {% endfor %}
 
-    <section class="card">
-        <h2>Создать рейс</h2>
-        <form method="post">
+    <section class="excavator-status-strip" aria-label="Состояние смены">
+        <div class="excavator-status-card status-current">
+            <span>Экскаватор</span>
+            <strong>{{ current_excavator|default:"Смена не открыта" }}</strong>
+        </div>
+        <div class="excavator-status-card">
+            <span>Смена</span>
+            <strong>{% if open_shift %}{{ open_shift.get_shift_type_display }}{% else %}Нет открытой смены{% endif %}</strong>
+        </div>
+        <div class="excavator-status-card">
+            <span>Самосвалы под экскаватором</span>
+            <strong>{{ available_assignments_count }}</strong>
+        </div>
+        <div class="excavator-status-card {% if active_trips_count %}status-warning{% else %}status-ok{% endif %}">
+            <span>В рейсе сейчас</span>
+            <strong>{{ active_trips_count }}</strong>
+        </div>
+        <div class="excavator-status-card">
+            <span>Выполнено сегодня</span>
+            <strong>{{ completed_today_count }}</strong>
+        </div>
+    </section>
+
+    {% if not open_shift %}
+        <div class="message warning">Открытая смена машиниста не найдена. Рейс можно создать, но смена загрузки не будет привязана к рейсу.</div>
+    {% endif %}
+
+    <section class="excavator-workspace">
+        <form class="card excavator-trip-card" method="post">
             {% csrf_token %}
-            <h3>Основные данные рейса</h3>
-            <div class="filters">
+            <div class="section-title-row">
                 <div>
+                    <h2>Отправить самосвал</h2>
+                    <p class="muted">Основной сценарий: самосвал выбран, параметры проверены, рейс создан.</p>
+                </div>
+                <button type="submit">Отправить рейс</button>
+            </div>
+
+            <div class="excavator-form-grid">
+                <div class="excavator-field field-wide">
                     <label for="{{ form.assignment.id_for_label }}">{{ form.assignment.label }}</label>
                     {{ form.assignment }}
                     {{ form.assignment.errors }}
                 </div>
-                <div>
+                <div class="excavator-field">
                     <label for="{{ form.rock_type.id_for_label }}">{{ form.rock_type.label }}</label>
                     {{ form.rock_type }}
                     {{ form.rock_type.errors }}
                 </div>
-                <div>
+                <div class="excavator-field">
                     <label for="{{ form.dump_point.id_for_label }}">{{ form.dump_point.label }}</label>
                     {{ form.dump_point }}
                     {{ form.dump_point.errors }}
                 </div>
             </div>
 
-            <h3>Параметры для отчета заказчику</h3>
-            <p class="muted">Система подставляет последние введенные параметры этого машиниста. Если экскаватор переехал или изменилась работа, достаточно поправить только изменившиеся поля.</p>
-            <div class="filters">
+            <div class="excavator-assignment-list" aria-label="Назначенные самосвалы">
+                {% for assignment in available_assignments %}
+                    <div class="excavator-assignment {% if assignment.has_active_trip %}is-busy{% endif %}">
+                        <strong>{{ assignment.truck }}</strong>
+                        <span>{{ assignment.excavator }}</span>
+                        {% if assignment.has_active_trip %}
+                            <em>в рейсе</em>
+                        {% else %}
+                            <em>готов к погрузке</em>
+                        {% endif %}
+                    </div>
+                {% empty %}
+                    <div class="excavator-empty-state">Нет принятых назначений самосвалов под экскаватор.</div>
+                {% endfor %}
+            </div>
+
+            <div class="section-title-row compact">
                 <div>
+                    <h3>Параметры забоя</h3>
+                    <p class="muted">Подставляются последние значения машиниста, менять нужно только отклонения.</p>
+                </div>
+            </div>
+            <div class="excavator-form-grid secondary">
+                <div class="excavator-field">
                     <label for="{{ form.planned_volume_m3.id_for_label }}">{{ form.planned_volume_m3.label }}</label>
                     {{ form.planned_volume_m3 }}
                     {{ form.planned_volume_m3.errors }}
                 </div>
-                <div>
+                <div class="excavator-field">
                     <label for="{{ form.loading_horizon.id_for_label }}">{{ form.loading_horizon.label }}</label>
                     {{ form.loading_horizon }}
                     {{ form.loading_horizon.errors }}
                 </div>
-                <div>
+                <div class="excavator-field">
                     <label for="{{ form.loading_block.id_for_label }}">{{ form.loading_block.label }}</label>
                     {{ form.loading_block }}
                     {{ form.loading_block.errors }}
                 </div>
-                <div>
+                <div class="excavator-field">
                     <label for="{{ form.transport_distance_km.id_for_label }}">{{ form.transport_distance_km.label }}</label>
                     {{ form.transport_distance_km }}
                     {{ form.transport_distance_km.errors }}
                 </div>
-                <div>
+                <div class="excavator-field field-wide">
                     <label for="{{ form.downtime_text.id_for_label }}">{{ form.downtime_text.label }}</label>
                     {{ form.downtime_text }}
                     {{ form.downtime_text.errors }}
                 </div>
-                <div>
+                <div class="excavator-field field-wide">
                     <label for="{{ form.note.id_for_label }}">{{ form.note.label }}</label>
                     {{ form.note }}
                     {{ form.note.errors }}
                 </div>
             </div>
-            <button type="submit">Отправить самосвал в рейс</button>
         </form>
-    </section>
 
-    <section class="card">
-        <h2>Активные рейсы</h2>
-        <div class="table-wrap">
-            <table>
-                <thead>
-                <tr>
-                    <th>Самосвал</th>
-                    <th>Экскаватор</th>
-                    <th>Порода</th>
-                    <th>Разгрузка</th>
-                    <th>Горизонт</th>
-                    <th>Блок</th>
-                    <th>Плечо</th>
-                    <th>Объем</th>
-                </tr>
-                </thead>
-                <tbody>
+        <aside class="card excavator-active-card">
+            <div class="section-title-row compact">
+                <div>
+                    <h2>Активные рейсы</h2>
+                    <p class="muted">Самосвалы, которые уже ушли от экскаватора и ждут завершения водителем.</p>
+                </div>
+            </div>
+            <div class="excavator-active-list">
                 {% for trip in active_trips %}
-                    <tr>
-                        <td>{{ trip.truck }}</td>
-                        <td>{{ trip.excavator }}</td>
-                        <td>{{ trip.rock_type }}</td>
-                        <td>{{ trip.dump_point }}</td>
-                        <td>{{ trip.loading_horizon|default:"-" }}</td>
-                        <td>{{ trip.loading_block|default:"-" }}</td>
-                        <td>{{ trip.transport_distance_km|default:"-" }}</td>
-                        <td>{{ trip.volume_m3|default:"-" }}</td>
-                    </tr>
+                    <article class="active-trip-item">
+                        <div>
+                            <strong>{{ trip.truck }}</strong>
+                            <span>{{ trip.rock_type }} -> {{ trip.dump_point }}</span>
+                        </div>
+                        <dl>
+                            <div><dt>Горизонт</dt><dd>{{ trip.loading_horizon|default:"-" }}</dd></div>
+                            <div><dt>Блок</dt><dd>{{ trip.loading_block|default:"-" }}</dd></div>
+                            <div><dt>Плечо</dt><dd>{{ trip.transport_distance_km|default:"-" }}</dd></div>
+                            <div><dt>Объем</dt><dd>{{ trip.volume_m3|default:"-" }}</dd></div>
+                        </dl>
+                    </article>
                 {% empty %}
-                    <tr><td colspan="8">Активных рейсов пока нет.</td></tr>
+                    <div class="excavator-empty-state">Активных рейсов пока нет.</div>
                 {% endfor %}
-                </tbody>
-            </table>
-        </div>
+            </div>
+        </aside>
     </section>
 </main>
 {% endblock %}

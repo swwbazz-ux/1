@@ -1,0 +1,40 @@
+{% load static %}
+
+<section class="mm-card mm-garage-card">
+    <div class="mm-section-head compact">
+        <div>
+            <h2>Неактивная смена</h2>
+        </div>
+        {% if can_edit %}
+            <form method="post" class="mm-garage-release-form">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="release_all">
+                <button type="submit" class="mm-release-all-button" data-confirm="Расформировать все комплексы и вернуть всю технику в неактивную смену?">Вернуть всех</button>
+            </form>
+        {% endif %}
+    </div>
+    <div class="mm-garage-zone" data-drop-garage="1" data-drop-inactive-shift="1">
+        <div class="mm-garage-title">Экскаваторы</div>
+        <div class="mm-truck-row garage mm-equipment-row">
+            {% for excavator in inactive_excavator_tiles %}
+                <div class="mm-equipment-tile mm-excavator-tile status-{{ excavator.status_key }}" role="button" tabindex="0" data-mm-draggable="{% if can_edit %}true{% else %}false{% endif %}" data-equipment-id="{{ excavator.id }}" data-excavator-id="{{ excavator.id }}" data-search="{{ excavator.search }}" data-zone="garage">
+                    <img src="{% static excavator.icon %}" alt="">
+                    <strong>{{ excavator.number }}</strong>
+                </div>
+            {% empty %}
+                <div class="mm-empty-inline">Нет экскаваторов</div>
+            {% endfor %}
+        </div>
+        <div class="mm-garage-title">Самосвалы</div>
+        <div class="mm-truck-row garage">
+            {% for truck in garage_tiles %}
+                <div class="mm-equipment-tile mm-truck-tile status-{{ truck.status_key }}" role="button" tabindex="0" data-mm-draggable="{% if can_edit %}true{% else %}false{% endif %}" data-equipment-id="{{ truck.id }}" data-truck-id="{{ truck.id }}" data-search="{{ truck.search }}" data-zone="garage">
+                    <img src="{% static truck.icon %}" alt="">
+                    <strong>{{ truck.number }}</strong>
+                </div>
+            {% empty %}
+                <div class="mm-empty-inline">Нет самосвалов</div>
+            {% endfor %}
+        </div>
+    </div>
+</section>

@@ -1,62 +1,9 @@
-{% extends "base.html" %}
-
-{% block title %}Расстановка техники{% endblock %}
-
-{% block body %}
-<header class="app-header">
-    <div class="header-inner">
-        <div class="topline">
-            <span>{{ access.employee.full_name }}</span>
-            <a href="{% url 'logout' %}">Выйти</a>
-        </div>
-        <h1>Расстановка техники</h1>
-        <p>Назначение самосвалов под экскаваторы. После назначения водитель видит задачу и подтверждает ее кнопкой.</p>
-    </div>
-</header>
-<main class="page">
-    {% for message in messages %}
-        <div class="message success">{{ message }}</div>
-    {% endfor %}
-
-    <section class="card">
-        <h2>Назначить самосвал под экскаватор</h2>
-        <form method="post">
-            {% csrf_token %}
-            {% for field in form %}
-                <label for="{{ field.id_for_label }}">{{ field.label }}</label>
-                {{ field }}
-                {{ field.errors }}
-            {% endfor %}
-            <button type="submit">Создать назначение</button>
-        </form>
-    </section>
-
-    <section class="card">
-        <h2>Последние назначения</h2>
-        <div class="table-wrap">
-            <table>
-                <thead>
-                <tr>
-                    <th>Самосвал</th>
-                    <th>Экскаватор</th>
-                    <th>Статус</th>
-                    <th>Назначено</th>
-                </tr>
-                </thead>
-                <tbody>
-                {% for assignment in assignments %}
-                    <tr>
-                        <td>{{ assignment.truck }}</td>
-                        <td>{{ assignment.excavator }}</td>
-                        <td>{{ assignment.get_status_display }}</td>
-                        <td>{{ assignment.assigned_at|date:"d.m.Y H:i" }}</td>
-                    </tr>
-                {% empty %}
-                    <tr><td colspan="4">Назначений пока нет.</td></tr>
-                {% endfor %}
-                </tbody>
-            </table>
-        </div>
-    </section>
-</main>
-{% endblock %}
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Горный мастер</title>
+</head>
+<body class="mining-master-clean-slate"></body>
+</html>

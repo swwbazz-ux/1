@@ -1,0 +1,40 @@
+<div class="dispatcher-header-row dispatcher-command-header">
+    <section class="dispatcher-command-identity" aria-label="{% if dispatcher_identity_label %}{{ dispatcher_identity_label }}{% else %}Активный диспетчер{% endif %}">
+        {% include "includes/dispatcher_active_badge.html" %}
+    </section>
+
+    <section class="dispatcher-command-main" aria-label="{% if dispatcher_main_label %}{{ dispatcher_main_label }}{% else %}Текущий раздел{% endif %}">
+        <div class="dispatcher-command-context">
+            <strong>{% if dispatcher_header_screen %}{{ dispatcher_header_screen }}{% else %}Пульт смены{% endif %}</strong>
+            <span class="dispatcher-command-shift-name">{% if dispatcher_header_shift_label %}{{ dispatcher_header_shift_label }}{% elif shift_label == "Ночная" %}Ночная смена{% elif shift_label == "Дневная" %}Дневная смена{% else %}Дневная смена{% endif %}</span>
+            <span class="dispatcher-command-date">{% if current_date %}{{ current_date }}{% else %}{{ dispatcher_dashboard.current_date }}{% endif %}</span>
+            <span class="dispatcher-command-time-range">{% if dispatcher_header_time_range %}{{ dispatcher_header_time_range }}{% else %}07:00-19:00{% endif %}</span>
+        </div>
+        {% include "includes/dispatcher_nav.html" %}
+    </section>
+
+    <section class="dispatcher-command-actions" aria-label="{% if dispatcher_actions_label %}{{ dispatcher_actions_label }}{% else %}Действия смены{% endif %}">
+        <span class="dispatcher-shift-slot">
+            {% include "includes/dispatcher_shift_action.html" %}
+        </span>
+        <div class="dispatcher-command-utility">
+            <button type="button" class="dispatcher-theme-button" data-dispatcher-theme-toggle title="День / Ночь">Д/Н</button>
+            <a class="dispatcher-utility-link dispatcher-utility-back" href="{% url 'role_home' %}"><span aria-hidden="true"></span>Назад</a>
+            <a class="dispatcher-utility-link dispatcher-utility-exit" href="{% url 'logout' %}"><span aria-hidden="true"></span>Выйти</a>
+        </div>
+    </section>
+
+    <section class="dispatcher-clock dispatcher-radial-clock" aria-label="{% if dispatcher_clock_label %}{{ dispatcher_clock_label }}{% else %}Текущее время{% endif %}">
+        <svg class="dispatcher-radial-clock-ring" viewBox="0 0 120 120" aria-hidden="true" focusable="false">
+            <circle class="dispatcher-radial-clock-base" cx="60" cy="60" r="52"></circle>
+            <circle class="dispatcher-radial-clock-ticks" cx="60" cy="60" r="52" pathLength="60"></circle>
+            <circle class="dispatcher-radial-clock-progress" cx="60" cy="60" r="50" pathLength="100"></circle>
+        </svg>
+        <span class="dispatcher-radial-clock-dot" aria-hidden="true"></span>
+        <span class="dispatcher-radial-clock-face">
+            <strong>{% if current_time %}{{ current_time }}{% else %}{{ dispatcher_dashboard.current_time }}{% endif %}</strong>
+            <span>{% if current_date %}{{ current_date }}{% else %}{{ dispatcher_dashboard.current_date }}{% endif %}</span>
+            <em>{% if dispatcher_clock_caption %}{{ dispatcher_clock_caption }}{% else %}текущее время{% endif %}</em>
+        </span>
+    </section>
+</div>

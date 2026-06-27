@@ -6,6 +6,7 @@ from django.contrib import messages
 from django.db.models import Count, Sum
 from django.http import HttpResponse
 from django.shortcuts import redirect, render
+from django.urls import reverse
 from django.utils import timezone
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
@@ -13,7 +14,9 @@ from openpyxl.utils import get_column_letter
 
 from downtimes.models import DowntimeEvent, DowntimeReason
 from references.models import DumpPoint, Equipment, RockType
-from trips.models import Trip, TripStatus
+from shifts.models import EmployeeShift
+from trips.dispatcher_header import build_dispatcher_header_context
+from trips.models import DispatcherActionLog, DispatcherActionType, Trip, TripStatus
 from users.models import EmployeeAccess
 
 from .forms import PilotFeedbackForm
@@ -260,6 +263,1362 @@ def parse_filter_date(value):
         return datetime.strptime(value, '%Y-%m-%d').date()
     except ValueError:
         return None
+
+
+def get_report_access(request):
+    access_id = request.session.get('employee_access_id')
+    if not access_id:
+        return None
+    return EmployeeAccess.objects.select_related('employee', 'role').filter(id=access_id, is_active=True).first()
+
+
+def require_dispatcher_report_access(request):
+    access = get_report_access(request)
+    if not access:
+        return None, redirect('login')
+    if access.role.code not in {'dispatcher', 'admin', 'manager'}:
+        return None, redirect('role_home')
+    return access, None
+
+
+def decimal_total(values):
+    total = Decimal('0')
+    for value in values:
+        if value is not None:
+            total += value
+    return total
+
+
+def percent(part, total):
+    if not total:
+        return Decimal('0')
+    return ((part / total) * Decimal('100')).quantize(Decimal('0.1'))
+
+
+def format_volume(value):
+    value = value or Decimal('0')
+    return f'{int(value):,}'.replace(',', ' ')
+
+
+def dashboard_status_by_percent(value):
+    if value < Decimal('70'):
+        return 'danger'
+    if value < Decimal('90'):
+        return 'risk'
+    return 'ok'
+
+
+def dashboard_status_by_deviation(value):
+    if value < Decimal('0'):
+        return 'danger'
+    if value == Decimal('0'):
+        return 'risk'
+    return 'ok'
+
+
+def dispatcher_mining_filters(request):
+    selected_date = parse_filter_date(request.GET.get('date')) or timezone.localdate()
+    shift_type = request.GET.get('shift_type', '').strip()
+    if shift_type not in {'', 'day', 'night'}:
+        shift_type = ''
+    return {
+        'date': selected_date,
+        'date_value': selected_date.strftime('%Y-%m-%d'),
+        'shift_type': shift_type,
+        'query_string': request.GET.urlencode(),
+    }
+
+
+def dispatcher_mining_trip_queryset(filters):
+    trips = Trip.objects.filter(status=TripStatus.COMPLETED).select_related(
+        'truck',
+        'excavator',
+        'rock_type',
+        'dump_point',
+        'loading_shift',
+        'unloading_shift',
+    )
+    trips = trips.filter(completed_at__date=filters['date'])
+    if filters['shift_type']:
+        trips = trips.filter(loading_shift__shift_type=filters['shift_type'])
+    return trips.order_by('-completed_at')
+
+
+def aggregate_dispatcher_rows(trips, key_getter, label_getter):
+    grouped = {}
+    for trip in trips:
+        key = key_getter(trip) or 'not-set'
+        if key not in grouped:
+            grouped[key] = {
+                'label': label_getter(trip) or 'Не указано',
+                'volume': Decimal('0'),
+                'tonnage': Decimal('0'),
+                'planned': Decimal('0'),
+                'trips': 0,
+            }
+        grouped[key]['volume'] += trip.volume_m3 or Decimal('0')
+        grouped[key]['tonnage'] += trip.tonnage or Decimal('0')
+        grouped[key]['planned'] += trip.planned_volume_m3 or Decimal('0')
+        grouped[key]['trips'] += 1
+
+    rows = sorted(grouped.values(), key=lambda item: item['volume'], reverse=True)
+    max_volume = rows[0]['volume'] if rows else Decimal('0')
+    total_volume = decimal_total(row['volume'] for row in rows)
+    for row in rows:
+        row['volume_display'] = format_volume(row['volume'])
+        row['tonnage_display'] = format_volume(row['tonnage'])
+        row['share'] = percent(row['volume'], total_volume)
+        row['bar'] = int(percent(row['volume'], max_volume)) if max_volume else 0
+        row['deviation'] = row['volume'] - row['planned']
+        row['status'] = dashboard_status_by_deviation(row['deviation'])
+    return rows
+
+
+def dispatcher_hourly_rows(trips):
+    grouped = defaultdict(lambda: {'label': '', 'volume': Decimal('0'), 'trips': 0})
+    for trip in trips:
+        hour = timezone.localtime(trip.completed_at).replace(minute=0, second=0, microsecond=0) if trip.completed_at else None
+        key = hour.strftime('%H:00') if hour else 'Не указано'
+        grouped[key]['label'] = key
+        grouped[key]['volume'] += trip.volume_m3 or Decimal('0')
+        grouped[key]['trips'] += 1
+    rows = sorted(grouped.values(), key=lambda item: item['label'])
+    max_volume = max((row['volume'] for row in rows), default=Decimal('0'))
+    for row in rows:
+        row['volume_display'] = format_volume(row['volume'])
+        row['bar'] = int(percent(row['volume'], max_volume)) if max_volume else 0
+    return rows
+
+
+def dispatcher_complex_rows(trips):
+    grouped = {}
+    for trip in trips:
+        key = trip.excavator_id or 'not-set'
+        if key not in grouped:
+            grouped[key] = {
+                'label': f'К-{trip.excavator.garage_number}' if trip.excavator else 'Без экскаватора',
+                'excavator': str(trip.excavator) if trip.excavator else 'Не указан',
+                'volume': Decimal('0'),
+                'planned': Decimal('0'),
+                'trips': 0,
+                'trucks': set(),
+                'dump_points': defaultdict(Decimal),
+                'faces': set(),
+            }
+        row = grouped[key]
+        row['volume'] += trip.volume_m3 or Decimal('0')
+        row['planned'] += trip.planned_volume_m3 or Decimal('0')
+        row['trips'] += 1
+        if trip.truck:
+            row['trucks'].add(trip.truck.garage_number)
+        if trip.dump_point:
+            row['dump_points'][trip.dump_point.name] += trip.volume_m3 or Decimal('0')
+        face = ' / '.join(part for part in [trip.loading_horizon, trip.loading_block] if part)
+        if face:
+            row['faces'].add(face)
+
+    rows = sorted(grouped.values(), key=lambda item: item['volume'], reverse=True)
+    for row in rows:
+        row['volume_display'] = format_volume(row['volume'])
+        row['completion'] = percent(row['volume'], row['planned'])
+        row['status'] = dashboard_status_by_percent(row['completion']) if row['planned'] else 'risk'
+        row['trucks_count'] = len(row['trucks'])
+        row['trucks_display'] = ', '.join(sorted(row['trucks'])) or 'Нет'
+        row['faces_display'] = ', '.join(sorted(row['faces'])) or 'Не указан'
+        dump_total = decimal_total(row['dump_points'].values())
+        row['dump_chips'] = [
+            {
+                'name': name,
+                'share': percent(volume, dump_total),
+                'volume_display': format_volume(volume),
+            }
+            for name, volume in sorted(row['dump_points'].items(), key=lambda item: item[1], reverse=True)
+        ]
+    return rows
+
+
+def dispatcher_mining_context(request, access):
+    filters = dispatcher_mining_filters(request)
+    trips = list(dispatcher_mining_trip_queryset(filters))
+    month_start = filters['date'].replace(day=1)
+    month_trips = list(
+        Trip.objects.filter(
+            status=TripStatus.COMPLETED,
+            completed_at__date__gte=month_start,
+            completed_at__date__lte=filters['date'],
+        )
+    )
+
+    plan_total = decimal_total(trip.planned_volume_m3 for trip in trips)
+    volume_total = decimal_total(trip.volume_m3 for trip in trips)
+    tonnage_total = decimal_total(trip.tonnage for trip in trips)
+    completion = percent(volume_total, plan_total)
+    deviation = volume_total - plan_total
+    month_volume = decimal_total(trip.volume_m3 for trip in month_trips)
+
+    dump_rows = aggregate_dispatcher_rows(
+        trips,
+        lambda trip: trip.dump_point_id,
+        lambda trip: trip.dump_point.name if trip.dump_point else '',
+    )
+    rock_rows = aggregate_dispatcher_rows(
+        trips,
+        lambda trip: trip.rock_type_id,
+        lambda trip: trip.rock_type.name if trip.rock_type else '',
+    )
+    face_rows = aggregate_dispatcher_rows(
+        trips,
+        lambda trip: '|'.join(part for part in [trip.loading_horizon, trip.loading_block] if part),
+        lambda trip: ' / '.join(part for part in [trip.loading_horizon, trip.loading_block] if part),
+    )
+
+    return {
+        'access': access,
+        'dispatcher_header': build_dispatcher_header_context(access),
+        'filters': filters,
+        'current_time': timezone.localtime(timezone.now()).strftime('%H:%M'),
+        'current_date': timezone.localdate().strftime('%d.%m.%Y'),
+        'shift_label': 'Дневная' if filters['shift_type'] == 'day' else 'Ночная' if filters['shift_type'] == 'night' else 'Все смены',
+        'kpis': {
+            'plan': format_volume(plan_total),
+            'volume': format_volume(volume_total),
+            'tonnage': format_volume(tonnage_total),
+            'trips': len(trips),
+            'completion': completion,
+            'deviation': format_volume(abs(deviation)),
+            'deviation_negative': deviation < 0,
+            'month_volume': format_volume(month_volume),
+            'complexes': len({trip.excavator_id for trip in trips if trip.excavator_id}),
+            'trucks': len({trip.truck_id for trip in trips if trip.truck_id}),
+        },
+        'completion_status': dashboard_status_by_percent(completion),
+        'dump_rows': dump_rows[:6],
+        'rock_rows': rock_rows[:5],
+        'face_rows': face_rows[:6],
+        'hourly_rows': dispatcher_hourly_rows(trips),
+        'complex_rows': dispatcher_complex_rows(trips)[:8],
+        'query_string': request.GET.urlencode(),
+    }
+
+
+def dispatcher_mining_volumes_view(request):
+    access, response = require_dispatcher_report_access(request)
+    if response:
+        return response
+    return render(request, 'reports/dispatcher_mining_volumes.html', dispatcher_mining_context(request, access))
+
+
+def write_dispatcher_mining_sheet(sheet, context):
+    sheet.title = 'Горные объемы'
+    sheet['A1'] = 'Горные объемы диспетчера'
+    sheet['A1'].font = Font(size=16, bold=True, color='12232E')
+    sheet.append(['Дата', context['filters']['date'].strftime('%d.%m.%Y')])
+    sheet.append(['Смена', context['shift_label']])
+    sheet.append(['Сформирован', f"{context['current_date']} {context['current_time']}"])
+    sheet.append([])
+    sheet.append(['План', context['kpis']['plan']])
+    sheet.append(['Факт', context['kpis']['volume']])
+    sheet.append(['Тоннаж', context['kpis']['tonnage']])
+    sheet.append(['Рейсы', context['kpis']['trips']])
+    sheet.append(['Комплексы', context['kpis']['complexes']])
+    sheet.append([])
+
+    sections = [
+        ('По точкам разгрузки', context['dump_rows'], ['label', 'volume_display', 'share', 'trips']),
+        ('По породе', context['rock_rows'], ['label', 'volume_display', 'share', 'trips']),
+        ('По забоям', context['face_rows'], ['label', 'volume_display', 'share', 'trips']),
+        ('По комплексам', context['complex_rows'], ['label', 'volume_display', 'completion', 'trucks_count', 'faces_display']),
+    ]
+    headers_by_key = {
+        'label': 'Разрез',
+        'volume_display': 'Объем',
+        'share': 'Доля, %',
+        'trips': 'Рейсы',
+        'completion': 'Выполнение, %',
+        'trucks_count': 'Самосвалы',
+        'faces_display': 'Забой',
+    }
+    for title, rows, keys in sections:
+        sheet.append([title])
+        title_row = sheet.max_row
+        sheet.cell(row=title_row, column=1).font = Font(bold=True, color='12232E')
+        sheet.append([headers_by_key[key] for key in keys])
+        header_row = sheet.max_row
+        for cell in sheet[header_row]:
+            cell.fill = PatternFill('solid', fgColor='12232E')
+            cell.font = Font(color='FFFFFF', bold=True)
+        for row in rows:
+            sheet.append([row.get(key, '') for key in keys])
+        sheet.append([])
+
+    for row in sheet.iter_rows():
+        for cell in row:
+            cell.alignment = Alignment(vertical='center', wrap_text=True)
+    for column_index in range(1, 8):
+        sheet.column_dimensions[get_column_letter(column_index)].width = 22
+
+
+def dispatcher_mining_volumes_export_view(request):
+    access, response = require_dispatcher_report_access(request)
+    if response:
+        return response
+    workbook = Workbook()
+    write_dispatcher_mining_sheet(workbook.active, dispatcher_mining_context(request, access))
+    response = HttpResponse(
+        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    )
+    response['Content-Disposition'] = 'attachment; filename="dispatcher_mining_volumes.xlsx"'
+    workbook.save(response)
+    return response
+
+
+def format_decimal_value(value, places=1):
+    if value is None:
+        return '-'
+    quant = Decimal('1') if places == 0 else Decimal('0.' + ('0' * (places - 1)) + '1')
+    return str(value.quantize(quant)).replace('.', ',')
+
+
+def dispatcher_transport_filters(request):
+    selected_date = parse_filter_date(request.GET.get('date')) or timezone.localdate()
+    shift_type = request.GET.get('shift_type', '').strip()
+    if shift_type not in {'', 'day', 'night'}:
+        shift_type = ''
+    return {
+        'date': selected_date,
+        'date_value': selected_date.strftime('%Y-%m-%d'),
+        'shift_type': shift_type,
+        'query_string': request.GET.urlencode(),
+    }
+
+
+def dispatcher_transport_shift_queryset(filters):
+    shifts = EmployeeShift.objects.select_related(
+        'employee',
+        'equipment',
+        'equipment__equipment_type',
+        'equipment__model',
+    ).filter(
+        equipment__equipment_type__name__icontains='Самосвал',
+        opened_at__date=filters['date'],
+    )
+    if filters['shift_type']:
+        shifts = shifts.filter(shift_type=filters['shift_type'])
+    return shifts.order_by('equipment__garage_number', 'opened_at')
+
+
+def dispatcher_transport_trip_stats(filters):
+    trips = Trip.objects.filter(
+        status=TripStatus.COMPLETED,
+        completed_at__date=filters['date'],
+        truck_id__isnull=False,
+    )
+    grouped = defaultdict(lambda: {
+        'trips': 0,
+        'volume': Decimal('0'),
+        'tonnage': Decimal('0'),
+    })
+    for trip in trips:
+        row = grouped[trip.truck_id]
+        row['trips'] += 1
+        row['volume'] += trip.volume_m3 or Decimal('0')
+        row['tonnage'] += trip.tonnage or Decimal('0')
+    return grouped
+
+
+def value_delta(start, end, reverse=False):
+    if start is None or end is None:
+        return None
+    return (start - end) if reverse else (end - start)
+
+
+def transport_row_status(row):
+    if row['has_negative_delta']:
+        return 'danger'
+    if row['missing_end']:
+        return 'risk'
+    return 'ok'
+
+
+def dispatcher_transport_rows(shifts, trip_stats):
+    rows = []
+    for shift in shifts:
+        fuel_delta = value_delta(shift.start_fuel, shift.end_fuel, reverse=True)
+        mileage_delta = value_delta(shift.start_mileage, shift.end_mileage)
+        hours_delta = value_delta(shift.start_engine_hours, shift.end_engine_hours)
+        stats = trip_stats.get(shift.equipment_id, {'trips': 0, 'volume': Decimal('0'), 'tonnage': Decimal('0')})
+        row = {
+            'equipment': shift.equipment,
+            'equipment_label': shift.equipment.garage_number if shift.equipment else '-',
+            'model': shift.equipment.model.name if shift.equipment and shift.equipment.model else 'не указана',
+            'driver': shift.employee.full_name,
+            'shift_type': shift.get_shift_type_display(),
+            'opened_at': timezone.localtime(shift.opened_at).strftime('%H:%M') if shift.opened_at else '-',
+            'closed_at': timezone.localtime(shift.closed_at).strftime('%H:%M') if shift.closed_at else 'открыта',
+            'start_fuel': shift.start_fuel,
+            'end_fuel': shift.end_fuel,
+            'fuel_delta': fuel_delta,
+            'start_mileage': shift.start_mileage,
+            'end_mileage': shift.end_mileage,
+            'mileage_delta': mileage_delta,
+            'start_engine_hours': shift.start_engine_hours,
+            'end_engine_hours': shift.end_engine_hours,
+            'hours_delta': hours_delta,
+            'missing_end': any(value is None for value in [shift.end_fuel, shift.end_mileage, shift.end_engine_hours]),
+            'has_negative_delta': any(value is not None and value < 0 for value in [fuel_delta, mileage_delta, hours_delta]),
+            'trips': stats['trips'],
+            'volume': stats['volume'],
+            'tonnage': stats['tonnage'],
+        }
+        row['status'] = transport_row_status(row)
+        row['fuel_display'] = format_decimal_value(fuel_delta)
+        row['mileage_display'] = format_decimal_value(mileage_delta)
+        row['hours_display'] = format_decimal_value(hours_delta)
+        row['fuel_per_km'] = format_decimal_value((fuel_delta / mileage_delta), 2) if fuel_delta is not None and mileage_delta else '-'
+        row['fuel_per_hour'] = format_decimal_value((fuel_delta / hours_delta), 2) if fuel_delta is not None and hours_delta else '-'
+        row['volume_display'] = format_volume(row['volume'])
+        rows.append(row)
+    return rows
+
+
+def dispatcher_transport_context(request, access):
+    filters = dispatcher_transport_filters(request)
+    shifts = list(dispatcher_transport_shift_queryset(filters))
+    rows = dispatcher_transport_rows(shifts, dispatcher_transport_trip_stats(filters))
+    fuel_total = decimal_total(row['fuel_delta'] for row in rows if row['fuel_delta'] is not None and row['fuel_delta'] >= 0)
+    mileage_total = decimal_total(row['mileage_delta'] for row in rows if row['mileage_delta'] is not None and row['mileage_delta'] >= 0)
+    hours_total = decimal_total(row['hours_delta'] for row in rows if row['hours_delta'] is not None and row['hours_delta'] >= 0)
+    trip_total = sum(row['trips'] for row in rows)
+    missing_count = sum(1 for row in rows if row['missing_end'])
+    anomaly_count = sum(1 for row in rows if row['has_negative_delta'])
+    volume_total = decimal_total(row['volume'] for row in rows)
+
+    sorted_by_fuel = sorted(
+        [row for row in rows if row['fuel_delta'] is not None and row['fuel_delta'] >= 0],
+        key=lambda row: row['fuel_delta'],
+        reverse=True,
+    )
+    max_fuel = sorted_by_fuel[0]['fuel_delta'] if sorted_by_fuel else Decimal('0')
+    for row in rows:
+        row['fuel_bar'] = int(percent(row['fuel_delta'], max_fuel)) if row['fuel_delta'] is not None and row['fuel_delta'] >= 0 and max_fuel else 0
+
+    return {
+        'access': access,
+        'dispatcher_header': build_dispatcher_header_context(access),
+        'filters': filters,
+        'current_time': timezone.localtime(timezone.now()).strftime('%H:%M'),
+        'current_date': timezone.localdate().strftime('%d.%m.%Y'),
+        'shift_label': 'Дневная' if filters['shift_type'] == 'day' else 'Ночная' if filters['shift_type'] == 'night' else 'Все смены',
+        'kpis': {
+            'shifts': len(rows),
+            'closed': sum(1 for row in rows if not row['missing_end']),
+            'missing': missing_count,
+            'anomalies': anomaly_count,
+            'fuel': format_decimal_value(fuel_total),
+            'mileage': format_decimal_value(mileage_total),
+            'hours': format_decimal_value(hours_total),
+            'trips': trip_total,
+            'volume': format_volume(volume_total),
+            'fuel_per_km': format_decimal_value((fuel_total / mileage_total), 2) if mileage_total else '-',
+            'fuel_per_hour': format_decimal_value((fuel_total / hours_total), 2) if hours_total else '-',
+        },
+        'rows': rows,
+        'fuel_leaders': sorted_by_fuel[:6],
+        'attention_rows': [row for row in rows if row['status'] != 'ok'][:8],
+        'query_string': request.GET.urlencode(),
+    }
+
+
+def dispatcher_transport_view(request):
+    access, response = require_dispatcher_report_access(request)
+    if response:
+        return response
+    return render(request, 'reports/dispatcher_transport.html', dispatcher_transport_context(request, access))
+
+
+def write_dispatcher_transport_sheet(sheet, context):
+    sheet.title = 'Автотранспорт'
+    sheet['A1'] = 'Автотранспорт диспетчера'
+    sheet['A1'].font = Font(size=16, bold=True, color='12232E')
+    sheet.append(['Дата', context['filters']['date'].strftime('%d.%m.%Y')])
+    sheet.append(['Смена', context['shift_label']])
+    sheet.append(['Сформирован', f"{context['current_date']} {context['current_time']}"])
+    sheet.append([])
+    for label, key in [
+        ('Смены', 'shifts'),
+        ('Закрыто без пропусков', 'closed'),
+        ('Требуют внимания', 'missing'),
+        ('Аномалии', 'anomalies'),
+        ('Топливо', 'fuel'),
+        ('Пробег', 'mileage'),
+        ('Моточасы', 'hours'),
+        ('Рейсы', 'trips'),
+        ('Объем', 'volume'),
+    ]:
+        sheet.append([label, context['kpis'][key]])
+    sheet.append([])
+    headers = [
+        'Самосвал',
+        'Водитель',
+        'Смена',
+        'Топливо начало',
+        'Топливо конец',
+        'Расход',
+        'Пробег',
+        'Моточасы',
+        'Рейсы',
+        'Объем',
+        'Статус',
+    ]
+    sheet.append(headers)
+    header_row = sheet.max_row
+    for cell in sheet[header_row]:
+        cell.fill = PatternFill('solid', fgColor='12232E')
+        cell.font = Font(color='FFFFFF', bold=True)
+    for row in context['rows']:
+        sheet.append([
+            row['equipment_label'],
+            row['driver'],
+            row['shift_type'],
+            row['start_fuel'],
+            row['end_fuel'],
+            row['fuel_delta'],
+            row['mileage_delta'],
+            row['hours_delta'],
+            row['trips'],
+            row['volume'],
+            row['status'],
+        ])
+    for row in sheet.iter_rows():
+        for cell in row:
+            cell.alignment = Alignment(vertical='center', wrap_text=True)
+    for column_index in range(1, 12):
+        sheet.column_dimensions[get_column_letter(column_index)].width = 18
+
+
+def dispatcher_transport_export_view(request):
+    access, response = require_dispatcher_report_access(request)
+    if response:
+        return response
+    workbook = Workbook()
+    write_dispatcher_transport_sheet(workbook.active, dispatcher_transport_context(request, access))
+    response = HttpResponse(
+        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    )
+    response['Content-Disposition'] = 'attachment; filename="dispatcher_transport.xlsx"'
+    workbook.save(response)
+    return response
+
+
+def dispatcher_downtime_filters(request):
+    selected_date = parse_filter_date(request.GET.get('date')) or timezone.localdate()
+    status = request.GET.get('status', '').strip()
+    if status not in {'', 'open', 'critical', 'closed'}:
+        status = ''
+    return {
+        'date': selected_date,
+        'date_value': selected_date.strftime('%Y-%m-%d'),
+        'status': status,
+        'query_string': request.GET.urlencode(),
+    }
+
+
+def dispatcher_downtime_queryset(filters):
+    events = DowntimeEvent.objects.select_related(
+        'equipment',
+        'equipment__equipment_type',
+        'reason',
+        'employee',
+    ).filter(started_at__date=filters['date'])
+    if filters['status'] == 'open':
+        events = events.filter(ended_at__isnull=True)
+    elif filters['status'] == 'closed':
+        events = events.filter(ended_at__isnull=False)
+    elif filters['status'] == 'critical':
+        events = events.filter(reason__is_critical=True)
+    return events.order_by('-started_at')
+
+
+def dispatcher_downtime_row(event):
+    duration_hours = downtime_duration_hours(event)
+    status = 'danger' if event.reason.is_critical else 'risk' if event.ended_at is None else 'ok'
+    return {
+        'started_at': event.started_at,
+        'ended_at': event.ended_at,
+        'started_at_display': timezone.localtime(event.started_at).strftime('%H:%M'),
+        'ended_at_display': timezone.localtime(event.ended_at).strftime('%H:%M') if event.ended_at else 'открыт',
+        'equipment': str(event.equipment),
+        'equipment_number': event.equipment.garage_number if event.equipment else '-',
+        'equipment_type': event.equipment.equipment_type.name if event.equipment and event.equipment.equipment_type else 'не указан',
+        'reason': event.reason.name,
+        'is_critical': event.reason.is_critical,
+        'status': status,
+        'status_label': 'критично' if event.reason.is_critical else 'открыт' if event.ended_at is None else 'закрыт',
+        'duration_hours': duration_hours,
+        'duration_display': format_decimal_value(duration_hours, 2),
+        'employee': event.employee.full_name if event.employee else '-',
+        'comment': event.comment or '-',
+    }
+
+
+def dispatcher_downtime_summary(rows, key):
+    grouped = {}
+    for row in rows:
+        name = row[key] or 'не указано'
+        if name not in grouped:
+            grouped[name] = {
+                'name': name,
+                'count': 0,
+                'open_count': 0,
+                'critical_count': 0,
+                'duration_hours': Decimal('0'),
+            }
+        grouped[name]['count'] += 1
+        grouped[name]['duration_hours'] += row['duration_hours']
+        if row['ended_at'] is None:
+            grouped[name]['open_count'] += 1
+        if row['is_critical']:
+            grouped[name]['critical_count'] += 1
+    result = sorted(grouped.values(), key=lambda item: (item['open_count'], item['critical_count'], item['duration_hours']), reverse=True)
+    max_duration = result[0]['duration_hours'] if result else Decimal('0')
+    for item in result:
+        item['duration_display'] = format_decimal_value(item['duration_hours'], 2)
+        item['bar'] = int(percent(item['duration_hours'], max_duration)) if max_duration else 0
+        item['status'] = 'danger' if item['critical_count'] else 'risk' if item['open_count'] else 'ok'
+    return result
+
+
+def dispatcher_downtime_context(request, access):
+    filters = dispatcher_downtime_filters(request)
+    rows = [dispatcher_downtime_row(event) for event in dispatcher_downtime_queryset(filters)]
+    total_duration_hours = decimal_total(row['duration_hours'] for row in rows)
+    open_rows = [row for row in rows if row['ended_at'] is None]
+    critical_rows = [row for row in rows if row['is_critical']]
+    closed_rows = [row for row in rows if row['ended_at'] is not None]
+    avg_duration = (total_duration_hours / Decimal(len(rows))).quantize(Decimal('0.01')) if rows else Decimal('0')
+
+    reason_rows = dispatcher_downtime_summary(rows, 'reason')
+    equipment_rows = dispatcher_downtime_summary(rows, 'equipment')
+    equipment_type_rows = dispatcher_downtime_summary(rows, 'equipment_type')
+
+    return {
+        'access': access,
+        'dispatcher_header': build_dispatcher_header_context(access),
+        'filters': filters,
+        'current_time': timezone.localtime(timezone.now()).strftime('%H:%M'),
+        'current_date': timezone.localdate().strftime('%d.%m.%Y'),
+        'shift_label': filters['date'].strftime('%d.%m.%Y'),
+        'kpis': {
+            'events': len(rows),
+            'open': len(open_rows),
+            'closed': len(closed_rows),
+            'critical': len(critical_rows),
+            'hours': format_decimal_value(total_duration_hours, 2),
+            'average': format_decimal_value(avg_duration, 2),
+            'equipment': len({row['equipment'] for row in rows}),
+        },
+        'status_choices': [
+            {'code': '', 'label': 'Все'},
+            {'code': 'open', 'label': 'Открытые'},
+            {'code': 'critical', 'label': 'Критические'},
+            {'code': 'closed', 'label': 'Закрытые'},
+        ],
+        'reason_rows': reason_rows[:8],
+        'equipment_rows': equipment_rows[:8],
+        'equipment_type_rows': equipment_type_rows[:5],
+        'open_rows': open_rows[:8],
+        'critical_rows': critical_rows[:8],
+        'rows': rows[:120],
+        'query_string': request.GET.urlencode(),
+    }
+
+
+def dispatcher_downtimes_view(request):
+    access, response = require_dispatcher_report_access(request)
+    if response:
+        return response
+    return render(request, 'reports/dispatcher_downtimes.html', dispatcher_downtime_context(request, access))
+
+
+def write_dispatcher_downtimes_sheet(sheet, context):
+    sheet.title = 'Простои'
+    sheet['A1'] = 'Простои и отклонения диспетчера'
+    sheet['A1'].font = Font(size=16, bold=True, color='12232E')
+    sheet.append(['Дата', context['filters']['date'].strftime('%d.%m.%Y')])
+    sheet.append(['Статус', next((item['label'] for item in context['status_choices'] if item['code'] == context['filters']['status']), 'Все')])
+    sheet.append(['Сформирован', f"{context['current_date']} {context['current_time']}"])
+    sheet.append([])
+    for label, key in [
+        ('События', 'events'),
+        ('Открытые', 'open'),
+        ('Закрытые', 'closed'),
+        ('Критические', 'critical'),
+        ('Техника', 'equipment'),
+        ('Потери, ч', 'hours'),
+        ('Средний простой, ч', 'average'),
+    ]:
+        sheet.append([label, context['kpis'][key]])
+    sheet.append([])
+
+    def write_summary(title, rows):
+        sheet.append([title])
+        title_row = sheet.max_row
+        sheet.cell(row=title_row, column=1).font = Font(bold=True, color='12232E')
+        sheet.append(['Разрез', 'События', 'Открытые', 'Критические', 'Потери, ч'])
+        header_row = sheet.max_row
+        for cell in sheet[header_row]:
+            cell.fill = PatternFill('solid', fgColor='12232E')
+            cell.font = Font(color='FFFFFF', bold=True)
+        for row in rows:
+            sheet.append([row['name'], row['count'], row['open_count'], row['critical_count'], row['duration_display']])
+        sheet.append([])
+
+    write_summary('По причинам', context['reason_rows'])
+    write_summary('По технике', context['equipment_rows'])
+    write_summary('По видам техники', context['equipment_type_rows'])
+
+    sheet.append(['Начало', 'Окончание', 'Статус', 'Техника', 'Вид', 'Причина', 'Потери, ч', 'Кто зафиксировал', 'Комментарий'])
+    header_row = sheet.max_row
+    for cell in sheet[header_row]:
+        cell.fill = PatternFill('solid', fgColor='12232E')
+        cell.font = Font(color='FFFFFF', bold=True)
+    for row in context['rows']:
+        sheet.append([
+            timezone.localtime(row['started_at']).strftime('%d.%m.%Y %H:%M'),
+            timezone.localtime(row['ended_at']).strftime('%d.%m.%Y %H:%M') if row['ended_at'] else 'открыт',
+            row['status_label'],
+            row['equipment'],
+            row['equipment_type'],
+            row['reason'],
+            row['duration_display'],
+            row['employee'],
+            row['comment'],
+        ])
+
+    for row in sheet.iter_rows():
+        for cell in row:
+            cell.alignment = Alignment(vertical='center', wrap_text=True)
+    for column_index in range(1, 10):
+        sheet.column_dimensions[get_column_letter(column_index)].width = 20
+
+
+def dispatcher_downtimes_export_view(request):
+    access, response = require_dispatcher_report_access(request)
+    if response:
+        return response
+    workbook = Workbook()
+    write_dispatcher_downtimes_sheet(workbook.active, dispatcher_downtime_context(request, access))
+    response = HttpResponse(
+        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    )
+    response['Content-Disposition'] = 'attachment; filename="dispatcher_downtimes.xlsx"'
+    workbook.save(response)
+    return response
+
+
+def dispatcher_shift_log_filters(request):
+    selected_date = parse_filter_date(request.GET.get('date')) or timezone.localdate()
+    event_type = request.GET.get('event_type', '').strip()
+    if event_type not in {'', 'dispatcher', 'downtime', 'trip'}:
+        event_type = ''
+    return {
+        'date': selected_date,
+        'date_value': selected_date.strftime('%Y-%m-%d'),
+        'event_type': event_type,
+        'query_string': request.GET.urlencode(),
+    }
+
+
+def dispatcher_action_status(action):
+    if action.action_type == DispatcherActionType.CANCEL_TRIP:
+        return 'danger'
+    if action.action_type in {DispatcherActionType.CANCEL_ASSIGNMENT, DispatcherActionType.SERVICE_CLOSE_SHIFT}:
+        return 'risk'
+    return 'ok'
+
+
+def dispatcher_trip_time(trip):
+    return trip.completed_at or trip.created_at
+
+
+def dispatcher_trip_status(trip):
+    if trip.status == TripStatus.CANCELLED:
+        return 'danger'
+    if trip.status == TripStatus.ACTIVE:
+        return 'info'
+    return 'ok'
+
+
+def dispatcher_trip_title(trip):
+    if trip.status == TripStatus.CANCELLED:
+        return 'Рейс отменен'
+    if trip.status == TripStatus.ACTIVE:
+        return 'Рейс открыт'
+    return 'Рейс выполнен'
+
+
+def dispatcher_trip_route(trip):
+    loading = ' / '.join(part for part in [trip.loading_horizon, trip.loading_block] if part) or '-'
+    return f'{loading} -> {trip.dump_point}'
+
+
+def dispatcher_shift_action_rows(filters):
+    actions = DispatcherActionLog.objects.select_related(
+        'actor',
+        'trip',
+        'trip__truck',
+        'trip__excavator',
+        'trip__dump_point',
+        'trip__rock_type',
+    ).filter(created_at__date=filters['date']).order_by('-created_at')
+    return [
+        {
+            'time': action.created_at,
+            'time_display': timezone.localtime(action.created_at).strftime('%H:%M'),
+            'type': 'dispatcher',
+            'type_label': 'действие',
+            'status': dispatcher_action_status(action),
+            'title': action.get_action_type_display(),
+            'summary': action.target_summary,
+            'reason': action.reason or '-',
+            'equipment': str(action.trip.truck) if action.trip else '-',
+            'actor': action.actor.full_name if action.actor else '-',
+            'route': dispatcher_trip_route(action.trip) if action.trip else '-',
+            'volume': format_volume(action.trip.volume_m3) + ' м3' if action.trip and action.trip.volume_m3 else '-',
+        }
+        for action in actions
+    ]
+
+
+def dispatcher_shift_downtime_rows(filters):
+    events = DowntimeEvent.objects.select_related(
+        'equipment',
+        'equipment__equipment_type',
+        'reason',
+        'employee',
+    ).filter(started_at__date=filters['date']).order_by('-started_at')
+    rows = []
+    for event in events:
+        duration = downtime_duration_hours(event)
+        status = 'danger' if event.reason.is_critical else 'risk' if event.ended_at is None else 'ok'
+        rows.append({
+            'time': event.started_at,
+            'time_display': timezone.localtime(event.started_at).strftime('%H:%M'),
+            'type': 'downtime',
+            'type_label': 'простой',
+            'status': status,
+            'title': event.reason.name,
+            'summary': event.comment or ('Открытый простой' if event.ended_at is None else 'Простой закрыт'),
+            'reason': event.reason.name,
+            'equipment': str(event.equipment),
+            'actor': event.employee.full_name if event.employee else '-',
+            'route': event.equipment.equipment_type.name if event.equipment and event.equipment.equipment_type else '-',
+            'volume': f'{format_decimal_value(duration, 2)} ч',
+        })
+    return rows
+
+
+def dispatcher_shift_trip_rows(filters):
+    trips = Trip.objects.select_related(
+        'truck',
+        'excavator',
+        'rock_type',
+        'dump_point',
+        'driver',
+        'excavator_operator',
+    ).filter(completed_at__date=filters['date']).order_by('-completed_at')
+    rows = []
+    for trip in trips:
+        rows.append({
+            'time': dispatcher_trip_time(trip),
+            'time_display': timezone.localtime(dispatcher_trip_time(trip)).strftime('%H:%M'),
+            'type': 'trip',
+            'type_label': 'рейс',
+            'status': dispatcher_trip_status(trip),
+            'title': dispatcher_trip_title(trip),
+            'summary': f'{trip.truck} из-под {trip.excavator} на {trip.dump_point}',
+            'reason': str(trip.rock_type),
+            'equipment': f'{trip.truck} / {trip.excavator}',
+            'actor': trip.driver.full_name if trip.driver else trip.excavator_operator.full_name if trip.excavator_operator else '-',
+            'route': dispatcher_trip_route(trip),
+            'volume': format_volume(trip.volume_m3) + ' м3' if trip.volume_m3 else '-',
+        })
+    return rows
+
+
+def dispatcher_shift_log_context(request, access):
+    filters = dispatcher_shift_log_filters(request)
+    action_rows = dispatcher_shift_action_rows(filters)
+    downtime_rows = dispatcher_shift_downtime_rows(filters)
+    trip_rows = dispatcher_shift_trip_rows(filters)
+    rows = action_rows + downtime_rows + trip_rows
+    if filters['event_type']:
+        rows = [row for row in rows if row['type'] == filters['event_type']]
+    rows = sorted(rows, key=lambda row: row['time'], reverse=True)
+    critical_downtimes = [row for row in downtime_rows if row['status'] == 'danger']
+    service_actions = [row for row in action_rows if row['status'] in {'danger', 'risk'}]
+    return {
+        'access': access,
+        'dispatcher_header': build_dispatcher_header_context(access),
+        'filters': filters,
+        'current_time': timezone.localtime(timezone.now()).strftime('%H:%M'),
+        'current_date': timezone.localdate().strftime('%d.%m.%Y'),
+        'shift_label': filters['date'].strftime('%d.%m.%Y'),
+        'kpis': {
+            'events': len(rows),
+            'actions': len(action_rows),
+            'downtimes': len(downtime_rows),
+            'critical_downtimes': len(critical_downtimes),
+            'trips': len(trip_rows),
+            'service_actions': len(service_actions),
+        },
+        'event_type_choices': [
+            {'code': '', 'label': 'Все события'},
+            {'code': 'dispatcher', 'label': 'Действия'},
+            {'code': 'downtime', 'label': 'Простои'},
+            {'code': 'trip', 'label': 'Рейсы'},
+        ],
+        'rows': rows[:180],
+        'action_rows': action_rows[:12],
+        'downtime_rows': downtime_rows[:12],
+        'trip_rows': trip_rows[:12],
+        'query_string': request.GET.urlencode(),
+    }
+
+
+def dispatcher_shift_log_view(request):
+    access, response = require_dispatcher_report_access(request)
+    if response:
+        return response
+    return render(request, 'reports/dispatcher_shift_log.html', dispatcher_shift_log_context(request, access))
+
+
+def write_dispatcher_shift_log_sheet(sheet, context):
+    sheet.title = 'Журнал смены'
+    sheet['A1'] = 'Журнал смены диспетчера'
+    sheet['A1'].font = Font(size=16, bold=True, color='12232E')
+    sheet.append(['Дата', context['filters']['date'].strftime('%d.%m.%Y')])
+    sheet.append(['Тип событий', next((item['label'] for item in context['event_type_choices'] if item['code'] == context['filters']['event_type']), 'Все события')])
+    sheet.append(['Сформирован', f"{context['current_date']} {context['current_time']}"])
+    sheet.append([])
+    for label, key in [
+        ('События', 'events'),
+        ('Действия', 'actions'),
+        ('Простои', 'downtimes'),
+        ('Критические простои', 'critical_downtimes'),
+        ('Рейсы', 'trips'),
+        ('Служебные действия', 'service_actions'),
+    ]:
+        sheet.append([label, context['kpis'][key]])
+    sheet.append([])
+    sheet.append(['Время', 'Тип', 'Статус', 'Событие', 'Описание', 'Объект', 'Причина/порода', 'Участник', 'Маршрут', 'Объем/потери'])
+    header_row = sheet.max_row
+    for cell in sheet[header_row]:
+        cell.fill = PatternFill('solid', fgColor='12232E')
+        cell.font = Font(color='FFFFFF', bold=True)
+    for row in context['rows']:
+        sheet.append([
+            timezone.localtime(row['time']).strftime('%d.%m.%Y %H:%M'),
+            row['type_label'],
+            row['status'],
+            row['title'],
+            row['summary'],
+            row['equipment'],
+            row['reason'],
+            row['actor'],
+            row['route'],
+            row['volume'],
+        ])
+    for row in sheet.iter_rows():
+        for cell in row:
+            cell.alignment = Alignment(vertical='center', wrap_text=True)
+    for column_index in range(1, 11):
+        sheet.column_dimensions[get_column_letter(column_index)].width = 20
+
+
+def dispatcher_shift_log_export_view(request):
+    access, response = require_dispatcher_report_access(request)
+    if response:
+        return response
+    workbook = Workbook()
+    write_dispatcher_shift_log_sheet(workbook.active, dispatcher_shift_log_context(request, access))
+    response = HttpResponse(
+        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    )
+    response['Content-Disposition'] = 'attachment; filename="dispatcher_shift_log.xlsx"'
+    workbook.save(response)
+    return response
+
+
+def dispatcher_reports_context(request, access):
+    filters = dispatcher_mining_filters(request)
+    trips = list(dispatcher_mining_trip_queryset(filters))
+    transport_rows = dispatcher_transport_rows(
+        list(dispatcher_transport_shift_queryset(filters)),
+        dispatcher_transport_trip_stats(filters),
+    )
+    downtime_rows = [dispatcher_downtime_row(event) for event in dispatcher_downtime_queryset({'date': filters['date'], 'status': ''})]
+    shift_actions_count = DispatcherActionLog.objects.filter(created_at__date=filters['date']).count()
+    active_templates = list(ReportTemplate.objects.filter(is_active=True).order_by('name')[:8])
+
+    plan_total = decimal_total(trip.planned_volume_m3 for trip in trips)
+    volume_total = decimal_total(trip.volume_m3 for trip in trips)
+    tonnage_total = decimal_total(trip.tonnage for trip in trips)
+    completion = percent(volume_total, plan_total)
+    missing_transport_count = sum(1 for row in transport_rows if row['missing_end'])
+    anomaly_transport_count = sum(1 for row in transport_rows if row['has_negative_delta'])
+    open_downtime_count = sum(1 for row in downtime_rows if row['ended_at'] is None)
+    critical_downtime_count = sum(1 for row in downtime_rows if row['is_critical'])
+    shift_log_events_count = len(trips) + len(downtime_rows) + shift_actions_count
+
+    def report_status(kind):
+        if kind == 'mining':
+            if not trips:
+                return 'risk'
+            return dashboard_status_by_percent(completion)
+        if kind == 'transport':
+            if anomaly_transport_count:
+                return 'danger'
+            if missing_transport_count or not transport_rows:
+                return 'risk'
+            return 'ok'
+        if kind == 'downtimes':
+            if critical_downtime_count:
+                return 'danger'
+            if open_downtime_count:
+                return 'risk'
+            return 'ok'
+        if kind == 'log':
+            return 'ok' if shift_log_events_count else 'risk'
+        if kind == 'templates':
+            return 'ok' if active_templates else 'risk'
+        return 'ok'
+
+    status_labels = {
+        'ok': 'готов',
+        'risk': 'проверить',
+        'danger': 'критично',
+    }
+
+    report_tiles = [
+        {
+            'title': 'Сменные объемы',
+            'kind': 'mining',
+            'status': report_status('mining'),
+            'primary': f'{format_volume(volume_total)} м3',
+            'secondary': f'{len(trips)} рейс. / {len({trip.truck_id for trip in trips if trip.truck_id})} самосв.',
+            'readiness': f'План {format_volume(plan_total)} м3 / {completion}%',
+            'view_url': reverse('dispatcher_mining_volumes'),
+            'export_url': reverse('dispatcher_mining_volumes_export'),
+        },
+        {
+            'title': 'Автотранспорт',
+            'kind': 'transport',
+            'status': report_status('transport'),
+            'primary': f'{len(transport_rows)} смен',
+            'secondary': f'{missing_transport_count} без закрытия / {anomaly_transport_count} аном.',
+            'readiness': f'{sum(1 for row in transport_rows if not row["missing_end"])} закрыто',
+            'view_url': reverse('dispatcher_transport'),
+            'export_url': reverse('dispatcher_transport_export'),
+        },
+        {
+            'title': 'Простои',
+            'kind': 'downtimes',
+            'status': report_status('downtimes'),
+            'primary': f'{len(downtime_rows)} событий',
+            'secondary': f'{open_downtime_count} открыто / {critical_downtime_count} крит.',
+            'readiness': f'{format_decimal_value(decimal_total(row["duration_hours"] for row in downtime_rows), 2)} ч потерь',
+            'view_url': reverse('dispatcher_downtimes'),
+            'export_url': reverse('dispatcher_downtimes_export'),
+        },
+        {
+            'title': 'Журнал смены',
+            'kind': 'log',
+            'status': report_status('log'),
+            'primary': f'{shift_log_events_count} событий',
+            'secondary': f'{shift_actions_count} действий / {len(trips)} рейс.',
+            'readiness': 'Хронология смены',
+            'view_url': reverse('dispatcher_shift_log'),
+            'export_url': reverse('dispatcher_shift_log_export'),
+        },
+        {
+            'title': 'Суточный заказчику',
+            'kind': 'customer',
+            'status': report_status('mining'),
+            'primary': f'{format_volume(tonnage_total)} т',
+            'secondary': 'Официальная выгрузка',
+            'readiness': 'По завершенным рейсам',
+            'view_url': reverse('customer_daily_report'),
+            'export_url': reverse('customer_daily_report_export'),
+        },
+        {
+            'title': 'Конструктор',
+            'kind': 'templates',
+            'status': report_status('templates'),
+            'primary': f'{len(active_templates)} шабл.',
+            'secondary': 'Настройка колонок и фильтров',
+            'readiness': 'Шаблоны отчетов',
+            'view_url': reverse('report_template_builder'),
+            'export_url': '',
+        },
+    ]
+    for tile in report_tiles:
+        tile['status_label'] = status_labels[tile['status']]
+
+    query_suffix = f'?{request.GET.urlencode()}' if request.GET.urlencode() else ''
+    return {
+        'access': access,
+        'dispatcher_header': build_dispatcher_header_context(access),
+        'filters': filters,
+        'current_time': timezone.localtime(timezone.now()).strftime('%H:%M'),
+        'current_date': timezone.localdate().strftime('%d.%m.%Y'),
+        'shift_label': 'Дневная' if filters['shift_type'] == 'day' else 'Ночная' if filters['shift_type'] == 'night' else 'Все смены',
+        'query_string': request.GET.urlencode(),
+        'query_suffix': query_suffix,
+        'kpis': {
+            'reports': len(report_tiles),
+            'ready': sum(1 for tile in report_tiles if tile['status'] == 'ok'),
+            'risk': sum(1 for tile in report_tiles if tile['status'] == 'risk'),
+            'danger': sum(1 for tile in report_tiles if tile['status'] == 'danger'),
+            'templates': len(active_templates),
+            'volume': format_volume(volume_total),
+            'trips': len(trips),
+            'transport_missing': missing_transport_count,
+        },
+        'report_tiles': report_tiles,
+        'active_templates': active_templates,
+    }
+
+
+def dispatcher_reports_view(request):
+    access, response = require_dispatcher_report_access(request)
+    if response:
+        return response
+    return render(request, 'reports/dispatcher_reports.html', dispatcher_reports_context(request, access))
+
+
+def write_dispatcher_reports_sheet(sheet, context):
+    sheet.title = 'Отчеты'
+    sheet['A1'] = 'Отчеты диспетчерской'
+    sheet['A1'].font = Font(size=16, bold=True, color='12232E')
+    sheet.append(['Дата', context['filters']['date'].strftime('%d.%m.%Y')])
+    sheet.append(['Смена', context['shift_label']])
+    sheet.append(['Сформирован', f"{context['current_date']} {context['current_time']}"])
+    sheet.append([])
+    sheet.append(['Отчет', 'Статус', 'Готовность', 'Показатель', 'Сводка'])
+    header_row = sheet.max_row
+    for cell in sheet[header_row]:
+        cell.fill = PatternFill('solid', fgColor='12232E')
+        cell.font = Font(color='FFFFFF', bold=True)
+    for tile in context['report_tiles']:
+        sheet.append([tile['title'], tile['status_label'], tile['readiness'], tile['primary'], tile['secondary']])
+    sheet.append([])
+    sheet.append(['Активные шаблоны'])
+    for template in context['active_templates']:
+        sheet.append([template.name, template.get_report_type_display(), template.group_by or 'без группировки'])
+    for row in sheet.iter_rows():
+        for cell in row:
+            cell.alignment = Alignment(vertical='center', wrap_text=True)
+    for column_index in range(1, 7):
+        sheet.column_dimensions[get_column_letter(column_index)].width = 24
+
+
+def dispatcher_reports_export_view(request):
+    access, response = require_dispatcher_report_access(request)
+    if response:
+        return response
+    workbook = Workbook()
+    write_dispatcher_reports_sheet(workbook.active, dispatcher_reports_context(request, access))
+    response = HttpResponse(
+        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    )
+    response['Content-Disposition'] = 'attachment; filename="dispatcher_reports.xlsx"'
+    workbook.save(response)
+    return response
+
+
+def dispatcher_management_attention_rows(downtime_rows, transport_rows):
+    rows = []
+    for row in downtime_rows:
+        if row['status'] == 'ok':
+            continue
+        rows.append({
+            'status': row['status'],
+            'title': row['equipment_number'],
+            'summary': row['reason'],
+            'detail': f"{row['status_label']} / {row['duration_display']} ч",
+        })
+    for row in transport_rows:
+        if row['status'] == 'ok':
+            continue
+        rows.append({
+            'status': row['status'],
+            'title': row['equipment_label'],
+            'summary': 'Показания автотранспорта',
+            'detail': 'нет закрытия' if row['missing_end'] else 'аномалия пробега/топлива',
+        })
+    status_order = {'danger': 0, 'risk': 1, 'ok': 2}
+    return sorted(rows, key=lambda item: status_order.get(item['status'], 3))[:8]
+
+
+def dispatcher_management_context(request, access):
+    filters = dispatcher_mining_filters(request)
+    trips = list(dispatcher_mining_trip_queryset(filters))
+    month_start = filters['date'].replace(day=1)
+    month_trips = list(
+        Trip.objects.filter(
+            status=TripStatus.COMPLETED,
+            completed_at__date__gte=month_start,
+            completed_at__date__lte=filters['date'],
+        )
+    )
+    if filters['shift_type']:
+        month_trips = [trip for trip in month_trips if trip.loading_shift and trip.loading_shift.shift_type == filters['shift_type']]
+
+    transport_rows = dispatcher_transport_rows(
+        list(dispatcher_transport_shift_queryset(filters)),
+        dispatcher_transport_trip_stats(filters),
+    )
+    downtime_rows = [dispatcher_downtime_row(event) for event in dispatcher_downtime_queryset({'date': filters['date'], 'status': ''})]
+    downtime_reason_rows = dispatcher_downtime_summary(downtime_rows, 'reason')
+    complex_rows = dispatcher_complex_rows(trips)
+    dump_rows = aggregate_dispatcher_rows(
+        trips,
+        lambda trip: trip.dump_point_id,
+        lambda trip: trip.dump_point.name if trip.dump_point else '',
+    )
+    rock_rows = aggregate_dispatcher_rows(
+        trips,
+        lambda trip: trip.rock_type_id,
+        lambda trip: trip.rock_type.name if trip.rock_type else '',
+    )
+    hourly_rows = dispatcher_hourly_rows(trips)
+
+    plan_total = decimal_total(trip.planned_volume_m3 for trip in trips)
+    volume_total = decimal_total(trip.volume_m3 for trip in trips)
+    tonnage_total = decimal_total(trip.tonnage for trip in trips)
+    completion = percent(volume_total, plan_total)
+    deviation = volume_total - plan_total
+    month_volume = decimal_total(trip.volume_m3 for trip in month_trips)
+    month_tonnage = decimal_total(trip.tonnage for trip in month_trips)
+    open_downtime_count = sum(1 for row in downtime_rows if row['ended_at'] is None)
+    critical_downtime_count = sum(1 for row in downtime_rows if row['is_critical'])
+    missing_transport_count = sum(1 for row in transport_rows if row['missing_end'])
+    anomaly_transport_count = sum(1 for row in transport_rows if row['has_negative_delta'])
+    action_count = DispatcherActionLog.objects.filter(created_at__date=filters['date']).count()
+    attention_rows = dispatcher_management_attention_rows(downtime_rows, transport_rows)
+
+    overall_status = dashboard_status_by_percent(completion) if trips else 'risk'
+    if critical_downtime_count or anomaly_transport_count:
+        overall_status = 'danger'
+    elif open_downtime_count or missing_transport_count:
+        overall_status = 'risk'
+
+    return {
+        'access': access,
+        'dispatcher_header': build_dispatcher_header_context(access),
+        'filters': filters,
+        'current_time': timezone.localtime(timezone.now()).strftime('%H:%M'),
+        'current_date': timezone.localdate().strftime('%d.%m.%Y'),
+        'shift_label': 'Дневная' if filters['shift_type'] == 'day' else 'Ночная' if filters['shift_type'] == 'night' else 'Все смены',
+        'query_string': request.GET.urlencode(),
+        'query_suffix': f"?{request.GET.urlencode()}" if request.GET.urlencode() else '',
+        'overall_status': overall_status,
+        'kpis': {
+            'plan': format_volume(plan_total),
+            'volume': format_volume(volume_total),
+            'tonnage': format_volume(tonnage_total),
+            'completion': completion,
+            'deviation': format_volume(abs(deviation)),
+            'deviation_negative': deviation < 0,
+            'trips': len(trips),
+            'complexes': len({trip.excavator_id for trip in trips if trip.excavator_id}),
+            'trucks': len({trip.truck_id for trip in trips if trip.truck_id}),
+            'month_volume': format_volume(month_volume),
+            'month_tonnage': format_volume(month_tonnage),
+            'month_trips': len(month_trips),
+            'transport_rows': len(transport_rows),
+            'transport_missing': missing_transport_count,
+            'transport_anomaly': anomaly_transport_count,
+            'downtimes': len(downtime_rows),
+            'open_downtimes': open_downtime_count,
+            'critical_downtimes': critical_downtime_count,
+            'downtime_hours': format_decimal_value(decimal_total(row['duration_hours'] for row in downtime_rows), 2),
+            'actions': action_count,
+            'attention': len(attention_rows),
+        },
+        'complex_rows': complex_rows[:6],
+        'dump_rows': dump_rows[:5],
+        'rock_rows': rock_rows[:5],
+        'hourly_rows': hourly_rows,
+        'downtime_reason_rows': downtime_reason_rows[:5],
+        'attention_rows': attention_rows,
+        'export_url': reverse('dispatcher_management_export'),
+    }
+
+
+def dispatcher_management_view(request):
+    access, response = require_dispatcher_report_access(request)
+    if response:
+        return response
+    return render(request, 'reports/dispatcher_management.html', dispatcher_management_context(request, access))
+
+
+def write_dispatcher_management_sheet(sheet, context):
+    sheet.title = 'Витрина'
+    sheet['A1'] = 'Витрина диспетчерской'
+    sheet['A1'].font = Font(size=16, bold=True, color='12232E')
+    sheet.append(['Дата', context['filters']['date'].strftime('%d.%m.%Y')])
+    sheet.append(['Смена', context['shift_label']])
+    sheet.append(['Сформирован', f"{context['current_date']} {context['current_time']}"])
+    sheet.append([])
+    sheet.append(['Итог смены'])
+    sheet.append(['План', context['kpis']['plan']])
+    sheet.append(['Факт', context['kpis']['volume']])
+    sheet.append(['Выполнение', f"{context['kpis']['completion']}%"])
+    sheet.append(['Отклонение', ('-' if context['kpis']['deviation_negative'] else '+') + context['kpis']['deviation']])
+    sheet.append(['Рейсы', context['kpis']['trips']])
+    sheet.append(['Самосвалы', context['kpis']['trucks']])
+    sheet.append(['Комплексы', context['kpis']['complexes']])
+    sheet.append([])
+    sheet.append(['Комплексы', 'Экскаватор', 'Объем', 'Выполнение', 'Самосвалы', 'Забои'])
+    header_row = sheet.max_row
+    for cell in sheet[header_row]:
+        cell.fill = PatternFill('solid', fgColor='12232E')
+        cell.font = Font(color='FFFFFF', bold=True)
+    for row in context['complex_rows']:
+        sheet.append([row['label'], row['excavator'], row['volume_display'], f"{row['completion']}%", row['trucks_display'], row['faces_display']])
+    sheet.append([])
+    sheet.append(['Разгрузки', 'Объем', 'Доля', 'Рейсы'])
+    for row in context['dump_rows']:
+        sheet.append([row['label'], row['volume_display'], f"{row['share']}%", row['trips']])
+    sheet.append([])
+    sheet.append(['Внимание', 'Статус', 'Сводка', 'Деталь'])
+    for row in context['attention_rows']:
+        sheet.append([row['title'], row['status'], row['summary'], row['detail']])
+    sheet.append([])
+    sheet.append(['Простои по причинам', 'Событий', 'Открыто', 'Критично', 'Часы'])
+    for row in context['downtime_reason_rows']:
+        sheet.append([row['name'], row['count'], row['open_count'], row['critical_count'], row['duration_display']])
+    for row in sheet.iter_rows():
+        for cell in row:
+            cell.alignment = Alignment(vertical='center', wrap_text=True)
+    for column_index in range(1, 8):
+        sheet.column_dimensions[get_column_letter(column_index)].width = 24
+
+
+def dispatcher_management_export_view(request):
+    access, response = require_dispatcher_report_access(request)
+    if response:
+        return response
+    workbook = Workbook()
+    write_dispatcher_management_sheet(workbook.active, dispatcher_management_context(request, access))
+    response = HttpResponse(
+        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    )
+    response['Content-Disposition'] = 'attachment; filename="dispatcher_management.xlsx"'
+    workbook.save(response)
+    return response
 
 
 def get_downtime_report_filters(request):

@@ -1,0 +1,27 @@
+{% with active_title=dispatcher_header.active_shift_title|default:"Активная смена горного диспетчера" inactive_title=dispatcher_header.inactive_shift_title|default:"Активная смена горного диспетчера не открыта" inactive_name=dispatcher_header.inactive_name|default:"смена не открыта" role_label=dispatcher_header.active_role_label|default:"горный диспетчер" %}
+    {% if dispatcher_header.active_dispatcher %}
+        <span class="dispatcher-active-badge" title="{{ active_title }}">
+            <span class="dispatcher-active-avatar">
+                {% if dispatcher_header.active_dispatcher_photo %}
+                    <img src="{{ dispatcher_header.active_dispatcher_photo }}" alt="">
+                {% else %}
+                    {{ dispatcher_header.active_dispatcher_initials }}
+                {% endif %}
+            </span>
+            <span class="dispatcher-active-text">
+                <strong>{{ dispatcher_header.active_dispatcher_name }}</strong>
+                <span class="dispatcher-active-role">{{ role_label }}</span>
+                {% if dispatcher_header.active_shift_opened_at %}<em>с {{ dispatcher_header.active_shift_opened_at }}</em>{% endif %}
+            </span>
+            <span class="dispatcher-active-dot" aria-hidden="true"></span>
+        </span>
+    {% else %}
+        <span class="dispatcher-active-badge is-muted" title="{{ inactive_title }}">
+            <span class="dispatcher-active-avatar">-</span>
+            <span class="dispatcher-active-text">
+                <strong>{{ inactive_name }}</strong>
+                <span class="dispatcher-active-role">{{ role_label }}</span>
+            </span>
+        </span>
+    {% endif %}
+{% endwith %}

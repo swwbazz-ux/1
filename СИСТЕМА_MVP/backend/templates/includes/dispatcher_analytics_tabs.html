@@ -1,0 +1,6 @@
+<nav class="dispatcher-subnav" aria-label="Разделы аналитики диспетчера">
+    <a class="{% if dispatcher_nav_active == 'management' %}is-active{% endif %}" href="{% url 'dispatcher_management' %}">Сводка</a>
+    <a class="{% if dispatcher_nav_active == 'mining' %}is-active{% endif %}" href="{% url 'dispatcher_mining_volumes' %}">Горные объемы</a>
+    <a class="{% if dispatcher_nav_active == 'transport' %}is-active{% endif %}" href="{% url 'dispatcher_transport' %}">Автотранспорт</a>
+    <a class="{% if dispatcher_nav_active == 'downtimes' %}is-active{% endif %}" href="{% url 'dispatcher_downtimes' %}">Простои</a>
+</nav>

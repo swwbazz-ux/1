@@ -1,0 +1,191 @@
+{% if dispatcher_header.can_toggle_shift %}
+    <form class="dispatcher-shift-form" method="post" action="{% if dispatcher_header.shift_form_action %}{{ dispatcher_header.shift_form_action }}{% else %}{% url 'dispatcher_toggle_shift' %}{% endif %}">
+        {% csrf_token %}
+        {% if not dispatcher_header.shift_form_action %}
+            <input type="hidden" name="next" value="{{ request.get_full_path }}">
+        {% endif %}
+        {% if dispatcher_header.shift_is_open %}
+            <button
+                type="submit"
+                name="{{ dispatcher_header.shift_action_field_name|default:'shift_action' }}"
+                value="{{ dispatcher_header.shift_end_value|default:'end' }}"
+                class="dispatcher-shift-button is-danger"
+                {% if dispatcher_header.shift_button_marker %}data-mm-shift-control{% endif %}
+                data-confirm="{{ dispatcher_header.shift_end_confirm|default:'Завершить смену горного диспетчера?' }}"
+                data-confirm-variant="shift-end"
+                data-confirm-title="{{ dispatcher_header.shift_end_confirm_title|default:'Завершение смены' }}"
+                data-confirm-description="{{ dispatcher_header.shift_end_confirm_description|default:'Вы уверены, что хотите завершить текущую смену? После завершения смены будут сохранены результаты работы.' }}"
+                data-confirm-date="{{ dispatcher_header.active_shift_date }}"
+                data-confirm-time="{{ dispatcher_header.active_shift_opened_at }}"
+                data-confirm-person-label="{{ dispatcher_header.shift_end_confirm_role|default:'Ответственный' }}"
+                data-confirm-person="{{ dispatcher_header.active_dispatcher_name }}"
+                data-confirm-delay="10"
+            >{{ dispatcher_header.shift_end_label|default:"Завершить смену" }}</button>
+        {% elif dispatcher_header.requires_shift_reauth %}
+            <button
+                type="button"
+                class="dispatcher-shift-button"
+                {% if dispatcher_header.shift_button_marker %}data-mm-shift-control{% endif %}
+                data-shared-shift-login-open
+            >{{ dispatcher_header.shift_start_label|default:"Начать смену" }}</button>
+        {% else %}
+            <button
+                type="submit"
+                name="{{ dispatcher_header.shift_action_field_name|default:'shift_action' }}"
+                value="{{ dispatcher_header.shift_start_value|default:'start' }}"
+                class="dispatcher-shift-button"
+                {% if dispatcher_header.shift_button_marker %}data-mm-shift-control{% endif %}
+                data-confirm="{{ dispatcher_header.shift_start_confirm|default:'Начать смену горного диспетчера?' }}"
+                data-confirm-delay="10"
+            >{{ dispatcher_header.shift_start_label|default:"Начать смену" }}</button>
+        {% endif %}
+    </form>
+    {% if dispatcher_header.requires_shift_reauth %}
+        <div class="app-confirm-modal" hidden data-shared-shift-login-modal>
+            <form class="app-confirm-dialog shared-shift-dialog" method="post" action="{% if dispatcher_header.shift_form_action %}{{ dispatcher_header.shift_form_action }}{% else %}{% url 'dispatcher_toggle_shift' %}{% endif %}" role="dialog" aria-modal="true" aria-labelledby="shared-shift-login-title">
+                {% csrf_token %}
+                <div class="shared-shift-accent" aria-hidden="true"></div>
+                <button class="shared-shift-close" type="button" aria-label="Закрыть" data-shared-shift-login-cancel>×</button>
+                <div class="app-confirm-content">
+                    <h2 id="shared-shift-login-title">{{ dispatcher_header.shift_reauth_title|default:"Вход Горного мастера" }}</h2>
+                    <p>{{ dispatcher_header.shift_reauth_description|default:"Введите телефон и код мастера, который начинает смену на этом устройстве." }}</p>
+                    <label class="shared-shift-login-field">
+                        <span>Телефон</span>
+                        <span class="shared-shift-phone-shell">
+                            <span class="shared-shift-country-code">+7 <span aria-hidden="true">⌄</span></span>
+                            <input type="text" name="reauth_phone" inputmode="numeric" autocomplete="tel" maxlength="13" pattern="[0-9]{3}-[0-9]{3}-[0-9]{2}-[0-9]{2}" placeholder="999-000-00-00" data-shared-shift-phone required>
+                        </span>
+                        <small>Введите номер телефона в формате +7 XXX-XXX-XX-XX</small>
+                    </label>
+                    <label class="shared-shift-login-field">
+                        <span>{{ dispatcher_header.shift_reauth_code_label|default:"Код мастера" }}</span>
+                        <input type="text" name="reauth_access_code" inputmode="numeric" autocomplete="one-time-code" placeholder="00-00-00" maxlength="8" pattern="[0-9]{2}-[0-9]{2}-[0-9]{2}" data-shared-shift-code required>
+                        <small>Код состоит из 6 цифр</small>
+                    </label>
+                    <fieldset class="shared-shift-device-choice">
+                        <legend>Устройство</legend>
+                        <label class="shared-shift-device-option">
+                            <input type="radio" name="device_kind" value="personal" {% if dispatcher_header.session_device_kind == "personal" %}checked{% endif %}>
+                            <span>Личное</span>
+                        </label>
+                        <label class="shared-shift-device-option">
+                            <input type="radio" name="device_kind" value="shared" {% if dispatcher_header.session_device_kind != "personal" %}checked{% endif %}>
+                            <span>Общее</span>
+                        </label>
+                    </fieldset>
+                    <input type="hidden" name="{{ dispatcher_header.shift_action_field_name|default:'shift_action' }}" value="{{ dispatcher_header.shift_start_value|default:'start' }}">
+                </div>
+                <div class="app-confirm-actions">
+                    <button class="secondary" type="button" data-shared-shift-login-cancel>Отмена</button>
+                    <button class="danger" type="submit">Начать смену</button>
+                </div>
+            </form>
+        </div>
+        <script>
+        (function () {
+            var modal = document.querySelector("[data-shared-shift-login-modal]");
+            var openButtons = document.querySelectorAll("[data-shared-shift-login-open]");
+            if (!modal || !openButtons.length) {
+                return;
+            }
+            var cancelButton = modal.querySelector("[data-shared-shift-login-cancel]");
+            var firstInput = modal.querySelector("[data-shared-shift-phone]");
+            var codeInput = modal.querySelector("[data-shared-shift-code]");
+            function formatPhone(value) {
+                var digits = String(value || "").replace(/\D/g, "");
+                if (digits.charAt(0) === "8") {
+                    digits = "7" + digits.slice(1);
+                }
+                if (digits.charAt(0) === "7") {
+                    digits = digits.slice(1);
+                }
+                digits = digits.slice(0, 10);
+                var result = digits.slice(0, 3);
+                if (digits.length > 3) {
+                    result += "-" + digits.slice(3, 6);
+                }
+                if (digits.length > 6) {
+                    result += "-" + digits.slice(6, 8);
+                }
+                if (digits.length > 8) {
+                    result += "-" + digits.slice(8, 10);
+                }
+                return result;
+            }
+            function formatAccessCode(value) {
+                var digits = String(value || "").replace(/\D/g, "").slice(0, 6);
+                var result = digits.slice(0, 2);
+                if (digits.length > 2) {
+                    result += "-" + digits.slice(2, 4);
+                }
+                if (digits.length > 4) {
+                    result += "-" + digits.slice(4, 6);
+                }
+                return result;
+            }
+            function normalizeCode() {
+                if (!codeInput) {
+                    return;
+                }
+                codeInput.value = formatAccessCode(codeInput.value);
+            }
+            function normalizePhone() {
+                if (!firstInput) {
+                    return;
+                }
+                firstInput.value = formatPhone(firstInput.value);
+            }
+            function closeModal() {
+                modal.hidden = true;
+            }
+            openButtons.forEach(function (openButton) {
+                openButton.addEventListener("click", function () {
+                    modal.hidden = false;
+                    normalizePhone();
+                    if (firstInput) {
+                        firstInput.focus();
+                        firstInput.setSelectionRange(firstInput.value.length, firstInput.value.length);
+                    }
+                });
+            });
+            if (firstInput) {
+                firstInput.addEventListener("input", normalizePhone);
+                firstInput.addEventListener("focus", normalizePhone);
+                firstInput.addEventListener("keydown", function (event) {
+                    return;
+                });
+                normalizePhone();
+            }
+            if (codeInput) {
+                codeInput.addEventListener("input", normalizeCode);
+                codeInput.addEventListener("paste", function (event) {
+                    var clipboard = event.clipboardData || window.clipboardData;
+                    if (!clipboard) {
+                        return;
+                    }
+                    event.preventDefault();
+                    codeInput.value = formatAccessCode(clipboard.getData("text"));
+                    normalizeCode();
+                });
+                normalizeCode();
+            }
+            if (cancelButton) {
+                cancelButton.addEventListener("click", closeModal);
+            }
+            modal.addEventListener("click", function (event) {
+                if (event.target === modal) {
+                    closeModal();
+                }
+            });
+            document.addEventListener("keydown", function (event) {
+                if (event.key === "Escape" && !modal.hidden) {
+                    closeModal();
+                }
+            });
+        })();
+        </script>
+    {% endif %}
+{% endif %}
+{% if not dispatcher_header.can_toggle_shift %}
+    <span class="dispatcher-shift-placeholder" aria-hidden="true"></span>
+{% endif %}

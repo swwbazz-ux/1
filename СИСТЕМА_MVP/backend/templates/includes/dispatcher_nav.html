@@ -1,0 +1,22 @@
+<nav class="dispatcher-nav" aria-label="{% if dispatcher_nav_label %}{{ dispatcher_nav_label }}{% else %}Навигация диспетчера{% endif %}">
+    {% if dispatcher_nav_items %}
+        {% for item in dispatcher_nav_items %}
+            <a class="{% if item.active %}is-active{% endif %}" href="{{ item.href|default:'#' }}"{% if item.data_tab %} data-mm-tab="{{ item.data_tab }}"{% endif %}>
+                <span>{{ item.label }}</span>
+            </a>
+        {% endfor %}
+    {% else %}
+        <a class="{% if dispatcher_nav_active == 'control' %}is-active{% endif %}" href="{% url 'dispatcher_control' %}">
+            <span>Пульт</span>
+        </a>
+        <a class="{% if dispatcher_nav_active == 'management' or dispatcher_nav_active == 'mining' or dispatcher_nav_active == 'transport' or dispatcher_nav_active == 'downtimes' %}is-active{% endif %}" href="{% url 'dispatcher_management' %}">
+            <span>Аналитика</span>
+        </a>
+        <a class="{% if dispatcher_nav_active == 'shift_log' %}is-active{% endif %}" href="{% url 'dispatcher_shift_log' %}">
+            <span>Журнал</span>
+        </a>
+        <a class="{% if dispatcher_nav_active == 'reports' %}is-active{% endif %}" href="{% url 'dispatcher_reports' %}">
+            <span>Отчеты</span>
+        </a>
+    {% endif %}
+</nav>

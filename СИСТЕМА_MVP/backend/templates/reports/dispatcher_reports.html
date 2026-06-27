@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+
+{% block title %}Отчеты диспетчера{% endblock %}
+{% block body_class %}dispatcher-control-screen{% endblock %}
+
+{% block body %}
+<main class="dispatcher-shell dispatcher-analytics-shell" data-dispatcher-theme>
+    <section class="dispatcher-analytics-board" aria-label="Отчеты диспетчера">
+        <header class="dispatcher-topbar dispatcher-unified-topbar">
+            {% include "includes/dispatcher_header.html" with dispatcher_nav_active="reports" dispatcher_header_screen="Отчеты и шаблоны" %}
+        </header>
+        <div class="dispatcher-analytics-toolbar">
+            <span class="dispatcher-toolbar-spacer"></span>
+            <div class="dispatcher-report-actions">
+                <a href="{% url 'dispatcher_reports_export' %}{% if query_string %}?{{ query_string }}{% endif %}">Excel</a>
+                <button type="button" onclick="window.print()">Печать</button>
+            </div>
+        </div>
+
+        <form class="dispatcher-report-filters" method="get" data-auto-filter-form>
+            <label>
+                <span>Дата</span>
+                <input type="date" name="date" value="{{ filters.date_value }}">
+            </label>
+            <label>
+                <span>Смена</span>
+                <select name="shift_type">
+                    <option value="" {% if not filters.shift_type %}selected{% endif %}>Все смены</option>
+                    <option value="day" {% if filters.shift_type == 'day' %}selected{% endif %}>Дневная</option>
+                    <option value="night" {% if filters.shift_type == 'night' %}selected{% endif %}>Ночная</option>
+                </select>
+            </label>
+            <button type="submit">Показать</button>
+        </form>
+
+        <section class="dispatcher-reports-layout">
+            <div class="dispatcher-report-tile-grid">
+                {% for tile in report_tiles %}
+                    <article class="dispatcher-report-tile is-{{ tile.status }}">
+                        <div class="dispatcher-report-tile-head">
+                            <h2>{{ tile.title }}</h2>
+                            <span>{{ tile.status_label }}</span>
+                        </div>
+                        <strong>{{ tile.primary }}</strong>
+                        <p>{{ tile.secondary }}</p>
+                        <em>{{ tile.readiness }}</em>
+                        <div class="dispatcher-report-actions-row">
+                            <a href="{{ tile.view_url }}{{ query_suffix }}">Открыть</a>
+                            {% if tile.export_url %}
+                                <a href="{{ tile.export_url }}{{ query_suffix }}">Excel</a>
+                            {% endif %}
+                        </div>
+                    </article>
+                {% endfor %}
+            </div>
+
+            <aside class="dispatcher-report-card dispatcher-report-hub-card">
+                <div class="dispatcher-report-card-head">
+                    <h2>Шаблоны</h2>
+                    <span>конструктор</span>
+                </div>
+                <div class="dispatcher-report-template-list">
+                    {% for template in active_templates %}
+                        <a href="{% url 'volume_report' %}?template={{ template.id }}">
+                            <strong>{{ template.name }}</strong>
+                            <span>{{ template.get_report_type_display }}</span>
+                        </a>
+                    {% empty %}
+                        <p class="dispatcher-empty-note">Активных шаблонов пока нет.</p>
+                    {% endfor %}
+                </div>
+                <div class="dispatcher-report-actions-row dispatcher-report-actions-row-wide">
+                    <a href="{% url 'report_template_builder' %}">Конструктор</a>
+                    <a href="{% url 'volume_report' %}">Объемы</a>
+                    <a href="{% url 'customer_daily_report' %}">Заказчику</a>
+                </div>
+            </aside>
+        </section>
+    </section>
+</main>
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    var shell = document.querySelector("[data-dispatcher-theme]");
+    var saved = localStorage.getItem("dispatcher-theme") || "night";
+    function setTheme(theme) {
+        if (!shell) return;
+        shell.classList.toggle("dispatcher-night", theme === "night");
+        shell.classList.toggle("dispatcher-day", theme !== "night");
+        localStorage.setItem("dispatcher-theme", theme);
+    }
+    setTheme(saved);
+    document.querySelectorAll("[data-dispatcher-theme-toggle]").forEach(function (toggle) {
+        toggle.addEventListener("click", function () {
+            setTheme(shell.classList.contains("dispatcher-night") ? "day" : "night");
+        });
+    });
+});
+</script>
+{% endblock %}
