@@ -5,17 +5,37 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% block title %}MVP учетной системы{% endblock %}</title>
-    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=20260620-ux1">
+    <link rel="icon" href="{% static 'favicon.ico' %}">
+    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=20260627-admin-employee-create-shell1">
 </head>
 <body class="{% block body_class %}{% endblock %}">
 {% block body %}{% endblock %}
 
 <div class="app-confirm-modal" id="app-confirm-modal" hidden>
     <div class="app-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="app-confirm-title">
+        <button class="app-confirm-close" type="button" aria-label="Закрыть" data-confirm-close>×</button>
+        <div class="app-confirm-accent" aria-hidden="true"></div>
         <div class="app-confirm-icon">!</div>
         <div class="app-confirm-content">
             <h2 id="app-confirm-title">Подтвердите действие</h2>
             <p id="app-confirm-message">Выполнить действие?</p>
+        </div>
+        <div class="app-confirm-shift-summary" id="app-confirm-shift-summary" hidden>
+            <h3>Текущая смена</h3>
+            <div class="app-confirm-shift-grid">
+                <div>
+                    <span>Дата</span>
+                    <strong data-confirm-shift-date>-</strong>
+                </div>
+                <div>
+                    <span>Время начала</span>
+                    <strong data-confirm-shift-time>-</strong>
+                </div>
+                <div>
+                    <span data-confirm-shift-person-label>Ответственный</span>
+                    <strong data-confirm-shift-person>-</strong>
+                </div>
+            </div>
         </div>
         <div class="app-confirm-actions">
             <button class="secondary" type="button" data-confirm-cancel>Отмена</button>
@@ -32,7 +52,15 @@ document.addEventListener("DOMContentLoaded", function () {
     var confirmMessage = document.getElementById("app-confirm-message");
     var confirmAccept = confirmModal ? confirmModal.querySelector("[data-confirm-accept]") : null;
     var confirmCancel = confirmModal ? confirmModal.querySelector("[data-confirm-cancel]") : null;
+    var confirmClose = confirmModal ? confirmModal.querySelector("[data-confirm-close]") : null;
+    var confirmTitle = document.getElementById("app-confirm-title");
+    var confirmShiftSummary = document.getElementById("app-confirm-shift-summary");
+    var confirmShiftDate = confirmModal ? confirmModal.querySelector("[data-confirm-shift-date]") : null;
+    var confirmShiftTime = confirmModal ? confirmModal.querySelector("[data-confirm-shift-time]") : null;
+    var confirmShiftPersonLabel = confirmModal ? confirmModal.querySelector("[data-confirm-shift-person-label]") : null;
+    var confirmShiftPerson = confirmModal ? confirmModal.querySelector("[data-confirm-shift-person]") : null;
     var pendingConfirmAction = null;
+    var pendingConfirmTimer = null;
     var backTargets = [
         {pattern: /^\/system-admin\/employees\/create\/?$/, target: "{% url 'system_admin_employees' %}"},
         {pattern: /^\/system-admin\/employees\/\d+\/?$/, target: "{% url 'system_admin_employees' %}"},
@@ -40,6 +68,7 @@ document.addEventListener("DOMContentLoaded", function () {
         {pattern: /^\/system-admin\/references\/?$/, target: "{% url 'system_admin_dashboard' %}"},
         {pattern: /^\/system-admin\/conflicts\/?$/, target: "{% url 'system_admin_dashboard' %}"},
         {pattern: /^\/system-admin\/logs\/?$/, target: "{% url 'system_admin_dashboard' %}"},
+        {pattern: /^\/system-admin\/exports\/?$/, target: "{% url 'system_admin_dashboard' %}"},
         {pattern: /^\/system-admin\/?$/, target: roleHomePath},
         {pattern: /^\/reports\/pilot-scenario\/?$/, target: "{% url 'interface_map' %}"},
         {pattern: /^\/reports\/pilot-feedback\/?$/, target: "{% url 'pilot_launch_scenario' %}"},
@@ -67,15 +96,101 @@ document.addEventListener("DOMContentLoaded", function () {
         return roleHomePath;
     }
 
-    function openConfirmDialog(message, action) {
+    function resetConfirmAccept(acceptLabel) {
+        if (!confirmAccept) {
+            return;
+        }
+        confirmAccept.disabled = false;
+        confirmAccept.textContent = acceptLabel || "Подтвердить";
+    }
+
+    function syncConfirmTheme() {
+        if (!confirmModal) {
+            return;
+        }
+        var dispatcherShell = document.querySelector("[data-dispatcher-theme]");
+        confirmModal.classList.remove("dispatcher-day", "dispatcher-night");
+        if (!dispatcherShell) {
+            return;
+        }
+        confirmModal.classList.add(dispatcherShell.classList.contains("dispatcher-night") ? "dispatcher-night" : "dispatcher-day");
+    }
+
+    function clearConfirmVariant() {
+        if (!confirmModal) {
+            return;
+        }
+        confirmModal.classList.remove("is-shift-end-confirm");
+        if (confirmTitle) {
+            confirmTitle.textContent = "Подтвердите действие";
+        }
+        if (confirmShiftSummary) {
+            confirmShiftSummary.hidden = true;
+        }
+    }
+
+    function applyConfirmVariant(options) {
+        clearConfirmVariant();
+        options = options || {};
+        var variant = options.confirmVariant || options.variant;
+        if (variant !== "shift-end" || !confirmModal) {
+            return;
+        }
+        confirmModal.classList.add("is-shift-end-confirm");
+        if (confirmTitle) {
+            confirmTitle.textContent = options.confirmTitle || options.title || "Завершение смены";
+        }
+        if (confirmShiftSummary) {
+            confirmShiftSummary.hidden = false;
+        }
+        if (confirmShiftDate) {
+            confirmShiftDate.textContent = options.confirmDate || options.date || "-";
+        }
+        if (confirmShiftTime) {
+            confirmShiftTime.textContent = options.confirmTime || options.time || "-";
+        }
+        if (confirmShiftPersonLabel) {
+            confirmShiftPersonLabel.textContent = options.confirmPersonLabel || options.personLabel || "Ответственный";
+        }
+        if (confirmShiftPerson) {
+            confirmShiftPerson.textContent = options.confirmPerson || options.person || "-";
+        }
+    }
+
+    function openConfirmDialog(message, action, delaySeconds, acceptLabel, options) {
         if (!confirmModal || !confirmMessage || !confirmAccept || !confirmCancel) {
             return;
         }
+        window.clearInterval(pendingConfirmTimer);
+        syncConfirmTheme();
+        applyConfirmVariant(options);
         pendingConfirmAction = action;
-        confirmMessage.textContent = message || "Выполнить действие?";
+        confirmMessage.textContent = (options && (options.confirmDescription || options.description)) || message || "Выполнить действие?";
+        delaySeconds = Number(delaySeconds || 0);
+        if (delaySeconds > 0) {
+            var remaining = delaySeconds;
+            confirmAccept.disabled = true;
+            confirmAccept.textContent = "ОК через " + remaining;
+            pendingConfirmTimer = window.setInterval(function () {
+                remaining -= 1;
+                if (remaining <= 0) {
+                    window.clearInterval(pendingConfirmTimer);
+                    confirmAccept.disabled = false;
+                    confirmAccept.textContent = acceptLabel || "ОК";
+                    return;
+                }
+                confirmAccept.textContent = "ОК через " + remaining;
+            }, 1000);
+        } else {
+            resetConfirmAccept(acceptLabel);
+        }
         confirmModal.hidden = false;
         document.body.classList.add("modal-open");
-        confirmAccept.focus();
+        if (delaySeconds > 0) {
+            confirmCancel.focus();
+        } else {
+            confirmAccept.focus();
+        }
     }
 
     function closeConfirmDialog() {
@@ -85,6 +200,9 @@ document.addEventListener("DOMContentLoaded", function () {
         confirmModal.hidden = true;
         document.body.classList.remove("modal-open");
         pendingConfirmAction = null;
+        window.clearInterval(pendingConfirmTimer);
+        clearConfirmVariant();
+        resetConfirmAccept();
     }
 
     if (confirmAccept) {
@@ -99,6 +217,9 @@ document.addEventListener("DOMContentLoaded", function () {
 
     if (confirmCancel) {
         confirmCancel.addEventListener("click", closeConfirmDialog);
+    }
+    if (confirmClose) {
+        confirmClose.addEventListener("click", closeConfirmDialog);
     }
 
     if (confirmModal) {
@@ -137,7 +258,7 @@ document.addEventListener("DOMContentLoaded", function () {
         });
 
         nav.appendChild(backButton);
-        if (window.location.pathname !== roleHomePath && window.location.pathname !== "/system-admin/") {
+        if (!window.location.pathname.startsWith("/system-admin/") && window.location.pathname !== roleHomePath) {
             var homeLink = document.createElement("a");
             homeLink.href = roleHomePath;
             homeLink.textContent = "Главная";
@@ -160,9 +281,13 @@ document.addEventListener("DOMContentLoaded", function () {
         }
         if (message) {
             event.preventDefault();
+            var acceptLabel = (link.textContent || "").trim();
+            if (acceptLabel && link.dataset.confirmVariant !== "shift-end") {
+                acceptLabel = "ОК, " + acceptLabel;
+            }
             openConfirmDialog(message, function () {
                 window.location.href = link.href;
-            });
+            }, link.dataset.confirmDelay || 0, acceptLabel, link.dataset || {});
         }
     });
 
@@ -183,6 +308,14 @@ document.addEventListener("DOMContentLoaded", function () {
             }
 
             event.preventDefault();
+            var delay = submitter && submitter.dataset ? submitter.dataset.confirmDelay : "";
+            if (!delay && form.dataset.confirmDelay) {
+                delay = form.dataset.confirmDelay;
+            }
+            var acceptLabel = submitter ? (submitter.textContent || submitter.value || "").trim() : "";
+            if (acceptLabel && (!submitter || submitter.dataset.confirmVariant !== "shift-end")) {
+                acceptLabel = "ОК, " + acceptLabel;
+            }
             openConfirmDialog(message, function () {
                 form.dataset.confirmed = "1";
                 if (submitter && submitter.name) {
@@ -193,7 +326,148 @@ document.addEventListener("DOMContentLoaded", function () {
                     form.appendChild(hidden);
                 }
                 form.submit();
+            }, delay || 0, acceptLabel, submitter && submitter.dataset ? submitter.dataset : form.dataset);
+        });
+    });
+
+    document.querySelectorAll("[data-auto-filter-form]").forEach(function (form) {
+        var submitTimer = null;
+
+        function submitAutoFilter(delay) {
+            window.clearTimeout(submitTimer);
+            submitTimer = window.setTimeout(function () {
+                if (form.requestSubmit) {
+                    form.requestSubmit();
+                } else {
+                    form.submit();
+                }
+            }, delay || 0);
+        }
+
+        function openDatePicker(input) {
+            if (!input || !input.showPicker) {
+                return;
+            }
+            try {
+                input.showPicker();
+            } catch (error) {
+                return;
+            }
+        }
+
+        form.querySelectorAll("select").forEach(function (select) {
+            select.addEventListener("change", function () {
+                submitAutoFilter(0);
             });
+        });
+
+        form.querySelectorAll("input").forEach(function (input) {
+            var inputType = (input.getAttribute("type") || "text").toLowerCase();
+            if (inputType === "hidden") {
+                return;
+            }
+            if (inputType === "date") {
+                input.addEventListener("change", function () {
+                    submitAutoFilter(0);
+                });
+                input.addEventListener("click", function () {
+                    openDatePicker(input);
+                });
+                input.addEventListener("focus", function () {
+                    openDatePicker(input);
+                });
+                return;
+            }
+            input.addEventListener("input", function () {
+                submitAutoFilter(450);
+            });
+        });
+
+        form.querySelectorAll("label").forEach(function (label) {
+            var dateInput = label.querySelector("input[type='date']");
+            if (!dateInput) {
+                return;
+            }
+            label.addEventListener("click", function (event) {
+                if (event.target === dateInput) {
+                    return;
+                }
+                dateInput.focus();
+                openDatePicker(dateInput);
+            });
+        });
+    });
+
+    function updateDispatcherThemeIcons() {
+        document.querySelectorAll("[data-dispatcher-theme-toggle]").forEach(function (toggle) {
+            var shell = toggle.closest("[data-dispatcher-theme]") || document.querySelector("[data-dispatcher-theme]");
+            var isNight = shell ? shell.classList.contains("dispatcher-night") : (localStorage.getItem("dispatcher-theme") || "night") === "night";
+            toggle.textContent = "";
+            toggle.dataset.themeIcon = isNight ? "moon" : "sun";
+            toggle.setAttribute("aria-label", isNight ? "Переключить на дневной режим" : "Переключить на ночной режим");
+            toggle.setAttribute("title", isNight ? "Дневной режим" : "Ночной режим");
+        });
+    }
+
+    updateDispatcherThemeIcons();
+    document.querySelectorAll("[data-dispatcher-theme-toggle]").forEach(function (toggle) {
+        toggle.addEventListener("click", function () {
+            window.setTimeout(updateDispatcherThemeIcons, 0);
+        });
+    });
+
+    document.querySelectorAll(".dispatcher-radial-clock").forEach(function (clock) {
+        var stopTimer = null;
+        var timeNode = clock.querySelector(".dispatcher-radial-clock-face strong");
+        var dateNode = clock.querySelector(".dispatcher-radial-clock-face span");
+
+        function padClockPart(value) {
+            return String(value).padStart(2, "0");
+        }
+
+        function updateClockTime() {
+            var now = new Date();
+            if (timeNode) {
+                timeNode.innerHTML = '<span class="dispatcher-radial-clock-hour">' + padClockPart(now.getHours()) + '</span><span class="dispatcher-radial-clock-separator" aria-hidden="true">:</span><span class="dispatcher-radial-clock-minute">' + padClockPart(now.getMinutes()) + '</span>';
+            }
+            if (dateNode) {
+                dateNode.textContent = padClockPart(now.getDate()) + "." + padClockPart(now.getMonth() + 1) + "." + now.getFullYear();
+            }
+        }
+
+        updateClockTime();
+        window.setInterval(updateClockTime, 1000);
+        clock.setAttribute("role", "button");
+        clock.setAttribute("tabindex", "0");
+        clock.setAttribute("aria-pressed", "false");
+        clock.setAttribute("title", "Включить визуальный режим");
+
+        function toggleClockMusic() {
+            window.clearTimeout(stopTimer);
+            if (!clock.classList.contains("is-music")) {
+                clock.classList.remove("is-music-stopping");
+                clock.classList.add("is-music");
+                clock.setAttribute("aria-pressed", "true");
+                clock.setAttribute("title", "Выключить визуальный режим");
+                return;
+            }
+
+            clock.classList.remove("is-music");
+            clock.classList.add("is-music-stopping");
+            clock.setAttribute("aria-pressed", "false");
+            clock.setAttribute("title", "Включить визуальный режим");
+            stopTimer = window.setTimeout(function () {
+                clock.classList.remove("is-music-stopping");
+            }, 700);
+        }
+
+        clock.addEventListener("click", toggleClockMusic);
+        clock.addEventListener("keydown", function (event) {
+            if (event.key !== "Enter" && event.key !== " ") {
+                return;
+            }
+            event.preventDefault();
+            toggleClockMusic();
         });
     });
 });

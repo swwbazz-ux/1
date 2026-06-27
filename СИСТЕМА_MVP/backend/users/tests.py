@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timedelta
 from decimal import Decimal
 from io import BytesIO
@@ -11,7 +12,7 @@ from django.utils import timezone
 from openpyxl import load_workbook
 from PIL import Image
 
-from assignments.models import AssignmentStatus, HaulAssignment
+from assignments.models import AssignmentStatus, ExcavatorPlacement, HaulAssignment
 from downtimes.models import DowntimeEvent, DowntimeReason
 from references.models import (
     Dormitory,
@@ -83,7 +84,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(dashboard_response, 'href="/system-admin/employees/?access_status=not_activated"')
         self.assertContains(dashboard_response, 'href="/system-admin/employees/?access_status=blocked"')
         self.assertContains(dashboard_response, 'href="/system-admin/employees/?access_status=deactivated"')
-        self.assertNotContains(dashboard_response, '>Сотрудники</a>')
+        self.assertContains(dashboard_response, 'Журнал действий')
 
     def test_admin_employee_list_can_filter_by_access_status(self):
         admin_role = Role.objects.create(code='admin', name='Администратор')
@@ -400,6 +401,39 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, 'Точки разгрузки')
         self.assertContains(response, '/admin/references/equipmenttype/')
 
+    def test_reference_detail_save_keeps_selected_record_and_filters(self):
+        admin_role = Role.objects.create(code='admin', name='Администратор')
+        admin_employee = Employee.objects.create(full_name='Администратор MVP', status=Employee.Status.ACTIVE)
+        EmployeeAccess.objects.create(
+            employee=admin_employee,
+            role=admin_role,
+            access_code='1000',
+            status=EmployeeAccess.Status.ACTIVATED,
+        )
+        equipment_type = EquipmentType.objects.create(name='Самосвал')
+        equipment = Equipment.objects.create(equipment_type=equipment_type, garage_number='A-101', is_active=True)
+
+        self.client.post('/', {'access_code': '1000'}, follow=True, HTTP_HOST='localhost')
+        response = self.client.post(
+            f'/system-admin/references/equipment/?q=A&status=active&edit={equipment.id}',
+            {
+                'action': 'save',
+                'record_id': str(equipment.id),
+                'equipment_type': str(equipment_type.id),
+                'model': '',
+                'garage_number': 'A-102',
+                'vin': '',
+                'is_own': 'on',
+                'is_active': 'on',
+            },
+            HTTP_HOST='localhost',
+        )
+        equipment.refresh_from_db()
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(equipment.garage_number, 'A-102')
+        self.assertIn(f'/system-admin/references/equipment/?q=A&status=active&edit={equipment.id}', response['Location'])
+
     def test_admin_opens_conflicts_registry(self):
         admin_role = Role.objects.create(code='admin', name='Администратор')
         admin_employee = Employee.objects.create(full_name='Администратор MVP', status=Employee.Status.ACTIVE)
@@ -425,7 +459,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, 'Конфликты админки')
         self.assertContains(response, 'Тестовый конфликт')
         self.assertContains(response, 'Сотрудник с конфликтом')
-        self.assertContains(response, 'Выгрузить в Excel')
+        self.assertContains(response, 'Excel')
 
     def test_admin_updates_conflict_status(self):
         admin_role = Role.objects.create(code='admin', name='Администратор')
@@ -482,7 +516,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, 'Журнал действий админки')
         self.assertContains(response, 'Тестовое действие')
         self.assertContains(response, 'Тестовый объект')
-        self.assertContains(response, 'Выгрузить в Excel')
+        self.assertContains(response, 'Excel')
 
     def test_admin_creates_employee_with_primary_pin_and_exports_accesses(self):
         admin_role = Role.objects.create(code='admin', name='Администратор')
@@ -1156,6 +1190,399 @@ class AccessLoginTests(TestCase):
             'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         )
 
+    def test_dispatcher_can_open_mining_volumes_dashboard_and_export_it(self):
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        truck = Equipment.objects.create(equipment_type=truck_type, garage_number='10')
+        excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='1')
+        rock = RockType.objects.create(name='Руда')
+        dump_point = DumpPoint.objects.create(name='ККД')
+        dispatcher_role = Role.objects.create(code='dispatcher', name='Диспетчер')
+        dispatcher = Employee.objects.create(full_name='Тестовый диспетчер')
+        EmployeeAccess.objects.create(employee=dispatcher, role=dispatcher_role, access_code='5000')
+        EmployeeShift.objects.create(employee=dispatcher, shift_type='day', opened_at=timezone.now(), opened_by=dispatcher)
+        Trip.objects.create(
+            excavator=excavator,
+            truck=truck,
+            rock_type=rock,
+            dump_point=dump_point,
+            loading_horizon='245',
+            loading_block='7',
+            status=TripStatus.COMPLETED,
+            planned_volume_m3='100.00',
+            volume_m3='57.00',
+            tonnage='142.50',
+            completed_at=timezone.now(),
+        )
+
+        self.client.post('/', {'access_code': '5000'}, follow=True, HTTP_HOST='localhost')
+        response = self.client.get('/dispatcher/mining-volumes/', HTTP_HOST='localhost')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Горные объемы')
+        self.assertContains(response, '57')
+        self.assertContains(response, 'ККД')
+
+        export_response = self.client.get('/dispatcher/mining-volumes/export/', HTTP_HOST='localhost')
+        workbook = load_workbook(BytesIO(export_response.content))
+        values = [
+            cell
+            for row in workbook.active.iter_rows(values_only=True)
+            for cell in row
+            if cell not in {None, ''}
+        ]
+
+        self.assertEqual(export_response.status_code, 200)
+        self.assertEqual(
+            export_response['Content-Type'],
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+        self.assertIn('Горные объемы диспетчера', values)
+        self.assertIn('ККД', values)
+
+    def test_dispatcher_can_open_transport_dashboard_and_export_it(self):
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        truck = Equipment.objects.create(equipment_type=truck_type, garage_number='15')
+        excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='1')
+        rock = RockType.objects.create(name='Руда')
+        dump_point = DumpPoint.objects.create(name='ККД')
+        driver = Employee.objects.create(full_name='Водитель автотранспорта MVP')
+        dispatcher_role = Role.objects.create(code='dispatcher', name='Диспетчер')
+        dispatcher = Employee.objects.create(full_name='Тестовый диспетчер')
+        EmployeeAccess.objects.create(employee=dispatcher, role=dispatcher_role, access_code='5010')
+        selected_date = timezone.localdate()
+        opened_at = timezone.make_aware(datetime.combine(selected_date, datetime.min.time().replace(hour=8)))
+        closed_at = timezone.make_aware(datetime.combine(selected_date, datetime.min.time().replace(hour=12)))
+        EmployeeShift.objects.create(
+            employee=driver,
+            shift_type='day',
+            equipment=truck,
+            start_fuel=Decimal('100.00'),
+            end_fuel=Decimal('80.00'),
+            start_mileage=Decimal('2500.00'),
+            end_mileage=Decimal('2600.00'),
+            start_engine_hours=Decimal('700.00'),
+            end_engine_hours=Decimal('712.00'),
+            opened_at=opened_at,
+            closed_at=closed_at,
+        )
+        Trip.objects.create(
+            excavator=excavator,
+            truck=truck,
+            rock_type=rock,
+            dump_point=dump_point,
+            status=TripStatus.COMPLETED,
+            volume_m3='57.00',
+            tonnage='142.50',
+            completed_at=closed_at,
+        )
+
+        self.client.post('/', {'access_code': '5010'}, follow=True, HTTP_HOST='localhost')
+        response = self.client.get('/dispatcher/transport/', HTTP_HOST='localhost')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Автотранспорт')
+        self.assertContains(response, '15')
+        self.assertContains(response, 'Водитель автотранспорта MVP')
+        self.assertContains(response, '20,0')
+
+        export_response = self.client.get('/dispatcher/transport/export/', HTTP_HOST='localhost')
+        workbook = load_workbook(BytesIO(export_response.content))
+        values = [
+            cell
+            for row in workbook.active.iter_rows(values_only=True)
+            for cell in row
+            if cell not in {None, ''}
+        ]
+
+        self.assertEqual(export_response.status_code, 200)
+        self.assertEqual(
+            export_response['Content-Type'],
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+        self.assertIn('Автотранспорт диспетчера', values)
+        self.assertIn('15', values)
+        self.assertIn('Водитель автотранспорта MVP', values)
+
+    def test_dispatcher_can_open_downtimes_dashboard_and_export_it(self):
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='6')
+        truck = Equipment.objects.create(equipment_type=truck_type, garage_number='34')
+        dispatcher_role = Role.objects.create(code='dispatcher', name='Диспетчер')
+        dispatcher = Employee.objects.create(full_name='Тестовый диспетчер')
+        EmployeeAccess.objects.create(employee=dispatcher, role=dispatcher_role, access_code='5020')
+        critical_reason = DowntimeReason.objects.create(
+            name='Аварийная поломка',
+            equipment_type=excavator_type,
+            is_critical=True,
+        )
+        waiting_reason = DowntimeReason.objects.create(name='Ожидание разгрузки', equipment_type=truck_type)
+        selected_date = timezone.localdate()
+        started_at = timezone.make_aware(datetime.combine(selected_date, datetime.min.time().replace(hour=9)))
+        DowntimeEvent.objects.create(
+            equipment=excavator,
+            employee=dispatcher,
+            reason=critical_reason,
+            started_at=started_at,
+            comment='Демо диагностика',
+        )
+        DowntimeEvent.objects.create(
+            equipment=truck,
+            employee=dispatcher,
+            reason=waiting_reason,
+            started_at=started_at,
+            ended_at=started_at + timedelta(minutes=45),
+        )
+
+        self.client.post('/', {'access_code': '5020'}, follow=True, HTTP_HOST='localhost')
+        response = self.client.get('/dispatcher/downtimes/', HTTP_HOST='localhost')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Простои и отклонения')
+        self.assertContains(response, 'Аварийная поломка')
+        self.assertContains(response, '6')
+        self.assertContains(response, '34')
+
+        export_response = self.client.get('/dispatcher/downtimes/export/', HTTP_HOST='localhost')
+        workbook = load_workbook(BytesIO(export_response.content))
+        values = [
+            cell
+            for row in workbook.active.iter_rows(values_only=True)
+            for cell in row
+            if cell not in {None, ''}
+        ]
+
+        self.assertEqual(export_response.status_code, 200)
+        self.assertEqual(
+            export_response['Content-Type'],
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+        self.assertIn('Простои и отклонения диспетчера', values)
+        self.assertIn('Аварийная поломка', values)
+        self.assertIn('Экскаватор 6', values)
+
+    def test_dispatcher_can_open_shift_log_and_export_it(self):
+        excavator_type = EquipmentType.objects.create(name='Excavator')
+        truck_type = EquipmentType.objects.create(name='Truck')
+        excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='1')
+        truck = Equipment.objects.create(equipment_type=truck_type, garage_number='10')
+        rock = RockType.objects.create(name='Oxide')
+        dump_point = DumpPoint.objects.create(name='KKD')
+        dispatcher_role = Role.objects.create(code='dispatcher', name='Dispatcher')
+        dispatcher = Employee.objects.create(full_name='Shift log dispatcher')
+        driver = Employee.objects.create(full_name='Shift log driver')
+        EmployeeAccess.objects.create(employee=dispatcher, role=dispatcher_role, access_code='5030')
+        event_time = timezone.now()
+        trip = Trip.objects.create(
+            excavator=excavator,
+            truck=truck,
+            driver=driver,
+            rock_type=rock,
+            dump_point=dump_point,
+            loading_horizon='245',
+            loading_block='7',
+            status=TripStatus.COMPLETED,
+            volume_m3='57.00',
+            tonnage='142.50',
+            completed_at=event_time,
+        )
+        DispatcherActionLog.objects.create(
+            actor=dispatcher,
+            action_type=DispatcherActionType.COMPLETE_TRIP,
+            trip=trip,
+            target_summary='Trip 10 completed manually',
+            reason='Shift reconciliation demo',
+        )
+        reason = DowntimeReason.objects.create(name='Shift log diagnostics', equipment_type=excavator_type, is_critical=True)
+        DowntimeEvent.objects.create(
+            equipment=excavator,
+            employee=dispatcher,
+            reason=reason,
+            started_at=event_time,
+            comment='Shift timeline check',
+        )
+
+        self.client.post('/', {'access_code': '5030'}, follow=True, HTTP_HOST='localhost')
+        response = self.client.get('/dispatcher/shift-log/', HTTP_HOST='localhost')
+        export_response = self.client.get('/dispatcher/shift-log/export/', HTTP_HOST='localhost')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Trip 10 completed manually')
+        self.assertContains(response, 'Shift log diagnostics')
+        self.assertContains(response, 'Truck 10')
+        self.assertEqual(
+            export_response['Content-Type'],
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+        workbook = load_workbook(BytesIO(export_response.content))
+        values = [
+            cell
+            for row in workbook.active.iter_rows(values_only=True)
+            for cell in row
+            if cell not in {None, ''}
+        ]
+        self.assertIn('Журнал смены диспетчера', values)
+        self.assertIn('Trip 10 completed manually', values)
+        self.assertIn('Shift log diagnostics', values)
+
+    def test_dispatcher_can_open_reports_center_and_export_it(self):
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        truck = Equipment.objects.create(equipment_type=truck_type, garage_number='15')
+        excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='1')
+        rock = RockType.objects.create(name='Руда')
+        dump_point = DumpPoint.objects.create(name='ККД')
+        dispatcher_role = Role.objects.create(code='dispatcher', name='Диспетчер')
+        dispatcher = Employee.objects.create(full_name='Диспетчер отчетов')
+        driver = Employee.objects.create(full_name='Водитель отчетов')
+        EmployeeAccess.objects.create(employee=dispatcher, role=dispatcher_role, access_code='5040')
+        selected_date = timezone.localdate()
+        opened_at = timezone.make_aware(datetime.combine(selected_date, datetime.min.time().replace(hour=8)))
+        closed_at = timezone.make_aware(datetime.combine(selected_date, datetime.min.time().replace(hour=12)))
+        EmployeeShift.objects.create(
+            employee=driver,
+            shift_type='day',
+            equipment=truck,
+            start_fuel=Decimal('100.00'),
+            end_fuel=Decimal('80.00'),
+            start_mileage=Decimal('2500.00'),
+            end_mileage=Decimal('2600.00'),
+            start_engine_hours=Decimal('700.00'),
+            end_engine_hours=Decimal('712.00'),
+            opened_at=opened_at,
+            closed_at=closed_at,
+        )
+        trip = Trip.objects.create(
+            excavator=excavator,
+            truck=truck,
+            driver=driver,
+            rock_type=rock,
+            dump_point=dump_point,
+            status=TripStatus.COMPLETED,
+            planned_volume_m3='100.00',
+            volume_m3='57.00',
+            tonnage='142.50',
+            completed_at=closed_at,
+        )
+        DispatcherActionLog.objects.create(
+            actor=dispatcher,
+            action_type=DispatcherActionType.COMPLETE_TRIP,
+            trip=trip,
+            target_summary='Отчетный рейс закрыт',
+        )
+        ReportTemplate.objects.create(
+            name='Демо шаблон диспетчера',
+            report_type=ReportType.SHIFT_VOLUME,
+            columns=['truck', 'volume_m3'],
+            created_by=dispatcher,
+        )
+
+        self.client.post('/', {'access_code': '5040'}, follow=True, HTTP_HOST='localhost')
+        response = self.client.get('/dispatcher/reports/', HTTP_HOST='localhost')
+        export_response = self.client.get('/dispatcher/reports/export/', HTTP_HOST='localhost')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Отчеты диспетчера')
+        self.assertContains(response, 'Сменные объемы')
+        self.assertContains(response, 'Автотранспорт')
+        self.assertContains(response, 'Конструктор')
+        self.assertEqual(
+            export_response['Content-Type'],
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+        workbook = load_workbook(BytesIO(export_response.content))
+        values = [
+            cell
+            for row in workbook.active.iter_rows(values_only=True)
+            for cell in row
+            if cell not in {None, ''}
+        ]
+        self.assertIn('Отчеты диспетчерской', values)
+        self.assertIn('Сменные объемы', values)
+        self.assertIn('Демо шаблон диспетчера', values)
+
+    def test_dispatcher_can_open_management_showcase_and_export_it(self):
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        truck = Equipment.objects.create(equipment_type=truck_type, garage_number='15')
+        excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='1')
+        rock = RockType.objects.create(name='Руда')
+        dump_point = DumpPoint.objects.create(name='ККД')
+        dispatcher_role = Role.objects.create(code='dispatcher', name='Диспетчер')
+        dispatcher = Employee.objects.create(full_name='Диспетчер витрины')
+        driver = Employee.objects.create(full_name='Водитель витрины')
+        EmployeeAccess.objects.create(employee=dispatcher, role=dispatcher_role, access_code='5050')
+        selected_date = timezone.localdate()
+        opened_at = timezone.make_aware(datetime.combine(selected_date, datetime.min.time().replace(hour=8)))
+        closed_at = timezone.make_aware(datetime.combine(selected_date, datetime.min.time().replace(hour=12)))
+        EmployeeShift.objects.create(
+            employee=driver,
+            shift_type='day',
+            equipment=truck,
+            start_fuel=Decimal('100.00'),
+            end_fuel=None,
+            start_mileage=Decimal('2500.00'),
+            end_mileage=None,
+            start_engine_hours=Decimal('700.00'),
+            end_engine_hours=None,
+            opened_at=opened_at,
+        )
+        trip = Trip.objects.create(
+            excavator=excavator,
+            truck=truck,
+            driver=driver,
+            rock_type=rock,
+            dump_point=dump_point,
+            status=TripStatus.COMPLETED,
+            planned_volume_m3='100.00',
+            volume_m3='96.00',
+            tonnage='240.00',
+            loading_horizon='245',
+            loading_block='7',
+            completed_at=closed_at,
+        )
+        DispatcherActionLog.objects.create(
+            actor=dispatcher,
+            action_type=DispatcherActionType.COMPLETE_TRIP,
+            trip=trip,
+            target_summary='Рейс витрины закрыт',
+        )
+        reason = DowntimeReason.objects.create(name='Диагностика витрины', equipment_type=truck_type, is_critical=True)
+        DowntimeEvent.objects.create(
+            equipment=truck,
+            employee=dispatcher,
+            reason=reason,
+            started_at=opened_at,
+            comment='Проверка витрины',
+        )
+
+        self.client.post('/', {'access_code': '5050'}, follow=True, HTTP_HOST='localhost')
+        response = self.client.get('/dispatcher/management/', HTTP_HOST='localhost')
+        export_response = self.client.get('/dispatcher/management/export/', HTTP_HOST='localhost')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Витрина диспетчерской')
+        self.assertContains(response, 'Итог смены')
+        self.assertContains(response, 'Комплексы')
+        self.assertContains(response, 'ККД')
+        self.assertEqual(
+            export_response['Content-Type'],
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+        workbook = load_workbook(BytesIO(export_response.content))
+        values = [
+            cell
+            for row in workbook.active.iter_rows(values_only=True)
+            for cell in row
+            if cell not in {None, ''}
+        ]
+        self.assertIn('Витрина диспетчерской', values)
+        self.assertIn('Итог смены', values)
+        self.assertIn('К-1', values)
+        self.assertIn('ККД', values)
+
     def test_dispatcher_opens_control_panel_with_active_trips_and_pending_assignments(self):
         truck_type = EquipmentType.objects.create(name='Самосвал')
         excavator_type = EquipmentType.objects.create(name='Экскаватор')
@@ -1167,6 +1594,7 @@ class AccessLoginTests(TestCase):
         dispatcher_role = Role.objects.create(code='dispatcher', name='Диспетчер')
         dispatcher = Employee.objects.create(full_name='Тестовый диспетчер')
         EmployeeAccess.objects.create(employee=dispatcher, role=dispatcher_role, access_code='5000')
+        EmployeeShift.objects.create(employee=dispatcher, shift_type='day', opened_at=timezone.now(), opened_by=dispatcher)
         Trip.objects.create(
             excavator=excavator,
             truck=truck,
@@ -1241,6 +1669,7 @@ class AccessLoginTests(TestCase):
         dispatcher_role = Role.objects.create(code='dispatcher', name='Диспетчер')
         dispatcher = Employee.objects.create(full_name='Тестовый диспетчер')
         EmployeeAccess.objects.create(employee=dispatcher, role=dispatcher_role, access_code='5000')
+        EmployeeShift.objects.create(employee=dispatcher, shift_type='day', opened_at=timezone.now(), opened_by=dispatcher)
         HaulAssignment.objects.create(
             truck=truck,
             excavator=excavator,
@@ -1254,6 +1683,78 @@ class AccessLoginTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'Принятых назначений в работе сейчас нет.')
 
+    def test_dispatcher_cannot_change_complexes_without_open_shift(self):
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        truck = Equipment.objects.create(equipment_type=truck_type, garage_number='10')
+        excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='1')
+        dispatcher_role = Role.objects.create(code='dispatcher', name='Диспетчер')
+        dispatcher = Employee.objects.create(full_name='Тестовый диспетчер')
+        access = EmployeeAccess.objects.create(employee=dispatcher, role=dispatcher_role, access_code='5000')
+        ExcavatorPlacement.objects.create(excavator=excavator, zone=ExcavatorPlacement.Zone.INACTIVE)
+        session = self.client.session
+        session['employee_access_id'] = access.id
+        session.save()
+
+        response = self.client.post(
+            '/dispatcher/control/truck/assign/',
+            data=json.dumps({
+                'action': 'assign',
+                'truck_id': truck.id,
+                'excavator_id': excavator.id,
+            }),
+            content_type='application/json',
+            HTTP_HOST='localhost',
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertFalse(HaulAssignment.objects.filter(truck=truck, excavator=excavator).exists())
+        placement = ExcavatorPlacement.objects.get(excavator=excavator)
+        self.assertEqual(placement.zone, ExcavatorPlacement.Zone.INACTIVE)
+
+    def test_dispatcher_shift_metrics_start_from_open_shift(self):
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        truck = Equipment.objects.create(equipment_type=truck_type, garage_number='10')
+        excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='1')
+        rock = RockType.objects.create(name='Руда')
+        dump_point = DumpPoint.objects.create(name='ККД')
+        dispatcher_role = Role.objects.create(code='dispatcher', name='Диспетчер')
+        dispatcher = Employee.objects.create(full_name='Тестовый диспетчер')
+        access = EmployeeAccess.objects.create(employee=dispatcher, role=dispatcher_role, access_code='5000')
+        old_trip = Trip.objects.create(
+            excavator=excavator,
+            truck=truck,
+            rock_type=rock,
+            dump_point=dump_point,
+            status=TripStatus.ACTIVE,
+            volume_m3=Decimal('57.00'),
+        )
+        old_trip.created_at = timezone.now() - timedelta(hours=2)
+        old_trip.save(update_fields=['created_at'])
+        EmployeeShift.objects.create(
+            employee=dispatcher,
+            shift_type='day',
+            opened_at=timezone.now() - timedelta(hours=1),
+            opened_by=dispatcher,
+        )
+        Trip.objects.create(
+            excavator=excavator,
+            truck=truck,
+            rock_type=rock,
+            dump_point=dump_point,
+            status=TripStatus.ACTIVE,
+            volume_m3=Decimal('22.00'),
+        )
+        session = self.client.session
+        session['employee_access_id'] = access.id
+        session.save()
+
+        response = self.client.get('/dispatcher/control/', HTTP_HOST='localhost')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context['dispatcher_dashboard']['dispatcher_kpis']['fact_tons'], '22')
+
     def test_dispatcher_service_action_preserves_current_filters(self):
         truck_type = EquipmentType.objects.create(name='РЎР°РјРѕСЃРІР°Р»')
         excavator_type = EquipmentType.objects.create(name='Р­РєСЃРєР°РІР°С‚РѕСЂ')
@@ -1265,6 +1766,7 @@ class AccessLoginTests(TestCase):
         dispatcher_role = Role.objects.create(code='dispatcher', name='Р”РёСЃРїРµС‚С‡РµСЂ')
         dispatcher = Employee.objects.create(full_name='РўРµСЃС‚РѕРІС‹Р№ РґРёСЃРїРµС‚С‡РµСЂ')
         EmployeeAccess.objects.create(employee=dispatcher, role=dispatcher_role, access_code='5000')
+        EmployeeShift.objects.create(employee=dispatcher, shift_type='day', opened_at=timezone.now(), opened_by=dispatcher)
         target_trip = Trip.objects.create(
             excavator=excavator,
             truck=truck,
@@ -1314,6 +1816,7 @@ class AccessLoginTests(TestCase):
         driver = Employee.objects.create(full_name='Тестовый водитель')
         EmployeeAccess.objects.create(employee=dispatcher, role=dispatcher_role, access_code='5000')
         EmployeeAccess.objects.create(employee=driver, role=driver_role, access_code='2100')
+        EmployeeShift.objects.create(employee=dispatcher, shift_type='day', opened_at=timezone.now(), opened_by=dispatcher)
         shift = EmployeeShift.objects.create(
             employee=driver,
             shift_type='day',
@@ -1386,6 +1889,7 @@ class AccessLoginTests(TestCase):
         dispatcher_role = Role.objects.create(code='dispatcher', name='Диспетчер')
         dispatcher = Employee.objects.create(full_name='Тестовый диспетчер')
         EmployeeAccess.objects.create(employee=dispatcher, role=dispatcher_role, access_code='5000')
+        EmployeeShift.objects.create(employee=dispatcher, shift_type='day', opened_at=timezone.now(), opened_by=dispatcher)
         assignment = HaulAssignment.objects.create(
             truck=truck,
             excavator=excavator,
@@ -1417,6 +1921,7 @@ class AccessLoginTests(TestCase):
         dispatcher_role = Role.objects.create(code='dispatcher', name='Диспетчер')
         dispatcher = Employee.objects.create(full_name='Тестовый диспетчер')
         EmployeeAccess.objects.create(employee=dispatcher, role=dispatcher_role, access_code='5000')
+        EmployeeShift.objects.create(employee=dispatcher, shift_type='day', opened_at=timezone.now(), opened_by=dispatcher)
         assignment = HaulAssignment.objects.create(
             truck=truck,
             excavator=excavator,
@@ -1450,6 +1955,7 @@ class AccessLoginTests(TestCase):
         driver = Employee.objects.create(full_name='Тестовый водитель')
         EmployeeAccess.objects.create(employee=dispatcher, role=dispatcher_role, access_code='5000')
         EmployeeAccess.objects.create(employee=driver, role=driver_role, access_code='2102')
+        EmployeeShift.objects.create(employee=dispatcher, shift_type='day', opened_at=timezone.now(), opened_by=dispatcher)
         unloading_shift = EmployeeShift.objects.create(
             employee=driver,
             shift_type='day',
@@ -1495,6 +2001,7 @@ class AccessLoginTests(TestCase):
         dispatcher_role = Role.objects.create(code='dispatcher', name='Диспетчер')
         dispatcher = Employee.objects.create(full_name='Тестовый диспетчер')
         EmployeeAccess.objects.create(employee=dispatcher, role=dispatcher_role, access_code='5000')
+        EmployeeShift.objects.create(employee=dispatcher, shift_type='day', opened_at=timezone.now(), opened_by=dispatcher)
         trip = Trip.objects.create(
             excavator=excavator,
             truck=truck,
@@ -1526,6 +2033,7 @@ class AccessLoginTests(TestCase):
         dispatcher_role = Role.objects.create(code='dispatcher', name='Диспетчер')
         dispatcher = Employee.objects.create(full_name='Тестовый диспетчер')
         EmployeeAccess.objects.create(employee=dispatcher, role=dispatcher_role, access_code='5000')
+        EmployeeShift.objects.create(employee=dispatcher, shift_type='day', opened_at=timezone.now(), opened_by=dispatcher)
         trip = Trip.objects.create(
             excavator=excavator,
             truck=truck,
@@ -1903,6 +2411,24 @@ class AccessLoginTests(TestCase):
         self.assertIn('Средневзвешенное плечо', reconciliation_values)
 
     def test_seed_demo_scenario_command_creates_ready_demo_data(self):
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        truck_model = EquipmentModel.objects.create(equipment_type=truck_type, name='БЕЛАЗ тест')
+        excavator_model = EquipmentModel.objects.create(equipment_type=excavator_type, name='Экскаватор тест')
+        for garage_number in ('10', '11', '12'):
+            Equipment.objects.create(
+                equipment_type=truck_type,
+                model=truck_model,
+                garage_number=garage_number,
+                is_active=True,
+            )
+        Equipment.objects.create(
+            equipment_type=excavator_type,
+            model=excavator_model,
+            garage_number='1',
+            is_active=True,
+        )
+
         call_command('seed_demo_scenario')
 
         self.assertTrue(EmployeeAccess.objects.filter(access_code='200000', is_active=True).exists())
@@ -1919,6 +2445,32 @@ class AccessLoginTests(TestCase):
         self.assertTrue(DowntimeEvent.objects.filter(reason__is_critical=False, ended_at__isnull=False).exists())
         self.assertTrue(ReportTemplate.objects.filter(name='Демо отчет по объемам', is_active=True).exists())
         self.assertTrue(PilotFeedback.objects.filter(title__startswith='Демо-замечание').exists())
+        self.assertFalse(Equipment.objects.filter(garage_number__startswith='ДЕМО').exists())
+
+    def test_seed_demo_scenario_reuses_reference_trucks_without_demo_trucks(self):
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        truck_model = EquipmentModel.objects.create(equipment_type=truck_type, name='БЕЛАЗ тест')
+        excavator_model = EquipmentModel.objects.create(equipment_type=excavator_type, name='Экскаватор тест')
+        for garage_number in ('10', '11', '12'):
+            Equipment.objects.create(
+                equipment_type=truck_type,
+                model=truck_model,
+                garage_number=garage_number,
+                is_active=True,
+            )
+        Equipment.objects.create(
+            equipment_type=excavator_type,
+            model=excavator_model,
+            garage_number='1',
+            is_active=True,
+        )
+
+        call_command('seed_demo_scenario')
+
+        self.assertFalse(Equipment.objects.filter(garage_number__startswith='ДЕМО').exists())
+        self.assertTrue(HaulAssignment.objects.filter(truck__garage_number='11', status=AssignmentStatus.PENDING).exists())
+        self.assertTrue(Trip.objects.filter(truck__garage_number='12', status=TripStatus.COMPLETED).exists())
 
     def test_mechanic_opens_dashboard_and_creates_downtime_event(self):
         excavator_type = EquipmentType.objects.create(name='Р­РєСЃРєР°РІР°С‚РѕСЂ')

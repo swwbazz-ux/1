@@ -1,193 +1,328 @@
 {% extends "base.html" %}
 
 {% block title %}{{ employee.full_name }}{% endblock %}
+{% block body_class %}employee-detail-screen system-admin-employee-detail-screen{% endblock %}
 
 {% block body %}
-<header class="app-header">
-    <div class="header-inner wide-shell">
-        <div class="topline">
-            <span>{{ access.employee.full_name }}</span>
-            <a href="{% url 'system_admin_employees' %}">Сотрудники</a>
-        </div>
-        <h1>{{ employee.full_name }}</h1>
-        <p>Карточка сотрудника, доступы и административные действия.</p>
-    </div>
-</header>
+<div class="admin-shell admin-exports-shell admin-employee-detail-shell admin-day" data-admin-theme>
+    <header class="admin-console-header" aria-label="Административная шапка">
+        <section class="admin-console-identity">
+            <span class="admin-console-avatar">{{ access.employee.full_name|first }}</span>
+            <span>
+                <strong>{{ access.employee.full_name }}</strong>
+                <em>Системный администратор</em>
+            </span>
+        </section>
 
-<main class="page wide-page">
+        <section class="admin-console-main">
+            <div class="admin-console-title">
+                <span>Админка MVP</span>
+                <h1>{{ employee.full_name }}</h1>
+                <p>Карточка сотрудника, доступы, фото и административные действия.</p>
+            </div>
+            <nav class="admin-console-nav" aria-label="Разделы админки">
+                <a href="{% url 'system_admin_dashboard' %}">Сводка</a>
+                <a class="is-active" href="{% url 'system_admin_employees' %}">Сотрудники</a>
+                <a href="{% url 'system_admin_references' %}">Справочники</a>
+                <a href="{% url 'system_admin_conflicts' %}">Конфликты</a>
+                <a href="{% url 'system_admin_logs' %}">Журнал</a>
+                <a href="{% url 'system_admin_exports' %}">Выгрузки</a>
+            </nav>
+        </section>
+
+        <section class="admin-console-actions">
+            <button type="button" class="admin-theme-button" data-admin-theme-toggle title="День / Ночь">Д/Н</button>
+            <a class="admin-utility-link" href="{% url 'system_admin_employees' %}">Назад</a>
+            <a class="admin-utility-link" href="{% url 'system_admin_dashboard' %}">Админка</a>
+        </section>
+    </header>
+
+<main class="admin-console-page admin-page employee-detail-page">
     {% for message in messages %}
         <div class="message success">{{ message }}</div>
     {% endfor %}
 
-    <section class="card">
-        <h2>Карточка сотрудника</h2>
-        <form method="post" enctype="multipart/form-data">
+    <section class="employee-detail-grid">
+        <form class="card employee-detail-card employee-profile-form" method="post" enctype="multipart/form-data">
             {% csrf_token %}
-            <div class="employee-profile-head">
-                <div class="employee-photo-box">
-                <label class="employee-photo-card" for="{{ form.photo.id_for_label }}" title="Загрузить фото сотрудника">
-                    {% if employee.photo %}
-                        <img src="{{ employee.photo.url }}" alt="Фото {{ employee.full_name }}">
-                    {% else %}
-                        <span class="employee-photo-placeholder" aria-hidden="true">
-                            <span class="employee-photo-head"></span>
-                            <span class="employee-photo-body"></span>
-                        </span>
-                    {% endif %}
-                    <span class="employee-photo-plus">+</span>
-                </label>
-                <div class="employee-photo-controls">
-                    <label class="employee-photo-control add" for="{{ form.photo.id_for_label }}" title="Добавить или заменить фото">+</label>
-                    {% if employee.photo %}
-                        <button class="employee-photo-control remove" type="submit" name="remove_photo" value="1" data-confirm="Удалить фото сотрудника?">-</button>
-                    {% endif %}
+            <div class="employee-detail-card-head">
+                <div>
+                    <h2>Карточка сотрудника</h2>
+                    <p class="muted">Основные данные, фото и служебная информация.</p>
                 </div>
-                </div>
-                <div class="employee-profile-text">
-                    <strong>{{ employee.full_name }}</strong>
-                    <small class="employee-photo-hint">Клик по фото открывает просмотр. Зеленый плюс добавляет или заменяет фото, красный минус удаляет. Форматы: JPG, PNG, WEBP до 5 МБ.</small>
-                    <small id="employee-photo-selected" class="employee-photo-selected">Новый файл не выбран.</small>
-                    <span>{{ employee.position|default:"Должность не указана" }}</span>
-                    <small>Нажмите на фото или плюс, чтобы загрузить JPG, PNG или WEBP до 5 МБ. Система уменьшит фото для экономии места.</small>
+                <span class="employee-state-badge employee-state-{{ employee.status }}">{{ employee.get_status_display }}</span>
+            </div>
+
+            <div class="employee-profile-head employee-card-v2">
+                <div class="employee-card-v2-top">
+                    <div class="employee-photo-box employee-card-v2-photo-box">
+                        {% if employee.photo %}
+                            <button class="employee-photo-card employee-card-v2-photo" type="button" data-photo-open title="Открыть фото сотрудника">
+                                <img src="{{ employee.photo.url }}" alt="Фото {{ employee.full_name }}">
+                            </button>
+                        {% else %}
+                            <label class="employee-photo-card employee-card-v2-photo" for="{{ form.photo.id_for_label }}" title="Загрузить фото сотрудника">
+                                <span class="employee-photo-placeholder" aria-hidden="true">
+                                    <span class="employee-photo-head"></span>
+                                    <span class="employee-photo-body"></span>
+                                </span>
+                            </label>
+                        {% endif %}
+                        <div class="employee-photo-controls employee-card-v2-photo-controls">
+                            <label class="employee-photo-symbol add" for="{{ form.photo.id_for_label }}" title="Добавить или заменить фото">+</label>
+                            {% if employee.photo %}
+                                <button class="employee-photo-symbol remove" type="submit" name="remove_photo" value="1" data-confirm="Удалить фото сотрудника?">-</button>
+                            {% else %}
+                                <button class="employee-photo-symbol remove" type="button" disabled title="Фото еще не загружено">-</button>
+                            {% endif %}
+                        </div>
+                    </div>
+
+                    <div class="employee-card-v2-name-grid" data-full-name-source="{{ employee.full_name|default_if_none:'' }}">
+                        <div class="employee-detail-field employee-card-v2-field">
+                            <label for="employee-last-name">Фамилия</label>
+                            <input id="employee-last-name" type="text" autocomplete="off">
+                        </div>
+                        <div class="employee-detail-field employee-card-v2-field">
+                            <label for="employee-first-name">Имя</label>
+                            <input id="employee-first-name" type="text" autocomplete="off">
+                        </div>
+                        <div class="employee-detail-field employee-card-v2-field">
+                            <label for="employee-middle-name">Отчество</label>
+                            <input id="employee-middle-name" type="text" autocomplete="off">
+                        </div>
+                        <div class="employee-detail-field employee-card-v2-field">
+                            <label for="{{ form.phone.id_for_label }}">{{ form.phone.label }}</label>
+                            {{ form.phone }}
+                            {{ form.phone.errors }}
+                        </div>
+                    </div>
                 </div>
             </div>
+
             <div class="employee-photo-upload-field">
                 {{ form.photo }}
                 {{ form.photo.errors }}
             </div>
-            {% for field in form %}
-                {% if field.name != 'photo' %}
-                    <label for="{{ field.id_for_label }}">{{ field.label }}</label>
-                    {{ field }}
-                    {{ field.errors }}
-                {% endif %}
-            {% endfor %}
-            <button type="submit">Сохранить карточку</button>
-        </form>
-        <div class="actions">
-            <form method="post" action="{% url 'system_admin_employee_status_action' employee.id 'deactivate' %}" data-confirm="Деактивировать сотрудника? Его доступы будут отключены.">
-                {% csrf_token %}
-                <button type="submit">Деактивировать</button>
-            </form>
-            <form method="post" action="{% url 'system_admin_employee_status_action' employee.id 'archive' %}" data-confirm="Отправить сотрудника в архив? Его доступы будут отключены.">
-                {% csrf_token %}
-                <button type="submit">В архив</button>
-            </form>
-            <form method="post" action="{% url 'system_admin_employee_status_action' employee.id 'delete' %}" data-confirm="Полностью удалить сотрудника? Это действие нельзя будет отменить.">
-                {% csrf_token %}
-                <button type="submit">Удалить полностью</button>
-            </form>
-        </div>
-        <p class="muted">Полное удаление разрешено только если у сотрудника нет производственной истории. Если история есть, система заблокирует удаление и предложит архив.</p>
-    </section>
 
-    <section class="card">
-        <h2>Доступы</h2>
-        <p class="muted">
-            Роль в выпадающем списке показывает текущий активный доступ сотрудника.
-            Первичный пинкод является одноразовым: сотрудник вводит его один раз, затем создает свой постоянный пинкод.
-            Если сотрудник забыл постоянный пинкод, администратор выдает новый первичный пинкод для этой же роли.
-        </p>
-        <form method="post" action="{% url 'system_admin_generate_access' employee.id %}">
-            {% csrf_token %}
-            {% for field in role_form %}
-                <label for="{{ field.id_for_label }}">{{ field.label }}</label>
-                {{ field }}
-                {{ field.errors }}
-            {% endfor %}
-            <button type="submit">Выдать / сбросить первичный пинкод</button>
+            <div class="employee-card-v2-hidden">
+                {{ form.full_name.as_hidden }}
+                {{ form.personnel_number.as_hidden }}
+                {{ form.residence_text.as_hidden }}
+                <span class="employee-photo-plus" hidden></span>
+                <span class="employee-photo-control add" hidden></span>
+                <span class="employee-photo-control remove" hidden></span>
+            </div>
+            {{ form.full_name.errors }}
+            {{ form.personnel_number.errors }}
+            {{ form.residence_text.errors }}
+
+            <div class="employee-card-v2-grid">
+                <div class="employee-detail-field">
+                    <label for="{{ form.position.id_for_label }}">{{ form.position.label }}</label>
+                    {{ form.position }}
+                    {{ form.position.errors }}
+                </div>
+                <div class="employee-detail-field">
+                    <label for="{{ form.rotation.id_for_label }}">{{ form.rotation.label }}</label>
+                    {{ form.rotation }}
+                    {{ form.rotation.errors }}
+                </div>
+                <div class="employee-detail-field">
+                    <label for="{{ form.status.id_for_label }}">{{ form.status.label }}</label>
+                    {{ form.status }}
+                    {{ form.status.errors }}
+                </div>
+                <div class="employee-detail-field">
+                    <label for="{{ form.hired_at.id_for_label }}">{{ form.hired_at.label }}</label>
+                    {{ form.hired_at }}
+                    {{ form.hired_at.errors }}
+                </div>
+                <div class="employee-detail-field">
+                    <label for="{{ form.dismissed_at.id_for_label }}">{{ form.dismissed_at.label }}</label>
+                    {{ form.dismissed_at }}
+                    {{ form.dismissed_at.errors }}
+                </div>
+                <div class="employee-detail-field">
+                    <label for="employee-residence-general">Место проживания</label>
+                    <input id="employee-residence-general" type="text" autocomplete="off">
+                </div>
+                <div class="employee-detail-field">
+                    <label for="employee-dormitory">Общежитие</label>
+                    <input id="employee-dormitory" type="text" autocomplete="off">
+                </div>
+                <div class="employee-detail-field">
+                    <label for="employee-room">Комната</label>
+                    <input id="employee-room" type="text" autocomplete="off">
+                </div>
+                <div class="employee-detail-field">
+                    <label for="employee-bed">Место</label>
+                    <input id="employee-bed" type="text" autocomplete="off">
+                </div>
+            </div>
+
+            <div class="employee-card-v2-textareas">
+                <div class="employee-detail-field">
+                    <label for="{{ form.comment.id_for_label }}">{{ form.comment.label }}</label>
+                    {{ form.comment }}
+                    {{ form.comment.errors }}
+                </div>
+                <div class="employee-detail-field">
+                    <label for="{{ form.hr_data.id_for_label }}">{{ form.hr_data.label }}</label>
+                    {{ form.hr_data }}
+                    {{ form.hr_data.errors }}
+                </div>
+            </div>
+
+            <div class="employee-detail-save-row">
+                <button type="submit">Сохранить карточку</button>
+            </div>
         </form>
-        <div class="table-wrap">
-            <table>
-                <thead>
-                <tr>
-                    <th>Роль</th>
-                    <th>Статус</th>
-                    <th>Первичный пинкод</th>
-                    <th>Последний вход</th>
-                    <th>Действия</th>
-                </tr>
-                </thead>
-                <tbody>
+
+        <aside class="employee-detail-side">
+            <section class="card employee-detail-card employee-access-issue-card">
+                <div class="employee-detail-card-head">
+                    <div>
+                        <h2>Выдать доступ</h2>
+                        <p class="muted">Первичный пинкод одноразовый. После первого входа сотрудник задает постоянный.</p>
+                    </div>
+                </div>
+                <form class="employee-access-issue-form" method="post" action="{% url 'system_admin_generate_access' employee.id %}">
+                    {% csrf_token %}
+                    {% for field in role_form %}
+                        <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                        {{ field }}
+                        {{ field.errors }}
+                    {% endfor %}
+                    <button type="submit">Выдать / сбросить первичный пинкод</button>
+                </form>
+            </section>
+
+            <section class="card employee-detail-card employee-danger-card">
+                <div class="employee-detail-card-head">
+                    <div>
+                        <h2>Действия</h2>
+                        <p class="muted">Опасные операции требуют подтверждения.</p>
+                    </div>
+                </div>
+                <div class="employee-danger-actions">
+                    <form method="post" action="{% url 'system_admin_employee_status_action' employee.id 'deactivate' %}" data-confirm="Деактивировать сотрудника? Его доступы будут отключены.">
+                        {% csrf_token %}
+                        <button type="submit" class="button-warning">Деактивировать</button>
+                    </form>
+                    <form method="post" action="{% url 'system_admin_employee_status_action' employee.id 'archive' %}" data-confirm="Отправить сотрудника в архив? Его доступы будут отключены.">
+                        {% csrf_token %}
+                        <button type="submit" class="button-muted">В архив</button>
+                    </form>
+                    <form method="post" action="{% url 'system_admin_employee_status_action' employee.id 'delete' %}" data-confirm="Полностью удалить сотрудника? Это действие нельзя будет отменить.">
+                        {% csrf_token %}
+                        <button type="submit" class="button-danger">Удалить полностью</button>
+                    </form>
+                </div>
+                <p class="muted employee-danger-note">Если у сотрудника есть производственная история, система заблокирует полное удаление и предложит архив.</p>
+            </section>
+            <div class="employee-detail-bottom-grid">
+        <section class="card employee-detail-card employee-access-list-card">
+            <div class="employee-detail-card-head">
+                <div>
+                    <h2>Доступы</h2>
+                    <p class="muted">Роли, статусы входа и последние действия по доступам.</p>
+                </div>
+            </div>
+            <div class="employee-access-list">
                 {% for item in employee_accesses %}
-                    <tr>
-                        <td>{{ item.role.name }}</td>
-                        <td>{{ item.get_status_display }}</td>
-                        <td>
-                            {% if item.status == "not_activated" and item.primary_code_issued_at %}
-                                <span class="access-code">{{ item.access_code }}</span>
-                                <span class="muted">ожидает первого входа</span>
-                            {% elif item.status == "activated" %}
-                                <span class="badge">Пинкод активирован</span>
-                            {% elif item.status == "blocked" %}
-                                <span class="muted">Доступ заблокирован</span>
-                            {% elif item.status == "deactivated" %}
-                                <span class="muted">Доступ деактивирован</span>
-                            {% else %}
-                                <span class="muted">-</span>
-                            {% endif %}
-                        </td>
-                        <td>{{ item.last_login_at|date:"d.m.Y H:i"|default:"-" }}</td>
-                        <td>
+                    <article class="employee-access-card access-{{ item.status }}">
+                        <div class="employee-access-main">
+                            <strong>{{ item.role.name }}</strong>
+                            <span class="status-chip access-{{ item.status }}">{{ item.get_status_display }}</span>
+                        </div>
+                        <div class="employee-access-meta">
+                            <span>
+                                {% if item.status == "not_activated" and item.primary_code_issued_at %}
+                                    Первичный пинкод: <strong class="access-code">{{ item.access_code }}</strong>, ожидает первого входа
+                                {% elif item.status == "activated" %}
+                                    Пинкод активирован
+                                {% elif item.status == "blocked" %}
+                                    Доступ заблокирован
+                                {% elif item.status == "deactivated" %}
+                                    Доступ деактивирован
+                                {% else %}
+                                    Пинкод не выдан
+                                {% endif %}
+                            </span>
+                            <span>Последний вход: {{ item.last_login_at|date:"d.m.Y H:i"|default:"-" }}</span>
+                        </div>
+                        <div class="employee-access-actions">
                             <form method="post" action="{% url 'system_admin_access_action' item.id 'block' %}" data-confirm="Заблокировать этот доступ? Пользователь не сможет войти по этому пинкоду.">
                                 {% csrf_token %}
                                 <input type="text" name="reason" placeholder="Причина блокировки">
-                                <button type="submit">Заблокировать</button>
+                                <button type="submit" class="button-small button-warning">Заблокировать</button>
                             </form>
                             <form method="post" action="{% url 'system_admin_access_action' item.id 'unblock' %}">
                                 {% csrf_token %}
-                                <button type="submit">Разблокировать</button>
+                                <button type="submit" class="button-small">Разблокировать</button>
                             </form>
                             <form method="post" action="{% url 'system_admin_access_action' item.id 'deactivate' %}" data-confirm="Деактивировать этот доступ? Пользователь не сможет войти по этому пинкоду.">
                                 {% csrf_token %}
-                                <button type="submit">Деактивировать</button>
+                                <button type="submit" class="button-small button-muted">Деактивировать</button>
                             </form>
-                        </td>
-                    </tr>
+                        </div>
+                    </article>
                 {% empty %}
-                    <tr><td colspan="5">Доступов пока нет.</td></tr>
+                    <div class="empty-state">Доступов пока нет.</div>
                 {% endfor %}
-                </tbody>
-            </table>
-        </div>
-    </section>
+            </div>
+        </section>
 
-    <section class="card">
-        <h2>Последние действия по карточке</h2>
-        <div class="table-wrap">
-            <table>
-                <thead>
-                <tr>
-                    <th>Дата</th>
-                    <th>Действие</th>
-                    <th>Комментарий</th>
-                </tr>
-                </thead>
-                <tbody>
+        <section class="card employee-detail-card employee-log-card" hidden>
+            <div class="employee-detail-card-head">
+                <div>
+                    <h2>Последние действия</h2>
+                    <p class="muted">Журнал изменений по этой карточке.</p>
+                </div>
+            </div>
+            <div class="employee-log-list">
                 {% for log in logs %}
-                    <tr>
-                        <td>{{ log.created_at|date:"d.m.Y H:i" }}</td>
-                        <td>{{ log.action }}</td>
-                        <td>{{ log.comment|default:"-" }}</td>
-                    </tr>
+                    <div class="employee-log-row">
+                        <span>{{ log.created_at|date:"d.m.Y H:i" }}</span>
+                        <strong>{{ log.action }}</strong>
+                        <span>{{ log.comment|default:"-" }}</span>
+                    </div>
                 {% empty %}
-                    <tr><td colspan="3">Действий пока нет.</td></tr>
+                    <div class="empty-state">Действий пока нет.</div>
                 {% endfor %}
-                </tbody>
-            </table>
-        </div>
+            </div>
+        </section>
+            </div>
+        </aside>
     </section>
 </main>
+</div>
+
 {% if employee.photo %}
 <div class="employee-photo-modal" id="employee-photo-modal" hidden>
     <button class="employee-photo-modal-close" type="button" aria-label="Закрыть">×</button>
     <img src="{{ employee.photo.url }}" alt="Фото {{ employee.full_name }}">
 </div>
 {% endif %}
+
 <script>
 document.addEventListener('DOMContentLoaded', function () {
+    var shell = document.querySelector('[data-admin-theme]');
+    var themeToggle = document.querySelector('[data-admin-theme-toggle]');
+    var profileForm = document.querySelector('.employee-profile-form');
+    var fullNameInput = document.getElementById('{{ form.full_name.id_for_label }}');
+    var fullNameSource = document.querySelector('.employee-card-v2-name-grid');
+    var lastNameInput = document.getElementById('employee-last-name');
+    var firstNameInput = document.getElementById('employee-first-name');
+    var middleNameInput = document.getElementById('employee-middle-name');
+    var residenceInput = document.getElementById('{{ form.residence_text.id_for_label }}');
+    var residenceGeneralInput = document.getElementById('employee-residence-general');
+    var dormitoryInput = document.getElementById('employee-dormitory');
+    var roomInput = document.getElementById('employee-room');
+    var bedInput = document.getElementById('employee-bed');
     var input = document.getElementById('{{ form.photo.id_for_label }}');
-    var photoCard = document.querySelector('.employee-photo-card');
+    var photoCard = document.querySelector('[data-photo-open]');
     var image = document.querySelector('.employee-photo-card img');
     var modal = document.getElementById('employee-photo-modal');
     var modalImage = modal ? modal.querySelector('img') : null;
@@ -197,6 +332,91 @@ document.addEventListener('DOMContentLoaded', function () {
         selected.textContent = '';
         selected.hidden = true;
     }
+
+    function setAdminTheme(theme) {
+        if (!shell) return;
+        var isNight = theme === 'night';
+        shell.classList.toggle('admin-night', isNight);
+        shell.classList.toggle('admin-day', !isNight);
+        if (themeToggle) themeToggle.setAttribute('data-theme-icon', isNight ? 'moon' : 'sun');
+        try {
+            window.localStorage.setItem('admin-theme', isNight ? 'night' : 'day');
+        } catch (error) {
+            return;
+        }
+    }
+
+    if (shell) {
+        var savedTheme = 'day';
+        try {
+            savedTheme = window.localStorage.getItem('admin-theme') || 'day';
+        } catch (error) {
+            savedTheme = 'day';
+        }
+        setAdminTheme(savedTheme);
+    }
+    if (themeToggle) {
+        themeToggle.addEventListener('click', function () {
+            setAdminTheme(shell && shell.classList.contains('admin-night') ? 'day' : 'night');
+        });
+    }
+
+    function setValue(element, value) {
+        if (element) element.value = value || '';
+    }
+
+    function parseLabeledValue(text, label) {
+        var pattern = new RegExp(label + ':\\s*([^;]+)', 'i');
+        var match = (text || '').match(pattern);
+        return match ? match[1].trim() : '';
+    }
+
+    function fillVisualFields() {
+        var fullName = fullNameInput ? fullNameInput.value : '';
+        if (!fullName && fullNameSource) fullName = fullNameSource.dataset.fullNameSource || '';
+        var parts = fullName.trim().split(/\s+/).filter(Boolean);
+        setValue(lastNameInput, parts[0] || '');
+        setValue(firstNameInput, parts[1] || '');
+        setValue(middleNameInput, parts.slice(2).join(' '));
+
+        var residence = residenceInput ? residenceInput.value : '';
+        var general = parseLabeledValue(residence, 'Место проживания');
+        var dormitory = parseLabeledValue(residence, 'Общежитие');
+        var room = parseLabeledValue(residence, 'Комната');
+        var bed = parseLabeledValue(residence, 'Место');
+        setValue(residenceGeneralInput, general || (!dormitory && !room && !bed ? residence : ''));
+        setValue(dormitoryInput, dormitory);
+        setValue(roomInput, room);
+        setValue(bedInput, bed);
+    }
+
+    function syncHiddenFields() {
+        if (fullNameInput) {
+            var fullNameParts = [
+                lastNameInput ? lastNameInput.value.trim() : '',
+                firstNameInput ? firstNameInput.value.trim() : '',
+                middleNameInput ? middleNameInput.value.trim() : ''
+            ].filter(Boolean);
+            if (fullNameParts.length) fullNameInput.value = fullNameParts.join(' ');
+        }
+        if (residenceInput) {
+            var residenceParts = [
+                ['Место проживания', residenceGeneralInput ? residenceGeneralInput.value.trim() : ''],
+                ['Общежитие', dormitoryInput ? dormitoryInput.value.trim() : ''],
+                ['Комната', roomInput ? roomInput.value.trim() : ''],
+                ['Место', bedInput ? bedInput.value.trim() : '']
+            ].filter(function (item) { return item[1]; });
+            residenceInput.value = residenceParts.map(function (item) {
+                return item[0] + ': ' + item[1];
+            }).join('; ');
+        }
+    }
+
+    fillVisualFields();
+    if (profileForm) {
+        profileForm.addEventListener('submit', syncHiddenFields);
+    }
+
     if (!input) return;
 
     if (photoCard && image && modal) {
@@ -222,7 +442,10 @@ document.addEventListener('DOMContentLoaded', function () {
             if (selected) selected.textContent = 'Новый файл не выбран.';
             return;
         }
-        if (selected) selected.textContent = 'Выбрано: ' + file.name + '. Нажмите "Сохранить карточку".';
+        if (selected) {
+            selected.hidden = false;
+            selected.textContent = 'Выбрано: ' + file.name + '. Нажмите "Сохранить карточку".';
+        }
         if (file.type && file.type.indexOf('image/') === 0) {
             var url = URL.createObjectURL(file);
             if (!image) {

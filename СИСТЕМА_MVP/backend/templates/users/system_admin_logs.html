@@ -1,62 +1,237 @@
 {% extends "base.html" %}
 
 {% block title %}Журнал действий админки{% endblock %}
+{% block body_class %}system-admin-logs-screen{% endblock %}
 
 {% block body %}
-<header class="app-header">
-    <div class="header-inner wide-shell">
-        <div class="topline">
-            <span>{{ access.employee.full_name }}</span>
-            <a href="{% url 'system_admin_dashboard' %}">Админка</a>
-        </div>
-        <h1>Журнал действий админки</h1>
-        <p>История важных действий администратора: создание сотрудников, выдача пинкодов, блокировки, архив и удаления.</p>
-    </div>
-</header>
+<div class="admin-shell admin-exports-shell admin-logs-shell admin-day" data-admin-theme>
+    <header class="admin-console-header" aria-label="Административная шапка">
+        <section class="admin-console-identity">
+            <span class="admin-console-avatar">{{ access.employee.full_name|first }}</span>
+            <span>
+                <strong>{{ access.employee.full_name }}</strong>
+                <em>Системный администратор</em>
+            </span>
+        </section>
 
-<main class="page wide-page">
-    <section class="card">
-        <h2>Поиск</h2>
-        <form method="get" class="filter-form">
-            <label>
-                Что найти
-                <input type="search" name="q" value="{{ query }}" placeholder="ФИО, действие, объект или комментарий">
-            </label>
-            <button type="submit">Найти</button>
-            <a class="button-link" href="{% url 'system_admin_log_export' %}">Выгрузить в Excel</a>
-        </form>
-    </section>
+        <section class="admin-console-main">
+            <div class="admin-console-title">
+                <span>Админка MVP</span>
+                <h1>Журнал</h1>
+                <p>История административных действий по сотрудникам, доступам, конфликтам и справочникам.</p>
+            </div>
+            <nav class="admin-console-nav" aria-label="Разделы админки">
+                <a href="{% url 'system_admin_dashboard' %}">Сводка</a>
+                <a href="{% url 'system_admin_employees' %}">Сотрудники</a>
+                <a href="{% url 'system_admin_references' %}">Справочники</a>
+                <a href="{% url 'system_admin_conflicts' %}">Конфликты</a>
+                <a class="is-active" href="{% url 'system_admin_logs' %}">Журнал</a>
+                <a href="{% url 'system_admin_exports' %}">Выгрузки</a>
+            </nav>
+        </section>
 
-    <section class="card">
-        <h2>Последние действия</h2>
-        <div class="table-wrap">
-            <table>
-                <thead>
-                <tr>
-                    <th>Дата</th>
-                    <th>Кто</th>
-                    <th>Действие</th>
-                    <th>Тип объекта</th>
-                    <th>Объект</th>
-                    <th>Комментарий</th>
-                </tr>
-                </thead>
-                <tbody>
-                {% for log in logs %}
-                    <tr>
-                        <td>{{ log.created_at|date:"d.m.Y H:i" }}</td>
-                        <td>{{ log.actor.full_name|default:"-" }}</td>
-                        <td>{{ log.action }}</td>
-                        <td>{{ log.object_type }}</td>
-                        <td>{{ log.object_repr }}</td>
-                        <td>{{ log.comment|default:"-" }}</td>
-                    </tr>
-                {% empty %}
-                    <tr><td colspan="6">Действий по выбранному поиску нет.</td></tr>
-                {% endfor %}
-                </tbody>
-            </table>
-        </div>
-    </section>
-</main>
+        <section class="admin-console-actions">
+            <button type="button" class="admin-theme-button" data-admin-theme-toggle title="День / Ночь">Д/Н</button>
+            <a class="admin-utility-link" href="{% url 'system_admin_dashboard' %}">Назад</a>
+            <a class="admin-utility-link" href="{% url 'logout' %}">Выйти</a>
+        </section>
+    </header>
+
+    <main class="admin-console-page logs-page">
+        <section class="log-metrics">
+            <a class="log-metric metric-neutral" href="{% url 'system_admin_logs' %}">
+                <span>Всего действий</span>
+                <strong>{{ total_logs }}</strong>
+                <small>в журнале</small>
+            </a>
+            <a class="log-metric metric-warning" href="{% url 'system_admin_logs' %}?type=access">
+                <span>Доступы</span>
+                <strong>{{ access_log_total }}</strong>
+                <small>пинкоды и входы</small>
+            </a>
+            <a class="log-metric metric-ok" href="{% url 'system_admin_logs' %}?type=employee">
+                <span>Сотрудники</span>
+                <strong>{{ employee_log_total }}</strong>
+                <small>карточки и статусы</small>
+            </a>
+            <a class="log-metric metric-danger" href="{% url 'system_admin_logs' %}?type=conflict">
+                <span>Конфликты</span>
+                <strong>{{ conflict_log_total }}</strong>
+                <small>разборы</small>
+            </a>
+        </section>
+
+        <section class="logs-control-card">
+            <div class="admin-section-title">
+                <div>
+                    <h2>Поиск и фильтр</h2>
+                    <p>Фильтры работают сразу. Журнал доступен только для просмотра и выгрузки.</p>
+                </div>
+                <span class="admin-chip admin-chip-info">{{ logs|length }} видно</span>
+            </div>
+            <form class="logs-filter-bar" method="get">
+                <div class="field">
+                    <label for="log-search">Поиск</label>
+                    <input id="log-search" name="q" type="search" value="{{ query }}" placeholder="ФИО, действие, объект или комментарий" data-log-search>
+                </div>
+                <div class="field select-field">
+                    <label for="log-type">Тип</label>
+                    <select id="log-type" name="type" data-log-type>
+                        <option value="" {% if not selected_log_type %}selected{% endif %}>Все типы</option>
+                        <option value="access" {% if selected_log_type == 'access' %}selected{% endif %}>Доступы</option>
+                        <option value="employee" {% if selected_log_type == 'employee' %}selected{% endif %}>Сотрудники</option>
+                        <option value="conflict" {% if selected_log_type == 'conflict' %}selected{% endif %}>Конфликты</option>
+                        <option value="reference" {% if selected_log_type == 'reference' %}selected{% endif %}>Справочники</option>
+                    </select>
+                </div>
+                <a class="admin-button admin-button-secondary" href="{% url 'system_admin_logs' %}">Сбросить</a>
+            </form>
+        </section>
+
+        <section class="logs-workspace">
+            <div class="logs-list-card">
+                <div class="admin-section-title">
+                    <div>
+                        <h2>Последние действия</h2>
+                        <p>Показываются последние 200 событий с учетом выбранного фильтра.</p>
+                    </div>
+                    <span class="admin-chip" data-log-visible-count></span>
+                </div>
+
+                <div class="admin-log-list">
+                    {% for log in logs %}
+                        <article class="admin-log-row log-state-{{ log.type_class }}" data-log-row data-type="{% if log.type_label == 'Доступ' %}access{% elif log.type_label == 'Сотрудник' %}employee{% elif log.type_label == 'Конфликт' %}conflict{% elif log.type_label == 'Справочник' %}reference{% else %}other{% endif %}" data-text="{{ log.actor.full_name }} {{ log.action }} {{ log.object_type }} {{ log.object_repr }} {{ log.comment }} {{ log.old_value }} {{ log.new_value }}">
+                            <span class="log-row-accent" aria-hidden="true"></span>
+                            <div class="log-main">
+                                <div class="log-row-head">
+                                    <strong>{{ log.action }}</strong>
+                                    <span class="admin-chip admin-chip-{{ log.type_class }}">{{ log.type_label }}</span>
+                                </div>
+                                <div class="log-row-meta">
+                                    <span>{{ log.created_at|date:"d.m.Y H:i" }}</span>
+                                    <span>{{ log.actor.full_name|default:"Система" }}</span>
+                                    <span>{{ log.object_type|default:"Объект не указан" }}</span>
+                                </div>
+                                <div class="log-row-object">
+                                    <strong>{{ log.object_repr|default:"-" }}</strong>
+                                    <span>{{ log.comment|default:"Комментарий не указан" }}</span>
+                                </div>
+                                {% if log.old_value or log.new_value %}
+                                    <div class="log-row-diff">
+                                        {% if log.old_value %}<span><b>Было:</b> {{ log.old_value }}</span>{% endif %}
+                                        {% if log.new_value %}<span><b>Стало:</b> {{ log.new_value }}</span>{% endif %}
+                                    </div>
+                                {% endif %}
+                            </div>
+                        </article>
+                    {% empty %}
+                        <div class="reference-empty-state">
+                            <strong>Действий нет</strong>
+                            <span>По выбранному поиску журнал пуст.</span>
+                        </div>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <aside class="logs-side">
+                <section class="logs-side-card">
+                    <div class="admin-section-title compact">
+                        <div>
+                            <h2>Срез</h2>
+                            <p>Основные группы журнала.</p>
+                        </div>
+                    </div>
+                    <div class="admin-status-list">
+                        <div class="admin-status-row row-ok">
+                            <span>Сотрудники</span>
+                            <strong>{{ employee_log_total }}</strong>
+                        </div>
+                        <div class="admin-status-row row-warning">
+                            <span>Доступы</span>
+                            <strong>{{ access_log_total }}</strong>
+                        </div>
+                        <div class="admin-status-row row-danger">
+                            <span>Конфликты</span>
+                            <strong>{{ conflict_log_total }}</strong>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="logs-side-card">
+                    <div class="admin-section-title compact">
+                        <div>
+                            <h2>Действия</h2>
+                            <p>Экспорт и переходы администратора.</p>
+                        </div>
+                    </div>
+                    <div class="logs-side-actions">
+                        <a class="admin-button admin-button-primary" href="{% url 'system_admin_log_export' %}">Excel</a>
+                        <a class="admin-button admin-button-secondary" href="{% url 'system_admin_conflicts' %}">Конфликты</a>
+                        <a class="admin-button admin-button-secondary" href="{% url 'system_admin_dashboard' %}">Сводка</a>
+                    </div>
+                </section>
+            </aside>
+        </section>
+    </main>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    var search = document.querySelector('[data-log-search]');
+    var type = document.querySelector('[data-log-type]');
+    var rows = Array.from(document.querySelectorAll('[data-log-row]'));
+    var visibleCount = document.querySelector('[data-log-visible-count]');
+    var shell = document.querySelector('[data-admin-theme]');
+    var themeToggle = document.querySelector('[data-admin-theme-toggle]');
+
+    function setAdminTheme(theme) {
+        if (!shell) return;
+        var isNight = theme === 'night';
+        shell.classList.toggle('admin-night', isNight);
+        shell.classList.toggle('admin-day', !isNight);
+        if (themeToggle) themeToggle.setAttribute('data-theme-icon', isNight ? 'moon' : 'sun');
+        try {
+            window.localStorage.setItem('admin-theme', isNight ? 'night' : 'day');
+        } catch (error) {
+            return;
+        }
+    }
+
+    function normalize(value) {
+        return (value || '').toString().trim().toLowerCase();
+    }
+
+    function applyFilters() {
+        var query = normalize(search ? search.value : '');
+        var selectedType = type ? type.value : '';
+        var shown = 0;
+        rows.forEach(function (row) {
+            var matchesQuery = !query || normalize(row.dataset.text).indexOf(query) !== -1;
+            var matchesType = !selectedType || row.dataset.type === selectedType;
+            var isVisible = matchesQuery && matchesType;
+            row.hidden = !isVisible;
+            if (isVisible) shown += 1;
+        });
+        if (visibleCount) visibleCount.textContent = shown + ' видно';
+    }
+
+    if (search) search.addEventListener('input', applyFilters);
+    if (type) type.addEventListener('input', applyFilters);
+    if (shell) {
+        var savedTheme = 'day';
+        try {
+            savedTheme = window.localStorage.getItem('admin-theme') || 'day';
+        } catch (error) {
+            savedTheme = 'day';
+        }
+        setAdminTheme(savedTheme);
+    }
+    if (themeToggle) {
+        themeToggle.addEventListener('click', function () {
+            setAdminTheme(shell && shell.classList.contains('admin-night') ? 'day' : 'night');
+        });
+    }
+    applyFilters();
+});
+</script>
 {% endblock %}

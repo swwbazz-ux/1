@@ -1,13 +1,17 @@
 import secrets
 from datetime import datetime
 from io import BytesIO
+from urllib.parse import urlencode
 
 from django.contrib import messages
+from django.forms import modelform_factory
 from django.db.models import Count, Q
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from django.shortcuts import redirect, render
+from django.urls import reverse
 from django.utils import timezone
+from django.utils.http import url_has_allowed_host_and_scheme
 from openpyxl import Workbook
 
 from assignments.models import AssignmentStatus, HaulAssignment
@@ -16,6 +20,7 @@ from reports.models import ReportTemplate
 from shifts.models import EmployeeShift
 from trips.models import Trip, TripStatus
 
+from .access_auth import find_employee_access_by_credentials
 from .forms import (
     AdminAccessBlockForm,
     AccessActivationForm,
@@ -29,6 +34,7 @@ from .forms import (
     normalize_phone,
 )
 from .models import AdminActionLog, AdminConflict, DriverPrimaryRegistration, Employee, EmployeeAccess, Role
+from .session_device import detect_session_device_kind, mark_session_device_kind, set_session_device_kind
 
 
 ROLE_INTERFACE_NAMES = {
@@ -141,6 +147,17 @@ def log_admin_action(actor, action, obj=None, old_value='', new_value='', commen
     )
 
 
+
+def redirect_after_admin_action(request, fallback_view, **kwargs):
+    next_url = request.POST.get('next', '')
+    if next_url and url_has_allowed_host_and_scheme(
+        next_url,
+        allowed_hosts={request.get_host()},
+        require_https=request.is_secure(),
+    ):
+        return redirect(next_url)
+    return redirect(fallback_view, **kwargs)
+
 def build_workbook_response(workbook, filename):
     output = BytesIO()
     workbook.save(output)
@@ -170,27 +187,13 @@ def interface_map_view(request):
 
 
 def login_view(request):
+    selected_device_kind = request.POST.get('device_kind') if request.method == 'POST' else detect_session_device_kind(request)
+    if selected_device_kind not in {'personal', 'shared'}:
+        selected_device_kind = detect_session_device_kind(request)
     if request.method == 'POST':
         phone = request.POST.get('phone', '').strip()
-        normalized_phone = normalize_phone(phone)
         access_code = request.POST.get('access_code', '').strip()
-        if not access_code.isdigit():
-            messages.error(request, 'Телефон или пинкод указаны неверно.')
-            return render(request, 'users/login.html')
-        access_candidates = (
-            EmployeeAccess.objects
-            .select_related('employee', 'role')
-            .filter(access_code=access_code, is_active=True, employee__is_active=True, role__is_active=True)
-        )
-        access = None
-        for candidate in access_candidates:
-            employee_phone = normalize_phone(candidate.employee.phone)
-            if employee_phone and is_valid_russian_mobile_phone(phone) and len(access_code) == 6 and normalized_phone == employee_phone:
-                access = candidate
-                break
-            if not employee_phone and not normalized_phone:
-                access = candidate
-                break
+        access = find_employee_access_by_credentials(phone, access_code)
         if access:
             access.last_login_at = timezone.now()
             if access.status == EmployeeAccess.Status.NOT_ACTIVATED:
@@ -205,10 +208,11 @@ def login_view(request):
                     access.employee.is_active = True
                     access.employee.save(update_fields=['status', 'is_active', 'updated_at'])
             request.session['employee_access_id'] = access.id
+            set_session_device_kind(request, selected_device_kind)
             access.save(update_fields=['last_login_at', 'status', 'activated_at'])
             return redirect('role_home')
         messages.error(request, 'Телефон или пинкод указаны неверно.')
-    return render(request, 'users/login.html')
+    return render(request, 'users/login.html', {'selected_device_kind': selected_device_kind})
 
 
 def activate_access_view(request):
@@ -239,6 +243,7 @@ def activate_access_view(request):
                 access.employee.save(update_fields=['status', 'is_active', 'updated_at'])
             request.session.pop('pending_activation_access_id', None)
             request.session['employee_access_id'] = access.id
+            mark_session_device_kind(request)
             messages.success(request, 'Постоянный пинкод создан. Первичный пинкод больше не действует.')
             return redirect('role_home')
     else:
@@ -341,6 +346,7 @@ def system_admin_references_view(request):
     if not access:
         return redirect('role_home')
 
+    reference_configs = get_system_admin_reference_configs()
     reference_sections = [
         {
             'title': 'Сотрудники и доступы',
@@ -353,26 +359,51 @@ def system_admin_references_view(request):
         {
             'title': 'Техника',
             'items': [
-                {'name': 'Виды техники', 'count': EquipmentType.objects.count(), 'url': '', 'external_url': '/admin/references/equipmenttype/'},
-                {'name': 'Техника', 'count': Equipment.objects.count(), 'url': '', 'external_url': '/admin/references/equipment/'},
+                {'name': 'Виды техники', 'count': EquipmentType.objects.count(), 'url': '', 'external_url': '/admin/references/equipmenttype/', 'detail_code': 'equipment-types'},
+                {'name': 'Техника', 'count': Equipment.objects.count(), 'url': '', 'external_url': '/admin/references/equipment/', 'detail_code': 'equipment'},
             ],
         },
         {
             'title': 'Производственные справочники',
             'items': [
-                {'name': 'Породы', 'count': RockType.objects.count(), 'url': '', 'external_url': '/admin/references/rocktype/'},
-                {'name': 'Точки разгрузки', 'count': DumpPoint.objects.count(), 'url': '', 'external_url': '/admin/references/dumppoint/'},
+                {'name': 'Породы', 'count': RockType.objects.count(), 'url': '', 'external_url': '/admin/references/rocktype/', 'detail_code': 'rocks'},
+                {'name': 'Точки разгрузки', 'count': DumpPoint.objects.count(), 'url': '', 'external_url': '/admin/references/dumppoint/', 'detail_code': 'dump-points'},
                 {'name': 'Шаблоны отчетов', 'count': ReportTemplate.objects.count(), 'url': '', 'external_url': '/reports/templates/'},
             ],
         },
         {
             'title': 'Проживание',
             'items': [
-                {'name': 'Общежития', 'count': Dormitory.objects.count(), 'url': '', 'external_url': '/admin/references/dormitory/'},
-                {'name': 'Секции общежитий', 'count': DormitorySection.objects.count(), 'url': '', 'external_url': '/admin/references/dormitorysection/'},
+                {'name': 'Общежития', 'count': Dormitory.objects.count(), 'url': '', 'external_url': '/admin/references/dormitory/', 'detail_code': 'dormitories'},
+                {'name': 'Секции общежитий', 'count': DormitorySection.objects.count(), 'url': '', 'external_url': '/admin/references/dormitorysection/', 'detail_code': 'dormitory-sections'},
             ],
         },
     ]
+    reference_total = 0
+    empty_total = 0
+    for section in reference_sections:
+        section_count = 0
+        empty_count = 0
+        for item in section['items']:
+            count = item['count']
+            section_count += count
+            reference_total += count
+            if count:
+                item['status_label'] = 'Заполнен'
+                item['status_class'] = 'ok'
+            else:
+                empty_count += 1
+                empty_total += 1
+                item['status_label'] = 'Пусто'
+                item['status_class'] = 'warning'
+            if item.get('detail_code') in reference_configs:
+                item['target_label'] = 'Рабочий экран'
+            else:
+                item['target_label'] = 'Админка' if item['external_url'].startswith('/admin/') else 'Рабочий экран'
+        section['count'] = section_count
+        section['empty_count'] = empty_count
+        section['status_label'] = 'Требует заполнения' if empty_count else 'Готов'
+        section['status_class'] = 'warning' if empty_count else 'ok'
 
     return render(
         request,
@@ -380,6 +411,203 @@ def system_admin_references_view(request):
         {
             'access': access,
             'reference_sections': reference_sections,
+            'reference_total': reference_total,
+            'empty_total': empty_total,
+        },
+    )
+
+
+def get_system_admin_reference_configs():
+    return {
+        'equipment-types': {
+            'title': 'Виды техники',
+            'section': 'Техника',
+            'model': EquipmentType,
+            'search_fields': ['name'],
+            'preview_fields': ['name', 'is_active'],
+            'admin_url': '/admin/references/equipmenttype/',
+        },
+        'equipment': {
+            'title': 'Техника',
+            'section': 'Техника',
+            'model': Equipment,
+            'search_fields': ['garage_number', 'vin', 'equipment_type__name', 'model__name'],
+            'preview_fields': ['equipment_type', 'garage_number', 'model', 'vin'],
+            'select_related': ['equipment_type', 'model'],
+            'admin_url': '/admin/references/equipment/',
+        },
+        'rocks': {
+            'title': 'Породы',
+            'section': 'Производство',
+            'model': RockType,
+            'search_fields': ['name'],
+            'preview_fields': ['name', 'density', 'loosening_factor'],
+            'admin_url': '/admin/references/rocktype/',
+        },
+        'dump-points': {
+            'title': 'Точки разгрузки',
+            'section': 'Производство',
+            'model': DumpPoint,
+            'search_fields': ['name'],
+            'preview_fields': ['name', 'is_active'],
+            'admin_url': '/admin/references/dumppoint/',
+        },
+        'dormitories': {
+            'title': 'Общежития',
+            'section': 'Проживание',
+            'model': Dormitory,
+            'search_fields': ['number'],
+            'preview_fields': ['number', 'is_active'],
+            'admin_url': '/admin/references/dormitory/',
+        },
+        'dormitory-sections': {
+            'title': 'Секции общежитий',
+            'section': 'Проживание',
+            'model': DormitorySection,
+            'search_fields': ['name', 'block__name', 'block__dormitory__number'],
+            'preview_fields': ['block', 'name', 'day_capacity', 'night_capacity'],
+            'select_related': ['block', 'block__dormitory'],
+            'admin_url': '/admin/references/dormitorysection/',
+        },
+    }
+
+
+def build_reference_form(model):
+    editable_fields = [
+        field.name
+        for field in model._meta.fields
+        if field.name != 'id' and getattr(field, 'editable', True)
+    ]
+    return modelform_factory(model, fields=editable_fields)
+
+
+def build_reference_queryset(config):
+    queryset = config['model'].objects.all()
+    select_related = config.get('select_related') or []
+    if select_related:
+        queryset = queryset.select_related(*select_related)
+    return queryset
+
+
+def build_reference_search_filter(search_fields, query):
+    search_filter = Q()
+    for field_name in search_fields:
+        search_filter |= Q(**{f'{field_name}__icontains': query})
+    return search_filter
+
+
+def get_reference_status(record):
+    if hasattr(record, 'is_active') and not record.is_active:
+        return 'Отключен', 'neutral'
+    return 'Активен', 'ok'
+
+
+def get_reference_record_preview(record, config):
+    preview = []
+    for field_name in config.get('preview_fields', []):
+        field = record._meta.get_field(field_name)
+        value = getattr(record, field_name)
+        if field.get_internal_type() == 'BooleanField':
+            value = 'Да' if value else 'Нет'
+        elif value in (None, ''):
+            value = 'Не указано'
+        preview.append({'label': field.verbose_name, 'value': value})
+    return preview
+
+
+def system_admin_reference_detail_view(request, reference_code):
+    access = require_admin_access(request)
+    if not access:
+        return redirect('role_home')
+
+    configs = get_system_admin_reference_configs()
+    config = configs.get(reference_code)
+    if not config:
+        messages.error(request, 'Справочник не найден.')
+        return redirect('system_admin_references')
+
+    model = config['model']
+    form_class = build_reference_form(model)
+    query = request.GET.get('q', '').strip()
+    status_filter = request.GET.get('status', '').strip()
+    edit_id = request.GET.get('edit', '').strip()
+    selected_record = None
+    if edit_id.isdigit():
+        selected_record = get_object_or_404(build_reference_queryset(config), id=edit_id)
+
+    def reference_detail_redirect_url(record_id=None):
+        params = []
+        if query:
+            params.append(('q', query))
+        if status_filter:
+            params.append(('status', status_filter))
+        if record_id:
+            params.append(('edit', record_id))
+        query_string = urlencode(params)
+        url = reverse('system_admin_reference_detail', kwargs={'reference_code': reference_code})
+        return f'{url}?{query_string}' if query_string else url
+
+    if request.method == 'POST':
+        action = request.POST.get('action', 'save')
+        record_id = request.POST.get('record_id', '').strip()
+        record = None
+        if record_id.isdigit():
+            record = get_object_or_404(model, id=record_id)
+
+        if action in {'disable', 'enable'} and record and hasattr(record, 'is_active'):
+            old_value = 'Активен' if record.is_active else 'Отключен'
+            record.is_active = action == 'enable'
+            record.save(update_fields=['is_active'])
+            new_value = 'Активен' if record.is_active else 'Отключен'
+            log_admin_action(access.employee, f'Справочник: {config["title"]}', record, old_value, new_value)
+            messages.success(request, 'Состояние записи обновлено.')
+            return redirect(reference_detail_redirect_url(record.id))
+
+        form = form_class(request.POST, instance=record)
+        if form.is_valid():
+            saved_record = form.save()
+            log_admin_action(access.employee, f'Справочник: {config["title"]}', saved_record, '', 'Сохранено')
+            messages.success(request, 'Запись справочника сохранена.')
+            return redirect(reference_detail_redirect_url(saved_record.id))
+    else:
+        form = form_class(instance=selected_record)
+
+    records_queryset = build_reference_queryset(config)
+    if query:
+        records_queryset = records_queryset.filter(build_reference_search_filter(config.get('search_fields', []), query))
+    if status_filter and hasattr(model, 'is_active'):
+        records_queryset = records_queryset.filter(is_active=status_filter == 'active')
+
+    records = []
+    for record in records_queryset[:300]:
+        status_label, status_class = get_reference_status(record)
+        records.append({
+            'object': record,
+            'title': str(record),
+            'status_label': status_label,
+            'status_class': status_class,
+            'preview': get_reference_record_preview(record, config),
+        })
+
+    active_total = model.objects.filter(is_active=True).count() if hasattr(model, 'is_active') else records_queryset.count()
+    inactive_total = model.objects.filter(is_active=False).count() if hasattr(model, 'is_active') else 0
+
+    return render(
+        request,
+        'users/system_admin_reference_detail.html',
+        {
+            'access': access,
+            'reference_code': reference_code,
+            'reference_config': config,
+            'form': form,
+            'selected_record': selected_record,
+            'records': records,
+            'records_total': model.objects.count(),
+            'active_total': active_total,
+            'inactive_total': inactive_total,
+            'query': query,
+            'status_filter': status_filter,
+            'has_active_status': hasattr(model, 'is_active'),
         },
     )
 
@@ -390,9 +618,34 @@ def system_admin_conflicts_view(request):
         return redirect('role_home')
 
     status = request.GET.get('status', '').strip()
+    query = request.GET.get('q', '').strip()
     conflicts = AdminConflict.objects.select_related('employee', 'role').order_by('-created_at')
     if status:
         conflicts = conflicts.filter(status=status)
+    if query:
+        conflicts = conflicts.filter(
+            Q(conflict_type__icontains=query)
+            | Q(process__icontains=query)
+            | Q(description__icontains=query)
+            | Q(comment__icontains=query)
+            | Q(employee__full_name__icontains=query)
+            | Q(role__name__icontains=query)
+        )
+
+    conflict_status_counts = {
+        item['status']: item['total']
+        for item in AdminConflict.objects.values('status').annotate(total=Count('id'))
+    }
+    conflicts = list(conflicts[:200])
+    for conflict in conflicts:
+        if conflict.status == AdminConflict.Status.OPEN:
+            conflict.status_class = 'danger'
+        elif conflict.status == AdminConflict.Status.IN_PROGRESS:
+            conflict.status_class = 'warning'
+        elif conflict.status == AdminConflict.Status.RESOLVED:
+            conflict.status_class = 'ok'
+        else:
+            conflict.status_class = 'neutral'
 
     return render(
         request,
@@ -402,6 +655,12 @@ def system_admin_conflicts_view(request):
             'conflicts': conflicts,
             'statuses': AdminConflict.Status.choices,
             'selected_status': status,
+            'query': query,
+            'open_total': conflict_status_counts.get(AdminConflict.Status.OPEN, 0),
+            'in_progress_total': conflict_status_counts.get(AdminConflict.Status.IN_PROGRESS, 0),
+            'resolved_total': conflict_status_counts.get(AdminConflict.Status.RESOLVED, 0),
+            'rejected_total': conflict_status_counts.get(AdminConflict.Status.REJECTED, 0),
+            'conflict_total': sum(conflict_status_counts.values()),
         },
     )
 
@@ -446,6 +705,7 @@ def system_admin_logs_view(request):
         return redirect('role_home')
 
     query = request.GET.get('q', '').strip()
+    log_type = request.GET.get('type', '').strip()
     logs = AdminActionLog.objects.select_related('actor').order_by('-created_at')
     if query:
         logs = logs.filter(
@@ -455,14 +715,149 @@ def system_admin_logs_view(request):
             | Q(comment__icontains=query)
             | Q(actor__full_name__icontains=query)
         )
+    if log_type:
+        if log_type == 'access':
+            logs = logs.filter(Q(action__icontains='доступ') | Q(action__icontains='пинкод') | Q(object_type__icontains='Access'))
+        elif log_type == 'employee':
+            logs = logs.filter(Q(action__icontains='сотрудник') | Q(object_type__icontains='Employee'))
+        elif log_type == 'conflict':
+            logs = logs.filter(Q(action__icontains='конфликт') | Q(object_type__icontains='AdminConflict'))
+        elif log_type == 'reference':
+            logs = logs.filter(Q(action__icontains='Справочник') | Q(object_type__icontains='references'))
+
+    total_logs = AdminActionLog.objects.count()
+    access_total = AdminActionLog.objects.filter(Q(action__icontains='доступ') | Q(action__icontains='пинкод') | Q(object_type__icontains='Access')).count()
+    employee_total = AdminActionLog.objects.filter(Q(action__icontains='сотрудник') | Q(object_type__icontains='Employee')).count()
+    conflict_total = AdminActionLog.objects.filter(Q(action__icontains='конфликт') | Q(object_type__icontains='AdminConflict')).count()
+    logs = list(logs[:200])
+    for log in logs:
+        action_text = f'{log.action} {log.object_type}'.lower()
+        if 'конфликт' in action_text or 'adminconflict' in action_text:
+            log.type_label = 'Конфликт'
+            log.type_class = 'danger'
+        elif 'доступ' in action_text or 'пинкод' in action_text or 'access' in action_text:
+            log.type_label = 'Доступ'
+            log.type_class = 'warning'
+        elif 'сотрудник' in action_text or 'employee' in action_text:
+            log.type_label = 'Сотрудник'
+            log.type_class = 'ok'
+        elif 'справочник' in action_text:
+            log.type_label = 'Справочник'
+            log.type_class = 'neutral'
+        else:
+            log.type_label = 'Действие'
+            log.type_class = 'neutral'
 
     return render(
         request,
         'users/system_admin_logs.html',
         {
             'access': access,
-            'logs': logs[:200],
+            'logs': logs,
             'query': query,
+            'selected_log_type': log_type,
+            'total_logs': total_logs,
+            'access_log_total': access_total,
+            'employee_log_total': employee_total,
+            'conflict_log_total': conflict_total,
+        },
+    )
+
+
+def system_admin_exports_view(request):
+    access = require_admin_access(request)
+    if not access:
+        return redirect('role_home')
+
+    export_groups = [
+        {
+            'title': 'Администрирование',
+            'items': [
+                {
+                    'title': 'Сотрудники',
+                    'description': 'Кадровая карточка, статус, телефон, вахта и проживание.',
+                    'url_name': 'system_admin_employee_export',
+                    'count': Employee.objects.count(),
+                    'status_label': 'готово',
+                    'status_class': 'ok',
+                },
+                {
+                    'title': 'Доступы',
+                    'description': 'Роли, статусы входа, даты выдачи, активации и последнего входа.',
+                    'url_name': 'system_admin_access_export',
+                    'count': EmployeeAccess.objects.count(),
+                    'status_label': 'готово',
+                    'status_class': 'ok',
+                },
+                {
+                    'title': 'Журнал действий',
+                    'description': 'История административных действий для сверки и аудита.',
+                    'url_name': 'system_admin_log_export',
+                    'count': AdminActionLog.objects.count(),
+                    'status_label': 'готово',
+                    'status_class': 'ok',
+                },
+                {
+                    'title': 'Конфликты',
+                    'description': 'Заблокированные рискованные действия и статусы разбора.',
+                    'url_name': 'system_admin_conflict_export',
+                    'count': AdminConflict.objects.count(),
+                    'status_label': 'готово',
+                    'status_class': 'warning' if AdminConflict.objects.filter(status=AdminConflict.Status.OPEN).exists() else 'ok',
+                },
+            ],
+        },
+        {
+            'title': 'Рабочие отчеты MVP',
+            'items': [
+                {
+                    'title': 'Объемы',
+                    'description': 'Производственный отчет по рейсам, группировкам и шаблонам.',
+                    'external_url': '/reports/volume/export/',
+                    'count': Trip.objects.count(),
+                    'status_label': 'отчет',
+                    'status_class': 'neutral',
+                },
+                {
+                    'title': 'Суточный отчет заказчику',
+                    'description': 'Суточная форма по дате отчета для внешней сверки.',
+                    'external_url': '/reports/customer-daily/export/',
+                    'count': Trip.objects.count(),
+                    'status_label': 'отчет',
+                    'status_class': 'neutral',
+                },
+                {
+                    'title': 'Витрина руководства',
+                    'description': 'Excel-срез руководителя: сводка, динамика и сравнение смен.',
+                    'external_url': '/reports/management/export/',
+                    'count': Trip.objects.count(),
+                    'status_label': 'отчет',
+                    'status_class': 'neutral',
+                },
+                {
+                    'title': 'Механические простои',
+                    'description': 'Отчет по простоям техники с фильтрами механической службы.',
+                    'external_url': '/reports/downtimes/export/',
+                    'count': 0,
+                    'status_label': 'отчет',
+                    'status_class': 'neutral',
+                },
+            ],
+        },
+    ]
+    export_total = sum(len(group['items']) for group in export_groups)
+    ready_total = sum(1 for group in export_groups for item in group['items'] if item['status_class'] == 'ok')
+    warning_total = sum(1 for group in export_groups for item in group['items'] if item['status_class'] == 'warning')
+
+    return render(
+        request,
+        'users/system_admin_exports.html',
+        {
+            'access': access,
+            'export_groups': export_groups,
+            'export_total': export_total,
+            'ready_total': ready_total,
+            'warning_total': warning_total,
         },
     )
 
@@ -475,11 +870,14 @@ def system_admin_employees_view(request):
     employees = Employee.objects.prefetch_related('accesses__role').order_by('full_name')
     status = request.GET.get('status', '').strip()
     access_status = request.GET.get('access_status', '').strip()
+    role_id = request.GET.get('role', '').strip()
     query = request.GET.get('q', '').strip()
     if status:
         employees = employees.filter(status=status)
     if access_status:
         employees = employees.filter(accesses__status=access_status).distinct()
+    if role_id.isdigit():
+        employees = employees.filter(accesses__role_id=int(role_id)).distinct()
     if query:
         employees = employees.filter(full_name__icontains=query)
 
@@ -491,8 +889,10 @@ def system_admin_employees_view(request):
             'employees': employees,
             'statuses': Employee.Status.choices,
             'access_statuses': EmployeeAccess.Status.choices,
+            'roles': Role.objects.filter(is_active=True).order_by('name'),
             'selected_status': status,
             'selected_access_status': access_status,
+            'selected_role': role_id,
             'query': query,
         },
     )
@@ -522,7 +922,7 @@ def system_admin_employee_create_view(request):
             else:
                 log_admin_action(access.employee, 'Создан сотрудник без пинкода', employee, new_value=f'Роль: {role}')
                 messages.success(request, 'Сотрудник создан.')
-            return redirect('system_admin_employee_detail', employee_id=employee.id)
+            return redirect_after_admin_action(request, 'system_admin_employee_detail', employee_id=employee.id)
     else:
         form = AdminEmployeeForm()
 
@@ -544,7 +944,7 @@ def system_admin_employee_detail_view(request, employee_id):
                 employee.save(update_fields=['photo', 'updated_at'])
                 log_admin_action(access.employee, 'Удалено фото сотрудника', employee)
                 messages.success(request, 'Фото сотрудника удалено.')
-            return redirect('system_admin_employee_detail', employee_id=employee.id)
+            return redirect_after_admin_action(request, 'system_admin_employee_detail', employee_id=employee.id)
         form = AdminEmployeeEditForm(request.POST, request.FILES, instance=employee)
         if form.is_valid():
             saved_employee = form.save()
@@ -552,7 +952,7 @@ def system_admin_employee_detail_view(request, employee_id):
                 saved_employee.photo.storage.delete(old_photo_name)
             log_admin_action(access.employee, 'Изменена карточка сотрудника', employee)
             messages.success(request, 'Карточка сотрудника сохранена.')
-            return redirect('system_admin_employee_detail', employee_id=employee.id)
+            return redirect_after_admin_action(request, 'system_admin_employee_detail', employee_id=employee.id)
     else:
         form = AdminEmployeeEditForm(instance=employee)
 
@@ -609,7 +1009,7 @@ def system_admin_generate_access_view(request, employee_id):
             )
             log_admin_action(access.employee, 'Выдан новый первичный пинкод', employee_access, new_value=code)
             messages.success(request, f'Новый первичный пинкод: {code}')
-    return redirect('system_admin_employee_detail', employee_id=employee.id)
+    return redirect_after_admin_action(request, 'system_admin_employee_detail', employee_id=employee.id)
 
 
 def system_admin_access_action_view(request, access_id, action):
@@ -620,7 +1020,7 @@ def system_admin_access_action_view(request, access_id, action):
     if request.method == 'POST':
         if employee_access.id == admin_access.id and action in {'block', 'deactivate'}:
             messages.error(request, 'Нельзя заблокировать или деактивировать собственный доступ администратора.')
-            return redirect('system_admin_employee_detail', employee_id=employee_access.employee.id)
+            return redirect_after_admin_action(request, 'system_admin_employee_detail', employee_id=employee_access.employee.id)
         if action == 'block':
             form = AdminAccessBlockForm(request.POST)
             if form.is_valid():
@@ -632,11 +1032,23 @@ def system_admin_access_action_view(request, access_id, action):
                 log_admin_action(admin_access.employee, 'Заблокирован доступ', employee_access, comment=employee_access.block_reason)
                 messages.success(request, 'Доступ заблокирован.')
         elif action == 'unblock':
+            if employee_access.employee.status in {Employee.Status.DISMISSED, Employee.Status.DELETED}:
+                messages.error(request, 'Нельзя разблокировать доступ у уволенного или удаленного сотрудника.')
+                return redirect_after_admin_action(request, 'system_admin_employee_detail', employee_id=employee_access.employee.id)
             employee_access.status = EmployeeAccess.Status.ACTIVATED
             employee_access.is_active = True
             employee_access.blocked_at = None
             employee_access.block_reason = ''
-            employee_access.save(update_fields=['status', 'is_active', 'blocked_at', 'block_reason'])
+            employee_access.deactivated_at = None
+            employee_access.save(update_fields=['status', 'is_active', 'blocked_at', 'block_reason', 'deactivated_at'])
+            if employee_access.employee.status in {
+                Employee.Status.NOT_ACTIVATED,
+                Employee.Status.DEACTIVATED,
+                Employee.Status.ARCHIVED,
+            }:
+                employee_access.employee.status = Employee.Status.ACTIVE
+                employee_access.employee.is_active = True
+                employee_access.employee.save(update_fields=['status', 'is_active'])
             log_admin_action(admin_access.employee, 'Разблокирован доступ', employee_access)
             messages.success(request, 'Доступ разблокирован.')
         elif action == 'deactivate':
@@ -646,7 +1058,7 @@ def system_admin_access_action_view(request, access_id, action):
             employee_access.save(update_fields=['status', 'is_active', 'deactivated_at'])
             log_admin_action(admin_access.employee, 'Доступ деактивирован', employee_access)
             messages.success(request, 'Доступ деактивирован.')
-    return redirect('system_admin_employee_detail', employee_id=employee_access.employee.id)
+    return redirect_after_admin_action(request, 'system_admin_employee_detail', employee_id=employee_access.employee.id)
 
 
 def system_admin_employee_status_action_view(request, employee_id, action):
@@ -657,7 +1069,7 @@ def system_admin_employee_status_action_view(request, employee_id, action):
     if request.method == 'POST':
         if employee.id == access.employee.id and action in {'deactivate', 'archive', 'delete'}:
             messages.error(request, 'Нельзя деактивировать, архивировать или удалить собственную учетную запись администратора.')
-            return redirect('system_admin_employee_detail', employee_id=employee.id)
+            return redirect_after_admin_action(request, 'system_admin_employee_detail', employee_id=employee.id)
         if action == 'deactivate':
             employee.status = Employee.Status.DEACTIVATED
             employee.is_active = False
@@ -681,14 +1093,14 @@ def system_admin_employee_status_action_view(request, employee_id, action):
                 )
                 messages.error(request, 'Удаление запрещено: у сотрудника есть производственная история. Используйте архив.')
                 log_admin_action(access.employee, 'Удаление сотрудника заблокировано', employee)
-                return redirect('system_admin_employee_detail', employee_id=employee.id)
+                return redirect_after_admin_action(request, 'system_admin_employee_detail', employee_id=employee.id)
             employee_name = employee.full_name
             log_admin_action(access.employee, 'Сотрудник полностью удален', employee, old_value=employee_name)
             employee.delete()
             messages.success(request, f'Сотрудник {employee_name} удален.')
             return redirect('system_admin_employees')
     employee.save(update_fields=['status', 'is_active', 'updated_at'])
-    return redirect('system_admin_employee_detail', employee_id=employee.id)
+    return redirect_after_admin_action(request, 'system_admin_employee_detail', employee_id=employee.id)
 
 
 def system_admin_employee_export_view(request):

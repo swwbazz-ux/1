@@ -1,52 +1,246 @@
 {% extends "base.html" %}
 
 {% block title %}Справочники админки{% endblock %}
+{% block body_class %}system-admin-references-screen{% endblock %}
 
 {% block body %}
-<header class="app-header">
-    <div class="header-inner wide-shell">
-        <div class="topline">
-            <span>{{ access.employee.full_name }}</span>
-            <a href="{% url 'system_admin_dashboard' %}">Админка</a>
-        </div>
-        <h1>Справочники админки</h1>
-        <p>Единый реестр справочников первого этапа: техника, породы, точки разгрузки, проживание, роли и доступы.</p>
-    </div>
-</header>
+<div class="admin-shell admin-exports-shell admin-references-shell admin-day" data-admin-theme>
+    <header class="admin-console-header" aria-label="Административная шапка">
+        <section class="admin-console-identity">
+            <span class="admin-console-avatar">{{ access.employee.full_name|first }}</span>
+            <span>
+                <strong>{{ access.employee.full_name }}</strong>
+                <em>Системный администратор</em>
+            </span>
+        </section>
 
-<main class="page wide-page">
-    {% for section in reference_sections %}
-        <section class="card">
-            <h2>{{ section.title }}</h2>
-            <div class="table-wrap">
-                <table>
-                    <thead>
-                    <tr>
-                        <th>Справочник</th>
-                        <th>Записей</th>
-                        <th>Открыть</th>
-                    </tr>
-                    </thead>
-                    <tbody>
-                    {% for item in section.items %}
-                        <tr>
-                            <td>{{ item.name }}</td>
-                            <td>{{ item.count }}</td>
-                            <td>
-                                {% if item.url %}
-                                    <a href="{% url item.url %}">Открыть</a>
-                                {% elif item.external_url %}
-                                    <a href="{{ item.external_url }}">Открыть</a>
-                                {% else %}
-                                    -
-                                {% endif %}
-                            </td>
-                        </tr>
-                    {% endfor %}
-                    </tbody>
-                </table>
+        <section class="admin-console-main">
+            <div class="admin-console-title">
+                <span>Админка MVP</span>
+                <h1>Справочники</h1>
+                <p>Единый реестр данных первого этапа: техника, производство и проживание.</p>
+            </div>
+            <nav class="admin-console-nav" aria-label="Разделы админки">
+                <a href="{% url 'system_admin_dashboard' %}">Сводка</a>
+                <a href="{% url 'system_admin_employees' %}">Сотрудники</a>
+                <a class="is-active" href="{% url 'system_admin_references' %}">Справочники</a>
+                <a href="{% url 'system_admin_conflicts' %}">Конфликты</a>
+                <a href="{% url 'system_admin_logs' %}">Журнал</a>
+                <a href="{% url 'system_admin_exports' %}">Выгрузки</a>
+            </nav>
+        </section>
+
+        <section class="admin-console-actions">
+            <button type="button" class="admin-theme-button" data-admin-theme-toggle title="День / Ночь">Д/Н</button>
+            <a class="admin-utility-link" href="{% url 'system_admin_dashboard' %}">Назад</a>
+            <a class="admin-utility-link" href="{% url 'logout' %}">Выйти</a>
+        </section>
+    </header>
+
+    <main class="admin-console-page references-page">
+        <section class="references-control-card">
+            <div class="admin-section-title">
+                <div>
+                    <h2>Поиск и контроль</h2>
+                    <p>Фильтры применяются сразу. Строка открывает рабочий экран справочника.</p>
+                </div>
+                <span class="admin-chip admin-chip-info">{{ reference_total }} записей</span>
+            </div>
+            <div class="references-filter-bar">
+                <div class="field">
+                    <label for="reference-search">Поиск</label>
+                    <input id="reference-search" type="search" placeholder="Название справочника или раздел">
+                </div>
+                <div class="field select-field">
+                    <label for="reference-section-filter">Раздел</label>
+                    <select id="reference-section-filter">
+                        <option value="">Все разделы</option>
+                        {% for section in reference_sections %}
+                            <option value="{{ section.title }}">{{ section.title }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="field select-field">
+                    <label for="reference-status-filter">Состояние</label>
+                    <select id="reference-status-filter">
+                        <option value="">Все состояния</option>
+                        <option value="ok">Заполнен</option>
+                        <option value="warning">Пусто</option>
+                    </select>
+                </div>
+                <button class="admin-button admin-button-secondary" type="button" data-reference-reset>Сбросить</button>
             </div>
         </section>
-    {% endfor %}
-</main>
+
+        <section class="references-workspace">
+            <div class="references-list-card">
+                <div class="admin-section-title">
+                    <div>
+                        <h2>Реестр</h2>
+                        <p>Основные справочники MVP, которые администратор держит в актуальном состоянии.</p>
+                    </div>
+                    <span class="admin-chip" data-reference-visible-count></span>
+                </div>
+
+                <div class="references-list">
+                    {% for section in reference_sections %}
+                        <section class="references-section" data-reference-section="{{ section.title }}">
+                            <div class="references-section-head">
+                                <div>
+                                    <h3>{{ section.title }}</h3>
+                                    <span>{{ section.count }} записей</span>
+                                </div>
+                                <strong class="admin-chip admin-chip-{{ section.status_class }}">{{ section.status_label }}</strong>
+                            </div>
+                            <div class="references-section-list">
+                                {% for item in section.items %}
+                                    <article class="reference-row reference-row-{{ item.status_class }}" data-reference-row data-section="{{ section.title }}" data-status="{{ item.status_class }}" data-name="{{ item.name }}" {% if item.external_url %}data-admin-url="{{ item.external_url }}"{% endif %}>
+                                        <div class="reference-main">
+                                            <strong>{{ item.name }}</strong>
+                                            <span>{{ item.target_label }}</span>
+                                        </div>
+                                        <span class="reference-count">{{ item.count }}</span>
+                                        <span class="admin-chip admin-chip-{{ item.status_class }}">{{ item.status_label }}</span>
+                                        {% if item.detail_code %}
+                                            <a class="reference-open" href="{% url 'system_admin_reference_detail' item.detail_code %}" title="Открыть {{ item.name }}">Открыть</a>
+                                        {% elif item.url %}
+                                            <a class="reference-open" href="{% url item.url %}" title="Открыть {{ item.name }}">Открыть</a>
+                                        {% elif item.external_url %}
+                                            <a class="reference-open" href="{{ item.external_url }}" title="Открыть {{ item.name }}">Открыть</a>
+                                        {% else %}
+                                            <span class="reference-open is-disabled">Нет экрана</span>
+                                        {% endif %}
+                                    </article>
+                                {% endfor %}
+                            </div>
+                        </section>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <aside class="references-side">
+                <section class="references-side-card">
+                    <div class="admin-section-title compact">
+                        <div>
+                            <h2>Состояние</h2>
+                            <p>Короткая сводка по заполненности.</p>
+                        </div>
+                    </div>
+                    <div class="admin-status-list">
+                        <div class="admin-status-row row-ok">
+                            <span>Всего записей</span>
+                            <strong>{{ reference_total }}</strong>
+                        </div>
+                        <div class="admin-status-row {% if empty_total %}row-warning{% else %}row-ok{% endif %}">
+                            <span>Пустые справочники</span>
+                            <strong>{{ empty_total }}</strong>
+                        </div>
+                        <div class="admin-status-row row-neutral">
+                            <span>Разделов</span>
+                            <strong>{{ reference_sections|length }}</strong>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="references-side-card">
+                    <div class="admin-section-title compact">
+                        <div>
+                            <h2>Действия</h2>
+                            <p>Безопасные переходы администратора.</p>
+                        </div>
+                    </div>
+                    <div class="references-actions">
+                        <a class="admin-button admin-button-secondary" href="/admin/references/">Техническая админка</a>
+                        <a class="admin-button admin-button-secondary" href="{% url 'system_admin_logs' %}">Журнал действий</a>
+                        <a class="admin-button admin-button-primary" href="{% url 'system_admin_dashboard' %}">Главная админка</a>
+                    </div>
+                </section>
+            </aside>
+        </section>
+    </main>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    var search = document.getElementById('reference-search');
+    var sectionFilter = document.getElementById('reference-section-filter');
+    var statusFilter = document.getElementById('reference-status-filter');
+    var reset = document.querySelector('[data-reference-reset]');
+    var visibleCount = document.querySelector('[data-reference-visible-count]');
+    var rows = Array.from(document.querySelectorAll('[data-reference-row]'));
+    var sections = Array.from(document.querySelectorAll('.references-section'));
+    var shell = document.querySelector('[data-admin-theme]');
+    var themeToggle = document.querySelector('[data-admin-theme-toggle]');
+
+    function setAdminTheme(theme) {
+        if (!shell) return;
+        var isNight = theme === 'night';
+        shell.classList.toggle('admin-night', isNight);
+        shell.classList.toggle('admin-day', !isNight);
+        if (themeToggle) themeToggle.setAttribute('data-theme-icon', isNight ? 'moon' : 'sun');
+        try {
+            window.localStorage.setItem('admin-theme', isNight ? 'night' : 'day');
+        } catch (error) {
+            return;
+        }
+    }
+
+    function normalize(value) {
+        return (value || '').toString().trim().toLowerCase();
+    }
+
+    function applyFilters() {
+        var query = normalize(search ? search.value : '');
+        var section = sectionFilter ? sectionFilter.value : '';
+        var status = statusFilter ? statusFilter.value : '';
+        var shown = 0;
+
+        rows.forEach(function (row) {
+            var rowName = normalize(row.dataset.name);
+            var rowSection = row.dataset.section || '';
+            var rowStatus = row.dataset.status || '';
+            var matchesQuery = !query || rowName.indexOf(query) !== -1 || normalize(rowSection).indexOf(query) !== -1;
+            var matchesSection = !section || rowSection === section;
+            var matchesStatus = !status || rowStatus === status;
+            var isVisible = matchesQuery && matchesSection && matchesStatus;
+            row.hidden = !isVisible;
+            if (isVisible) shown += 1;
+        });
+
+        sections.forEach(function (sectionNode) {
+            var sectionRows = Array.from(sectionNode.querySelectorAll('[data-reference-row]'));
+            sectionNode.hidden = sectionRows.every(function (row) { return row.hidden; });
+        });
+
+        if (visibleCount) {
+            visibleCount.textContent = shown + ' видно';
+        }
+    }
+
+    [search, sectionFilter, statusFilter].forEach(function (control) {
+        if (control) control.addEventListener('input', applyFilters);
+    });
+    if (reset) {
+        reset.addEventListener('click', function () {
+            if (search) search.value = '';
+            if (sectionFilter) sectionFilter.value = '';
+            if (statusFilter) statusFilter.value = '';
+            applyFilters();
+        });
+    }
+    var savedTheme = 'day';
+    try {
+        savedTheme = window.localStorage.getItem('admin-theme') || 'day';
+    } catch (error) {
+        savedTheme = 'day';
+    }
+    setAdminTheme(savedTheme);
+    if (themeToggle) {
+        themeToggle.addEventListener('click', function () {
+            setAdminTheme(shell && shell.classList.contains('admin-night') ? 'day' : 'night');
+        });
+    }
+    applyFilters();
+});
+</script>
 {% endblock %}

@@ -21,9 +21,11 @@ from .views import (
     system_admin_employee_export_view,
     system_admin_employee_status_action_view,
     system_admin_employees_view,
+    system_admin_exports_view,
     system_admin_generate_access_view,
     system_admin_logs_view,
     system_admin_log_export_view,
+    system_admin_reference_detail_view,
     system_admin_references_view,
 )
 
@@ -39,9 +41,11 @@ urlpatterns = [
     path('system-admin/', system_admin_dashboard_view, name='system_admin_dashboard'),
     path('system-admin/employees/', system_admin_employees_view, name='system_admin_employees'),
     path('system-admin/references/', system_admin_references_view, name='system_admin_references'),
+    path('system-admin/references/<slug:reference_code>/', system_admin_reference_detail_view, name='system_admin_reference_detail'),
     path('system-admin/conflicts/', system_admin_conflicts_view, name='system_admin_conflicts'),
     path('system-admin/conflicts/<int:conflict_id>/<str:action>/', system_admin_conflict_action_view, name='system_admin_conflict_action'),
     path('system-admin/logs/', system_admin_logs_view, name='system_admin_logs'),
+    path('system-admin/exports/', system_admin_exports_view, name='system_admin_exports'),
     path('system-admin/employees/create/', system_admin_employee_create_view, name='system_admin_employee_create'),
     path('system-admin/employees/<int:employee_id>/', system_admin_employee_detail_view, name='system_admin_employee_detail'),
     path('system-admin/employees/<int:employee_id>/generate-access/', system_admin_generate_access_view, name='system_admin_generate_access'),

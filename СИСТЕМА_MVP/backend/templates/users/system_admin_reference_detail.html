@@ -1,0 +1,262 @@
+{% extends "base.html" %}
+
+{% block title %}{{ reference_config.title }}{% endblock %}
+{% block body_class %}system-admin-reference-detail-screen{% endblock %}
+
+{% block body %}
+<header class="app-header admin-employees-header system-admin-header">
+    <div class="header-inner wide-shell">
+        <div class="topline">
+            <span>{{ access.employee.full_name }}</span>
+            <span class="admin-user-pill">Админ: {{ access.employee.full_name }}</span>
+            <span class="topline-nav">
+                <button type="button" class="nav-pill" onclick="window.location.href='{% url 'system_admin_references' %}'">Назад</button>
+                <a class="nav-pill" href="{% url 'system_admin_dashboard' %}">Админка</a>
+            </span>
+        </div>
+        <h1>{{ reference_config.title }}</h1>
+        <p>{{ reference_config.section }}. Рабочее редактирование записей справочника без перехода в техническую админку.</p>
+    </div>
+</header>
+
+<main class="page wide-page admin-page reference-detail-page">
+    <section class="card reference-detail-control-card">
+        <div class="section-title-row">
+            <div>
+                <h2>Поиск и редактирование</h2>
+                <p>Список записей и форма изменения в одном рабочем экране.</p>
+            </div>
+            <span class="badge">{{ records_total }} записей</span>
+        </div>
+        <form class="reference-detail-filter-bar" method="get">
+            <div class="field">
+                <label for="reference-detail-search">Поиск</label>
+                <input id="reference-detail-search" name="q" type="search" value="{{ query }}" placeholder="Название, номер или связанный объект" data-reference-detail-search>
+            </div>
+            {% if has_active_status %}
+                <div class="field select-field">
+                    <label for="reference-detail-status">Состояние</label>
+                    <select id="reference-detail-status" name="status" data-reference-detail-status>
+                        <option value="" {% if not status_filter %}selected{% endif %}>Все состояния</option>
+                        <option value="active" {% if status_filter == 'active' %}selected{% endif %}>Активные</option>
+                        <option value="inactive" {% if status_filter == 'inactive' %}selected{% endif %}>Отключенные</option>
+                    </select>
+                </div>
+            {% endif %}
+            <a class="filter-reset-link" href="{% url 'system_admin_reference_detail' reference_code %}">Сбросить</a>
+        </form>
+    </section>
+
+    <section class="reference-detail-workspace">
+        <div class="card reference-records-card">
+            <div class="section-title-row">
+                <div>
+                    <h2>Записи</h2>
+                    <p>Запись открывается в форме редактирования.</p>
+                </div>
+                <span class="badge">{{ records|length }} видно</span>
+            </div>
+
+            <div class="reference-record-list">
+                {% for record in records %}
+                    <article id="reference-record-{{ record.object.id }}" class="reference-record-row reference-record-row-{{ record.status_class }} {% if selected_record and selected_record.id == record.object.id %}is-selected{% endif %}" data-reference-record-url="{% url 'system_admin_reference_detail' reference_code %}?edit={{ record.object.id }}" data-reference-record-id="{{ record.object.id }}" data-record-name="{{ record.title }}" data-record-status="{% if record.status_class == 'ok' %}active{% else %}inactive{% endif %}">
+                        <div class="reference-record-main">
+                            <strong>{{ record.title }}</strong>
+                            <span>{{ reference_config.section }}</span>
+                        </div>
+                        <div class="reference-record-preview">
+                            {% for item in record.preview %}
+                                <span><b>{{ item.label }}:</b> {{ item.value }}</span>
+                            {% endfor %}
+                        </div>
+                        <strong class="reference-state reference-state-{{ record.status_class }}">{{ record.status_label }}</strong>
+                        <a class="reference-open" href="{% url 'system_admin_reference_detail' reference_code %}?edit={{ record.object.id }}">Править</a>
+                    </article>
+                {% empty %}
+                    <div class="reference-empty-state">
+                        <strong>Записей пока нет</strong>
+                        <span>Добавьте первую запись в форме справа.</span>
+                    </div>
+                {% endfor %}
+            </div>
+        </div>
+
+        <aside class="reference-editor-side">
+            <section class="card reference-editor-card">
+                <div class="employee-detail-card-head">
+                    <div>
+                        <h2>{% if selected_record %}Редактировать запись{% else %}Новая запись{% endif %}</h2>
+                        <p class="muted">Основные поля выбранного справочника.</p>
+                    </div>
+                    {% if selected_record %}
+                        <span class="badge">ID {{ selected_record.id }}</span>
+                    {% endif %}
+                </div>
+
+                {% if messages %}
+                    <div class="reference-messages">
+                        {% for message in messages %}
+                            <div class="reference-message reference-message-{{ message.tags }}">{{ message }}</div>
+                        {% endfor %}
+                    </div>
+                {% endif %}
+
+                <form class="reference-editor-form" method="post">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="save">
+                    {% if selected_record %}
+                        <input type="hidden" name="record_id" value="{{ selected_record.id }}">
+                    {% endif %}
+
+                    {% if form.non_field_errors %}
+                        <div class="form-errors">{{ form.non_field_errors }}</div>
+                    {% endif %}
+
+                    <div class="reference-editor-fields">
+                        {% for field in form.visible_fields %}
+                            <div class="employee-detail-field {% if field.field.widget.input_type == 'checkbox' %}field-checkbox{% endif %}">
+                                <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                                {{ field }}
+                                {% if field.errors %}
+                                    <span class="field-error">{{ field.errors|striptags }}</span>
+                                {% endif %}
+                            </div>
+                        {% endfor %}
+                    </div>
+
+                    <button class="button-link reference-save-button" type="submit">Сохранить запись</button>
+                </form>
+            </section>
+
+            <section class="card reference-editor-card reference-state-card">
+                <div class="employee-detail-card-head">
+                    <div>
+                        <h2>Состояние</h2>
+                        <p class="muted">Короткая сводка по справочнику.</p>
+                    </div>
+                </div>
+                <div class="references-status-list">
+                    <div class="references-status-row row-ok">
+                        <span>Активные</span>
+                        <strong>{{ active_total }}</strong>
+                    </div>
+                    <div class="references-status-row {% if inactive_total %}row-warning{% else %}row-neutral{% endif %}">
+                        <span>Отключенные</span>
+                        <strong>{{ inactive_total }}</strong>
+                    </div>
+                    <div class="references-status-row row-neutral">
+                        <span>Всего</span>
+                        <strong>{{ records_total }}</strong>
+                    </div>
+                </div>
+            </section>
+
+            <section class="card reference-editor-card">
+                <div class="employee-detail-card-head">
+                    <div>
+                        <h2>Действия</h2>
+                        <p class="muted">Отключение не удаляет запись из истории.</p>
+                    </div>
+                </div>
+                <div class="references-actions">
+                    <a class="button-link button-secondary" href="{% url 'system_admin_reference_detail' reference_code %}">Новая запись</a>
+                    {% if selected_record and has_active_status %}
+                        {% if selected_record.is_active %}
+                            <form method="post" data-confirm="Отключить запись справочника? Существующая история сохранится.">
+                                {% csrf_token %}
+                                <input type="hidden" name="action" value="disable">
+                                <input type="hidden" name="record_id" value="{{ selected_record.id }}">
+                                <button class="button-link button-warning" type="submit">Отключить</button>
+                            </form>
+                        {% else %}
+                            <form method="post">
+                                {% csrf_token %}
+                                <input type="hidden" name="action" value="enable">
+                                <input type="hidden" name="record_id" value="{{ selected_record.id }}">
+                                <button class="button-link" type="submit">Вернуть в работу</button>
+                            </form>
+                        {% endif %}
+                    {% endif %}
+                    <a class="button-link button-secondary" href="{{ reference_config.admin_url }}">Техническая админка</a>
+                </div>
+            </section>
+        </aside>
+    </section>
+</main>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    var search = document.querySelector('[data-reference-detail-search]');
+    var status = document.querySelector('[data-reference-detail-status]');
+    var rows = Array.from(document.querySelectorAll('[data-reference-record-url]'));
+    var recordsCard = document.querySelector('.reference-records-card');
+    var selectedRow = document.querySelector('.reference-record-row.is-selected');
+    var storageKey = 'system-admin-reference-scroll:' + window.location.pathname;
+
+    function normalize(value) {
+        return (value || '').toString().trim().toLowerCase();
+    }
+
+    function applyFilters() {
+        var query = normalize(search ? search.value : '');
+        var state = status ? status.value : '';
+        rows.forEach(function (row) {
+            var matchesQuery = !query || normalize(row.dataset.recordName).indexOf(query) !== -1 || normalize(row.innerText).indexOf(query) !== -1;
+            var matchesState = !state || row.dataset.recordStatus === state;
+            row.hidden = !(matchesQuery && matchesState);
+        });
+    }
+
+    if (search) search.addEventListener('input', applyFilters);
+    if (status) status.addEventListener('input', applyFilters);
+    if (recordsCard) {
+        recordsCard.addEventListener('scroll', function () {
+            try {
+                window.sessionStorage.setItem(storageKey, String(recordsCard.scrollTop));
+            } catch (error) {
+                return;
+            }
+        }, { passive: true });
+    }
+
+    function saveCurrentScroll() {
+        if (!recordsCard) return;
+        try {
+            window.sessionStorage.setItem(storageKey, String(recordsCard.scrollTop));
+        } catch (error) {
+            return;
+        }
+    }
+
+    function restoreScroll() {
+        if (!recordsCard) return;
+        var savedScroll = null;
+        try {
+            savedScroll = window.sessionStorage.getItem(storageKey);
+        } catch (error) {
+            savedScroll = null;
+        }
+        if (savedScroll !== null && savedScroll !== '') {
+            recordsCard.scrollTop = parseInt(savedScroll, 10) || 0;
+            return;
+        }
+        if (selectedRow) {
+            selectedRow.scrollIntoView({ block: 'center', inline: 'nearest' });
+        }
+    }
+
+    rows.forEach(function (row) {
+        row.addEventListener('dblclick', function () {
+            saveCurrentScroll();
+            window.location.href = row.dataset.referenceRecordUrl;
+        });
+    });
+    document.querySelectorAll('.reference-record-row .reference-open, .reference-editor-form, .references-actions form, .references-actions a').forEach(function (node) {
+        var eventName = node.tagName === 'FORM' ? 'submit' : 'click';
+        node.addEventListener(eventName, saveCurrentScroll);
+    });
+    applyFilters();
+    window.requestAnimationFrame(restoreScroll);
+});
+</script>
+{% endblock %}
