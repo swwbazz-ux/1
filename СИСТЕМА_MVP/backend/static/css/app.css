@@ -5921,7 +5921,7 @@ body.employees-admin-screen {
     max-width: 100%;
     min-height: 22px;
     padding: 3px 10px;
-    border-radius: 999px;
+    border-radius: 6px;
     font-size: 10px;
     font-weight: 900;
     line-height: 1.15;
@@ -5962,7 +5962,7 @@ body.employees-admin-screen {
     gap: 4px;
     min-height: 22px;
     padding: 3px 10px;
-    border-radius: 999px;
+    border-radius: 6px;
     background: #e8f8f5;
     color: #08766c;
     font-size: 10px;
@@ -6022,16 +6022,16 @@ body.employees-admin-screen {
     gap: 9px;
     max-width: 300px;
     min-width: 170px;
-    padding: 7px 12px 7px 7px;
-    border: 1px solid rgba(8, 118, 108, .74);
-    border-radius: 999px;
-    background: rgba(255, 255, 255, .75);
+    padding: 8px 12px 8px 8px;
+    border: 1px solid var(--admin-line, rgba(8, 118, 108, .38));
+    border-left: 4px solid var(--admin-green, #1f9a63);
+    border-radius: 8px;
+    background: var(--admin-panel, rgba(255, 255, 255, .92));
     color: var(--ink);
     box-shadow:
         0 16px 36px rgba(16, 24, 32, .30),
-        0 0 0 2px rgba(255, 255, 255, .75),
-        inset 0 0 0 999px rgba(255, 255, 255, .75);
-    filter: drop-shadow(0 8px 14px rgba(16, 24, 32, .20));
+        0 0 0 1px rgba(255, 255, 255, .62);
+    filter: none;
     font-size: 13px;
     font-weight: 900;
     line-height: 1.15;
@@ -6049,6 +6049,7 @@ body.employees-admin-screen {
     width: 38px;
     height: 38px;
     border-width: 2px;
+    border-radius: 6px;
     font-size: 14px;
 }
 
@@ -10090,6 +10091,174 @@ body.employees-admin-screen {
     color: var(--admin-cyan);
 }
 
+#app-confirm-modal.admin-day,
+#app-confirm-modal.admin-night {
+    --admin-bg: #dce4e7;
+    --admin-ink: #162022;
+    --admin-muted: #647277;
+    --admin-line: #cdd7da;
+    --admin-panel: #f7faf9;
+    --admin-panel-soft: #e9f0ee;
+    --admin-green: #198e55;
+    --admin-green-soft: #dff5ea;
+    --admin-yellow: #d89412;
+    --admin-yellow-soft: #fff4d9;
+    --admin-red: #d64a42;
+    --admin-red-soft: #ffe2df;
+    background: color-mix(in srgb, var(--admin-bg) 78%, rgba(16, 24, 32, .62));
+    backdrop-filter: blur(3px);
+}
+
+#app-confirm-modal.admin-night {
+    --admin-bg: #050b0f;
+    --admin-ink: #edf5f7;
+    --admin-muted: #8c9ca4;
+    --admin-line: #23333c;
+    --admin-panel: #10191f;
+    --admin-panel-soft: #0b151b;
+    --admin-green: #7bd319;
+    --admin-green-soft: rgba(123, 211, 25, .14);
+    --admin-yellow: #ffb93e;
+    --admin-yellow-soft: rgba(255, 185, 62, .14);
+    --admin-red: #ff524b;
+    --admin-red-soft: rgba(255, 82, 75, .16);
+}
+
+#app-confirm-modal.admin-day .app-confirm-dialog,
+#app-confirm-modal.admin-night .app-confirm-dialog {
+    grid-template-columns: 4px 44px minmax(0, 1fr);
+    gap: 0 12px;
+    align-items: start;
+    width: min(520px, calc(100vw - 40px));
+    padding: 18px 20px;
+    border: 1px solid var(--admin-line);
+    border-radius: 8px;
+    background: var(--admin-panel);
+    color: var(--admin-ink);
+    font-family: "Roboto Condensed", "Arial Narrow", "Segoe UI", Arial, sans-serif;
+    box-shadow: 0 26px 70px rgba(16, 24, 32, .24);
+}
+
+#app-confirm-modal.admin-night .app-confirm-dialog {
+    box-shadow: 0 26px 80px rgba(0, 0, 0, .48);
+}
+
+#app-confirm-modal.admin-day .app-confirm-close,
+#app-confirm-modal.admin-night .app-confirm-close {
+    position: absolute;
+    top: 12px;
+    right: 14px;
+    display: grid;
+    place-items: center;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--admin-muted);
+    font-size: 28px;
+    font-weight: 300;
+    line-height: 1;
+    cursor: pointer;
+}
+
+#app-confirm-modal.admin-day .app-confirm-close:hover,
+#app-confirm-modal.admin-night .app-confirm-close:hover,
+#app-confirm-modal.admin-day .app-confirm-close:focus-visible,
+#app-confirm-modal.admin-night .app-confirm-close:focus-visible {
+    color: var(--admin-ink);
+    outline: none;
+}
+
+#app-confirm-modal.admin-day .app-confirm-accent,
+#app-confirm-modal.admin-night .app-confirm-accent {
+    display: block;
+    grid-column: 1;
+    grid-row: 1 / span 2;
+    align-self: stretch;
+    width: 4px;
+    min-height: 52px;
+    border-radius: 4px;
+    background: var(--admin-red);
+}
+
+#app-confirm-modal.admin-day .app-confirm-icon,
+#app-confirm-modal.admin-night .app-confirm-icon {
+    grid-column: 2;
+    width: 44px;
+    height: 44px;
+    border: 1px solid color-mix(in srgb, var(--admin-red) 58%, var(--admin-line));
+    border-radius: 8px;
+    background: var(--admin-red-soft);
+    color: var(--admin-red);
+    font-size: 26px;
+    font-weight: 900;
+    line-height: 1;
+}
+
+#app-confirm-modal.admin-day .app-confirm-content,
+#app-confirm-modal.admin-night .app-confirm-content {
+    grid-column: 3;
+    padding-right: 22px;
+}
+
+#app-confirm-modal.admin-day .app-confirm-content h2,
+#app-confirm-modal.admin-night .app-confirm-content h2 {
+    margin: 0 0 8px;
+    color: var(--admin-ink);
+    font-size: 22px;
+    font-weight: 900;
+    line-height: 1;
+    text-transform: uppercase;
+}
+
+#app-confirm-modal.admin-day .app-confirm-content p,
+#app-confirm-modal.admin-night .app-confirm-content p {
+    color: var(--admin-muted);
+    font-size: 13px;
+    font-weight: 800;
+    line-height: 1.35;
+}
+
+#app-confirm-modal.admin-day .app-confirm-actions,
+#app-confirm-modal.admin-night .app-confirm-actions {
+    grid-column: 2 / -1;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 112px 160px;
+    gap: 12px;
+    align-items: center;
+    margin-top: 24px;
+}
+
+#app-confirm-modal.admin-day .app-confirm-actions button,
+#app-confirm-modal.admin-night .app-confirm-actions button {
+    min-width: 0;
+    min-height: 40px;
+    padding: 0 12px;
+    border: 1px solid var(--admin-line);
+    border-radius: 6px;
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 900;
+    line-height: 1;
+    text-transform: uppercase;
+}
+
+#app-confirm-modal.admin-day .app-confirm-actions .secondary,
+#app-confirm-modal.admin-night .app-confirm-actions .secondary {
+    grid-column: 2;
+    background: var(--admin-panel-soft);
+    color: var(--admin-ink);
+}
+
+#app-confirm-modal.admin-day .app-confirm-actions .danger,
+#app-confirm-modal.admin-night .app-confirm-actions .danger {
+    grid-column: 3;
+    background: var(--admin-red);
+    color: #ffffff;
+}
+
 .admin-exports-shell .exports-filter-bar {
     grid-template-columns: minmax(300px, 1fr) minmax(190px, .42fr) minmax(122px, .2fr);
     gap: 10px;
@@ -11868,27 +12037,47 @@ body.employees-admin-screen {
 }
 
 .admin-employees-shell .dnd-reason-dialog {
+    display: grid;
+    gap: 10px;
+    width: min(520px, calc(100vw - 40px));
+    padding: 18px 20px;
     border: 1px solid var(--admin-line);
     border-radius: 8px;
     background: var(--admin-panel);
     color: var(--admin-ink);
-    box-shadow: var(--admin-shadow);
+    box-shadow: 0 26px 70px rgba(16, 24, 32, .24);
+}
+
+.admin-employees-shell.admin-night .dnd-reason-dialog {
+    box-shadow: 0 26px 80px rgba(0, 0, 0, .48);
 }
 
 .admin-employees-shell .dnd-reason-dialog h2 {
+    margin: 0;
     color: var(--admin-ink);
     font-size: 22px;
+    font-weight: 900;
+    line-height: 1;
     text-transform: uppercase;
 }
 
 .admin-employees-shell .dnd-reason-dialog p,
 .admin-employees-shell .dnd-reason-error {
     color: var(--admin-muted);
+    font-size: 13px;
     font-weight: 800;
+    line-height: 1.35;
+}
+
+.admin-employees-shell .dnd-reason-dialog p {
+    margin: 0;
 }
 
 .admin-employees-shell .dnd-reason-dialog textarea {
+    min-height: 118px;
+    padding: 10px 12px;
     border-color: var(--admin-line);
+    border-radius: 6px;
     background: var(--admin-panel-soft);
     color: var(--admin-ink);
     font-family: inherit;
@@ -11896,13 +12085,47 @@ body.employees-admin-screen {
     font-weight: 800;
 }
 
+.admin-employees-shell .dnd-reason-dialog textarea:focus {
+    border-color: var(--admin-green);
+    outline: none;
+    box-shadow: 0 0 0 1px var(--admin-green);
+}
+
+.admin-employees-shell .dnd-reason-error {
+    margin-top: 0;
+    color: var(--admin-red);
+}
+
+.admin-employees-shell .dnd-reason-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 112px 160px;
+    gap: 12px;
+    margin-top: 4px;
+}
+
 .admin-employees-shell .dnd-reason-actions button {
+    min-width: 0;
     min-height: 40px;
+    padding: 0 12px;
+    border: 1px solid var(--admin-line);
     border-radius: 6px;
     font-family: inherit;
     font-size: 13px;
     font-weight: 900;
+    line-height: 1;
     text-transform: uppercase;
+}
+
+.admin-employees-shell .dnd-reason-actions .secondary {
+    grid-column: 2;
+    background: var(--admin-panel-soft);
+    color: var(--admin-ink);
+}
+
+.admin-employees-shell .dnd-reason-actions .danger {
+    grid-column: 3;
+    background: var(--admin-red);
+    color: #ffffff;
 }
 
 @media (max-width: 1180px) {
@@ -19570,22 +19793,22 @@ body.mining-master-screen .dispatcher-complex-card .complex-truck-tile {
 
     .mm-mobile-detail-header {
         display: grid;
-        grid-template-columns: 38px minmax(0, 1fr) auto;
+        grid-template-columns: 34px minmax(0, 1fr) auto;
         align-items: center;
-        gap: 8px;
+        gap: 6px;
         min-width: 0;
     }
 
     .mm-mobile-back-button {
         display: grid;
         place-items: center;
-        width: 38px;
-        height: 38px;
+        width: 34px;
+        height: 34px;
         border: 1px solid rgba(139, 159, 170, .45);
         border-radius: 8px;
         background: rgba(12, 26, 35, .72);
         color: #f1f7fb;
-        font-size: 25px;
+        font-size: 22px;
         font-weight: 700;
         line-height: 1;
         box-shadow: inset 0 0 20px rgba(255, 255, 255, .03), 0 8px 18px rgba(0, 0, 0, .28);
@@ -19595,14 +19818,14 @@ body.mining-master-screen .dispatcher-complex-card .complex-truck-tile {
     .mm-mobile-detail-title {
         display: flex;
         align-items: center;
-        gap: 8px;
+        gap: 6px;
         min-width: 0;
     }
 
     .mm-mobile-detail-title h1 {
         margin: 0;
         color: #f3f7f8;
-        font-size: 31px;
+        font-size: 27px;
         font-weight: 900;
         line-height: .9;
         letter-spacing: 0;
@@ -19937,7 +20160,7 @@ body.mining-master-screen .dispatcher-complex-card .complex-truck-tile {
     .mm-mobile-header-actions {
         display: flex;
         align-items: center;
-        gap: 5px;
+        gap: 4px;
         flex: 0 0 auto;
     }
 
@@ -19953,21 +20176,22 @@ body.mining-master-screen .dispatcher-complex-card .complex-truck-tile {
     }
 
     .mm-mobile-clock {
-        width: 40px;
-        height: 40px;
+        width: 42px;
+        height: 42px;
         border-color: #57df51;
         border-radius: 999px;
-        font-size: 14px;
+        font-size: 12px;
         font-weight: 900;
         letter-spacing: 0;
         line-height: 1;
+        font-variant-numeric: tabular-nums;
     }
 
     .mm-mobile-icon-button {
-        width: 35px;
-        height: 35px;
+        width: 34px;
+        height: 34px;
         border-radius: 8px;
-        font-size: 18px;
+        font-size: 17px;
         font-weight: 800;
     }
 
@@ -20237,7 +20461,7 @@ body.mining-master-screen .dispatcher-complex-card .complex-truck-tile {
     .mm-mobile-bottom-nav {
         display: grid;
         grid-template-columns: repeat(4, minmax(0, 1fr));
-        min-height: 62px;
+        min-height: 66px;
         border: 1px solid rgba(139, 159, 170, .34);
         border-radius: 10px;
         background: rgba(8, 19, 27, .84);
@@ -20250,12 +20474,13 @@ body.mining-master-screen .dispatcher-complex-card .complex-truck-tile {
         display: grid;
         place-items: center;
         align-content: center;
-        gap: 4px;
+        gap: 3px;
+        padding: 7px 2px 6px;
         min-width: 0;
         border-left: 1px solid rgba(139, 159, 170, .25);
         color: rgba(177, 190, 198, .72);
         text-decoration: none;
-        font-size: 10px;
+        font-size: 9px;
         font-weight: 800;
         line-height: 1;
         transition: color .16s ease, background .16s ease, transform .16s ease;
@@ -20284,8 +20509,8 @@ body.mining-master-screen .dispatcher-complex-card .complex-truck-tile {
 
     .mm-mobile-nav-item img,
     .mm-mobile-nav-icon {
-        width: 24px;
-        height: 24px;
+        width: 22px;
+        height: 22px;
         object-fit: contain;
         opacity: .85;
     }
@@ -20324,18 +20549,18 @@ body.mining-master-screen .dispatcher-complex-card .complex-truck-tile {
     .mm-mobile-nav-icon-reports::before,
     .mm-mobile-nav-icon-reports::after {
         content: "";
-        width: 5px;
+        width: 4px;
         border-radius: 2px 2px 0 0;
         background: currentColor;
-        box-shadow: 8px -8px 0 currentColor;
+        box-shadow: 7px -7px 0 currentColor;
     }
 
     .mm-mobile-nav-icon-reports::before {
-        height: 14px;
+        height: 12px;
     }
 
     .mm-mobile-nav-icon-reports::after {
-        height: 26px;
+        height: 21px;
     }
 }
 

@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% block title %}MVP учетной системы{% endblock %}</title>
     <link rel="icon" href="{% static 'favicon.ico' %}">
-    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=20260627-admin-employee-create-shell1">
+    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=20260627-admin-popups-badges1-mm-mobile-polish1">
 </head>
 <body class="{% block body_class %}{% endblock %}">
 {% block body %}{% endblock %}
@@ -109,7 +109,12 @@ document.addEventListener("DOMContentLoaded", function () {
             return;
         }
         var dispatcherShell = document.querySelector("[data-dispatcher-theme]");
-        confirmModal.classList.remove("dispatcher-day", "dispatcher-night");
+        var adminShell = document.querySelector("[data-admin-theme]");
+        confirmModal.classList.remove("dispatcher-day", "dispatcher-night", "admin-day", "admin-night");
+        if (adminShell) {
+            confirmModal.classList.add(adminShell.classList.contains("admin-night") ? "admin-night" : "admin-day");
+            return;
+        }
         if (!dispatcherShell) {
             return;
         }

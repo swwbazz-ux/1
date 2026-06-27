@@ -54,7 +54,7 @@
             </div>
         </div>
 
-        <form method="get" class="employee-list-filters employees-filter-bar" data-auto-filter-form>
+        <form method="get" class="employee-list-filters employees-filter-bar" data-employee-filter-form>
             <div class="field admin-search-field">
                 <label for="employee-search">Поиск по ФИО</label>
                 <input id="employee-search" name="q" value="{{ query }}" placeholder="Введите ФИО" autocomplete="off" data-auto-filter-search>
@@ -353,7 +353,7 @@ document.addEventListener("DOMContentLoaded", function () {
         }
     }
 
-    var filterForm = document.querySelector("[data-auto-filter-form]");
+    var filterForm = document.querySelector("[data-employee-filter-form]");
     var filterSearch = document.querySelector("[data-auto-filter-search]");
     function submitFilterForm() {
         if (!filterForm) {
