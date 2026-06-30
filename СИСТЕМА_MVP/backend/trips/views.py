@@ -1,4 +1,5 @@
 import json
+import math
 import re
 from collections import defaultdict
 from decimal import Decimal
@@ -740,7 +741,10 @@ def build_dispatcher_dashboard_context(*, dispatcher_shift, active_trips, pendin
         })
 
     excavator_garage_tiles = []
-    inactive_excavator_tiles = [tile for tile in excavator_tiles if tile.get('equipment') and tile['equipment'].id not in active_excavator_ids]
+    inactive_excavator_tiles = sorted(
+        [tile for tile in excavator_tiles if tile.get('equipment') and tile['equipment'].id not in active_excavator_ids],
+        key=lambda tile: tile.get('board_number') or 9999,
+    )
     for index, tile in enumerate(inactive_excavator_tiles[:12], start=1):
         garage_tile = tile.copy()
         garage_tile['display_name'] = str(tile.get('board_number') or index)
@@ -759,6 +763,25 @@ def build_dispatcher_dashboard_context(*, dispatcher_shift, active_trips, pendin
             'percent': 0,
             'is_placeholder': True,
         })
+    mobile_excavator_garage_tiles = [
+        tile
+        for tile in excavator_garage_tiles
+        if not tile.get('is_placeholder')
+    ]
+    while len(mobile_excavator_garage_tiles) < 6 or len(mobile_excavator_garage_tiles) % 2:
+        index = len(mobile_excavator_garage_tiles) + 1
+        mobile_excavator_garage_tiles.append({
+            'equipment': None,
+            'name': 'Будущий экскаватор',
+            'status': 'empty',
+            'label': 'резерв',
+            'icon': 'img/equipment/excavator-gray.png',
+            'board_number': index,
+            'display_name': '',
+            'percent': 0,
+            'is_placeholder': True,
+        })
+    mobile_excavator_garage_row_count = max(3, math.ceil(len(mobile_excavator_garage_tiles) / 2))
 
     total_trucks = len(trucks_list)
     accepted_truck_ids = {assignment.truck_id for assignment in accepted_assignments_list}
@@ -877,6 +900,54 @@ def build_dispatcher_dashboard_context(*, dispatcher_shift, active_trips, pendin
             'unload_points': [],
             'attention_label': '',
         })
+    mobile_complex_zones = [
+        zone
+        for zone in complex_zones
+        if not zone.get('is_empty')
+    ]
+    mobile_empty_complex_zones = [
+        zone
+        for zone in complex_zones
+        if zone.get('is_empty')
+    ]
+    while len(mobile_complex_zones) < 6 or len(mobile_complex_zones) % 2:
+        if mobile_empty_complex_zones:
+            mobile_complex_zones.append(mobile_empty_complex_zones.pop(0))
+        else:
+            index = len(mobile_complex_zones) + 1
+            mobile_complex_zones.append({
+                'id': f'K-{index}',
+                'is_empty': True,
+                'status_key': 'empty',
+                'status_label': 'СВОБОДНАЯ ЗОНА',
+                'percent': 0,
+                'material': '',
+                'excavator_name': '',
+                'excavator_icon': 'img/equipment/excavator-gray.png',
+                'truck_icon': 'img/equipment/truck-gray.png',
+                'assigned': 0,
+                'need': 0,
+                'plan_tons': '0',
+                'fact_tons': '0',
+                'forecast_tons': '0',
+                'card_id': '',
+                'equipment_card_id': '',
+                'balance': 0,
+                'balance_label': '0',
+                'balance_status': 'zero',
+                'current_trucks': [],
+                'removed_trucks': [],
+                'active_truck_tiles': [],
+                'truck_scale_class': 'truck-fill-1',
+                'truck_column_count': 1,
+                'truck_preview': [],
+                'truck_overflow': 0,
+                'mobile_truck_overflow': 0,
+                'current_face': '',
+                'current_rock': '',
+                'unload_points': [],
+                'attention_label': '',
+            })
 
     assigned_truck_ids = accepted_truck_ids | pending_truck_ids
     active_complex_truck_names = {
@@ -1125,8 +1196,11 @@ def build_dispatcher_dashboard_context(*, dispatcher_shift, active_trips, pendin
         },
         'excavator_tiles': excavator_tiles,
         'excavator_garage_tiles': excavator_garage_tiles,
+        'mobile_excavator_garage_tiles': mobile_excavator_garage_tiles,
+        'mobile_excavator_garage_row_count': mobile_excavator_garage_row_count,
         'complex_cards': complex_cards,
         'complex_zones': complex_zones[:12],
+        'mobile_complex_zones': mobile_complex_zones,
         'truck_garage_tiles': truck_garage_tiles,
         'equipment_cards': equipment_cards,
         'truck_balance': {
@@ -1384,8 +1458,69 @@ def excavator_work_view(request):
         active_trips_queryset = active_trips_queryset.filter(excavator_operator=access.employee)
     active_trips = list(active_trips_queryset[:20])
     active_truck_ids = {trip.truck_id for trip in active_trips}
+    active_trip_by_truck_id = {trip.truck_id: trip for trip in active_trips}
+    first_ready_assignment_id = next((assignment.id for assignment in available_assignments if assignment.truck_id not in active_truck_ids), None)
     for assignment in available_assignments:
         assignment.has_active_trip = assignment.truck_id in active_truck_ids
+
+    def equipment_number(equipment):
+        return str(getattr(equipment, 'garage_number', '') or equipment or '-')
+
+    def excavator_operator_label(equipment):
+        if not equipment:
+            return 'ЭКГ-12'
+        number = getattr(equipment, 'garage_number', '') or ''
+        if number:
+            return f'ЭКС-{number}'
+        return equipment_short_name(equipment)
+
+    truck_cards = []
+    for assignment in available_assignments:
+        active_trip = active_trip_by_truck_id.get(assignment.truck_id)
+        if active_trip:
+            status_key = 'green'
+            status_label = 'В рейсе'
+            target_label = str(active_trip.dump_point)
+        elif assignment.id == first_ready_assignment_id:
+            status_key = 'yellow'
+            status_label = 'Под погрузкой'
+            target_label = ''
+        else:
+            status_key = 'gray'
+            status_label = 'Ожидает'
+            target_label = ''
+        truck_cards.append({
+            'assignment': assignment,
+            'number': equipment_number(assignment.truck),
+            'status_key': status_key,
+            'status_label': status_label,
+            'target_label': target_label,
+            'icon': f'img/equipment/truck-{status_key}.png',
+        })
+
+    dump_points = list(form.fields['dump_point'].queryset[:4])
+    dump_colors = ['yellow', 'green', 'gray', 'gray']
+    dump_cards = [
+        {
+            'point': point,
+            'name': str(point),
+            'status_key': dump_colors[index] if index < len(dump_colors) else 'gray',
+            'is_default': index == 0,
+        }
+        for index, point in enumerate(dump_points)
+    ]
+
+    rock_choices = list(form.fields['rock_type'].queryset[:12])
+    default_rock = form['rock_type'].value() or (rock_choices[0].id if rock_choices else '')
+    default_dump_point = form['dump_point'].value() or (dump_points[0].id if dump_points else '')
+    face_horizon = form['loading_horizon'].value() or ''
+    face_block = form['loading_block'].value() or ''
+    current_rock = next((rock for rock in rock_choices if str(rock.id) == str(default_rock)), None)
+    selected_dump_point = next((point for point in dump_points if str(point.id) == str(default_dump_point)), None)
+
+    def form_value_as_text(field_name):
+        value = form[field_name].value()
+        return '' if value is None else str(value)
 
     return render(
         request,
@@ -1400,6 +1535,23 @@ def excavator_work_view(request):
             'available_assignments_count': len(available_assignments),
             'active_trips_count': len(active_trips),
             'completed_today_count': Trip.objects.filter(excavator_operator=access.employee, status=TripStatus.COMPLETED, completed_at__date=timezone.localdate()).count(),
+            'truck_cards': truck_cards,
+            'dump_cards': dump_cards,
+            'rock_choices': rock_choices,
+            'default_rock': default_rock,
+            'default_dump_point': default_dump_point,
+            'face_horizon': face_horizon,
+            'face_block': face_block,
+            'current_rock': current_rock,
+            'selected_dump_point': selected_dump_point,
+            'shift_time_label': '07:00-19:00' if not open_shift or open_shift.shift_type == 'day' else '19:00-07:00',
+            'excavator_label': excavator_operator_label(current_excavator),
+            'excavator_label': equipment_number(current_excavator) if current_excavator else 'ЭКГ-12',
+            'excavator_label': excavator_operator_label(current_excavator),
+            'planned_volume_value': form_value_as_text('planned_volume_m3'),
+            'transport_distance_value': form_value_as_text('transport_distance_km'),
+            'downtime_text_value': form_value_as_text('downtime_text'),
+            'note_value': form_value_as_text('note'),
         },
     )
 

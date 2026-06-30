@@ -6,7 +6,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% block title %}MVP учетной системы{% endblock %}</title>
     <link rel="icon" href="{% static 'favicon.ico' %}">
-    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=20260627-admin-popups-badges1-mm-mobile-polish1">
+    <link rel="stylesheet" href="{% static 'css/app.css' %}?v={% now 'U' %}">
+    {% block extra_head %}{% endblock %}
 </head>
 <body class="{% block body_class %}{% endblock %}">
 {% block body %}{% endblock %}
@@ -139,6 +140,9 @@ document.addEventListener("DOMContentLoaded", function () {
         options = options || {};
         var variant = options.confirmVariant || options.variant;
         if (variant !== "shift-end" || !confirmModal) {
+            if (confirmTitle && (options.confirmTitle || options.title)) {
+                confirmTitle.textContent = options.confirmTitle || options.title;
+            }
             return;
         }
         confirmModal.classList.add("is-shift-end-confirm");
@@ -197,6 +201,8 @@ document.addEventListener("DOMContentLoaded", function () {
             confirmAccept.focus();
         }
     }
+
+    window.openAppConfirmDialog = openConfirmDialog;
 
     function closeConfirmDialog() {
         if (!confirmModal) {

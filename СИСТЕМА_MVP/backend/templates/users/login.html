@@ -1,6 +1,16 @@
 {% extends "base.html" %}
+{% load static %}
 
 {% block title %}Вход в систему{% endblock %}
+{% block extra_head %}
+    <link rel="manifest" href="{% url 'mining_master_manifest' %}">
+    <meta name="theme-color" content="#041017">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Горный мастер">
+    <link rel="apple-touch-icon" href="{% static 'img/pwa/mining-master-180.png' %}">
+{% endblock %}
 {% block body_class %}login-page dispatcher-shell dispatcher-night unified-login-screen{% endblock %}
 
 {% block body %}
@@ -9,7 +19,7 @@
     <form method="post" data-validated-login class="app-confirm-content unified-login-form">
         {% csrf_token %}
         <h2>Единый вход</h2>
-        <p>Введите телефон и пинкод сотрудника. Система откроет интерфейс по вашей роли.</p>
+        <p>Телефон и пинкод сотрудника.</p>
         <label class="shared-shift-login-field" for="login-phone">
             <span>Телефон</span>
             <span class="shared-shift-phone-shell">
@@ -47,6 +57,19 @@
 document.addEventListener('DOMContentLoaded', function () {
     var form = document.querySelector('[data-validated-login]');
     var submitButton = form ? form.querySelector('button[type="submit"]') : null;
+    var loginPage = document.body;
+
+    function setLoginKeyboardMode(isActive) {
+        if (!loginPage || !loginPage.classList.contains('unified-login-screen')) return;
+        loginPage.classList.toggle('is-login-keyboard-active', Boolean(isActive));
+    }
+
+    function keepLoginFieldVisible(input) {
+        window.setTimeout(function () {
+            if (!input || document.activeElement !== input) return;
+            input.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' });
+        }, 90);
+    }
 
     function refreshSubmitState() {
         if (!form || !submitButton) return;
@@ -117,9 +140,25 @@ document.addEventListener('DOMContentLoaded', function () {
         }
 
         input.addEventListener('input', validate);
-        input.addEventListener('blur', validate);
+        input.addEventListener('focus', function () {
+            setLoginKeyboardMode(true);
+            keepLoginFieldVisible(input);
+        });
+        input.addEventListener('blur', function () {
+            validate();
+            window.setTimeout(function () {
+                if (!form || form.contains(document.activeElement)) return;
+                setLoginKeyboardMode(false);
+            }, 120);
+        });
         validate();
     });
+    if (window.visualViewport) {
+        window.visualViewport.addEventListener('resize', function () {
+            var keyboardLikelyOpen = window.visualViewport.height < window.innerHeight - 120;
+            setLoginKeyboardMode(keyboardLikelyOpen && form && form.contains(document.activeElement));
+        });
+    }
     if (form) {
         form.addEventListener('submit', function () {
             var phoneInput = form.querySelector('[data-phone-input]');
@@ -132,6 +171,9 @@ document.addEventListener('DOMContentLoaded', function () {
                 pinInput.value = pinInput.value.replace(/\D/g, '').slice(0, 6);
             }
         });
+    }
+    if ("serviceWorker" in navigator) {
+        navigator.serviceWorker.register("/mining-master-sw.js", { scope: "/" }).catch(function () {});
     }
 });
 </script>

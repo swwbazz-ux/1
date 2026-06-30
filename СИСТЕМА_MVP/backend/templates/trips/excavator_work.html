@@ -1,162 +1,309 @@
 {% extends "base.html" %}
+{% load static %}
 
-{% block title %}Работа экскаватора{% endblock %}
-{% block body_class %}excavator-work-screen{% endblock %}
+{% block title %}Экскаваторщик{% endblock %}
+{% block body_class %}excavator-operator-screen{% endblock %}
 
 {% block body %}
-<header class="app-header excavator-work-header">
-    <div class="header-inner">
-        <div class="topline">
-            <span>{{ access.employee.full_name }}</span>
-            <a href="{% url 'logout' %}">Выйти</a>
+<main class="eo-shell" data-eo-shell data-eo-active-tab="trucks">
+    {% if messages %}
+        <div class="eo-messages">
+            {% for message in messages %}
+                <div class="message {% if message.tags %}{{ message.tags }}{% else %}success{% endif %}">{{ message }}</div>
+            {% endfor %}
         </div>
-        <h1>Работа экскаватора</h1>
-        <p>Выберите самосвал под погрузкой, проверьте породу и точку разгрузки, затем отправьте рейс водителю.</p>
-    </div>
-</header>
-<main class="page excavator-work-page">
-    {% for message in messages %}
-        <div class="message success">{{ message }}</div>
-    {% endfor %}
-
-    <section class="excavator-status-strip" aria-label="Состояние смены">
-        <div class="excavator-status-card status-current">
-            <span>Экскаватор</span>
-            <strong>{{ current_excavator|default:"Смена не открыта" }}</strong>
-        </div>
-        <div class="excavator-status-card">
-            <span>Смена</span>
-            <strong>{% if open_shift %}{{ open_shift.get_shift_type_display }}{% else %}Нет открытой смены{% endif %}</strong>
-        </div>
-        <div class="excavator-status-card">
-            <span>Самосвалы под экскаватором</span>
-            <strong>{{ available_assignments_count }}</strong>
-        </div>
-        <div class="excavator-status-card {% if active_trips_count %}status-warning{% else %}status-ok{% endif %}">
-            <span>В рейсе сейчас</span>
-            <strong>{{ active_trips_count }}</strong>
-        </div>
-        <div class="excavator-status-card">
-            <span>Выполнено сегодня</span>
-            <strong>{{ completed_today_count }}</strong>
-        </div>
-    </section>
-
-    {% if not open_shift %}
-        <div class="message warning">Открытая смена машиниста не найдена. Рейс можно создать, но смена загрузки не будет привязана к рейсу.</div>
     {% endif %}
 
-    <section class="excavator-workspace">
-        <form class="card excavator-trip-card" method="post">
-            {% csrf_token %}
-            <div class="section-title-row">
-                <div>
-                    <h2>Отправить самосвал</h2>
-                    <p class="muted">Основной сценарий: самосвал выбран, параметры проверены, рейс создан.</p>
-                </div>
-                <button type="submit">Отправить рейс</button>
-            </div>
+    <form class="eo-form" method="post" data-eo-trip-form>
+        {% csrf_token %}
+        <input type="hidden" name="assignment" value="{% if truck_cards %}{{ truck_cards.0.assignment.id }}{% endif %}" data-eo-assignment-input>
+        <input type="hidden" name="planned_volume_m3" value="{{ planned_volume_value }}">
+        <input type="hidden" name="transport_distance_km" value="{{ transport_distance_value }}">
+        <input type="hidden" name="downtime_text" value="{{ downtime_text_value }}" data-eo-downtime-input>
+        <input type="hidden" name="note" value="{{ note_value }}">
 
-            <div class="excavator-form-grid">
-                <div class="excavator-field field-wide">
-                    <label for="{{ form.assignment.id_for_label }}">{{ form.assignment.label }}</label>
-                    {{ form.assignment }}
-                    {{ form.assignment.errors }}
-                </div>
-                <div class="excavator-field">
-                    <label for="{{ form.rock_type.id_for_label }}">{{ form.rock_type.label }}</label>
-                    {{ form.rock_type }}
-                    {{ form.rock_type.errors }}
-                </div>
-                <div class="excavator-field">
-                    <label for="{{ form.dump_point.id_for_label }}">{{ form.dump_point.label }}</label>
-                    {{ form.dump_point }}
-                    {{ form.dump_point.errors }}
-                </div>
+        <header class="eo-topbar" aria-label="Состояние экскаватора">
+            <div class="eo-topbar-cell">
+                <img src="{% static 'img/equipment/excavator-yellow.png' %}" alt="">
+                <strong>{{ excavator_label }}</strong>
             </div>
+            <div class="eo-topbar-cell">
+                <span class="eo-clock-icon" aria-hidden="true"></span>
+                <strong>{{ shift_time_label }}</strong>
+            </div>
+            <div class="eo-topbar-cell eo-status-cell {% if open_shift %}is-work{% else %}is-idle{% endif %}">
+                <span></span>
+                <strong>{% if open_shift %}Работает{% else %}Простой{% endif %}</strong>
+            </div>
+            <div class="eo-topbar-cell eo-face-cell">
+                <span class="eo-pin-icon" aria-hidden="true"></span>
+                <strong>Гор.{{ face_horizon|default:"125" }} / Блок {{ face_block|default:"4" }}</strong>
+            </div>
+        </header>
 
-            <div class="excavator-assignment-list" aria-label="Назначенные самосвалы">
-                {% for assignment in available_assignments %}
-                    <div class="excavator-assignment {% if assignment.has_active_trip %}is-busy{% endif %}">
-                        <strong>{{ assignment.truck }}</strong>
-                        <span>{{ assignment.excavator }}</span>
-                        {% if assignment.has_active_trip %}
-                            <em>в рейсе</em>
-                        {% else %}
-                            <em>готов к погрузке</em>
-                        {% endif %}
+        <section class="eo-screen" data-eo-screen="shift">
+            <h1>Смена</h1>
+            <div class="eo-shift-metrics">
+                <label class="eo-field-card">
+                    <span>Топливо</span>
+                    <input type="number" inputmode="decimal" value="{% if open_shift and open_shift.start_fuel %}{{ open_shift.start_fuel }}{% endif %}" placeholder="0">
+                </label>
+                <label class="eo-field-card">
+                    <span>Пробег</span>
+                    <input type="number" inputmode="decimal" value="{% if open_shift and open_shift.start_mileage %}{{ open_shift.start_mileage }}{% endif %}" placeholder="0">
+                </label>
+                <label class="eo-field-card">
+                    <span>Моточасы</span>
+                    <input type="number" inputmode="decimal" value="{% if open_shift and open_shift.start_engine_hours %}{{ open_shift.start_engine_hours }}{% endif %}" placeholder="0">
+                </label>
+            </div>
+            <div class="eo-shift-face">
+                <div><span>Горизонт</span><strong>{{ face_horizon|default:"125" }}</strong></div>
+                <div><span>Блок</span><strong>{{ face_block|default:"4" }}</strong></div>
+                <div><span>Порода</span><strong>{% if current_rock %}{{ current_rock }}{% else %}Руда{% endif %}</strong></div>
+                <div><span>Точка</span><strong>{% if selected_dump_point %}{{ selected_dump_point }}{% elif dump_cards %}{{ dump_cards.0.name }}{% else %}-{% endif %}</strong></div>
+            </div>
+            <button class="eo-primary-action" type="button">{% if open_shift %}Закончить смену{% else %}Начать смену{% endif %}</button>
+        </section>
+
+        <section class="eo-screen" data-eo-screen="face">
+            <h1>Забой</h1>
+            <div class="eo-face-form">
+                <label class="eo-large-field">
+                    <span>Горизонт</span>
+                    <input type="number" inputmode="numeric" name="loading_horizon" value="{{ face_horizon }}" placeholder="125">
+                </label>
+                <label class="eo-large-field">
+                    <span>Блок</span>
+                    <input type="number" inputmode="numeric" name="loading_block" value="{{ face_block }}" placeholder="4">
+                </label>
+                <label class="eo-large-field">
+                    <span>Порода</span>
+                    <select name="rock_type">
+                        {% for rock in rock_choices %}
+                            <option value="{{ rock.id }}" {% if rock.id|stringformat:"s" == default_rock|stringformat:"s" %}selected{% endif %}>{{ rock }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+            </div>
+            <div class="eo-unload-grid eo-unload-grid-settings">
+                {% for card in dump_cards %}
+                    <button class="eo-unload-card status-{{ card.status_key }}{% if card.is_default %} is-selected{% endif %}" type="button" data-eo-dump-select="{{ card.point.id }}">
+                        <strong>{{ card.name }}</strong>
+                    </button>
+                {% endfor %}
+                {% if dump_cards|length < 4 %}
+                    <button class="eo-unload-card is-add" type="button">
+                        <span>+</span>
+                        <strong>Добавить</strong>
+                    </button>
+                {% endif %}
+            </div>
+            <input type="hidden" name="dump_point" value="{{ default_dump_point }}" data-eo-dump-input>
+            <button class="eo-primary-action" type="button" data-eo-apply-settings>Применить настройки</button>
+        </section>
+
+        <section class="eo-screen" data-eo-screen="trucks">
+            <div class="eo-title-row">
+                <h1>Погрузка</h1>
+                <strong>{{ available_assignments_count }} шт.</strong>
+            </div>
+            <div class="eo-truck-grid{% if not truck_cards %} is-empty{% endif %}" aria-label="Назначенные самосвалы">
+                {% for card in truck_cards %}
+                    <button class="eo-truck-card status-{{ card.status_key }}{% if forloop.first %} is-selected{% endif %}" type="button" draggable="true" data-eo-truck-card data-assignment-id="{{ card.assignment.id }}">
+                        <strong>{{ card.number }}</strong>
+                        <img src="{% static card.icon %}" alt="">
+                        <span>{{ card.status_label }}</span>
+                        {% if card.target_label %}<em>{{ card.target_label }}</em>{% endif %}
+                    </button>
+                {% empty %}
+                    <div class="eo-empty-state">
+                        <img src="{% static 'img/equipment/truck-gray.png' %}" alt="">
+                        <strong>Нет погрузки</strong>
+                        <span>Назначает горный мастер</span>
                     </div>
-                {% empty %}
-                    <div class="excavator-empty-state">Нет принятых назначений самосвалов под экскаватор.</div>
                 {% endfor %}
             </div>
-
-            <div class="section-title-row compact">
-                <div>
-                    <h3>Параметры забоя</h3>
-                    <p class="muted">Подставляются последние значения машиниста, менять нужно только отклонения.</p>
-                </div>
-            </div>
-            <div class="excavator-form-grid secondary">
-                <div class="excavator-field">
-                    <label for="{{ form.planned_volume_m3.id_for_label }}">{{ form.planned_volume_m3.label }}</label>
-                    {{ form.planned_volume_m3 }}
-                    {{ form.planned_volume_m3.errors }}
-                </div>
-                <div class="excavator-field">
-                    <label for="{{ form.loading_horizon.id_for_label }}">{{ form.loading_horizon.label }}</label>
-                    {{ form.loading_horizon }}
-                    {{ form.loading_horizon.errors }}
-                </div>
-                <div class="excavator-field">
-                    <label for="{{ form.loading_block.id_for_label }}">{{ form.loading_block.label }}</label>
-                    {{ form.loading_block }}
-                    {{ form.loading_block.errors }}
-                </div>
-                <div class="excavator-field">
-                    <label for="{{ form.transport_distance_km.id_for_label }}">{{ form.transport_distance_km.label }}</label>
-                    {{ form.transport_distance_km }}
-                    {{ form.transport_distance_km.errors }}
-                </div>
-                <div class="excavator-field field-wide">
-                    <label for="{{ form.downtime_text.id_for_label }}">{{ form.downtime_text.label }}</label>
-                    {{ form.downtime_text }}
-                    {{ form.downtime_text.errors }}
-                </div>
-                <div class="excavator-field field-wide">
-                    <label for="{{ form.note.id_for_label }}">{{ form.note.label }}</label>
-                    {{ form.note }}
-                    {{ form.note.errors }}
-                </div>
-            </div>
-        </form>
-
-        <aside class="card excavator-active-card">
-            <div class="section-title-row compact">
-                <div>
-                    <h2>Активные рейсы</h2>
-                    <p class="muted">Самосвалы, которые уже ушли от экскаватора и ждут завершения водителем.</p>
-                </div>
-            </div>
-            <div class="excavator-active-list">
-                {% for trip in active_trips %}
-                    <article class="active-trip-item">
-                        <div>
-                            <strong>{{ trip.truck }}</strong>
-                            <span>{{ trip.rock_type }} -> {{ trip.dump_point }}</span>
-                        </div>
-                        <dl>
-                            <div><dt>Горизонт</dt><dd>{{ trip.loading_horizon|default:"-" }}</dd></div>
-                            <div><dt>Блок</dt><dd>{{ trip.loading_block|default:"-" }}</dd></div>
-                            <div><dt>Плечо</dt><dd>{{ trip.transport_distance_km|default:"-" }}</dd></div>
-                            <div><dt>Объем</dt><dd>{{ trip.volume_m3|default:"-" }}</dd></div>
-                        </dl>
-                    </article>
-                {% empty %}
-                    <div class="excavator-empty-state">Активных рейсов пока нет.</div>
+            <div class="eo-unload-grid eo-unload-grid-work" aria-label="Точки разгрузки">
+                {% for card in dump_cards %}
+                    <button class="eo-unload-card status-{{ card.status_key }}{% if card.is_default %} is-selected{% endif %}" type="button" data-eo-dump-target="{{ card.point.id }}">
+                        <strong>{{ card.name }}</strong>
+                        {% if card.is_default %}<small>Отпустить сюда</small>{% endif %}
+                    </button>
                 {% endfor %}
             </div>
-        </aside>
-    </section>
+        </section>
+
+        <section class="eo-screen" data-eo-screen="events">
+            <div class="eo-title-row">
+                <h1>События</h1>
+                <button class="eo-refresh-button" type="button" aria-label="Обновить">↻</button>
+            </div>
+            <div class="eo-downtime-card">
+                <span class="eo-downtime-clock"></span>
+                <div>
+                    <strong>Активный простой</strong>
+                    <b>00:12</b>
+                    <em data-eo-active-reason>Ожидание самосвалов</em>
+                </div>
+            </div>
+            <div class="eo-reason-grid">
+                <button class="is-selected" type="button" data-eo-reason="Ожидание самосвалов"><img src="{% static 'img/equipment/truck-yellow.png' %}" alt="">Ожидание</button>
+                <button type="button" data-eo-reason="Нет фронта">Нет фронта</button>
+                <button type="button" data-eo-reason="Зачистка">Зачистка</button>
+                <button type="button" data-eo-reason="Погода">Погода</button>
+                <button type="button" data-eo-reason="Ремонт">Ремонт</button>
+                <button type="button" data-eo-reason="Другое">? Другое</button>
+                <button type="button" data-eo-reason="Т.О.">Т.О.</button>
+                <button type="button" data-eo-reason="Заправка">Заправка</button>
+            </div>
+            <div class="eo-event-actions">
+                <button class="is-move" type="button" data-eo-reason="Перегон">Перегон</button>
+                <button class="is-alarm" type="button" data-eo-reason="Авария">Авария</button>
+            </div>
+            <button class="eo-primary-action" type="button" data-eo-close-event>Завершить простой</button>
+        </section>
+    </form>
+
+    <nav class="eo-bottom-nav" aria-label="Навигация экскаваторщика">
+        <button type="button" data-eo-tab="trucks"><img src="{% static 'img/equipment/truck-gray.png' %}" data-eo-icon-idle="{% static 'img/equipment/truck-gray.png' %}" data-eo-icon-active="{% static 'img/equipment/truck-yellow.png' %}" alt=""><strong>Погрузка</strong></button>
+        <button type="button" data-eo-tab="shift"><span class="eo-nav-clock"></span><strong>Смена</strong></button>
+        <button type="button" data-eo-tab="face"><img src="{% static 'img/equipment/excavator-gray.png' %}" data-eo-icon-idle="{% static 'img/equipment/excavator-gray.png' %}" data-eo-icon-active="{% static 'img/equipment/excavator-yellow.png' %}" alt=""><strong>Забой</strong></button>
+        <button type="button" data-eo-tab="events"><span class="eo-nav-bell"></span><strong>События</strong></button>
+    </nav>
 </main>
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    var shell = document.querySelector("[data-eo-shell]");
+    if (!shell) return;
+
+    var screens = shell.querySelectorAll("[data-eo-screen]");
+    var tabs = shell.querySelectorAll("[data-eo-tab]");
+    var assignmentInput = shell.querySelector("[data-eo-assignment-input]");
+    var dumpInput = shell.querySelector("[data-eo-dump-input]");
+    var downtimeInput = shell.querySelector("[data-eo-downtime-input]");
+    var activeReason = shell.querySelector("[data-eo-active-reason]");
+    var selectedTruck = shell.querySelector("[data-eo-truck-card].is-selected");
+
+    function activateTab(name) {
+        screens.forEach(function (screen) {
+            screen.hidden = screen.dataset.eoScreen !== name;
+        });
+        tabs.forEach(function (tab) {
+            var isActive = tab.dataset.eoTab === name;
+            var icon = tab.querySelector("[data-eo-icon-idle]");
+            tab.classList.toggle("is-active", isActive);
+            if (icon) {
+                icon.src = isActive ? icon.dataset.eoIconActive : icon.dataset.eoIconIdle;
+            }
+        });
+        shell.dataset.eoActiveTab = name;
+    }
+
+    function selectTruck(card) {
+        if (!card) return;
+        shell.querySelectorAll("[data-eo-truck-card]").forEach(function (item) {
+            item.classList.remove("is-selected");
+        });
+        card.classList.add("is-selected");
+        selectedTruck = card;
+        if (assignmentInput) {
+            assignmentInput.value = card.dataset.assignmentId || "";
+        }
+    }
+
+    function selectDump(id) {
+        if (!id) return;
+        shell.querySelectorAll("[data-eo-dump-select], [data-eo-dump-target]").forEach(function (item) {
+            item.classList.toggle("is-selected", item.dataset.eoDumpSelect === id || item.dataset.eoDumpTarget === id);
+        });
+        if (dumpInput) {
+            dumpInput.value = id;
+        }
+    }
+
+    tabs.forEach(function (tab) {
+        tab.addEventListener("click", function () {
+            activateTab(tab.dataset.eoTab);
+        });
+    });
+
+    shell.querySelectorAll("[data-eo-truck-card]").forEach(function (card) {
+        card.addEventListener("click", function () {
+            selectTruck(card);
+        });
+        card.addEventListener("dragstart", function (event) {
+            selectTruck(card);
+            event.dataTransfer.setData("text/plain", card.dataset.assignmentId || "");
+        });
+    });
+
+    shell.querySelectorAll("[data-eo-dump-select]").forEach(function (button) {
+        button.addEventListener("click", function () {
+            selectDump(button.dataset.eoDumpSelect);
+        });
+    });
+
+    shell.querySelectorAll("[data-eo-dump-target]").forEach(function (target) {
+        target.addEventListener("dragover", function (event) {
+            event.preventDefault();
+            target.classList.add("is-drop-ready");
+        });
+        target.addEventListener("dragleave", function () {
+            target.classList.remove("is-drop-ready");
+        });
+        target.addEventListener("drop", function (event) {
+            event.preventDefault();
+            target.classList.remove("is-drop-ready");
+            selectDump(target.dataset.eoDumpTarget);
+            if (assignmentInput && assignmentInput.value && dumpInput && dumpInput.value) {
+                shell.querySelector("[data-eo-trip-form]").submit();
+            }
+        });
+        target.addEventListener("click", function () {
+            selectDump(target.dataset.eoDumpTarget);
+            if (selectedTruck && assignmentInput && assignmentInput.value) {
+                shell.querySelector("[data-eo-trip-form]").submit();
+            }
+        });
+    });
+
+    shell.querySelectorAll("[data-eo-reason]").forEach(function (button) {
+        button.addEventListener("click", function () {
+            shell.querySelectorAll("[data-eo-reason]").forEach(function (item) {
+                item.classList.remove("is-selected");
+            });
+            button.classList.add("is-selected");
+            if (downtimeInput) {
+                downtimeInput.value = button.dataset.eoReason || "";
+            }
+            if (activeReason) {
+                activeReason.textContent = button.dataset.eoReason || "";
+            }
+        });
+    });
+
+    var applySettings = shell.querySelector("[data-eo-apply-settings]");
+    if (applySettings) {
+        applySettings.addEventListener("click", function () {
+            activateTab("trucks");
+        });
+    }
+
+    var closeEvent = shell.querySelector("[data-eo-close-event]");
+    if (closeEvent) {
+        closeEvent.addEventListener("click", function () {
+            if (downtimeInput) {
+                downtimeInput.value = "";
+            }
+            if (activeReason) {
+                activeReason.textContent = "Нет активного простоя";
+            }
+        });
+    }
+
+    activateTab(shell.dataset.eoActiveTab || "trucks");
+});
+</script>
 {% endblock %}

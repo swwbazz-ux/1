@@ -88,6 +88,79 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertNotContains(response, 'data-mm-panel')
         self.assertEqual(len(response.context['dispatcher_dashboard']['complex_zones']), 9)
 
+    def test_mining_master_mobile_shell_renders_open_shift_status(self):
+        response = self.client.get(reverse('mining_master_assignments'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'mm-mobile-shell')
+        self.assertContains(response, 'is-shift-open')
+        self.assertContains(response, 'mm-mobile-plan-ring')
+        self.assertContains(response, 'Горный мастер')
+        self.assertContains(response, 'Горный М.Т.')
+        self.assertNotContains(response, 'mm-mobile-clock')
+        self.assertNotContains(response, 'mm-mobile-icon-button')
+
+    def test_mining_master_mobile_shell_includes_pwa_install_metadata(self):
+        response = self.client.get(reverse('mining_master_assignments'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, reverse('mining_master_manifest'))
+        self.assertContains(response, 'rel="manifest"')
+        self.assertContains(response, 'name="theme-color"')
+        self.assertContains(response, 'apple-mobile-web-app-capable')
+        self.assertContains(response, 'apple-touch-icon')
+        self.assertContains(response, '/mining-master-sw.js')
+
+    def test_login_screen_includes_mining_master_pwa_install_metadata(self):
+        response = self.client.get('/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, reverse('mining_master_manifest'))
+        self.assertContains(response, 'rel="manifest"')
+        self.assertContains(response, 'name="theme-color"')
+        self.assertContains(response, 'apple-mobile-web-app-capable')
+        self.assertContains(response, 'apple-touch-icon')
+        self.assertContains(response, '/mining-master-sw.js')
+
+    def test_mining_master_manifest_is_installable_pwa_manifest(self):
+        response = self.client.get(reverse('mining_master_manifest'))
+        manifest = json.loads(response.content.decode('utf-8'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response['Content-Type'], 'application/manifest+json; charset=utf-8')
+        self.assertEqual(manifest['name'], 'Горный мастер')
+        self.assertEqual(manifest['start_url'], reverse('mining_master_assignments'))
+        self.assertEqual(manifest['scope'], '/')
+        self.assertEqual(manifest['display'], 'standalone')
+        self.assertEqual(manifest['orientation'], 'portrait')
+        self.assertIn('icons', manifest)
+        self.assertTrue(any(icon.get('sizes') == '192x192' for icon in manifest['icons']))
+        self.assertTrue(any(icon.get('sizes') == '512x512' for icon in manifest['icons']))
+        self.assertTrue(any(icon.get('purpose') == 'maskable' for icon in manifest['icons']))
+
+    def test_mining_master_service_worker_caches_pwa_assets(self):
+        response = self.client.get(reverse('mining_master_service_worker'))
+        script = response.content.decode('utf-8')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'mining-master-mobile-shell-v59')
+        self.assertIn(reverse('mining_master_manifest'), script)
+        self.assertIn('/static/img/pwa/mining-master-192.png', script)
+        self.assertIn('/static/img/pwa/mining-master-maskable-512.png', script)
+
+    def test_mining_master_mobile_shell_renders_closed_shift_status(self):
+        self.shift.closed_at = timezone.now()
+        self.shift.closed_by = self.master
+        self.shift.save(update_fields=['closed_at', 'closed_by'])
+
+        response = self.client.get(reverse('mining_master_assignments'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'mm-mobile-shell')
+        self.assertContains(response, 'is-shift-closed')
+        self.assertContains(response, 'mm-mobile-plan-ring')
+        self.assertNotContains(response, 'is-shift-open')
+
     def test_truck_tiles_keep_unique_visible_numbers(self):
         response = self.client.get(reverse('mining_master_assignments'))
 
@@ -366,6 +439,29 @@ class MiningMasterAssignmentsViewTests(TestCase):
             .exists()
         )
 
+    def test_mining_master_json_rejects_stale_truck_move_conflict(self):
+        response = self.client.post(
+            reverse('mining_master_assign_truck'),
+            data=json.dumps({
+                'action': 'assign',
+                'truck_id': self.assigned_truck.id,
+                'excavator_id': self.other_excavator.id,
+                'expected_source_excavator_id': self.other_excavator.id,
+                'client_action_id': 'client-action-1',
+            }),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertFalse(response.json()['ok'])
+        self.assertTrue(response.json()['conflict'])
+        self.assertEqual(response.json()['client_action_id'], 'client-action-1')
+        self.assertTrue(
+            HaulAssignment.objects
+            .filter(truck=self.assigned_truck, excavator=self.excavator, ended_at__isnull=True)
+            .exists()
+        )
+
     def test_mining_master_json_release_complex_keeps_excavator_active(self):
         HaulAssignment.objects.create(
             truck=self.free_truck,
@@ -456,15 +552,7 @@ class MiningMasterAssignmentsViewTests(TestCase):
         session['device_kind'] = 'personal'
         session.save()
 
-        response = self.client.post(
-            reverse('mining_master_assignments'),
-            {
-                'action': 'start_shift',
-                'reauth_phone': '+7 900-000-04-00',
-                'reauth_access_code': '40-00-00',
-                'device_kind': 'personal',
-            },
-        )
+        response = self.client.post(reverse('mining_master_assignments'), {'action': 'start_shift'})
         self.assertRedirects(response, reverse('mining_master_assignments'))
         self.assertTrue(EmployeeShift.objects.filter(employee=self.master, closed_at__isnull=True).exists())
         self.assertEqual(self.client.session['device_kind'], 'personal')
@@ -503,6 +591,26 @@ class MiningMasterAssignmentsViewTests(TestCase):
 
         self.assertRedirects(response, reverse('mining_master_assignments'))
         self.assertFalse(EmployeeShift.objects.filter(employee=self.master, closed_at__isnull=True).exists())
+
+    def test_mobile_start_shift_marks_shared_session_as_personal(self):
+        self.shift.closed_at = timezone.now()
+        self.shift.closed_by = self.master
+        self.shift.save(update_fields=['closed_at', 'closed_by'])
+        session = self.client.session
+        session['device_kind'] = 'shared'
+        session.save()
+
+        response = self.client.post(
+            reverse('mining_master_assignments'),
+            {
+                'action': 'start_shift',
+                'device_kind': 'personal',
+            },
+        )
+
+        self.assertRedirects(response, reverse('mining_master_assignments'))
+        self.assertTrue(EmployeeShift.objects.filter(employee=self.master, closed_at__isnull=True).exists())
+        self.assertEqual(self.client.session['device_kind'], 'personal')
 
     def test_shared_desktop_can_start_shift_with_other_mining_master_credentials(self):
         self.shift.closed_at = timezone.now()

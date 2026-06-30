@@ -1,28 +1,159 @@
-from collections import defaultdict
 import re
 import json
-from datetime import timedelta
 from decimal import Decimal
 
 from django.contrib import messages
-from django.http import JsonResponse
-from django.db.models import Count, Sum
-from django.shortcuts import get_object_or_404, redirect, render
+from django.http import HttpResponse, JsonResponse
+from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
-from downtimes.models import DowntimeEvent
 from references.models import Equipment
 from shifts.models import EmployeeShift, ShiftType
-from trips.models import Trip, TripStatus
 from trips.views import dispatcher_control_view as render_dispatcher_control_view
 from users.access_auth import find_employee_access_by_credentials
 from users.models import EmployeeAccess
 from users.session_device import get_session_device_kind, set_session_device_kind
 
-from .forms import HaulAssignmentForm
-from .models import AssignmentStatus, EquipmentAssignment, ExcavatorPlacement, HaulAssignment
+from .models import AssignmentStatus, ExcavatorPlacement, HaulAssignment
+
+
+MINING_MASTER_MANIFEST = {
+    'id': '/mining-master/assignments/',
+    'name': 'Горный мастер',
+    'short_name': 'Горный мастер',
+    'description': 'Мобильный пульт Горного мастера для управления активной сменой.',
+    'start_url': '/mining-master/assignments/',
+    'scope': '/',
+    'display': 'standalone',
+    'display_override': ['standalone', 'fullscreen'],
+    'orientation': 'portrait',
+    'background_color': '#041017',
+    'theme_color': '#041017',
+    'categories': ['business', 'productivity'],
+    'icons': [
+        {
+            'src': '/static/img/pwa/mining-master-192.png',
+            'sizes': '192x192',
+            'type': 'image/png',
+            'purpose': 'any',
+        },
+        {
+            'src': '/static/img/pwa/mining-master-512.png',
+            'sizes': '512x512',
+            'type': 'image/png',
+            'purpose': 'any',
+        },
+        {
+            'src': '/static/img/pwa/mining-master-maskable-512.png',
+            'sizes': '512x512',
+            'type': 'image/png',
+            'purpose': 'maskable',
+        },
+    ],
+    'shortcuts': [
+        {
+            'name': 'Пульт смены',
+            'short_name': 'Пульт',
+            'url': '/mining-master/assignments/',
+            'description': 'Открыть мобильный пульт Горного мастера.',
+        },
+    ],
+}
+
+
+MINING_MASTER_SERVICE_WORKER_JS = r"""
+const CACHE_NAME = "mining-master-mobile-shell-v59";
+const APP_SHELL_URL = "/mining-master/assignments/";
+const LOGIN_URL = "/";
+const MANIFEST_URL = "/mining-master-manifest.webmanifest";
+const CORE_ASSETS = [
+  LOGIN_URL,
+  APP_SHELL_URL,
+  MANIFEST_URL,
+  "/static/css/app.css",
+  "/static/favicon.ico",
+  "/static/img/pwa/mining-master-180.png",
+  "/static/img/pwa/mining-master-192.png",
+  "/static/img/pwa/mining-master-512.png",
+  "/static/img/pwa/mining-master-maskable-512.png",
+  "/static/img/equipment/excavator-gray.png",
+  "/static/img/equipment/excavator-green.png",
+  "/static/img/equipment/excavator-yellow.png",
+  "/static/img/equipment/excavator-red.png",
+  "/static/img/equipment/truck-gray.png",
+  "/static/img/equipment/truck-green.png",
+  "/static/img/equipment/truck-yellow.png",
+  "/static/img/equipment/truck-red.png"
+];
+
+self.addEventListener("install", event => {
+  event.waitUntil(
+    caches.open(CACHE_NAME)
+      .then(cache => cache.addAll(CORE_ASSETS.map(url => new Request(url, { cache: "reload" }))).catch(() => undefined))
+      .then(() => self.skipWaiting())
+  );
+});
+
+self.addEventListener("activate", event => {
+  event.waitUntil(
+    caches.keys()
+      .then(keys => Promise.all(keys.filter(key => key !== CACHE_NAME).map(key => caches.delete(key))))
+      .then(() => self.clients.claim())
+  );
+});
+
+async function networkFirst(request, fallbackUrl) {
+  const cache = await caches.open(CACHE_NAME);
+  try {
+    const response = await fetch(request);
+    if (response && response.ok) {
+      cache.put(request, response.clone()).catch(() => undefined);
+      if (fallbackUrl) {
+        cache.put(fallbackUrl, response.clone()).catch(() => undefined);
+      }
+    }
+    return response;
+  } catch (error) {
+    return (await cache.match(request)) ||
+      (fallbackUrl ? await cache.match(fallbackUrl) : null) ||
+      new Response("Оффлайн: экран еще не сохранен на этом устройстве.", {
+        status: 503,
+        headers: { "Content-Type": "text/plain; charset=utf-8" }
+      });
+  }
+}
+
+async function cacheFirst(request) {
+  const cache = await caches.open(CACHE_NAME);
+  const cached = await cache.match(request);
+  if (cached) return cached;
+  const response = await fetch(request);
+  if (response && response.ok) {
+    cache.put(request, response.clone()).catch(() => undefined);
+  }
+  return response;
+}
+
+self.addEventListener("fetch", event => {
+  const request = event.request;
+  if (request.method !== "GET") return;
+  const url = new URL(request.url);
+  if (url.origin !== self.location.origin) return;
+  if (request.mode === "navigate" || url.pathname === APP_SHELL_URL || url.pathname === LOGIN_URL) {
+    event.respondWith(networkFirst(request, url.pathname === LOGIN_URL ? LOGIN_URL : APP_SHELL_URL));
+    return;
+  }
+  if (url.pathname === MANIFEST_URL) {
+    event.respondWith(networkFirst(request, MANIFEST_URL));
+    return;
+  }
+  if (url.pathname.startsWith("/static/")) {
+    event.respondWith(cacheFirst(request));
+  }
+});
+"""
 
 
 TRUCK_ICON_BY_STATUS = {
@@ -103,6 +234,20 @@ def get_shift_type_for_now(now):
     return ShiftType.DAY if 8 <= timezone.localtime(now).hour < 20 else ShiftType.NIGHT
 
 
+def mining_master_service_worker_view(request):
+    response = HttpResponse(MINING_MASTER_SERVICE_WORKER_JS, content_type='application/javascript; charset=utf-8')
+    response['Cache-Control'] = 'no-cache'
+    response['Service-Worker-Allowed'] = '/'
+    return response
+
+
+def mining_master_manifest_view(request):
+    response = JsonResponse(MINING_MASTER_MANIFEST, json_dumps_params={'ensure_ascii': False})
+    response['Content-Type'] = 'application/manifest+json; charset=utf-8'
+    response['Cache-Control'] = 'no-cache'
+    return response
+
+
 def build_truck_tile(equipment, status_key, status_label, assignment=None, active_trip=None):
     label = get_truck_label(equipment)
     number = get_equipment_number(equipment)
@@ -174,6 +319,17 @@ def build_employee_initials(employee):
         return '--'
     initials = ''.join(part[0] for part in (employee.full_name or '').split()[:2]).upper()
     return initials or '--'
+
+
+def build_employee_short_name(employee):
+    if not employee:
+        return ''
+    parts = (employee.full_name or '').split()
+    if not parts:
+        return ''
+    surname = parts[0]
+    initials = ''.join(f'{part[0].upper()}.' for part in parts[1:3] if part)
+    return f'{surname} {initials}'.strip()
 
 
 def get_complex_truck_scale_class(truck_count):
@@ -401,6 +557,15 @@ def mining_master_json_payload(request):
         return {}
 
 
+def mining_master_json_ok(payload=None, **extra):
+    response = {'ok': True}
+    response.update(extra)
+    client_action_id = (payload or {}).get('client_action_id')
+    if client_action_id:
+        response['client_action_id'] = client_action_id
+    return JsonResponse(response)
+
+
 def mining_master_open_shift_or_error(access):
     if access.role.code != 'mining_master':
         return None, 'Изменять пульт Горного мастера может только Горный мастер.'
@@ -431,34 +596,39 @@ def build_mining_master_dispatcher_header(request, access, current_shift, blocki
             photo_url = ''
 
     can_start_shift = not current_shift and not blocking_shift
-    requires_shift_reauth = can_start_shift
+    requires_shift_reauth = can_start_shift and get_session_device_kind(request) == 'shared'
     current_time = timezone.localtime().strftime('%H:%M')
     current_date = timezone.localdate().strftime('%d.%m.%Y')
     if current_shift:
         shift_label = 'Смена открыта'
         time_range = f'с {active_shift_opened_at}'
         clock_caption = 'в работе'
+        shift_status_variant = 'open'
     elif blocking_shift:
         shift_label = 'Режим наблюдателя'
         time_range = f'с {active_shift_opened_at}' if active_shift_opened_at else 'ожидание закрытия'
         clock_caption = 'наблюдение'
+        shift_status_variant = 'blocked'
     else:
         shift_label = ''
         time_range = ''
         clock_caption = ''
+        shift_status_variant = 'closed'
 
     return {
         'header': {
-            'active_shift': current_shift,
+            'active_shift': current_shift or blocking_shift,
             'own_shift': current_shift,
             'active_dispatcher': active_person,
             'active_dispatcher_name': active_person.full_name if active_person else '',
+            'active_dispatcher_short_name': build_employee_short_name(active_person),
             'active_dispatcher_photo': photo_url,
             'active_dispatcher_initials': build_employee_initials(active_person),
             'active_shift_date': active_shift_date,
             'active_shift_opened_at': active_shift_opened_at,
             'can_toggle_shift': bool(current_shift or can_start_shift),
             'shift_is_open': bool(current_shift),
+            'shift_status_variant': shift_status_variant,
             'active_role_label': 'горный мастер',
             'active_shift_title': 'Активная смена горного мастера',
             'inactive_shift_title': 'Смена горного мастера не открыта',
@@ -537,7 +707,7 @@ def mining_master_move_excavator_view(request):
         closed_count = len(active_assignments)
         close_active_assignments(active_assignments, timezone.now())
 
-    return JsonResponse({'ok': True, 'closed': closed_count})
+    return mining_master_json_ok(payload, closed=closed_count)
 
 
 @require_POST
@@ -562,7 +732,7 @@ def mining_master_assign_truck_view(request):
         )
         assignments = list(get_active_assignments_queryset().filter(excavator=excavator))
         close_active_assignments(assignments, now)
-        return JsonResponse({'ok': True, 'closed': len(assignments)})
+        return mining_master_json_ok(payload, closed=len(assignments))
 
     truck = get_object_or_404(
         Equipment.objects.select_related('equipment_type', 'model'),
@@ -577,10 +747,19 @@ def mining_master_assign_truck_view(request):
         .select_related('excavator')
         .order_by('-assigned_at')
     )
+    active_assignment = active_assignments[0] if active_assignments else None
+    expected_source_excavator_id = str(payload.get('expected_source_excavator_id') or '').strip()
+    if expected_source_excavator_id and active_assignment and str(active_assignment.excavator_id) != expected_source_excavator_id:
+        return JsonResponse({
+            'ok': False,
+            'error': 'Данные по самосвалу изменились в системе. Обновите пульт и повторите действие.',
+            'conflict': True,
+            'client_action_id': payload.get('client_action_id') or '',
+        }, status=409)
 
     if action == 'release':
         close_active_assignments(active_assignments, now)
-        return JsonResponse({'ok': True, 'closed': len(active_assignments)})
+        return mining_master_json_ok(payload, closed=len(active_assignments))
 
     if action != 'assign':
         return JsonResponse({'ok': False, 'error': 'Неизвестное действие.'}, status=400)
@@ -594,10 +773,9 @@ def mining_master_assign_truck_view(request):
     if not ExcavatorPlacement.objects.filter(excavator=excavator, zone=ExcavatorPlacement.Zone.ACTIVE).exists():
         return JsonResponse({'ok': False, 'error': 'Самосвал можно назначить только в активный комплекс.'}, status=400)
 
-    active_assignment = active_assignments[0] if active_assignments else None
     if active_assignment and active_assignment.excavator_id == excavator.id:
         close_active_assignments(active_assignments[1:], now)
-        return JsonResponse({'ok': True, 'already_assigned': True})
+        return mining_master_json_ok(payload, already_assigned=True)
 
     close_active_assignments(active_assignments, now)
     HaulAssignment.objects.create(
@@ -606,7 +784,7 @@ def mining_master_assign_truck_view(request):
         assigned_by=access.employee,
         status=AssignmentStatus.PENDING,
     )
-    return JsonResponse({'ok': True})
+    return mining_master_json_ok(payload)
 
 
 def handle_bulk_release_action(request, action, current_shift, access):
@@ -703,12 +881,18 @@ def mining_master_assignments_view(request):
         action = request.POST.get('action') or 'assign'
         if action in {'start_shift', 'end_shift'}:
             if action == 'start_shift':
-                reauth_access, reauth_error = authenticate_shared_shift_start(request)
-                if reauth_error:
-                    messages.error(request, reauth_error)
-                    return redirect('mining_master_assignments')
-                access = reauth_access
-                current_shift, blocking_shift = get_shift_state_for_access(access)
+                has_reauth_credentials = bool(request.POST.get('reauth_phone') and request.POST.get('reauth_access_code'))
+                requested_device_kind = request.POST.get('device_kind', '').strip()
+                starts_as_personal_device = requested_device_kind == 'personal' and not has_reauth_credentials
+                if starts_as_personal_device:
+                    set_session_device_kind(request, 'personal')
+                elif get_session_device_kind(request) == 'shared' or has_reauth_credentials:
+                    reauth_access, reauth_error = authenticate_shared_shift_start(request)
+                    if reauth_error:
+                        messages.error(request, reauth_error)
+                        return redirect('mining_master_assignments')
+                    access = reauth_access
+                    current_shift, blocking_shift = get_shift_state_for_access(access)
             handle_shift_action(request, action, access, current_shift, blocking_shift)
         elif action in {'assign', 'release'}:
             handle_assignment_action(request, action, access, current_shift)
@@ -727,326 +911,4 @@ def mining_master_assignments_view(request):
         enforce_dispatcher_access=False,
         dispatcher_header_override=master_dispatcher['header'],
         context_overrides=master_dispatcher['context'],
-    )
-
-    form = HaulAssignmentForm()
-    now = timezone.now()
-    shift_window_start = current_shift.opened_at if current_shift else now - timedelta(hours=12)
-
-    excavators = list(
-        Equipment.objects
-        .filter(equipment_type__name='Экскаватор', is_active=True)
-        .select_related('equipment_type', 'model')
-        .order_by('garage_number')
-    )
-    active_excavator_ids = set(
-        ExcavatorPlacement.objects
-        .filter(excavator__in=excavators, zone=ExcavatorPlacement.Zone.ACTIVE)
-        .values_list('excavator_id', flat=True)
-    )
-    trucks = list(
-        Equipment.objects
-        .filter(equipment_type__name='Самосвал', is_active=True)
-        .select_related('equipment_type', 'model')
-        .order_by('garage_number')
-    )
-    active_assignment_rows = list(
-        HaulAssignment.objects
-        .select_related('truck', 'truck__model', 'excavator', 'excavator__model', 'assigned_by')
-        .filter(ended_at__isnull=True)
-        .exclude(status=AssignmentStatus.CANCELLED)
-        .order_by('truck_id', '-assigned_at')
-    )
-    active_assignments_by_truck = {}
-    for assignment in active_assignment_rows:
-        active_assignments_by_truck.setdefault(assignment.truck_id, assignment)
-    active_assignments = list(active_assignments_by_truck.values())
-
-    current_employee_by_equipment = {}
-    for equipment_assignment in (
-        EquipmentAssignment.objects
-        .filter(ended_at__isnull=True, equipment__is_active=True)
-        .exclude(status=AssignmentStatus.CANCELLED)
-        .select_related('employee', 'equipment')
-        .order_by('equipment_id', '-assigned_at')
-    ):
-        current_employee_by_equipment.setdefault(equipment_assignment.equipment_id, equipment_assignment.employee)
-
-    assignments_by_excavator = defaultdict(list)
-    for assignment in active_assignments:
-        assignments_by_excavator[assignment.excavator_id].append(assignment)
-
-    active_trip_by_truck = {
-        trip.truck_id: trip
-        for trip in (
-            Trip.objects
-            .filter(status=TripStatus.ACTIVE)
-            .select_related('truck', 'excavator', 'rock_type', 'dump_point')
-        )
-    }
-    open_downtime_by_equipment = {
-        event.equipment_id: event
-        for event in DowntimeEvent.objects.filter(ended_at__isnull=True).select_related('reason', 'equipment')
-    }
-    trips_by_excavator = {
-        item['excavator_id']: item
-        for item in (
-            Trip.objects
-            .filter(created_at__gte=shift_window_start)
-            .exclude(status=TripStatus.CANCELLED)
-            .values('excavator_id')
-            .annotate(total=Count('id'), volume=Sum('volume_m3'))
-        )
-    }
-    latest_trip_by_excavator = {}
-    for trip in (
-        Trip.objects
-        .filter(created_at__gte=shift_window_start)
-        .exclude(status=TripStatus.CANCELLED)
-        .select_related('excavator', 'truck', 'rock_type', 'dump_point')
-        .order_by('-created_at')
-    ):
-        latest_trip_by_excavator.setdefault(trip.excavator_id, trip)
-
-    complexes = []
-    equipment_tiles_by_status = {'green': [], 'yellow': [], 'blue': [], 'red': [], 'gray': []}
-    equipment_cards = {}
-    total_volume = Decimal('0')
-    total_trips = 0
-    not_work_count = 0
-
-    inactive_excavator_tiles = []
-
-    for excavator in excavators:
-        if excavator.id not in active_excavator_ids:
-            downtime = open_downtime_by_equipment.get(excavator.id)
-            if downtime and downtime.reason.is_critical:
-                excavator_status = 'red'
-                excavator_label = 'Ремонт'
-            elif downtime:
-                excavator_status = 'yellow'
-                excavator_label = 'ОФР'
-            else:
-                excavator_status = 'gray'
-                excavator_label = 'Неактивная'
-            tile = build_excavator_tile(excavator, excavator_status, excavator_label)
-            inactive_excavator_tiles.append(tile)
-            equipment_tiles_by_status[excavator_status].append(tile)
-            equipment_cards[str(excavator.id)] = build_equipment_card_data(
-                excavator,
-                tile,
-                'Неактивная смена',
-                excavator_label,
-                downtime=downtime,
-                shift_stats={},
-                truck_count=0,
-                latest_trip=latest_trip_by_excavator.get(excavator.id),
-                current_employee=current_employee_by_equipment.get(excavator.id),
-            )
-            continue
-
-        downtime = open_downtime_by_equipment.get(excavator.id)
-        trip_stats = trips_by_excavator.get(excavator.id, {})
-        trips_count = trip_stats.get('total') or 0
-        volume = trip_stats.get('volume') or Decimal('0')
-        total_volume += volume
-        total_trips += trips_count
-
-        if downtime and downtime.reason.is_critical:
-            excavator_status = 'red'
-            excavator_label = 'Ремонт'
-            complex_state = 'state-danger'
-            not_work_count += 1
-        elif downtime:
-            excavator_status = 'yellow'
-            excavator_label = 'ОФР'
-            complex_state = 'state-warning'
-            not_work_count += 1
-        elif assignments_by_excavator.get(excavator.id) or trips_count:
-            excavator_status = 'green'
-            excavator_label = 'Работает'
-            complex_state = 'state-normal'
-        else:
-            excavator_status = 'gray'
-            excavator_label = 'Без сам.'
-            complex_state = 'state-neutral'
-            not_work_count += 1
-
-        truck_tiles = []
-        for assignment in assignments_by_excavator.get(excavator.id, []):
-            active_trip = active_trip_by_truck.get(assignment.truck_id)
-            if active_trip:
-                truck_status = 'blue'
-                truck_status_label = 'В рейсе'
-            elif assignment.status == AssignmentStatus.PENDING:
-                truck_status = 'yellow'
-                truck_status_label = 'Ожидает'
-            else:
-                truck_status = 'green'
-                truck_status_label = 'Работает'
-            tile = build_truck_tile(assignment.truck, truck_status, truck_status_label, assignment, active_trip)
-            truck_tiles.append(tile)
-            equipment_tiles_by_status[truck_status].append(tile)
-            equipment_cards[str(assignment.truck_id)] = build_equipment_card_data(
-                assignment.truck,
-                tile,
-                f'Комплекс {get_excavator_label(excavator)}',
-                truck_status_label,
-                active_assignment=assignment,
-                active_trip=active_trip,
-                downtime=open_downtime_by_equipment.get(assignment.truck_id),
-                current_employee=current_employee_by_equipment.get(assignment.truck_id),
-            )
-
-        excavator_tile = build_excavator_tile(excavator, excavator_status, excavator_label)
-        latest_trip = latest_trip_by_excavator.get(excavator.id)
-        current_horizon = f'Гор. {latest_trip.loading_horizon}' if latest_trip and latest_trip.loading_horizon else 'Гор. -'
-        current_block = f'Блок {latest_trip.loading_block}' if latest_trip and latest_trip.loading_block else 'Блок -'
-        current_rock = latest_trip.rock_type.name if latest_trip and latest_trip.rock_type else 'порода не указана'
-        equipment_tiles_by_status[excavator_status].append(excavator_tile)
-        equipment_cards[str(excavator.id)] = build_equipment_card_data(
-            excavator,
-            excavator_tile,
-            'Активная смена',
-            excavator_label,
-            downtime=downtime,
-            shift_stats=trip_stats,
-            truck_count=len(truck_tiles),
-            latest_trip=latest_trip_by_excavator.get(excavator.id),
-            current_employee=current_employee_by_equipment.get(excavator.id),
-        )
-        complexes.append({
-            'excavator': excavator,
-            'tile': excavator_tile,
-            'state': complex_state,
-            'trucks': truck_tiles,
-            'truck_count': len(truck_tiles),
-            'volume': volume,
-            'trips_count': trips_count,
-            'downtime': downtime,
-            'truck_scale_class': get_complex_truck_scale_class(len(truck_tiles)),
-            'truck_column_count': 6,
-            'current_horizon': current_horizon,
-            'current_block': current_block,
-            'current_rock': current_rock,
-        })
-
-    garage_tiles = []
-    for truck in trucks:
-        if truck.id in active_assignments_by_truck:
-            continue
-        active_trip = active_trip_by_truck.get(truck.id)
-        status_key = 'blue' if active_trip else 'gray'
-        status_label = 'В рейсе' if active_trip else 'Гараж'
-        tile = build_truck_tile(truck, status_key, status_label, active_trip=active_trip)
-        garage_tiles.append(tile)
-        equipment_tiles_by_status[status_key].append(tile)
-        equipment_cards[str(truck.id)] = build_equipment_card_data(
-            truck,
-            tile,
-            'Неактивная смена',
-            status_label,
-            active_trip=active_trip,
-            downtime=open_downtime_by_equipment.get(truck.id),
-            current_employee=current_employee_by_equipment.get(truck.id),
-        )
-
-    pending_count = sum(1 for assignment in active_assignments if assignment.status == AssignmentStatus.PENDING)
-    accepted_count = sum(1 for assignment in active_assignments if assignment.status == AssignmentStatus.ACCEPTED)
-    selected_tile = garage_tiles[0] if garage_tiles else (complexes[0]['trucks'][0] if complexes and complexes[0]['trucks'] else None)
-    can_edit = bool(current_shift)
-    can_start_shift = not current_shift and not blocking_shift
-    current_time = timezone.localtime().strftime('%H:%M')
-    current_date = timezone.localdate().strftime('%d.%m.%Y')
-    shift_opened_at = timezone.localtime(current_shift.opened_at).strftime('%H:%M') if current_shift else ''
-    if current_shift:
-        dispatcher_header_shift_label = 'Смена открыта'
-        dispatcher_header_time_range = f'с {shift_opened_at}'
-        dispatcher_clock_caption = 'в работе'
-    elif blocking_shift:
-        dispatcher_header_shift_label = 'Режим наблюдателя'
-        dispatcher_header_time_range = 'ожидание закрытия'
-        dispatcher_clock_caption = 'наблюдение'
-    else:
-        dispatcher_header_shift_label = ''
-        dispatcher_header_time_range = ''
-        dispatcher_clock_caption = 'готово'
-    employee_photo = ''
-    if getattr(access.employee, 'photo', None):
-        try:
-            employee_photo = access.employee.photo.url
-        except ValueError:
-            employee_photo = ''
-    dispatcher_header = {
-        'active_shift': current_shift,
-        'active_dispatcher': access.employee if current_shift else None,
-        'active_dispatcher_name': access.employee.full_name or 'Горный мастер',
-        'active_dispatcher_photo': employee_photo,
-        'active_dispatcher_initials': build_employee_initials(access.employee),
-        'active_shift_opened_at': shift_opened_at,
-        'can_toggle_shift': bool(current_shift or can_start_shift),
-        'shift_is_open': bool(current_shift),
-        'active_role_label': 'горный мастер',
-        'active_shift_title': 'Активная смена горного мастера',
-        'inactive_shift_title': 'Активная смена горного мастера не открыта',
-        'inactive_name': 'смена не открыта',
-        'shift_form_action': request.get_full_path(),
-        'shift_action_field_name': 'action',
-        'shift_start_value': 'start_shift',
-        'shift_end_value': 'end_shift',
-        'shift_start_label': 'Начать смену',
-        'shift_end_label': 'Завершить смену',
-        'shift_start_confirm': 'Начать смену горного мастера?',
-        'shift_end_confirm': 'Завершить смену горного мастера?',
-        'shift_button_marker': True,
-    }
-    dispatcher_nav_items = [
-        {'label': 'Пульт', 'href': '#', 'active': True, 'data_tab': 'complexes'},
-        {'label': 'Техника', 'href': '#', 'active': False, 'data_tab': 'equipment'},
-        {'label': 'Отчеты', 'href': '#', 'active': False, 'data_tab': 'dashboards'},
-        {'label': 'Журнал', 'href': '#', 'active': False, 'data_tab': 'shift'},
-    ]
-
-    dashboard_rows = sorted(complexes, key=lambda item: item['volume'], reverse=True)
-    max_volume = max([item['volume'] for item in dashboard_rows] or [Decimal('1')]) or Decimal('1')
-    for item in dashboard_rows:
-        item['volume_percent'] = int((item['volume'] / max_volume) * 100) if max_volume else 0
-    desktop_complex_empty_slots = range(max(0, 9 - len(complexes)))
-
-    return render(
-        request,
-        'assignments/mining_master_assignments.html',
-        {
-            'access': access,
-            'form': form,
-            'current_shift': current_shift,
-            'blocking_shift': blocking_shift,
-            'can_edit': can_edit,
-            'can_start_shift': can_start_shift,
-            'master_initials': build_employee_initials(access.employee),
-            'current_time': current_time,
-            'current_date': current_date,
-            'dispatcher_header': dispatcher_header,
-            'dispatcher_nav_items': dispatcher_nav_items,
-            'dispatcher_header_shift_label': dispatcher_header_shift_label,
-            'dispatcher_header_time_range': dispatcher_header_time_range,
-            'dispatcher_clock_caption': dispatcher_clock_caption,
-            'complexes': complexes,
-            'desktop_complex_empty_slots': desktop_complex_empty_slots,
-            'garage_tiles': garage_tiles,
-            'inactive_excavator_tiles': inactive_excavator_tiles,
-            'selected_tile': selected_tile,
-            'pending_assignments_count': pending_count,
-            'accepted_assignments_count': accepted_count,
-            'active_assignments_count': len(active_assignments),
-            'active_excavators_count': len([item for item in complexes if item['tile']['status_key'] == 'green']),
-            'free_trucks_count': len(garage_tiles),
-            'not_work_count': not_work_count,
-            'total_volume': total_volume,
-            'total_trips': total_trips,
-            'equipment_tiles_by_status': equipment_tiles_by_status,
-            'equipment_cards': equipment_cards,
-            'dashboard_rows': dashboard_rows,
-            'shift_window_start': shift_window_start,
-        },
     )

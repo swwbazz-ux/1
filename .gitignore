@@ -30,8 +30,13 @@ outputs/
 ENV_BACKUP_*/
 server-*.log
 server-supervisor*.log
+localhostrun*.log
+localtunnel*.log
 */backend/runserver*.log
 */backend/.server-stop
+
+# Local project backups
+РЕЗЕРВНЫЕ_КОПИИ/
 
 # OS / editor
 .DS_Store
