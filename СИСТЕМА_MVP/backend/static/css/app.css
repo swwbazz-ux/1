@@ -21033,6 +21033,14 @@ a.management-shift-card:hover {
     width: 100%;
 }
 
+.management-dynamics-content {
+    grid-template-columns: minmax(0, 1fr);
+}
+
+.management-dynamics-content > * {
+    grid-column: 1 / -1;
+}
+
 .management-dynamics-excavators {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
