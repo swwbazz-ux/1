@@ -1,20 +1,14 @@
 {% extends "base.html" %}
 
 {% block title %}Отчет по простоям техники{% endblock %}
+{% block body_class %}dispatcher-control-screen{% endblock %}
 
 {% block body %}
-<header class="app-header">
-    <div class="header-inner">
-        <div class="topline">
-            <span>{{ access.employee.full_name }}</span>
-            <a href="{% url 'logout' %}">Выйти</a>
-        </div>
-        <h1>Отчет по простоям техники</h1>
-        <p>Разбор событий простоев: механика, ожидание разгрузки, открытые и закрытые события, причины, техника, длительность и выгрузка в Excel.</p>
-    </div>
-</header>
+<main class="dispatcher-shell dispatcher-analytics-shell management-linked-report" data-dispatcher-theme>
+    <section class="dispatcher-analytics-board management-dashboard-board management-linked-report-board" aria-label="Простои">
+        {% include "reports/includes/management_report_header.html" with active="downtime" title="Простои" subtitle="События простоев, причины, техника, длительность и критичность." %}
+        <div class="management-linked-report-content">
 
-<main class="page">
     <section class="metric-grid">
         <div class="metric-card">
             <div>Всего событий</div>
@@ -299,5 +293,8 @@
             </table>
         </div>
     </section>
+</div>
+</section>
 </main>
+{% include "reports/includes/management_report_theme.html" %}
 {% endblock %}

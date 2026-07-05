@@ -48,6 +48,55 @@ class Equipment(models.Model):
         return f'{self.equipment_type} {self.garage_number}'
 
 
+class EquipmentState(models.Model):
+    class ColorGroup(models.TextChoices):
+        GRAY = 'gray', 'Серый'
+        YELLOW = 'yellow', 'Желтый'
+        GREEN = 'green', 'Зеленый'
+        BLUE = 'blue', 'Синий'
+        ORANGE = 'orange', 'Оранжевый'
+        RED = 'red', 'Красный'
+
+    class SemanticGroup(models.TextChoices):
+        AVAILABILITY = 'availability', 'Доступность'
+        ASSIGNMENT = 'assignment', 'Назначение'
+        OPERATION = 'operation', 'Рабочая операция'
+        TECHNICAL = 'technical', 'Техническое состояние'
+        SYSTEM = 'system', 'Системное состояние'
+        TERMINAL = 'terminal', 'Выведено из работы'
+
+    code = models.SlugField('Код состояния', max_length=64, unique=True)
+    name = models.CharField('Название', max_length=128)
+    short_label = models.CharField('Короткая подпись', max_length=64, blank=True)
+    color_group = models.CharField('Цветовая группа', max_length=16, choices=ColorGroup.choices)
+    semantic_group = models.CharField('Смысловая группа', max_length=32, choices=SemanticGroup.choices)
+    priority = models.PositiveIntegerField('Приоритет отображения', default=100)
+    allows_assignment = models.BooleanField('Можно назначать', default=False)
+    allows_drag = models.BooleanField('Можно перетаскивать', default=False)
+    blocks_operation = models.BooleanField('Блокирует работу', default=False)
+    requires_attention = models.BooleanField('Требует внимания', default=False)
+    requires_reason = models.BooleanField('Требует причину', default=False)
+    is_terminal = models.BooleanField('Финальное состояние', default=False)
+    is_active = models.BooleanField('Активно', default=True)
+    description = models.TextField('Описание', blank=True)
+
+    class Meta:
+        verbose_name = 'Состояние техники'
+        verbose_name_plural = 'Состояния техники'
+        ordering = ['priority', 'name']
+
+    @property
+    def label(self):
+        return self.short_label or self.name
+
+    @property
+    def css_class(self):
+        return f'status-{self.color_group}'
+
+    def __str__(self):
+        return self.name
+
+
 class RockType(models.Model):
     name = models.CharField('Порода/груз', max_length=128, unique=True)
     density = models.DecimalField('Плотность', max_digits=10, decimal_places=4, null=True, blank=True)

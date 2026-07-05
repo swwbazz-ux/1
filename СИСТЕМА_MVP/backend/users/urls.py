@@ -3,8 +3,11 @@ from django.urls import path
 from .views import (
     activate_access_view,
     driver_accept_assignment_view,
+    driver_downtime_action_view,
     driver_close_shift_view,
+    driver_manifest_view,
     driver_registration_view,
+    driver_service_worker_view,
     driver_shift_view,
     interface_map_view,
     login_view,
@@ -27,6 +30,7 @@ from .views import (
     system_admin_log_export_view,
     system_admin_reference_detail_view,
     system_admin_references_view,
+    system_admin_reset_shift_test_data_view,
 )
 
 urlpatterns = [
@@ -34,11 +38,16 @@ urlpatterns = [
     path('activate-access/', activate_access_view, name='activate_access'),
     path('interfaces/', interface_map_view, name='interface_map'),
     path('home/', role_home_view, name='role_home'),
+    path('driver.webmanifest', driver_manifest_view, name='driver_manifest'),
+    path('driver-sw.js', driver_service_worker_view, name='driver_service_worker'),
+    path('driver/', driver_shift_view, name='driver_work'),
     path('driver/registration/', driver_registration_view, name='driver_registration'),
     path('driver/shift/', driver_shift_view, name='driver_shift'),
     path('driver/shift/close/', driver_close_shift_view, name='driver_close_shift'),
+    path('driver/downtime/', driver_downtime_action_view, name='driver_downtime_action'),
     path('driver/assignment/<int:assignment_id>/accept/', driver_accept_assignment_view, name='driver_accept_assignment'),
     path('system-admin/', system_admin_dashboard_view, name='system_admin_dashboard'),
+    path('system-admin/reset-shift-test-data/', system_admin_reset_shift_test_data_view, name='system_admin_reset_shift_test_data'),
     path('system-admin/employees/', system_admin_employees_view, name='system_admin_employees'),
     path('system-admin/references/', system_admin_references_view, name='system_admin_references'),
     path('system-admin/references/<slug:reference_code>/', system_admin_reference_detail_view, name='system_admin_reference_detail'),

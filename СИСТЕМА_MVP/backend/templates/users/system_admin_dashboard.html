@@ -114,6 +114,17 @@
                     <a class="admin-button admin-button-danger" href="{% url 'system_admin_conflicts' %}">Конфликты</a>
                     <a class="admin-button admin-button-secondary" href="{% url 'system_admin_logs' %}">Журнал действий</a>
                     <a class="admin-button admin-button-secondary" href="{% url 'system_admin_exports' %}">Выгрузки</a>
+                    <form method="post"
+                          action="{% url 'system_admin_reset_shift_test_data' %}"
+                          class="dashboard-reset-form"
+                          data-confirm="Сбросить тестовые показатели смены? Будут удалены рейсы, простои, оперативные события и журналы действий. Сотрудники, техника, справочники и планы останутся."
+                          data-confirm-delay="3"
+                          data-confirm-accept="Сбросить">
+                        {% csrf_token %}
+                        <button class="admin-button admin-button-danger" type="submit">
+                            Сброс тестов{% if shift_fact_total %} · {{ shift_fact_total }}{% endif %}
+                        </button>
+                    </form>
                 </div>
             </div>
         </section>

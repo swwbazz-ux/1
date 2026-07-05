@@ -1,15 +1,17 @@
-﻿from django.test import TestCase
+from django.test import TestCase
 import json
 
 from django.urls import reverse
 from django.utils import timezone
 
-from references.models import DumpPoint, Equipment, EquipmentModel, EquipmentType, RockType
+from downtimes.models import DowntimeEvent, DowntimeReason
+from references.models import DumpPoint, Equipment, EquipmentModel, EquipmentState, EquipmentType, RockType
 from shifts.models import EmployeeShift
 from trips.models import Trip, TripStatus
 from users.models import Employee, EmployeeAccess, Role
 
 from .models import AssignmentStatus, ExcavatorPlacement, HaulAssignment
+from .views import build_excavator_tile, build_truck_tile
 
 
 class MiningMasterAssignmentsViewTests(TestCase):
@@ -27,6 +29,20 @@ class MiningMasterAssignmentsViewTests(TestCase):
         excavator_type = EquipmentType.objects.create(name='Экскаватор')
         truck_model = EquipmentModel.objects.create(equipment_type=truck_type, name='БЕЛАЗ тест')
         excavator_model = EquipmentModel.objects.create(equipment_type=excavator_type, name='Экскаватор тест')
+        self.waiting_state = EquipmentState.objects.create(
+            code='waiting',
+            name='Ожидает',
+            short_label='Ожидает',
+            color_group='yellow',
+            semantic_group='availability',
+        )
+        self.maintenance_state = EquipmentState.objects.create(
+            code='maintenance',
+            name='Техническое обслуживание',
+            short_label='ТО',
+            color_group='orange',
+            semantic_group='technical',
+        )
         self.assigned_truck = Equipment.objects.create(
             equipment_type=truck_type,
             model=truck_model,
@@ -69,6 +85,15 @@ class MiningMasterAssignmentsViewTests(TestCase):
         session['employee_access_id'] = self.access.id
         session.save()
 
+    def test_legacy_tiles_accept_server_orange_status(self):
+        truck_tile = build_truck_tile(self.free_truck, 'orange', 'ТО')
+        excavator_tile = build_excavator_tile(self.excavator, 'orange', 'Ремонт')
+
+        self.assertEqual(truck_tile['status_key'], 'orange')
+        self.assertEqual(excavator_tile['status_key'], 'orange')
+        self.assertEqual(truck_tile['icon'], 'img/equipment/truck-yellow.png')
+        self.assertEqual(excavator_tile['icon'], 'img/equipment/excavator-yellow.png')
+
     def test_mining_master_screen_renders_dispatcher_pult_copy(self):
         response = self.client.get(reverse('mining_master_assignments'))
 
@@ -88,17 +113,116 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertNotContains(response, 'data-mm-panel')
         self.assertEqual(len(response.context['dispatcher_dashboard']['complex_zones']), 9)
 
+    def test_mining_master_desktop_realtime_refresh_uses_rendered_board(self):
+        response = self.client.get(reverse('mining_master_assignments'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'function isElementRendered(node)')
+        self.assertContains(response, 'return isElementRendered(document.querySelector(".dispatcher-board"));')
+        self.assertContains(response, 'function isMiningMasterMobilePage()')
+        self.assertContains(response, 'function captureDispatcherDesktopState(currentBoard)')
+        self.assertContains(response, 'function restoreDispatcherDesktopState(freshBoard, state)')
+        self.assertContains(response, 'function sortDesktopEquipmentList')
+        self.assertContains(response, 'function compareDesktopEquipmentTiles')
+        self.assertContains(response, 'function refreshDesktopBoardAfterStructuralAction')
+        self.assertContains(response, 'window.initAppConfirmForms')
+        self.assertContains(response, 'window.initDispatcherThemeControls')
+        self.assertContains(response, 'window.initDispatcherRadialClocks')
+        self.assertContains(response, 'detailLayer.dataset.gdActiveCardId')
+        self.assertContains(response, 'dispatcherIncomingRefreshQueueGraceMs')
+        self.assertContains(response, 'isDispatcherSyncQueueBlockingRefresh')
+        self.assertNotContains(response, 'return Boolean(document.querySelector(".dispatcher-board")) && !document.querySelector(".mm-mobile-shell");')
+
     def test_mining_master_mobile_shell_renders_open_shift_status(self):
         response = self.client.get(reverse('mining_master_assignments'))
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'mm-mobile-shell')
         self.assertContains(response, 'is-shift-open')
+        self.assertContains(response, 'data-mm-mobile-readonly="false"')
         self.assertContains(response, 'mm-mobile-plan-ring')
         self.assertContains(response, 'Горный мастер')
         self.assertContains(response, 'Горный М.Т.')
         self.assertNotContains(response, 'mm-mobile-clock')
         self.assertNotContains(response, 'mm-mobile-icon-button')
+
+    def test_mining_master_mobile_complex_status_chip_uses_downtime_reason_label(self):
+        reason = DowntimeReason.objects.create(
+            name='Заправка экскаватора',
+            short_label='Заправка',
+            equipment_type=self.excavator.equipment_type,
+            is_critical=False,
+        )
+        DowntimeEvent.objects.create(
+            equipment=self.excavator,
+            reason=reason,
+            started_at=timezone.now(),
+        )
+
+        response = self.client.get(reverse('mining_master_assignments'))
+        mobile_zones = [
+            zone
+            for zone in response.context['dispatcher_dashboard']['mobile_complex_zones']
+            if not zone.get('is_empty')
+        ]
+        complex_card = next(zone for zone in mobile_zones if zone['id'] == 'K-1')
+
+        self.assertEqual(complex_card['status_key'], 'yellow')
+        self.assertEqual(complex_card['equipment_state_code'], 'waiting')
+        self.assertEqual(complex_card['status_label'], 'Заправка')
+        self.assertContains(response, 'Заправка')
+
+    def test_mining_master_desktop_complex_status_chip_uses_downtime_reason_label(self):
+        reason = DowntimeReason.objects.create(
+            name='БВР тест Горного мастера',
+            short_label='БВР',
+            equipment_type=self.excavator.equipment_type,
+            equipment_state=self.waiting_state,
+            is_critical=False,
+        )
+        DowntimeEvent.objects.create(
+            equipment=self.excavator,
+            reason=reason,
+            started_at=timezone.now(),
+        )
+
+        response = self.client.get(reverse('mining_master_assignments'))
+        complex_card = next(
+            zone
+            for zone in response.context['dispatcher_dashboard']['complex_zones']
+            if zone.get('id') == 'K-1'
+        )
+
+        self.assertEqual(complex_card['status_key'], 'yellow')
+        self.assertEqual(complex_card['equipment_state_code'], 'waiting')
+        self.assertEqual(complex_card['status_label'], 'БВР')
+        self.assertContains(response, '<span class="complex-state-chip">БВР</span>', html=True)
+
+    def test_mining_master_desktop_complex_status_chip_preserves_server_color_from_reason_state(self):
+        reason = DowntimeReason.objects.create(
+            name='ТО тест Горного мастера',
+            short_label='ТО',
+            equipment_type=self.excavator.equipment_type,
+            equipment_state=self.maintenance_state,
+            is_critical=False,
+        )
+        DowntimeEvent.objects.create(
+            equipment=self.excavator,
+            reason=reason,
+            started_at=timezone.now(),
+        )
+
+        response = self.client.get(reverse('mining_master_assignments'))
+        complex_card = next(
+            zone
+            for zone in response.context['dispatcher_dashboard']['complex_zones']
+            if zone.get('id') == 'K-1'
+        )
+
+        self.assertEqual(complex_card['status_key'], 'orange')
+        self.assertEqual(complex_card['equipment_state_code'], 'maintenance')
+        self.assertEqual(complex_card['status_label'], 'ТО')
+        self.assertContains(response, '<span class="complex-state-chip">ТО</span>', html=True)
 
     def test_mining_master_mobile_shell_includes_pwa_install_metadata(self):
         response = self.client.get(reverse('mining_master_assignments'))
@@ -110,6 +234,21 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertContains(response, 'apple-mobile-web-app-capable')
         self.assertContains(response, 'apple-touch-icon')
         self.assertContains(response, '/mining-master-sw.js')
+        self.assertContains(response, 'data-mm-pwa-update-modal')
+        self.assertContains(response, 'data-mm-pwa-current-shell-version')
+        self.assertContains(response, 'data-mm-pwa-update-nav-target')
+        self.assertContains(response, 'data-mm-pwa-update-badge')
+        self.assertContains(response, 'setMiningMasterUpdateButtonsAttention')
+        self.assertContains(response, 'Обновить приложение Горного мастера')
+        self.assertContains(response, 'miningMasterUpdateCheckIntervalMs')
+        self.assertContains(response, 'checkMiningMasterPwaUpdateSilently')
+        self.assertContains(response, 'Установлена последняя версия приложения')
+        self.assertContains(response, 'mining-master-mobile-shell-v97')
+        self.assertContains(response, '"trip_changed"')
+        self.assertContains(
+            response,
+            'querySelectorAll("[data-mm-mobile-panel=\'trucks\'] .mm-mobile-truck-card[data-equipment-card-id]").forEach(bindEquipmentCardTrigger)'
+        )
 
     def test_login_screen_includes_mining_master_pwa_install_metadata(self):
         response = self.client.get('/')
@@ -143,10 +282,16 @@ class MiningMasterAssignmentsViewTests(TestCase):
         script = response.content.decode('utf-8')
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'mining-master-mobile-shell-v59')
+        self.assertContains(response, 'mining-master-mobile-shell-v97')
         self.assertIn(reverse('mining_master_manifest'), script)
+        self.assertIn('/static/js/realtime-client.js', script)
+        self.assertIn('ignoreSearch: true', script)
+        self.assertIn('request.headers.get("X-Requested-With") === "XMLHttpRequest"', script)
+        self.assertIn('networkOnly(request)', script)
         self.assertIn('/static/img/pwa/mining-master-192.png', script)
         self.assertIn('/static/img/pwa/mining-master-maskable-512.png', script)
+        self.assertIn('SKIP_WAITING', script)
+        self.assertIn('GET_VERSION', script)
 
     def test_mining_master_mobile_shell_renders_closed_shift_status(self):
         self.shift.closed_at = timezone.now()
@@ -158,8 +303,40 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'mm-mobile-shell')
         self.assertContains(response, 'is-shift-closed')
+        self.assertContains(response, 'data-mm-mobile-readonly="true"')
         self.assertContains(response, 'mm-mobile-plan-ring')
         self.assertNotContains(response, 'is-shift-open')
+
+    def test_mining_master_mobile_shell_is_readonly_when_other_master_shift_blocks_work(self):
+        self.shift.closed_at = timezone.now()
+        self.shift.closed_by = self.master
+        self.shift.save(update_fields=['closed_at', 'closed_by'])
+        other_master = Employee.objects.create(
+            full_name='Другой Горный Мастер',
+            phone='79000000401',
+            is_active=True,
+        )
+        EmployeeAccess.objects.create(
+            employee=other_master,
+            role=self.master_role,
+            access_code='400001',
+            is_active=True,
+            status=EmployeeAccess.Status.ACTIVATED,
+        )
+        EmployeeShift.objects.create(
+            employee=other_master,
+            shift_type='day',
+            opened_at=timezone.now(),
+            opened_by=other_master,
+        )
+
+        response = self.client.get(reverse('mining_master_assignments'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'mm-mobile-shell')
+        self.assertContains(response, 'is-shift-blocked')
+        self.assertContains(response, 'is-readonly')
+        self.assertContains(response, 'data-mm-mobile-readonly="true"')
 
     def test_truck_tiles_keep_unique_visible_numbers(self):
         response = self.client.get(reverse('mining_master_assignments'))
@@ -187,6 +364,198 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertIn('101', complex_numbers)
         self.assertNotIn('101', garage_numbers)
         self.assertIn('102', garage_numbers)
+
+    def test_active_trip_sets_truck_status_to_loaded_waiting_unload(self):
+        rock_type = RockType.objects.create(name='Щебень')
+        dump_point = DumpPoint.objects.create(name='Накопитель 1')
+        Trip.objects.create(
+            truck=self.assigned_truck,
+            excavator=self.excavator,
+            rock_type=rock_type,
+            dump_point=dump_point,
+            status=TripStatus.ACTIVE,
+        )
+
+        response = self.client.get(reverse('mining_master_assignments'))
+
+        dashboard = response.context['dispatcher_dashboard']
+        complex_zone = next(
+            zone for zone in dashboard['complex_zones']
+            if str(zone.get('equipment_card_id')) == str(self.excavator.id)
+        )
+        active_tiles = complex_zone.get('active_truck_tiles', [])
+        truck_tile = next(
+            tile for tile in active_tiles
+            if str(tile.get('card_id')) == str(self.assigned_truck.id)
+        )
+
+        self.assertEqual(truck_tile.get('status'), 'green')
+        self.assertEqual(truck_tile.get('label'), 'На разгрузку')
+        self.assertEqual(truck_tile.get('equipment_state_code'), 'loaded_waiting_unload')
+
+    def test_accepted_truck_without_trip_is_assigned_blue_in_complex(self):
+        HaulAssignment.objects.filter(truck=self.assigned_truck).update(
+            status=AssignmentStatus.ACCEPTED,
+            accepted_at=timezone.now(),
+        )
+
+        response = self.client.get(reverse('mining_master_assignments'))
+
+        dashboard = response.context['dispatcher_dashboard']
+        complex_zone = next(
+            zone for zone in dashboard['complex_zones']
+            if str(zone.get('equipment_card_id')) == str(self.excavator.id)
+        )
+        truck_tile = next(
+            tile for tile in complex_zone.get('active_truck_tiles', [])
+            if str(tile.get('card_id')) == str(self.assigned_truck.id)
+        )
+
+        self.assertEqual(truck_tile.get('status'), 'blue')
+        self.assertEqual(truck_tile.get('equipment_state_code'), 'assigned')
+        self.assertEqual(truck_tile.get('label'), 'Назначена')
+
+    def test_mobile_truck_garage_shows_server_truck_states(self):
+        truck_type = self.free_truck.equipment_type
+        truck_model = self.free_truck.model
+        trip_truck = Equipment.objects.create(
+            equipment_type=truck_type,
+            model=truck_model,
+            garage_number='104',
+            is_active=True,
+        )
+        broken_truck = Equipment.objects.create(
+            equipment_type=truck_type,
+            model=truck_model,
+            garage_number='103',
+            is_active=True,
+        )
+        reason = DowntimeReason.objects.create(name='Авария самосвала', is_critical=True)
+        DowntimeEvent.objects.create(
+            equipment=broken_truck,
+            employee=self.master,
+            reason=reason,
+            started_at=timezone.now(),
+        )
+        rock_type = RockType.objects.create(name='Щебень рейс')
+        dump_point = DumpPoint.objects.create(name='Накопитель рейс')
+        Trip.objects.create(
+            truck=self.assigned_truck,
+            excavator=self.excavator,
+            rock_type=rock_type,
+            dump_point=dump_point,
+            status=TripStatus.LOADED_WAITING_UNLOAD,
+        )
+        Trip.objects.create(
+            truck=trip_truck,
+            excavator=self.excavator,
+            rock_type=rock_type,
+            dump_point=dump_point,
+            status=TripStatus.LOADED_WAITING_UNLOAD,
+        )
+
+        response = self.client.get(reverse('mining_master_assignments'))
+
+        dashboard = response.context['dispatcher_dashboard']
+        mobile_tiles = {
+            str(tile['name']): tile
+            for tile in dashboard['mobile_truck_garage_tiles']
+        }
+
+        self.assertNotIn('101', mobile_tiles)
+        self.assertEqual(mobile_tiles['102']['status'], 'yellow')
+        self.assertEqual(mobile_tiles['102']['equipment_state_code'], 'free')
+        self.assertEqual(mobile_tiles['102']['label'], 'Свободен')
+        self.assertEqual(mobile_tiles['103']['status'], 'red')
+        self.assertEqual(mobile_tiles['103']['equipment_state_code'], 'breakdown')
+        self.assertEqual(mobile_tiles['103']['label'], 'Поломка')
+        self.assertEqual(mobile_tiles['104']['status'], 'green')
+        self.assertEqual(mobile_tiles['104']['equipment_state_code'], 'loaded_waiting_unload')
+        self.assertEqual(mobile_tiles['104']['label'], 'На разгрузку')
+
+    def test_mobile_complexes_are_sorted_by_status_priority_then_number(self):
+        excavator_type = self.excavator.equipment_type
+        model = self.excavator.model
+        excavator_10 = Equipment.objects.create(
+            equipment_type=excavator_type,
+            model=model,
+            garage_number='Э-10',
+            is_active=True,
+        )
+        excavator_3 = Equipment.objects.create(
+            equipment_type=excavator_type,
+            model=model,
+            garage_number='Э-3',
+            is_active=True,
+        )
+        excavator_4 = Equipment.objects.create(
+            equipment_type=excavator_type,
+            model=model,
+            garage_number='Э-4',
+            is_active=True,
+        )
+        ExcavatorPlacement.objects.create(excavator=excavator_10, zone=ExcavatorPlacement.Zone.ACTIVE)
+        ExcavatorPlacement.objects.create(excavator=excavator_3, zone=ExcavatorPlacement.Zone.ACTIVE)
+        ExcavatorPlacement.objects.create(excavator=excavator_4, zone=ExcavatorPlacement.Zone.ACTIVE)
+        critical_downtime_reason = DowntimeReason.objects.create(
+            name='Аварийная остановка',
+            equipment_type=excavator_type,
+            is_critical=True,
+        )
+        warning_downtime_reason = DowntimeReason.objects.create(
+            name='Перегон',
+            equipment_type=excavator_type,
+            is_critical=False,
+        )
+        DowntimeEvent.objects.create(
+            equipment=excavator_10,
+            employee=self.master,
+            reason=critical_downtime_reason,
+            started_at=timezone.now(),
+        )
+        DowntimeEvent.objects.create(
+            equipment=excavator_3,
+            employee=self.master,
+            reason=warning_downtime_reason,
+            started_at=timezone.now(),
+        )
+        pending_truck_type = self.free_truck.equipment_type
+        pending_truck_model = self.free_truck.model
+        for number, excavator in (('103', excavator_3), ('104', excavator_4)):
+            truck = Equipment.objects.create(
+                equipment_type=pending_truck_type,
+                model=pending_truck_model,
+                garage_number=number,
+                is_active=True,
+            )
+            HaulAssignment.objects.create(
+                truck=truck,
+                excavator=excavator,
+                assigned_by=self.master,
+                status=AssignmentStatus.PENDING,
+            )
+
+        response = self.client.get(reverse('mining_master_assignments'))
+
+        mobile_zones = [
+            zone
+            for zone in response.context['dispatcher_dashboard']['mobile_complex_zones']
+            if not zone.get('is_empty')
+        ]
+        self.assertEqual(
+            [(zone['id'], zone['status_key']) for zone in mobile_zones],
+            [
+                ('K-10', 'red'),
+                ('K-1', 'yellow'),
+                ('K-3', 'yellow'),
+                ('K-4', 'yellow'),
+                ('K-2', 'blue'),
+            ],
+        )
+        self.assertEqual(
+            next(zone for zone in mobile_zones if zone['id'] == 'K-3')['equipment_state_code'],
+            'waiting',
+        )
 
     def test_closed_mining_master_shift_uses_dispatcher_header_defaults(self):
         self.shift.closed_at = timezone.now()

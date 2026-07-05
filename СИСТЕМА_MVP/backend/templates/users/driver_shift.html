@@ -1,100 +1,3505 @@
 {% extends "base.html" %}
+{% load static l10n %}
 
-{% block title %}Смена водителя{% endblock %}
+{% block title %}Работа водителя{% endblock %}
+{% block body_class %}driver-mobile-screen{% endblock %}
+{% block realtime_screen %}driver-shift{% endblock %}
+{% block realtime_mode %}custom{% endblock %}
+{% block realtime_role %}driver{% endblock %}
+{% block extra_head %}
+<meta name="theme-color" content="#030708">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Самосвал">
+<link rel="manifest" href="{% url 'driver_manifest' %}">
+<link rel="apple-touch-icon" href="{% static 'img/pwa/mining-master-180.png' %}">
+<style>
+@media (max-width: 520px) and (max-height: 800px) {
+    body.driver-mobile-screen {
+        min-height: 100dvh !important;
+        overflow: hidden !important;
+    }
+
+    body.driver-mobile-screen .driver-shell {
+        width: min(100vw, 430px) !important;
+        height: 100dvh !important;
+        min-height: 0 !important;
+        grid-template-rows: 132px minmax(0, 1fr) 94px !important;
+        gap: 0 !important;
+        padding: 14px 14px 0 !important;
+        margin: 0 auto !important;
+        overflow: hidden !important;
+    }
+
+    body.driver-mobile-screen .driver-header {
+        height: 132px !important;
+        min-height: 0 !important;
+        padding: 17px 0 12px !important;
+    }
+
+    body.driver-mobile-screen .driver-header > div {
+        width: calc(100% - 100px) !important;
+        min-width: 0 !important;
+    }
+
+    body.driver-mobile-screen .driver-header h1 {
+        max-width: 100% !important;
+        margin: 8px 0 10px !important;
+        font-size: clamp(28px, 8.1vw, 32px) !important;
+        line-height: .92 !important;
+    }
+
+    body.driver-mobile-screen .driver-header p {
+        font-size: 14px !important;
+        line-height: 1.05 !important;
+    }
+
+    body.driver-mobile-screen .driver-online {
+        top: 15px !important;
+        right: 3px !important;
+    }
+
+    body.driver-mobile-screen .driver-online strong {
+        width: 56px !important;
+        height: 56px !important;
+    }
+
+    body.driver-mobile-screen .driver-messages {
+        position: absolute !important;
+        top: 12px !important;
+        left: 14px !important;
+        right: 14px !important;
+        z-index: 40 !important;
+        display: grid !important;
+        gap: 8px !important;
+        pointer-events: none !important;
+    }
+
+    body.driver-mobile-screen .driver-messages .message {
+        min-height: 0 !important;
+        padding: 10px 12px !important;
+        border-radius: 7px !important;
+        font-size: 14px !important;
+        line-height: 1.2 !important;
+        box-shadow: 0 16px 34px rgba(0, 0, 0, .34) !important;
+    }
+
+    body.driver-mobile-screen .driver-shell,
+    body.driver-mobile-screen .driver-shell *:not(input):not(textarea):not(select):not(option),
+    body.driver-mobile-screen .driver-shell *::before,
+    body.driver-mobile-screen .driver-shell *::after {
+        -webkit-tap-highlight-color: transparent !important;
+        -webkit-touch-callout: none !important;
+        -webkit-user-select: none !important;
+        user-select: none !important;
+    }
+
+    body.driver-mobile-screen .driver-shell ::selection {
+        background: transparent !important;
+        color: inherit !important;
+    }
+
+    body.driver-mobile-screen .driver-panel[data-driver-tab-panel="work"].is-active {
+        display: grid !important;
+        grid-template-rows: auto auto auto !important;
+        align-content: start !important;
+        padding-bottom: 0 !important;
+        overflow: hidden !important;
+    }
+
+    body.driver-mobile-screen .driver-panel[data-driver-tab-panel="downtimes"].is-active {
+        display: grid !important;
+        grid-template-rows: auto minmax(0, 1fr) auto !important;
+        gap: clamp(8px, 2cqw, 12px) !important;
+        align-content: start !important;
+        padding-bottom: 0 !important;
+        overflow: hidden !important;
+    }
+
+    body.driver-mobile-screen .driver-downtime-card {
+        grid-row: 1 !important;
+        position: relative !important;
+        z-index: 1 !important;
+        margin: 0 !important;
+    }
+
+    body.driver-mobile-screen .driver-downtime-list {
+        grid-row: 2 !important;
+        min-height: 0 !important;
+        overflow-y: auto !important;
+        overscroll-behavior: contain !important;
+        scrollbar-width: none !important;
+    }
+
+    body.driver-mobile-screen .driver-downtime-list::-webkit-scrollbar {
+        display: none !important;
+    }
+
+    body.driver-mobile-screen .driver-downtime-close {
+        grid-row: 3 !important;
+        margin-top: 0 !important;
+    }
+
+    body.driver-mobile-screen .driver-downtime-list {
+        display: grid !important;
+        grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+        gap: 8px !important;
+        align-content: start !important;
+        padding-bottom: 12px !important;
+    }
+
+    body.driver-mobile-screen .driver-downtime-list button {
+        min-height: 92px !important;
+        aspect-ratio: 1 / .92 !important;
+        display: grid !important;
+        place-items: center !important;
+        padding: 7px 6px !important;
+        text-align: center !important;
+    }
+
+    body.driver-mobile-screen .driver-downtime-list button span {
+        font-size: clamp(15px, 4.1vw, 19px) !important;
+        line-height: .96 !important;
+        white-space: normal !important;
+        overflow-wrap: anywhere !important;
+        hyphens: auto !important;
+    }
+
+    body.driver-mobile-screen .driver-downtime-list button strong {
+        display: none !important;
+    }
+
+    body.driver-mobile-screen .driver-work-grid {
+        gap: 10px !important;
+        margin: 13px 0 0 !important;
+    }
+
+    body.driver-mobile-screen .driver-small-card {
+        min-height: 74px !important;
+        padding: 16px 12px 10px !important;
+    }
+
+    body.driver-mobile-screen .driver-small-card strong {
+        max-width: 78px !important;
+        margin-top: 13px !important;
+        font-size: 20px !important;
+        line-height: .9 !important;
+        position: relative !important;
+        z-index: 1 !important;
+    }
+
+    body.driver-mobile-screen .driver-card-icon {
+        right: 12px !important;
+        bottom: 10px !important;
+        width: 42px !important;
+        height: auto !important;
+        max-width: 42px !important;
+        max-height: 32px !important;
+        object-fit: contain !important;
+    }
+
+    body.driver-mobile-screen .driver-point-card.is-action {
+        cursor: pointer !important;
+    }
+
+    body.driver-mobile-screen .driver-point-card.is-action b {
+        position: absolute !important;
+        right: 13px !important;
+        top: 50% !important;
+        transform: translateY(-50%) !important;
+        color: #9cff31 !important;
+        font-size: 31px !important;
+        font-weight: 900 !important;
+        line-height: 1 !important;
+    }
+
+    body.driver-mobile-screen .driver-status-ring {
+        --driver-ring-accent: #9cff31 !important;
+        --driver-ring-track: rgba(88, 102, 111, .62) !important;
+        --driver-ring-text: #9cff31 !important;
+        position: relative !important;
+        width: min(82vw, 296px) !important;
+        height: auto !important;
+        aspect-ratio: 1 !important;
+        margin: 18px auto 0 !important;
+        align-self: start !important;
+        display: grid !important;
+        place-items: center !important;
+        border: 0 !important;
+        border-radius: 50% !important;
+        padding: 0 !important;
+        background:
+            radial-gradient(circle, transparent 0 58%, rgba(126, 145, 153, .16) 58.4% 61.2%, transparent 61.5%),
+            conic-gradient(from 0deg, var(--driver-ring-accent) var(--driver-ring), var(--driver-ring-track) 0) !important;
+        box-shadow:
+            0 0 34px rgba(101, 219, 57, .10),
+            inset 0 0 0 25px rgba(3, 12, 18, .90) !important;
+        color: inherit !important;
+        font: inherit !important;
+        outline: none !important;
+        -webkit-appearance: none !important;
+        appearance: none !important;
+        overflow: visible !important;
+    }
+
+    body.driver-mobile-screen .driver-status-ring:focus,
+    body.driver-mobile-screen .driver-status-ring:focus-visible,
+    body.driver-mobile-screen .driver-status-ring:active {
+        outline: none !important;
+    }
+
+    body.driver-mobile-screen .driver-status-ring.is-empty {
+        --driver-ring-accent: rgba(174, 188, 195, .76) !important;
+        --driver-ring-track: rgba(65, 80, 89, .62) !important;
+        --driver-ring-text: rgba(174, 188, 195, .78) !important;
+        filter: none !important;
+        box-shadow:
+            0 0 28px rgba(190, 210, 216, .08),
+            inset 0 0 0 25px rgba(3, 12, 18, .90) !important;
+    }
+
+    body.driver-mobile-screen .driver-status-ring::before {
+        content: "" !important;
+        position: absolute !important;
+        inset: 0 !important;
+        z-index: 1 !important;
+        border-radius: 50% !important;
+        background:
+            repeating-conic-gradient(from 0deg, rgba(168, 185, 193, .46) 0deg .52deg, transparent .6deg 6deg),
+            repeating-conic-gradient(from 0deg, rgba(186, 202, 209, .70) 0deg 1.25deg, transparent 1.35deg 45deg) !important;
+        -webkit-mask: radial-gradient(circle, transparent 0 58%, #000 58.4% 94%, transparent 94.4%) !important;
+        mask: radial-gradient(circle, transparent 0 58%, #000 58.4% 94%, transparent 94.4%) !important;
+        pointer-events: none !important;
+    }
+
+    body.driver-mobile-screen .driver-status-ring::after {
+        content: "" !important;
+        position: absolute !important;
+        inset: 14% !important;
+        z-index: 0 !important;
+        border: 1px solid rgba(196, 211, 217, .36) !important;
+        border-radius: 50% !important;
+        background: radial-gradient(circle at 50% 44%, #3b4f59 0%, #2a3f49 56%, #152832 100%) !important;
+        box-shadow:
+            0 0 18px rgba(190, 210, 216, .22),
+            inset 0 0 28px rgba(210, 226, 230, .08) !important;
+        pointer-events: none !important;
+    }
+
+    body.driver-mobile-screen .driver-hold-progress {
+        position: absolute !important;
+        inset: 0 !important;
+        z-index: 3 !important;
+        border-radius: 50% !important;
+        background: conic-gradient(from 0deg, rgba(156, 255, 49, .96) var(--driver-hold), transparent 0) !important;
+        -webkit-mask: radial-gradient(circle, transparent 0 69%, #000 69.4% 86.8%, transparent 87.2%) !important;
+        mask: radial-gradient(circle, transparent 0 69%, #000 69.4% 86.8%, transparent 87.2%) !important;
+        opacity: 0 !important;
+        pointer-events: none !important;
+        filter: drop-shadow(0 0 8px rgba(156, 255, 49, .5)) !important;
+    }
+
+    body.driver-mobile-screen .driver-status-ring.is-holding .driver-hold-progress,
+    body.driver-mobile-screen .driver-status-ring.is-pending .driver-hold-progress {
+        opacity: 1 !important;
+    }
+
+    body.driver-mobile-screen .driver-ring-inner {
+        position: absolute !important;
+        inset: 14% !important;
+        z-index: 4 !important;
+        width: auto !important;
+        height: auto !important;
+        display: grid !important;
+        place-items: center !important;
+        align-content: center !important;
+        gap: 12px !important;
+        border: 0 !important;
+        border-radius: 50% !important;
+        background: transparent !important;
+        box-shadow: none !important;
+        text-align: center !important;
+    }
+
+    body.driver-mobile-screen .driver-ring-inner span {
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        gap: 13px !important;
+        color: rgba(175, 189, 196, .74) !important;
+        font-size: 16px !important;
+        font-weight: 700 !important;
+        line-height: 1 !important;
+    }
+
+    body.driver-mobile-screen .driver-ring-inner span::before,
+    body.driver-mobile-screen .driver-ring-inner span::after {
+        content: "" !important;
+        width: 34px !important;
+        height: 1px !important;
+        background: rgba(178, 191, 198, .27) !important;
+    }
+
+    body.driver-mobile-screen .driver-ring-inner strong {
+        display: block !important;
+        max-width: 220px !important;
+        overflow: hidden !important;
+        color: var(--driver-ring-text) !important;
+        font-size: clamp(34px, 9.6vw, 40px) !important;
+        line-height: .86 !important;
+        font-weight: 900 !important;
+        letter-spacing: 0 !important;
+        text-align: center !important;
+        text-transform: uppercase !important;
+        text-shadow: none !important;
+        white-space: nowrap !important;
+    }
+
+    body.driver-mobile-screen .driver-status-ring.is-loaded .driver-ring-inner strong {
+        width: 178px !important;
+        max-width: calc(100% - 18px) !important;
+        font-size: 22px !important;
+        transform: scaleX(.94) !important;
+        transform-origin: center center !important;
+    }
+
+    body.driver-mobile-screen .driver-status-ring.is-attention .driver-ring-inner strong {
+        width: 188px !important;
+        max-width: calc(100% - 14px) !important;
+        overflow: hidden !important;
+        color: #ffd33d !important;
+        font-size: 23px !important;
+        white-space: nowrap !important;
+        transform: scaleX(.92) !important;
+        transform-origin: center center !important;
+    }
+
+    body.driver-mobile-screen .driver-ring-inner em {
+        max-width: 148px !important;
+        color: rgba(174, 188, 195, .64) !important;
+        font-size: 9px !important;
+        font-style: normal !important;
+        font-weight: 700 !important;
+        letter-spacing: .04em !important;
+        line-height: 1.1 !important;
+        text-transform: uppercase !important;
+    }
+
+    body.driver-mobile-screen .driver-work-caption {
+        display: grid !important;
+        grid-template-columns: minmax(42px, 1fr) auto minmax(42px, 1fr) !important;
+        align-items: center !important;
+        gap: 14px !important;
+        margin: 18px 0 0 !important;
+        color: var(--driver-ring-text, #9cff31) !important;
+        font-size: 18px !important;
+        font-weight: 800 !important;
+        letter-spacing: .08em !important;
+        line-height: 1 !important;
+        text-align: center !important;
+        text-transform: uppercase !important;
+    }
+
+    body.driver-mobile-screen .driver-work-caption::before,
+    body.driver-mobile-screen .driver-work-caption::after {
+        content: "" !important;
+        height: 1px !important;
+        background: rgba(154, 173, 180, .24) !important;
+    }
+
+    body.driver-mobile-screen .driver-work-caption.is-muted {
+        color: rgba(174, 188, 195, .66) !important;
+    }
+
+    body.driver-mobile-screen .driver-unload-tile strong {
+        display: block !important;
+        width: 100% !important;
+        font-size: clamp(20px, 6.1vw, 32px) !important;
+        line-height: 1.05 !important;
+        overflow-wrap: break-word !important;
+        word-break: normal !important;
+        text-wrap: wrap !important;
+    }
+
+    body.driver-mobile-screen .driver-unload-tile strong.is-long {
+        font-size: clamp(18px, 5.4vw, 27px) !important;
+    }
+
+    body.driver-mobile-screen .driver-unload-tile strong.is-extra-long {
+        width: 140px !important;
+        max-width: 140px !important;
+        font-size: clamp(14px, 4.15vw, 19px) !important;
+        line-height: 1.1 !important;
+    }
+
+    body.driver-mobile-screen .driver-muted-action,
+    body.driver-mobile-screen .driver-trip-action .driver-primary-action {
+        min-height: 25px !important;
+        padding: 0 70px !important;
+        font-size: 13px !important;
+    }
+
+    body.driver-mobile-screen .driver-bottom-nav {
+        width: calc(100% + 28px) !important;
+        height: 94px !important;
+        margin: 0 -14px !important;
+        border: 0 !important;
+        border-top: 1px solid rgba(128, 151, 160, .28) !important;
+        border-radius: 0 !important;
+        background: rgba(5, 16, 23, .88) !important;
+        overflow: hidden !important;
+    }
+
+    body.driver-mobile-screen .driver-bottom-nav .mm-mobile-nav-item {
+        gap: 8px !important;
+        padding: 9px 0 10px !important;
+        border: 0 !important;
+        background: transparent !important;
+        font-size: 10px !important;
+    }
+
+    body.driver-mobile-screen .driver-bottom-nav .driver-nav-icon {
+        width: 28px !important;
+        height: 28px !important;
+    }
+}
+
+@media (max-width: 370px) and (max-height: 800px) {
+    body.driver-mobile-screen .driver-shell {
+        grid-template-rows: 128px minmax(0, 1fr) 94px !important;
+        padding: 14px 16px 0 !important;
+    }
+
+    body.driver-mobile-screen .driver-header {
+        height: 128px !important;
+        padding-top: 18px !important;
+    }
+
+    body.driver-mobile-screen .driver-header > div {
+        width: calc(100% - 76px) !important;
+    }
+
+    body.driver-mobile-screen .driver-header h1 {
+        max-width: none !important;
+        white-space: nowrap !important;
+        font-size: clamp(25px, 7.25vw, 27px) !important;
+        line-height: .96 !important;
+    }
+
+    body.driver-mobile-screen .driver-online {
+        right: -1px !important;
+    }
+
+    body.driver-mobile-screen .driver-online strong {
+        width: 54px !important;
+        height: 54px !important;
+    }
+
+    body.driver-mobile-screen .driver-work-grid {
+        margin-top: 11px !important;
+    }
+
+    body.driver-mobile-screen .driver-status-ring {
+        width: 276px !important;
+        margin-top: 18px !important;
+        box-shadow:
+            0 0 28px rgba(101, 219, 57, .10),
+            inset 0 0 0 22px rgba(3, 12, 18, .90) !important;
+    }
+
+    body.driver-mobile-screen .driver-ring-inner strong {
+        font-size: clamp(35px, 10vw, 40px) !important;
+    }
+
+    body.driver-mobile-screen .driver-status-ring.is-loaded .driver-ring-inner strong {
+        width: 178px !important;
+        max-width: calc(100% - 18px) !important;
+        font-size: 22px !important;
+        transform: scaleX(.94) !important;
+        transform-origin: center center !important;
+    }
+
+    body.driver-mobile-screen .driver-status-ring.is-attention .driver-ring-inner strong {
+        width: 188px !important;
+        max-width: calc(100% - 14px) !important;
+        font-size: 23px !important;
+        transform: scaleX(.92) !important;
+        transform-origin: center center !important;
+    }
+
+    body.driver-mobile-screen .driver-bottom-nav {
+        width: calc(100% + 32px) !important;
+        margin: 0 -16px !important;
+    }
+
+    body.driver-mobile-screen .driver-panel[data-driver-tab-panel="work"].is-active {
+        grid-template-rows: auto auto auto !important;
+        align-content: start !important;
+    }
+}
+</style>
+<style>
+@media (max-width: 520px) and (max-height: 800px) {
+    body.driver-mobile-screen .driver-shell {
+        --driver-edge: clamp(12px, 4vw, 16px) !important;
+        --driver-header-h: clamp(118px, 17dvh, 132px) !important;
+        --driver-nav-h: clamp(84px, 12.8dvh, 94px) !important;
+        --driver-ring-size: clamp(238px, 76vw, 284px) !important;
+        grid-template-rows: var(--driver-header-h) minmax(0, 1fr) var(--driver-nav-h) !important;
+        padding: clamp(10px, 2.2dvh, 14px) var(--driver-edge) 0 !important;
+    }
+
+    body.driver-mobile-screen .driver-header {
+        height: var(--driver-header-h) !important;
+        padding: clamp(16px, 2.6dvh, 18px) 0 clamp(8px, 1.6dvh, 12px) !important;
+    }
+
+    body.driver-mobile-screen .driver-header > div {
+        width: calc(100% - clamp(72px, 21vw, 86px)) !important;
+    }
+
+    body.driver-mobile-screen .driver-header h1 {
+        font-size: clamp(25px, 7.6vw, 32px) !important;
+        white-space: nowrap !important;
+    }
+
+    body.driver-mobile-screen .driver-status-ring {
+        width: min(var(--driver-ring-size), 100%) !important;
+        max-width: calc(100dvh - var(--driver-header-h) - var(--driver-nav-h) - 94px) !important;
+        margin-top: clamp(10px, 2.4dvh, 18px) !important;
+    }
+
+    body.driver-mobile-screen .driver-ring-inner strong {
+        font-size: clamp(34px, 10.5vw, 41px) !important;
+    }
+
+    body.driver-mobile-screen .driver-status-ring.is-loaded .driver-ring-inner strong {
+        width: 178px !important;
+        max-width: calc(100% - 18px) !important;
+        font-size: 22px !important;
+        transform: scaleX(.94) !important;
+        transform-origin: center center !important;
+    }
+
+    body.driver-mobile-screen .driver-status-ring.is-attention .driver-ring-inner strong {
+        width: 188px !important;
+        max-width: calc(100% - 14px) !important;
+        font-size: 23px !important;
+        transform: scaleX(.92) !important;
+        transform-origin: center center !important;
+    }
+
+    body.driver-mobile-screen .driver-bottom-nav {
+        width: calc(100% + (var(--driver-edge) * 2)) !important;
+        height: var(--driver-nav-h) !important;
+        margin: 0 calc(var(--driver-edge) * -1) !important;
+    }
+}
+</style>
+<style>
+body.driver-mobile-screen .driver-panel[data-driver-tab-panel="downtimes"].is-active {
+    display: grid !important;
+    grid-template-rows: auto minmax(0, 1fr) auto !important;
+    gap: clamp(8px, 2cqw, 12px) !important;
+    align-content: start !important;
+    overflow: hidden !important;
+}
+
+body.driver-mobile-screen .driver-downtime-card {
+    grid-row: 1 !important;
+    position: relative !important;
+    z-index: 1 !important;
+    margin: 0 !important;
+}
+
+body.driver-mobile-screen .driver-downtime-list {
+    grid-row: 2 !important;
+    min-height: 0 !important;
+    display: grid !important;
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    gap: clamp(7px, 2cqw, 10px) !important;
+    align-content: start !important;
+    padding-bottom: 14px !important;
+    overflow-y: auto !important;
+    overscroll-behavior: contain !important;
+    scrollbar-width: none !important;
+}
+
+body.driver-mobile-screen .driver-downtime-list::-webkit-scrollbar {
+    display: none !important;
+}
+
+body.driver-mobile-screen .driver-downtime-list form {
+    min-width: 0 !important;
+    margin: 0 !important;
+}
+
+body.driver-mobile-screen .driver-downtime-list button {
+    width: 100% !important;
+    min-height: clamp(92px, 26cqw, 132px) !important;
+    aspect-ratio: 1 / .92 !important;
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+    place-items: center !important;
+    align-content: center !important;
+    padding: clamp(6px, 1.7cqw, 10px) !important;
+    text-align: center !important;
+    overflow: hidden !important;
+}
+
+body.driver-mobile-screen .driver-downtime-list button span {
+    max-width: 100% !important;
+    font-size: clamp(15px, 4.1cqw, 24px) !important;
+    line-height: .96 !important;
+    white-space: normal !important;
+    overflow-wrap: anywhere !important;
+    hyphens: auto !important;
+}
+
+body.driver-mobile-screen .driver-downtime-list button strong {
+    display: none !important;
+}
+
+body.driver-mobile-screen .driver-downtime-card {
+    display: grid !important;
+    grid-template-columns: clamp(54px, 15cqw, 74px) minmax(0, 1fr) !important;
+    align-items: center !important;
+    min-height: clamp(86px, 18cqw, 118px) !important;
+    margin: 0 0 clamp(8px, 2cqw, 12px) !important;
+    padding: clamp(9px, 1.8cqw, 14px) !important;
+    border: 2px solid #ffd33d !important;
+    border-radius: 7px !important;
+    background: radial-gradient(circle at 50% 50%, rgba(255, 211, 61, .18), rgba(80, 56, 0, .46)) !important;
+    color: #ffd33d !important;
+    box-shadow: inset 0 0 22px rgba(255, 211, 61, .08), 0 0 14px rgba(255, 211, 61, .14) !important;
+}
+
+body.driver-mobile-screen .driver-downtime-card.status-red {
+    border-color: #ff514c !important;
+    background: radial-gradient(circle at 50% 50%, rgba(255, 81, 76, .2), rgba(76, 21, 18, .52)) !important;
+    color: #ff5a47 !important;
+}
+
+body.driver-mobile-screen .driver-downtime-card.status-orange {
+    border-color: #ff9a36 !important;
+    background: radial-gradient(circle at 50% 50%, rgba(255, 154, 54, .2), rgba(75, 42, 10, .5)) !important;
+    color: #ff9a36 !important;
+}
+
+body.driver-mobile-screen .driver-downtime-state-dot {
+    position: relative !important;
+    width: clamp(44px, 11cqw, 62px) !important;
+    height: clamp(44px, 11cqw, 62px) !important;
+    border: clamp(4px, 1cqw, 6px) solid currentColor !important;
+    border-radius: 50% !important;
+    box-shadow: inset 0 0 16px rgba(255, 255, 255, .08), 0 0 18px currentColor !important;
+}
+
+body.driver-mobile-screen .driver-downtime-state-dot::before {
+    content: "" !important;
+    position: absolute !important;
+    left: 50% !important;
+    top: 50% !important;
+    width: 42% !important;
+    height: 42% !important;
+    border-radius: 50% !important;
+    background: currentColor !important;
+    transform: translate(-50%, -50%) !important;
+}
+
+body.driver-mobile-screen .driver-downtime-state-dot::after {
+    content: "" !important;
+    position: absolute !important;
+    inset: 7px !important;
+    border: 1px solid currentColor !important;
+    border-radius: 50% !important;
+    opacity: .42 !important;
+}
+
+body.driver-mobile-screen .driver-downtime-card.is-active .driver-downtime-state-dot::before {
+    box-shadow: 0 0 16px currentColor !important;
+}
+
+body.driver-mobile-screen .driver-downtime-card strong,
+body.driver-mobile-screen .driver-downtime-card b,
+body.driver-mobile-screen .driver-downtime-card em {
+    display: block !important;
+}
+
+body.driver-mobile-screen .driver-downtime-card strong {
+    font-size: clamp(15px, 3.2cqw, 20px) !important;
+    line-height: 1.05 !important;
+    font-weight: 900 !important;
+    text-transform: uppercase !important;
+}
+
+body.driver-mobile-screen .driver-downtime-card b {
+    font-size: clamp(30px, 6.8cqw, 46px) !important;
+    line-height: .95 !important;
+    font-weight: 900 !important;
+}
+
+body.driver-mobile-screen .driver-downtime-card em {
+    overflow: hidden !important;
+    color: #f8ffe9 !important;
+    font-size: clamp(14px, 3.1cqw, 19px) !important;
+    line-height: 1.08 !important;
+    font-style: normal !important;
+    font-weight: 800 !important;
+    text-overflow: ellipsis !important;
+}
+
+body.driver-mobile-screen .driver-downtime-close.is-disabled,
+body.driver-mobile-screen .driver-downtime-close:disabled {
+    border-color: rgba(143, 161, 171, .22) !important;
+    background: rgba(89, 99, 106, .22) !important;
+    color: rgba(176, 190, 198, .44) !important;
+    box-shadow: none !important;
+    cursor: not-allowed !important;
+    filter: grayscale(.8) saturate(.35) !important;
+    opacity: .62 !important;
+}
+
+body.driver-mobile-screen .driver-downtime-close {
+    grid-row: 3 !important;
+    margin-top: 0 !important;
+}
+</style>
+<style>
+body.driver-mobile-screen {
+    min-height: 100dvh !important;
+    overflow: hidden !important;
+    background: #030708 !important;
+}
+
+body.driver-mobile-screen .driver-shell,
+body.driver-mobile-screen .driver-shell *:not(input):not(textarea):not(select):not(option),
+body.driver-mobile-screen .driver-shell *::before,
+body.driver-mobile-screen .driver-shell *::after {
+    -webkit-tap-highlight-color: transparent !important;
+    -webkit-touch-callout: none !important;
+    -webkit-user-select: none !important;
+    user-select: none !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab {
+    --driver-ref-edge: clamp(28px, 7.2vw, 52px);
+    --driver-ref-nav: clamp(96px, 12dvh, 112px);
+    --driver-ref-ring-size: clamp(244px, 62dvh - 280px, 318px);
+    --driver-ref-green: #93f13c;
+    --driver-ref-cyan: #20d3df;
+    --driver-ref-ink: #f2ffe8;
+    width: min(100vw, 430px) !important;
+    height: 100dvh !important;
+    min-height: 0 !important;
+    margin: 0 auto !important;
+    display: grid !important;
+    grid-template-rows: clamp(178px, 23dvh, 214px) minmax(0, 1fr) var(--driver-ref-nav) !important;
+    gap: 0 !important;
+    padding: 0 var(--driver-ref-edge) !important;
+    overflow: hidden !important;
+    position: relative !important;
+    color: var(--driver-ref-ink) !important;
+    font-family: "Roboto Condensed", "Arial Narrow", "Segoe UI", Arial, sans-serif !important;
+    background:
+        radial-gradient(circle at 82% 7%, rgba(88, 223, 82, .13) 0, rgba(88, 223, 82, .04) 18%, transparent 32%),
+        radial-gradient(circle at 52% 48%, rgba(123, 211, 25, .07) 0, transparent 52%),
+        linear-gradient(180deg, #061016 0%, #03090d 58%, #061117 100%) !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab::before {
+    content: "" !important;
+    position: absolute !important;
+    inset: 0 !important;
+    z-index: 0 !important;
+    pointer-events: none !important;
+    background:
+        linear-gradient(90deg, rgba(255,255,255,.025), transparent 6%, transparent 94%, rgba(255,255,255,.02)),
+        radial-gradient(ellipse at center, transparent 44%, rgba(0,0,0,.28) 100%) !important;
+}
+
+body.driver-mobile-screen.driver-work-tab-active .app-realtime-status {
+    display: none !important;
+}
+
+body.driver-mobile-screen .driver-header,
+body.driver-mobile-screen .driver-panel,
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-bottom-nav {
+    position: relative !important;
+    z-index: 1 !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-header {
+    height: auto !important;
+    min-height: 0 !important;
+    display: block !important;
+    padding: clamp(48px, 7.4dvh, 72px) 0 0 !important;
+    border: 0 !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-header::after {
+    content: "" !important;
+    position: absolute !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    height: 1px !important;
+    background: rgba(125,151,156,.32) !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-header > div {
+    width: calc(100% - clamp(78px, 22vw, 106px)) !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-header span {
+    display: block !important;
+    color: #82939b !important;
+    font-size: clamp(14px, 3.75vw, 18px) !important;
+    font-weight: 500 !important;
+    line-height: 1 !important;
+    text-transform: uppercase !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-header h1 {
+    max-width: 100% !important;
+    margin: clamp(10px, 1.7dvh, 15px) 0 clamp(12px, 2dvh, 18px) !important;
+    color: #f2ffe8 !important;
+    font-size: clamp(32px, 9.9vw, 44px) !important;
+    font-weight: 900 !important;
+    line-height: .92 !important;
+    text-transform: uppercase !important;
+    white-space: nowrap !important;
+    letter-spacing: 0 !important;
+    text-shadow: 0 0 1px rgba(255,255,255,.92), 0 6px 22px rgba(0,0,0,.50) !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-header p {
+    display: flex !important;
+    align-items: center !important;
+    gap: clamp(10px, 3vw, 18px) !important;
+    margin: 0 !important;
+    padding-left: 0 !important;
+    border-left: 0 !important;
+    color: #7bd319 !important;
+    font-size: clamp(18px, 5.6vw, 26px) !important;
+    font-weight: 500 !important;
+    line-height: 1 !important;
+    text-transform: uppercase !important;
+    text-shadow: 0 0 16px rgba(123,211,25,.18) !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-header p::before {
+    content: "" !important;
+    width: 4px !important;
+    height: 24px !important;
+    border-radius: 3px !important;
+    background: #93f13c !important;
+    box-shadow: 0 0 14px rgba(123,211,25,.45) !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-online {
+    position: absolute !important;
+    top: clamp(48px, 7.1dvh, 66px) !important;
+    right: 0 !important;
+    width: clamp(70px, 19vw, 94px) !important;
+    height: clamp(88px, 14dvh, 120px) !important;
+    display: block !important;
+    color: var(--driver-ref-cyan) !important;
+    text-decoration: none !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-online span {
+    position: absolute !important;
+    right: clamp(22px, 6vw, 32px) !important;
+    top: 0 !important;
+    color: var(--driver-ref-cyan) !important;
+    font-size: clamp(13px, 3.5vw, 17px) !important;
+    font-weight: 700 !important;
+    line-height: 1 !important;
+    text-transform: uppercase !important;
+    text-shadow: 0 0 16px rgba(32,211,223,.32) !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-online::after {
+    content: "" !important;
+    position: absolute !important;
+    right: 0 !important;
+    top: 0 !important;
+    width: clamp(9px, 2.6vw, 14px) !important;
+    height: clamp(9px, 2.6vw, 14px) !important;
+    border-radius: 50% !important;
+    background: var(--driver-ref-cyan) !important;
+    box-shadow: 0 0 18px rgba(32,211,223,.95), 0 0 34px rgba(32,211,223,.22) !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-online strong {
+    position: absolute !important;
+    right: clamp(10px, 3vw, 16px) !important;
+    top: clamp(28px, 5.7dvh, 48px) !important;
+    width: clamp(58px, 16vw, 78px) !important;
+    height: clamp(58px, 16vw, 78px) !important;
+    border-radius: 50% !important;
+    background:
+        radial-gradient(circle, rgba(153,244,68,1) 0 12%, rgba(153,244,68,.34) 13% 21%, transparent 22%),
+        radial-gradient(circle, transparent 0 38%, rgba(123,211,25,.35) 39% 42%, transparent 43% 58%, rgba(20,190,198,.18) 59% 61%, transparent 62%) !important;
+    filter: drop-shadow(0 0 18px rgba(123,211,25,.16)) !important;
+}
+
+body.driver-mobile-screen .driver-ref-work:not(.is-active) {
+    display: none !important;
+}
+
+body.driver-mobile-screen .driver-ref-work.is-active {
+    min-height: 0 !important;
+    display: grid !important;
+    grid-template-rows: auto minmax(0, 1fr) auto !important;
+    align-content: start !important;
+    padding: clamp(10px, 2dvh, 18px) 0 0 !important;
+    overflow: hidden !important;
+}
+
+body.driver-mobile-screen .driver-ref-cards {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: clamp(12px, 3.7vw, 22px) !important;
+    margin: 0 0 clamp(14px, 2.7dvh, 24px) !important;
+}
+
+body.driver-mobile-screen .driver-ref-card {
+    position: relative !important;
+    min-height: clamp(82px, 12.8dvh, 104px) !important;
+    display: block !important;
+    padding: clamp(16px, 3.8vw, 24px) clamp(16px, 4.2vw, 26px) !important;
+    border: 1px solid rgba(102,137,146,.36) !important;
+    border-radius: 7px !important;
+    background: linear-gradient(150deg, rgba(13,31,39,.93), rgba(8,22,29,.86)) !important;
+    box-shadow: inset 0 0 24px rgba(68,139,155,.06), 0 20px 42px rgba(0,0,0,.16) !important;
+    overflow: hidden !important;
+}
+
+body.driver-mobile-screen .driver-ref-card span {
+    display: block !important;
+    color: #8a9aa2 !important;
+    font-size: clamp(14px, 3.7vw, 18px) !important;
+    font-weight: 600 !important;
+    line-height: 1 !important;
+    text-transform: uppercase !important;
+}
+
+body.driver-mobile-screen .driver-ref-card strong {
+    position: relative !important;
+    z-index: 2 !important;
+    display: block !important;
+    margin-top: clamp(18px, 3.4dvh, 26px) !important;
+    color: #f2ffe8 !important;
+    font-size: clamp(27px, 7.3vw, 36px) !important;
+    font-weight: 900 !important;
+    line-height: .86 !important;
+    text-transform: uppercase !important;
+    text-shadow: 0 0 1px rgba(255,255,255,.7) !important;
+}
+
+body.driver-mobile-screen .driver-ref-excavator {
+    position: absolute !important;
+    right: clamp(18px, 4.8vw, 28px) !important;
+    bottom: clamp(14px, 3vw, 22px) !important;
+    width: clamp(54px, 16vw, 84px) !important;
+    height: auto !important;
+    opacity: .45 !important;
+    filter: drop-shadow(0 0 8px rgba(123,211,25,.08)) !important;
+    pointer-events: none !important;
+}
+
+body.driver-mobile-screen .driver-ref-arrow {
+    position: absolute !important;
+    right: clamp(14px, 4vw, 24px) !important;
+    top: 50% !important;
+    transform: translateY(-50%) !important;
+    color: #93ff28 !important;
+    font-size: clamp(34px, 8vw, 45px) !important;
+    font-weight: 900 !important;
+    line-height: 1 !important;
+}
+
+body.driver-mobile-screen .driver-ref-ring-wrap {
+    min-height: 0 !important;
+    display: grid !important;
+    justify-items: center !important;
+    align-content: start !important;
+    overflow: visible !important;
+}
+
+body.driver-mobile-screen .driver-ref-ring-form {
+    margin: 0 !important;
+}
+
+body.driver-mobile-screen .driver-ref-ring {
+    --driver-ring: 40%;
+    --driver-hold: 0%;
+    position: relative !important;
+    width: min(90vw, var(--driver-ref-ring-size)) !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    aspect-ratio: 1 !important;
+    display: grid !important;
+    place-items: center !important;
+    margin: 0 auto !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 50% !important;
+    color: inherit !important;
+    font: inherit !important;
+    outline: none !important;
+    background:
+        radial-gradient(circle, transparent 0 56%, rgba(196,211,217,.20) 56.5% 58.8%, transparent 59.2%),
+        conic-gradient(from 0deg, #c7e9a6 var(--driver-ring), rgba(86,101,108,.72) 0) !important;
+    box-shadow:
+        0 0 42px rgba(123,211,25,.12),
+        inset 0 0 0 clamp(27px, 7.4vw, 42px) rgba(3,12,18,.92) !important;
+    cursor: pointer !important;
+    -webkit-appearance: none !important;
+    appearance: none !important;
+    overflow: visible !important;
+}
+
+body.driver-mobile-screen .driver-ref-ring::before {
+    content: "" !important;
+    position: absolute !important;
+    inset: 0 !important;
+    z-index: 1 !important;
+    border-radius: 50% !important;
+    background:
+        repeating-conic-gradient(from 0deg, rgba(168,185,193,.42) 0deg .45deg, transparent .55deg 6deg),
+        repeating-conic-gradient(from 0deg, rgba(186,202,209,.66) 0deg 1.1deg, transparent 1.3deg 45deg) !important;
+    -webkit-mask: radial-gradient(circle, transparent 0 60%, #000 60.5% 94%, transparent 94.5%) !important;
+    mask: radial-gradient(circle, transparent 0 60%, #000 60.5% 94%, transparent 94.5%) !important;
+    pointer-events: none !important;
+}
+
+body.driver-mobile-screen .driver-ref-ring::after {
+    content: "" !important;
+    position: absolute !important;
+    inset: 14.5% !important;
+    z-index: 0 !important;
+    border: 1px solid rgba(196,211,217,.36) !important;
+    border-radius: 50% !important;
+    background: radial-gradient(circle at 50% 44%, #3b4f59 0%, #2a3f49 56%, #152832 100%) !important;
+    box-shadow: inset 0 0 36px rgba(255,255,255,.05), 0 0 34px rgba(196,211,217,.12) !important;
+    pointer-events: none !important;
+}
+
+body.driver-mobile-screen .driver-ref-hold-progress {
+    position: absolute !important;
+    inset: clamp(-5px, -1.4vw, -3px) !important;
+    z-index: 2 !important;
+    border-radius: 50% !important;
+    background: conic-gradient(from 0deg, rgba(147,241,60,.98) var(--driver-hold), transparent 0) !important;
+    -webkit-mask: radial-gradient(circle, transparent 0 69%, #000 69.5% 81%, transparent 81.5%) !important;
+    mask: radial-gradient(circle, transparent 0 69%, #000 69.5% 81%, transparent 81.5%) !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+}
+
+body.driver-mobile-screen .driver-ref-ring.is-holding .driver-ref-hold-progress,
+body.driver-mobile-screen .driver-ref-ring.is-pending .driver-ref-hold-progress {
+    opacity: 1 !important;
+}
+
+body.driver-mobile-screen .driver-ref-ring-inner {
+    position: relative !important;
+    z-index: 3 !important;
+    width: 70% !important;
+    height: 70% !important;
+    display: grid !important;
+    place-items: center !important;
+    align-content: center !important;
+    text-align: center !important;
+    color: #b1bec5 !important;
+    border-radius: 50% !important;
+    background: radial-gradient(circle at 50% 44%, rgba(80,100,108,.28), rgba(21,40,50,.16) 58%, transparent 70%) !important;
+}
+
+body.driver-mobile-screen .driver-ref-percent {
+    position: relative !important;
+    margin-bottom: clamp(16px, 3.4dvh, 29px) !important;
+    color: #a8b4bb !important;
+    font-size: clamp(21px, 5.8vw, 31px) !important;
+    font-weight: 700 !important;
+    line-height: 1 !important;
+}
+
+body.driver-mobile-screen .driver-ref-percent::before,
+body.driver-mobile-screen .driver-ref-percent::after {
+    content: "" !important;
+    position: absolute !important;
+    top: 50% !important;
+    width: clamp(32px, 8vw, 51px) !important;
+    height: 1px !important;
+    background: rgba(174,188,195,.35) !important;
+}
+
+body.driver-mobile-screen .driver-ref-percent::before {
+    right: calc(100% + clamp(14px, 3.4vw, 24px)) !important;
+}
+
+body.driver-mobile-screen .driver-ref-percent::after {
+    left: calc(100% + clamp(14px, 3.4vw, 24px)) !important;
+}
+
+body.driver-mobile-screen .driver-ref-ring-label {
+    display: inline-block !important;
+    width: auto !important;
+    max-width: none !important;
+    color: #93ff28 !important;
+    font-size: clamp(30px, 8.4vw, 40px) !important;
+    font-weight: 900 !important;
+    line-height: .86 !important;
+    letter-spacing: 0 !important;
+    text-transform: uppercase !important;
+    white-space: nowrap !important;
+    text-align: center !important;
+    transform: scaleX(.9) !important;
+    transform-origin: center !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+    text-shadow: 0 0 18px rgba(123,211,25,.18) !important;
+}
+
+body.driver-mobile-screen .driver-ref-hold-note {
+    margin-top: clamp(14px, 2.6dvh, 22px) !important;
+    color: #8998a1 !important;
+    font-size: clamp(11px, 3vw, 15px) !important;
+    font-weight: 700 !important;
+    line-height: 1.05 !important;
+    text-transform: uppercase !important;
+}
+
+body.driver-mobile-screen .driver-ref-caption {
+    width: 100% !important;
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) !important;
+    align-items: center !important;
+    gap: clamp(18px, 5vw, 34px) !important;
+    margin-top: clamp(12px, 2.2dvh, 24px) !important;
+    color: #8d9ba3 !important;
+    font-size: clamp(22px, 6.1vw, 32px) !important;
+    font-weight: 600 !important;
+    line-height: 1 !important;
+    text-transform: uppercase !important;
+}
+
+body.driver-mobile-screen .driver-ref-caption::before,
+body.driver-mobile-screen .driver-ref-caption::after {
+    content: "" !important;
+    height: 1px !important;
+    background: rgba(125,151,156,.30) !important;
+}
+
+body.driver-mobile-screen .driver-ref-actions {
+    display: grid !important;
+    gap: clamp(10px, 2dvh, 16px) !important;
+    margin-top: clamp(17px, 3.5dvh, 30px) !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-bottom-nav {
+    align-self: end !important;
+    width: calc(100% + (var(--driver-ref-edge) * 2)) !important;
+    height: var(--driver-ref-nav) !important;
+    margin: 0 calc(var(--driver-ref-edge) * -1) !important;
+    display: grid !important;
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+    border-top: 1px solid rgba(125,151,156,.30) !important;
+    border-radius: 0 !important;
+    background: rgba(4,16,22,.86) !important;
+    box-shadow: 0 -18px 34px rgba(0,0,0,.18), inset 0 1px 0 rgba(255,255,255,.02) !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-bottom-nav .mm-mobile-nav-item {
+    position: relative !important;
+    min-width: 0 !important;
+    height: 100% !important;
+    display: grid !important;
+    place-items: center !important;
+    align-content: center !important;
+    gap: clamp(6px, 1.4dvh, 10px) !important;
+    padding: clamp(10px, 2dvh, 17px) 4px clamp(8px, 1.4dvh, 12px) !important;
+    border: 0 !important;
+    border-left: 1px solid rgba(102,137,146,.16) !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    color: #7c8c94 !important;
+    font: inherit !important;
+    text-transform: uppercase !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-bottom-nav .mm-mobile-nav-item:first-child {
+    border-left: 0 !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-bottom-nav .mm-mobile-nav-item::before {
+    content: "" !important;
+    position: absolute !important;
+    top: 0 !important;
+    left: 50% !important;
+    width: clamp(44px, 11vw, 62px) !important;
+    height: 4px !important;
+    border-radius: 0 0 3px 3px !important;
+    background: #93ff28 !important;
+    box-shadow: 0 0 18px rgba(123,211,25,.78) !important;
+    transform: translateX(-50%) scaleX(0) !important;
+    opacity: 0 !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-bottom-nav .mm-mobile-nav-item.is-active::before {
+    opacity: 1 !important;
+    transform: translateX(-50%) scaleX(1) !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-bottom-nav .mm-mobile-nav-item span:last-child {
+    color: inherit !important;
+    font-size: clamp(11px, 3vw, 15px) !important;
+    font-weight: 500 !important;
+    line-height: 1 !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-bottom-nav .mm-mobile-nav-item.is-active {
+    color: #93ff28 !important;
+    text-shadow: 0 0 14px rgba(123,211,25,.35) !important;
+}
+
+@media (max-width: 390px), (max-height: 760px) {
+    body.driver-mobile-screen .driver-shell.is-work-tab {
+        --driver-ref-edge: clamp(22px, 6.3vw, 28px);
+        --driver-ref-nav: clamp(86px, 12.2dvh, 98px);
+        --driver-ref-ring-size: clamp(236px, 61dvh - 254px, 292px);
+        grid-template-rows: clamp(154px, 22.2dvh, 178px) minmax(0, 1fr) var(--driver-ref-nav) !important;
+    }
+
+    body.driver-mobile-screen .driver-shell.is-work-tab .driver-header {
+        padding-top: clamp(34px, 6.3dvh, 48px) !important;
+    }
+
+    body.driver-mobile-screen .driver-shell.is-work-tab .driver-header h1 {
+        font-size: clamp(30px, 9.7vw, 38px) !important;
+    }
+
+    body.driver-mobile-screen .driver-shell.is-work-tab .driver-ref-card {
+        min-height: clamp(76px, 13.4dvh, 94px) !important;
+    }
+
+    body.driver-mobile-screen .driver-shell.is-work-tab .driver-ref-ring {
+        width: min(88vw, var(--driver-ref-ring-size)) !important;
+        min-width: 0 !important;
+        max-width: 100% !important;
+    }
+
+    body.driver-mobile-screen .driver-shell.is-work-tab .driver-ref-caption {
+        margin-top: clamp(9px, 1.7dvh, 16px) !important;
+    }
+}
+
+body.driver-mobile-screen .driver-shell:not(.is-work-tab) [data-driver-tab-panel="work"],
+body.driver-mobile-screen .driver-shell:not(.is-work-tab) .driver-ref-work,
+body.driver-mobile-screen .driver-ref-work:not(.is-active) {
+    display: none !important;
+    visibility: hidden !important;
+    position: absolute !important;
+    inset: auto !important;
+    width: 0 !important;
+    height: 0 !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
+    max-width: 0 !important;
+    max-height: 0 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    overflow: hidden !important;
+    pointer-events: none !important;
+}
+
+body.driver-mobile-screen .driver-shell:not(.is-work-tab) [data-driver-tab-panel="work"] *,
+body.driver-mobile-screen .driver-shell:not(.is-work-tab) .driver-ref-work *,
+body.driver-mobile-screen .driver-ref-work:not(.is-active) * {
+    display: none !important;
+}
+
+/* v21: the work tab is rendered as the reference 941x1672 stage.
+   Other driver tabs keep their existing flow layout. */
+body.driver-mobile-screen.driver-work-tab-active,
+body.driver-mobile-screen:has(.driver-shell.is-work-tab) {
+    display: grid !important;
+    place-items: center !important;
+    overflow: hidden !important;
+    background: #0f1112 !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab {
+    --driver-ref-green: #93f13c;
+    --driver-ref-green-2: #7bd319;
+    --driver-ref-cyan: #20d3df;
+    --driver-ref-ink: #f2ffe8;
+    --driver-ref-muted: #82939b;
+    position: fixed !important;
+    left: 50% !important;
+    top: 50% !important;
+    width: 941px !important;
+    height: 1672px !important;
+    min-width: 941px !important;
+    min-height: 1672px !important;
+    max-width: none !important;
+    max-height: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    display: block !important;
+    overflow: hidden !important;
+    transform: translate(-50%, -50%) scale(var(--driver-stage-scale, .41445)) !important;
+    transform-origin: center center !important;
+    color: var(--driver-ref-ink) !important;
+    letter-spacing: 0 !important;
+    font-family: "Roboto Condensed", "Arial Narrow", "Segoe UI", Arial, sans-serif !important;
+    background:
+        radial-gradient(circle at 84% 9%, rgba(28, 210, 224, .10) 0, rgba(28, 210, 224, .045) 13%, transparent 28%),
+        radial-gradient(circle at 51% 56%, rgba(123, 211, 25, .075) 0, rgba(123, 211, 25, .025) 29%, transparent 54%),
+        radial-gradient(circle at 8% 21%, rgba(255,255,255,.03) 0, transparent 33%),
+        linear-gradient(168deg, #06131a 0%, #03090d 43%, #061117 100%) !important;
+}
+
+@media (max-aspect-ratio: 941/1672) {
+    body.driver-mobile-screen .driver-shell.is-work-tab {
+        --driver-stage-scale: calc(100vw / 941px);
+    }
+}
+
+@media (min-aspect-ratio: 941/1672) {
+    body.driver-mobile-screen .driver-shell.is-work-tab {
+        --driver-stage-scale: calc(100dvh / 1672px);
+    }
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab::before {
+    content: "" !important;
+    position: absolute !important;
+    inset: 0 !important;
+    z-index: 0 !important;
+    pointer-events: none !important;
+    opacity: .22 !important;
+    background-image:
+        linear-gradient(120deg, rgba(255,255,255,.045) 0 1px, transparent 1px 7px),
+        radial-gradient(circle at 50% 50%, rgba(255,255,255,.08), transparent 1px) !important;
+    background-size: 213px 213px, 19px 19px !important;
+    mix-blend-mode: overlay !important;
+    filter: blur(.2px) !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab::after {
+    content: "" !important;
+    position: absolute !important;
+    inset: 0 !important;
+    z-index: 0 !important;
+    pointer-events: none !important;
+    background:
+        linear-gradient(90deg, rgba(255,255,255,.026), transparent 6%, transparent 94%, rgba(255,255,255,.02)),
+        radial-gradient(ellipse at center, transparent 47%, rgba(0,0,0,.26) 100%) !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-messages {
+    display: none !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-header {
+    position: absolute !important;
+    inset: 0 !important;
+    z-index: 5 !important;
+    height: 0 !important;
+    min-height: 0 !important;
+    display: block !important;
+    padding: 0 !important;
+    border: 0 !important;
+    background: transparent !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-header::after {
+    content: "" !important;
+    position: absolute !important;
+    left: 50px !important;
+    right: 56px !important;
+    top: 323px !important;
+    bottom: auto !important;
+    height: 1px !important;
+    background: rgba(125,151,156,.32) !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-header > div {
+    display: block !important;
+    width: auto !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-header span {
+    position: absolute !important;
+    left: 54px !important;
+    top: 85px !important;
+    display: block !important;
+    color: var(--driver-ref-muted) !important;
+    font-size: 30px !important;
+    font-weight: 500 !important;
+    line-height: 1 !important;
+    text-transform: uppercase !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-header h1 {
+    position: absolute !important;
+    left: 52px !important;
+    top: 144px !important;
+    max-width: 665px !important;
+    margin: 0 !important;
+    color: var(--driver-ref-ink) !important;
+    font-size: 69px !important;
+    font-weight: 900 !important;
+    line-height: .92 !important;
+    letter-spacing: 0 !important;
+    text-transform: uppercase !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: clip !important;
+    text-shadow: 0 0 1px rgba(255,255,255,.92), 0 6px 22px rgba(0,0,0,.50) !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-header p {
+    position: absolute !important;
+    left: 54px !important;
+    top: 270px !important;
+    display: flex !important;
+    align-items: center !important;
+    gap: 21px !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    color: var(--driver-ref-green-2) !important;
+    font-size: 34px !important;
+    font-weight: 500 !important;
+    line-height: 1 !important;
+    text-transform: uppercase !important;
+    text-shadow: 0 0 16px rgba(123,211,25,.18) !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-header p::before {
+    content: "" !important;
+    width: 5px !important;
+    height: 28px !important;
+    border-radius: 3px !important;
+    background: var(--driver-ref-green) !important;
+    box-shadow: 0 0 14px rgba(123,211,25,.45) !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-online {
+    position: absolute !important;
+    left: auto !important;
+    right: 0 !important;
+    top: 0 !important;
+    z-index: 6 !important;
+    width: 240px !important;
+    height: 260px !important;
+    display: block !important;
+    text-decoration: none !important;
+    color: var(--driver-ref-cyan) !important;
+    pointer-events: none !important;
+    cursor: default !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-online span {
+    position: absolute !important;
+    right: 89px !important;
+    top: 58px !important;
+    width: auto !important;
+    color: var(--driver-ref-cyan) !important;
+    font-size: 29px !important;
+    font-weight: 700 !important;
+    line-height: 1 !important;
+    text-align: right !important;
+    text-transform: uppercase !important;
+    text-shadow: 0 0 16px rgba(32,211,223,.32) !important;
+    white-space: nowrap !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-online::after {
+    content: "" !important;
+    position: absolute !important;
+    right: 58px !important;
+    top: 63px !important;
+    z-index: 7 !important;
+    width: 18px !important;
+    height: 18px !important;
+    border-radius: 50% !important;
+    background: var(--driver-ref-cyan) !important;
+    box-shadow: 0 0 18px rgba(32,211,223,.95), 0 0 34px rgba(32,211,223,.22) !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-online strong {
+    position: absolute !important;
+    right: 86px !important;
+    top: 116px !important;
+    z-index: 5 !important;
+    width: 124px !important;
+    height: 124px !important;
+    border-radius: 50% !important;
+    background:
+        radial-gradient(circle, rgba(153,244,68,1) 0 12%, rgba(153,244,68,.34) 13% 21%, transparent 22%),
+        radial-gradient(circle, transparent 0 38%, rgba(123,211,25,.35) 39% 42%, transparent 43% 58%, rgba(20,190,198,.18) 59% 61%, transparent 62%) !important;
+    filter: drop-shadow(0 0 18px rgba(123,211,25,.16)) !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-ref-work.is-active {
+    position: absolute !important;
+    inset: 0 !important;
+    z-index: 2 !important;
+    display: block !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+    visibility: visible !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-ref-cards {
+    position: absolute !important;
+    left: 50px !important;
+    top: 355px !important;
+    z-index: 3 !important;
+    display: grid !important;
+    grid-template-columns: 405px 405px !important;
+    gap: 32px !important;
+    margin: 0 !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-ref-card {
+    position: relative !important;
+    width: 405px !important;
+    height: 164px !important;
+    min-height: 164px !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+    border: 1px solid rgba(111,139,145,.28) !important;
+    border-radius: 13px !important;
+    background: linear-gradient(145deg, rgba(18,37,45,.54), rgba(5,14,20,.74)) !important;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.035), 0 18px 36px rgba(0,0,0,.16) !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-ref-card::before {
+    content: "" !important;
+    position: absolute !important;
+    inset: 0 !important;
+    background: radial-gradient(circle at 50% 0%, rgba(255,255,255,.04), transparent 57%) !important;
+    pointer-events: none !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-ref-card span {
+    position: absolute !important;
+    left: 34px !important;
+    top: 37px !important;
+    display: block !important;
+    color: #8799a0 !important;
+    font-size: 29px !important;
+    font-weight: 500 !important;
+    line-height: 1 !important;
+    text-transform: uppercase !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-ref-card strong {
+    position: absolute !important;
+    left: 34px !important;
+    top: 83px !important;
+    z-index: 2 !important;
+    display: block !important;
+    margin: 0 !important;
+    max-width: 280px !important;
+    color: var(--driver-ref-ink) !important;
+    font-size: 44px !important;
+    font-weight: 900 !important;
+    line-height: 1 !important;
+    text-transform: uppercase !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    text-shadow: 0 0 18px rgba(255,255,255,.08) !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-ref-excavator {
+    position: absolute !important;
+    right: 49px !important;
+    top: 43px !important;
+    width: 78px !important;
+    height: 78px !important;
+    opacity: .52 !important;
+    object-fit: contain !important;
+    filter: drop-shadow(0 0 8px rgba(123,211,25,.08)) !important;
+    pointer-events: none !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-ref-arrow {
+    position: absolute !important;
+    right: 43px !important;
+    top: 62px !important;
+    transform: none !important;
+    color: var(--driver-ref-green) !important;
+    font-size: 48px !important;
+    font-weight: 900 !important;
+    line-height: 1 !important;
+    filter: drop-shadow(0 0 10px rgba(123,211,25,.25)) !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-ref-ring-wrap {
+    position: absolute !important;
+    inset: 0 !important;
+    z-index: 2 !important;
+    display: block !important;
+    overflow: visible !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-ref-ring-form,
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-ref-ring-wrap > .driver-ref-ring {
+    position: absolute !important;
+    left: 89px !important;
+    top: 574px !important;
+    width: 764px !important;
+    height: 764px !important;
+    margin: 0 !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-ref-ring {
+    --driver-ring: 40%;
+    --driver-hold: 0%;
+    position: relative !important;
+    width: 764px !important;
+    height: 764px !important;
+    max-width: none !important;
+    min-width: 0 !important;
+    aspect-ratio: 1 !important;
+    display: block !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 50% !important;
+    color: inherit !important;
+    font: inherit !important;
+    outline: none !important;
+    background:
+        radial-gradient(circle, transparent 0 56%, rgba(196,211,217,.20) 56.5% 58.8%, transparent 59.2%),
+        conic-gradient(from 0deg, #c7e9a6 var(--driver-ring), rgba(86,101,108,.72) 0) !important;
+    box-shadow: 0 0 42px rgba(123,211,25,.12), inset 0 0 0 72px rgba(3,12,18,.92) !important;
+    cursor: pointer !important;
+    -webkit-appearance: none !important;
+    appearance: none !important;
+    overflow: visible !important;
+    touch-action: manipulation !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-ref-ring::before {
+    content: "" !important;
+    position: absolute !important;
+    left: 73px !important;
+    top: 73px !important;
+    width: 618px !important;
+    height: 618px !important;
+    z-index: 1 !important;
+    border-radius: 50% !important;
+    background:
+        repeating-conic-gradient(from 0deg, rgba(143,167,173,.25) 0deg 1deg, transparent 1deg 6deg),
+        repeating-conic-gradient(from 0deg, transparent 0deg 29deg, rgba(147,172,177,.42) 29deg 30deg, transparent 30deg 45deg) !important;
+    -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 46px), #000 calc(100% - 45px), #000 calc(100% - 38px), transparent calc(100% - 37px)) !important;
+    mask: radial-gradient(farthest-side, transparent calc(100% - 46px), #000 calc(100% - 45px), #000 calc(100% - 38px), transparent calc(100% - 37px)) !important;
+    opacity: .55 !important;
+    pointer-events: none !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-ref-ring::after {
+    content: "" !important;
+    position: absolute !important;
+    left: 125px !important;
+    top: 125px !important;
+    width: 514px !important;
+    height: 514px !important;
+    z-index: 0 !important;
+    border: 3px solid rgba(162,255,82,.84) !important;
+    border-radius: 50% !important;
+    background: radial-gradient(circle at 50% 42%, rgba(137,242,63,.30) 0%, rgba(49,141,38,.28) 26%, rgba(14,47,22,.78) 57%, rgba(7,22,18,.93) 100%) !important;
+    box-shadow: 0 0 0 1px rgba(162,255,82,.10), 0 0 48px rgba(123,211,25,.42), 0 0 114px rgba(123,211,25,.17), inset 0 0 44px rgba(123,211,25,.30), inset 0 -30px 70px rgba(0,0,0,.26) !important;
+    pointer-events: none !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-ref-ring.is-empty {
+    background:
+        radial-gradient(circle, transparent 0 56%, rgba(196,211,217,.20) 56.5% 58.8%, transparent 59.2%),
+        conic-gradient(from 0deg, rgba(136,154,160,.68) var(--driver-ring), rgba(86,101,108,.72) 0) !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-ref-ring.is-empty::after {
+    border-color: rgba(157,174,180,.55) !important;
+    background: radial-gradient(circle at 50% 42%, rgba(135,154,160,.18), rgba(31,48,56,.72) 55%, rgba(11,18,22,.94)) !important;
+    box-shadow: 0 0 42px rgba(190,210,218,.10), inset 0 0 42px rgba(190,210,218,.12) !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-ref-hold-progress {
+    position: absolute !important;
+    inset: -6px !important;
+    z-index: 4 !important;
+    border-radius: 50% !important;
+    background: conic-gradient(from 0deg, rgba(231,255,208,.98) var(--driver-hold), transparent 0) !important;
+    -webkit-mask: radial-gradient(circle, transparent 0 70%, #000 70.5% 76%, transparent 76.5%) !important;
+    mask: radial-gradient(circle, transparent 0 70%, #000 70.5% 76%, transparent 76.5%) !important;
+    opacity: 0 !important;
+    filter: drop-shadow(0 0 18px rgba(231,255,208,.60)) !important;
+    pointer-events: none !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-ref-ring.is-holding .driver-ref-hold-progress,
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-ref-ring.is-pending .driver-ref-hold-progress {
+    opacity: 1 !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-ref-ring-inner {
+    position: absolute !important;
+    left: 125px !important;
+    top: 125px !important;
+    z-index: 3 !important;
+    width: 514px !important;
+    height: 514px !important;
+    display: block !important;
+    text-align: center !important;
+    color: #b1bec5 !important;
+    border-radius: 50% !important;
+    background: transparent !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-ref-percent {
+    position: absolute !important;
+    left: 0 !important;
+    right: 0 !important;
+    top: 154px !important;
+    margin: 0 !important;
+    color: #b9fa6b !important;
+    font-size: 45px !important;
+    font-weight: 900 !important;
+    line-height: 1 !important;
+    text-align: center !important;
+    text-shadow: 0 0 16px rgba(123,211,25,.26) !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-ref-percent::before,
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-ref-percent::after {
+    content: "" !important;
+    display: inline-block !important;
+    position: static !important;
+    width: 43px !important;
+    height: 1px !important;
+    margin: 0 22px 12px !important;
+    background: rgba(153,244,68,.42) !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-ref-ring-label {
+    position: absolute !important;
+    left: -95px !important;
+    right: -95px !important;
+    top: 250px !important;
+    display: block !important;
+    width: auto !important;
+    max-width: none !important;
+    color: #a9fb56 !important;
+    font-size: 76px !important;
+    font-weight: 900 !important;
+    line-height: .95 !important;
+    letter-spacing: 0 !important;
+    text-align: center !important;
+    text-transform: uppercase !important;
+    white-space: nowrap !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+    transform: none !important;
+    text-shadow: 0 0 24px rgba(123,211,25,.38), 0 4px 18px rgba(0,0,0,.48) !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-ref-hold-note {
+    position: absolute !important;
+    left: 0 !important;
+    right: 0 !important;
+    top: 424px !important;
+    margin: 0 !important;
+    color: rgba(209, 225, 218, .60) !important;
+    font-size: 29px !important;
+    font-weight: 700 !important;
+    line-height: 1.25 !important;
+    text-align: center !important;
+    text-transform: uppercase !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-ref-ring.is-empty .driver-ref-ring-label,
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-ref-ring.is-empty .driver-ref-percent {
+    color: rgba(201,214,218,.72) !important;
+    text-shadow: none !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-ref-ring.is-empty .driver-ref-hold-note {
+    display: none !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-ref-caption {
+    position: absolute !important;
+    left: 185px !important;
+    right: 185px !important;
+    top: 1362px !important;
+    z-index: 3 !important;
+    width: auto !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 36px !important;
+    margin: 0 !important;
+    color: rgba(123,211,25,.76) !important;
+    font-size: 38px !important;
+    font-weight: 500 !important;
+    line-height: 1 !important;
+    text-align: center !important;
+    text-transform: uppercase !important;
+    text-shadow: 0 0 14px rgba(123,211,25,.18) !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-ref-caption::before,
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-ref-caption::after {
+    content: "" !important;
+    flex: 1 1 auto !important;
+    height: 1px !important;
+    background: linear-gradient(90deg, transparent, rgba(123,211,25,.50)) !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-ref-caption::after {
+    background: linear-gradient(90deg, rgba(123,211,25,.50), transparent) !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-ref-actions {
+    position: absolute !important;
+    left: 54px !important;
+    right: 54px !important;
+    top: 1120px !important;
+    z-index: 12 !important;
+    display: grid !important;
+    gap: 10px !important;
+    margin: 0 !important;
+    pointer-events: auto !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-ref-actions .driver-primary-action {
+    min-height: 108px !important;
+    height: 108px !important;
+    padding: 0 18px !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-bottom-nav {
+    position: absolute !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    z-index: 8 !important;
+    width: auto !important;
+    height: 196px !important;
+    display: grid !important;
+    grid-template-columns: repeat(4, 1fr) !important;
+    align-items: start !important;
+    margin: 0 !important;
+    padding: 30px 0 0 !important;
+    border-top: 1px solid rgba(102, 128, 133, .28) !important;
+    border-radius: 0 !important;
+    background: linear-gradient(180deg, rgba(5,15,20,.38), rgba(4,12,17,.88)) !important;
+    box-shadow: none !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-bottom-nav .mm-mobile-nav-item {
+    position: relative !important;
+    display: grid !important;
+    justify-items: center !important;
+    align-content: start !important;
+    gap: 13px !important;
+    height: 100% !important;
+    min-width: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-left: 1px solid rgba(102,137,146,.16) !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    color: #778991 !important;
+    font: inherit !important;
+    text-transform: uppercase !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-bottom-nav .mm-mobile-nav-item:first-child {
+    border-left: 0 !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-bottom-nav .mm-mobile-nav-item::before {
+    content: "" !important;
+    position: absolute !important;
+    top: -33px !important;
+    left: 50% !important;
+    width: 86px !important;
+    height: 6px !important;
+    border-radius: 8px !important;
+    background: var(--driver-ref-green) !important;
+    box-shadow: 0 0 15px rgba(123,211,25,.65) !important;
+    transform: translateX(-50%) scaleX(0) !important;
+    opacity: 0 !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-bottom-nav .mm-mobile-nav-item.is-active::before {
+    opacity: 1 !important;
+    transform: translateX(-50%) scaleX(1) !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-bottom-nav .mm-mobile-nav-item span:last-child {
+    color: inherit !important;
+    font-size: 25px !important;
+    font-weight: 500 !important;
+    line-height: 1 !important;
+    min-height: 25px !important;
+    display: block !important;
+    text-align: center !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-bottom-nav .mm-mobile-nav-item.is-active {
+    color: var(--driver-ref-green) !important;
+    text-shadow: 0 0 14px rgba(123,211,25,.25) !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-nav-icon {
+    width: 62px !important;
+    height: 62px !important;
+    opacity: .94 !important;
+    display: block !important;
+    object-fit: contain !important;
+    margin: 0 auto !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-online {
+    left: auto !important;
+    right: 0 !important;
+    top: clamp(48px, 7.1dvh, 66px) !important;
+    width: clamp(70px, 19vw, 94px) !important;
+    height: clamp(88px, 14dvh, 120px) !important;
+    pointer-events: none !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-online span {
+    left: auto !important;
+    right: clamp(22px, 6vw, 32px) !important;
+    top: 0 !important;
+    width: max-content !important;
+    text-align: right !important;
+    white-space: nowrap !important;
+    z-index: 7 !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-online::after {
+    right: 0 !important;
+    top: 0 !important;
+    z-index: 8 !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-online strong {
+    right: clamp(10px, 3vw, 16px) !important;
+    top: clamp(28px, 5.7dvh, 48px) !important;
+    z-index: 5 !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-online {
+    position: absolute !important;
+    left: auto !important;
+    right: 0 !important;
+    top: clamp(48px, 7.1dvh, 66px) !important;
+    width: clamp(70px, 19vw, 94px) !important;
+    height: clamp(88px, 14dvh, 120px) !important;
+    cursor: default !important;
+    pointer-events: none !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-online > span {
+    position: absolute !important;
+    display: block !important;
+    left: auto !important;
+    inset-inline-start: auto !important;
+    right: clamp(22px, 6vw, 32px) !important;
+    inset-inline-end: clamp(22px, 6vw, 32px) !important;
+    top: 0 !important;
+    width: max-content !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    z-index: 7 !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab header.driver-header .driver-online > span {
+    left: auto !important;
+    inset-inline-start: auto !important;
+    right: clamp(22px, 6vw, 32px) !important;
+    inset-inline-end: clamp(22px, 6vw, 32px) !important;
+    top: 0 !important;
+    width: max-content !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    text-align: right !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-online::after {
+    right: 0 !important;
+    top: 0 !important;
+    z-index: 8 !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-online > strong {
+    position: absolute !important;
+    right: clamp(10px, 3vw, 16px) !important;
+    top: clamp(28px, 5.7dvh, 48px) !important;
+    z-index: 5 !important;
+}
+
+body.driver-mobile-screen .driver-downtime-list button {
+    --driver-downtime-accent: #ff5a47;
+    border-color: color-mix(in srgb, var(--driver-downtime-accent) 86%, transparent) !important;
+    color: var(--driver-downtime-accent) !important;
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,.015) !important;
+}
+
+body.driver-mobile-screen .driver-downtime-list button.status-red {
+    --driver-downtime-accent: #ff5a47;
+}
+
+body.driver-mobile-screen .driver-downtime-list button.status-orange {
+    --driver-downtime-accent: #ff9a36;
+}
+
+body.driver-mobile-screen .driver-downtime-list button.status-yellow {
+    --driver-downtime-accent: #ffd31f;
+}
+
+body.driver-mobile-screen .driver-downtime-list button.status-blue {
+    --driver-downtime-accent: #6eb2ff;
+}
+
+body.driver-mobile-screen .driver-downtime-list button.status-green {
+    --driver-downtime-accent: #8cff36;
+}
+
+body.driver-mobile-screen .driver-downtime-list button.status-gray {
+    --driver-downtime-accent: #94a6ad;
+}
+
+body.driver-mobile-screen .driver-downtime-list button span {
+    color: var(--driver-downtime-accent) !important;
+    text-shadow: 0 0 10px color-mix(in srgb, var(--driver-downtime-accent) 18%, transparent) !important;
+}
+
+body.driver-mobile-screen .driver-downtime-list button.is-selected {
+    box-shadow:
+        inset 0 0 0 2px var(--driver-downtime-accent),
+        0 0 18px color-mix(in srgb, var(--driver-downtime-accent) 26%, transparent) !important;
+}
+
+body.driver-mobile-screen.driver-work-tab-active,
+body.driver-mobile-screen:has(.driver-shell.is-work-tab) {
+    place-items: stretch center !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab {
+    top: 0 !important;
+    height: max(1672px, calc(100dvh / var(--driver-stage-scale, .41445))) !important;
+    min-height: max(1672px, calc(100dvh / var(--driver-stage-scale, .41445))) !important;
+    transform: translateX(-50%) scale(var(--driver-stage-scale, .41445)) !important;
+    transform-origin: top center !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-bottom-nav {
+    height: calc(101px / var(--driver-stage-scale, .41445)) !important;
+    padding: calc(9px / var(--driver-stage-scale, .41445)) 0 calc(10px / var(--driver-stage-scale, .41445)) !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-bottom-nav .mm-mobile-nav-item {
+    align-content: center !important;
+    gap: calc(8px / var(--driver-stage-scale, .41445)) !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-bottom-nav .mm-mobile-nav-item::before {
+    top: 0 !important;
+    width: calc(62px / var(--driver-stage-scale, .41445)) !important;
+    height: calc(4px / var(--driver-stage-scale, .41445)) !important;
+    border-radius: 0 0 calc(3px / var(--driver-stage-scale, .41445)) calc(3px / var(--driver-stage-scale, .41445)) !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-nav-icon {
+    width: calc(28px / var(--driver-stage-scale, .41445)) !important;
+    height: calc(28px / var(--driver-stage-scale, .41445)) !important;
+}
+
+body.driver-mobile-screen .driver-shell:not(.is-work-tab) .driver-header > div {
+    width: calc(100% - 112px) !important;
+    max-width: calc(100% - 112px) !important;
+}
+
+body.driver-mobile-screen .driver-shell:not(.is-work-tab) .driver-header h1 {
+    max-width: 100% !important;
+    white-space: nowrap !important;
+}
+
+body.driver-mobile-screen .driver-shell:not(.is-work-tab) .driver-online {
+    position: absolute !important;
+    display: block !important;
+    inset-inline-start: auto !important;
+    inset-inline-end: 0 !important;
+    left: auto !important;
+    right: 0 !important;
+    width: 94px !important;
+    min-width: 94px !important;
+    max-width: 94px !important;
+    pointer-events: none !important;
+}
+
+body.driver-mobile-screen .driver-shell:not(.is-work-tab) header.driver-header .driver-online {
+    position: absolute !important;
+    display: block !important;
+    left: auto !important;
+    inset-inline-start: auto !important;
+    right: 0 !important;
+    inset-inline-end: 0 !important;
+    width: 94px !important;
+    min-width: 94px !important;
+    max-width: 94px !important;
+}
+
+body.driver-mobile-screen .driver-shell:not(.is-work-tab) .driver-online span {
+    position: absolute !important;
+    display: block !important;
+    inset-inline-start: auto !important;
+    inset-inline-end: 24px !important;
+    left: auto !important;
+    right: 24px !important;
+    width: max-content !important;
+    white-space: nowrap !important;
+    text-align: right !important;
+}
+
+body.driver-mobile-screen .driver-shell:not(.is-work-tab) header.driver-header .driver-online > span {
+    position: absolute !important;
+    display: block !important;
+    left: auto !important;
+    inset-inline-start: auto !important;
+    right: 24px !important;
+    inset-inline-end: 24px !important;
+    top: 0 !important;
+    width: max-content !important;
+    min-width: 0 !important;
+    max-width: none !important;
+}
+
+body.driver-mobile-screen .driver-shell:not(.is-work-tab) .driver-online strong {
+    position: absolute !important;
+    display: block !important;
+    inset-inline-start: auto !important;
+    inset-inline-end: 8px !important;
+    left: auto !important;
+    right: 8px !important;
+    top: 22px !important;
+}
+
+body.driver-mobile-screen .driver-shell:not(.is-work-tab) header.driver-header .driver-online > strong {
+    position: absolute !important;
+    display: block !important;
+    left: auto !important;
+    inset-inline-start: auto !important;
+    right: 8px !important;
+    inset-inline-end: 8px !important;
+    top: 22px !important;
+}
+
+body.driver-mobile-screen .driver-shell:not(.is-work-tab) .driver-online::after {
+    inset-inline-start: auto !important;
+    inset-inline-end: 0 !important;
+    left: auto !important;
+    right: 0 !important;
+}
+
+/* v26: keep the driver shell geometry identical on every tab.
+   The work tab must no longer scale the whole <main>; only its contents use
+   the reference styling. */
+body.driver-mobile-screen.driver-work-tab-active,
+body.driver-mobile-screen:has(.driver-shell.is-work-tab) {
+    display: grid !important;
+    place-items: stretch center !important;
+    overflow: hidden !important;
+    background: #030708 !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab {
+    --driver-ref-edge: clamp(22px, 7.2vw, 32px);
+    --driver-ref-nav: clamp(94px, 12dvh, 104px);
+    --driver-ref-ring-size: clamp(286px, 82vw, 336px);
+    --driver-ref-green: #93f13c;
+    --driver-ref-green-2: #7bd319;
+    --driver-ref-cyan: #20d3df;
+    --driver-ref-ink: #f2ffe8;
+    --driver-ref-muted: #82939b;
+    position: relative !important;
+    left: auto !important;
+    top: auto !important;
+    width: min(100vw, 430px) !important;
+    min-width: 0 !important;
+    max-width: 430px !important;
+    height: 100dvh !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    margin: 0 auto !important;
+    padding: 0 var(--driver-ref-edge) !important;
+    display: grid !important;
+    grid-template-rows: clamp(176px, 23dvh, 214px) minmax(0, 1fr) var(--driver-ref-nav) !important;
+    gap: 0 !important;
+    overflow: hidden !important;
+    transform: none !important;
+    transform-origin: initial !important;
+    color: var(--driver-ref-ink) !important;
+    letter-spacing: 0 !important;
+    font-family: "Roboto Condensed", "Arial Narrow", "Segoe UI", Arial, sans-serif !important;
+    background:
+        radial-gradient(circle at 84% 9%, rgba(28, 210, 224, .10) 0, rgba(28, 210, 224, .045) 13%, transparent 28%),
+        radial-gradient(circle at 51% 56%, rgba(123, 211, 25, .075) 0, rgba(123, 211, 25, .025) 29%, transparent 54%),
+        radial-gradient(circle at 8% 21%, rgba(255,255,255,.03) 0, transparent 33%),
+        linear-gradient(168deg, #06131a 0%, #03090d 43%, #061117 100%) !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-header {
+    position: relative !important;
+    inset: auto !important;
+    z-index: 5 !important;
+    height: auto !important;
+    min-height: 0 !important;
+    display: block !important;
+    padding: clamp(48px, 7.4dvh, 72px) 0 0 !important;
+    border: 0 !important;
+    background: transparent !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-header::after {
+    left: 0 !important;
+    right: 0 !important;
+    top: auto !important;
+    bottom: 0 !important;
+    height: 1px !important;
+    background: rgba(125,151,156,.32) !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-header > div {
+    width: calc(100% - clamp(44px, 12vw, 58px)) !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-header span {
+    position: static !important;
+    display: block !important;
+    color: var(--driver-ref-muted) !important;
+    font-size: clamp(14px, 3.75vw, 18px) !important;
+    font-weight: 500 !important;
+    line-height: 1 !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-header h1 {
+    position: static !important;
+    max-width: 100% !important;
+    margin: clamp(10px, 1.7dvh, 15px) 0 clamp(12px, 2dvh, 18px) !important;
+    color: var(--driver-ref-ink) !important;
+    font-size: clamp(30px, 8.2vw, 38px) !important;
+    font-weight: 900 !important;
+    line-height: .92 !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-header p {
+    position: static !important;
+    display: flex !important;
+    align-items: center !important;
+    gap: clamp(10px, 3vw, 18px) !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    color: var(--driver-ref-green-2) !important;
+    font-size: clamp(18px, 5.6vw, 26px) !important;
+    font-weight: 500 !important;
+    line-height: 1 !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-online,
+body.driver-mobile-screen .driver-shell.is-work-tab header.driver-header .driver-online {
+    position: absolute !important;
+    left: auto !important;
+    right: 0 !important;
+    top: clamp(48px, 7.1dvh, 66px) !important;
+    width: clamp(70px, 19vw, 94px) !important;
+    height: clamp(88px, 14dvh, 120px) !important;
+    display: block !important;
+    pointer-events: none !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-online > span,
+body.driver-mobile-screen .driver-shell.is-work-tab header.driver-header .driver-online > span {
+    position: absolute !important;
+    left: auto !important;
+    right: clamp(22px, 6vw, 32px) !important;
+    top: 0 !important;
+    width: max-content !important;
+    color: var(--driver-ref-cyan) !important;
+    font-size: clamp(13px, 3.5vw, 17px) !important;
+    font-weight: 700 !important;
+    line-height: 1 !important;
+    text-align: right !important;
+    white-space: nowrap !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-online::after {
+    right: 0 !important;
+    top: 0 !important;
+    width: clamp(9px, 2.6vw, 14px) !important;
+    height: clamp(9px, 2.6vw, 14px) !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-online > strong,
+body.driver-mobile-screen .driver-shell.is-work-tab header.driver-header .driver-online > strong {
+    position: absolute !important;
+    right: clamp(10px, 3vw, 16px) !important;
+    top: clamp(28px, 5.7dvh, 48px) !important;
+    width: clamp(58px, 16vw, 78px) !important;
+    height: clamp(58px, 16vw, 78px) !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-ref-work.is-active {
+    position: relative !important;
+    inset: auto !important;
+    z-index: 2 !important;
+    min-height: 0 !important;
+    display: grid !important;
+    grid-template-rows: auto minmax(0, 1fr) auto !important;
+    align-content: start !important;
+    padding: clamp(10px, 2dvh, 18px) 0 0 !important;
+    overflow: hidden !important;
+    visibility: visible !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-ref-cards {
+    position: static !important;
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: clamp(12px, 3.7vw, 22px) !important;
+    margin: 0 0 clamp(14px, 2.7dvh, 24px) !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-ref-card {
+    position: relative !important;
+    width: auto !important;
+    height: auto !important;
+    min-height: clamp(82px, 12.8dvh, 104px) !important;
+    padding: clamp(16px, 3.8vw, 24px) clamp(16px, 4.2vw, 26px) !important;
+    border-radius: 7px !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-ref-card span,
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-ref-card strong,
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-ref-excavator,
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-ref-arrow {
+    position: static !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-ref-card span {
+    font-size: clamp(13px, 3.55vw, 17px) !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-ref-card strong {
+    margin-top: clamp(18px, 3.4dvh, 26px) !important;
+    max-width: calc(100% - 48px) !important;
+    font-size: clamp(27px, 7.3vw, 36px) !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-ref-excavator {
+    position: absolute !important;
+    right: clamp(18px, 4.8vw, 28px) !important;
+    bottom: clamp(14px, 3vw, 22px) !important;
+    top: auto !important;
+    width: clamp(54px, 16vw, 84px) !important;
+    height: auto !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-ref-arrow {
+    position: absolute !important;
+    right: clamp(14px, 4vw, 24px) !important;
+    top: 50% !important;
+    transform: translateY(-50%) !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-ref-ring-wrap {
+    position: static !important;
+    inset: auto !important;
+    min-height: 0 !important;
+    display: grid !important;
+    justify-items: center !important;
+    align-content: start !important;
+    overflow: visible !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-ref-ring-form,
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-ref-ring-wrap > .driver-ref-ring {
+    position: static !important;
+    width: auto !important;
+    height: auto !important;
+    margin: 0 !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-ref-ring {
+    position: relative !important;
+    width: min(90vw, var(--driver-ref-ring-size)) !important;
+    height: auto !important;
+    max-width: 100% !important;
+    aspect-ratio: 1 !important;
+    display: grid !important;
+    place-items: center !important;
+    margin: 0 auto !important;
+    box-shadow:
+        0 0 42px rgba(123,211,25,.12),
+        inset 0 0 0 clamp(27px, 7.4vw, 42px) rgba(3,12,18,.92) !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-ref-ring::before {
+    left: 9.6% !important;
+    top: 9.6% !important;
+    width: 80.8% !important;
+    height: 80.8% !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-ref-ring::after,
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-ref-ring-inner {
+    left: 16.4% !important;
+    top: 16.4% !important;
+    width: 67.2% !important;
+    height: 67.2% !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-ref-ring-inner {
+    position: absolute !important;
+    display: grid !important;
+    place-items: center !important;
+    align-content: center !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-ref-percent,
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-ref-ring-label,
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-ref-hold-note {
+    position: static !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-ref-percent {
+    margin-bottom: clamp(16px, 3.4dvh, 29px) !important;
+    font-size: clamp(21px, 5.8vw, 31px) !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-ref-ring-label {
+    width: auto !important;
+    max-width: none !important;
+    font-size: clamp(30px, 8.4vw, 40px) !important;
+    transform: scaleX(.9) !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-ref-hold-note {
+    margin-top: clamp(14px, 2.6dvh, 22px) !important;
+    font-size: clamp(11px, 3vw, 15px) !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-ref-caption {
+    position: static !important;
+    width: 100% !important;
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) !important;
+    gap: clamp(18px, 5vw, 34px) !important;
+    margin-top: clamp(12px, 2.2dvh, 24px) !important;
+    font-size: clamp(22px, 6.1vw, 32px) !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-ref-actions {
+    position: static !important;
+    display: grid !important;
+    gap: clamp(10px, 2dvh, 16px) !important;
+    margin-top: clamp(17px, 3.5dvh, 30px) !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-bottom-nav {
+    position: relative !important;
+    left: auto !important;
+    right: auto !important;
+    bottom: auto !important;
+    align-self: end !important;
+    width: calc(100% + (var(--driver-ref-edge) * 2)) !important;
+    height: var(--driver-ref-nav) !important;
+    margin: 0 calc(var(--driver-ref-edge) * -1) !important;
+    padding: clamp(9px, 1.1dvh, 10px) 0 clamp(10px, 1.2dvh, 12px) !important;
+    display: grid !important;
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+    align-items: stretch !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-bottom-nav .mm-mobile-nav-item {
+    align-content: center !important;
+    gap: clamp(6px, 1.4dvh, 10px) !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-bottom-nav .mm-mobile-nav-item span:last-child {
+    font-size: clamp(11px, 3vw, 15px) !important;
+    font-weight: 500 !important;
+    line-height: 1 !important;
+    min-height: auto !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-bottom-nav .mm-mobile-nav-item::before {
+    top: 0 !important;
+    width: clamp(44px, 11vw, 62px) !important;
+    height: 4px !important;
+    border-radius: 0 0 3px 3px !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-nav-icon {
+    width: 28px !important;
+    height: 28px !important;
+}
+
+/* v27: the Work tab must reuse the exact same bottom navigation geometry as every other driver tab. */
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-bottom-nav {
+    position: relative !important;
+    left: auto !important;
+    right: auto !important;
+    bottom: auto !important;
+    z-index: 1 !important;
+    align-self: end !important;
+    width: calc(100% + (var(--driver-ref-edge) * 2)) !important;
+    height: var(--driver-nav-h) !important;
+    min-height: 0 !important;
+    margin: 0 calc(var(--driver-ref-edge) * -1) !important;
+    padding: 0 !important;
+    display: grid !important;
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+    align-items: stretch !important;
+    border: 0 !important;
+    border-top: 1px solid rgba(128, 151, 160, .28) !important;
+    border-radius: 0 !important;
+    background: rgba(5, 16, 23, .82) !important;
+    box-shadow: none !important;
+    overflow: hidden !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-bottom-nav .mm-mobile-nav-item {
+    appearance: none !important;
+    position: relative !important;
+    width: auto !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
+    height: auto !important;
+    display: grid !important;
+    place-items: center !important;
+    align-content: center !important;
+    gap: clamp(6px, 1.9dvh, 10px) !important;
+    padding: clamp(7px, 1.5dvh, 11px) 0 clamp(8px, 1.7dvh, 12px) !important;
+    border: 0 !important;
+    border-left: 1px solid rgba(102,137,146,.16) !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    color: #7c8c94 !important;
+    font: inherit !important;
+    text-transform: uppercase !important;
+    overflow: hidden !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-bottom-nav .mm-mobile-nav-item:first-child {
+    border-left: 0 !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-bottom-nav .mm-mobile-nav-item.is-active {
+    color: var(--driver-green) !important;
+    background: transparent !important;
+    text-shadow: none !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-bottom-nav .mm-mobile-nav-item::before {
+    content: none !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-bottom-nav .mm-mobile-nav-item.is-active::before {
+    content: "" !important;
+    position: absolute !important;
+    top: 0 !important;
+    left: 28% !important;
+    right: 28% !important;
+    width: auto !important;
+    height: 2.6px !important;
+    border-radius: 0 0 999px 999px !important;
+    background: var(--driver-green) !important;
+    box-shadow: 0 0 18px rgba(123, 211, 25, .72) !important;
+    opacity: 1 !important;
+    transform: none !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-bottom-nav .driver-nav-icon {
+    width: clamp(26px, 6.93vw, 34px) !important;
+    height: clamp(26px, 6.93vw, 34px) !important;
+    color: currentColor !important;
+    opacity: .86 !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-bottom-nav .mm-mobile-nav-item.is-active .driver-nav-icon {
+    opacity: 1 !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-bottom-nav .mm-mobile-nav-item:not(.is-active) img.driver-nav-icon {
+    filter: grayscale(1) brightness(.68) !important;
+    opacity: .76 !important;
+}
+
+body.driver-mobile-screen .driver-shell.is-work-tab .driver-bottom-nav .mm-mobile-nav-item span:last-child {
+    color: inherit !important;
+    font-size: clamp(10px, 2.68vw, 13px) !important;
+    font-weight: 500 !important;
+    line-height: 1 !important;
+    min-height: auto !important;
+    display: block !important;
+    text-align: center !important;
+    white-space: nowrap !important;
+}
+</style>
+{% endblock %}
 
 {% block body %}
-<header class="app-header">
-    <div class="header-inner">
-        <div class="topline">
-            <span>{{ access.employee.full_name }}</span>
-            <a href="{% url 'logout' %}">Выйти</a>
+<main class="driver-shell{% if active_tab == 'work' %} is-work-tab{% endif %}" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="driver-mobile-shell-v27">
+    {% if messages %}
+        <div class="driver-messages">
+            {% for message in messages %}
+                <div class="message {% if message.tags %}{{ message.tags }}{% else %}success{% endif %}">{{ message }}</div>
+            {% endfor %}
         </div>
-        <h1>Смена водителя</h1>
-        <p>Рабочий экран водителя: открыть смену, принять назначение, выполнить рейс и закрыть смену.</p>
-    </div>
-</header>
-<main class="page compact-page">
-    {% for message in messages %}
-        <div class="message success">{{ message }}</div>
-    {% endfor %}
+    {% endif %}
 
-    <section class="card">
-        <h2>Регистрационные данные</h2>
-        <div class="grid">
-            <div class="tile"><strong>Проживание</strong>{{ registration.dormitory_section }}</div>
-            <div class="tile"><strong>Текущий самосвал</strong>{{ current_truck|default:"Смена не открыта" }}</div>
+    <header class="driver-header">
+        <div>
+            <span>Водитель</span>
+            <h1>{% if current_truck %}Самосвал {{ current_truck.garage_number|default:current_truck }}{% else %}Самосвал{% endif %}</h1>
+            <p>{% if open_shift %}Активная смена{% else %}Смена не открыта{% endif %}</p>
         </div>
+        <div class="driver-online" role="status" aria-label="Онлайн">
+            <span>онлайн</span>
+            <strong></strong>
+        </div>
+    </header>
+
+    <section class="driver-panel driver-tab driver-ref-work {% if active_tab == 'work' %}is-active{% endif %}" data-driver-tab-panel="work">
+        <div class="driver-ref-cards">
+            <article class="driver-ref-card">
+                <span>Экскаватор</span>
+                <strong>{% if active_trip %}{{ active_trip.excavator.garage_number|default:active_trip.excavator }}{% elif pending_assignment %}{{ pending_assignment.excavator.garage_number|default:pending_assignment.excavator }}{% elif accepted_assignment %}{{ accepted_assignment.excavator.garage_number|default:accepted_assignment.excavator }}{% else %}—{% endif %}</strong>
+                <img class="driver-ref-excavator" src="{% static 'img/equipment/excavator-green.png' %}" alt="">
+            </article>
+            <article class="driver-ref-card driver-point-card{% if active_trip %} is-action{% endif %}"{% if active_trip %} role="button" tabindex="0" data-driver-point-open{% endif %}>
+                <span>Ехать</span>
+                <strong>{{ driver_target_label }}</strong>
+                {% if active_trip %}<b class="driver-ref-arrow" aria-hidden="true">›</b>{% endif %}
+            </article>
+        </div>
+
+        <div class="driver-ref-ring-wrap">
+            {% if active_trip %}
+                <form method="post" action="{% url 'driver_complete_trip' active_trip.id %}" class="driver-ref-ring-form" data-driver-hold-form>
+                    {% csrf_token %}
+                    <input type="hidden" name="client_action_id" value="" data-driver-client-action>
+                    <button class="driver-ref-ring {{ driver_status_class }} is-holdable" type="submit" style="--driver-ring: {{ shift_plan_percent|default:40 }}%; --driver-hold: 0%" data-driver-hold-button>
+                        <span class="driver-ref-hold-progress driver-hold-progress" aria-hidden="true"></span>
+                        <span class="driver-ref-ring-inner">
+                            <span class="driver-ref-percent">{{ shift_plan_percent|default:40 }}%</span>
+                            <strong class="driver-ref-ring-label">{{ driver_status }}</strong>
+                            <em class="driver-ref-hold-note">удерживать<br>2 сек</em>
+                        </span>
+                    </button>
+                </form>
+                <div class="driver-ref-caption">Точковка</div>
+            {% else %}
+                <section class="driver-ref-ring {{ driver_status_class }}" style="--driver-ring: {{ shift_plan_percent|default:40 }}%">
+                    <div class="driver-ref-ring-inner">
+                        <span class="driver-ref-percent">{{ shift_plan_percent|default:40 }}%</span>
+                        <strong class="driver-ref-ring-label">{{ driver_status }}</strong>
+                        {% if pending_assignment %}
+                            <em class="driver-ref-hold-note">принять назначение</em>
+                        {% elif not open_shift %}
+                            <em class="driver-ref-hold-note">открыть смену</em>
+                        {% endif %}
+                    </div>
+                </section>
+                <div class="driver-ref-caption{% if open_shift %} is-muted{% endif %}">{% if open_shift %}Точковка{% else %}Смена не открыта{% endif %}</div>
+            {% endif %}
+        </div>
+
+        {% if pending_assignment %}
+            <div class="driver-ref-actions">
+                <div class="driver-action-title">Новое назначение</div>
+                <form method="post" action="{% url 'driver_accept_assignment' pending_assignment.id %}" class="driver-primary-form">
+                    {% csrf_token %}
+                    <button class="driver-primary-action is-warning" type="submit">Принять</button>
+                </form>
+            </div>
+        {% elif not open_shift %}
+            <div class="driver-ref-actions">
+                <button class="driver-primary-action" type="button" data-driver-tab-open="shift">Открыть смену</button>
+            </div>
+        {% endif %}
     </section>
 
-    <section class="card">
-        {% if open_shift %}
-            <h2>Смена открыта</h2>
-            <div class="grid">
-                <div class="tile"><strong>Открыта</strong>{{ open_shift.opened_at|date:"d.m.Y H:i" }}</div>
-                <div class="tile"><strong>Смена</strong>{{ open_shift.get_shift_type_display }}</div>
-                <div class="tile"><strong>Самосвал</strong>{{ open_shift.equipment }}</div>
-                <div class="tile"><strong>Топливо</strong>{{ open_shift.start_fuel }}</div>
-                <div class="tile"><strong>Пробег</strong>{{ open_shift.start_mileage }}</div>
-                <div class="tile"><strong>Моточасы</strong>{{ open_shift.start_engine_hours }}</div>
+    {% if active_trip %}
+        <section class="driver-unload-sheet" data-driver-point-sheet hidden>
+            <div class="driver-unload-head">
+                <span>Выбор точки</span>
+                <strong>Назначено: {{ active_trip_assigned_dump_point }}</strong>
             </div>
-            {% if active_trip %}
-                <p class="muted">Есть активный рейс. Смена может быть закрыта, а состояние рейса останется в системе для следующей смены.</p>
-            {% endif %}
-            <form method="post" action="{% url 'driver_close_shift' %}">
+            <div class="driver-unload-grid">
+                {% for point in unload_points %}
+                    <form method="post" action="{% url 'driver_change_unload_point' active_trip.id %}" class="driver-unload-tile-form">
+                        {% csrf_token %}
+                        <input type="hidden" name="client_action_id" value="" data-driver-client-action>
+                        <input type="hidden" name="dump_point" value="{{ point.id }}">
+                        <button class="driver-unload-tile{% if point.id == active_trip_actual_dump_point_id %} is-current{% endif %}" type="submit">
+                            <span>{% if point.id == active_trip_actual_dump_point_id %}?{% endif %}</span>
+                            <strong class="{% if point.name|length > 15 %}is-extra-long{% elif point.name|length > 8 %}is-long{% endif %}">{{ point.name }}</strong>
+                        </button>
+                    </form>
+                {% endfor %}
+            </div>
+            <button class="driver-unload-cancel" type="button" data-driver-point-close>Отмена</button>
+        </section>
+    {% endif %}
+
+    <section class="driver-panel driver-tab {% if active_tab == 'shift' %}is-active{% endif %}" data-driver-tab-panel="shift">
+        {% if open_shift %}
+            <div class="driver-section-title">
+                <span>Закрытие смены</span>
+                <strong>{{ shift_trip_count }} рейсов · {{ shift_plan_percent }}% плана</strong>
+            </div>
+            <form method="post" action="{% url 'driver_close_shift' %}" class="driver-form-card">
                 {% csrf_token %}
                 {% for field in close_form %}
-                    <label for="{{ field.id_for_label }}">{{ field.label }}</label>
-                    {{ field }}
-                    {{ field.errors }}
+                    <label>
+                        <span>{{ field.label }}</span>
+                        {{ field }}
+                        {{ field.errors }}
+                    </label>
                 {% endfor %}
-                <button type="submit">Закрыть смену</button>
+                <button class="driver-primary-action" type="submit">Закрыть смену</button>
             </form>
         {% else %}
-            <h2>Открыть смену</h2>
-            <p class="muted">Выберите смену и самосвал, затем укажите фактические показатели техники на начало смены.</p>
+            <div class="driver-section-title">
+                <span>Открытие смены</span>
+                <strong>{{ registration.dormitory_section }}</strong>
+            </div>
             {% if last_closed_shift %}
-                <div class="message success">По умолчанию подставлены показатели на конец предыдущей закрытой смены по этому самосвалу.</div>
+                <div class="driver-inline-note">Подставлены показатели предыдущей закрытой смены по самосвалу.</div>
             {% endif %}
-            <form method="post">
+            <form method="post" class="driver-form-card">
                 {% csrf_token %}
                 {% for field in form %}
-                    <label for="{{ field.id_for_label }}">{{ field.label }}</label>
-                    {{ field }}
-                    {{ field.errors }}
+                    <label>
+                        <span>{{ field.label }}</span>
+                        {{ field }}
+                        {{ field.errors }}
+                    </label>
                 {% endfor %}
-                <button type="submit">Открыть смену</button>
+                <button class="driver-primary-action" type="submit">Открыть смену</button>
             </form>
         {% endif %}
     </section>
 
-    {% if pending_assignment %}
-        <section class="card highlight-warning">
-            <h2>Новое назначение</h2>
-            <div class="grid">
-                <div class="tile"><strong>Самосвал</strong>{{ pending_assignment.truck }}</div>
-                <div class="tile"><strong>Экскаватор</strong>{{ pending_assignment.excavator }}</div>
+    <section class="driver-panel driver-tab {% if active_tab == 'downtimes' %}is-active{% endif %}" data-driver-tab-panel="downtimes" data-driver-downtime-url="{% url 'driver_downtime_action' %}">
+        <div class="driver-downtime-card status-{{ active_downtime_status_key }}{% if active_downtime %} is-active{% endif %}" data-driver-active-downtime-id="{% if active_downtime %}{{ active_downtime.id }}{% endif %}" data-driver-active-started-at="{{ active_downtime_started_at }}" data-driver-active-elapsed-seconds="{{ active_downtime_elapsed_seconds }}">
+            <span class="driver-downtime-state-dot" data-driver-downtime-indicator aria-hidden="true"></span>
+            <div>
+                <strong data-driver-active-title>{% if active_downtime %}Активный простой{% else %}Простоя нет{% endif %}</strong>
+                <b data-driver-active-duration>{{ active_downtime_elapsed_label }}</b>
+                <em data-driver-active-reason>{% if active_downtime %}{{ active_downtime.reason }}{% else %}Выберите причину для начала{% endif %}</em>
             </div>
-            <form method="post" action="{% url 'driver_accept_assignment' pending_assignment.id %}">
-                {% csrf_token %}
-                <button type="submit">Принял</button>
-            </form>
-        </section>
-    {% endif %}
+        </div>
+        <div class="driver-downtime-list">
+            {% for reason in downtime_reasons %}
+                <form method="post" action="{% url 'driver_downtime_action' %}" data-driver-downtime-reason-id="{{ reason.id }}">
+                    {% csrf_token %}
+                    <input type="hidden" name="reason_id" value="{{ reason.id }}">
+                    <button class="status-{{ reason.effective_color_group }}{% if active_downtime and active_downtime.reason_id == reason.id %} is-selected{% endif %}" type="submit" data-driver-downtime-reason-button data-driver-downtime-reason-id="{{ reason.id }}" data-driver-reason="{{ reason }}" data-driver-status-key="{{ reason.effective_color_group }}">
+                        <span>{{ reason.button_label }}</span>
+                        <strong>›</strong>
+                    </button>
+                </form>
+            {% empty %}
+                <div class="driver-inline-note">Активные причины простоев для самосвалов не найдены.</div>
+            {% endfor %}
+        </div>
+        <button class="driver-primary-action driver-downtime-close{% if not active_downtime %} is-disabled{% endif %}" type="button" data-driver-close-downtime {% if not active_downtime %}disabled aria-disabled="true"{% endif %}>Завершить простой</button>
+    </section>
 
-    {% if active_trip %}
-        <section class="card highlight-success">
-            <h2>Активный рейс</h2>
-            <div class="grid">
-                <div class="tile"><strong>От экскаватора</strong>{{ active_trip.excavator }}</div>
-                <div class="tile"><strong>Порода</strong>{{ active_trip.rock_type }}</div>
-                <div class="tile"><strong>Точка разгрузки</strong>{{ active_trip.dump_point }}</div>
-                <div class="tile"><strong>Объем</strong>{{ active_trip.volume_m3|default:"-" }}</div>
-            </div>
-            <form method="post" action="{% url 'driver_complete_trip' active_trip.id %}">
-                {% csrf_token %}
-                <button type="submit">Выполнено</button>
-            </form>
-        </section>
-    {% endif %}
+    <section class="driver-panel driver-tab {% if active_tab == 'manifest' %}is-active{% endif %}" data-driver-tab-panel="manifest">
+        <div class="driver-section-title">
+            <span>Путевка</span>
+            <strong>{{ shift_trip_count }} рейсов · {{ shift_plan_percent }}% плана</strong>
+        </div>
+        <div class="driver-trip-list">
+            {% for trip in shift_trips %}
+                <details class="driver-trip-row">
+                    <summary>
+                        <span>{{ forloop.counter|stringformat:"02d" }}</span>
+                        <strong>{{ trip.excavator }}</strong>
+                        <em>{{ trip.dump_point }}</em>
+                        <b>{% if trip.completed_at %}{{ trip.completed_at|date:"H:i" }}{% else %}в рейсе{% endif %}</b>
+                    </summary>
+                    <dl>
+                        <div><dt>Статус</dt><dd>{{ trip.get_status_display }}</dd></div>
+                        <div><dt>Порода</dt><dd>{{ trip.rock_type }}</dd></div>
+                        <div><dt>Объем</dt><dd>{{ trip.volume_m3|default:"—" }}</dd></div>
+                        <div><dt>Время создания</dt><dd>{{ trip.created_at|date:"H:i" }}</dd></div>
+                    </dl>
+                </details>
+            {% empty %}
+                <div class="driver-empty-state">Рейсов за текущую смену пока нет.</div>
+            {% endfor %}
+        </div>
+    </section>
+
+    <nav class="mm-mobile-bottom-nav driver-bottom-nav" aria-label="Навигация водителя">
+        <button class="mm-mobile-nav-item {% if active_tab == 'work' %}is-active{% endif %}" type="button" data-driver-tab-open="work">
+            <img class="driver-nav-icon driver-nav-truck" src="{% static 'img/equipment/truck-green.png' %}" alt="">
+            <span>Работа</span>
+        </button>
+        <button class="mm-mobile-nav-item {% if active_tab == 'shift' %}is-active{% endif %}" type="button" data-driver-tab-open="shift">
+            <span class="driver-nav-icon driver-nav-clock" aria-hidden="true"></span>
+            <span>Смена</span>
+        </button>
+        <button class="mm-mobile-nav-item {% if active_tab == 'downtimes' %}is-active{% endif %}" type="button" data-driver-tab-open="downtimes">
+            <span class="driver-nav-icon driver-nav-alert" aria-hidden="true"></span>
+            <span>Простои</span>
+        </button>
+        <button class="mm-mobile-nav-item {% if active_tab == 'manifest' %}is-active{% endif %}" type="button" data-driver-tab-open="manifest" data-driver-pwa-update-nav-target>
+            <span class="driver-nav-icon driver-nav-doc" aria-hidden="true"></span>
+            <span>Путевка</span>
+            <span class="driver-mobile-update-badge" data-driver-pwa-update-badge hidden aria-hidden="true"></span>
+        </button>
+    </nav>
 </main>
+
+<div class="driver-mobile-update-modal" data-driver-pwa-update-modal hidden aria-live="polite" aria-modal="true" role="dialog">
+    <div class="driver-mobile-update-dialog">
+        <strong>Доступно обновление</strong>
+        <p data-driver-pwa-update-status>Можно установить новую версию экрана водителя.</p>
+        <div class="driver-mobile-update-versions">
+            <span>Сейчас: <b data-driver-pwa-current-version>v1</b></span>
+            <span>Новая: <b data-driver-pwa-new-version>v1</b></span>
+        </div>
+        <div class="driver-mobile-update-actions">
+            <button type="button" data-driver-pwa-update-later>Позже</button>
+            <button type="button" data-driver-pwa-update-apply>Обновить</button>
+        </div>
+    </div>
+</div>
+
+<script>
+window.applyOperationalStateRefresh = function (context) {
+    var currentShell = document.querySelector("[data-driver-shell]");
+    if (!currentShell || !window.fetch || !window.DOMParser) {
+        return Promise.resolve(false);
+    }
+    var activeTab = currentShell.dataset.activeTab || "work";
+    var url = new URL(window.location.href);
+    url.searchParams.set("_driver_refresh", Date.now());
+    return fetch(url.toString(), {
+        method: "GET",
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: {
+            "Accept": "text/html",
+            "X-Requested-With": "XMLHttpRequest"
+        }
+    }).then(function (response) {
+        if (!response.ok) {
+            return false;
+        }
+        return response.text();
+    }).then(function (html) {
+        if (!html) {
+            return false;
+        }
+        var doc = new DOMParser().parseFromString(html, "text/html");
+        var freshShell = doc.querySelector("[data-driver-shell]");
+        if (!freshShell) {
+            return false;
+        }
+        var oldShell = document.querySelector("[data-driver-shell]");
+        if (!oldShell) {
+            return false;
+        }
+        freshShell.dataset.activeTab = activeTab;
+        oldShell.replaceWith(freshShell);
+
+        var freshModal = doc.querySelector("[data-driver-pwa-update-modal]");
+        var oldModal = document.querySelector("[data-driver-pwa-update-modal]");
+        if (freshModal && oldModal) {
+            oldModal.replaceWith(freshModal);
+        }
+
+        if (doc.body && doc.body.dataset.operationalStateVersion) {
+            document.body.dataset.operationalStateVersion = doc.body.dataset.operationalStateVersion;
+        } else if (context && context.version) {
+            document.body.dataset.operationalStateVersion = String(context.version);
+        }
+        if (typeof window.bindDriverMobileShell === "function") {
+            window.bindDriverMobileShell();
+        }
+        return true;
+    }).catch(function () {
+        return false;
+    });
+};
+
+window.bindDriverMobileShell = function () {
+    var shell = document.querySelector("[data-driver-shell]");
+    if (!shell) {
+        return;
+    }
+    if (shell.dataset.driverShellBound === "true") {
+        return;
+    }
+    shell.dataset.driverShellBound = "true";
+    function syncDriverReferenceScale() {
+        if (!shell.classList.contains("is-work-tab")) {
+            shell.style.removeProperty("--driver-stage-scale");
+            return;
+        }
+        var widthScale = window.innerWidth / 941;
+        var heightScale = window.innerHeight / 1672;
+        var scale = Math.min(widthScale, heightScale);
+        if (Number.isFinite(scale) && scale > 0) {
+            shell.style.setProperty("--driver-stage-scale", String(scale));
+        }
+    }
+    window.addEventListener("resize", syncDriverReferenceScale);
+    window.addEventListener("orientationchange", syncDriverReferenceScale);
+    function isTextEditable(target) {
+        return Boolean(target && target.closest && target.closest("input, textarea, select, option, [contenteditable='true'], [contenteditable='']"));
+    }
+    function clearDriverSelection() {
+        var selection = window.getSelection ? window.getSelection() : null;
+        if (selection && selection.removeAllRanges) {
+            selection.removeAllRanges();
+        }
+    }
+    shell.addEventListener("selectstart", function (event) {
+        if (!isTextEditable(event.target)) {
+            event.preventDefault();
+            clearDriverSelection();
+        }
+    });
+    shell.addEventListener("dragstart", function (event) {
+        if (event.target && event.target.closest && event.target.closest("img, svg, canvas, video")) {
+            event.preventDefault();
+        }
+    });
+    shell.addEventListener("pointerdown", function (event) {
+        if (!isTextEditable(event.target)) {
+            clearDriverSelection();
+        }
+    }, true);
+    shell.querySelectorAll(".driver-unload-tile strong").forEach(function (label) {
+        var length = label.textContent.trim().length;
+        if (length > 15) {
+            label.classList.add("is-extra-long");
+        } else if (length > 8) {
+            label.classList.add("is-long");
+        }
+    });
+    function generateClientActionId(prefix) {
+        if (window.crypto && window.crypto.randomUUID) {
+            return prefix + "-" + window.crypto.randomUUID();
+        }
+        return prefix + "-" + Date.now() + "-" + Math.random().toString(16).slice(2);
+    }
+    function fillClientAction(form, prefix) {
+        var input = form.querySelector("[data-driver-client-action]");
+        if (input && !input.value) {
+            input.value = generateClientActionId(prefix);
+        }
+    }
+    function clearDriverMessages() {
+        var messages = shell.querySelector(".driver-messages");
+        if (messages && shell.dataset.activeTab === "downtimes") {
+            messages.innerHTML = "";
+        }
+    }
+    function openDriverTab(tab) {
+        shell.dataset.activeTab = tab;
+        shell.classList.toggle("is-work-tab", tab === "work");
+        document.body.classList.toggle("driver-work-tab-active", tab === "work");
+        syncDriverReferenceScale();
+        shell.querySelectorAll("[data-driver-tab-panel]").forEach(function (panel) {
+            panel.classList.toggle("is-active", panel.dataset.driverTabPanel === tab);
+        });
+        shell.querySelectorAll("[data-driver-tab-open]").forEach(function (button) {
+            button.classList.toggle("is-active", button.dataset.driverTabOpen === tab);
+        });
+        if (window.history && window.history.replaceState) {
+            var url = new URL(window.location.href);
+            url.searchParams.set("tab", tab);
+            window.history.replaceState({}, "", url.toString());
+        }
+        clearDriverMessages();
+    }
+    shell.classList.toggle("is-work-tab", (shell.dataset.activeTab || "work") === "work");
+    document.body.classList.toggle("driver-work-tab-active", (shell.dataset.activeTab || "work") === "work");
+    syncDriverReferenceScale();
+    shell.querySelectorAll("[data-driver-tab-open]").forEach(function (button) {
+        button.addEventListener("click", function () {
+            openDriverTab(button.dataset.driverTabOpen);
+        });
+    });
+    shell.querySelectorAll("form").forEach(function (form) {
+        if (!form.matches("[data-driver-hold-form]")) {
+            form.addEventListener("submit", function () {
+                fillClientAction(form, "driver-action");
+            });
+        }
+    });
+    clearDriverMessages();
+
+    var downtimePanel = shell.querySelector("[data-driver-tab-panel='downtimes']");
+    var downtimeCard = shell.querySelector("[data-driver-active-downtime-id]");
+    var downtimeDuration = shell.querySelector("[data-driver-active-duration]");
+    var downtimeTitle = shell.querySelector("[data-driver-active-title]");
+    var downtimeReason = shell.querySelector("[data-driver-active-reason]");
+    var downtimeClose = shell.querySelector("[data-driver-close-downtime]");
+    var downtimeUrl = downtimePanel ? downtimePanel.dataset.driverDowntimeUrl : "";
+    var downtimeCsrfInput = downtimePanel ? downtimePanel.querySelector("input[name='csrfmiddlewaretoken']") : null;
+    var downtimeCsrfToken = downtimeCsrfInput ? downtimeCsrfInput.value : "";
+
+    function formatDriverDowntimeDuration(seconds) {
+        seconds = Math.max(0, Math.floor(Number(seconds) || 0));
+        var hours = Math.floor(seconds / 3600);
+        var minutes = Math.floor((seconds % 3600) / 60);
+        var rest = seconds % 60;
+        return [hours, minutes, rest].map(function (part) {
+            return String(part).padStart(2, "0");
+        }).join(":");
+    }
+
+    function clearDriverDowntimeTimer() {
+        if (window.driverDowntimeTimerId) {
+            window.clearInterval(window.driverDowntimeTimerId);
+            window.driverDowntimeTimerId = null;
+        }
+    }
+
+    function startDriverDowntimeTimer(startedAt, fallbackElapsedSeconds) {
+        clearDriverDowntimeTimer();
+        if (!downtimeDuration) {
+            return;
+        }
+        var startedAtMs = startedAt ? Date.parse(startedAt) : NaN;
+        var fallbackStartedAtMs = Date.now() - (Math.max(0, Number(fallbackElapsedSeconds) || 0) * 1000);
+        var startMs = Number.isNaN(startedAtMs) ? fallbackStartedAtMs : startedAtMs;
+        function tick() {
+            downtimeDuration.textContent = formatDriverDowntimeDuration((Date.now() - startMs) / 1000);
+        }
+        tick();
+        window.driverDowntimeTimerId = window.setInterval(tick, 1000);
+    }
+
+    function setDriverDowntimeStatusClass(statusKey) {
+        if (!downtimeCard) {
+            return;
+        }
+        ["status-gray", "status-yellow", "status-green", "status-blue", "status-orange", "status-red"].forEach(function (className) {
+            downtimeCard.classList.remove(className);
+        });
+        downtimeCard.classList.add("status-" + (statusKey || "yellow"));
+    }
+
+    function applyDriverActiveDowntime(payload) {
+        if (!downtimeCard || !payload || !payload.event_id) {
+            return;
+        }
+        downtimeCard.dataset.driverActiveDowntimeId = payload.event_id;
+        downtimeCard.dataset.driverActiveStartedAt = payload.started_at || "";
+        downtimeCard.dataset.driverActiveElapsedSeconds = String(payload.elapsed_seconds || 0);
+        downtimeCard.classList.add("is-active");
+        setDriverDowntimeStatusClass(payload.status_key || "red");
+        if (downtimeTitle) downtimeTitle.textContent = "Активный простой";
+        if (downtimeReason) downtimeReason.textContent = payload.reason || "";
+        startDriverDowntimeTimer(payload.started_at, payload.elapsed_seconds);
+        if (downtimeClose) {
+            downtimeClose.disabled = false;
+            downtimeClose.classList.remove("is-disabled");
+            downtimeClose.removeAttribute("aria-disabled");
+        }
+    }
+
+    function clearDriverActiveDowntime(payload) {
+        clearDriverDowntimeTimer();
+        if (downtimeTitle) downtimeTitle.textContent = "Простоя нет";
+        if (downtimeReason) downtimeReason.textContent = "Выберите причину для начала";
+        if (downtimeDuration) downtimeDuration.textContent = "00:00:00";
+        if (downtimeCard) {
+            downtimeCard.dataset.driverActiveDowntimeId = "";
+            downtimeCard.dataset.driverActiveStartedAt = "";
+            downtimeCard.dataset.driverActiveElapsedSeconds = String((payload && payload.elapsed_seconds) || 0);
+            downtimeCard.classList.remove("is-active");
+            setDriverDowntimeStatusClass("yellow");
+        }
+        if (downtimeClose) {
+            downtimeClose.disabled = true;
+            downtimeClose.classList.add("is-disabled");
+            downtimeClose.setAttribute("aria-disabled", "true");
+        }
+        shell.querySelectorAll("[data-driver-downtime-reason-button]").forEach(function (button) {
+            button.classList.remove("is-selected");
+        });
+    }
+
+    function postDriverDowntimeAction(payload) {
+        if (!downtimeUrl) {
+            return Promise.reject(new Error("Адрес действия простоя не найден"));
+        }
+        return fetch(downtimeUrl, {
+            method: "POST",
+            credentials: "same-origin",
+            headers: {
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "X-CSRFToken": downtimeCsrfToken,
+                "X-Requested-With": "XMLHttpRequest"
+            },
+            body: JSON.stringify(payload || {})
+        }).then(function (response) {
+            return response.json().catch(function () { return {}; }).then(function (data) {
+                if (!response.ok || !data.ok) {
+                    throw new Error(data.error || "Действие простоя не сохранено");
+                }
+                return data;
+            });
+        });
+    }
+
+    shell.querySelectorAll("form[data-driver-downtime-reason-id]").forEach(function (form) {
+        form.addEventListener("submit", function (event) {
+            event.preventDefault();
+            var button = form.querySelector("[data-driver-downtime-reason-button]");
+            if (!button || button.disabled) {
+                return;
+            }
+            shell.querySelectorAll("[data-driver-downtime-reason-button]").forEach(function (item) {
+                item.classList.remove("is-selected");
+            });
+            button.classList.add("is-selected");
+            if (downtimeReason) {
+                downtimeReason.textContent = button.dataset.driverReason || button.textContent.trim();
+            }
+            button.disabled = true;
+            postDriverDowntimeAction({
+                action: "start",
+                reason_id: button.dataset.driverDowntimeReasonId,
+                client_action_id: generateClientActionId("driver-downtime")
+            }).then(function (payload) {
+                applyDriverActiveDowntime(payload);
+                if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
+                    window.AppRealtime.wake("driver_downtime_saved");
+                }
+            }).catch(function (error) {
+                window.alert(error.message || "Простой не сохранен");
+                button.classList.remove("is-selected");
+            }).finally(function () {
+                button.disabled = false;
+            });
+        });
+    });
+
+    if (downtimeClose) {
+        downtimeClose.addEventListener("click", function () {
+            if (downtimeClose.disabled || downtimeClose.getAttribute("aria-disabled") === "true") {
+                return;
+            }
+            if (!downtimeCard || !downtimeCard.dataset.driverActiveDowntimeId) {
+                clearDriverActiveDowntime();
+                return;
+            }
+            downtimeClose.disabled = true;
+            downtimeClose.classList.add("is-pending");
+            postDriverDowntimeAction({
+                action: "close",
+                client_action_id: generateClientActionId("driver-downtime-close")
+            }).then(function (payload) {
+                clearDriverActiveDowntime(payload);
+                if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
+                    window.AppRealtime.wake("driver_downtime_closed");
+                }
+            }).catch(function (error) {
+                window.alert(error.message || "Простой не завершен");
+                downtimeClose.disabled = false;
+                downtimeClose.classList.remove("is-disabled");
+                downtimeClose.removeAttribute("aria-disabled");
+            }).finally(function () {
+                downtimeClose.classList.remove("is-pending");
+            });
+        });
+    }
+
+    if (downtimeCard && downtimeCard.dataset.driverActiveDowntimeId && downtimeCard.dataset.driverActiveStartedAt) {
+        startDriverDowntimeTimer(downtimeCard.dataset.driverActiveStartedAt, downtimeCard.dataset.driverActiveElapsedSeconds);
+    } else if (downtimeDuration) {
+        downtimeDuration.textContent = "00:00:00";
+        clearDriverDowntimeTimer();
+    }
+
+    var holdForm = shell.querySelector("[data-driver-hold-form]");
+    var holdButton = shell.querySelector("[data-driver-hold-button]");
+    if (holdForm && holdButton) {
+        var holdTimer = null;
+        var holdStart = 0;
+        var holdFrame = null;
+        var holdMs = 2000;
+        function resetHold() {
+            window.clearTimeout(holdTimer);
+            if (holdFrame) {
+                window.cancelAnimationFrame(holdFrame);
+            }
+            holdTimer = null;
+            holdStart = 0;
+            holdButton.classList.remove("is-holding");
+            holdButton.style.setProperty("--driver-hold", "0%");
+        }
+        function drawHold() {
+            if (!holdStart) {
+                return;
+            }
+            var elapsed = Date.now() - holdStart;
+            var percent = Math.max(0, Math.min(100, Math.round((elapsed / holdMs) * 100)));
+            holdButton.style.setProperty("--driver-hold", percent + "%");
+            if (percent < 100) {
+                holdFrame = window.requestAnimationFrame(drawHold);
+            }
+        }
+        function completeHold() {
+            fillClientAction(holdForm, "trip-unloaded");
+            holdForm.dataset.holdComplete = "true";
+            holdButton.classList.add("is-pending");
+            holdButton.disabled = true;
+            holdForm.submit();
+        }
+        holdButton.addEventListener("pointerdown", function (event) {
+            if (holdButton.disabled) {
+                return;
+            }
+            event.preventDefault();
+            resetHold();
+            holdStart = Date.now();
+            holdButton.classList.add("is-holding");
+            holdButton.setPointerCapture?.(event.pointerId);
+            drawHold();
+            holdTimer = window.setTimeout(completeHold, holdMs);
+        });
+        ["pointerup", "pointercancel", "pointerleave"].forEach(function (eventName) {
+            holdButton.addEventListener(eventName, function () {
+                if (holdForm.dataset.holdComplete !== "true") {
+                    resetHold();
+                }
+            });
+        });
+        holdForm.addEventListener("submit", function (event) {
+            if (holdForm.dataset.holdComplete !== "true") {
+                event.preventDefault();
+                resetHold();
+            }
+        });
+    }
+
+    var pointSheet = shell.querySelector("[data-driver-point-sheet]");
+    var pointOpen = shell.querySelector("[data-driver-point-open]");
+    function setPointSheet(open) {
+        if (!pointSheet) {
+            return;
+        }
+        pointSheet.hidden = !open;
+        shell.classList.toggle("is-point-sheet-open", open);
+    }
+    if (pointOpen && pointSheet) {
+        pointOpen.addEventListener("click", function () {
+            setPointSheet(true);
+        });
+        pointOpen.addEventListener("keydown", function (event) {
+            if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                setPointSheet(true);
+            }
+        });
+        pointSheet.querySelectorAll("[data-driver-point-close]").forEach(function (button) {
+            button.addEventListener("click", function () {
+                setPointSheet(false);
+            });
+        });
+        pointSheet.querySelectorAll("form").forEach(function (form) {
+            form.addEventListener("submit", function () {
+                fillClientAction(form, "change-unload-point");
+            });
+        });
+    }
+
+    (function initDriverPwaUpdates() {
+        if (!("serviceWorker" in navigator)) {
+            return;
+        }
+        var currentShellVersion = shell.dataset.driverPwaVersion || "driver-mobile-shell-v27";
+        var updateModal = document.querySelector("[data-driver-pwa-update-modal]");
+        var updateBadge = document.querySelector("[data-driver-pwa-update-badge]");
+        var updateTarget = document.querySelector("[data-driver-pwa-update-nav-target]");
+        var statusNode = document.querySelector("[data-driver-pwa-update-status]");
+        var currentVersionNode = document.querySelector("[data-driver-pwa-current-version]");
+        var newVersionNode = document.querySelector("[data-driver-pwa-new-version]");
+        var applyButton = document.querySelector("[data-driver-pwa-update-apply]");
+        var laterButton = document.querySelector("[data-driver-pwa-update-later]");
+        var waitingWorker = null;
+        var reloading = false;
+
+        function formatVersion(version) {
+            var match = String(version || "").match(/driver-mobile-shell-v(\d+)/);
+            return match ? "v" + match[1] : String(version || "v1");
+        }
+        function setBadge(visible) {
+            if (updateBadge) {
+                updateBadge.hidden = !visible;
+            }
+            if (updateTarget) {
+                updateTarget.classList.toggle("has-update", visible);
+            }
+        }
+        function setStatus(text) {
+            if (statusNode) {
+                statusNode.textContent = text;
+            }
+        }
+        function showUpdate(nextVersion, worker) {
+            waitingWorker = worker || waitingWorker;
+            setBadge(true);
+            if (currentVersionNode) {
+                currentVersionNode.textContent = formatVersion(currentShellVersion);
+            }
+            if (newVersionNode) {
+                newVersionNode.textContent = formatVersion(nextVersion);
+            }
+            setStatus("Можно установить новую версию экрана водителя.");
+        }
+        function requestWorkerVersion(worker) {
+            if (!worker || !worker.postMessage || !window.MessageChannel) {
+                return Promise.resolve("");
+            }
+            return new Promise(function (resolve) {
+                var channel = new MessageChannel();
+                var timeout = window.setTimeout(function () {
+                    resolve("");
+                }, 1200);
+                channel.port1.onmessage = function (event) {
+                    window.clearTimeout(timeout);
+                    resolve(event.data && event.data.version ? event.data.version : "");
+                };
+                worker.postMessage({ type: "GET_VERSION" }, [channel.port2]);
+            });
+        }
+        function fetchLatestVersion() {
+            return fetch("/driver-sw.js?version_check=" + Date.now(), { cache: "no-store" })
+                .then(function (response) { return response.ok ? response.text() : ""; })
+                .then(function (text) {
+                    var match = text.match(/driver-mobile-shell-v\d+/);
+                    return match ? match[0] : "";
+                })
+                .catch(function () { return ""; });
+        }
+        function revealModal() {
+            if (updateModal) {
+                updateModal.hidden = false;
+            }
+        }
+        function hideModal() {
+            if (updateModal) {
+                updateModal.hidden = true;
+            }
+        }
+        function applyUpdate(registration) {
+            setStatus("Устанавливаем обновление...");
+            var worker = waitingWorker || (registration && registration.waiting);
+            if (worker) {
+                worker.postMessage({ type: "SKIP_WAITING" });
+                return;
+            }
+            if (registration && registration.update) {
+                registration.update().then(function () {
+                    worker = registration.waiting || waitingWorker;
+                    if (worker) {
+                        worker.postMessage({ type: "SKIP_WAITING" });
+                    } else {
+                        window.location.reload();
+                    }
+                }).catch(function () {
+                    setStatus("Не удалось установить обновление. Попробуйте еще раз.");
+                });
+            }
+        }
+
+        navigator.serviceWorker.addEventListener("controllerchange", function () {
+            if (!reloading) {
+                reloading = true;
+                window.location.reload();
+            }
+        });
+
+        navigator.serviceWorker.register("/driver-sw.js", { scope: "/driver/" }).then(function (registration) {
+            if (registration.waiting) {
+                requestWorkerVersion(registration.waiting).then(function (version) {
+                    if (version && version !== currentShellVersion) {
+                        showUpdate(version, registration.waiting);
+                    }
+                });
+            }
+            registration.addEventListener("updatefound", function () {
+                var worker = registration.installing;
+                if (!worker) {
+                    return;
+                }
+                worker.addEventListener("statechange", function () {
+                    if (worker.state === "installed" && navigator.serviceWorker.controller) {
+                        requestWorkerVersion(worker).then(function (version) {
+                            showUpdate(version || currentShellVersion, worker);
+                        });
+                    }
+                });
+            });
+            fetchLatestVersion().then(function (latestVersion) {
+                if (latestVersion && latestVersion !== currentShellVersion) {
+                    showUpdate(latestVersion, registration.waiting);
+                }
+            });
+            if (applyButton) {
+                applyButton.addEventListener("click", function () {
+                    applyUpdate(registration);
+                });
+            }
+        }).catch(function () {
+            setBadge(false);
+        });
+
+        if (laterButton) {
+            laterButton.addEventListener("click", hideModal);
+        }
+        if (updateTarget) {
+            updateTarget.addEventListener("click", function () {
+                if (updateBadge && !updateBadge.hidden) {
+                    revealModal();
+                }
+            }, true);
+        }
+    })();
+};
+document.addEventListener("DOMContentLoaded", window.bindDriverMobileShell);
+</script>
 {% endblock %}

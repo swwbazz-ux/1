@@ -81,7 +81,7 @@ class Command(BaseCommand):
         active_trip = Trip.objects.filter(
             truck=truck,
             excavator=excavator,
-            status=TripStatus.ACTIVE,
+            status__in=(TripStatus.ACTIVE, TripStatus.LOADED_WAITING_UNLOAD),
         ).first()
         if not active_trip:
             active_trip = Trip.objects.create(
@@ -98,8 +98,8 @@ class Command(BaseCommand):
                 loading_block='52',
                 transport_distance_km=Decimal('3.10'),
                 downtime_text='зачистка забоя',
-                note='демо активный рейс',
-                status=TripStatus.ACTIVE,
+                note='демо рейс на разгрузку',
+                status=TripStatus.LOADED_WAITING_UNLOAD,
             )
         else:
             active_trip.planned_volume_m3 = Decimal('7000.00')
@@ -107,7 +107,8 @@ class Command(BaseCommand):
             active_trip.loading_block = '52'
             active_trip.transport_distance_km = Decimal('3.10')
             active_trip.downtime_text = 'зачистка забоя'
-            active_trip.note = 'демо активный рейс'
+            active_trip.note = 'демо рейс на разгрузку'
+            active_trip.status = TripStatus.LOADED_WAITING_UNLOAD
             active_trip.save(update_fields=[
                 'planned_volume_m3',
                 'loading_horizon',
@@ -115,6 +116,7 @@ class Command(BaseCommand):
                 'transport_distance_km',
                 'downtime_text',
                 'note',
+                'status',
             ])
 
         completed_truck = trucks[2] if len(trucks) > 2 else None

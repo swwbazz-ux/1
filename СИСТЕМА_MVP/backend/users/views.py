@@ -1,24 +1,30 @@
-import secrets
+﻿import secrets
+import json
 from datetime import datetime
 from io import BytesIO
 from urllib.parse import urlencode
 
 from django.contrib import messages
 from django.forms import modelform_factory
+from django.db import transaction
 from django.db.models import Count, Q
-from django.http import HttpResponse
+from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
+from django.views.decorators.http import require_POST
 from openpyxl import Workbook
 
 from assignments.models import AssignmentStatus, HaulAssignment
-from references.models import Dormitory, DormitorySection, DumpPoint, Equipment, EquipmentType, RockType
+from core.models import OperationalStateEvent, bump_operational_state
+from downtimes.models import DowntimeEvent, DowntimeReason
+from references.models import Dormitory, DormitorySection, DumpPoint, Equipment, EquipmentState, EquipmentType, RockType
 from reports.models import ReportTemplate
-from shifts.models import EmployeeShift
-from trips.models import Trip, TripStatus
+from shifts.models import EmployeeShift, EquipmentShiftPlan, PlanCalculationMode, ShiftPlan, ShiftPlanScope
+from shifts.services import calculate_open_shift_progress
+from trips.models import DispatcherActionLog, OPEN_TRIP_STATUSES, Trip, TripClientAction, TripStatus
 
 from .access_auth import find_employee_access_by_credentials
 from .forms import (
@@ -65,7 +71,7 @@ INTERFACE_MAP = [
     {
         'section': 'Рабочие интерфейсы',
         'items': [
-            {'title': 'Водитель самосвала', 'url': '/driver/shift/', 'code': '2000', 'note': 'Открытие/закрытие смены, активный рейс, подтверждение назначения'},
+            {'title': 'Работа водителя самосвала', 'url': '/driver/', 'code': '2000', 'note': 'Главный PWA-экран Работа, смена, простои и путевка'},
             {'title': 'Первичная регистрация водителя', 'url': '/driver/registration/', 'code': '2000', 'note': 'Первичное заполнение данных проживания; смена и техника выбираются при открытии смены'},
             {'title': 'Машинист экскаватора', 'url': '/excavator/work/', 'code': '3000', 'note': 'Создание рейса и параметры для отчета заказчику'},
             {'title': 'Горный мастер', 'url': '/mining-master/assignments/', 'code': '4000', 'note': 'Назначение самосвалов под экскаваторы'},
@@ -99,6 +105,149 @@ DEMO_ACCESS_CODES = [
     ('+79000000007', '700000', 'Механик'),
     ('+79000000006', '600000', 'Руководство'),
 ]
+
+
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v21'
+
+DRIVER_MANIFEST = {
+    'id': '/driver/',
+    'name': 'Водитель самосвала',
+    'short_name': 'Водитель',
+    'description': 'Мобильное рабочее место водителя самосвала: работа, смена, простои и путевка.',
+    'start_url': '/driver/',
+    'scope': '/driver/',
+    'display': 'standalone',
+    'display_override': ['standalone', 'fullscreen'],
+    'orientation': 'portrait',
+    'background_color': '#030708',
+    'theme_color': '#030708',
+    'categories': ['business', 'productivity'],
+    'icons': [
+        {
+            'src': '/static/img/pwa/mining-master-180.png',
+            'sizes': '180x180',
+            'type': 'image/png',
+        },
+        {
+            'src': '/static/img/pwa/mining-master-192.png',
+            'sizes': '192x192',
+            'type': 'image/png',
+        },
+        {
+            'src': '/static/img/pwa/mining-master-512.png',
+            'sizes': '512x512',
+            'type': 'image/png',
+        },
+        {
+            'src': '/static/img/pwa/mining-master-maskable-512.png',
+            'sizes': '512x512',
+            'type': 'image/png',
+            'purpose': 'maskable',
+        },
+    ],
+}
+
+DRIVER_SERVICE_WORKER_JS = f"""
+const CACHE_NAME = "{DRIVER_SHELL_VERSION}";
+const APP_SHELL_URL = "/driver/";
+const LEGACY_SHELL_URL = "/driver/shift/";
+const MANIFEST_URL = "/driver.webmanifest";
+const CORE_ASSETS = [
+    APP_SHELL_URL,
+    LEGACY_SHELL_URL,
+    MANIFEST_URL,
+    "/static/css/app.css",
+    "/static/js/realtime-client.js",
+    "/static/favicon.ico",
+    "/static/img/equipment/truck-green.png",
+    "/static/img/equipment/excavator-green.png",
+    "/static/img/pwa/mining-master-180.png",
+    "/static/img/pwa/mining-master-192.png",
+    "/static/img/pwa/mining-master-512.png",
+    "/static/img/pwa/mining-master-maskable-512.png"
+];
+
+self.addEventListener("install", (event) => {{
+    event.waitUntil(
+        caches.open(CACHE_NAME).then((cache) => cache.addAll(CORE_ASSETS))
+    );
+    self.skipWaiting();
+}});
+
+self.addEventListener("activate", (event) => {{
+    event.waitUntil(
+        caches.keys().then((keys) => Promise.all(
+            keys
+                .filter((key) => key.startsWith("driver-mobile-shell-") && key !== CACHE_NAME)
+                .map((key) => caches.delete(key))
+        )).then(() => self.clients.claim())
+    );
+}});
+
+async function networkFirst(request, fallbackUrl) {{
+    const cache = await caches.open(CACHE_NAME);
+    try {{
+        const response = await fetch(request);
+        if (response && response.ok) {{
+            cache.put(request, response.clone());
+        }}
+        return response;
+    }} catch (error) {{
+        return (await cache.match(request)) || (fallbackUrl ? cache.match(fallbackUrl) : undefined) || Response.error();
+    }}
+}}
+
+async function cacheFirst(request) {{
+    const cache = await caches.open(CACHE_NAME);
+    const cached = await cache.match(request, {{ ignoreSearch: true }});
+    if (cached) {{
+        return cached;
+    }}
+    const response = await fetch(request);
+    if (response && response.ok) {{
+        cache.put(request, response.clone());
+    }}
+    return response;
+}}
+
+self.addEventListener("fetch", (event) => {{
+    const request = event.request;
+    if (request.method !== "GET") {{
+        return;
+    }}
+    const url = new URL(request.url);
+    if (url.origin !== self.location.origin) {{
+        return;
+    }}
+    if (request.headers.get("x-requested-with") === "XMLHttpRequest") {{
+        event.respondWith(fetch(request));
+        return;
+    }}
+    if (request.mode === "navigate" || url.pathname === APP_SHELL_URL || url.pathname === LEGACY_SHELL_URL) {{
+        event.respondWith(networkFirst(request, APP_SHELL_URL));
+        return;
+    }}
+    if (url.pathname === MANIFEST_URL) {{
+        event.respondWith(networkFirst(request, MANIFEST_URL));
+        return;
+    }}
+    if (url.pathname.startsWith("/static/")) {{
+        event.respondWith(cacheFirst(request));
+    }}
+}});
+
+self.addEventListener("message", (event) => {{
+    if (!event.data || !event.data.type) {{
+        return;
+    }}
+    if (event.data.type === "SKIP_WAITING") {{
+        self.skipWaiting();
+    }}
+    if (event.data.type === "GET_VERSION" && event.ports && event.ports[0]) {{
+        event.ports[0].postMessage({{ version: CACHE_NAME }});
+    }}
+}});
+""".strip()
 
 
 def get_current_access(request):
@@ -173,6 +322,20 @@ def excel_value(value):
     if isinstance(value, datetime) and timezone.is_aware(value):
         return timezone.localtime(value).replace(tzinfo=None)
     return value
+
+
+def driver_manifest_view(request):
+    response = JsonResponse(DRIVER_MANIFEST, json_dumps_params={'ensure_ascii': False})
+    response['Content-Type'] = 'application/manifest+json; charset=utf-8'
+    response['Cache-Control'] = 'no-cache'
+    return response
+
+
+def driver_service_worker_view(request):
+    response = HttpResponse(DRIVER_SERVICE_WORKER_JS, content_type='application/javascript; charset=utf-8')
+    response['Cache-Control'] = 'no-cache'
+    response['Service-Worker-Allowed'] = '/driver/'
+    return response
 
 
 def interface_map_view(request):
@@ -275,7 +438,7 @@ def role_home_view(request):
     if access.role.code == 'driver':
         if not hasattr(access.employee, 'driver_registration'):
             return redirect('driver_registration')
-        return redirect('driver_shift')
+        return redirect('driver_work')
     if access.role.code == 'mining_master':
         return redirect('mining_master_assignments')
     if access.role.code == 'excavator_operator':
@@ -315,6 +478,8 @@ def system_admin_dashboard_view(request):
     reference_counts = [
         ('Виды техники', EquipmentType.objects.count(), '/admin/references/equipmenttype/'),
         ('Техника', Equipment.objects.count(), '/admin/references/equipment/'),
+        ('Состояния техники', EquipmentState.objects.count(), '/admin/references/equipmentstate/'),
+        ('Причины простоев', DowntimeReason.objects.count(), '/admin/downtimes/downtimereason/'),
         ('Породы', RockType.objects.count(), '/admin/references/rocktype/'),
         ('Точки разгрузки', DumpPoint.objects.count(), '/admin/references/dumppoint/'),
         ('Общежития', Dormitory.objects.count(), '/admin/references/dormitory/'),
@@ -337,8 +502,47 @@ def system_admin_dashboard_view(request):
             'recent_logs': AdminActionLog.objects.select_related('actor')[:8],
             'open_conflicts': AdminConflict.objects.select_related('employee', 'role').filter(status=AdminConflict.Status.OPEN)[:8],
             'reference_counts': reference_counts,
+            'shift_fact_total': Trip.objects.count() + DowntimeEvent.objects.count(),
         },
     )
+
+
+@require_POST
+def system_admin_reset_shift_test_data_view(request):
+    access = require_admin_access(request)
+    if not access:
+        return redirect('role_home')
+
+    deleted_counts = {
+        'рейсы': Trip.objects.count(),
+        'простои': DowntimeEvent.objects.count(),
+        'оперативные события': OperationalStateEvent.objects.count(),
+        'клиентские действия рейсов': TripClientAction.objects.count(),
+        'диспетчерские журналы действий': DispatcherActionLog.objects.count(),
+    }
+
+    with transaction.atomic():
+        TripClientAction.objects.all().delete()
+        DispatcherActionLog.objects.all().delete()
+        Trip.objects.all().delete()
+        DowntimeEvent.objects.all().delete()
+        OperationalStateEvent.objects.all().delete()
+        bump_operational_state(
+            'SystemAdmin:test_shift_data_reset',
+            event_type='test_shift_data_reset',
+            object_type='SystemAdmin',
+            payload={'action': 'test_shift_data_reset', 'deleted_counts': deleted_counts},
+        )
+        log_admin_action(
+            access.employee,
+            'Сброшены тестовые показатели смены',
+            new_value=json.dumps(deleted_counts, ensure_ascii=False),
+            comment='Удалены только рейсы, простои, оперативные события и журналы действий. Справочники, сотрудники, техника и планы сохранены.',
+        )
+
+    deleted_total = sum(deleted_counts.values())
+    messages.success(request, f'Тестовые показатели смены сброшены. Удалено записей: {deleted_total}.')
+    return redirect('system_admin_dashboard')
 
 
 def system_admin_references_view(request):
@@ -361,6 +565,7 @@ def system_admin_references_view(request):
             'items': [
                 {'name': 'Виды техники', 'count': EquipmentType.objects.count(), 'url': '', 'external_url': '/admin/references/equipmenttype/', 'detail_code': 'equipment-types'},
                 {'name': 'Техника', 'count': Equipment.objects.count(), 'url': '', 'external_url': '/admin/references/equipment/', 'detail_code': 'equipment'},
+                {'name': 'Состояния техники', 'count': EquipmentState.objects.count(), 'url': '', 'external_url': '/admin/references/equipmentstate/', 'detail_code': 'equipment-states'},
             ],
         },
         {
@@ -369,6 +574,17 @@ def system_admin_references_view(request):
                 {'name': 'Породы', 'count': RockType.objects.count(), 'url': '', 'external_url': '/admin/references/rocktype/', 'detail_code': 'rocks'},
                 {'name': 'Точки разгрузки', 'count': DumpPoint.objects.count(), 'url': '', 'external_url': '/admin/references/dumppoint/', 'detail_code': 'dump-points'},
                 {'name': 'Шаблоны отчетов', 'count': ReportTemplate.objects.count(), 'url': '', 'external_url': '/reports/templates/'},
+                {'name': 'Сменные планы', 'count': ShiftPlan.objects.count(), 'url': '', 'external_url': '/admin/shifts/shiftplan/', 'detail_code': 'shift-plans'},
+                {'name': 'Планы техники', 'count': EquipmentShiftPlan.objects.count(), 'url': '', 'external_url': '/admin/shifts/equipmentshiftplan/', 'detail_code': 'equipment-shift-plans'},
+            ],
+        },
+        {
+            'title': 'Простои',
+            'items': [
+                {'name': 'Общий список простоев', 'count': DowntimeReason.objects.count(), 'url': '', 'external_url': '/admin/downtimes/downtimereason/', 'detail_code': 'downtime-reasons'},
+                {'name': 'Простои водителя самосвала', 'count': DowntimeReason.objects.filter(show_for_truck_driver=True).count(), 'url': '', 'external_url': '/admin/downtimes/downtimereason/', 'detail_code': 'truck-driver-downtimes'},
+                {'name': 'Простои машиниста экскаватора', 'count': DowntimeReason.objects.filter(show_for_excavator_operator=True).count(), 'url': '', 'external_url': '/admin/downtimes/downtimereason/', 'detail_code': 'excavator-operator-downtimes'},
+                {'name': 'Детальные простои механика', 'count': DowntimeReason.objects.filter(show_for_mechanic=True).count(), 'url': '', 'external_url': '/admin/downtimes/downtimereason/', 'detail_code': 'mechanic-downtimes'},
             ],
         },
         {
@@ -436,6 +652,71 @@ def get_system_admin_reference_configs():
             'select_related': ['equipment_type', 'model'],
             'admin_url': '/admin/references/equipment/',
         },
+        'equipment-states': {
+            'title': 'Состояния техники',
+            'section': 'Техника',
+            'model': EquipmentState,
+            'search_fields': ['code', 'name', 'short_label', 'description'],
+            'preview_fields': ['code', 'name', 'short_label', 'color_group', 'semantic_group'],
+            'admin_url': '/admin/references/equipmentstate/',
+        },
+        'downtime-reasons': {
+            'title': 'Общий список простоев',
+            'section': 'Простои',
+            'model': DowntimeReason,
+            'fields': [
+                'name',
+                'short_label',
+                'equipment_type',
+                'equipment_state',
+                'is_critical',
+                'show_for_truck_driver',
+                'show_for_excavator_operator',
+                'show_for_mechanic',
+                'sort_order',
+                'is_active',
+            ],
+            'search_fields': ['name', 'short_label', 'equipment_type__name', 'equipment_state__name'],
+            'preview_fields': ['short_label', 'equipment_type', 'equipment_state', 'show_for_truck_driver', 'show_for_excavator_operator', 'show_for_mechanic'],
+            'select_related': ['equipment_type', 'equipment_state'],
+            'admin_url': '/admin/downtimes/downtimereason/',
+        },
+        'truck-driver-downtimes': {
+            'title': 'Простои водителя самосвала',
+            'section': 'Простои',
+            'model': DowntimeReason,
+            'fields': ['name', 'short_label', 'equipment_type', 'equipment_state', 'is_critical', 'show_for_truck_driver', 'sort_order', 'is_active'],
+            'search_fields': ['name', 'short_label', 'equipment_type__name', 'equipment_state__name'],
+            'preview_fields': ['short_label', 'equipment_type', 'equipment_state', 'is_critical', 'show_for_truck_driver'],
+            'select_related': ['equipment_type', 'equipment_state'],
+            'base_filter': {'show_for_truck_driver': True},
+            'initial': {'show_for_truck_driver': True},
+            'admin_url': '/admin/downtimes/downtimereason/',
+        },
+        'excavator-operator-downtimes': {
+            'title': 'Простои машиниста экскаватора',
+            'section': 'Простои',
+            'model': DowntimeReason,
+            'fields': ['name', 'short_label', 'equipment_type', 'equipment_state', 'is_critical', 'show_for_excavator_operator', 'sort_order', 'is_active'],
+            'search_fields': ['name', 'short_label', 'equipment_type__name', 'equipment_state__name'],
+            'preview_fields': ['short_label', 'equipment_type', 'equipment_state', 'is_critical', 'show_for_excavator_operator'],
+            'select_related': ['equipment_type', 'equipment_state'],
+            'base_filter': {'show_for_excavator_operator': True},
+            'initial': {'show_for_excavator_operator': True},
+            'admin_url': '/admin/downtimes/downtimereason/',
+        },
+        'mechanic-downtimes': {
+            'title': 'Детальные простои механика',
+            'section': 'Простои',
+            'model': DowntimeReason,
+            'fields': ['name', 'short_label', 'equipment_type', 'equipment_state', 'is_critical', 'show_for_mechanic', 'sort_order', 'is_active'],
+            'search_fields': ['name', 'short_label', 'equipment_type__name', 'equipment_state__name'],
+            'preview_fields': ['short_label', 'equipment_type', 'equipment_state', 'is_critical', 'show_for_mechanic'],
+            'select_related': ['equipment_type', 'equipment_state'],
+            'base_filter': {'show_for_mechanic': True},
+            'initial': {'show_for_mechanic': True},
+            'admin_url': '/admin/downtimes/downtimereason/',
+        },
         'rocks': {
             'title': 'Породы',
             'section': 'Производство',
@@ -451,6 +732,37 @@ def get_system_admin_reference_configs():
             'search_fields': ['name'],
             'preview_fields': ['name', 'is_active'],
             'admin_url': '/admin/references/dumppoint/',
+        },
+        'shift-plans': {
+            'title': 'Сменные планы',
+            'section': 'Производство',
+            'model': ShiftPlan,
+            'description': 'Планы объема в кубах: месяц, сутки, дневная смена и ночная смена. Рейсы задаются только в планах конкретной техники.',
+            'fields': ['plan_scope', 'name', 'plan_volume_m3', 'is_active', 'comment'],
+            'search_fields': ['name', 'comment'],
+            'preview_fields': ['plan_scope', 'plan_volume_m3'],
+            'select_related': ['created_by'],
+            'initial': {'plan_scope': ShiftPlanScope.DAY_SHIFT, 'name': 'Дневной сменный план', 'is_active': True},
+            'hide_actions_card': True,
+            'admin_url': '/admin/shifts/shiftplan/',
+        },
+        'equipment-shift-plans': {
+            'title': 'Планы техники',
+            'section': 'Производство',
+            'model': EquipmentShiftPlan,
+            'description': 'Планы по конкретной технике: для самосвалов обычно рейсы, для экскаваторов объем в м3.',
+            'fields': ['shift_plan', 'equipment', 'employee', 'calculation_mode', 'plan_trips', 'plan_volume_m3', 'is_active', 'comment'],
+            'search_fields': ['shift_plan__name', 'equipment__garage_number', 'equipment__equipment_type__name', 'employee__full_name', 'comment'],
+            'preview_fields': ['shift_plan', 'equipment', 'employee', 'calculation_mode', 'plan_trips', 'plan_volume_m3'],
+            'select_related': ['shift_plan', 'equipment', 'equipment__equipment_type', 'employee'],
+            'initial': {'is_active': True},
+            'field_choices': {
+                'calculation_mode': [
+                    (PlanCalculationMode.TRIPS, 'По рейсам'),
+                    (PlanCalculationMode.VOLUME, 'По объему, м3'),
+                ],
+            },
+            'admin_url': '/admin/shifts/equipmentshiftplan/',
         },
         'dormitories': {
             'title': 'Общежития',
@@ -472,17 +784,46 @@ def get_system_admin_reference_configs():
     }
 
 
-def build_reference_form(model):
-    editable_fields = [
+def build_reference_form(model, config=None):
+    config = config or {}
+    editable_fields = config.get('fields') or [
         field.name
         for field in model._meta.fields
         if field.name != 'id' and getattr(field, 'editable', True)
     ]
-    return modelform_factory(model, fields=editable_fields)
+    form_class = modelform_factory(model, fields=editable_fields)
+    field_choices = config.get('field_choices') or {}
+    if not field_choices:
+        return form_class
+
+    class ReferenceForm(form_class):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            for field_name, choices in field_choices.items():
+                if field_name in self.fields:
+                    self.fields[field_name].choices = choices
+
+    return ReferenceForm
+
+
+def prepare_reference_record_for_save(reference_code, record, access):
+    if reference_code == 'shift-plans':
+        if not record.date:
+            record.date = timezone.localdate()
+        record.plan_trips = None
+        record.plan_tonnage = None
+        if not record.created_by_id:
+            record.created_by = access.employee
+    elif reference_code == 'equipment-shift-plans':
+        record.plan_tonnage = None
+    return record
 
 
 def build_reference_queryset(config):
     queryset = config['model'].objects.all()
+    base_filter = config.get('base_filter') or {}
+    if base_filter:
+        queryset = queryset.filter(**base_filter)
     select_related = config.get('select_related') or []
     if select_related:
         queryset = queryset.select_related(*select_related)
@@ -509,6 +850,8 @@ def get_reference_record_preview(record, config):
         value = getattr(record, field_name)
         if field.get_internal_type() == 'BooleanField':
             value = 'Да' if value else 'Нет'
+        elif getattr(field, 'choices', None):
+            value = getattr(record, f'get_{field_name}_display')()
         elif value in (None, ''):
             value = 'Не указано'
         preview.append({'label': field.verbose_name, 'value': value})
@@ -527,7 +870,7 @@ def system_admin_reference_detail_view(request, reference_code):
         return redirect('system_admin_references')
 
     model = config['model']
-    form_class = build_reference_form(model)
+    form_class = build_reference_form(model, config)
     query = request.GET.get('q', '').strip()
     status_filter = request.GET.get('status', '').strip()
     edit_id = request.GET.get('edit', '').strip()
@@ -565,12 +908,16 @@ def system_admin_reference_detail_view(request, reference_code):
 
         form = form_class(request.POST, instance=record)
         if form.is_valid():
-            saved_record = form.save()
+            saved_record = form.save(commit=False)
+            saved_record = prepare_reference_record_for_save(reference_code, saved_record, access)
+            saved_record.save()
+            form.save_m2m()
             log_admin_action(access.employee, f'Справочник: {config["title"]}', saved_record, '', 'Сохранено')
             messages.success(request, 'Запись справочника сохранена.')
             return redirect(reference_detail_redirect_url(saved_record.id))
     else:
-        form = form_class(instance=selected_record)
+        form_initial = None if selected_record else config.get('initial')
+        form = form_class(instance=selected_record, initial=form_initial)
 
     records_queryset = build_reference_queryset(config)
     if query:
@@ -589,8 +936,9 @@ def system_admin_reference_detail_view(request, reference_code):
             'preview': get_reference_record_preview(record, config),
         })
 
-    active_total = model.objects.filter(is_active=True).count() if hasattr(model, 'is_active') else records_queryset.count()
-    inactive_total = model.objects.filter(is_active=False).count() if hasattr(model, 'is_active') else 0
+    count_queryset = build_reference_queryset(config)
+    active_total = count_queryset.filter(is_active=True).count() if hasattr(model, 'is_active') else count_queryset.count()
+    inactive_total = count_queryset.filter(is_active=False).count() if hasattr(model, 'is_active') else 0
 
     return render(
         request,
@@ -602,7 +950,7 @@ def system_admin_reference_detail_view(request, reference_code):
             'form': form,
             'selected_record': selected_record,
             'records': records,
-            'records_total': model.objects.count(),
+            'records_total': count_queryset.count(),
             'active_total': active_total,
             'inactive_total': inactive_total,
             'query': query,
@@ -1203,6 +1551,58 @@ def driver_registration_view(request):
     return render(request, 'users/driver_registration.html', {'form': form, 'access': access})
 
 
+def driver_format_duration_label(seconds):
+    seconds = max(0, int(seconds or 0))
+    hours = seconds // 3600
+    minutes = (seconds % 3600) // 60
+    return f'{hours:02d}:{minutes:02d}:{seconds % 60:02d}'
+
+
+def driver_downtime_reason_status_key(reason):
+    if reason:
+        return reason.effective_color_group
+    return 'yellow'
+
+
+def driver_downtime_event_payload(event, *, action='', closed=False):
+    now = timezone.now()
+    started_at = event.started_at or now
+    ended_at = event.ended_at
+    elapsed_until = ended_at or now
+    elapsed_seconds = max(0, int((elapsed_until - started_at).total_seconds()))
+    reason = event.reason if event.reason_id else None
+    return {
+        'ok': True,
+        'action': action,
+        'active': not bool(ended_at),
+        'closed': bool(closed),
+        'event_id': event.id,
+        'reason_id': event.reason_id,
+        'reason': str(reason) if reason else '',
+        'started_at': started_at.isoformat(),
+        'ended_at': ended_at.isoformat() if ended_at else '',
+        'elapsed_seconds': elapsed_seconds,
+        'elapsed_label': driver_format_duration_label(elapsed_seconds),
+        'status_key': driver_downtime_reason_status_key(reason),
+    }
+
+
+def driver_json_payload(request):
+    if 'application/json' not in (request.headers.get('Content-Type') or ''):
+        return request.POST
+    try:
+        return json.loads(request.body.decode('utf-8') or '{}')
+    except (TypeError, ValueError, UnicodeDecodeError):
+        return {}
+
+
+def driver_wants_json(request):
+    return (
+        request.headers.get('X-Requested-With') == 'XMLHttpRequest'
+        or 'application/json' in (request.headers.get('Accept') or '')
+    )
+
+
 def driver_shift_view(request):
     access_id = request.session.get('employee_access_id')
     if not access_id:
@@ -1217,17 +1617,89 @@ def driver_shift_view(request):
     open_shift = EmployeeShift.objects.filter(employee=access.employee, closed_at__isnull=True).order_by('-opened_at').first()
     current_truck = open_shift.equipment if open_shift else None
     pending_assignment = None
+    accepted_assignment = None
     active_trip = None
+    active_downtime = None
+    shift_trips = []
     if current_truck:
         pending_assignment = HaulAssignment.objects.filter(
             truck=current_truck,
             status=AssignmentStatus.PENDING,
             ended_at__isnull=True,
         ).select_related('truck', 'excavator').order_by('-assigned_at').first()
+        accepted_assignment = HaulAssignment.objects.filter(
+            truck=current_truck,
+            status=AssignmentStatus.ACCEPTED,
+            ended_at__isnull=True,
+        ).select_related('truck', 'excavator').order_by('-accepted_at', '-assigned_at').first()
         active_trip = Trip.objects.filter(
             truck=current_truck,
-            status=TripStatus.ACTIVE,
-        ).select_related('truck', 'excavator', 'rock_type', 'dump_point').order_by('-created_at').first()
+            status__in=OPEN_TRIP_STATUSES,
+        ).select_related(
+            'truck',
+            'excavator',
+            'rock_type',
+            'dump_point',
+            'assigned_dump_point',
+            'actual_dump_point',
+        ).order_by('-created_at').first()
+        active_downtime = (
+            DowntimeEvent.objects
+            .select_related('reason', 'reason__equipment_state')
+            .filter(equipment=current_truck, employee=access.employee, ended_at__isnull=True)
+            .order_by('-started_at')
+            .first()
+        )
+        shift_trips = list(
+            Trip.objects
+            .select_related('excavator', 'rock_type', 'dump_point', 'assigned_dump_point', 'actual_dump_point')
+            .filter(Q(unloading_shift=open_shift) | Q(loading_shift=open_shift) | Q(driver=access.employee, completed_at__gte=open_shift.opened_at))
+            .distinct()
+            .order_by('created_at')[:30]
+        )
+
+    completed_shift_trips = [trip for trip in shift_trips if trip.status == TripStatus.COMPLETED]
+    shift_trip_count = len(completed_shift_trips)
+    shift_progress = calculate_open_shift_progress(open_shift)
+    if shift_progress and shift_progress['progress_percent'] is not None:
+        shift_plan_percent = shift_progress['progress_percent']
+    else:
+        shift_plan_trips = 20
+        shift_plan_percent = min(100, round((shift_trip_count / shift_plan_trips) * 100)) if shift_plan_trips else 0
+    active_tab = request.GET.get('tab', 'work')
+    if active_tab not in {'work', 'shift', 'downtimes', 'manifest'}:
+        active_tab = 'work'
+    driver_status = 'ПУСТОЙ'
+    driver_status_class = 'is-empty'
+    driver_target_label = '—'
+    if active_trip:
+        driver_status = 'ГРУЖЕНЫЙ'
+        driver_status_class = 'is-loaded'
+        driver_target_label = active_trip.actual_dump_point or active_trip.dump_point
+    elif pending_assignment:
+        driver_status = 'ПРИНЯТЬ'
+        driver_status_class = 'is-attention'
+    elif active_downtime:
+        driver_status = 'ПРОСТОЙ'
+        driver_status_class = 'is-downtime'
+
+    downtime_equipment_type = current_truck.equipment_type if current_truck else None
+    downtime_reasons = DowntimeReason.for_workplace('truck_driver', downtime_equipment_type)
+    unload_points = DumpPoint.objects.filter(is_active=True).order_by('name')[:10]
+    active_trip_assigned_dump_point = None
+    active_trip_actual_dump_point_id = None
+    if active_trip:
+        active_trip_assigned_dump_point = active_trip.assigned_dump_point or active_trip.dump_point
+        active_trip_actual_dump_point_id = (active_trip.actual_dump_point_id or active_trip.dump_point_id)
+    active_downtime_elapsed_seconds = 0
+    active_downtime_elapsed_label = '00:00:00'
+    active_downtime_started_at = ''
+    active_downtime_status_key = 'yellow'
+    if active_downtime and active_downtime.started_at:
+        active_downtime_elapsed_seconds = max(0, int((timezone.now() - active_downtime.started_at).total_seconds()))
+        active_downtime_elapsed_label = driver_format_duration_label(active_downtime_elapsed_seconds)
+        active_downtime_started_at = active_downtime.started_at.isoformat()
+        active_downtime_status_key = driver_downtime_reason_status_key(active_downtime.reason)
 
     selected_truck_id = request.POST.get('truck') if request.method == 'POST' else request.GET.get('truck')
     last_closed_shift = None
@@ -1248,7 +1720,7 @@ def driver_shift_view(request):
             shift.opened_at = timezone.now()
             shift.save()
             messages.success(request, 'Смена открыта.')
-            return redirect('driver_shift')
+            return redirect('driver_work')
     else:
         form_initial = {}
         if last_closed_shift:
@@ -1270,10 +1742,28 @@ def driver_shift_view(request):
             'current_truck': current_truck,
             'open_shift': open_shift,
             'pending_assignment': pending_assignment,
+            'accepted_assignment': accepted_assignment,
             'active_trip': active_trip,
             'form': form,
             'close_form': DriverCloseShiftForm(instance=open_shift) if open_shift else None,
             'last_closed_shift': last_closed_shift,
+            'active_tab': active_tab,
+            'active_downtime': active_downtime,
+            'active_downtime_started_at': active_downtime_started_at,
+            'active_downtime_elapsed_seconds': active_downtime_elapsed_seconds,
+            'active_downtime_elapsed_label': active_downtime_elapsed_label,
+            'active_downtime_status_key': active_downtime_status_key,
+            'downtime_reasons': downtime_reasons,
+            'shift_trips': shift_trips,
+            'shift_trip_count': shift_trip_count,
+            'shift_plan_percent': shift_plan_percent,
+            'driver_status': driver_status,
+            'driver_status_class': driver_status_class,
+            'driver_target_label': driver_target_label,
+            'unload_points': unload_points,
+            'active_trip_assigned_dump_point': active_trip_assigned_dump_point,
+            'active_trip_actual_dump_point_id': active_trip_actual_dump_point_id,
+            'trip_status_loaded': TripStatus.LOADED_WAITING_UNLOAD,
         },
     )
 
@@ -1292,7 +1782,7 @@ def driver_close_shift_view(request):
     open_shift = EmployeeShift.objects.filter(employee=access.employee, closed_at__isnull=True).order_by('-opened_at').first()
     if not open_shift:
         messages.error(request, 'Открытая смена не найдена.')
-        return redirect('driver_shift')
+        return redirect('driver_work')
 
     if request.method == 'POST':
         form = DriverCloseShiftForm(request.POST, instance=open_shift)
@@ -1302,7 +1792,7 @@ def driver_close_shift_view(request):
             shift.closed_by = access.employee
             shift.save(update_fields=['end_fuel', 'end_mileage', 'end_engine_hours', 'closed_at', 'closed_by'])
             messages.success(request, 'Смена закрыта.')
-    return redirect('driver_shift')
+    return redirect('driver_work')
 
 
 def driver_accept_assignment_view(request, assignment_id):
@@ -1318,7 +1808,7 @@ def driver_accept_assignment_view(request, assignment_id):
     open_shift = EmployeeShift.objects.filter(employee=access.employee, closed_at__isnull=True).order_by('-opened_at').first()
     if not open_shift or not open_shift.equipment:
         messages.error(request, 'Нельзя принять назначение: открытая смена с самосвалом не найдена.')
-        return redirect('driver_shift')
+        return redirect('driver_work')
 
     assignment = HaulAssignment.objects.filter(
         id=assignment_id,
@@ -1329,7 +1819,94 @@ def driver_accept_assignment_view(request, assignment_id):
         assignment.status = AssignmentStatus.ACCEPTED
         assignment.accepted_at = timezone.now()
         assignment.save(update_fields=['status', 'accepted_at'])
-        messages.success(request, 'Назначение принято.')
-    return redirect('driver_shift')
+    return redirect('driver_work')
+
+
+def driver_downtime_action_view(request):
+    wants_json = driver_wants_json(request)
+    access_id = request.session.get('employee_access_id')
+    if not access_id:
+        if wants_json:
+            return JsonResponse({'ok': False, 'error': 'Нет доступа к экрану водителя.'}, status=403)
+        return redirect('login')
+    access = EmployeeAccess.objects.select_related('employee', 'role').filter(id=access_id, is_active=True).first()
+    if not access or access.role.code != 'driver':
+        if wants_json:
+            return JsonResponse({'ok': False, 'error': 'Нет доступа к экрану водителя.'}, status=403)
+        return redirect('role_home')
+    if not getattr(access.employee, 'driver_registration', None):
+        if wants_json:
+            return JsonResponse({'ok': False, 'error': 'Водитель не зарегистрирован.'}, status=403)
+        return redirect('driver_registration')
+
+    open_shift = (
+        EmployeeShift.objects
+        .filter(employee=access.employee, closed_at__isnull=True)
+        .select_related('equipment')
+        .order_by('-opened_at')
+        .first()
+    )
+    if not open_shift or not open_shift.equipment:
+        if wants_json:
+            return JsonResponse({'ok': False, 'error': 'Нельзя зафиксировать простой: открытая смена с самосвалом не найдена.'}, status=409)
+        messages.error(request, 'Нельзя зафиксировать простой: открытая смена с самосвалом не найдена.')
+        return redirect(f'{reverse("driver_work")}?tab=downtimes')
+
+    if request.method != 'POST':
+        if wants_json:
+            return JsonResponse({'ok': False, 'error': 'Некорректный метод действия простоя.'}, status=405)
+        return redirect(f'{reverse("driver_work")}?tab=downtimes')
+
+    payload = driver_json_payload(request)
+    action = (payload.get('action') or '').strip()
+    active_event = (
+        DowntimeEvent.objects
+        .select_related('reason', 'reason__equipment_state')
+        .filter(equipment=open_shift.equipment, employee=access.employee, ended_at__isnull=True)
+        .order_by('-started_at')
+        .first()
+    )
+    if action == 'close':
+        if active_event:
+            active_event.ended_at = timezone.now()
+            active_event.save(update_fields=['ended_at'])
+            if wants_json:
+                return JsonResponse(driver_downtime_event_payload(active_event, action='downtime_closed', closed=True))
+        else:
+            if wants_json:
+                return JsonResponse({
+                    'ok': True,
+                    'active': False,
+                    'closed': False,
+                    'elapsed_seconds': 0,
+                    'elapsed_label': '00:00:00',
+                })
+            messages.error(request, 'Активный простой не найден.')
+        return redirect(f'{reverse("driver_work")}?tab=downtimes')
+
+    reason_id = payload.get('reason_id')
+    reason = DowntimeReason.for_workplace('truck_driver', open_shift.equipment.equipment_type).filter(id=reason_id).first()
+    if not reason:
+        if wants_json:
+            return JsonResponse({'ok': False, 'error': 'Причина простоя не найдена.'}, status=400)
+        messages.error(request, 'Причина простоя не найдена.')
+        return redirect(f'{reverse("driver_work")}?tab=downtimes')
+    if active_event:
+        active_event.reason = reason
+        active_event.save(update_fields=['reason'])
+        event = active_event
+        action_label = 'downtime_updated'
+    else:
+        event = DowntimeEvent.objects.create(
+            equipment=open_shift.equipment,
+            employee=access.employee,
+            reason=reason,
+            started_at=timezone.now(),
+            comment='Зафиксировано водителем самосвала',
+        )
+        action_label = 'downtime_started'
+    if wants_json:
+        return JsonResponse(driver_downtime_event_payload(event, action=action_label))
+    return redirect(f'{reverse("driver_work")}?tab=downtimes')
 
 # Create your views here.

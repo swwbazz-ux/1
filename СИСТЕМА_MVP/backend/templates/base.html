@@ -7,10 +7,182 @@
     <title>{% block title %}MVP учетной системы{% endblock %}</title>
     <link rel="icon" href="{% static 'favicon.ico' %}">
     <link rel="stylesheet" href="{% static 'css/app.css' %}?v={% now 'U' %}">
+    <style>
+        .app-sync-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 10000;
+            display: grid;
+            place-items: center;
+            padding: 24px;
+            background: rgba(4, 12, 18, 0.84);
+            color: #f7fafc;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 160ms ease;
+        }
+        .app-sync-overlay.is-visible {
+            opacity: 1;
+            pointer-events: auto;
+        }
+        .app-sync-overlay[hidden] {
+            display: none;
+        }
+        .app-sync-overlay__panel {
+            width: min(420px, 100%);
+            display: grid;
+            gap: 12px;
+            justify-items: center;
+            padding: 28px 24px;
+            border: 1px solid rgba(148, 163, 184, 0.28);
+            border-radius: 8px;
+            background: rgba(15, 23, 42, 0.96);
+            box-shadow: 0 28px 70px rgba(0, 0, 0, 0.42);
+            text-align: center;
+        }
+        .app-sync-overlay__spinner {
+            width: 42px;
+            height: 42px;
+            border: 4px solid rgba(148, 163, 184, 0.34);
+            border-top-color: #38bdf8;
+            border-radius: 50%;
+            animation: app-sync-spin 0.9s linear infinite;
+        }
+        .app-sync-overlay__title {
+            font-size: 20px;
+            font-weight: 800;
+            letter-spacing: 0;
+        }
+        .app-sync-overlay__text {
+            max-width: 32ch;
+            color: #cbd5e1;
+            font-size: 15px;
+            line-height: 1.45;
+        }
+        @keyframes app-sync-spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+        .app-realtime-status {
+            position: fixed;
+            left: 50%;
+            bottom: max(14px, env(safe-area-inset-bottom));
+            z-index: 10001;
+            min-width: min(360px, calc(100vw - 28px));
+            max-width: calc(100vw - 28px);
+            transform: translate(-50%, 12px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            padding: 11px 14px;
+            border: 1px solid rgba(255, 212, 91, .58);
+            border-radius: 8px;
+            background: rgba(19, 16, 8, .94);
+            color: #ffe8a8;
+            font-size: 13px;
+            font-weight: 800;
+            line-height: 1.2;
+            box-shadow: 0 14px 42px rgba(0, 0, 0, .34);
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 160ms ease, transform 160ms ease;
+        }
+        .app-realtime-status::before {
+            content: "";
+            width: 9px;
+            height: 9px;
+            border-radius: 50%;
+            background: #ffd45b;
+            box-shadow: 0 0 14px rgba(255, 212, 91, .82);
+        }
+        .app-realtime-status.is-visible {
+            opacity: 1;
+            transform: translate(-50%, 0);
+        }
+        .app-realtime-status[hidden] {
+            display: none;
+        }
+        .app-realtime-update {
+            position: fixed;
+            left: 50%;
+            bottom: calc(max(14px, env(safe-area-inset-bottom)) + 58px);
+            z-index: 10000;
+            width: min(420px, calc(100vw - 28px));
+            transform: translate(-50%, 12px);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 10px 12px 10px 14px;
+            border: 1px solid rgba(96, 165, 250, .5);
+            border-radius: 8px;
+            background: rgba(10, 22, 38, .95);
+            color: #dbeafe;
+            font-size: 13px;
+            font-weight: 800;
+            line-height: 1.25;
+            box-shadow: 0 14px 42px rgba(0, 0, 0, .34);
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 160ms ease, transform 160ms ease;
+        }
+        .app-realtime-update.is-visible {
+            opacity: 1;
+            pointer-events: auto;
+            transform: translate(-50%, 0);
+        }
+        .app-realtime-update[hidden] {
+            display: none;
+        }
+        .app-realtime-update__button {
+            flex: 0 0 auto;
+            border: 0;
+            border-radius: 6px;
+            padding: 8px 10px;
+            background: #60a5fa;
+            color: #07131f;
+            font: inherit;
+            font-size: 12px;
+            font-weight: 900;
+            cursor: pointer;
+        }
+        .app-realtime-update__button:focus-visible {
+            outline: 2px solid #bfdbfe;
+            outline-offset: 2px;
+        }
+        @media (max-width: 520px) {
+            .app-realtime-update {
+                align-items: stretch;
+                flex-direction: column;
+            }
+            .app-realtime-update__button {
+                width: 100%;
+            }
+        }
+    </style>
     {% block extra_head %}{% endblock %}
 </head>
-<body class="{% block body_class %}{% endblock %}">
+<body class="{% block body_class %}{% endblock %}" data-realtime-screen="{% block realtime_screen %}{% endblock %}" data-realtime-mode="{% block realtime_mode %}{% endblock %}" data-realtime-role="{% block realtime_role %}{% endblock %}" data-operational-state-version="{{ operational_state_version|default:0 }}">
 {% block body %}{% endblock %}
+
+<div class="app-sync-overlay" data-app-sync-overlay hidden aria-live="polite" aria-busy="true">
+    <div class="app-sync-overlay__panel" role="status">
+        <div class="app-sync-overlay__spinner" aria-hidden="true"></div>
+        <strong class="app-sync-overlay__title" data-app-sync-title>Обновляем данные</strong>
+        <span class="app-sync-overlay__text" data-app-sync-text>Сверяем экран с сервером. Это займет несколько секунд.</span>
+    </div>
+</div>
+
+<div class="app-realtime-status" data-app-realtime-status hidden role="status" aria-live="polite">
+    Связь с сервером потеряна. Экран может отставать.
+</div>
+
+<div class="app-realtime-update" data-app-realtime-update hidden role="status" aria-live="polite">
+    <span data-app-realtime-update-text>На сервере появились новые данные.</span>
+    <button class="app-realtime-update__button" type="button" data-app-realtime-update-button>Обновить</button>
+</div>
 
 <div class="app-confirm-modal" id="app-confirm-modal" hidden>
     <div class="app-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="app-confirm-title">
@@ -60,6 +232,9 @@ document.addEventListener("DOMContentLoaded", function () {
     var confirmShiftTime = confirmModal ? confirmModal.querySelector("[data-confirm-shift-time]") : null;
     var confirmShiftPersonLabel = confirmModal ? confirmModal.querySelector("[data-confirm-shift-person-label]") : null;
     var confirmShiftPerson = confirmModal ? confirmModal.querySelector("[data-confirm-shift-person]") : null;
+    var syncOverlay = document.querySelector("[data-app-sync-overlay]");
+    var syncOverlayTitle = syncOverlay ? syncOverlay.querySelector("[data-app-sync-title]") : null;
+    var syncOverlayText = syncOverlay ? syncOverlay.querySelector("[data-app-sync-text]") : null;
     var pendingConfirmAction = null;
     var pendingConfirmTimer = null;
     var backTargets = [
@@ -86,6 +261,42 @@ document.addEventListener("DOMContentLoaded", function () {
         {pattern: /^\/mechanic\/downtimes\/?$/, target: roleHomePath},
         {pattern: /^\/interfaces\/?$/, target: roleHomePath}
     ];
+
+    function showAppSyncOverlay(options) {
+        if (!syncOverlay) {
+            return;
+        }
+        options = options || {};
+        if (syncOverlayTitle && options.title) {
+            syncOverlayTitle.textContent = options.title;
+        }
+        if (syncOverlayText && options.text) {
+            syncOverlayText.textContent = options.text;
+        }
+        syncOverlay.hidden = false;
+        window.requestAnimationFrame(function () {
+            syncOverlay.classList.add("is-visible");
+        });
+    }
+
+    function hideAppSyncOverlay() {
+        if (!syncOverlay) {
+            return;
+        }
+        syncOverlay.classList.remove("is-visible");
+        window.setTimeout(function () {
+            if (!syncOverlay.classList.contains("is-visible")) {
+                syncOverlay.hidden = true;
+            }
+        }, 180);
+    }
+
+    window.showAppSyncOverlay = showAppSyncOverlay;
+    window.hideAppSyncOverlay = hideAppSyncOverlay;
+    window.addEventListener("app-sync-show", function (event) {
+        showAppSyncOverlay(event.detail || {});
+    });
+    window.addEventListener("app-sync-hide", hideAppSyncOverlay);
 
     function getBackTarget() {
         var currentPath = window.location.pathname;
@@ -302,7 +513,11 @@ document.addEventListener("DOMContentLoaded", function () {
         }
     });
 
-    document.querySelectorAll("form").forEach(function (form) {
+    function bindAppConfirmForm(form) {
+        if (!form || form.dataset.confirmBound === "true") {
+            return;
+        }
+        form.dataset.confirmBound = "true";
         form.addEventListener("submit", function (event) {
             if (form.dataset.confirmed === "1") {
                 delete form.dataset.confirmed;
@@ -339,7 +554,14 @@ document.addEventListener("DOMContentLoaded", function () {
                 form.submit();
             }, delay || 0, acceptLabel, submitter && submitter.dataset ? submitter.dataset : form.dataset);
         });
-    });
+    }
+
+    function initAppConfirmForms() {
+        document.querySelectorAll("form").forEach(bindAppConfirmForm);
+    }
+
+    window.initAppConfirmForms = initAppConfirmForms;
+    initAppConfirmForms();
 
     document.querySelectorAll("[data-auto-filter-form]").forEach(function (form) {
         var submitTimer = null;
@@ -420,68 +642,136 @@ document.addEventListener("DOMContentLoaded", function () {
         });
     }
 
-    updateDispatcherThemeIcons();
-    document.querySelectorAll("[data-dispatcher-theme-toggle]").forEach(function (toggle) {
+    function bindDispatcherThemeToggle(toggle) {
+        if (!toggle || toggle.dataset.themeBound === "true") {
+            return;
+        }
+        toggle.dataset.themeBound = "true";
         toggle.addEventListener("click", function () {
             window.setTimeout(updateDispatcherThemeIcons, 0);
         });
-    });
+    }
 
-    document.querySelectorAll(".dispatcher-radial-clock").forEach(function (clock) {
-        var stopTimer = null;
-        var timeNode = clock.querySelector(".dispatcher-radial-clock-face strong");
-        var dateNode = clock.querySelector(".dispatcher-radial-clock-face span");
+    function initDispatcherThemeControls() {
+        updateDispatcherThemeIcons();
+        document.querySelectorAll("[data-dispatcher-theme-toggle]").forEach(bindDispatcherThemeToggle);
+    }
 
-        function padClockPart(value) {
-            return String(value).padStart(2, "0");
-        }
+    window.initDispatcherThemeControls = initDispatcherThemeControls;
+    initDispatcherThemeControls();
 
-        function updateClockTime() {
-            var now = new Date();
-            if (timeNode) {
-                timeNode.innerHTML = '<span class="dispatcher-radial-clock-hour">' + padClockPart(now.getHours()) + '</span><span class="dispatcher-radial-clock-separator" aria-hidden="true">:</span><span class="dispatcher-radial-clock-minute">' + padClockPart(now.getMinutes()) + '</span>';
+    function padDispatcherClockPart(value) {
+        return String(value).padStart(2, "0");
+    }
+
+    function initDispatcherRadialClocks() {
+        document.querySelectorAll(".dispatcher-radial-clock").forEach(function (clock) {
+            if (clock.dataset.clockBound === "true") return;
+            clock.dataset.clockBound = "true";
+            var stopTimer = null;
+            var timeNode = clock.querySelector(".dispatcher-radial-clock-face strong");
+            var dateNode = clock.querySelector(".dispatcher-radial-clock-face span");
+
+            function updateClockTime() {
+                var now = new Date();
+                if (timeNode) {
+                    timeNode.innerHTML = '<span class="dispatcher-radial-clock-hour">' + padDispatcherClockPart(now.getHours()) + '</span><span class="dispatcher-radial-clock-separator" aria-hidden="true">:</span><span class="dispatcher-radial-clock-minute">' + padDispatcherClockPart(now.getMinutes()) + '</span>';
+                }
+                if (dateNode) {
+                    dateNode.textContent = padDispatcherClockPart(now.getDate()) + "." + padDispatcherClockPart(now.getMonth() + 1) + "." + now.getFullYear();
+                }
             }
-            if (dateNode) {
-                dateNode.textContent = padClockPart(now.getDate()) + "." + padClockPart(now.getMonth() + 1) + "." + now.getFullYear();
+
+            function isMusicModeSaved() {
+                try {
+                    return window.sessionStorage.getItem("dispatcher-radial-clock-music") === "true";
+                } catch (error) {
+                    return false;
+                }
             }
-        }
 
-        updateClockTime();
-        window.setInterval(updateClockTime, 1000);
-        clock.setAttribute("role", "button");
-        clock.setAttribute("tabindex", "0");
-        clock.setAttribute("aria-pressed", "false");
-        clock.setAttribute("title", "Включить визуальный режим");
+            function saveMusicMode(isActive) {
+                try {
+                    window.sessionStorage.setItem("dispatcher-radial-clock-music", isActive ? "true" : "false");
+                } catch (error) {}
+            }
 
-        function toggleClockMusic() {
-            window.clearTimeout(stopTimer);
-            if (!clock.classList.contains("is-music")) {
+            function setClockMusicActive(isActive) {
+                window.clearTimeout(stopTimer);
+                clock.classList.toggle("is-music", isActive);
                 clock.classList.remove("is-music-stopping");
-                clock.classList.add("is-music");
-                clock.setAttribute("aria-pressed", "true");
-                clock.setAttribute("title", "Выключить визуальный режим");
-                return;
+                clock.setAttribute("aria-pressed", isActive ? "true" : "false");
+                clock.setAttribute("title", isActive ? "Выключить визуальный режим" : "Включить визуальный режим");
             }
 
-            clock.classList.remove("is-music");
-            clock.classList.add("is-music-stopping");
-            clock.setAttribute("aria-pressed", "false");
-            clock.setAttribute("title", "Включить визуальный режим");
-            stopTimer = window.setTimeout(function () {
-                clock.classList.remove("is-music-stopping");
-            }, 700);
-        }
+            function toggleClockMusic() {
+                if (!clock.classList.contains("is-music")) {
+                    setClockMusicActive(true);
+                    saveMusicMode(true);
+                    return;
+                }
 
-        clock.addEventListener("click", toggleClockMusic);
-        clock.addEventListener("keydown", function (event) {
-            if (event.key !== "Enter" && event.key !== " ") {
-                return;
+                window.clearTimeout(stopTimer);
+                clock.classList.remove("is-music");
+                clock.classList.add("is-music-stopping");
+                clock.setAttribute("aria-pressed", "false");
+                clock.setAttribute("title", "Включить визуальный режим");
+                saveMusicMode(false);
+                stopTimer = window.setTimeout(function () {
+                    clock.classList.remove("is-music-stopping");
+                }, 700);
             }
-            event.preventDefault();
-            toggleClockMusic();
+
+            updateClockTime();
+            window.setInterval(updateClockTime, 1000);
+            clock.setAttribute("role", "button");
+            clock.setAttribute("tabindex", "0");
+            setClockMusicActive(isMusicModeSaved());
+            clock.addEventListener("click", toggleClockMusic);
+            clock.addEventListener("keydown", function (event) {
+                if (event.key !== "Enter" && event.key !== " ") {
+                    return;
+                }
+                event.preventDefault();
+                toggleClockMusic();
+            });
         });
-    });
+    }
+
+    window.initDispatcherRadialClocks = initDispatcherRadialClocks;
+    initDispatcherRadialClocks();
 });
 </script>
+<script>
+window.AppRealtimeConfig = {
+    stateUrl: "{% url 'operational_state_version' %}",
+    initialVersion: Number(document.body.dataset.operationalStateVersion || 0),
+    pollIntervalMs: 1000,
+    idleDelayMs: 2500,
+    pollTimeoutMs: 8000,
+    maxSilentMs: 7000,
+    mobileQueueKey: "mining-master-mobile-sync-queue-v1",
+    screens: [
+        {name: "dispatcher-control", role: "dispatcher", mode: "custom", path: "^/dispatcher/control/?$", customRefresh: true},
+        {name: "dispatcher-reports", role: "dispatcher", mode: "manual", path: "^/dispatcher/"},
+        {name: "mining-master", role: "mining_master", mode: "custom", path: "^/mining-master/", customRefresh: true},
+        {name: "excavator", role: "excavator_operator", mode: "custom", path: "^/excavator/work/?$", customRefresh: true},
+        {name: "driver", role: "driver", mode: "custom", path: "^/driver/(?:shift/?)?$", customRefresh: true},
+        {name: "system-admin", role: "system_admin", mode: "observer", path: "^/system-admin/", customRefresh: true},
+        {name: "management-shift-analytics", role: "management", mode: "custom", path: "^/reports/shift-analytics/?$", customRefresh: true},
+        {name: "management-dynamics", role: "management", mode: "custom", path: "^/reports/management/dynamics/?$", customRefresh: true},
+        {name: "management-reports", role: "management", mode: "manual", path: "^/reports/"}
+    ],
+    customRefreshPaths: [
+        "^/mining-master/",
+        "^/excavator/work/?$",
+        "^/driver/(?:shift/?)?$",
+        "^/system-admin/",
+        "^/reports/shift-analytics/?$",
+        "^/reports/management/dynamics/?$"
+    ]
+};
+</script>
+<script src="{% static 'js/realtime-client.js' %}?v={% now 'U' %}"></script>
 </body>
 </html>

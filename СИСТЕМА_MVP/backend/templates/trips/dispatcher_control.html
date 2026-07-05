@@ -11,6 +11,14 @@
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
         <meta name="apple-mobile-web-app-title" content="Горный мастер">
         <link rel="apple-touch-icon" href="{% static 'img/pwa/mining-master-180.png' %}">
+    {% else %}
+        <link rel="manifest" href="{% url 'dispatcher_manifest' %}">
+        <meta name="theme-color" content="#07131f">
+        <meta name="mobile-web-app-capable" content="yes">
+        <meta name="apple-mobile-web-app-capable" content="yes">
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+        <meta name="apple-mobile-web-app-title" content="Горный диспетчер">
+        <link rel="apple-touch-icon" href="{% static 'img/pwa/mining-master-180.png' %}">
     {% endif %}
 {% endblock %}
 {% block body_class %}dispatcher-control-screen{% if mining_master_mobile_enabled %} mining-master-mobile-screen{% endif %}{% endblock %}
@@ -39,7 +47,7 @@
             </div>
             <div class="dispatcher-excavators" aria-label="Экскаваторы">
                 {% for tile in dispatcher_dashboard.excavator_garage_tiles %}
-                    <article class="dispatcher-equipment-tile dispatcher-excavator-garage-tile status-{{ tile.status }}{% if tile.is_placeholder %} is-placeholder{% endif %}" style="--tile-progress: {{ tile.percent|default:0 }}%;" {% if not tile.is_placeholder %}role="button" tabindex="0" draggable="true" data-dispatcher-drag="excavator" data-equipment-card-id="{{ tile.card_id }}" data-equipment-id="{{ tile.card_id }}" data-equipment-name="{{ tile.name }}" data-excavator-slot="{{ tile.display_name }}" data-garage-item="excavator"{% endif %}>
+                    <article class="dispatcher-equipment-tile dispatcher-excavator-garage-tile status-{{ tile.status }}{% if tile.is_placeholder %} is-placeholder{% endif %}" style="--tile-progress: {{ tile.percent|default:0 }}%;" {% if not tile.is_placeholder %}role="button" tabindex="0" draggable="true" data-dispatcher-drag="excavator" data-equipment-card-id="{{ tile.card_id }}" data-equipment-id="{{ tile.card_id }}" data-equipment-name="{{ tile.name }}" data-equipment-state="{{ tile.equipment_state_code }}" data-excavator-slot="{{ tile.display_name }}" data-garage-item="excavator"{% endif %}>
                         {% if tile.display_name %}<strong>{{ tile.display_name }}</strong>{% endif %}
                         <img src="{% static tile.icon %}" alt="">
                         {% if not tile.is_placeholder %}<span>{{ tile.label }}</span>{% endif %}
@@ -59,12 +67,15 @@
             </div>
             <div class="dispatcher-zone-grid">
             {% for complex in dispatcher_dashboard.complex_zones %}
-                <article class="dispatcher-complex-card {% if complex.is_empty %}status-empty{% else %}status-{{ complex.status_key }}{% endif %}" style="--complex-progress: {{ complex.percent }}%;" data-dispatcher-drop="complex" data-zone-id="{{ complex.id }}"{% if not complex.is_empty %} role="button" tabindex="0" draggable="true" data-dispatcher-drag="complex" data-equipment-card-id="{{ complex.card_id }}" data-source-equipment-card-id="{{ complex.equipment_card_id }}" data-equipment-id="{{ complex.equipment_card_id }}" data-equipment-name="{{ complex.excavator_name }}" data-excavator-slot="{{ complex.excavator_slot }}"{% endif %}>
+                <article class="dispatcher-complex-card {% if complex.is_empty %}status-empty{% else %}status-{{ complex.status_key }}{% endif %}" style="--complex-progress: {{ complex.percent }}%;" data-dispatcher-drop="complex" data-zone-id="{{ complex.id }}"{% if not complex.is_empty %} role="button" tabindex="0" draggable="true" data-dispatcher-drag="complex" data-equipment-card-id="{{ complex.card_id }}" data-source-equipment-card-id="{{ complex.equipment_card_id }}" data-equipment-id="{{ complex.equipment_card_id }}" data-equipment-name="{{ complex.excavator_name }}" data-equipment-state="{{ complex.equipment_state_code }}" data-excavator-slot="{{ complex.excavator_slot }}"{% endif %}>
                     {% if complex.is_empty %}
                         <div class="complex-empty" aria-hidden="true"></div>
                     {% else %}
                         <div class="complex-work-head">
-                            <h2>{{ complex.id }}</h2>
+                            <div class="complex-title-state">
+                                <h2>{{ complex.id }}</h2>
+                                <span class="complex-state-chip">{{ complex.status_label }}</span>
+                            </div>
                             <div class="complex-context">
                                 <span class="complex-info-chip chip-horizon">{{ complex.current_horizon|default:"Гор. -" }}</span>
                                 <span class="complex-info-chip chip-block">{{ complex.current_block|default:"Блок -" }}</span>
@@ -80,7 +91,7 @@
                         </div>
                         <div class="complex-assigned-trucks {{ complex.truck_scale_class }}" style="--complex-truck-cols: {{ complex.truck_column_count|default:1 }};" aria-label="Активные самосвалы комплекса">
                             {% for truck in complex.active_truck_tiles %}
-                                <article class="dispatcher-truck-tile complex-truck-tile status-{{ truck.status }}" style="--tile-progress: {{ truck.percent|default:0 }}%;" role="button" tabindex="0" draggable="true" data-dispatcher-drag="truck" data-equipment-card-id="{{ truck.card_id }}" data-equipment-id="{{ truck.card_id }}" data-equipment-name="{{ truck.name }}" data-complex-truck="true" data-assigned-zone="{{ complex.id }}">
+                                <article class="dispatcher-truck-tile complex-truck-tile status-{{ truck.status }}" style="--tile-progress: {{ truck.percent|default:0 }}%;" role="button" tabindex="0" draggable="true" data-dispatcher-drag="truck" data-equipment-card-id="{{ truck.card_id }}" data-equipment-id="{{ truck.card_id }}" data-equipment-name="{{ truck.name }}" data-equipment-state="{{ truck.equipment_state_code }}" data-complex-truck="true" data-assigned-zone="{{ complex.id }}">
                                     <strong>{{ truck.name }}</strong>
                                     <img src="{% static truck.icon %}" alt="">
                                     <span>{{ truck.label }}</span>
@@ -103,7 +114,7 @@
                 </div>
                 <div class="dispatcher-trucks" aria-label="Самосвалы">
                 {% for tile in dispatcher_dashboard.truck_garage_tiles %}
-                    <article class="dispatcher-truck-tile status-{{ tile.status }}" style="--tile-progress: {{ tile.percent|default:0 }}%;" role="button" tabindex="0" draggable="true" data-dispatcher-drag="truck" data-equipment-card-id="{{ tile.card_id }}" data-equipment-id="{{ tile.card_id }}" data-equipment-name="{{ tile.name }}" data-garage-item="truck">
+                    <article class="dispatcher-truck-tile status-{{ tile.status }}" style="--tile-progress: {{ tile.percent|default:0 }}%;" role="button" tabindex="0" draggable="true" data-dispatcher-drag="truck" data-equipment-card-id="{{ tile.card_id }}" data-equipment-id="{{ tile.card_id }}" data-equipment-name="{{ tile.name }}" data-equipment-state="{{ tile.equipment_state_code }}" data-garage-item="truck">
                         <strong>{{ tile.name }}</strong>
                         <img src="{% static tile.icon %}" alt="">
                         <span>{{ tile.label }}</span>
@@ -115,7 +126,7 @@
     </section>
 
     {% if mining_master_mobile_enabled %}
-    <section class="mm-mobile-shell {% if dispatcher_header.shift_status_variant == 'open' %}is-shift-open{% elif dispatcher_header.shift_status_variant == 'blocked' %}is-shift-blocked{% else %}is-shift-closed{% endif %}" aria-label="Мобильный пульт Горного мастера">
+    <section class="mm-mobile-shell {% if dispatcher_header.shift_status_variant == 'open' %}is-shift-open{% elif dispatcher_header.shift_status_variant == 'blocked' %}is-shift-blocked{% else %}is-shift-closed{% endif %} {% if not dispatcher_header.shift_is_open %}is-readonly{% endif %}" data-mm-mobile-readonly="{% if dispatcher_header.shift_is_open %}false{% else %}true{% endif %}" aria-label="Мобильный пульт Горного мастера">
         <div class="mm-mobile-home" data-mm-mobile-view="home">
         <header class="mm-mobile-header">
             <div class="mm-mobile-title">
@@ -126,6 +137,7 @@
                 <div class="mm-mobile-plan-ring" style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" role="img" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%">
                     {{ dispatcher_dashboard.completion_percent|default:0 }}%
                 </div>
+                <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v97</span>
             </div>
         </header>
 
@@ -145,7 +157,7 @@
                         <div class="mm-mobile-complex-card-head">
                             <h2>{{ complex.id }}</h2>
                             <span class="mm-mobile-status-chip">
-                                {% if complex.status_key == "danger" %}проблема{% elif complex.status_key == "risk" %}ожидание{% else %}работает{% endif %}
+                                {{ complex.status_label|default:"состояние" }}
                             </span>
                         </div>
                         <div class="mm-mobile-complex-visual" aria-hidden="true" data-mm-mobile-release-trucks>
@@ -153,7 +165,7 @@
                         </div>
                         <div class="mm-mobile-truck-preview" aria-label="Самосвалы комплекса" data-mm-mobile-truck-count="{% if complex.mobile_truck_overflow %}17{% else %}{{ complex.active_truck_tiles|length }}{% endif %}">
                             {% for truck in complex.active_truck_tiles|slice:":16" %}
-                                <span class="mm-mobile-truck-mini status-{{ truck.status }}" data-mm-mobile-home-truck-id="{{ truck.card_id }}" data-mm-mobile-home-truck-number="{{ truck.name }}" data-mm-mobile-home-source-excavator-id="{{ complex.equipment_card_id }}">{{ truck.name }}</span>
+                                <span class="mm-mobile-truck-mini status-{{ truck.status }}" data-mm-mobile-home-truck-id="{{ truck.card_id }}" data-mm-mobile-home-truck-number="{{ truck.name }}" data-mm-mobile-home-source-excavator-id="{{ complex.equipment_card_id }}" data-mm-mobile-equipment-state="{{ truck.equipment_state_code }}">{{ truck.name }}</span>
                             {% endfor %}
                             {% if complex.mobile_truck_overflow %}
                                 <span class="mm-mobile-truck-mini is-more">+{{ complex.mobile_truck_overflow }}</span>
@@ -182,8 +194,9 @@
                 <img src="{% static 'img/equipment/truck-gray.png' %}" alt="">
                 <span>Самосвалы</span>
             </a>
-            <a class="mm-mobile-nav-item" href="#" data-mm-mobile-nav="reports">
+            <a class="mm-mobile-nav-item" href="#" data-mm-mobile-nav="reports" data-mm-pwa-update-nav-target>
                 <span class="mm-mobile-nav-icon mm-mobile-nav-icon-reports" aria-hidden="true"></span>
+                <span class="mm-mobile-update-badge" data-mm-pwa-update-badge hidden aria-hidden="true"></span>
                 <span>Отчеты</span>
             </a>
         </nav>
@@ -199,6 +212,7 @@
                     <div class="mm-mobile-plan-ring" style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" role="img" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%">
                         {{ dispatcher_dashboard.completion_percent|default:0 }}%
                     </div>
+                    <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v97</span>
                 </div>
             </header>
 
@@ -211,7 +225,7 @@
             <div class="mm-mobile-detail-trucks mm-mobile-excavator-garage-grid" style="--mm-mobile-garage-rows: {{ dispatcher_dashboard.mobile_excavator_garage_row_count|default:3 }};" aria-label="Гараж экскаваторов">
                 {% for excavator in dispatcher_dashboard.mobile_excavator_garage_tiles %}
                     {% if not excavator.is_placeholder %}
-                        <button type="button" class="mm-mobile-garage-excavator status-{{ excavator.status }}" data-mm-mobile-activate-excavator="{{ excavator.card_id }}" data-mm-mobile-excavator-sort="{{ excavator.board_number|default:9999 }}" aria-label="Вернуть экскаватор {{ excavator.display_name }} в активную смену">
+                        <button type="button" class="mm-mobile-garage-excavator status-{{ excavator.status }}" data-mm-mobile-activate-excavator="{{ excavator.card_id }}" data-equipment-card-id="{{ excavator.card_id }}" data-mm-mobile-excavator-sort="{{ excavator.board_number|default:9999 }}" data-mm-mobile-equipment-state="{{ excavator.equipment_state_code }}" title="{{ excavator.label }}" aria-label="Вернуть экскаватор {{ excavator.display_name }} в активную смену">
                             <span>Экс {{ excavator.display_name }}</span>
                             <img src="{% static excavator.icon %}" alt="">
                         </button>
@@ -234,8 +248,9 @@
                     <img src="{% static 'img/equipment/truck-gray.png' %}" alt="">
                     <span>Самосвалы</span>
                 </a>
-                <a class="mm-mobile-nav-item" href="#" data-mm-mobile-nav="reports">
+                <a class="mm-mobile-nav-item" href="#" data-mm-mobile-nav="reports" data-mm-pwa-update-nav-target>
                     <span class="mm-mobile-nav-icon mm-mobile-nav-icon-reports" aria-hidden="true"></span>
+                    <span class="mm-mobile-update-badge" data-mm-pwa-update-badge hidden aria-hidden="true"></span>
                     <span>Отчеты</span>
                 </a>
             </nav>
@@ -251,6 +266,7 @@
                     <div class="mm-mobile-plan-ring" style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" role="img" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%">
                         {{ dispatcher_dashboard.completion_percent|default:0 }}%
                     </div>
+                    <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v97</span>
                 </div>
             </header>
 
@@ -259,8 +275,8 @@
             </div>
 
             <div class="mm-mobile-detail-trucks" aria-label="Гараж самосвалов">
-                {% for truck in dispatcher_dashboard.truck_garage_tiles %}
-                    <article class="mm-mobile-truck-card status-{{ truck.status }}" role="button" tabindex="0" data-equipment-card-id="{{ truck.card_id }}" data-mm-mobile-truck-sort="{{ truck.name }}">
+                {% for truck in dispatcher_dashboard.mobile_truck_garage_tiles %}
+                    <article class="mm-mobile-truck-card status-{{ truck.status }}" role="button" tabindex="0" data-equipment-card-id="{{ truck.card_id }}" data-mm-mobile-truck-sort="{{ truck.name }}" data-mm-mobile-truck-state="{{ truck.status }}" data-mm-mobile-equipment-state="{{ truck.equipment_state_code }}" title="{{ truck.label }}" aria-label="Самосвал {{ truck.name }}: {{ truck.label }}">
                         <img src="{% static truck.icon %}" alt="">
                         <strong>{{ truck.name }}</strong>
                         <span></span>
@@ -283,8 +299,9 @@
                     <img src="{% static 'img/equipment/truck-gray.png' %}" alt="">
                     <span>Самосвалы</span>
                 </a>
-                <a class="mm-mobile-nav-item" href="#" data-mm-mobile-nav="reports">
+                <a class="mm-mobile-nav-item" href="#" data-mm-mobile-nav="reports" data-mm-pwa-update-nav-target>
                     <span class="mm-mobile-nav-icon mm-mobile-nav-icon-reports" aria-hidden="true"></span>
+                    <span class="mm-mobile-update-badge" data-mm-pwa-update-badge hidden aria-hidden="true"></span>
                     <span>Отчеты</span>
                 </a>
             </nav>
@@ -300,6 +317,7 @@
                     <div class="mm-mobile-plan-ring" style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" role="img" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%">
                         {{ dispatcher_dashboard.completion_percent|default:0 }}%
                     </div>
+                    <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v97</span>
                 </div>
             </header>
 
@@ -360,6 +378,12 @@
                 {% endif %}
             </form>
 
+            <div class="mm-mobile-version-strip" aria-label="Версия приложения">
+                <span>Версия приложения</span>
+                <strong data-mm-pwa-current-shell-version>v97</strong>
+                <button type="button" data-mm-pwa-check-update>Проверить обновления</button>
+            </div>
+
             <nav class="mm-mobile-bottom-nav" aria-label="Навигация Горного мастера">
                 <a class="mm-mobile-nav-item" href="#" data-mm-mobile-nav="home">
                     <span class="mm-mobile-nav-icon mm-mobile-nav-icon-pult" aria-hidden="true"></span>
@@ -373,8 +397,9 @@
                     <img src="{% static 'img/equipment/truck-gray.png' %}" alt="">
                     <span>Самосвалы</span>
                 </a>
-                <a class="mm-mobile-nav-item is-active" href="#" data-mm-mobile-nav="reports">
+                <a class="mm-mobile-nav-item is-active" href="#" data-mm-mobile-nav="reports" data-mm-pwa-update-nav-target>
                     <span class="mm-mobile-nav-icon mm-mobile-nav-icon-reports" aria-hidden="true"></span>
+                    <span class="mm-mobile-update-badge" data-mm-pwa-update-badge hidden aria-hidden="true"></span>
                     <span>Отчеты</span>
                 </a>
             </nav>
@@ -392,6 +417,7 @@
                             <div class="mm-mobile-plan-ring" style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" role="img" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%">
                                 {{ dispatcher_dashboard.completion_percent|default:0 }}%
                             </div>
+                            <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v97</span>
                         </div>
                     </header>
 
@@ -404,7 +430,7 @@
                         </div>
                         <div class="mm-mobile-fill-assigned" data-mm-mobile-fill-assigned aria-label="Самосвалы комплекса">
                             {% for truck in complex.active_truck_tiles|slice:":16" %}
-                                <span class="mm-mobile-truck-mini status-{{ truck.status }}" data-mm-mobile-assigned-truck-id="{{ truck.card_id }}" data-mm-mobile-assigned-truck-number="{{ truck.name }}">{{ truck.name }}</span>
+                                <span class="mm-mobile-truck-mini status-{{ truck.status }}" data-mm-mobile-assigned-truck-id="{{ truck.card_id }}" data-mm-mobile-assigned-truck-number="{{ truck.name }}" data-mm-mobile-equipment-state="{{ truck.equipment_state_code }}">{{ truck.name }}</span>
                             {% endfor %}
                         </div>
                     </div>
@@ -414,8 +440,8 @@
                             <strong>Гараж - самосвалов</strong>
                         </div>
                         <div class="mm-mobile-fill-truck-garage" aria-label="Гараж самосвалов">
-                            {% for truck in dispatcher_dashboard.truck_garage_tiles %}
-                                <button type="button" class="mm-mobile-truck-card mm-mobile-fill-truck status-{{ truck.status }}" data-equipment-card-id="{{ truck.card_id }}" data-mm-mobile-fill-truck-id="{{ truck.card_id }}" data-mm-mobile-fill-truck-number="{{ truck.name }}" data-mm-mobile-truck-sort="{{ truck.name }}">
+                            {% for truck in dispatcher_dashboard.mobile_truck_garage_tiles %}
+                                <button type="button" class="mm-mobile-truck-card mm-mobile-fill-truck status-{{ truck.status }}" data-equipment-card-id="{{ truck.card_id }}" data-mm-mobile-fill-truck-id="{{ truck.card_id }}" data-mm-mobile-fill-truck-number="{{ truck.name }}" data-mm-mobile-truck-sort="{{ truck.name }}" data-mm-mobile-truck-state="{{ truck.status }}" data-mm-mobile-equipment-state="{{ truck.equipment_state_code }}" title="{{ truck.label }}" aria-label="Самосвал {{ truck.name }}: {{ truck.label }}">
                                     <img src="{% static truck.icon %}" alt="">
                                     <strong>{{ truck.name }}</strong>
                                     <span></span>
@@ -441,6 +467,28 @@
             <button type="button" data-dispatcher-notice-close>ОК</button>
         </div>
     </div>
+
+    {% if mining_master_mobile_enabled %}
+    <div class="mm-mobile-update-modal" data-mm-pwa-update-modal hidden>
+        <section class="mm-mobile-update-dialog" role="alertdialog" aria-modal="true" aria-labelledby="mm-pwa-update-title" aria-describedby="mm-pwa-update-text">
+            <div class="mm-mobile-update-pulse" aria-hidden="true"></div>
+            <div class="mm-mobile-update-copy">
+                <span>Обновление приложения</span>
+                <h2 id="mm-pwa-update-title">Доступна новая версия</h2>
+                <p id="mm-pwa-update-text" data-mm-pwa-update-text>Можно установить новую оболочку Горного мастера.</p>
+                <div class="mm-mobile-update-versions" aria-label="Версии приложения">
+                    <div><small>Текущая</small><strong data-mm-pwa-current-version>неизвестно</strong></div>
+                    <div><small>Новая</small><strong data-mm-pwa-new-version>неизвестно</strong></div>
+                </div>
+                <div class="mm-mobile-update-status" data-mm-pwa-update-status>Обновление займет несколько секунд.</div>
+            </div>
+            <div class="mm-mobile-update-actions">
+                <button type="button" class="secondary" data-mm-pwa-update-later>Позже</button>
+                <button type="button" class="primary" data-mm-pwa-update-apply>Обновить</button>
+            </div>
+        </section>
+    </div>
+    {% endif %}
 
     <section class="dispatcher-tools" aria-label="Фильтры и служебные списки" hidden>
         <div class="dispatcher-tool-head">
@@ -713,6 +761,7 @@
 </main>
 
 {{ dispatcher_dashboard.equipment_cards|json_script:"gd-equipment-cards-data" }}
+{{ dispatcher_dashboard.equipment_state_ui|json_script:"gd-equipment-states-data" }}
 {% get_static_prefix as static_prefix %}
 
 <script>
@@ -726,6 +775,8 @@ document.addEventListener("DOMContentLoaded", function () {
     var dispatcherShiftOpen = {{ dispatcher_header.active_shift|yesno:"true,false" }};
     var equipmentCardsNode = document.getElementById("gd-equipment-cards-data");
     var equipmentCards = equipmentCardsNode ? JSON.parse(equipmentCardsNode.textContent) : {};
+    var equipmentStatesNode = document.getElementById("gd-equipment-states-data");
+    var equipmentStates = equipmentStatesNode ? JSON.parse(equipmentStatesNode.textContent) : {};
     var detailLayer = document.querySelector("[data-gd-equipment-detail]");
     var detailIconSlot = document.querySelector("[data-gd-detail-icon-slot]");
     var detailType = document.querySelector("[data-gd-detail-type]");
@@ -752,10 +803,58 @@ document.addEventListener("DOMContentLoaded", function () {
         var input = document.querySelector("[name=csrfmiddlewaretoken]");
         return getCookie("csrftoken") || (input ? input.value : "");
     }
+    function dispatcherEquipmentState(code) {
+        var key = code || "inactive";
+        return equipmentStates[key] || equipmentStates.inactive || {
+            code: key,
+            label: "",
+            color_group: "gray",
+            allows_assignment: false,
+            allows_drag: false,
+            blocks_operation: true
+        };
+    }
+    function dispatcherEquipmentStateColor(code) {
+        var color = dispatcherEquipmentState(code).color_group || "gray";
+        return ["green", "yellow", "blue", "orange", "red", "gray"].indexOf(color) >= 0 ? color : "gray";
+    }
+    function dispatcherEquipmentStateClass(code) {
+        return "status-" + dispatcherEquipmentStateColor(code);
+    }
+    function dispatcherEquipmentStateLabel(code) {
+        return dispatcherEquipmentState(code).label || "";
+    }
+    function dispatcherEquipmentStateIconColor(code) {
+        var color = dispatcherEquipmentStateColor(code);
+        return color === "orange" ? "yellow" : color;
+    }
+    function setDispatcherNodeEquipmentState(node, code, equipmentType) {
+        if (!node) return;
+        var state = dispatcherEquipmentState(code);
+        node.classList.remove("status-red", "status-yellow", "status-green", "status-blue", "status-orange", "status-gray", "status-normal", "status-risk", "status-danger");
+        node.classList.add(dispatcherEquipmentStateClass(state.code));
+        node.dataset.equipmentState = state.code;
+        if (node.dataset.mmMobileEquipmentState !== undefined) {
+            node.dataset.mmMobileEquipmentState = state.code;
+        }
+        var label = node.querySelector("span");
+        if (label && state.label) label.textContent = state.label;
+        var img = node.querySelector("img");
+        if (img && equipmentType) {
+            img.src = staticPrefix + "img/equipment/" + equipmentType + "-" + dispatcherEquipmentStateIconColor(state.code) + ".png";
+        }
+    }
     var dispatcherSyncPendingCount = 0;
     var dispatcherSyncQueueKey = "mining-master-mobile-sync-queue-v1";
     var dispatcherSyncQueueFlushing = false;
     var dispatcherSyncFlushTimer = null;
+    var dispatcherMobileSyncFlushDelayMs = 300;
+    var dispatcherSyncRequestTimeoutMs = 12000;
+    var dispatcherRefreshRequestTimeoutMs = 12000;
+    var dispatcherRealtimeConnected = true;
+    var dispatcherRealtimeLastSuccessAt = 0;
+    var dispatcherRealtimeLastReason = "";
+    var miningMasterShellVersion = "mining-master-mobile-shell-v97";
     function readDispatcherSyncQueue() {
         try {
             return JSON.parse(window.localStorage.getItem(dispatcherSyncQueueKey) || "[]");
@@ -769,10 +868,36 @@ document.addEventListener("DOMContentLoaded", function () {
         } catch (error) {}
         updateDispatcherSyncIndicator();
     }
+    function getDispatcherSyncQueueState() {
+        var queue = readDispatcherSyncQueue();
+        var now = Date.now();
+        var oldestAgeMs = 0;
+        queue.forEach(function (item) {
+            var createdAt = Number(item && item.createdAt ? item.createdAt : 0);
+            var age = createdAt ? Math.max(0, now - createdAt) : 0;
+            if (!oldestAgeMs || age > oldestAgeMs) oldestAgeMs = age;
+        });
+        return {
+            length: queue.length,
+            oldestAgeMs: oldestAgeMs,
+            isFlushing: dispatcherSyncQueueFlushing,
+            pendingCount: dispatcherSyncPendingCount
+        };
+    }
     function updateDispatcherSyncIndicator() {
         var mobileShell = document.querySelector(".mm-mobile-shell");
-        if (!mobileShell) return;
-        mobileShell.classList.toggle("is-sync-pending", dispatcherSyncPendingCount > 0 || readDispatcherSyncQueue().length > 0);
+        var queueState = getDispatcherSyncQueueState();
+        var isPending = dispatcherSyncPendingCount > 0 || queueState.length > 0 || dispatcherSyncQueueFlushing;
+        if (mobileShell) {
+            mobileShell.classList.toggle("is-sync-pending", isPending);
+            mobileShell.classList.toggle("is-realtime-stale", !dispatcherRealtimeConnected);
+            mobileShell.dataset.mmSyncQueueLength = String(queueState.length);
+            mobileShell.dataset.mmRealtimeConnected = dispatcherRealtimeConnected ? "true" : "false";
+        }
+        var desktopBoard = document.querySelector(".dispatcher-board");
+        if (desktopBoard) {
+            desktopBoard.classList.toggle("is-realtime-stale", !dispatcherRealtimeConnected);
+        }
     }
     function setDispatcherSyncPending(isPending) {
         dispatcherSyncPendingCount = Math.max(0, dispatcherSyncPendingCount + (isPending ? 1 : -1));
@@ -791,6 +916,8 @@ document.addEventListener("DOMContentLoaded", function () {
     function sendDispatcherSyncRequest(request) {
         var headers = { "X-CSRFToken": getCsrfToken() };
         var body = null;
+        var controller = window.AbortController ? new AbortController() : null;
+        var timeoutId = null;
         if (request.kind === "form") {
             body = new FormData();
             Object.keys(request.fields || {}).forEach(function (key) {
@@ -800,10 +927,20 @@ document.addEventListener("DOMContentLoaded", function () {
             headers["Content-Type"] = "application/json";
             body = JSON.stringify(request.data || {});
         }
+        if (controller) {
+            timeoutId = window.setTimeout(function () {
+                try {
+                    controller.abort();
+                } catch (error) {}
+            }, dispatcherSyncRequestTimeoutMs);
+        }
         return fetch(request.url, {
             method: "POST",
             headers: headers,
-            body: body
+            body: body,
+            credentials: "same-origin",
+            cache: "no-store",
+            signal: controller ? controller.signal : undefined
         }).then(function (response) {
             if (!response.ok) {
                 return response.json().catch(function () { return {}; }).then(function (payload) {
@@ -813,6 +950,28 @@ document.addEventListener("DOMContentLoaded", function () {
                 });
             }
             return response.json().catch(function () { return { ok: true }; });
+        }).finally(function () {
+            if (timeoutId) {
+                window.clearTimeout(timeoutId);
+            }
+        });
+    }
+    function dispatcherFetchWithTimeout(url, options, timeoutMs) {
+        var controller = window.AbortController ? new AbortController() : null;
+        var timeoutId = null;
+        var fetchOptions = Object.assign({}, options || {});
+        if (controller) {
+            fetchOptions.signal = controller.signal;
+            timeoutId = window.setTimeout(function () {
+                try {
+                    controller.abort();
+                } catch (error) {}
+            }, timeoutMs || dispatcherRefreshRequestTimeoutMs);
+        }
+        return fetch(url, fetchOptions).finally(function () {
+            if (timeoutId) {
+                window.clearTimeout(timeoutId);
+            }
         });
     }
     function flushDispatcherSyncQueue() {
@@ -839,8 +998,8 @@ document.addEventListener("DOMContentLoaded", function () {
                 });
             }
             writeDispatcherSyncQueue(freshQueue);
-            if (request.refreshMobileBoard) {
-                refreshMobileBoardFromServer().catch(function () {});
+            if (request.refreshMobileBoard && !freshQueue.length) {
+                Promise.resolve(refreshMobileBoardFromServer({ preserveScreen: true })).catch(function () {});
             }
         }).catch(function (error) {
             if (error && error.isServerResponse) {
@@ -849,6 +1008,9 @@ document.addEventListener("DOMContentLoaded", function () {
                 });
                 writeDispatcherSyncQueue(freshQueue);
                 showDispatcherDnDError(error);
+                if (request.refreshMobileBoard && !freshQueue.length) {
+                    Promise.resolve(refreshMobileBoardFromServer({ preserveScreen: true })).catch(function () {});
+                }
             } else {
                 var retryQueue = readDispatcherSyncQueue();
                 if (retryQueue.length && retryQueue[0].id === request.id) {
@@ -901,8 +1063,9 @@ document.addEventListener("DOMContentLoaded", function () {
         enqueueDispatcherSyncRequest({
             kind: "json",
             url: url,
-            data: payload
-        }, typeof delayMs === "number" ? delayMs : 5000);
+            data: payload,
+            refreshMobileBoard: true
+        }, typeof delayMs === "number" ? delayMs : dispatcherMobileSyncFlushDelayMs);
         return Promise.resolve({ queued: true });
     }
     window.addEventListener("focus", scheduleDispatcherSyncFlush);
@@ -910,21 +1073,194 @@ document.addEventListener("DOMContentLoaded", function () {
     document.addEventListener("visibilitychange", function () {
         if (!document.hidden) scheduleDispatcherSyncFlush();
     });
-    function reloadDispatcherBoard() {
-        window.location.reload();
+    function reloadDispatcherBoardAsFallback() {
+        if (typeof window.showAppSyncOverlay === "function") {
+            window.showAppSyncOverlay({
+                title: "Синхронизируем диспетчерский экран",
+                text: "Сервер отдал состояние, которое нельзя безопасно применить точечно. Загружаем свежую версию."
+            });
+        }
+        window.setTimeout(function () {
+            window.location.reload();
+        }, 80);
     }
-    function reloadDispatcherBoardUnlessQueued(response) {
-        if (response && response.queued) return response;
-        reloadDispatcherBoard();
-        return response;
+    var miningMasterRealtimeStorageKey = "operational-state-version";
+    var miningMasterRealtimeLastVersion = readRenderedOperationalStateVersion() || readMiningMasterRealtimeVersion();
+    function readRenderedOperationalStateVersion() {
+        var parsed = parseInt(document.body ? document.body.dataset.operationalStateVersion || "0" : "0", 10);
+        return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
     }
-    function refreshMobileBoardFromServer() {
-        if (!document.querySelector(".mm-mobile-shell")) return Promise.resolve(false);
-        return fetch(window.location.href, {
+    function readMiningMasterRealtimeVersion() {
+        try {
+            var raw = window.sessionStorage.getItem(miningMasterRealtimeStorageKey);
+            var parsed = parseInt(raw || "0", 10);
+            return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+        } catch (error) {
+            return 0;
+        }
+    }
+    function storeMiningMasterRealtimeVersion(version) {
+        var parsed = parseInt(version || "0", 10);
+        if (!Number.isFinite(parsed) || parsed <= 0) return;
+        miningMasterRealtimeLastVersion = parsed;
+        if (document.body) {
+            document.body.dataset.operationalStateVersion = String(parsed);
+        }
+        try {
+            window.sessionStorage.setItem(miningMasterRealtimeStorageKey, String(parsed));
+        } catch (error) {}
+    }
+    function buildMiningMasterRealtimeUrl(afterVersion, limit) {
+        var url = new URL("{% url 'operational_state_version' %}", window.location.origin);
+        var parsed = parseInt(afterVersion || "0", 10);
+        if (Number.isFinite(parsed) && parsed > 0) {
+            url.searchParams.set("after", String(parsed));
+        }
+        var parsedLimit = parseInt(limit || "0", 10);
+        if (Number.isFinite(parsedLimit) && parsedLimit > 0) {
+            url.searchParams.set("limit", String(parsedLimit));
+        }
+        return url.toString();
+    }
+    function fetchMiningMasterRealtimeState(context, limit) {
+        var targetVersion = context && context.version ? parseInt(context.version, 10) : 0;
+        var previousVersion = context && context.previousVersion ? parseInt(context.previousVersion, 10) : 0;
+        var afterVersion = Number.isFinite(previousVersion) && previousVersion > 0
+            ? previousVersion
+            : (miningMasterRealtimeLastVersion || readMiningMasterRealtimeVersion());
+        if (targetVersion > 1 && (!afterVersion || afterVersion >= targetVersion)) {
+            afterVersion = targetVersion - 1;
+        }
+        return dispatcherFetchWithTimeout(buildMiningMasterRealtimeUrl(afterVersion, limit), {
+            method: "GET",
+            credentials: "same-origin",
+            cache: "no-store",
+            headers: { "Accept": "application/json" }
+        }, dispatcherRefreshRequestTimeoutMs).then(function (response) {
+            if (!response.ok) throw new Error("Operational state fetch failed.");
+            return response.json();
+        });
+    }
+    function hasMiningMasterRelevantEvents(events) {
+        if (!Array.isArray(events) || !events.length) return true;
+        return events.some(function (event) {
+            return [
+                "equipment_changed",
+                "assignment_changed",
+                "shift_changed",
+                "reference_changed",
+                "downtime_changed",
+                "trip_changed"
+            ].indexOf(event && event.type) !== -1;
+        });
+    }
+    function getMobileShellScreen(shell) {
+        if (!shell) return "home";
+        return shell.dataset.mobileScreen || shell.dataset.mmMobileScreen || "home";
+    }
+    function setMobileShellScreen(shell, screenName) {
+        if (!shell) return;
+        var value = screenName || "home";
+        shell.dataset.mobileScreen = value;
+        shell.dataset.mmMobileScreen = value;
+    }
+    function captureMobileShellState(currentShell) {
+        if (!currentShell) return {};
+        var activePanel = currentShell.querySelector("[data-mm-mobile-panel]:not([hidden])");
+        var activeFill = currentShell.querySelector("[data-mm-mobile-fill]:not([hidden])");
+        var homeView = currentShell.querySelector("[data-mm-mobile-view='home']");
+        var mobileScreen = getMobileShellScreen(currentShell);
+        if (activeFill) {
+            mobileScreen = "fill";
+        } else if (activePanel) {
+            mobileScreen = activePanel.dataset.mmMobilePanel || mobileScreen;
+        } else if (homeView && !homeView.hidden) {
+            mobileScreen = "home";
+        }
+        return {
+            mobileScreen: mobileScreen || "home",
+            activeComplex: currentShell.dataset.activeComplex || (activeFill && activeFill.dataset.mmMobileFill) || "",
+            scrollTop: currentShell.scrollTop || 0,
+            panelScrollTop: activePanel ? activePanel.scrollTop || 0 : 0,
+            panelGridScrollTop: activePanel && activePanel.querySelector(".mm-mobile-detail-trucks")
+                ? activePanel.querySelector(".mm-mobile-detail-trucks").scrollTop || 0
+                : 0,
+            fillScrollTop: activeFill ? activeFill.scrollTop || 0 : 0,
+            fillGarageScrollTop: activeFill && activeFill.querySelector(".mm-mobile-fill-truck-garage")
+                ? activeFill.querySelector(".mm-mobile-fill-truck-garage").scrollTop || 0
+                : 0
+        };
+    }
+    function restoreMobileShellState(freshShell, state) {
+        if (!freshShell || !state) return;
+        var homeView = freshShell.querySelector("[data-mm-mobile-view='home']");
+        var panels = Array.prototype.slice.call(freshShell.querySelectorAll("[data-mm-mobile-panel]"));
+        var fills = Array.prototype.slice.call(freshShell.querySelectorAll("[data-mm-mobile-fill]"));
+        var screenName = state.mobileScreen || "home";
+        var restored = false;
+        panels.forEach(function (panel) {
+            panel.hidden = true;
+        });
+        fills.forEach(function (fill) {
+            fill.hidden = true;
+        });
+        if (screenName === "fill" && state.activeComplex) {
+            var targetFill = freshShell.querySelector("[data-mm-mobile-fill='" + CSS.escape(String(state.activeComplex)) + "']");
+            if (targetFill) {
+                if (homeView) homeView.hidden = true;
+                targetFill.hidden = false;
+                setMobileShellScreen(freshShell, "fill");
+                freshShell.dataset.activeComplex = String(state.activeComplex);
+                targetFill.scrollTop = state.fillScrollTop || 0;
+                var targetFillGarage = targetFill.querySelector(".mm-mobile-fill-truck-garage");
+                if (targetFillGarage) targetFillGarage.scrollTop = state.fillGarageScrollTop || 0;
+                restored = true;
+            }
+        } else if (screenName && screenName !== "home") {
+            var targetPanel = freshShell.querySelector("[data-mm-mobile-panel='" + CSS.escape(String(screenName)) + "']");
+            if (targetPanel) {
+                if (homeView) homeView.hidden = true;
+                targetPanel.hidden = false;
+                setMobileShellScreen(freshShell, screenName);
+                delete freshShell.dataset.activeComplex;
+                targetPanel.scrollTop = state.panelScrollTop || 0;
+                var targetPanelGrid = targetPanel.querySelector(".mm-mobile-detail-trucks");
+                if (targetPanelGrid) targetPanelGrid.scrollTop = state.panelGridScrollTop || 0;
+                restored = true;
+            }
+        }
+        if (!restored) {
+            if (homeView) homeView.hidden = false;
+            setMobileShellScreen(freshShell, "home");
+            delete freshShell.dataset.activeComplex;
+            screenName = "home";
+        }
+        freshShell.querySelectorAll("[data-mm-mobile-nav]").forEach(function (item) {
+            var isTarget = item.dataset.mmMobileNav === (screenName === "fill" ? "home" : screenName);
+            item.classList.toggle("is-active", isTarget && !item.classList.contains("is-disabled"));
+        });
+        freshShell.scrollTop = state.scrollTop || 0;
+    }
+    var miningMasterMobileRefreshPromise = null;
+    var miningMasterMobileLastRefreshAt = 0;
+    var miningMasterMobilePassiveReconcileMs = 10000;
+    function buildMobileBoardRefreshUrl() {
+        var url = new URL(window.location.href);
+        url.searchParams.set("_mm_refresh", String(Date.now()));
+        return url.toString();
+    }
+    function refreshMobileBoardFromServer(options) {
+        if (miningMasterMobileRefreshPromise) {
+            return miningMasterMobileRefreshPromise;
+        }
+        var currentShell = document.querySelector(".mm-mobile-shell");
+        if (!currentShell) return Promise.resolve(false);
+        var state = captureMobileShellState(currentShell);
+        miningMasterMobileRefreshPromise = dispatcherFetchWithTimeout(buildMobileBoardRefreshUrl(), {
             method: "GET",
             headers: { "X-Requested-With": "XMLHttpRequest" },
             cache: "no-store"
-        }).then(function (response) {
+        }, dispatcherRefreshRequestTimeoutMs).then(function (response) {
             if (!response.ok) throw new Error("Не удалось обновить мобильный пульт.");
             return response.text();
         }).then(function (html) {
@@ -933,12 +1269,352 @@ document.addEventListener("DOMContentLoaded", function () {
             var freshShell = doc.querySelector(".mm-mobile-shell");
             var currentShell = document.querySelector(".mm-mobile-shell");
             if (!freshShell || !currentShell) return false;
+            var freshVersion = parseInt(doc.body ? doc.body.dataset.operationalStateVersion || "0" : "0", 10);
+            if (Number.isFinite(freshVersion) && freshVersion > 0) {
+                storeMiningMasterRealtimeVersion(freshVersion);
+                if (window.AppRealtime && typeof window.AppRealtime.markApplied === "function") {
+                    window.AppRealtime.markApplied(freshVersion);
+                }
+            }
+            var freshCardsNode = doc.getElementById("gd-equipment-cards-data");
+            if (freshCardsNode && equipmentCardsNode) {
+                equipmentCardsNode.textContent = freshCardsNode.textContent || "{}";
+                try {
+                    equipmentCards = JSON.parse(equipmentCardsNode.textContent || "{}");
+                } catch (error) {
+                    equipmentCards = {};
+                }
+            }
+            if (options && options.preserveScreen) {
+                restoreMobileShellState(freshShell, state);
+            }
             currentShell.replaceWith(freshShell);
             bindMiningMasterMobileScreens();
+            refreshMiningMasterUpdateIndicatorFromStorage();
+            var replacedShell = document.querySelector(".mm-mobile-shell");
+            if (replacedShell && options && options.preserveScreen) {
+                replacedShell.scrollTop = state.scrollTop || 0;
+            }
+            updateDispatcherSyncIndicator();
+            miningMasterMobileLastRefreshAt = Date.now();
+            return true;
+        }).finally(function () {
+            miningMasterMobileRefreshPromise = null;
+        });
+    }
+    function isMobileOperationalRefreshUnsafe() {
+        var mobileShell = document.querySelector(".mm-mobile-shell");
+        if (!mobileShell) return false;
+        var active = document.activeElement;
+        var activeTag = active && active.tagName ? active.tagName.toLowerCase() : "";
+        if (active && (active.isContentEditable || activeTag === "input" || activeTag === "textarea" || activeTag === "select")) {
+            return true;
+        }
+        if (isDispatcherSyncQueueBlockingRefresh()) {
+            return true;
+        }
+        if (document.body.classList.contains("modal-open")) {
+            return true;
+        }
+        if (document.querySelector(".app-confirm-modal:not([hidden]), .dispatcher-notice-modal:not([hidden]), .mm-mobile-update-modal:not([hidden]), [data-gd-equipment-detail]:not([hidden])")) {
+            return true;
+        }
+        if (mobileShell.querySelector(".is-dragging, .is-hold-pending, .is-hold-ready, .is-work-swiping, .is-swiping, .is-truck-swiping, .is-fill-swiping, .is-create-swiping, .is-activating, .is-removing, .is-releasing, .is-releasing-trucks")) {
+            return true;
+        }
+        if (mobileShell.classList.contains("is-fill-target-peeking") || mobileShell.classList.contains("is-create-complex-peeking") || mobileShell.classList.contains("is-truck-garage-peeking") || mobileShell.classList.contains("is-excavator-garage-peeking")) {
+            return true;
+        }
+        return false;
+    }
+    var miningMasterRealtimeHardLagLimit = 150;
+    var dispatcherRealtimeHardLagLimit = 150;
+    var dispatcherLocalAssignmentAppliedUntil = 0;
+    var dispatcherIncomingRefreshQueueGraceMs = 15000;
+    var dispatcherSyncQueueWakeThrottleMs = 1500;
+    var dispatcherLastSyncQueueWakeAt = 0;
+    function wakeDispatcherSyncQueueForRefresh() {
+        var now = Date.now();
+        if (now - dispatcherLastSyncQueueWakeAt < dispatcherSyncQueueWakeThrottleMs) return;
+        dispatcherLastSyncQueueWakeAt = now;
+        scheduleDispatcherSyncFlush(0);
+    }
+    function isDispatcherSyncQueueBlockingRefresh() {
+        if (dispatcherSyncQueueFlushing || dispatcherSyncPendingCount > 0) {
+            return true;
+        }
+        var queue = readDispatcherSyncQueue();
+        if (!queue.length) {
+            return false;
+        }
+        wakeDispatcherSyncQueueForRefresh();
+        if (navigator && navigator.onLine === false) {
+            return true;
+        }
+        var now = Date.now();
+        return queue.some(function (item) {
+            var createdAt = Number(item && item.createdAt ? item.createdAt : 0);
+            return !createdAt || now - createdAt < dispatcherIncomingRefreshQueueGraceMs;
+        });
+    }
+    function isElementRendered(node) {
+        if (!node) return false;
+        var style = window.getComputedStyle(node);
+        if (!style || style.display === "none" || style.visibility === "hidden") return false;
+        return node.getClientRects().length > 0;
+    }
+    function isDispatcherDesktopPage() {
+        return isElementRendered(document.querySelector(".dispatcher-board"));
+    }
+    function isMiningMasterMobilePage() {
+        return isElementRendered(document.querySelector(".mm-mobile-shell"));
+    }
+    function markDispatcherLocalAssignmentApplied() {
+        dispatcherLocalAssignmentAppliedUntil = Date.now() + 8000;
+    }
+    function hasDispatcherRelevantEvents(events) {
+        if (!Array.isArray(events) || !events.length) return true;
+        return events.some(function (event) {
+            return [
+                "equipment_changed",
+                "assignment_changed",
+                "shift_changed",
+                "reference_changed",
+                "downtime_changed",
+                "trip_changed",
+                "employee_changed",
+                "access_changed"
+            ].indexOf(event && event.type) !== -1;
+        });
+    }
+    function canTrustLocalDispatcherAssignmentEvents(events) {
+        if (!Array.isArray(events) || !events.length) return false;
+        if (Date.now() > dispatcherLocalAssignmentAppliedUntil) return false;
+        return events.every(function (event) {
+            return event && event.type === "assignment_changed";
+        });
+    }
+    function isDispatcherOperationalRefreshUnsafe() {
+        if (!isDispatcherDesktopPage()) return false;
+        var active = document.activeElement;
+        var activeTag = active && active.tagName ? active.tagName.toLowerCase() : "";
+        if (active && (active.isContentEditable || activeTag === "input" || activeTag === "textarea" || activeTag === "select")) {
+            return true;
+        }
+        if (isDispatcherSyncQueueBlockingRefresh()) {
+            return true;
+        }
+        if (document.body.classList.contains("modal-open")) {
+            return true;
+        }
+        if (document.querySelector(".app-confirm-modal:not([hidden]), .dispatcher-notice-modal:not([hidden]), .mm-mobile-update-modal:not([hidden]), [data-gd-equipment-detail]:not([hidden])")) {
+            return true;
+        }
+        if (document.querySelector(".dispatcher-dragging, .dispatcher-drop-target, .is-dragging")) {
+            return true;
+        }
+        return false;
+    }
+    function captureDispatcherDesktopState(currentBoard) {
+        var selectors = [
+            ".dispatcher-left",
+            ".dispatcher-excavators",
+            ".dispatcher-complexes",
+            ".dispatcher-zone-grid",
+            ".dispatcher-right",
+            ".dispatcher-trucks"
+        ];
+        var state = {
+            scrollX: window.scrollX || 0,
+            scrollY: window.scrollY || 0,
+            scrolls: {},
+            activeDetailCardId: "",
+            detailScrollTop: 0
+        };
+        selectors.forEach(function (selector) {
+            var node = currentBoard ? currentBoard.querySelector(selector) : document.querySelector(selector);
+            if (!node) return;
+            state.scrolls[selector] = {
+                top: node.scrollTop || 0,
+                left: node.scrollLeft || 0
+            };
+        });
+        if (detailLayer && !detailLayer.hidden) {
+            state.activeDetailCardId = detailLayer.dataset.gdActiveCardId || "";
+            var panel = detailLayer.querySelector(".mm-equipment-detail-panel");
+            state.detailScrollTop = panel ? panel.scrollTop || 0 : 0;
+        }
+        return state;
+    }
+    function restoreDispatcherDesktopState(freshBoard, state) {
+        if (!state) return;
+        Object.keys(state.scrolls || {}).forEach(function (selector) {
+            var node = freshBoard ? freshBoard.querySelector(selector) : document.querySelector(selector);
+            var saved = state.scrolls[selector];
+            if (!node || !saved) return;
+            node.scrollTop = saved.top || 0;
+            node.scrollLeft = saved.left || 0;
+        });
+        window.scrollTo(state.scrollX || 0, state.scrollY || 0);
+        if (state.activeDetailCardId && equipmentCards[String(state.activeDetailCardId || "")]) {
+            openEquipmentCard(state.activeDetailCardId);
+            var panel = detailLayer ? detailLayer.querySelector(".mm-equipment-detail-panel") : null;
+            if (panel) panel.scrollTop = state.detailScrollTop || 0;
+        }
+    }
+    function refreshDispatcherDesktopBoardFromServer() {
+        if (!isDispatcherDesktopPage()) return Promise.resolve(false);
+        var currentBoard = document.querySelector(".dispatcher-board");
+        var desktopState = captureDispatcherDesktopState(currentBoard);
+        return fetch(window.location.href, {
+            method: "GET",
+            headers: { "X-Requested-With": "XMLHttpRequest" },
+            cache: "no-store"
+        }).then(function (response) {
+            if (!response.ok) throw new Error("Не удалось обновить диспетчерский пульт.");
+            return response.text();
+        }).then(function (html) {
+            var parser = new DOMParser();
+            var doc = parser.parseFromString(html, "text/html");
+            var freshBoard = doc.querySelector(".dispatcher-board");
+            var freshCardsNode = doc.getElementById("gd-equipment-cards-data");
+            currentBoard = document.querySelector(".dispatcher-board");
+            if (!freshBoard || !currentBoard) return false;
+            if (freshCardsNode && equipmentCardsNode) {
+                equipmentCardsNode.textContent = freshCardsNode.textContent || "{}";
+                try {
+                    equipmentCards = JSON.parse(equipmentCardsNode.textContent || "{}");
+                } catch (error) {
+                    equipmentCards = {};
+                }
+            }
+            currentBoard.replaceWith(freshBoard);
+            bindDispatcherDesktopInteractions();
+            if (typeof window.initAppConfirmForms === "function") {
+                window.initAppConfirmForms();
+            }
+            if (typeof window.initDispatcherThemeControls === "function") {
+                window.initDispatcherThemeControls();
+            }
+            if (typeof window.initDispatcherRadialClocks === "function") {
+                window.initDispatcherRadialClocks();
+            }
+            restoreDispatcherDesktopState(freshBoard, desktopState);
+            refreshDesktopBoardIntegrity();
             updateDispatcherSyncIndicator();
             return true;
         });
     }
+    function applyDispatcherOperationalStateRefresh(context) {
+        if (isDispatcherOperationalRefreshUnsafe()) {
+            return Promise.resolve({ deferred: true, reason: "dispatcher_busy" });
+        }
+        return fetchMiningMasterRealtimeState(context, dispatcherRealtimeHardLagLimit).then(function (state) {
+            if (isDispatcherOperationalRefreshUnsafe()) {
+                return { deferred: true, reason: "dispatcher_busy" };
+            }
+            var targetVersion = state && state.version ? state.version : (context && context.version);
+            var events = state && state.events;
+            var currentStoredVersion = miningMasterRealtimeLastVersion || readMiningMasterRealtimeVersion();
+            var versionGap = targetVersion && currentStoredVersion ? targetVersion - currentStoredVersion : 0;
+            if (state && state.events_truncated || versionGap > dispatcherRealtimeHardLagLimit) {
+                return refreshDispatcherDesktopBoardFromServer().then(function (applied) {
+                    if (!applied) return { deferred: true, reason: "dispatcher_refresh_failed" };
+                    storeMiningMasterRealtimeVersion(targetVersion);
+                    return { applied: true };
+                });
+            }
+            if (!hasDispatcherRelevantEvents(events) || canTrustLocalDispatcherAssignmentEvents(events)) {
+                storeMiningMasterRealtimeVersion(targetVersion);
+                return { applied: true };
+            }
+            return refreshDispatcherDesktopBoardFromServer().then(function (applied) {
+                if (!applied) return { deferred: true, reason: "dispatcher_refresh_failed" };
+                storeMiningMasterRealtimeVersion(targetVersion);
+                return { applied: true };
+            });
+        }).catch(function () {
+            return { deferred: true, reason: "dispatcher_refresh_error" };
+        });
+    }
+    window.applyOperationalStateRefresh = function (context) {
+        if (isDispatcherDesktopPage()) {
+            return applyDispatcherOperationalStateRefresh(context);
+        }
+        if (!isMiningMasterMobilePage()) return false;
+        if (isMobileOperationalRefreshUnsafe()) {
+            return Promise.resolve({ deferred: true, reason: "mobile_busy" });
+        }
+        return fetchMiningMasterRealtimeState(context, miningMasterRealtimeHardLagLimit).then(function (state) {
+            if (isMobileOperationalRefreshUnsafe()) {
+                return { deferred: true, reason: "mobile_busy" };
+            }
+            var targetVersion = state && state.version ? state.version : (context && context.version);
+            var events = state && state.events;
+            var currentStoredVersion = miningMasterRealtimeLastVersion || readMiningMasterRealtimeVersion();
+            var versionGap = targetVersion && currentStoredVersion ? targetVersion - currentStoredVersion : 0;
+            if (state && state.events_truncated || versionGap > miningMasterRealtimeHardLagLimit) {
+                return refreshMobileBoardFromServer({ preserveScreen: true }).then(function (applied) {
+                    if (!applied) return { deferred: true, reason: "mobile_refresh_failed" };
+                    storeMiningMasterRealtimeVersion(targetVersion);
+                    return { applied: true };
+                });
+            }
+            if (!hasMiningMasterRelevantEvents(events)) {
+                storeMiningMasterRealtimeVersion(targetVersion);
+                return { applied: true };
+            }
+            return refreshMobileBoardFromServer({ preserveScreen: true }).then(function (applied) {
+                if (!applied) return { deferred: true, reason: "mobile_refresh_failed" };
+                storeMiningMasterRealtimeVersion(targetVersion);
+                return { applied: true };
+            });
+        }).catch(function () {
+            return { deferred: true, reason: "mobile_refresh_error" };
+        });
+    };
+    function runMiningMasterPassiveReconcile(reason) {
+        if (document.hidden || !isMiningMasterMobilePage() || isMobileOperationalRefreshUnsafe()) {
+            return;
+        }
+        if (Date.now() - miningMasterMobileLastRefreshAt < miningMasterMobilePassiveReconcileMs) {
+            return;
+        }
+        miningMasterMobileLastRefreshAt = Date.now();
+        if (window.AppRealtime && typeof window.AppRealtime.poll === "function") {
+            try {
+                window.AppRealtime.poll({ force: true });
+            } catch (error) {}
+        }
+        Promise.resolve(refreshMobileBoardFromServer({ preserveScreen: true, passive: true })).catch(function () {
+            miningMasterMobileLastRefreshAt = 0;
+        });
+    }
+    window.addEventListener("operational-state-refresh-applied", function () {
+        miningMasterMobileLastRefreshAt = Date.now();
+    });
+    window.addEventListener("operational-state-poll-reset", function () {
+        window.setTimeout(function () {
+            runMiningMasterPassiveReconcile("poll_reset");
+        }, 300);
+    });
+    window.setInterval(function () {
+        runMiningMasterPassiveReconcile("interval");
+    }, miningMasterMobilePassiveReconcileMs);
+    ["focus", "pageshow", "online"].forEach(function (eventName) {
+        window.addEventListener(eventName, function () {
+            window.setTimeout(function () {
+                runMiningMasterPassiveReconcile(eventName);
+            }, 300);
+        });
+    });
+    document.addEventListener("visibilitychange", function () {
+        if (!document.hidden) {
+            window.setTimeout(function () {
+                runMiningMasterPassiveReconcile("visibilitychange");
+            }, 300);
+        }
+    });
     var dispatcherNotice = document.querySelector("[data-dispatcher-notice]");
     var dispatcherNoticeMessage = document.querySelector("[data-dispatcher-notice-message]");
     var dispatcherNoticeClose = document.querySelector("[data-dispatcher-notice-close]");
@@ -969,6 +1645,432 @@ document.addEventListener("DOMContentLoaded", function () {
             console.warn(message);
         }
     }
+    var miningMasterUpdateModal = document.querySelector("[data-mm-pwa-update-modal]");
+    var miningMasterUpdateText = document.querySelector("[data-mm-pwa-update-text]");
+    var miningMasterUpdateStatus = document.querySelector("[data-mm-pwa-update-status]");
+    var miningMasterUpdateCurrent = document.querySelector("[data-mm-pwa-current-version]");
+    var miningMasterUpdateNew = document.querySelector("[data-mm-pwa-new-version]");
+    var miningMasterUpdateLater = document.querySelector("[data-mm-pwa-update-later]");
+    var miningMasterUpdateApply = document.querySelector("[data-mm-pwa-update-apply]");
+    var miningMasterServiceWorkerRegistration = null;
+    var miningMasterWaitingWorker = null;
+    var miningMasterUpdateReloading = false;
+    var miningMasterUpdateStorageKey = "mining-master-pwa-update-available";
+    var miningMasterUpdateCheckIntervalMs = 60000;
+    var miningMasterUpdateCheckTimer = null;
+    var miningMasterUpdateSilentCheckInFlight = false;
+    function formatMiningMasterVersion(version) {
+        return String(version || "неизвестно").replace("mining-master-mobile-shell-", "");
+    }
+    function setMiningMasterVisibleVersion(version) {
+        document.querySelectorAll("[data-mm-pwa-current-shell-version]").forEach(function (node) {
+            node.textContent = formatMiningMasterVersion(version || miningMasterShellVersion);
+        });
+        refreshMiningMasterUpdateIndicatorFromStorage(version || miningMasterShellVersion);
+    }
+    function setMiningMasterCheckUpdateButtonsDisabled(isDisabled) {
+        document.querySelectorAll("[data-mm-pwa-check-update]").forEach(function (button) {
+            button.disabled = !!isDisabled;
+        });
+    }
+    function setMiningMasterUpdateButtonsAttention(isAvailable) {
+        document.querySelectorAll("[data-mm-pwa-check-update]").forEach(function (button) {
+            button.classList.toggle("has-pwa-update", !!isAvailable);
+            button.textContent = isAvailable ? "Обновить" : "Проверить обновления";
+            button.setAttribute(
+                "aria-label",
+                isAvailable ? "Обновить приложение Горного мастера" : "Проверить обновления приложения Горного мастера"
+            );
+        });
+    }
+    function getMiningMasterVersionNumber(version) {
+        var match = String(version || "").match(/(?:shell-v|v)(\d+)$/);
+        return match ? parseInt(match[1], 10) : 0;
+    }
+    function isMiningMasterVersionNewer(newVersion, currentVersion) {
+        var newNumber = getMiningMasterVersionNumber(newVersion);
+        var currentNumber = getMiningMasterVersionNumber(currentVersion || miningMasterShellVersion);
+        return newNumber > currentNumber;
+    }
+    function readMiningMasterStoredUpdate() {
+        try {
+            return JSON.parse(localStorage.getItem(miningMasterUpdateStorageKey) || "{}") || {};
+        } catch (error) {
+            return {};
+        }
+    }
+    function rememberMiningMasterUpdate(newVersion, currentVersion) {
+        try {
+            localStorage.setItem(miningMasterUpdateStorageKey, JSON.stringify({
+                newVersion: newVersion || "",
+                currentVersion: currentVersion || miningMasterShellVersion,
+                savedAt: Date.now()
+            }));
+        } catch (error) {}
+    }
+    function clearMiningMasterStoredUpdate() {
+        try {
+            localStorage.removeItem(miningMasterUpdateStorageKey);
+        } catch (error) {}
+    }
+    function setMiningMasterUpdateIndicator(isAvailable, newVersion, currentVersion) {
+        var visible = !!(isAvailable && isMiningMasterVersionNewer(newVersion, currentVersion || miningMasterShellVersion));
+        document.querySelectorAll("[data-mm-pwa-update-badge]").forEach(function (badge) {
+            badge.hidden = !visible;
+        });
+        document.querySelectorAll("[data-mm-pwa-update-nav-target]").forEach(function (item) {
+            item.classList.toggle("has-pwa-update", visible);
+            if (visible) {
+                item.setAttribute("aria-label", "Отчеты. Доступна новая версия приложения");
+                item.title = "Доступна новая версия приложения";
+            } else {
+                item.removeAttribute("aria-label");
+                item.removeAttribute("title");
+            }
+        });
+        setMiningMasterUpdateButtonsAttention(visible);
+        if (visible) {
+            rememberMiningMasterUpdate(newVersion, currentVersion);
+        } else {
+            clearMiningMasterStoredUpdate();
+        }
+    }
+    function refreshMiningMasterUpdateIndicatorFromStorage(currentVersion) {
+        var storedUpdate = readMiningMasterStoredUpdate();
+        if (storedUpdate.newVersion && isMiningMasterVersionNewer(storedUpdate.newVersion, currentVersion || storedUpdate.currentVersion || miningMasterShellVersion)) {
+            setMiningMasterUpdateIndicator(true, storedUpdate.newVersion, currentVersion || storedUpdate.currentVersion || miningMasterShellVersion);
+        } else if (storedUpdate.newVersion) {
+            setMiningMasterUpdateIndicator(false);
+        }
+    }
+    function requestMiningMasterWorkerVersion(worker) {
+        if (!worker || !window.MessageChannel) {
+            return Promise.resolve("");
+        }
+        return new Promise(function (resolve) {
+            var channel = new MessageChannel();
+            var timer = window.setTimeout(function () {
+                resolve("");
+            }, 900);
+            channel.port1.onmessage = function (event) {
+                window.clearTimeout(timer);
+                var data = event.data || {};
+                resolve(data.version || "");
+            };
+            try {
+                worker.postMessage({ type: "GET_VERSION" }, [channel.port2]);
+            } catch (error) {
+                window.clearTimeout(timer);
+                resolve("");
+            }
+        });
+    }
+    function setMiningMasterUpdateInstalling(isInstalling) {
+        if (!miningMasterUpdateModal) return;
+        miningMasterUpdateModal.classList.toggle("is-installing", !!isInstalling);
+        if (miningMasterUpdateApply) miningMasterUpdateApply.disabled = !!isInstalling;
+        if (miningMasterUpdateLater) miningMasterUpdateLater.disabled = !!isInstalling;
+    }
+    function closeMiningMasterUpdateModal() {
+        if (miningMasterUpdateModal) miningMasterUpdateModal.hidden = true;
+        setMiningMasterUpdateInstalling(false);
+    }
+    function showMiningMasterUpdateModal(waitingWorker, newVersion, currentVersion) {
+        if (!miningMasterUpdateModal) return;
+        miningMasterWaitingWorker = waitingWorker || null;
+        setMiningMasterUpdateIndicator(true, newVersion, currentVersion);
+        var title = document.getElementById("mm-pwa-update-title");
+        if (title) {
+            title.textContent = "Доступна новая версия";
+        }
+        if (miningMasterUpdateCurrent) {
+            miningMasterUpdateCurrent.textContent = formatMiningMasterVersion(currentVersion || (navigator.serviceWorker.controller ? "текущая" : miningMasterShellVersion));
+        }
+        if (miningMasterUpdateNew) {
+            miningMasterUpdateNew.textContent = formatMiningMasterVersion(newVersion || "новая");
+        }
+        if (miningMasterUpdateText) {
+            miningMasterUpdateText.textContent = "Сервер загрузил новую оболочку Горного мастера. Установите ее, чтобы телефон работал на актуальной версии.";
+        }
+        if (miningMasterUpdateStatus) {
+            miningMasterUpdateStatus.textContent = waitingWorker
+                ? "Обновление займет несколько секунд."
+                : "Браузер еще готовит установку. Повторите проверку через несколько секунд.";
+        }
+        if (miningMasterUpdateApply) {
+            miningMasterUpdateApply.textContent = "Обновить";
+        }
+        if (miningMasterUpdateLater) {
+            miningMasterUpdateLater.hidden = false;
+        }
+        setMiningMasterUpdateInstalling(false);
+        if (miningMasterUpdateApply) {
+            miningMasterUpdateApply.disabled = !waitingWorker;
+        }
+        miningMasterUpdateModal.hidden = false;
+        if (waitingWorker && miningMasterUpdateApply) miningMasterUpdateApply.focus();
+    }
+    function showMiningMasterNoUpdateModal(currentVersion) {
+        if (!miningMasterUpdateModal) return;
+        miningMasterWaitingWorker = null;
+        setMiningMasterUpdateIndicator(false);
+        var title = document.getElementById("mm-pwa-update-title");
+        if (title) {
+            title.textContent = "Установлена последняя версия приложения";
+        }
+        if (miningMasterUpdateCurrent) {
+            miningMasterUpdateCurrent.textContent = formatMiningMasterVersion(currentVersion || miningMasterShellVersion);
+        }
+        if (miningMasterUpdateNew) {
+            miningMasterUpdateNew.textContent = "не требуется";
+        }
+        if (miningMasterUpdateText) {
+            miningMasterUpdateText.textContent = "У вас установлена последняя версия приложения Горного мастера.";
+        }
+        if (miningMasterUpdateStatus) {
+            miningMasterUpdateStatus.textContent = "Дополнительных обновлений сейчас нет.";
+        }
+        if (miningMasterUpdateApply) {
+            miningMasterUpdateApply.textContent = "ОК";
+            miningMasterUpdateApply.disabled = false;
+        }
+        if (miningMasterUpdateLater) {
+            miningMasterUpdateLater.hidden = true;
+            miningMasterUpdateLater.disabled = false;
+        }
+        setMiningMasterUpdateInstalling(false);
+        miningMasterUpdateModal.hidden = false;
+        if (miningMasterUpdateApply) miningMasterUpdateApply.focus();
+    }
+    function inspectMiningMasterWaitingWorker(registration, worker, options) {
+        if (!registration || !worker || worker === navigator.serviceWorker.controller) {
+            return Promise.resolve(false);
+        }
+        return Promise.all([
+            requestMiningMasterWorkerVersion(registration.active || navigator.serviceWorker.controller),
+            requestMiningMasterWorkerVersion(worker)
+        ]).then(function (versions) {
+            showMiningMasterUpdateModal(worker, versions[1], versions[0]);
+            return true;
+        }).catch(function () {
+            if (options && options.manual && miningMasterUpdateStatus) {
+                miningMasterUpdateStatus.textContent = "Не удалось проверить обновление. Проверьте связь и повторите.";
+            }
+            return false;
+        });
+    }
+    function fetchMiningMasterServerVersion() {
+        return fetch("/mining-master-" + "sw.js?version_check=" + Date.now(), {
+            cache: "no-store",
+            credentials: "same-origin"
+        }).then(function (response) {
+            if (!response.ok) return "";
+            return response.text();
+        }).then(function (text) {
+            var match = String(text || "").match(/mining-master-mobile-shell-v\d+/);
+            return match ? match[0] : "";
+        }).catch(function () {
+            return "";
+        });
+    }
+    function getMiningMasterCurrentWorkerVersion() {
+        if (!("serviceWorker" in navigator)) {
+            return Promise.resolve(miningMasterShellVersion);
+        }
+        var registrationPromise = miningMasterServiceWorkerRegistration
+            ? Promise.resolve(miningMasterServiceWorkerRegistration)
+            : navigator.serviceWorker.getRegistration("/");
+        return registrationPromise.then(function (registration) {
+            if (registration) {
+                miningMasterServiceWorkerRegistration = registration;
+            }
+            return requestMiningMasterWorkerVersion((registration && registration.active) || navigator.serviceWorker.controller);
+        }).then(function (version) {
+            return version || miningMasterShellVersion;
+        }).catch(function () {
+            return miningMasterShellVersion;
+        });
+    }
+    function checkMiningMasterPwaUpdateSilently() {
+        refreshMiningMasterUpdateIndicatorFromStorage();
+        if (miningMasterUpdateSilentCheckInFlight) {
+            return Promise.resolve(false);
+        }
+        miningMasterUpdateSilentCheckInFlight = true;
+        return Promise.all([
+            getMiningMasterCurrentWorkerVersion(),
+            fetchMiningMasterServerVersion()
+        ]).then(function (versions) {
+            var currentVersion = versions && versions[0] ? versions[0] : miningMasterShellVersion;
+            var serverVersion = versions && versions[1] ? versions[1] : "";
+            setMiningMasterVisibleVersion(currentVersion);
+            if (!serverVersion) {
+                return false;
+            }
+            if (isMiningMasterVersionNewer(serverVersion, currentVersion)) {
+                setMiningMasterUpdateIndicator(true, serverVersion, currentVersion);
+                return true;
+            }
+            if (formatMiningMasterVersion(currentVersion) === formatMiningMasterVersion(serverVersion)) {
+                setMiningMasterUpdateIndicator(false);
+            }
+            return false;
+        }).catch(function () {
+            refreshMiningMasterUpdateIndicatorFromStorage(miningMasterShellVersion);
+            return false;
+        }).finally(function () {
+            miningMasterUpdateSilentCheckInFlight = false;
+        });
+    }
+    function startMiningMasterPwaUpdateWatcher() {
+        refreshMiningMasterUpdateIndicatorFromStorage();
+        if (miningMasterUpdateCheckTimer) {
+            window.clearInterval(miningMasterUpdateCheckTimer);
+        }
+        checkMiningMasterPwaUpdateSilently();
+        miningMasterUpdateCheckTimer = window.setInterval(checkMiningMasterPwaUpdateSilently, miningMasterUpdateCheckIntervalMs);
+    }
+    function checkMiningMasterPwaUpdateManually() {
+        if (!("serviceWorker" in navigator)) {
+            showMiningMasterNoUpdateModal(miningMasterShellVersion);
+            return;
+        }
+        var statusTarget = miningMasterUpdateStatus;
+        setMiningMasterCheckUpdateButtonsDisabled(true);
+        if (statusTarget) {
+            statusTarget.textContent = "Проверяем новую версию приложения...";
+        }
+        var registrationPromise = miningMasterServiceWorkerRegistration
+            ? Promise.resolve(miningMasterServiceWorkerRegistration)
+            : navigator.serviceWorker.getRegistration("/");
+        var checkedRegistration = null;
+        var currentVersion = "";
+        var serverVersion = "";
+        registrationPromise.then(function (registration) {
+            checkedRegistration = registration || null;
+            if (!registration) {
+                return Promise.all([Promise.resolve(miningMasterShellVersion), fetchMiningMasterServerVersion()]);
+            }
+            miningMasterServiceWorkerRegistration = registration;
+            return Promise.all([
+                requestMiningMasterWorkerVersion(registration.active || navigator.serviceWorker.controller).then(function (version) {
+                    return version || miningMasterShellVersion;
+                }),
+                fetchMiningMasterServerVersion()
+            ]);
+        }).then(function (versions) {
+            currentVersion = versions && versions[0] ? versions[0] : miningMasterShellVersion;
+            serverVersion = versions && versions[1] ? versions[1] : "";
+            if (!serverVersion) {
+                throw new Error("Не удалось получить версию сервера.");
+            }
+            if (formatMiningMasterVersion(currentVersion) === formatMiningMasterVersion(serverVersion)) {
+                showMiningMasterNoUpdateModal(currentVersion);
+                return true;
+            }
+            setMiningMasterUpdateIndicator(true, serverVersion, currentVersion);
+            var registration = checkedRegistration;
+            if (!registration) {
+                throw new Error("Service worker недоступен.");
+            }
+            if (registration.waiting) {
+                return inspectMiningMasterWaitingWorker(registration, registration.waiting, { manual: true });
+            }
+            return registration.update().then(function () {
+                if (registration.waiting) {
+                    return inspectMiningMasterWaitingWorker(registration, registration.waiting, { manual: true });
+                }
+                return new Promise(function (resolve) {
+                    window.setTimeout(function () {
+                        if (registration.waiting) {
+                            inspectMiningMasterWaitingWorker(registration, registration.waiting, { manual: true }).then(resolve);
+                        } else {
+                            resolve(false);
+                        }
+                    }, 900);
+                });
+            });
+        }).then(function (found) {
+            if (found) return;
+            if (formatMiningMasterVersion(currentVersion) === formatMiningMasterVersion(serverVersion)) {
+                showMiningMasterNoUpdateModal(currentVersion);
+                return;
+            }
+            if (miningMasterUpdateStatus) {
+                miningMasterUpdateStatus.textContent = "Сервер отдает новую версию, но браузер еще не подготовил установку. Закройте и снова откройте приложение или повторите проверку.";
+            }
+            showMiningMasterUpdateModal(null, serverVersion, currentVersion);
+        }).catch(function () {
+            if (miningMasterUpdateStatus) {
+                miningMasterUpdateStatus.textContent = "Не удалось проверить обновление. Проверьте связь и повторите.";
+            }
+        }).finally(function () {
+            setMiningMasterCheckUpdateButtonsDisabled(false);
+        });
+    }
+    function applyMiningMasterPwaUpdate() {
+        if (!miningMasterWaitingWorker) {
+            closeMiningMasterUpdateModal();
+            return;
+        }
+        if (!miningMasterUpdateStatus) return;
+        if (readDispatcherSyncQueue().length || dispatcherSyncPendingCount > 0 || dispatcherSyncQueueFlushing) {
+            miningMasterUpdateStatus.textContent = "Сначала дождитесь синхронизации текущих действий. После этого обновление можно установить.";
+            return;
+        }
+        setMiningMasterUpdateInstalling(true);
+        miningMasterUpdateStatus.textContent = "Устанавливаем новую версию приложения...";
+        try {
+            miningMasterWaitingWorker.postMessage({ type: "SKIP_WAITING" });
+        } catch (error) {
+            miningMasterUpdateStatus.textContent = "Не удалось запустить обновление. Закройте и снова откройте приложение.";
+            setMiningMasterUpdateInstalling(false);
+        }
+    }
+    if (miningMasterUpdateLater) {
+        miningMasterUpdateLater.addEventListener("click", closeMiningMasterUpdateModal);
+    }
+    if (miningMasterUpdateApply) {
+        miningMasterUpdateApply.addEventListener("click", applyMiningMasterPwaUpdate);
+    }
+    document.addEventListener("click", function (event) {
+        var button = event.target && event.target.closest ? event.target.closest("[data-mm-pwa-check-update]") : null;
+        if (!button) return;
+        event.preventDefault();
+        checkMiningMasterPwaUpdateManually();
+    });
+    if (miningMasterUpdateModal) {
+        miningMasterUpdateModal.addEventListener("click", function (event) {
+            if (event.target === miningMasterUpdateModal && !miningMasterUpdateModal.classList.contains("is-installing")) {
+                closeMiningMasterUpdateModal();
+            }
+        });
+    }
+    if ("serviceWorker" in navigator) {
+        navigator.serviceWorker.addEventListener("controllerchange", function () {
+            if (miningMasterUpdateReloading) return;
+            miningMasterUpdateReloading = true;
+            setMiningMasterUpdateIndicator(false);
+            if (miningMasterUpdateStatus) {
+                miningMasterUpdateStatus.textContent = "Новая версия установлена. Открываем свежий экран...";
+            }
+            window.setTimeout(function () {
+                window.location.reload();
+            }, 350);
+        });
+    }
+    refreshMiningMasterUpdateIndicatorFromStorage();
+    window.MiningMasterPwaUpdates = {
+        checkNow: checkMiningMasterPwaUpdateSilently,
+        hydrateIndicator: refreshMiningMasterUpdateIndicatorFromStorage,
+        getState: function () {
+            return {
+                currentVersion: miningMasterShellVersion,
+                storedUpdate: readMiningMasterStoredUpdate(),
+                checkIntervalMs: miningMasterUpdateCheckIntervalMs
+            };
+        }
+    };
     function setTheme(theme) {
         if (!shell) return;
         shell.classList.toggle("dispatcher-night", theme === "night");
@@ -983,10 +2085,16 @@ document.addEventListener("DOMContentLoaded", function () {
     });
 
     function normalizeTileStatus(status) {
-        if (status === "normal") return "green";
-        if (status === "danger") return "red";
-        if (status === "risk") return "yellow";
-        return status || "gray";
+        var directColors = ["green", "yellow", "blue", "orange", "red", "gray"];
+        var legacyCodes = {
+            normal: "working",
+            danger: "breakdown",
+            risk: "waiting",
+            reserved: "assigned",
+            empty: "inactive"
+        };
+        if (directColors.indexOf(status) >= 0) return status;
+        return dispatcherEquipmentStateColor(legacyCodes[status] || status || "inactive");
     }
 
     function cleanDetailTile(tile) {
@@ -1276,6 +2384,7 @@ document.addEventListener("DOMContentLoaded", function () {
     function openEquipmentCard(cardId) {
         var data = equipmentCards[String(cardId || "")];
         if (!data || !detailLayer) return false;
+        detailLayer.dataset.gdActiveCardId = String(cardId || "");
         renderDetailGarageIcon(cardId, data);
         if (detailType) detailType.textContent = data.type || "";
         if (detailTitle) detailTitle.textContent = data.label || "";
@@ -1330,7 +2439,10 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     function closeEquipmentCard() {
-        if (detailLayer) detailLayer.hidden = true;
+        if (detailLayer) {
+            detailLayer.hidden = true;
+            delete detailLayer.dataset.gdActiveCardId;
+        }
     }
 
     document.querySelectorAll("[data-gd-detail-close]").forEach(function (node) {
@@ -1347,6 +2459,21 @@ document.addEventListener("DOMContentLoaded", function () {
         var home = shell.querySelector("[data-mm-mobile-view='home']");
         var tabPanels = Array.from(shell.querySelectorAll("[data-mm-mobile-panel]"));
         var fillScreens = Array.from(shell.querySelectorAll("[data-mm-mobile-fill]"));
+        function isMiningMasterMobileReadonly() {
+            return shell.dataset.mmMobileReadonly === "true" || shell.classList.contains("is-readonly");
+        }
+        function isMobileEditableTarget(target) {
+            return Boolean(target && target.closest && target.closest("input, textarea, select, [contenteditable='true']"));
+        }
+        if (shell.dataset.mmMobileCopyGuardBound !== "true") {
+            shell.dataset.mmMobileCopyGuardBound = "true";
+            ["copy", "cut", "contextmenu", "selectstart"].forEach(function (eventName) {
+                shell.addEventListener(eventName, function (event) {
+                    if (isMobileEditableTarget(event.target)) return;
+                    event.preventDefault();
+                });
+            });
+        }
         function getMobileGarageItemCount(panelName) {
             var panel = shell.querySelector("[data-mm-mobile-panel='" + CSS.escape(String(panelName || "")) + "']");
             if (!panel) return 0;
@@ -1430,7 +2557,7 @@ document.addEventListener("DOMContentLoaded", function () {
             if (existing) return existing;
             var sample = shell.querySelector(".mm-mobile-fill-screen");
             var screen = sample ? sample.cloneNode(true) : document.createElement("section");
-            screen.className = "mm-mobile-fill-screen " + (statusClass || "status-normal");
+            screen.className = "mm-mobile-fill-screen " + (statusClass || dispatcherEquipmentStateClass("assigned"));
             screen.dataset.mmMobileFill = fillId;
             screen.hidden = true;
             if (!sample) {
@@ -1438,7 +2565,7 @@ document.addEventListener("DOMContentLoaded", function () {
                     '<header class="mm-mobile-detail-header">',
                         '<button type="button" class="mm-mobile-back-button" data-mm-mobile-fill-back aria-label="Назад">←</button>',
                         '<div class="mm-mobile-detail-title mm-mobile-fill-title"><h1>Набор самосвалов</h1></div>',
-                        '<div class="mm-mobile-header-actions"><div class="mm-mobile-plan-ring" style="--mm-mobile-plan-progress: 0%;" role="img" aria-label="Выполнение плана смены 0%">0%</div></div>',
+                        '<div class="mm-mobile-header-actions"><div class="mm-mobile-plan-ring" style="--mm-mobile-plan-progress: 0%;" role="img" aria-label="Выполнение плана смены 0%">0%</div><span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>' + formatMiningMasterVersion(miningMasterShellVersion) + '</span></div>',
                     '</header>',
                     '<div class="mm-mobile-fill-save-overlay" aria-hidden="true">Сохранить</div>',
                     '<div class="mm-mobile-fill-shake-overlay" aria-hidden="true">Стряхнуть</div>',
@@ -1470,8 +2597,8 @@ document.addEventListener("DOMContentLoaded", function () {
             var drop = screen.querySelector("[data-mm-mobile-fill-drop]");
             if (drop) {
                 drop.dataset.mmMobileFillExcavatorId = excavatorId;
-                drop.classList.remove("status-danger", "status-risk", "status-normal", "status-empty");
-                drop.classList.add(statusClass || "status-normal");
+                drop.classList.remove("status-red", "status-yellow", "status-green", "status-blue", "status-orange", "status-gray", "status-danger", "status-risk", "status-normal", "status-empty");
+                drop.classList.add(statusClass || dispatcherEquipmentStateClass("assigned"));
             }
             var assigned = screen.querySelector("[data-mm-mobile-fill-assigned]");
             if (assigned) {
@@ -1561,6 +2688,7 @@ document.addEventListener("DOMContentLoaded", function () {
         }
         var mobileLayoutReconcileTimer = null;
         function reconcileMobileLocalLayout() {
+            shell.querySelectorAll("[data-mm-mobile-open-complex]").forEach(bindMobileComplexCardInteractions);
             shell.querySelectorAll(".mm-mobile-truck-preview").forEach(updateMobileHomeTruckPreviewLayout);
             shell.querySelectorAll("[data-mm-mobile-fill-assigned]").forEach(updateMobileFillAssignedLayout);
             sortMobileTruckGarageViews();
@@ -1608,6 +2736,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 mini.dataset.mmMobileHomeTruckId = source.dataset.mmMobileAssignedTruckId || "";
                 mini.dataset.mmMobileHomeTruckNumber = source.dataset.mmMobileAssignedTruckNumber || source.textContent || "";
                 mini.dataset.mmMobileHomeSourceExcavatorId = excavatorId;
+                mini.dataset.mmMobileEquipmentState = source.dataset.mmMobileEquipmentState || "";
                 mini.textContent = mini.dataset.mmMobileHomeTruckNumber || "";
                 preview.appendChild(mini);
                 bindMobileHomeTruckDrag(mini);
@@ -1622,17 +2751,31 @@ document.addEventListener("DOMContentLoaded", function () {
             }).join(" ");
         }
         function getMobileAssignedTruckStatusClass(node) {
-            if (node && node.dataset && node.dataset.mmMobileFillAdded === "true") return "status-yellow";
+            if (node && node.dataset && node.dataset.mmMobileEquipmentState) return dispatcherEquipmentStateClass(node.dataset.mmMobileEquipmentState);
+            if (node && node.dataset && node.dataset.mmMobileFillAdded === "true") return dispatcherEquipmentStateClass("sync_pending");
             return getMobileTruckStatusClass(node) || "status-yellow";
         }
         function getMobileGarageTruckStatusClass(node) {
+            if (node && node.dataset && node.dataset.mmMobileEquipmentState) return dispatcherEquipmentStateClass(node.dataset.mmMobileEquipmentState);
             if (node && (node.classList.contains("status-danger") || node.classList.contains("status-red"))) return "status-red";
-            return "status-gray";
+            if (node && (node.classList.contains("status-normal") || node.classList.contains("status-green"))) return "status-green";
+            if (node && (node.classList.contains("status-risk") || node.classList.contains("status-yellow"))) return "status-yellow";
+            if (node && node.classList.contains("status-blue")) return "status-blue";
+            if (node && node.classList.contains("status-orange")) return "status-orange";
+            if (node && node.classList.contains("status-gray")) return "status-gray";
+            return "status-yellow";
         }
         function getMobileGarageTruckIcon(node) {
-            return getMobileGarageTruckStatusClass(node) === "status-red"
-                ? "/static/img/equipment/truck-red.png"
-                : "/static/img/equipment/truck-gray.png";
+            if (node && node.dataset && node.dataset.mmMobileEquipmentState) {
+                return "/static/img/equipment/truck-" + dispatcherEquipmentStateIconColor(node.dataset.mmMobileEquipmentState) + ".png";
+            }
+            var statusClass = getMobileGarageTruckStatusClass(node);
+            if (statusClass === "status-red") return "/static/img/equipment/truck-red.png";
+            if (statusClass === "status-green") return "/static/img/equipment/truck-green.png";
+            if (statusClass === "status-blue") return "/static/img/equipment/truck-blue.png";
+            if (statusClass === "status-yellow") return "/static/img/equipment/truck-yellow.png";
+            if (statusClass === "status-orange") return "/static/img/equipment/truck-yellow.png";
+            return "/static/img/equipment/truck-gray.png";
         }
         function getMobileTruckSortValue(node) {
             var raw = (node && node.dataset && node.dataset.mmMobileTruckSort) ||
@@ -1700,6 +2843,7 @@ document.addEventListener("DOMContentLoaded", function () {
             card.hidden = false;
             card.style.display = "";
             card.dataset.mmMobileTruckSort = truckNumber;
+            card.dataset.mmMobileEquipmentState = source.dataset.mmMobileEquipmentState || "";
             var image = card.querySelector("img");
             if (image) image.src = getMobileGarageTruckIcon(source);
             var title = card.querySelector("strong");
@@ -1734,9 +2878,12 @@ document.addEventListener("DOMContentLoaded", function () {
             var existing = garage.querySelector("[data-mm-mobile-fill-truck-id='" + CSS.escape(String(truckId)) + "']");
             if (existing) {
                 existing.classList.remove("is-assigned", "is-assigning", "is-dragging", "is-hold-pending", "is-hold-ready");
-                existing.classList.remove("status-red", "status-yellow", "status-green", "status-normal", "status-risk", "status-danger");
+                existing.classList.remove("status-red", "status-yellow", "status-green", "status-blue", "status-orange", "status-gray", "status-normal", "status-risk", "status-danger");
                 existing.classList.add(getMobileGarageTruckStatusClass(source));
                 existing.dataset.mmMobileTruckSort = truckNumber;
+                existing.dataset.mmMobileEquipmentState = source.dataset.mmMobileEquipmentState || "";
+                var existingImage = existing.querySelector("img");
+                if (existingImage) existingImage.src = getMobileGarageTruckIcon(source);
                 existing.hidden = false;
                 return existing;
             }
@@ -1747,6 +2894,7 @@ document.addEventListener("DOMContentLoaded", function () {
             button.dataset.equipmentCardId = truckId;
             button.dataset.mmMobileFillTruckNumber = truckNumber;
             button.dataset.mmMobileTruckSort = button.dataset.mmMobileFillTruckNumber || "";
+            button.dataset.mmMobileEquipmentState = source.dataset.mmMobileEquipmentState || "";
             var img = document.createElement("img");
             img.src = getMobileGarageTruckIcon(source);
             img.alt = "";
@@ -1774,6 +2922,7 @@ document.addEventListener("DOMContentLoaded", function () {
             mini.className = "mm-mobile-truck-mini " + getMobileTruckStatusClass(homeTruck);
             mini.dataset.mmMobileAssignedTruckId = homeTruck.dataset.mmMobileHomeTruckId || "";
             mini.dataset.mmMobileAssignedTruckNumber = homeTruck.dataset.mmMobileHomeTruckNumber || homeTruck.textContent || "";
+            mini.dataset.mmMobileEquipmentState = homeTruck.dataset.mmMobileEquipmentState || "";
             mini.dataset.mmMobileFillOriginal = "true";
             mini.textContent = mini.dataset.mmMobileAssignedTruckNumber || "";
             return mini;
@@ -1808,6 +2957,7 @@ document.addEventListener("DOMContentLoaded", function () {
             syncMobileGarageNavState();
         }
         function confirmMobileFillScreen(screen) {
+            if (isMiningMasterMobileReadonly()) return;
             if (!screen) return;
             var zone = screen.querySelector("[data-mm-mobile-fill-drop]");
             syncMobileFillAssignmentsToServer(screen);
@@ -1972,7 +3122,7 @@ document.addEventListener("DOMContentLoaded", function () {
             var numberMatch = titleText.match(/(\d+)/);
             var sortNumber = numberMatch ? parseInt(numberMatch[1], 10) : 9999;
             var labelText = numberMatch ? "Экс " + numberMatch[1] : titleText.replace(/^К/i, "Экс") || "Экс";
-            var statusClass = card.classList.contains("status-danger") ? "status-red" : card.classList.contains("status-risk") ? "status-yellow" : "status-green";
+            var statusClass = "status-gray";
             var button = grid.querySelector("[data-mm-mobile-activate-excavator='" + CSS.escape(String(excavatorId)) + "']");
             var created = false;
             if (!button) {
@@ -1980,6 +3130,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 button.type = "button";
                 button.className = "mm-mobile-garage-excavator " + statusClass;
                 button.dataset.mmMobileActivateExcavator = excavatorId;
+                button.dataset.equipmentCardId = excavatorId;
                 button.setAttribute("aria-label", "Вернуть экскаватор " + labelText + " в активную смену");
                 button.innerHTML = '<span></span><img src="' + staticPrefix + 'img/equipment/excavator-gray.png" alt="">';
                 var firstEmpty = grid.querySelector(".mm-mobile-garage-slot.status-empty");
@@ -1989,10 +3140,12 @@ document.addEventListener("DOMContentLoaded", function () {
                     grid.appendChild(button);
                 }
                 bindMobileGarageExcavatorSwipe(button);
+                bindEquipmentCardTrigger(button);
                 created = true;
             }
-            button.classList.remove("status-red", "status-yellow", "status-green", "is-activating", "is-removing", "is-work-swiping", "is-work-ready");
+            button.classList.remove("status-red", "status-yellow", "status-green", "status-blue", "status-orange", "status-gray", "is-activating", "is-removing", "is-work-swiping", "is-work-ready");
             button.classList.add(statusClass);
+            button.dataset.mmMobileEquipmentState = "garage";
             button.disabled = false;
             button.hidden = false;
             button.style.display = "";
@@ -2034,6 +3187,7 @@ document.addEventListener("DOMContentLoaded", function () {
             });
         }
         function bindMobileHomeTruckDrag(mini) {
+            if (isMiningMasterMobileReadonly()) return;
             if (!mini || mini.dataset.mmMobileHomeTruckBound === "true") return;
             mini.dataset.mmMobileHomeTruckBound = "true";
             var activeTouchId = null;
@@ -2320,16 +3474,18 @@ document.addEventListener("DOMContentLoaded", function () {
             var complexTitle = numberMatch ? "К-" + numberMatch[1] : labelText.replace(/^Экс\s*/i, "К-") || "К";
             var targetCard = grid.querySelector(".mm-mobile-complex-card.status-empty:not([hidden])") || grid.querySelector(".mm-mobile-complex-card.status-empty");
             var card = document.createElement("article");
-            card.className = "mm-mobile-complex-card status-normal";
+            var stateCode = "assigned";
+            card.className = "mm-mobile-complex-card " + dispatcherEquipmentStateClass(stateCode);
             card.setAttribute("role", "button");
             card.setAttribute("tabindex", "0");
             var localFillId = "local-complex-" + excavatorId;
             card.dataset.mmMobileOpenComplex = localFillId;
             card.dataset.mmMobileExcavatorId = excavatorId;
+            card.dataset.mmMobileEquipmentState = stateCode;
             card.innerHTML =
                 '<div class="mm-mobile-complex-card-head">' +
                     '<h2></h2>' +
-                    '<span class="mm-mobile-status-chip">работает</span>' +
+                    '<span class="mm-mobile-status-chip">' + escapeHtml(dispatcherEquipmentStateLabel(stateCode)) + '</span>' +
                 '</div>' +
                 '<div class="mm-mobile-complex-visual" aria-hidden="true" data-mm-mobile-release-trucks>' +
                     '<img src="' + staticPrefix + 'img/equipment/excavator-gray.png" alt="">' +
@@ -2346,14 +3502,15 @@ document.addEventListener("DOMContentLoaded", function () {
             } else {
                 grid.appendChild(card);
             }
-            bindMobileComplexSwipe(card);
-            ensureMobileLocalFillScreen(localFillId, complexTitle, excavatorId, "status-normal");
+            bindMobileComplexCardInteractions(card);
+            ensureMobileLocalFillScreen(localFillId, complexTitle, excavatorId, dispatcherEquipmentStateClass(stateCode));
             updateMobileHomeTruckPreviewLayout(card.querySelector(".mm-mobile-truck-preview"));
             updateMobileHomeComplexGridLayout();
             scheduleMobileLocalLayoutReconcile();
             return card;
         }
         function activateMobileGarageExcavator(button, direction, returnPanel) {
+            if (isMiningMasterMobileReadonly()) return;
             if (!button || button.disabled || button.classList.contains("is-activating")) return;
             var excavatorId = button.dataset.mmMobileActivateExcavator;
             if (!excavatorId) return;
@@ -2382,6 +3539,7 @@ document.addEventListener("DOMContentLoaded", function () {
                     closeDetails();
                     createdCard.hidden = false;
                     createdCard.style.display = "";
+                    bindMobileComplexCardInteractions(createdCard);
                     updateMobileHomeComplexGridLayout();
                     scheduleMobileLocalLayoutReconcile();
                 }, 120);
@@ -2420,6 +3578,7 @@ document.addEventListener("DOMContentLoaded", function () {
             });
         }
         function bindMobileGarageExcavatorSwipe(button) {
+            if (isMiningMasterMobileReadonly()) return;
             if (!window.PointerEvent) return;
             var startX = 0;
             var startY = 0;
@@ -2457,6 +3616,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 resetMobileGarageExcavatorSwipe(button);
             }
             button.addEventListener("pointerdown", function (event) {
+                if (isMiningMasterMobileReadonly()) return;
                 if (event.pointerType === "mouse" && event.button !== 0) return;
                 if (button.disabled || button.classList.contains("is-activating")) return;
                 activePointerId = event.pointerId;
@@ -2548,6 +3708,7 @@ document.addEventListener("DOMContentLoaded", function () {
             }
         }
         function releaseMobileComplexToGarage(card) {
+            if (isMiningMasterMobileReadonly()) return;
             var excavatorId = card.dataset.mmMobileExcavatorId;
             if (!excavatorId || card.classList.contains("is-releasing")) return;
             var complexTitle = getMobileComplexTitle(card);
@@ -2562,6 +3723,7 @@ document.addEventListener("DOMContentLoaded", function () {
             });
         }
         function executeMobileComplexToGarage(card) {
+            if (isMiningMasterMobileReadonly()) return;
             var excavatorId = card.dataset.mmMobileExcavatorId;
             if (!excavatorId || card.classList.contains("is-releasing")) return;
             card.classList.remove("is-swiping", "is-swipe-ready");
@@ -2668,6 +3830,7 @@ document.addEventListener("DOMContentLoaded", function () {
             shell.classList.remove("is-truck-garage-peeking");
         }
         function releaseMobileComplexTrucks(card) {
+            if (isMiningMasterMobileReadonly()) return;
             var excavatorId = card.dataset.mmMobileExcavatorId;
             if (!excavatorId || card.classList.contains("is-releasing-trucks")) return;
             var preview = card.querySelector(".mm-mobile-truck-preview");
@@ -2688,6 +3851,7 @@ document.addEventListener("DOMContentLoaded", function () {
             });
         }
         function executeMobileComplexTrucksRelease(card) {
+            if (isMiningMasterMobileReadonly()) return;
             var excavatorId = card.dataset.mmMobileExcavatorId;
             if (!excavatorId || card.classList.contains("is-releasing-trucks")) return;
             card.classList.remove("is-truck-swiping", "is-truck-swipe-ready");
@@ -2737,10 +3901,12 @@ document.addEventListener("DOMContentLoaded", function () {
         function addMobileFillAssignedTruck(screen, truckButton) {
             var assigned = screen.querySelector("[data-mm-mobile-fill-assigned]");
             if (!assigned || !truckButton) return;
+            var stateCode = "assigned";
             var mini = document.createElement("span");
-            mini.className = "mm-mobile-truck-mini " + getMobileTruckStatusClass(truckButton);
+            mini.className = "mm-mobile-truck-mini " + dispatcherEquipmentStateClass(stateCode);
             mini.dataset.mmMobileAssignedTruckId = truckButton.dataset.mmMobileFillTruckId || "";
             mini.dataset.mmMobileAssignedTruckNumber = truckButton.dataset.mmMobileFillTruckNumber || (truckButton.querySelector("strong") && truckButton.querySelector("strong").textContent) || "";
+            mini.dataset.mmMobileEquipmentState = stateCode;
             if (truckButton.dataset.mmMobileFillWasAssigned === "true") {
                 mini.dataset.mmMobileFillOriginal = "true";
             } else {
@@ -2753,30 +3919,38 @@ document.addEventListener("DOMContentLoaded", function () {
         }
         function getMobileFillTruckIcon(mini) {
             if (!mini) return "/static/img/equipment/truck-gray.png";
+            if (mini.dataset && mini.dataset.mmMobileEquipmentState) {
+                return "/static/img/equipment/truck-" + dispatcherEquipmentStateIconColor(mini.dataset.mmMobileEquipmentState) + ".png";
+            }
             if (mini.classList.contains("status-danger") || mini.classList.contains("status-red")) return "/static/img/equipment/truck-red.png";
             if (mini.classList.contains("status-risk") || mini.classList.contains("status-yellow")) return "/static/img/equipment/truck-yellow.png";
             if (mini.classList.contains("status-normal") || mini.classList.contains("status-green")) return "/static/img/equipment/truck-green.png";
+            if (mini.classList.contains("status-blue")) return "/static/img/equipment/truck-blue.png";
+            if (mini.classList.contains("status-orange")) return "/static/img/equipment/truck-yellow.png";
             return "/static/img/equipment/truck-gray.png";
         }
         function restoreMobileFillTruckToGarage(screen, mini) {
             var garage = screen && screen.querySelector(".mm-mobile-fill-truck-garage");
             if (!garage || !mini) return null;
+            var stateCode = "free";
             var button = document.createElement("button");
             button.type = "button";
-            button.className = "mm-mobile-truck-card mm-mobile-fill-truck " + getMobileGarageTruckStatusClass(mini);
+            button.className = "mm-mobile-truck-card mm-mobile-fill-truck " + dispatcherEquipmentStateClass(stateCode);
             button.dataset.mmMobileFillTruckId = mini.dataset.mmMobileAssignedTruckId || "";
             button.dataset.equipmentCardId = button.dataset.mmMobileFillTruckId || "";
             button.dataset.mmMobileFillTruckNumber = mini.dataset.mmMobileAssignedTruckNumber || mini.textContent || "";
             button.dataset.mmMobileTruckSort = button.dataset.mmMobileFillTruckNumber || "";
+            button.dataset.mmMobileEquipmentState = stateCode;
             if (mini.dataset.mmMobileFillOriginal === "true") {
                 button.dataset.mmMobileFillWasAssigned = "true";
             }
             var img = document.createElement("img");
-            img.src = getMobileGarageTruckIcon(mini);
+            img.src = staticPrefix + "img/equipment/truck-" + dispatcherEquipmentStateIconColor(stateCode) + ".png";
             img.alt = "";
             var strong = document.createElement("strong");
             strong.textContent = button.dataset.mmMobileFillTruckNumber || "";
             var status = document.createElement("span");
+            status.textContent = dispatcherEquipmentStateLabel(stateCode);
             button.appendChild(img);
             button.appendChild(strong);
             button.appendChild(status);
@@ -2787,6 +3961,7 @@ document.addEventListener("DOMContentLoaded", function () {
             return button;
         }
         function releaseMobileFillAssignedTruck(mini) {
+            if (isMiningMasterMobileReadonly()) return Promise.resolve(false);
             var screen = mini && mini.closest("[data-mm-mobile-fill]");
             var truckId = mini && mini.dataset.mmMobileAssignedTruckId;
             if (!screen || !truckId || mini.classList.contains("is-releasing")) return Promise.resolve(false);
@@ -2801,6 +3976,7 @@ document.addEventListener("DOMContentLoaded", function () {
             return Promise.resolve(true);
         }
         function clearMobileFillAssignedTrucks(screen) {
+            if (isMiningMasterMobileReadonly()) return Promise.resolve(false);
             if (!screen || screen.classList.contains("is-clearing-added")) return Promise.resolve(false);
             var assigned = Array.from(screen.querySelectorAll("[data-mm-mobile-assigned-truck-id]"));
             if (!assigned.length) return Promise.resolve(false);
@@ -2811,6 +3987,7 @@ document.addEventListener("DOMContentLoaded", function () {
             });
         }
         function bindMobileFillAssignedTruckRelease(mini) {
+            if (isMiningMasterMobileReadonly()) return;
             if (!window.PointerEvent || !mini || mini.dataset.mmMobileReleaseBound === "true") return;
             mini.dataset.mmMobileReleaseBound = "true";
             var startX = 0;
@@ -2993,6 +4170,7 @@ document.addEventListener("DOMContentLoaded", function () {
             });
         }
         function assignMobileFillTruck(screen, truckButton) {
+            if (isMiningMasterMobileReadonly()) return;
             if (!screen || !truckButton || truckButton.classList.contains("is-assigning") || truckButton.classList.contains("is-assigned")) return;
             var drop = screen.querySelector("[data-mm-mobile-fill-drop]");
             var truckId = truckButton.dataset.mmMobileFillTruckId;
@@ -3012,6 +4190,7 @@ document.addEventListener("DOMContentLoaded", function () {
             }, 120);
         }
         function bindMobileFillTruckDrag(button) {
+            if (isMiningMasterMobileReadonly()) return;
             if (!window.PointerEvent) return;
             var startX = 0;
             var startY = 0;
@@ -3096,6 +4275,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 return null;
             }
             button.addEventListener("pointerdown", function (event) {
+                if (isMiningMasterMobileReadonly()) return;
                 if (event.pointerType === "touch") return;
                 if (event.pointerType === "mouse" && event.button !== 0) return;
                 if (button.classList.contains("is-assigning") || button.classList.contains("is-assigned")) return;
@@ -3141,6 +4321,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 finish(event, true);
             });
             button.addEventListener("touchstart", function (event) {
+                if (isMiningMasterMobileReadonly()) return;
                 if (activeTouchId !== null || button.classList.contains("is-assigning") || button.classList.contains("is-assigned")) return;
                 if (!event.changedTouches || !event.changedTouches.length) return;
                 var touch = event.changedTouches[0];
@@ -3197,6 +4378,7 @@ document.addEventListener("DOMContentLoaded", function () {
             }, { passive: false });
         }
         function bindMobileFillFinishSwipe(zone) {
+            if (isMiningMasterMobileReadonly()) return;
             if (!window.PointerEvent) return;
             var startY = 0;
             var activePointerId = null;
@@ -3252,6 +4434,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 zone.style.removeProperty("--mm-mobile-fill-exit-y");
             }
             zone.addEventListener("pointerdown", function (event) {
+                if (isMiningMasterMobileReadonly()) return;
                 if (event.pointerType === "mouse" && event.button !== 0) return;
                 if (event.target && event.target.closest && event.target.closest("[data-mm-mobile-assigned-truck-id]")) return;
                 activePointerId = event.pointerId;
@@ -3288,7 +4471,10 @@ document.addEventListener("DOMContentLoaded", function () {
             });
         }
         function bindMobileComplexSwipe(card) {
+            if (isMiningMasterMobileReadonly()) return;
             if (!window.PointerEvent || !card.dataset.mmMobileExcavatorId) return;
+            if (card.dataset.mmMobileComplexSwipeBound === "true") return;
+            card.dataset.mmMobileComplexSwipeBound = "true";
             var startX = 0;
             var startY = 0;
             var activePointerId = null;
@@ -3517,7 +4703,29 @@ document.addEventListener("DOMContentLoaded", function () {
                 finishSwipe(true);
             }, { passive: false, capture: true });
         }
+        function bindMobileComplexCardInteractions(card) {
+            if (!card || !card.dataset || !card.dataset.mmMobileOpenComplex) return;
+            bindMobileComplexSwipe(card);
+            if (card.dataset.mmMobileComplexOpenBound === "true") return;
+            card.dataset.mmMobileComplexOpenBound = "true";
+            card.addEventListener("click", function (event) {
+                if (card.dataset.mmMobileSwipeIgnoreClick === "true" || card.classList.contains("is-releasing") || card.classList.contains("is-releasing-trucks")) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    return;
+                }
+                event.preventDefault();
+                event.stopPropagation();
+                openFill(card.dataset.mmMobileOpenComplex);
+            });
+            card.addEventListener("keydown", function (event) {
+                if (event.key !== "Enter" && event.key !== " ") return;
+                event.preventDefault();
+                openFill(card.dataset.mmMobileOpenComplex);
+            });
+        }
         function bindMobileEmptyComplexSwipe(card) {
+            if (isMiningMasterMobileReadonly()) return;
             if (!window.PointerEvent) return;
             var startX = 0;
             var startY = 0;
@@ -3552,6 +4760,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 }
             }
             card.addEventListener("pointerdown", function (event) {
+                if (isMiningMasterMobileReadonly()) return;
                 if (event.pointerType === "mouse" && event.button !== 0) return;
                 if (card.hidden) return;
                 activePointerId = event.pointerId;
@@ -3596,22 +4805,7 @@ document.addEventListener("DOMContentLoaded", function () {
             });
         }
         shell.querySelectorAll("[data-mm-mobile-open-complex]").forEach(function (card) {
-            bindMobileComplexSwipe(card);
-            card.addEventListener("click", function (event) {
-                if (card.dataset.mmMobileSwipeIgnoreClick === "true" || card.classList.contains("is-releasing") || card.classList.contains("is-releasing-trucks")) {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    return;
-                }
-                event.preventDefault();
-                event.stopPropagation();
-                openFill(card.dataset.mmMobileOpenComplex);
-            });
-            card.addEventListener("keydown", function (event) {
-                if (event.key !== "Enter" && event.key !== " ") return;
-                event.preventDefault();
-                openFill(card.dataset.mmMobileOpenComplex);
-            });
+            bindMobileComplexCardInteractions(card);
         });
         shell.querySelectorAll(".mm-mobile-complex-card.status-empty").forEach(bindMobileEmptyComplexSwipe);
         shell.querySelectorAll("[data-mm-mobile-back]").forEach(function (button) {
@@ -3622,11 +4816,13 @@ document.addEventListener("DOMContentLoaded", function () {
         });
         shell.querySelectorAll("[data-mm-mobile-activate-excavator]").forEach(function (button) {
             bindMobileGarageExcavatorSwipe(button);
+            bindEquipmentCardTrigger(button);
             button.addEventListener("click", function (event) {
                 event.preventDefault();
                 event.stopPropagation();
             });
         });
+        shell.querySelectorAll("[data-mm-mobile-panel='trucks'] .mm-mobile-truck-card[data-equipment-card-id]").forEach(bindEquipmentCardTrigger);
         shell.querySelectorAll("[data-mm-mobile-fill-back]").forEach(function (button) {
             button.addEventListener("click", function (event) {
                 event.preventDefault();
@@ -3697,15 +4893,109 @@ document.addEventListener("DOMContentLoaded", function () {
         } catch (error) {}
     }
     bindMiningMasterMobileScreens();
+    {% if mining_master_mobile_enabled %}
+    refreshMiningMasterUpdateIndicatorFromStorage();
+    {% endif %}
     if ("serviceWorker" in navigator) {
-        navigator.serviceWorker.register("/mining-master-sw.js", { scope: "/" }).catch(function () {});
+        {% if mining_master_mobile_enabled %}
+        function watchMiningMasterRegistration(registration) {
+            if (!registration) return;
+            function inspectWaitingWorker(worker) {
+                inspectMiningMasterWaitingWorker(registration, worker);
+            }
+            if (registration.waiting) {
+                inspectWaitingWorker(registration.waiting);
+            }
+            registration.addEventListener("updatefound", function () {
+                var installing = registration.installing;
+                if (!installing) return;
+                installing.addEventListener("statechange", function () {
+                    if (installing.state === "installed" && navigator.serviceWorker.controller) {
+                        inspectWaitingWorker(registration.waiting || installing);
+                    }
+                });
+            });
+        }
+        navigator.serviceWorker.register("/mining-master-sw.js", { scope: "/" }).then(function (registration) {
+            miningMasterServiceWorkerRegistration = registration;
+            watchMiningMasterRegistration(registration);
+            requestMiningMasterWorkerVersion(registration.active || navigator.serviceWorker.controller).then(setMiningMasterVisibleVersion);
+            registration.update().catch(function () {});
+            startMiningMasterPwaUpdateWatcher();
+            document.addEventListener("visibilitychange", function () {
+                if (!document.hidden) {
+                    requestMiningMasterWorkerVersion(registration.active || navigator.serviceWorker.controller).then(setMiningMasterVisibleVersion);
+                    registration.update().catch(function () {});
+                    checkMiningMasterPwaUpdateSilently();
+                }
+            });
+            window.addEventListener("online", checkMiningMasterPwaUpdateSilently);
+            window.addEventListener("focus", checkMiningMasterPwaUpdateSilently);
+        }).catch(function () {});
+        {% else %}
+        navigator.serviceWorker.register("/dispatcher-sw.js", { scope: "/dispatcher/" }).then(function (registration) {
+            registration.update().catch(function () {});
+            if (registration.waiting) {
+                registration.waiting.postMessage({type: "SKIP_WAITING"});
+            }
+            registration.addEventListener("updatefound", function () {
+                var installing = registration.installing;
+                if (!installing) return;
+                installing.addEventListener("statechange", function () {
+                    if (installing.state === "installed" && navigator.serviceWorker.controller) {
+                        (registration.waiting || installing).postMessage({type: "SKIP_WAITING"});
+                    }
+                });
+            });
+            document.addEventListener("visibilitychange", function () {
+                if (!document.hidden) {
+                    registration.update().catch(function () {});
+                }
+            });
+        }).catch(function () {});
+        {% endif %}
     }
     updateDispatcherSyncIndicator();
     window.addEventListener("online", scheduleDispatcherSyncFlush);
+    window.addEventListener("operational-state-connection", function (event) {
+        var detail = event.detail || {};
+        dispatcherRealtimeConnected = detail.connected !== false;
+        dispatcherRealtimeLastReason = detail.reason || "";
+        if (dispatcherRealtimeConnected) {
+            dispatcherRealtimeLastSuccessAt = detail.lastSuccessAt || Date.now();
+            scheduleDispatcherSyncFlush(0);
+            if (isMiningMasterMobilePage()) {
+                window.setTimeout(function () {
+                    runMiningMasterPassiveReconcile("connection_restored");
+                }, 250);
+            }
+        }
+        updateDispatcherSyncIndicator();
+    });
     window.addEventListener("storage", function (event) {
         if (event.key === dispatcherSyncQueueKey) updateDispatcherSyncIndicator();
     });
     scheduleDispatcherSyncFlush();
+    window.MiningMasterSyncDebug = {
+        queueKey: dispatcherSyncQueueKey,
+        getState: function () {
+            return {
+                realtimeConnected: dispatcherRealtimeConnected,
+                realtimeLastSuccessAt: dispatcherRealtimeLastSuccessAt,
+                realtimeLastReason: dispatcherRealtimeLastReason,
+                syncQueue: getDispatcherSyncQueueState(),
+                appRealtime: window.AppRealtime && typeof window.AppRealtime.getDebugState === "function"
+                    ? window.AppRealtime.getDebugState()
+                    : null
+            };
+        },
+        wake: function () {
+            scheduleDispatcherSyncFlush(0);
+            if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
+                window.AppRealtime.wake("manual_debug");
+            }
+        }
+    };
 
     var draggedTile = null;
     var board = document.querySelector(".dispatcher-board");
@@ -3713,8 +5003,82 @@ document.addEventListener("DOMContentLoaded", function () {
     var dragGhost = null;
     function refreshExcavatorGarage() {
         if (!board || !excavatorGarage) return;
+        sortDesktopEquipmentList(excavatorGarage.querySelector(".dispatcher-excavators"), ".dispatcher-excavator-garage-tile:not(.is-placeholder)");
         var activeTiles = excavatorGarage.querySelectorAll("[data-garage-item='excavator']:not(.is-assigned)");
         board.classList.toggle("is-excavator-garage-empty", activeTiles.length === 0);
+    }
+    function getDesktopEquipmentSortNumber(tile) {
+        if (!tile) return 999999;
+        var candidates = [
+            tile.dataset.excavatorSlot,
+            tile.dataset.equipmentSort,
+            tile.dataset.equipmentNumber,
+            tile.dataset.equipmentName,
+            tile.querySelector("strong") ? tile.querySelector("strong").textContent : ""
+        ];
+        for (var index = 0; index < candidates.length; index += 1) {
+            var match = String(candidates[index] || "").match(/\d+/);
+            if (match) return parseInt(match[0], 10);
+        }
+        return 999999;
+    }
+    function getDesktopEquipmentSortLabel(tile) {
+        if (!tile) return "";
+        return String(tile.dataset.equipmentName || (tile.textContent || "")).trim();
+    }
+    function compareDesktopEquipmentTiles(a, b) {
+        var numberDiff = getDesktopEquipmentSortNumber(a) - getDesktopEquipmentSortNumber(b);
+        if (numberDiff !== 0) return numberDiff;
+        return getDesktopEquipmentSortLabel(a).localeCompare(getDesktopEquipmentSortLabel(b), "ru", { numeric: true });
+    }
+    function sortDesktopEquipmentList(container, selector) {
+        if (!container) return;
+        Array.from(container.querySelectorAll(selector))
+            .sort(compareDesktopEquipmentTiles)
+            .forEach(function (tile) {
+                var firstPlaceholder = container.querySelector(".is-placeholder");
+                var empty = container.querySelector(".complex-truck-empty");
+                if (firstPlaceholder) {
+                    container.insertBefore(tile, firstPlaceholder);
+                } else if (empty) {
+                    container.insertBefore(tile, empty);
+                } else {
+                    container.appendChild(tile);
+                }
+            });
+    }
+    function dispatcherSelectorValue(value) {
+        var stringValue = String(value || "");
+        if (window.CSS && typeof window.CSS.escape === "function") {
+            return window.CSS.escape(stringValue);
+        }
+        return stringValue.replace(/["\\]/g, "\\$&");
+    }
+    function removeDuplicateDesktopTruckTiles(truckId, keepTile) {
+        if (!truckId) return;
+        var selector = '[data-dispatcher-drag="truck"][data-equipment-id="' + dispatcherSelectorValue(truckId) + '"]';
+        document.querySelectorAll(selector).forEach(function (tile) {
+            if (tile !== keepTile) {
+                tile.remove();
+            }
+        });
+    }
+    function reconcileDesktopTruckUniqueness() {
+        var seen = {};
+        document.querySelectorAll('[data-dispatcher-drag="truck"][data-equipment-id]').forEach(function (tile) {
+            var truckId = tile.dataset.equipmentId || "";
+            if (!truckId) return;
+            if (seen[truckId]) {
+                tile.remove();
+                return;
+            }
+            seen[truckId] = true;
+        });
+    }
+    function refreshDesktopBoardIntegrity() {
+        reconcileDesktopTruckUniqueness();
+        refreshTruckGarage();
+        refreshAllComplexTruckRacks();
     }
     function refreshTruckGarage() {
         if (!board) return;
@@ -3722,6 +5086,7 @@ document.addEventListener("DOMContentLoaded", function () {
             slot.remove();
         });
         var garage = document.querySelector(".dispatcher-trucks");
+        sortDesktopEquipmentList(garage, "[data-garage-item='truck']:not(.is-placeholder)");
         var freeTrucks = document.querySelectorAll("[data-garage-item='truck']:not(.is-assigned)");
         var columns = Math.max(1, Math.min(3, Math.ceil(freeTrucks.length / 12)));
         var scrollNeeded = freeTrucks.length > columns * 12;
@@ -3754,9 +5119,12 @@ document.addEventListener("DOMContentLoaded", function () {
         if (!grid) return;
         var cards = Array.from(grid.querySelectorAll(".dispatcher-complex-card"));
         function sortWeight(card) {
-            if (card.classList.contains("status-danger")) return 0;
-            if (card.classList.contains("status-risk")) return 1;
-            return 2;
+            if (card.classList.contains("status-red") || card.classList.contains("status-danger")) return 0;
+            if (card.classList.contains("status-orange")) return 1;
+            if (card.classList.contains("status-yellow") || card.classList.contains("status-risk")) return 2;
+            if (card.classList.contains("status-blue")) return 3;
+            if (card.classList.contains("status-green") || card.classList.contains("status-normal")) return 4;
+            return 5;
         }
         var active = cards
             .filter(function (card) { return !card.classList.contains("status-empty"); })
@@ -3772,6 +5140,7 @@ document.addEventListener("DOMContentLoaded", function () {
     }
     function refreshComplexTruckRack(rack) {
         if (!rack) return;
+        sortDesktopEquipmentList(rack, ".complex-truck-tile");
         var tiles = Array.from(rack.querySelectorAll(".complex-truck-tile"));
         var empty = rack.querySelector(".complex-truck-empty");
         if (!empty && tiles.length === 0) {
@@ -3816,6 +5185,255 @@ document.addEventListener("DOMContentLoaded", function () {
     }
     function refreshAllComplexTruckRacks() {
         document.querySelectorAll(".complex-assigned-trucks").forEach(refreshComplexTruckRack);
+    }
+    function findTruckGarageList() {
+        return document.querySelector(".dispatcher-trucks");
+    }
+    function findComplexTruckRack(complexCard) {
+        return complexCard ? complexCard.querySelector(".complex-assigned-trucks") : null;
+    }
+    function getFirstTruckGaragePlaceholder() {
+        var garage = findTruckGarageList();
+        return garage ? garage.querySelector(".dispatcher-truck-tile.is-placeholder") : null;
+    }
+    function moveDesktopTruckToGarage(tile) {
+        var garage = findTruckGarageList();
+        if (!garage || !tile) return false;
+        removeDuplicateDesktopTruckTiles(tile.dataset.equipmentId, tile);
+        tile.classList.remove("complex-truck-tile", "dispatcher-dragging");
+        setDispatcherNodeEquipmentState(tile, "free", "truck");
+        tile.dataset.dispatcherDrag = "truck";
+        tile.dataset.garageItem = "truck";
+        tile.setAttribute("draggable", "true");
+        tile.removeAttribute("aria-disabled");
+        delete tile.dataset.complexTruck;
+        delete tile.dataset.assignedZone;
+        var firstPlaceholder = getFirstTruckGaragePlaceholder();
+        if (firstPlaceholder && firstPlaceholder.parentNode === garage) {
+            garage.insertBefore(tile, firstPlaceholder);
+        } else {
+            garage.appendChild(tile);
+        }
+        bindDragTile(tile);
+        bindEquipmentCardTrigger(tile);
+        refreshDesktopBoardIntegrity();
+        return true;
+    }
+    function moveDesktopTruckToComplex(tile, complexCard) {
+        var rack = findComplexTruckRack(complexCard);
+        if (!rack || !tile) return false;
+        var sourceRack = tile.closest(".complex-assigned-trucks");
+        var zoneId = complexCard.dataset.zoneId || "";
+        removeDuplicateDesktopTruckTiles(tile.dataset.equipmentId, tile);
+        tile.classList.add("complex-truck-tile");
+        tile.classList.remove("dispatcher-dragging", "is-placeholder");
+        setDispatcherNodeEquipmentState(tile, "assigned", "truck");
+        tile.dataset.dispatcherDrag = "truck";
+        tile.dataset.complexTruck = "true";
+        tile.dataset.assignedZone = zoneId;
+        tile.setAttribute("draggable", "true");
+        tile.removeAttribute("aria-disabled");
+        delete tile.dataset.garageItem;
+        var empty = rack.querySelector(".complex-truck-empty");
+        if (empty) empty.hidden = true;
+        rack.appendChild(tile);
+        if (sourceRack && sourceRack !== rack) {
+            refreshComplexTruckRack(sourceRack);
+        }
+        bindDragTile(tile);
+        bindEquipmentCardTrigger(tile);
+        refreshDesktopBoardIntegrity();
+        return true;
+    }
+    function releaseDesktopComplexTrucks(complexCard) {
+        var rack = findComplexTruckRack(complexCard);
+        if (!rack) return false;
+        var trucks = Array.from(rack.querySelectorAll(".complex-truck-tile"));
+        if (!trucks.length) {
+            refreshComplexTruckRack(rack);
+            return true;
+        }
+        trucks.forEach(moveDesktopTruckToGarage);
+        refreshComplexTruckRack(rack);
+        refreshTruckGarage();
+        return true;
+    }
+    function findExcavatorGarageList() {
+        return document.querySelector(".dispatcher-excavators");
+    }
+    function getFirstExcavatorGaragePlaceholder() {
+        var garage = findExcavatorGarageList();
+        return garage ? garage.querySelector(".dispatcher-excavator-garage-tile.is-placeholder") : null;
+    }
+    function resetDesktopComplexCardToEmpty(complexCard) {
+        if (!complexCard) return false;
+        var zoneId = complexCard.dataset.zoneId || "";
+        complexCard.className = "dispatcher-complex-card status-empty";
+        complexCard.style.setProperty("--complex-progress", "0%");
+        complexCard.dataset.dispatcherDrop = "complex";
+        complexCard.dataset.zoneId = zoneId;
+        delete complexCard.dataset.dispatcherDrag;
+        delete complexCard.dataset.equipmentCardId;
+        delete complexCard.dataset.sourceEquipmentCardId;
+        delete complexCard.dataset.equipmentId;
+        delete complexCard.dataset.equipmentName;
+        delete complexCard.dataset.equipmentState;
+        delete complexCard.dataset.excavatorSlot;
+        delete complexCard.dataset.dragBound;
+        delete complexCard.dataset.cardBound;
+        complexCard.removeAttribute("role");
+        complexCard.removeAttribute("tabindex");
+        complexCard.removeAttribute("draggable");
+        complexCard.innerHTML = '<div class="complex-empty" aria-hidden="true"></div>';
+        return true;
+    }
+    function buildDesktopExcavatorGarageTile(complexCard) {
+        var tile = document.createElement("article");
+        var slot = complexCard.dataset.excavatorSlot || "";
+        var name = complexCard.dataset.equipmentName || ("Экскаватор " + slot).trim();
+        var cardId = complexCard.dataset.equipmentId || complexCard.dataset.equipmentCardId || complexCard.dataset.sourceEquipmentCardId || "";
+        var stateCode = "garage";
+        tile.className = "dispatcher-equipment-tile dispatcher-excavator-garage-tile " + dispatcherEquipmentStateClass(stateCode) + " is-sync-pending";
+        tile.style.setProperty("--tile-progress", "0%");
+        tile.setAttribute("role", "button");
+        tile.setAttribute("tabindex", "0");
+        tile.setAttribute("draggable", "true");
+        tile.dataset.dispatcherDrag = "excavator";
+        tile.dataset.equipmentCardId = cardId;
+        tile.dataset.equipmentId = cardId;
+        tile.dataset.equipmentName = name;
+        tile.dataset.equipmentState = stateCode;
+        tile.dataset.excavatorSlot = slot;
+        tile.dataset.garageItem = "excavator";
+        tile.innerHTML =
+            (slot ? "<strong>" + escapeHtml(slot) + "</strong>" : "") +
+            '<img src="/static/img/equipment/excavator-' + dispatcherEquipmentStateIconColor(stateCode) + '.png" alt="">' +
+            "<span>" + escapeHtml(dispatcherEquipmentStateLabel(stateCode)) + "</span>";
+        return tile;
+    }
+    function moveDesktopComplexToExcavatorGarage(complexCard) {
+        var garage = findExcavatorGarageList();
+        if (!garage || !complexCard || complexCard.classList.contains("status-empty")) return false;
+        releaseDesktopComplexTrucks(complexCard);
+        var tile = buildDesktopExcavatorGarageTile(complexCard);
+        var firstPlaceholder = getFirstExcavatorGaragePlaceholder();
+        if (firstPlaceholder && firstPlaceholder.parentNode === garage) {
+            garage.insertBefore(tile, firstPlaceholder);
+        } else {
+            garage.appendChild(tile);
+        }
+        resetDesktopComplexCardToEmpty(complexCard);
+        bindDragTile(tile);
+        bindEquipmentCardTrigger(tile);
+        refreshExcavatorGarage();
+        refreshTruckGarage();
+        refreshAllComplexTruckRacks();
+        normalizeComplexGrid();
+        return true;
+    }
+    function activateDesktopComplexFromExcavatorTile(tile, complexCard) {
+        if (!tile || !complexCard) return false;
+        var targetCard = complexCard.classList.contains("status-empty")
+            ? complexCard
+            : document.querySelector(".dispatcher-complex-card.status-empty");
+        if (!targetCard) return false;
+        var zoneId = targetCard.dataset.zoneId || "К";
+        var cardId = tile.dataset.equipmentId || tile.dataset.equipmentCardId || "";
+        var name = tile.dataset.equipmentName || "";
+        var slot = tile.dataset.excavatorSlot || (tile.querySelector("strong") && tile.querySelector("strong").textContent) || "";
+        var stateCode = "assigned";
+        targetCard.className = "dispatcher-complex-card " + dispatcherEquipmentStateClass(stateCode) + " is-sync-pending";
+        targetCard.style.setProperty("--complex-progress", "0%");
+        targetCard.dataset.dispatcherDrop = "complex";
+        targetCard.dataset.zoneId = zoneId;
+        targetCard.dataset.dispatcherDrag = "complex";
+        targetCard.dataset.equipmentCardId = cardId;
+        targetCard.dataset.sourceEquipmentCardId = cardId;
+        targetCard.dataset.equipmentId = cardId;
+        targetCard.dataset.equipmentName = name;
+        targetCard.dataset.equipmentState = stateCode;
+        targetCard.dataset.excavatorSlot = slot;
+        delete targetCard.dataset.dragBound;
+        delete targetCard.dataset.cardBound;
+        targetCard.setAttribute("role", "button");
+        targetCard.setAttribute("tabindex", "0");
+        targetCard.setAttribute("draggable", "true");
+        targetCard.innerHTML =
+            '<div class="complex-work-head">' +
+                '<div class="complex-title-state">' +
+                    "<h2>" + escapeHtml(zoneId) + "</h2>" +
+                    '<span class="complex-state-chip">' + escapeHtml(dispatcherEquipmentStateLabel(stateCode)) + '</span>' +
+                '</div>' +
+                '<div class="complex-context">' +
+                    '<span class="complex-info-chip chip-horizon">Гор. -</span>' +
+                    '<span class="complex-info-chip chip-block">Блок -</span>' +
+                    '<span class="complex-info-chip chip-rock">порода не указана</span>' +
+                "</div>" +
+            "</div>" +
+            '<div class="complex-assigned-trucks truck-fill-1" style="--complex-truck-cols: 6;" aria-label="Активные самосвалы комплекса">' +
+                '<em class="complex-truck-empty">самосвалы не назначены</em>' +
+            "</div>";
+        tile.remove();
+        bindDragTile(targetCard);
+        bindEquipmentCardTrigger(targetCard);
+        refreshExcavatorGarage();
+        refreshTruckGarage();
+        refreshAllComplexTruckRacks();
+        normalizeComplexGrid();
+        return true;
+    }
+    function confirmDesktopOptimisticBoardAction(response) {
+        if (response && response.queued) return response;
+        markDispatcherLocalAssignmentApplied();
+        return response;
+    }
+    function refreshDesktopBoardAfterStructuralAction(response, localFallback) {
+        if (response && response.queued) {
+            if (typeof localFallback === "function") {
+                localFallback();
+            }
+            markDispatcherLocalAssignmentApplied();
+            return response;
+        }
+        return refreshDispatcherDesktopBoardFromServer().then(function (applied) {
+            if (!applied) {
+                if (typeof localFallback === "function") {
+                    localFallback();
+                }
+                markDispatcherLocalAssignmentApplied();
+            }
+            return response;
+        }).catch(function (error) {
+            if (typeof localFallback === "function") {
+                localFallback();
+                markDispatcherLocalAssignmentApplied();
+            } else {
+                throw error;
+            }
+            return response;
+        });
+    }
+    function handleDesktopOptimisticBoardError(error) {
+        showDispatcherDnDError(error);
+        return refreshDispatcherDesktopBoardFromServer();
+    }
+    function applyDesktopTruckAction(response, action) {
+        if (response && response.queued) return response;
+        if (!action || !action.type) return response;
+        var applied = false;
+        if (action.type === "assign") {
+            applied = moveDesktopTruckToComplex(action.truckTile, action.complexCard);
+        } else if (action.type === "release") {
+            applied = moveDesktopTruckToGarage(action.truckTile);
+        } else if (action.type === "release_complex") {
+            applied = releaseDesktopComplexTrucks(action.complexCard);
+        }
+        if (!applied) {
+            refreshDispatcherDesktopBoardFromServer().catch(reloadDispatcherBoardAsFallback);
+        } else {
+            markDispatcherLocalAssignmentApplied();
+        }
+        return response;
     }
     refreshExcavatorGarage();
     refreshTruckGarage();
@@ -3866,12 +5484,37 @@ document.addEventListener("DOMContentLoaded", function () {
         var mobileTapPointerId = null;
         var mobileTapStartX = 0;
         var mobileTapStartY = 0;
-        var openedByPointerAt = 0;
-        var shouldUsePointerTap = node.classList.contains("mm-mobile-truck-card") && node.closest(".mm-mobile-shell");
+        var mobileLongTapTimer = null;
+        var mobileLongTapOpened = false;
+        var shouldUsePointerTap = Boolean(node.closest(".mm-mobile-shell")) && (
+            node.classList.contains("mm-mobile-truck-card") ||
+            node.classList.contains("mm-mobile-garage-excavator")
+        );
         function isEquipmentCardTapBlocked(event) {
             var control = event.target && event.target.closest ? event.target.closest("button, a, input, form") : null;
             return node.classList.contains("is-placeholder") ||
                 Boolean(control && control !== node);
+        }
+        function clearMobileLongTapTimer() {
+            if (!mobileLongTapTimer) return;
+            window.clearTimeout(mobileLongTapTimer);
+            mobileLongTapTimer = null;
+        }
+        function pulseMobileEquipmentCard() {
+            node.classList.remove("is-mobile-tap-feedback");
+            void node.offsetWidth;
+            node.classList.add("is-mobile-tap-feedback");
+            window.setTimeout(function () {
+                node.classList.remove("is-mobile-tap-feedback");
+            }, 260);
+        }
+        function openMobileEquipmentCard(event) {
+            if (!openEquipmentCard(node.dataset.equipmentCardId)) return false;
+            if (event) {
+                event.preventDefault();
+                event.stopPropagation();
+            }
+            return true;
         }
         if (shouldUsePointerTap && window.PointerEvent) {
             node.addEventListener("pointerdown", function (event) {
@@ -3879,35 +5522,49 @@ document.addEventListener("DOMContentLoaded", function () {
                 mobileTapPointerId = event.pointerId;
                 mobileTapStartX = event.clientX;
                 mobileTapStartY = event.clientY;
+                mobileLongTapOpened = false;
+                clearMobileLongTapTimer();
+                mobileLongTapTimer = window.setTimeout(function () {
+                    if (mobileTapPointerId !== event.pointerId) return;
+                    mobileLongTapOpened = openMobileEquipmentCard(event);
+                }, 520);
+            });
+            node.addEventListener("pointermove", function (event) {
+                if (mobileTapPointerId === null || event.pointerId !== mobileTapPointerId) return;
+                var dx = event.clientX - mobileTapStartX;
+                var dy = event.clientY - mobileTapStartY;
+                if (Math.hypot(dx, dy) > 10) {
+                    clearMobileLongTapTimer();
+                }
             });
             node.addEventListener("pointerup", function (event) {
                 if (mobileTapPointerId === null || event.pointerId !== mobileTapPointerId) return;
                 var dx = event.clientX - mobileTapStartX;
                 var dy = event.clientY - mobileTapStartY;
+                clearMobileLongTapTimer();
                 mobileTapPointerId = null;
                 if (Math.hypot(dx, dy) > 10 || isEquipmentCardTapBlocked(event)) return;
-                if (openEquipmentCard(node.dataset.equipmentCardId)) {
-                    openedByPointerAt = Date.now();
+                if (!mobileLongTapOpened) {
+                    pulseMobileEquipmentCard();
                     event.preventDefault();
                     event.stopPropagation();
                 }
             });
             node.addEventListener("pointercancel", function () {
+                clearMobileLongTapTimer();
                 mobileTapPointerId = null;
+                mobileLongTapOpened = false;
             });
         }
         node.addEventListener("click", function (event) {
-            if (openedByPointerAt && Date.now() - openedByPointerAt < 500) {
+            if (shouldUsePointerTap) {
                 event.preventDefault();
                 event.stopPropagation();
                 return;
             }
             if (isEquipmentCardTapBlocked(event)) return;
             if (node.dataset.complexTruck === "true") event.stopPropagation();
-            if (openEquipmentCard(node.dataset.equipmentCardId)) {
-                event.preventDefault();
-                event.stopPropagation();
-            }
+            openMobileEquipmentCard(event);
         });
         node.addEventListener("keydown", function (event) {
             if (event.key !== "Enter" && event.key !== " ") return;
@@ -3916,13 +5573,9 @@ document.addEventListener("DOMContentLoaded", function () {
             }
         });
     }
-    document.querySelectorAll("[data-dispatcher-drag]").forEach(bindDragTile);
-    document.querySelectorAll("[data-equipment-card-id]").forEach(bindEquipmentCardTrigger);
-    normalizeComplexGrid();
-    refreshAllComplexTruckRacks();
-    window.addEventListener("resize", refreshAllComplexTruckRacks);
-    if (!dispatcherShiftOpen) return;
-    document.querySelectorAll("[data-dispatcher-drop='complex']").forEach(function (zone) {
+    function bindDispatcherComplexDrop(zone) {
+        if (!zone || zone.dataset.dispatcherDropBound === "true") return;
+        zone.dataset.dispatcherDropBound = "true";
         zone.addEventListener("dragover", function (event) {
             if (!draggedTile) return;
             if (draggedTile.dataset.dispatcherDrag === "complex") return;
@@ -3938,26 +5591,42 @@ document.addEventListener("DOMContentLoaded", function () {
             if (!draggedTile) return;
             if (draggedTile.dataset.dispatcherDrag === "complex") return;
             if (draggedTile.dataset.dispatcherDrag === "excavator") {
+                var activatedExcavatorTile = draggedTile;
+                var targetComplexCard = zone;
                 dispatcherPost(dispatcherMoveExcavatorUrl, {
-                    excavator_id: draggedTile.dataset.equipmentId,
+                    excavator_id: activatedExcavatorTile.dataset.equipmentId,
                     zone: "active"
-                }).then(reloadDispatcherBoardUnlessQueued).catch(showDispatcherDnDError);
+                }).then(function (response) {
+                    return refreshDesktopBoardAfterStructuralAction(response, function () {
+                        activateDesktopComplexFromExcavatorTile(activatedExcavatorTile, targetComplexCard);
+                    });
+                }).catch(handleDesktopOptimisticBoardError);
                 return;
             }
             if (draggedTile.dataset.dispatcherDrag === "truck") {
                 if (!zone.dataset.equipmentId) {
                     return;
                 }
+                var assignedTruckTile = draggedTile;
+                var targetComplexCard = zone;
                 dispatcherPost(dispatcherAssignTruckUrl, {
                     action: "assign",
-                    truck_id: draggedTile.dataset.equipmentId,
+                    truck_id: assignedTruckTile.dataset.equipmentId,
                     excavator_id: zone.dataset.equipmentId
-                }).then(reloadDispatcherBoardUnlessQueued).catch(showDispatcherDnDError);
+                }).then(function (response) {
+                    return applyDesktopTruckAction(response, {
+                        type: "assign",
+                        truckTile: assignedTruckTile,
+                        complexCard: targetComplexCard
+                    });
+                }).catch(showDispatcherDnDError);
                 return;
             }
         });
-    });
-    document.querySelectorAll("[data-dispatcher-drop='excavator-garage']").forEach(function (garage) {
+    }
+    function bindDispatcherExcavatorGarageDrop(garage) {
+        if (!garage || garage.dataset.dispatcherDropBound === "true") return;
+        garage.dataset.dispatcherDropBound = "true";
         garage.addEventListener("dragover", function (event) {
             if (!draggedTile || draggedTile.dataset.dispatcherDrag !== "complex") return;
             event.preventDefault();
@@ -3970,13 +5639,21 @@ document.addEventListener("DOMContentLoaded", function () {
             event.preventDefault();
             garage.classList.remove("dispatcher-drop-target");
             if (!draggedTile || draggedTile.dataset.dispatcherDrag !== "complex") return;
+            var inactiveComplexCard = draggedTile;
+            var inactiveExcavatorId = inactiveComplexCard.dataset.equipmentId;
             dispatcherPost(dispatcherMoveExcavatorUrl, {
-                excavator_id: draggedTile.dataset.equipmentId,
+                excavator_id: inactiveExcavatorId,
                 zone: "inactive"
-            }).then(reloadDispatcherBoardUnlessQueued).catch(showDispatcherDnDError);
+            }).then(function (response) {
+                return refreshDesktopBoardAfterStructuralAction(response, function () {
+                    moveDesktopComplexToExcavatorGarage(inactiveComplexCard);
+                });
+            }).catch(handleDesktopOptimisticBoardError);
         });
-    });
-    document.querySelectorAll("[data-dispatcher-drop='truck-garage']").forEach(function (garage) {
+    }
+    function bindDispatcherTruckGarageDrop(garage) {
+        if (!garage || garage.dataset.dispatcherDropBound === "true") return;
+        garage.dataset.dispatcherDropBound = "true";
         garage.addEventListener("dragover", function (event) {
             if (!draggedTile || (draggedTile.dataset.complexTruck !== "true" && draggedTile.dataset.dispatcherDrag !== "complex")) return;
             event.preventDefault();
@@ -3990,19 +5667,47 @@ document.addEventListener("DOMContentLoaded", function () {
             garage.classList.remove("dispatcher-drop-target");
             if (!draggedTile) return;
             if (draggedTile.dataset.dispatcherDrag === "complex") {
+                var complexCard = draggedTile;
                 dispatcherPost(dispatcherAssignTruckUrl, {
                     action: "release_complex",
-                    excavator_id: draggedTile.dataset.equipmentId
-                }).then(reloadDispatcherBoardUnlessQueued).catch(showDispatcherDnDError);
+                    excavator_id: complexCard.dataset.equipmentId
+                }).then(function (response) {
+                    return applyDesktopTruckAction(response, {
+                        type: "release_complex",
+                        complexCard: complexCard
+                    });
+                }).catch(showDispatcherDnDError);
                 return;
             }
             if (draggedTile.dataset.complexTruck !== "true") return;
+            var releasedTruckTile = draggedTile;
             dispatcherPost(dispatcherAssignTruckUrl, {
                 action: "release",
-                truck_id: draggedTile.dataset.equipmentId
-            }).then(reloadDispatcherBoardUnlessQueued).catch(showDispatcherDnDError);
+                truck_id: releasedTruckTile.dataset.equipmentId
+            }).then(function (response) {
+                return applyDesktopTruckAction(response, {
+                    type: "release",
+                    truckTile: releasedTruckTile
+                });
+            }).catch(showDispatcherDnDError);
         });
-    });
+    }
+    function bindDispatcherDesktopInteractions() {
+        board = document.querySelector(".dispatcher-board");
+        excavatorGarage = document.querySelector("[data-dispatcher-excavator-garage]");
+        document.querySelectorAll("[data-dispatcher-drag]").forEach(bindDragTile);
+        document.querySelectorAll("[data-equipment-card-id]").forEach(bindEquipmentCardTrigger);
+        normalizeComplexGrid();
+        refreshExcavatorGarage();
+        refreshTruckGarage();
+        refreshAllComplexTruckRacks();
+        if (!dispatcherShiftOpen) return;
+        document.querySelectorAll("[data-dispatcher-drop='complex']").forEach(bindDispatcherComplexDrop);
+        document.querySelectorAll("[data-dispatcher-drop='excavator-garage']").forEach(bindDispatcherExcavatorGarageDrop);
+        document.querySelectorAll("[data-dispatcher-drop='truck-garage']").forEach(bindDispatcherTruckGarageDrop);
+    }
+    bindDispatcherDesktopInteractions();
+    window.addEventListener("resize", refreshAllComplexTruckRacks);
 });
 </script>
 {% endblock %}

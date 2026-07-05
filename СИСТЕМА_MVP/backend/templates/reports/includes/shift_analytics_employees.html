@@ -1,0 +1,36 @@
+<article class="dispatcher-report-card dispatcher-report-card-wide">
+    <div class="dispatcher-report-card-head">
+        <h2>Сотрудники</h2>
+        <span>первый фундамент для будущего рейтинга</span>
+    </div>
+    <div class="table-wrap">
+        <table>
+            <thead>
+            <tr>
+                <th>Сотрудник</th>
+                <th>Роль</th>
+                <th>Отгружено</th>
+                <th>Разгружено</th>
+                <th>Объем, м3</th>
+                <th>Тоннаж, т</th>
+                <th>Техника</th>
+            </tr>
+            </thead>
+            <tbody>
+            {% for row in rows %}
+                <tr>
+                    <td><strong>{{ row.label }}</strong></td>
+                    <td>{{ row.role }}</td>
+                    <td>{{ row.loaded_count }}</td>
+                    <td>{{ row.unloaded_count }}</td>
+                    <td>{{ row.volume_display }}</td>
+                    <td>{{ row.tonnage_display }}</td>
+                    <td>{% if row.role == "Водитель самосвала" %}{{ row.trucks_display }}{% else %}{{ row.excavators_display }}{% endif %}</td>
+                </tr>
+            {% empty %}
+                <tr><td colspan="7">Данных по сотрудникам за выбранный срез пока нет.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</article>

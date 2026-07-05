@@ -64,14 +64,16 @@ MINING_MASTER_MANIFEST = {
 
 
 MINING_MASTER_SERVICE_WORKER_JS = r"""
-const CACHE_NAME = "mining-master-mobile-shell-v59";
+const CACHE_NAME = "mining-master-mobile-shell-v97";
 const APP_SHELL_URL = "/mining-master/assignments/";
 const LOGIN_URL = "/";
 const MANIFEST_URL = "/mining-master-manifest.webmanifest";
+const NETWORK_FIRST_TIMEOUT_MS = 2500;
 const CORE_ASSETS = [
   LOGIN_URL,
   APP_SHELL_URL,
   MANIFEST_URL,
+  "/static/js/realtime-client.js",
   "/static/css/app.css",
   "/static/favicon.ico",
   "/static/img/pwa/mining-master-180.png",
@@ -79,10 +81,12 @@ const CORE_ASSETS = [
   "/static/img/pwa/mining-master-512.png",
   "/static/img/pwa/mining-master-maskable-512.png",
   "/static/img/equipment/excavator-gray.png",
+  "/static/img/equipment/excavator-blue.png",
   "/static/img/equipment/excavator-green.png",
   "/static/img/equipment/excavator-yellow.png",
   "/static/img/equipment/excavator-red.png",
   "/static/img/equipment/truck-gray.png",
+  "/static/img/equipment/truck-blue.png",
   "/static/img/equipment/truck-green.png",
   "/static/img/equipment/truck-yellow.png",
   "/static/img/equipment/truck-red.png"
@@ -92,7 +96,6 @@ self.addEventListener("install", event => {
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then(cache => cache.addAll(CORE_ASSETS.map(url => new Request(url, { cache: "reload" }))).catch(() => undefined))
-      .then(() => self.skipWaiting())
   );
 });
 
@@ -104,30 +107,62 @@ self.addEventListener("activate", event => {
   );
 });
 
-async function networkFirst(request, fallbackUrl) {
+function networkDelay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function networkFirst(request, fallbackUrl, event) {
   const cache = await caches.open(CACHE_NAME);
-  try {
-    const response = await fetch(request);
-    if (response && response.ok) {
-      cache.put(request, response.clone()).catch(() => undefined);
-      if (fallbackUrl) {
-        cache.put(fallbackUrl, response.clone()).catch(() => undefined);
+  const cached = (await cache.match(request)) ||
+    (fallbackUrl ? await cache.match(fallbackUrl) : null);
+  const networkRequest = fetch(request)
+    .then(response => {
+      if (response && response.ok) {
+        cache.put(request, response.clone()).catch(() => undefined);
+        if (fallbackUrl) {
+          cache.put(fallbackUrl, response.clone()).catch(() => undefined);
+        }
       }
+      return response;
+    });
+  networkRequest.catch(() => undefined);
+  if (event && event.waitUntil) {
+    event.waitUntil(networkRequest.then(() => undefined).catch(() => undefined));
+  }
+  if (cached) {
+    try {
+      return await Promise.race([
+        networkRequest,
+        networkDelay(NETWORK_FIRST_TIMEOUT_MS).then(() => cached)
+      ]);
+    } catch (error) {
+      return cached;
     }
-    return response;
+  }
+  try {
+    return await networkRequest;
   } catch (error) {
-    return (await cache.match(request)) ||
-      (fallbackUrl ? await cache.match(fallbackUrl) : null) ||
-      new Response("Оффлайн: экран еще не сохранен на этом устройстве.", {
-        status: 503,
-        headers: { "Content-Type": "text/plain; charset=utf-8" }
-      });
+    return new Response("Оффлайн: экран еще не сохранен на этом устройстве.", {
+      status: 503,
+      headers: { "Content-Type": "text/plain; charset=utf-8" }
+    });
+  }
+}
+
+async function networkOnly(request) {
+  try {
+    return await fetch(request);
+  } catch (error) {
+    return new Response("Сеть недоступна: свежий фрагмент экрана не получен.", {
+      status: 503,
+      headers: { "Content-Type": "text/plain; charset=utf-8" }
+    });
   }
 }
 
 async function cacheFirst(request) {
   const cache = await caches.open(CACHE_NAME);
-  const cached = await cache.match(request);
+  const cached = await cache.match(request, { ignoreSearch: true });
   if (cached) return cached;
   const response = await fetch(request);
   if (response && response.ok) {
@@ -141,16 +176,39 @@ self.addEventListener("fetch", event => {
   if (request.method !== "GET") return;
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
+  if (request.headers.get("X-Requested-With") === "XMLHttpRequest") {
+    event.respondWith(networkOnly(request));
+    return;
+  }
   if (request.mode === "navigate" || url.pathname === APP_SHELL_URL || url.pathname === LOGIN_URL) {
-    event.respondWith(networkFirst(request, url.pathname === LOGIN_URL ? LOGIN_URL : APP_SHELL_URL));
+    event.respondWith(networkFirst(request, url.pathname === LOGIN_URL ? LOGIN_URL : APP_SHELL_URL, event));
     return;
   }
   if (url.pathname === MANIFEST_URL) {
-    event.respondWith(networkFirst(request, MANIFEST_URL));
+    event.respondWith(networkFirst(request, MANIFEST_URL, event));
     return;
   }
   if (url.pathname.startsWith("/static/")) {
     event.respondWith(cacheFirst(request));
+  }
+});
+
+self.addEventListener("message", event => {
+  const data = event.data || {};
+  if (data.type === "SKIP_WAITING") {
+    self.skipWaiting();
+    return;
+  }
+  if (data.type === "GET_VERSION") {
+    const message = {
+      type: "MINING_MASTER_SW_VERSION",
+      version: CACHE_NAME
+    };
+    if (event.ports && event.ports[0]) {
+      event.ports[0].postMessage(message);
+    } else if (event.source) {
+      event.source.postMessage(message);
+    }
   }
 });
 """
@@ -160,6 +218,7 @@ TRUCK_ICON_BY_STATUS = {
     'green': 'img/equipment/truck-green.png',
     'yellow': 'img/equipment/truck-yellow.png',
     'blue': 'img/equipment/truck-blue.png',
+    'orange': 'img/equipment/truck-yellow.png',
     'red': 'img/equipment/truck-red.png',
     'gray': 'img/equipment/truck-gray.png',
 }
@@ -168,6 +227,7 @@ EXCAVATOR_ICON_BY_STATUS = {
     'green': 'img/equipment/excavator-green.png',
     'yellow': 'img/equipment/excavator-yellow.png',
     'blue': 'img/equipment/excavator-blue.png',
+    'orange': 'img/equipment/excavator-yellow.png',
     'red': 'img/equipment/excavator-red.png',
     'gray': 'img/equipment/excavator-gray.png',
 }
@@ -259,7 +319,7 @@ def build_truck_tile(equipment, status_key, status_label, assignment=None, activ
         'garage_number': equipment.garage_number,
         'status_key': status_key,
         'status_label': status_label,
-        'icon': TRUCK_ICON_BY_STATUS[status_key],
+        'icon': TRUCK_ICON_BY_STATUS.get(status_key, TRUCK_ICON_BY_STATUS['gray']),
         'model': equipment.model.name if equipment.model else 'модель не указана',
         'search': f'{number} {label} {equipment.garage_number}'.lower(),
         'is_active_trip': bool(active_trip),
@@ -277,7 +337,7 @@ def build_excavator_tile(equipment, status_key, status_label):
         'status_key': status_key,
         'status_label': status_label,
         'percent': 100,
-        'icon': EXCAVATOR_ICON_BY_STATUS[status_key],
+        'icon': EXCAVATOR_ICON_BY_STATUS.get(status_key, EXCAVATOR_ICON_BY_STATUS['gray']),
         'model': equipment.model.name if equipment.model else 'модель не указана',
         'search': f'{number} {label} {equipment.garage_number}'.lower(),
     }

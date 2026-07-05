@@ -4,51 +4,134 @@
 {% block body_class %}system-admin-reference-detail-screen{% endblock %}
 
 {% block body %}
-<header class="app-header admin-employees-header system-admin-header">
-    <div class="header-inner wide-shell">
-        <div class="topline">
-            <span>{{ access.employee.full_name }}</span>
-            <span class="admin-user-pill">Админ: {{ access.employee.full_name }}</span>
-            <span class="topline-nav">
-                <button type="button" class="nav-pill" onclick="window.location.href='{% url 'system_admin_references' %}'">Назад</button>
-                <a class="nav-pill" href="{% url 'system_admin_dashboard' %}">Админка</a>
+<style>
+@media (min-width: 1041px) {
+    body.system-admin-reference-detail-screen .admin-reference-detail-shell {
+        display: grid;
+        grid-template-rows: auto minmax(0, 1fr);
+        height: 100dvh;
+        max-height: 100dvh;
+        min-height: 0;
+        overflow: hidden;
+    }
+
+    body.system-admin-reference-detail-screen .admin-reference-detail-shell .admin-page {
+        height: auto;
+        min-height: 0;
+        overflow: hidden;
+    }
+
+    body.system-admin-reference-detail-screen .reference-detail-workspace,
+    body.system-admin-reference-detail-screen .reference-detail-left-column,
+    body.system-admin-reference-detail-screen .reference-editor-side {
+        height: 100%;
+        min-height: 0;
+    }
+
+    body.system-admin-reference-detail-screen .reference-editor-side {
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+    }
+
+    body.system-admin-reference-detail-screen .reference-editor-primary-card {
+        display: flex;
+        flex: 1 1 auto;
+        flex-direction: column;
+        min-height: 0;
+        overflow: hidden;
+    }
+
+    body.system-admin-reference-detail-screen .reference-editor-side > .reference-editor-card:not(.reference-editor-primary-card) {
+        flex: 0 0 auto;
+    }
+
+    body.system-admin-reference-detail-screen .reference-editor-primary-card .reference-editor-form {
+        display: flex;
+        flex: 1 1 auto;
+        flex-direction: column;
+        min-height: 0;
+        overflow: hidden;
+    }
+
+    body.system-admin-reference-detail-screen .reference-editor-primary-card .reference-editor-fields {
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow-y: auto;
+    }
+
+    body.system-admin-reference-detail-screen .reference-editor-form-actions {
+        position: sticky;
+        bottom: 0;
+        z-index: 2;
+        flex: 0 0 auto;
+    }
+}
+</style>
+<div class="admin-shell admin-exports-shell admin-references-shell admin-reference-detail-shell admin-day" data-admin-theme>
+    <header class="admin-console-header" aria-label="Административная шапка">
+        <section class="admin-console-identity">
+            <span class="admin-console-avatar">{{ access.employee.full_name|first }}</span>
+            <span>
+                <strong>{{ access.employee.full_name }}</strong>
+                <em>Системный администратор</em>
             </span>
-        </div>
-        <h1>{{ reference_config.title }}</h1>
-        <p>{{ reference_config.section }}. Рабочее редактирование записей справочника без перехода в техническую админку.</p>
-    </div>
-</header>
+        </section>
+
+        <section class="admin-console-main">
+            <div class="admin-console-title">
+                <span>Админка MVP</span>
+                <h1>{{ reference_config.title }}</h1>
+                <p>{% if reference_config.description %}{{ reference_config.description }}{% else %}{{ reference_config.section }}. Рабочее редактирование записей справочника без перехода в техническую админку.{% endif %}</p>
+            </div>
+            <nav class="admin-console-nav" aria-label="Разделы админки">
+                <a href="{% url 'system_admin_dashboard' %}">Сводка</a>
+                <a href="{% url 'system_admin_employees' %}">Сотрудники</a>
+                <a class="is-active" href="{% url 'system_admin_references' %}">Справочники</a>
+                <a href="{% url 'system_admin_conflicts' %}">Конфликты</a>
+                <a href="{% url 'system_admin_logs' %}">Журнал</a>
+                <a href="{% url 'system_admin_exports' %}">Выгрузки</a>
+            </nav>
+        </section>
+
+        <section class="admin-console-actions">
+            <button type="button" class="admin-theme-button" data-admin-theme-toggle title="День / Ночь">Д/Н</button>
+            <a class="admin-utility-link" href="{% url 'system_admin_references' %}">Назад</a>
+            <a class="admin-utility-link" href="{% url 'system_admin_dashboard' %}">Админка</a>
+        </section>
+    </header>
 
 <main class="page wide-page admin-page reference-detail-page">
-    <section class="card reference-detail-control-card">
-        <div class="section-title-row">
-            <div>
-                <h2>Поиск и редактирование</h2>
-                <p>Список записей и форма изменения в одном рабочем экране.</p>
-            </div>
-            <span class="badge">{{ records_total }} записей</span>
-        </div>
-        <form class="reference-detail-filter-bar" method="get">
-            <div class="field">
-                <label for="reference-detail-search">Поиск</label>
-                <input id="reference-detail-search" name="q" type="search" value="{{ query }}" placeholder="Название, номер или связанный объект" data-reference-detail-search>
-            </div>
-            {% if has_active_status %}
-                <div class="field select-field">
-                    <label for="reference-detail-status">Состояние</label>
-                    <select id="reference-detail-status" name="status" data-reference-detail-status>
-                        <option value="" {% if not status_filter %}selected{% endif %}>Все состояния</option>
-                        <option value="active" {% if status_filter == 'active' %}selected{% endif %}>Активные</option>
-                        <option value="inactive" {% if status_filter == 'inactive' %}selected{% endif %}>Отключенные</option>
-                    </select>
+    <section class="references-workspace reference-detail-workspace">
+        <div class="reference-detail-left-column">
+            <section class="card reference-detail-control-card">
+                <div class="section-title-row">
+                    <div>
+                        <h2>Поиск и редактирование</h2>
+                        <p>{% if reference_config.description %}{{ reference_config.description }}{% else %}Список записей и форма изменения в одном рабочем экране.{% endif %}</p>
+                    </div>
+                    <span class="badge">{{ records_total }} записей</span>
                 </div>
-            {% endif %}
-            <a class="filter-reset-link" href="{% url 'system_admin_reference_detail' reference_code %}">Сбросить</a>
-        </form>
-    </section>
+                <form class="reference-detail-filter-bar" method="get">
+                    <div class="field">
+                        <label for="reference-detail-search">Поиск</label>
+                        <input id="reference-detail-search" name="q" type="search" value="{{ query }}" placeholder="Название, номер или связанный объект" data-reference-detail-search>
+                    </div>
+                    {% if has_active_status %}
+                        <div class="field select-field">
+                            <label for="reference-detail-status">Состояние</label>
+                            <select id="reference-detail-status" name="status" data-reference-detail-status>
+                                <option value="" {% if not status_filter %}selected{% endif %}>Все состояния</option>
+                                <option value="active" {% if status_filter == 'active' %}selected{% endif %}>Активные</option>
+                                <option value="inactive" {% if status_filter == 'inactive' %}selected{% endif %}>Отключенные</option>
+                            </select>
+                        </div>
+                    {% endif %}
+                    <a class="filter-reset-link" href="{% url 'system_admin_reference_detail' reference_code %}">Сбросить</a>
+                </form>
+            </section>
 
-    <section class="reference-detail-workspace">
-        <div class="card reference-records-card">
+        <div class="references-list-card reference-records-card">
             <div class="section-title-row">
                 <div>
                     <h2>Записи</h2>
@@ -69,8 +152,10 @@
                                 <span><b>{{ item.label }}:</b> {{ item.value }}</span>
                             {% endfor %}
                         </div>
-                        <strong class="reference-state reference-state-{{ record.status_class }}">{{ record.status_label }}</strong>
-                        <a class="reference-open" href="{% url 'system_admin_reference_detail' reference_code %}?edit={{ record.object.id }}">Править</a>
+                        <div class="reference-record-actions">
+                            <strong class="reference-state reference-state-{{ record.status_class }}">{{ record.status_label }}</strong>
+                            <a class="reference-open" href="{% url 'system_admin_reference_detail' reference_code %}?edit={{ record.object.id }}">Править</a>
+                        </div>
                     </article>
                 {% empty %}
                     <div class="reference-empty-state">
@@ -80,9 +165,10 @@
                 {% endfor %}
             </div>
         </div>
+        </div>
 
-        <aside class="reference-editor-side">
-            <section class="card reference-editor-card">
+        <aside class="references-side reference-editor-side">
+            <section class="references-side-card reference-editor-card reference-editor-primary-card">
                 <div class="employee-detail-card-head">
                     <div>
                         <h2>{% if selected_record %}Редактировать запись{% else %}Новая запись{% endif %}</h2>
@@ -124,77 +210,74 @@
                         {% endfor %}
                     </div>
 
-                    <button class="button-link reference-save-button" type="submit">Сохранить запись</button>
+                    <div class="reference-editor-form-actions">
+                        <button class="button-link reference-save-button" type="submit">Сохранить запись</button>
+                    </div>
                 </form>
             </section>
 
-            <section class="card reference-editor-card reference-state-card">
-                <div class="employee-detail-card-head">
-                    <div>
-                        <h2>Состояние</h2>
-                        <p class="muted">Короткая сводка по справочнику.</p>
+            {% if not reference_config.hide_actions_card %}
+                <section class="references-side-card reference-editor-card">
+                    <div class="employee-detail-card-head">
+                        <div>
+                            <h2>Действия</h2>
+                            <p class="muted">Отключение не удаляет запись из истории.</p>
+                        </div>
                     </div>
-                </div>
-                <div class="references-status-list">
-                    <div class="references-status-row row-ok">
-                        <span>Активные</span>
-                        <strong>{{ active_total }}</strong>
-                    </div>
-                    <div class="references-status-row {% if inactive_total %}row-warning{% else %}row-neutral{% endif %}">
-                        <span>Отключенные</span>
-                        <strong>{{ inactive_total }}</strong>
-                    </div>
-                    <div class="references-status-row row-neutral">
-                        <span>Всего</span>
-                        <strong>{{ records_total }}</strong>
-                    </div>
-                </div>
-            </section>
-
-            <section class="card reference-editor-card">
-                <div class="employee-detail-card-head">
-                    <div>
-                        <h2>Действия</h2>
-                        <p class="muted">Отключение не удаляет запись из истории.</p>
-                    </div>
-                </div>
-                <div class="references-actions">
-                    <a class="button-link button-secondary" href="{% url 'system_admin_reference_detail' reference_code %}">Новая запись</a>
-                    {% if selected_record and has_active_status %}
-                        {% if selected_record.is_active %}
-                            <form method="post" data-confirm="Отключить запись справочника? Существующая история сохранится.">
-                                {% csrf_token %}
-                                <input type="hidden" name="action" value="disable">
-                                <input type="hidden" name="record_id" value="{{ selected_record.id }}">
-                                <button class="button-link button-warning" type="submit">Отключить</button>
-                            </form>
-                        {% else %}
-                            <form method="post">
-                                {% csrf_token %}
-                                <input type="hidden" name="action" value="enable">
-                                <input type="hidden" name="record_id" value="{{ selected_record.id }}">
-                                <button class="button-link" type="submit">Вернуть в работу</button>
-                            </form>
+                    <div class="references-actions">
+                        <a class="button-link button-secondary" href="{% url 'system_admin_reference_detail' reference_code %}">Новая запись</a>
+                        {% if selected_record and has_active_status %}
+                            {% if selected_record.is_active %}
+                                <form method="post" data-confirm="Отключить запись справочника? Существующая история сохранится.">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="action" value="disable">
+                                    <input type="hidden" name="record_id" value="{{ selected_record.id }}">
+                                    <button class="button-link button-warning" type="submit">Отключить</button>
+                                </form>
+                            {% else %}
+                                <form method="post">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="action" value="enable">
+                                    <input type="hidden" name="record_id" value="{{ selected_record.id }}">
+                                    <button class="button-link" type="submit">Вернуть в работу</button>
+                                </form>
+                            {% endif %}
                         {% endif %}
-                    {% endif %}
-                    <a class="button-link button-secondary" href="{{ reference_config.admin_url }}">Техническая админка</a>
-                </div>
-            </section>
+                        <a class="button-link button-secondary" href="{{ reference_config.admin_url }}">Техническая админка</a>
+                    </div>
+                </section>
+            {% endif %}
         </aside>
     </section>
 </main>
+</div>
 
 <script>
 document.addEventListener('DOMContentLoaded', function () {
     var search = document.querySelector('[data-reference-detail-search]');
     var status = document.querySelector('[data-reference-detail-status]');
     var rows = Array.from(document.querySelectorAll('[data-reference-record-url]'));
-    var recordsCard = document.querySelector('.reference-records-card');
+    var recordsScroller = document.querySelector('.reference-record-list');
     var selectedRow = document.querySelector('.reference-record-row.is-selected');
     var storageKey = 'system-admin-reference-scroll:' + window.location.pathname;
+    var shell = document.querySelector('[data-admin-theme]');
+    var themeToggle = document.querySelector('[data-admin-theme-toggle]');
 
     function normalize(value) {
         return (value || '').toString().trim().toLowerCase();
+    }
+
+    function setAdminTheme(theme) {
+        if (!shell) return;
+        var isNight = theme === 'night';
+        shell.classList.toggle('admin-night', isNight);
+        shell.classList.toggle('admin-day', !isNight);
+        if (themeToggle) themeToggle.setAttribute('data-theme-icon', isNight ? 'moon' : 'sun');
+        try {
+            window.localStorage.setItem('admin-theme', isNight ? 'night' : 'day');
+        } catch (error) {
+            return;
+        }
     }
 
     function applyFilters() {
@@ -209,10 +292,10 @@ document.addEventListener('DOMContentLoaded', function () {
 
     if (search) search.addEventListener('input', applyFilters);
     if (status) status.addEventListener('input', applyFilters);
-    if (recordsCard) {
-        recordsCard.addEventListener('scroll', function () {
+    if (recordsScroller) {
+        recordsScroller.addEventListener('scroll', function () {
             try {
-                window.sessionStorage.setItem(storageKey, String(recordsCard.scrollTop));
+                window.sessionStorage.setItem(storageKey, String(recordsScroller.scrollTop));
             } catch (error) {
                 return;
             }
@@ -220,16 +303,16 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     function saveCurrentScroll() {
-        if (!recordsCard) return;
+        if (!recordsScroller) return;
         try {
-            window.sessionStorage.setItem(storageKey, String(recordsCard.scrollTop));
+            window.sessionStorage.setItem(storageKey, String(recordsScroller.scrollTop));
         } catch (error) {
             return;
         }
     }
 
     function restoreScroll() {
-        if (!recordsCard) return;
+        if (!recordsScroller) return;
         var savedScroll = null;
         try {
             savedScroll = window.sessionStorage.getItem(storageKey);
@@ -237,7 +320,7 @@ document.addEventListener('DOMContentLoaded', function () {
             savedScroll = null;
         }
         if (savedScroll !== null && savedScroll !== '') {
-            recordsCard.scrollTop = parseInt(savedScroll, 10) || 0;
+            recordsScroller.scrollTop = parseInt(savedScroll, 10) || 0;
             return;
         }
         if (selectedRow) {
@@ -255,6 +338,18 @@ document.addEventListener('DOMContentLoaded', function () {
         var eventName = node.tagName === 'FORM' ? 'submit' : 'click';
         node.addEventListener(eventName, saveCurrentScroll);
     });
+    var savedTheme = 'day';
+    try {
+        savedTheme = window.localStorage.getItem('admin-theme') || 'day';
+    } catch (error) {
+        savedTheme = 'day';
+    }
+    setAdminTheme(savedTheme);
+    if (themeToggle) {
+        themeToggle.addEventListener('click', function () {
+            setAdminTheme(shell && shell.classList.contains('admin-night') ? 'day' : 'night');
+        });
+    }
     applyFilters();
     window.requestAnimationFrame(restoreScroll);
 });

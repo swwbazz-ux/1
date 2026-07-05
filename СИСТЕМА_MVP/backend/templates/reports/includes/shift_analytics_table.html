@@ -1,0 +1,50 @@
+<article class="dispatcher-report-card dispatcher-report-card-wide">
+    <div class="dispatcher-report-card-head">
+        <h2>{{ title }}</h2>
+        <span>{{ subtitle }}</span>
+    </div>
+    <div class="table-wrap">
+        <table>
+            <thead>
+            <tr>
+                <th>{{ primary_label }}</th>
+                <th>Рейсы</th>
+                <th>Объем, м3</th>
+                <th>Тоннаж, т</th>
+                {% if mode == "equipment" %}
+                    <th>Породы</th>
+                    <th>Разгрузка</th>
+                    <th>Горизонт / блок</th>
+                    <th>Переходящие</th>
+                {% else %}
+                    <th>Самосвалы</th>
+                    <th>Экскаваторы</th>
+                    <th>Горизонт / блок</th>
+                {% endif %}
+            </tr>
+            </thead>
+            <tbody>
+            {% for row in rows %}
+                <tr>
+                    <td><strong>{{ row.label }}</strong></td>
+                    <td>{{ row.trip_count }}</td>
+                    <td>{{ row.volume_display }}</td>
+                    <td>{{ row.tonnage_display }}</td>
+                    {% if mode == "equipment" %}
+                        <td>{{ row.rocks_display }}</td>
+                        <td>{{ row.dump_points_display }}</td>
+                        <td>{{ row.faces_display }}</td>
+                        <td>{{ row.carryover_count }}</td>
+                    {% else %}
+                        <td>{{ row.trucks_display }}</td>
+                        <td>{{ row.excavators_display }}</td>
+                        <td>{{ row.faces_display }}</td>
+                    {% endif %}
+                </tr>
+            {% empty %}
+                <tr><td colspan="8">Данных за выбранный срез пока нет.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</article>

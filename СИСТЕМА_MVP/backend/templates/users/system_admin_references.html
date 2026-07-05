@@ -94,7 +94,7 @@
                             </div>
                             <div class="references-section-list">
                                 {% for item in section.items %}
-                                    <article class="reference-row reference-row-{{ item.status_class }}" data-reference-row data-section="{{ section.title }}" data-status="{{ item.status_class }}" data-name="{{ item.name }}" {% if item.external_url %}data-admin-url="{{ item.external_url }}"{% endif %}>
+                                    <article class="reference-row reference-row-{{ item.status_class }}" data-reference-row data-section="{{ section.title }}" data-status="{{ item.status_class }}" data-name="{{ item.name }}" {% if item.detail_code %}data-reference-target="{% url 'system_admin_reference_detail' item.detail_code %}"{% elif item.url %}data-reference-target="{% url item.url %}"{% elif item.external_url %}data-reference-target="{{ item.external_url }}"{% endif %} {% if item.external_url %}data-admin-url="{{ item.external_url }}"{% endif %}>
                                         <div class="reference-main">
                                             <strong>{{ item.name }}</strong>
                                             <span>{{ item.target_label }}</span>
@@ -240,6 +240,15 @@ document.addEventListener('DOMContentLoaded', function () {
             setAdminTheme(shell && shell.classList.contains('admin-night') ? 'day' : 'night');
         });
     }
+    rows.forEach(function (row) {
+        row.addEventListener('click', function (event) {
+            var link = event.target.closest('a.reference-open');
+            var target = link ? link.href : row.dataset.referenceTarget;
+            if (!target || event.target.closest('button, input, select, textarea')) return;
+            event.preventDefault();
+            window.location.assign(target);
+        });
+    });
     applyFilters();
 });
 </script>

@@ -1,20 +1,14 @@
 {% extends "base.html" %}
 
 {% block title %}Чеклист пилотной проверки отчетов{% endblock %}
+{% block body_class %}dispatcher-control-screen{% endblock %}
 
 {% block body %}
-<header class="app-header">
-    <div class="header-inner">
-        <div class="topline">
-            <span>{{ access.employee.full_name }}</span>
-            <a href="{% url 'logout' %}">Выйти</a>
-        </div>
-        <h1>Чеклист пилотной проверки отчетов</h1>
-        <p>Рабочая навигация перед переходом к пилотному запуску: что открыть, что выгрузить и что сверить с текущими Excel-формами.</p>
-    </div>
-</header>
+<main class="dispatcher-shell dispatcher-analytics-shell management-linked-report" data-dispatcher-theme>
+    <section class="dispatcher-analytics-board management-dashboard-board management-linked-report-board" aria-label="Пилот">
+        {% include "reports/includes/management_report_header.html" with active="pilot" title="Пилот" subtitle="Чеклист проверки отчетов и готовности перед пилотным запуском." %}
+        <div class="management-linked-report-content">
 
-<main class="page">
     <section class="metric-grid">
         <div class="metric-card">
             <div>Текущий этап</div>
@@ -103,5 +97,8 @@
             </article>
         {% endfor %}
     </section>
+</div>
+</section>
 </main>
+{% include "reports/includes/management_report_theme.html" %}
 {% endblock %}

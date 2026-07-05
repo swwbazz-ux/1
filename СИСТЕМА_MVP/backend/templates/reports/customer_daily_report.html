@@ -1,19 +1,14 @@
 {% extends "base.html" %}
 
 {% block title %}Суточный отчет заказчику{% endblock %}
+{% block body_class %}dispatcher-control-screen{% endblock %}
 
 {% block body %}
-<header class="app-header">
-    <div class="header-inner">
-        <div class="topline">
-            <span>{{ access.employee.full_name }}</span>
-            <a href="{% url 'logout' %}">Выйти</a>
-        </div>
-        <h1>Суточный отчет заказчику</h1>
-        <p>Первая веб-версия отчета по структуре Excel: день, ночь, суточная сводка и выгрузка для заказчика.</p>
-    </div>
-</header>
-<main class="page">
+<main class="dispatcher-shell dispatcher-analytics-shell management-linked-report" data-dispatcher-theme>
+    <section class="dispatcher-analytics-board management-dashboard-board management-linked-report-board" aria-label="Суточный отчет">
+        {% include "reports/includes/management_report_header.html" with active="daily" title="Суточный отчет" subtitle="Суточный срез, смены, план-факт и выгрузка для заказчика." %}
+        <div class="management-linked-report-content">
+
     <section class="metric-grid">
         <div class="metric-card success">
             <div>Факт за сутки</div>
@@ -246,5 +241,8 @@
         </div>
         <p class="muted">В первой версии простой относится к дате его открытия. Более точное распределение по сменам добавим отдельным шагом, если это понадобится для отчетности.</p>
     </section>
+</div>
+</section>
 </main>
+{% include "reports/includes/management_report_theme.html" %}
 {% endblock %}
