@@ -1,5 +1,4 @@
 from collections import defaultdict
-from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 
 from django.db.models import Q
@@ -163,7 +162,7 @@ def build_chart_points(rows, max_volume):
         return ''
     if len(rows) == 1:
         y = Decimal('220') - (rows[0]['volume_m3'] / max_volume * Decimal('180'))
-        return f'500,{int(y)}'
+        return f'460,{int(y)} 540,{int(y)}'
     points = []
     last_index = len(rows) - 1
     for index, row in enumerate(rows):
