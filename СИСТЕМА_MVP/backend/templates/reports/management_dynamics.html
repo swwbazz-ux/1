@@ -26,16 +26,21 @@
                         <option value="month" {% if granularity == 'month' %}selected{% endif %}>Месяцы</option>
                     </select>
                 </label>
-                <label class="management-dynamics-excavators">
-                    <span>Экскаваторы</span>
-                    <select name="excavators" multiple>
+                <fieldset class="management-dynamics-excavators">
+                    <legend>Экскаваторы</legend>
+                    <label class="management-dynamics-excavator-chip management-dynamics-excavator-all">
+                        <input type="checkbox" data-management-dynamics-all {% if not selected_excavator_ids %}checked{% endif %}>
+                        <span>Все</span>
+                    </label>
+                    <div class="management-dynamics-excavator-list">
                         {% for excavator in excavator_choices %}
-                            <option value="{{ excavator.id }}" {% if excavator.id in selected_excavator_ids %}selected{% endif %}>
-                                {% if excavator.garage_number %}Экскаватор {{ excavator.garage_number }}{% else %}{{ excavator }}{% endif %}
-                            </option>
+                            <label class="management-dynamics-excavator-chip" title="{% if excavator.garage_number %}Экскаватор {{ excavator.garage_number }}{% else %}{{ excavator }}{% endif %}">
+                                <input type="checkbox" name="excavators" value="{{ excavator.id }}" {% if excavator.id in selected_excavator_ids %}checked{% endif %}>
+                                <span>{% if excavator.garage_number %}{{ excavator.garage_number }}{% else %}{{ excavator }}{% endif %}</span>
+                            </label>
                         {% endfor %}
-                    </select>
-                </label>
+                    </div>
+                </fieldset>
                 <button type="submit">Показать</button>
             </form>
 
@@ -152,6 +157,25 @@
             }, delay || 0);
         }
 
+        var allExcavatorsControl = form.querySelector("[data-management-dynamics-all]");
+        var excavatorControls = Array.prototype.slice.call(form.querySelectorAll('input[name="excavators"]'));
+
+        function syncExcavatorSelection(changedControl) {
+            if (!allExcavatorsControl) {
+                return;
+            }
+            if (changedControl === allExcavatorsControl && allExcavatorsControl.checked) {
+                excavatorControls.forEach(function (input) {
+                    input.checked = false;
+                });
+                return;
+            }
+            var hasSelectedExcavator = excavatorControls.some(function (input) {
+                return input.checked;
+            });
+            allExcavatorsControl.checked = !hasSelectedExcavator;
+        }
+
         form.querySelectorAll("select").forEach(function (select) {
             select.addEventListener("change", function () {
                 submitAutoFilter(0);
@@ -169,6 +193,11 @@
                         try { input.showPicker(); } catch (error) {}
                     });
                 }
+            } else if (inputType === "checkbox" && (input === allExcavatorsControl || input.name === "excavators")) {
+                input.addEventListener("change", function () {
+                    syncExcavatorSelection(input);
+                    submitAutoFilter(0);
+                });
             }
         });
     }
