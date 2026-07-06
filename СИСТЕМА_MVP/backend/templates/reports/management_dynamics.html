@@ -17,7 +17,16 @@
                     <span>По дату</span>
                     <input type="date" name="date_to" value="{{ date_to_value }}">
                 </label>
-                <input type="hidden" name="granularity" value="{{ granularity }}" data-management-dynamics-granularity-input>
+                <div class="management-dynamics-filter-field management-dynamics-scale-field">
+                    <span>Масштаб</span>
+                    <input type="hidden" name="granularity" value="{{ granularity }}" data-management-dynamics-granularity-input>
+                    <div class="management-dynamics-segments" role="group" aria-label="Масштаб графика">
+                        <button type="button" class="management-dynamics-segment {% if granularity == 'hour' %}is-active{% endif %}" data-management-dynamics-granularity="hour">Часы</button>
+                        <button type="button" class="management-dynamics-segment {% if granularity == 'shift' %}is-active{% endif %}" data-management-dynamics-granularity="shift">Смены</button>
+                        <button type="button" class="management-dynamics-segment {% if granularity == 'day' %}is-active{% endif %}" data-management-dynamics-granularity="day">Дни</button>
+                        <button type="button" class="management-dynamics-segment {% if granularity == 'month' %}is-active{% endif %}" data-management-dynamics-granularity="month">Мес.</button>
+                    </div>
+                </div>
                 <div class="management-dynamics-filter-field management-dynamics-shift-field">
                     <span>Смена</span>
                     <input type="hidden" name="shift_type" value="{{ shift_type }}" data-management-dynamics-shift-input>
@@ -100,26 +109,15 @@
             </section>
 
             <article class="dispatcher-report-card dispatcher-report-card-wide management-dynamics-chart-card">
-                <div class="dispatcher-report-card-head management-dynamics-chart-head">
+                <div class="dispatcher-report-card-head">
                     <div>
                         <h2>График выработки</h2>
                         <span>Ось X — {{ dynamics.granularity_label }}, ось Y — кубы</span>
                     </div>
-                    <div class="management-dynamics-chart-tools">
-                        <div class="management-dynamics-chart-scale">
-                            <span>Масштаб</span>
-                            <div class="management-dynamics-segments" role="group" aria-label="Масштаб графика">
-                                <button type="button" class="management-dynamics-segment {% if granularity == 'hour' %}is-active{% endif %}" data-management-dynamics-granularity="hour">Часы</button>
-                                <button type="button" class="management-dynamics-segment {% if granularity == 'shift' %}is-active{% endif %}" data-management-dynamics-granularity="shift">Смены</button>
-                                <button type="button" class="management-dynamics-segment {% if granularity == 'day' %}is-active{% endif %}" data-management-dynamics-granularity="day">Дни</button>
-                                <button type="button" class="management-dynamics-segment {% if granularity == 'month' %}is-active{% endif %}" data-management-dynamics-granularity="month">Мес.</button>
-                            </div>
-                        </div>
-                        <div class="management-dynamics-legend">
-                            {% for series in dynamics.chart_series %}
-                                <span><i style="background: {{ series.color }};"></i>{{ series.label }}</span>
-                            {% endfor %}
-                        </div>
+                    <div class="management-dynamics-legend">
+                        {% for series in dynamics.chart_series %}
+                            <span><i style="background: {{ series.color }};"></i>{{ series.label }}</span>
+                        {% endfor %}
                     </div>
                 </div>
                 <div class="management-dynamics-chart">
@@ -233,9 +231,8 @@
             }, delay || 0);
         }
 
-        var dynamicsRoot = form.closest("[data-management-dynamics-refresh-root]") || document;
         var granularityInput = form.querySelector("[data-management-dynamics-granularity-input]");
-        var granularityButtons = Array.prototype.slice.call(dynamicsRoot.querySelectorAll("[data-management-dynamics-granularity]"));
+        var granularityButtons = Array.prototype.slice.call(form.querySelectorAll("[data-management-dynamics-granularity]"));
         var shiftInput = form.querySelector("[data-management-dynamics-shift-input]");
         var shiftButtons = Array.prototype.slice.call(form.querySelectorAll("[data-management-dynamics-shift]"));
         var dateControls = Array.prototype.slice.call(form.querySelectorAll('input[type="date"]'));

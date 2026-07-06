@@ -21076,12 +21076,16 @@ a.management-shift-card:hover {
     grid-column: span 2;
 }
 
+.management-dynamics-filters .management-dynamics-scale-field {
+    grid-column: span 3;
+}
+
 .management-dynamics-filters .management-dynamics-shift-field {
     grid-column: span 2;
 }
 
 .management-dynamics-filters .management-dynamics-excavators {
-    grid-column: span 5;
+    grid-column: span 3;
 }
 
 .management-dynamics-filters > button[type="submit"] {
@@ -21398,38 +21402,6 @@ a.management-shift-card:hover {
 
 .management-dynamics-chart-card {
     min-height: 0;
-}
-
-.management-dynamics-chart-head {
-    align-items: start;
-    gap: 14px;
-}
-
-.management-dynamics-chart-tools {
-    display: grid;
-    justify-items: end;
-    gap: 8px;
-    min-width: min(520px, 100%);
-}
-
-.management-dynamics-chart-scale {
-    display: grid;
-    gap: 5px;
-    width: min(430px, 100%);
-}
-
-.management-dynamics-chart-scale > span {
-    color: var(--gd-muted);
-    font-size: 10px;
-    font-weight: 900;
-    letter-spacing: .08em;
-    line-height: 1;
-    text-align: right;
-    text-transform: uppercase;
-}
-
-.management-dynamics-chart-scale .management-dynamics-segment {
-    min-height: 34px;
 }
 
 .management-dynamics-chart {
@@ -24468,25 +24440,6 @@ body.mining-master-screen .dispatcher-complex-card .complex-truck-tile {
 
     .management-dynamics-chart-card {
         min-height: 360px;
-    }
-
-    .management-dynamics-chart-head {
-        align-items: stretch;
-        flex-direction: column;
-    }
-
-    .management-dynamics-chart-tools {
-        justify-items: stretch;
-        min-width: 0;
-        width: 100%;
-    }
-
-    .management-dynamics-chart-scale {
-        width: 100%;
-    }
-
-    .management-dynamics-chart-scale > span {
-        text-align: left;
     }
 
     .management-dynamics-chart {
