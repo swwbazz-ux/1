@@ -458,14 +458,56 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, 'customRefresh: true')
         self.assertContains(response, reverse('excavator_manifest'))
         self.assertContains(response, 'rel="manifest"')
+        self.assertContains(response, '/static/css/excavator-work-v41.css')
         self.assertContains(response, '/excavator-sw.js')
         self.assertContains(response, 'scope: "/excavator/"')
-        self.assertContains(response, 'excavator-mobile-shell-v22')
+        self.assertContains(response, 'excavator-mobile-shell-v41')
+        self.assertContains(response, 'resolveExcavatorUpdateVersion')
+        self.assertContains(response, 'renderUpdateModal')
+        self.assertContains(response, 'fetchServerVersion')
+        self.assertContains(response, 'normalizeExcavatorVersion')
+        self.assertContains(response, 'data-eo-pwa-update-check')
+        self.assertContains(response, 'data-eo-pwa-update-check-label')
+        self.assertContains(response, 'data-eo-pwa-update-check-version')
+        self.assertContains(response, 'runManualUpdateCheck')
+        self.assertContains(response, 'Проверка...')
+        self.assertContains(response, 'registration && registration.active')
+        self.assertNotContains(response, 'newVersion || "new"')
+        self.assertNotContains(response, 'registration.active || navigator.serviceWorker.controller')
         self.assertContains(response, reverse('excavator_work_settings'))
+        self.assertContains(response, reverse('excavator_shift_action'))
+        self.assertContains(response, 'data-eo-shift-url')
+        self.assertContains(response, 'data-eo-shift-button')
+        self.assertContains(response, 'data-eo-shift-action="close"')
+        self.assertContains(response, reverse('logout'))
+        self.assertContains(response, 'data-eo-logout-button')
+        self.assertContains(response, 'data-eo-logout-url')
+        self.assertContains(response, 'data-eo-shift-label')
+        self.assertContains(response, '--eo-shift-hold: 0%')
+        self.assertContains(response, 'Показатели техники')
+        self.assertContains(response, 'Точки разгрузки')
+        self.assertContains(response, 'eo-shift-rock')
+        self.assertContains(response, 'Зафиксировано')
+        self.assertContains(response, 'Итог смены')
+        self.assertContains(response, 'Назначено')
+        self.assertContains(response, 'В пути')
+        self.assertContains(response, 'data-eo-shift-fuel')
+        self.assertContains(response, '<em>л</em>')
+        self.assertContains(response, '<em>км</em>')
+        self.assertContains(response, '<em>м/ч</em>')
+        self.assertContains(response, 'Отгружено')
+        self.assertContains(response, '0 маш.')
+        self.assertNotContains(response, 'Факт</span><strong>0 рейс.</strong>')
+        self.assertNotContains(response, 'data-eo-open-face-settings')
+        self.assertNotContains(response, '+ Добавить')
+        self.assertContains(response, 'Удерживайте 2 секунды, чтобы завершить смену')
+        self.assertContains(response, 'Удерживайте 2 секунды, чтобы выйти')
         self.assertContains(response, 'data-eo-settings-url')
         self.assertContains(response, 'data-eo-rock-select')
         self.assertContains(response, 'data-eo-dump-points-input')
         self.assertContains(response, 'dump_point_ids')
+        self.assertContains(response, 'data-eo-apply-settings')
+        self.assertContains(response, 'Удерживайте 2 секунды, чтобы применить настройки')
         self.assertContains(response, 'window.applyOperationalStateRefresh')
         self.assertContains(response, 'refreshExcavatorWorkFromServer')
         self.assertContains(response, 'assignment_changed')
@@ -585,6 +627,67 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(OperationalStateEvent.objects.filter(payload__action='excavator_work_settings').count(), 0)
 
+    def test_excavator_shift_action_closes_open_shift_with_meter_values(self):
+        shift = EmployeeShift.objects.get(employee=self.operator, closed_at__isnull=True)
+
+        response = self.client.post(
+            reverse('excavator_shift_action'),
+            data=json.dumps({
+                'action': 'close',
+                'client_action_id': 'shift-close-1',
+                'fuel': '87.5',
+                'mileage': '1234',
+                'engine_hours': '1208.25',
+            }),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.content.decode('utf-8'))
+        self.assertTrue(payload['ok'])
+        self.assertEqual(payload['action'], 'shift_closed')
+        self.assertFalse(payload['shift_open'])
+        shift.refresh_from_db()
+        self.assertIsNotNone(shift.closed_at)
+        self.assertEqual(str(shift.end_fuel), '87.50')
+        self.assertEqual(str(shift.end_mileage), '1234.00')
+        self.assertEqual(str(shift.end_engine_hours), '1208.25')
+        self.assertTrue(
+            OperationalStateEvent.objects.filter(
+                event_type='shift_changed',
+                object_type='EmployeeShift',
+                object_id=str(shift.id),
+            ).exists()
+        )
+
+    def test_excavator_shift_action_opens_shift_when_none_is_open(self):
+        EmployeeShift.objects.filter(employee=self.operator, closed_at__isnull=True).update(closed_at=timezone.now())
+
+        response = self.client.post(
+            reverse('excavator_shift_action'),
+            data=json.dumps({
+                'action': 'open',
+                'client_action_id': 'shift-open-1',
+                'excavator_id': self.excavator.id,
+                'fuel': '90',
+                'mileage': '0',
+                'engine_hours': '1210',
+            }),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.content.decode('utf-8'))
+        self.assertTrue(payload['ok'])
+        self.assertEqual(payload['action'], 'shift_opened')
+        self.assertTrue(payload['shift_open'])
+        shift = EmployeeShift.objects.get(id=payload['shift_id'])
+        self.assertEqual(shift.employee, self.operator)
+        self.assertEqual(shift.equipment, self.excavator)
+        self.assertEqual(str(shift.start_fuel), '90.00')
+        self.assertEqual(str(shift.start_mileage), '0.00')
+        self.assertEqual(str(shift.start_engine_hours), '1210.00')
+
     def test_excavator_downtime_reasons_come_from_role_reference_without_limit(self):
         waiting_state = EquipmentState.objects.get(code='waiting')
         created_reasons = []
@@ -622,6 +725,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         for reason in created_reasons:
             self.assertIn(reason.id, rendered_ids)
             self.assertContains(response, f'data-eo-downtime-reason-id="{reason.id}"')
+            self.assertContains(response, 'eo-hold-action')
             self.assertContains(response, f'>{reason.button_label}</button>')
         self.assertNotIn(hidden_reason.id, rendered_ids)
         self.assertNotIn(wrong_type_reason.id, rendered_ids)
@@ -649,6 +753,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, f'data-eo-downtime-reason-id="{reason.id}"')
         self.assertContains(response, 'data-eo-reason="Полное название регламентного обслуживания экскаватора"')
         self.assertContains(response, 'data-eo-equipment-state="maintenance"')
+        self.assertContains(response, 'Удерживайте 2 секунды, чтобы начать простой: ТО смены')
         self.assertContains(response, '>ТО смены</button>')
 
     def test_excavator_downtime_reason_uses_effective_server_semantics_without_local_red_default(self):
@@ -734,16 +839,18 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/excavator/')
-        self.assertIn('excavator-mobile-shell-v22', script)
+        self.assertIn('excavator-mobile-shell-v41', script)
         self.assertIn(reverse('excavator_work'), script)
         self.assertIn(reverse('excavator_manifest'), script)
         self.assertIn('/static/js/realtime-client.js', script)
         self.assertIn('/static/css/app.css', script)
+        self.assertIn('/static/css/excavator-work-v41.css', script)
         self.assertIn('ignoreSearch: true', script)
         self.assertIn('request.headers.get("X-Requested-With") === "XMLHttpRequest"', script)
         self.assertIn('networkOnly(request)', script)
         self.assertIn('SKIP_WAITING', script)
         self.assertIn('GET_VERSION', script)
+        self.assertIn('event.ports && event.ports[0]', script)
 
     def test_excavator_work_displays_pending_assignment_from_dispatcher(self):
         pending_truck = Equipment.objects.create(equipment_type=self.truck_type, garage_number='77')
@@ -1024,8 +1131,11 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
     def test_excavator_close_downtime_button_disabled_without_active_downtime(self):
         response = self.client.get(reverse('excavator_work'))
 
-        self.assertContains(response, 'data-eo-close-event disabled aria-disabled="true"')
-        self.assertContains(response, 'eo-primary-action is-disabled')
+        self.assertContains(response, 'data-eo-close-event')
+        self.assertContains(response, 'disabled aria-disabled="true"')
+        self.assertContains(response, 'eo-primary-action')
+        self.assertContains(response, 'is-disabled')
+        self.assertContains(response, 'data-eo-hold-label="Завершить простой"')
 
     def test_excavator_close_downtime_button_enabled_with_active_downtime(self):
         DowntimeEvent.objects.create(
@@ -1040,6 +1150,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, 'data-eo-close-event')
         self.assertNotContains(response, 'data-eo-close-event disabled aria-disabled="true"')
         self.assertNotContains(response, 'eo-primary-action is-disabled')
+        self.assertContains(response, 'Удерживайте 2 секунды, чтобы завершить простой')
 
 
 class DispatcherAssignmentRealtimeTests(TestCase):

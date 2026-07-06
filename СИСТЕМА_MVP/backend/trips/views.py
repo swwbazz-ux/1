@@ -2,7 +2,7 @@ import json
 import math
 import re
 from collections import defaultdict
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 from django.contrib import messages
 from django.db import transaction
@@ -393,7 +393,7 @@ EXCAVATOR_MANIFEST = {
 }
 
 EXCAVATOR_SERVICE_WORKER_JS = r"""
-const CACHE_NAME = "excavator-mobile-shell-v22";
+const CACHE_NAME = "excavator-mobile-shell-v41";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const CORE_ASSETS = [
@@ -401,6 +401,7 @@ const CORE_ASSETS = [
   MANIFEST_URL,
   "/static/js/realtime-client.js",
   "/static/css/app.css",
+  "/static/css/excavator-work-v41.css",
   "/static/favicon.ico",
   "/static/img/pwa/mining-master-180.png",
   "/static/img/pwa/mining-master-192.png",
@@ -503,10 +504,16 @@ self.addEventListener("message", event => {
     return;
   }
   if (event.data.type === "GET_VERSION") {
-    event.source && event.source.postMessage({
+    const target = event.ports && event.ports[0];
+    const payload = {
       type: "VERSION",
       version: CACHE_NAME
-    });
+    };
+    if (target) {
+      target.postMessage(payload);
+      return;
+    }
+    event.source && event.source.postMessage(payload);
   }
 });
 """
@@ -632,6 +639,22 @@ def add_dispatcher_detail(details, seen_labels, label, value):
 
 def dispatcher_trip_amount(trip):
     return trip.tonnage or trip.volume_m3 or Decimal('0')
+
+
+def format_whole_number(value):
+    if value in {None, ''}:
+        return ''
+    try:
+        parsed = Decimal(value)
+    except (InvalidOperation, TypeError, ValueError):
+        return str(value)
+    rounded = int(parsed.to_integral_value(rounding=ROUND_HALF_UP))
+    return f'{rounded:,}'.replace(',', ' ')
+
+
+def format_whole_value_with_unit(value, unit):
+    formatted = format_whole_number(value)
+    return f'{formatted} {unit}' if formatted and unit else formatted
 
 
 def dispatcher_chart_percent(value, max_value):
@@ -2461,6 +2484,156 @@ def excavator_work_settings_view(request):
     })
 
 
+def parse_excavator_shift_decimal(value, field_label):
+    raw_value = (
+        str(value or '')
+        .strip()
+        .replace('\u00a0', '')
+        .replace(' ', '')
+        .replace(',', '.')
+    )
+    if raw_value == '':
+        return None
+    try:
+        parsed = Decimal(raw_value)
+    except (InvalidOperation, ValueError):
+        raise ValueError(f'{field_label}: нужно указать число.')
+    if parsed < 0:
+        raise ValueError(f'{field_label}: значение не может быть меньше нуля.')
+    return parsed.quantize(Decimal('0.01'))
+
+
+def default_excavator_shift_type(now=None):
+    now = timezone.localtime(now or timezone.now())
+    return 'day' if 7 <= now.hour < 19 else 'night'
+
+
+def get_excavator_for_shift_start(employee, payload):
+    raw_excavator_id = payload.get('excavator_id') or payload.get('equipment_id') or ''
+    if raw_excavator_id:
+        try:
+            excavator_id = int(raw_excavator_id)
+        except (TypeError, ValueError):
+            return None
+        return Equipment.objects.filter(
+            id=excavator_id,
+            equipment_type__name__icontains='Экскаватор',
+            is_active=True,
+        ).first()
+
+    last_shift = (
+        EmployeeShift.objects
+        .filter(employee=employee, equipment__equipment_type__name__icontains='Экскаватор')
+        .select_related('equipment', 'equipment__equipment_type')
+        .order_by('-opened_at')
+        .first()
+    )
+    if last_shift and last_shift.equipment and last_shift.equipment.is_active:
+        return last_shift.equipment
+
+    busy_equipment_ids = EmployeeShift.objects.filter(closed_at__isnull=True, equipment_id__isnull=False).values('equipment_id')
+    return (
+        Equipment.objects
+        .filter(equipment_type__name__icontains='Экскаватор', is_active=True)
+        .exclude(id__in=busy_equipment_ids)
+        .order_by('garage_number')
+        .first()
+    )
+
+
+@require_POST
+def excavator_shift_action_view(request):
+    access = excavator_access_from_request(request)
+    if not access:
+        return JsonResponse({'ok': False, 'error': 'Нет доступа к экрану Экскаваторщика.'}, status=403)
+
+    payload = excavator_json_payload(request)
+    client_action_id = str(payload.get('client_action_id') or '').strip()
+    if not client_action_id:
+        return JsonResponse({'ok': False, 'error': 'Не передан client_action_id.'}, status=400)
+
+    action = str(payload.get('action') or payload.get('shift_action') or '').strip()
+    open_shift = get_excavator_open_shift(access.employee)
+    if action == 'toggle':
+        action = 'close' if open_shift else 'open'
+    if action not in {'open', 'close'}:
+        return JsonResponse({'ok': False, 'error': 'Неизвестное действие смены.'}, status=400)
+
+    try:
+        fuel = parse_excavator_shift_decimal(payload.get('fuel'), 'Топливо')
+        mileage = parse_excavator_shift_decimal(payload.get('mileage'), 'Пробег')
+        engine_hours = parse_excavator_shift_decimal(payload.get('engine_hours'), 'Моточасы')
+    except ValueError as error:
+        return JsonResponse({'ok': False, 'error': str(error)}, status=400)
+
+    with transaction.atomic():
+        if action == 'close':
+            open_shift = (
+                EmployeeShift.objects
+                .select_for_update(of=('self',))
+                .filter(employee=access.employee, closed_at__isnull=True)
+                .select_related('equipment')
+                .order_by('-opened_at')
+                .first()
+            )
+            if not open_shift:
+                return JsonResponse({'ok': False, 'error': 'Открытая смена уже закрыта.'}, status=409)
+            open_shift.end_fuel = fuel
+            open_shift.end_mileage = mileage
+            open_shift.end_engine_hours = engine_hours
+            open_shift.closed_at = timezone.now()
+            open_shift.closed_by = access.employee
+            open_shift.save(update_fields=['end_fuel', 'end_mileage', 'end_engine_hours', 'closed_at', 'closed_by'])
+            return JsonResponse({
+                'ok': True,
+                'action': 'shift_closed',
+                'client_action_id': client_action_id,
+                'shift_id': open_shift.id,
+                'shift_open': False,
+                'version': get_operational_state_version(),
+            })
+
+        if open_shift:
+            return JsonResponse({
+                'ok': True,
+                'action': 'shift_opened',
+                'client_action_id': client_action_id,
+                'shift_id': open_shift.id,
+                'shift_open': True,
+                'deduplicated': True,
+                'version': get_operational_state_version(),
+            })
+
+        excavator = get_excavator_for_shift_start(access.employee, payload)
+        if not excavator:
+            return JsonResponse({'ok': False, 'error': 'Не найден свободный экскаватор для начала смены.'}, status=409)
+        if EmployeeShift.objects.filter(equipment=excavator, closed_at__isnull=True).exists():
+            return JsonResponse({'ok': False, 'error': 'На этом экскаваторе уже открыта смена.'}, status=409)
+
+        shift_type = str(payload.get('shift_type') or default_excavator_shift_type())
+        if shift_type not in {'day', 'night'}:
+            shift_type = default_excavator_shift_type()
+        shift = EmployeeShift.objects.create(
+            employee=access.employee,
+            equipment=excavator,
+            shift_type=shift_type,
+            start_fuel=fuel,
+            start_mileage=mileage,
+            start_engine_hours=engine_hours,
+            opened_at=timezone.now(),
+            opened_by=access.employee,
+        )
+        return JsonResponse({
+            'ok': True,
+            'action': 'shift_opened',
+            'client_action_id': client_action_id,
+            'shift_id': shift.id,
+            'shift_open': True,
+            'equipment_id': excavator.id,
+            'version': get_operational_state_version(),
+        })
+
+
 def excavator_work_view(request):
     access_id = request.session.get('employee_access_id')
     if not access_id:
@@ -2662,6 +2835,17 @@ def excavator_work_view(request):
         if row['actual_dump_point_id']:
             completed_by_dump_id[row['actual_dump_point_id']] = row['total']
 
+    completed_shift_count = completed_queryset.count()
+    completed_shift_volume = completed_queryset.aggregate(total=Sum('volume_m3'))['total'] or Decimal('0')
+    shift_fact_meta = ''
+    if completed_shift_volume > 0:
+        shift_fact_label = 'Факт'
+        shift_fact_value = format_whole_value_with_unit(completed_shift_volume, 'м³')
+        shift_fact_meta = f'{completed_shift_count} маш.' if completed_shift_count else ''
+    else:
+        shift_fact_label = 'Отгружено'
+        shift_fact_value = f'{completed_shift_count} маш.'
+
     for card in dump_cards:
         point_id = card['point'].id
         card['completed_count'] = completed_by_dump_id[point_id]
@@ -2689,7 +2873,7 @@ def excavator_work_view(request):
             'active_trips': active_trips,
             'available_assignments_count': len(available_assignments),
             'active_trips_count': len(active_trips),
-            'completed_today_count': Trip.objects.filter(excavator_operator=access.employee, status=TripStatus.COMPLETED, completed_at__date=timezone.localdate()).count(),
+            'completed_today_count': completed_shift_count,
             'truck_cards': truck_cards,
             'dump_cards': dump_cards,
             'dump_choice_cards': dump_choice_cards,
@@ -2704,6 +2888,12 @@ def excavator_work_view(request):
             'shift_time_label': '07:00-19:00' if not open_shift or open_shift.shift_type == 'day' else '19:00-07:00',
             'excavator_label': excavator_operator_label(current_excavator),
             'shift_plan_percent': shift_plan_percent,
+            'shift_fact_label': shift_fact_label,
+            'shift_fact_value': shift_fact_value,
+            'shift_fact_meta': shift_fact_meta,
+            'shift_fuel_display': format_whole_number(open_shift.start_fuel) if open_shift else '',
+            'shift_mileage_display': format_whole_number(open_shift.start_mileage) if open_shift else '',
+            'shift_engine_hours_display': format_whole_number(open_shift.start_engine_hours) if open_shift else '',
             'active_downtime': active_downtime,
             'active_downtime_started_at': active_downtime_started_at,
             'active_downtime_elapsed_seconds': active_downtime_elapsed_seconds,
@@ -2723,7 +2913,7 @@ def excavator_work_view(request):
 def excavator_downtime_action_view(request):
     access = excavator_access_from_request(request)
     if not access:
-        return JsonResponse({'ok': False, 'error': 'Нет доступа к экрану экскаваторщика.'}, status=403)
+        return JsonResponse({'ok': False, 'error': 'Нет доступа к экрану Экскаваторщика.'}, status=403)
     open_shift = get_excavator_open_shift(access.employee)
     current_excavator = open_shift.equipment if open_shift else None
     if not current_excavator:
@@ -2779,7 +2969,6 @@ def excavator_downtime_action_view(request):
         )
     action_label = 'downtime_updated' if active_event else 'downtime_started'
     return JsonResponse(downtime_event_payload(event, action=action_label))
-
 
 def dispatcher_control_view(request, *, access_override=None, enforce_dispatcher_access=True, dispatcher_header_override=None, context_overrides=None):
     if access_override is None:

@@ -18,6 +18,7 @@
     box-sizing: border-box;
 }
 
+
 html,
 body,
 body * {
@@ -20360,6 +20361,29 @@ body.system-admin-reference-detail-screen .admin-page {
     width: auto;
 }
 
+.management-dynamics-page .management-dashboard-header {
+    grid-template-columns: minmax(650px, 1fr) minmax(190px, 360px) minmax(250px, auto);
+    gap: 12px;
+}
+
+.management-dynamics-page .management-dashboard-header-title h1 {
+    font-size: clamp(30px, 2.2vw, 42px);
+}
+
+.management-dynamics-page .management-dashboard-header-meta {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.management-dynamics-page .management-dashboard-header-meta strong {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.management-dynamics-page .management-dashboard-header-actions {
+    grid-template-columns: 50px repeat(2, 116px);
+    gap: 10px;
+}
+
 .management-dashboard-header-actions a,
 .management-dashboard-header-actions button {
     display: inline-flex;
@@ -21028,27 +21052,111 @@ a.management-shift-card:hover {
 
 .management-dynamics-filters {
     display: grid;
-    grid-template-columns: minmax(136px, .7fr) minmax(136px, .7fr) minmax(132px, .65fr) minmax(360px, 2.4fr) minmax(112px, auto);
+    grid-template-columns: repeat(12, minmax(0, 1fr));
     align-items: end;
+    gap: 10px;
     width: 100%;
+    position: relative;
+    z-index: 8;
 }
 
 .management-dynamics-content {
-    grid-template-columns: minmax(0, 1fr);
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 10px;
+    padding-bottom: 28px;
 }
 
 .management-dynamics-content > * {
-    grid-column: 1 / -1;
+    grid-column: 1 / -1 !important;
+}
+
+.management-dynamics-filters > label:nth-of-type(1),
+.management-dynamics-filters > label:nth-of-type(2) {
+    grid-column: span 2;
+}
+
+.management-dynamics-filters .management-dynamics-scale-field {
+    grid-column: span 3;
+}
+
+.management-dynamics-filters .management-dynamics-shift-field {
+    grid-column: span 2;
+}
+
+.management-dynamics-filters .management-dynamics-excavators {
+    grid-column: span 3;
+}
+
+.management-dynamics-filters > button[type="submit"] {
+    display: none;
+}
+
+.management-dynamics-filter-field {
+    display: grid;
+    gap: 6px;
+    min-width: 0;
+}
+
+.management-dynamics-filter-field > span {
+    display: block;
+    color: var(--gd-text);
+    font-size: 12px;
+    font-weight: 900;
+    line-height: 1;
+}
+
+.management-dynamics-segments {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px;
+    min-width: 0;
+}
+
+.management-dynamics-shift-segments {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+    min-width: 0;
+}
+
+.management-dynamics-segment {
+    min-width: 0;
+    min-height: 40px;
+    padding: 0 10px;
+    border: 1px solid var(--gd-line);
+    border-radius: 5px;
+    background: var(--gd-panel);
+    color: var(--gd-muted);
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 900;
+    letter-spacing: .08em;
+    line-height: 1;
+    text-transform: uppercase;
+}
+
+.management-dynamics-filters .management-dynamics-segment {
+    min-width: 0;
+    width: 100%;
+    padding: 0 8px;
+}
+
+.management-dynamics-segment.is-active {
+    background: rgba(80, 214, 74, .18);
+    border-color: var(--gd-green);
+    color: var(--gd-green);
+    box-shadow: inset 0 0 0 1px rgba(80, 214, 74, .2), 0 0 0 1px rgba(80, 214, 74, .08);
 }
 
 .management-dynamics-excavators {
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr);
-    align-items: center;
-    gap: 7px;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
     min-width: 0;
+    min-height: 62px;
     margin: 0;
-    padding: 7px;
+    padding: 8px 10px;
     border: 1px solid var(--gd-line);
     border-radius: 5px;
     background: var(--gd-panel-soft);
@@ -21063,12 +21171,152 @@ a.management-shift-card:hover {
     line-height: 1;
 }
 
-.management-dynamics-excavator-list {
+.management-dynamics-selector-head {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px;
+}
+
+.management-dynamics-selector-head strong {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--gd-text);
+    font-size: 15px;
+    font-weight: 900;
+    line-height: 1.15;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.management-dynamics-selector-toggle,
+.management-dynamics-selector-note button {
+    min-height: 30px;
+    border: 1px solid rgba(80, 214, 74, .45);
+    border-radius: 5px;
+    background: rgba(80, 214, 74, .1);
+    color: var(--gd-green);
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 900;
+    letter-spacing: .08em;
+    line-height: 1;
+    text-transform: uppercase;
+}
+
+.management-dynamics-selector-toggle {
+    padding: 0 10px;
+}
+
+.management-dynamics-filters .management-dynamics-selector-toggle,
+.management-dynamics-filters .management-dynamics-selector-note button {
+    min-width: 0;
+    width: auto;
+    padding: 0 10px;
+}
+
+.management-dynamics-selector-popover {
+    position: fixed;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    width: auto;
+    max-height: none;
+    overflow: visible;
+    padding: 20px;
+    border: 0;
+    border-radius: 0;
+    background: rgba(0, 8, 10, .62);
+    box-shadow: none;
+    z-index: 80;
+}
+
+.management-dynamics-selector-popover[hidden] {
+    display: none;
+}
+
+.management-dynamics-selector-panel {
+    width: min(760px, calc(100vw - 36px));
+    max-height: min(660px, calc(100vh - 52px));
+    overflow: auto;
+    padding: 16px;
+    border: 1px solid var(--gd-line-strong);
+    border-radius: 7px;
+    background: var(--gd-panel);
+    box-shadow: 0 22px 70px rgba(0, 0, 0, .52);
+}
+
+.management-dynamics-selector-note {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 10px;
+    color: var(--gd-muted);
+    font-size: 11px;
+    font-weight: 900;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+}
+
+.management-dynamics-selector-help {
+    max-width: 580px;
+    margin: 0 0 12px;
+    color: var(--gd-muted);
+    font-size: 13px;
+    font-weight: 700;
+    line-height: 1.35;
+}
+
+.management-dynamics-selector-actions,
+.management-dynamics-selector-footer {
     display: flex;
     flex-wrap: wrap;
-    gap: 5px;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.management-dynamics-selector-footer {
+    justify-content: flex-end;
+    margin: 14px 0 0;
+    padding-top: 12px;
+    border-top: 1px solid var(--gd-line);
+}
+
+.management-dynamics-selector-actions button,
+.management-dynamics-selector-footer button {
+    min-height: 38px;
+    padding: 0 16px;
+    border: 1px solid var(--gd-line);
+    border-radius: 5px;
+    background: var(--gd-panel-soft);
+    color: var(--gd-text);
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 900;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+}
+
+.management-dynamics-selector-footer button[type="submit"] {
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+    border-color: var(--gd-green);
+    background: rgba(80, 214, 74, .16);
+    color: var(--gd-green);
+}
+
+.management-dynamics-selector-note button {
+    padding: 0 9px;
+}
+
+.management-dynamics-excavator-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
+    gap: 7px;
     min-width: 0;
-    max-height: 76px;
+    max-height: 360px;
     overflow: auto;
     padding-right: 2px;
 }
@@ -21093,10 +21341,11 @@ a.management-shift-card:hover {
 .management-dynamics-excavator-chip span {
     display: inline-flex;
     align-items: center;
-    justify-content: center;
+    justify-content: flex-start;
+    width: 100%;
     min-width: 38px;
-    min-height: 30px;
-    padding: 0 9px;
+    min-height: 38px;
+    padding: 0 12px;
     border: 1px solid var(--gd-line);
     border-radius: 5px;
     background: var(--gd-panel);
@@ -21119,11 +21368,12 @@ a.management-shift-card:hover {
 }
 
 .management-dynamics-kpis {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
 .management-dynamics-kpis .dispatcher-report-tile {
     min-width: 0;
+    min-height: 132px;
 }
 
 .management-dynamics-kpis .dispatcher-report-tile-head {
@@ -21133,26 +21383,31 @@ a.management-shift-card:hover {
 
 .management-dynamics-kpis .dispatcher-report-tile-head h2 {
     min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    overflow-wrap: anywhere;
+    white-space: normal;
 }
 
 .management-dynamics-kpis .dispatcher-report-tile-head span {
-    max-width: 104px;
+    flex: 0 0 auto;
+    max-width: 112px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
+.management-dynamics-kpis .dispatcher-report-tile > strong {
+    overflow-wrap: anywhere;
+    white-space: normal;
+}
+
 .management-dynamics-chart-card {
-    min-height: 330px;
+    min-height: 0;
 }
 
 .management-dynamics-chart {
     display: grid;
-    gap: 8px;
-    min-height: 260px;
+    gap: 10px;
+    min-height: 0;
     padding: 12px;
     border: 1px solid var(--gd-line);
     border-radius: 6px;
@@ -21162,18 +21417,47 @@ a.management-shift-card:hover {
 .management-dynamics-chart svg {
     display: block;
     width: 100%;
-    height: 240px;
+    height: auto;
+    min-height: 360px;
+    max-height: none;
     overflow: visible;
 }
 
-.management-dynamics-chart line {
+.management-dynamics-chart line,
+.management-dynamics-chart .axis {
     stroke: var(--gd-line-strong);
-    stroke-width: 3;
+    stroke-width: 2;
 }
 
-.management-dynamics-chart line.grid {
-    stroke: var(--gd-line);
+.management-dynamics-chart line.grid,
+.management-dynamics-chart .grid {
+    stroke: rgba(145, 163, 176, .18);
     stroke-width: 1;
+    stroke-dasharray: 5 8;
+}
+
+.management-dynamics-chart .axis-label {
+    fill: var(--gd-muted);
+    font-size: 5.2px;
+    font-weight: 400;
+    letter-spacing: 0;
+    text-transform: none;
+}
+
+.management-dynamics-chart .axis-title {
+    fill: var(--gd-muted);
+    font-size: 5.8px;
+    font-weight: 400;
+    letter-spacing: 0;
+    text-transform: none;
+}
+
+.management-dynamics-chart .management-dynamics-area {
+    fill: url("#management-dynamics-area-gradient");
+    fill-opacity: 1;
+    stroke: none;
+    opacity: 1;
+    mix-blend-mode: normal;
 }
 
 .management-dynamics-chart polyline {
@@ -21181,8 +21465,46 @@ a.management-shift-card:hover {
     stroke: var(--gd-green);
     stroke-linecap: round;
     stroke-linejoin: round;
-    stroke-width: 7;
-    filter: drop-shadow(0 0 10px rgba(80, 214, 74, .22));
+    stroke-width: 2;
+    opacity: 1;
+    filter: none;
+    vector-effect: non-scaling-stroke;
+}
+
+.management-dynamics-chart polyline.is-total {
+    stroke-width: 2.2;
+    opacity: 1;
+}
+
+.management-dynamics-legend {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 9px 14px;
+    min-width: 0;
+    color: var(--gd-muted);
+    font-size: 11px;
+    font-weight: 900;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+}
+
+.management-dynamics-legend span {
+    display: inline-flex;
+    align-items: center;
+    min-width: 0;
+    max-width: 190px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.management-dynamics-legend i {
+    flex: 0 0 auto;
+    width: 18px;
+    height: 3px;
+    margin-right: 6px;
+    border-radius: 999px;
 }
 
 .management-dynamics-chart-labels {
@@ -21206,8 +21528,90 @@ a.management-shift-card:hover {
 
 .management-dynamics-grid {
     display: grid;
-    grid-template-columns: minmax(0, 1.2fr) minmax(0, .8fr);
+    grid-template-columns: minmax(0, 1.45fr) minmax(320px, .7fr);
     gap: 10px;
+}
+
+.management-dynamics-periods-card {
+    grid-column: 1 / -1;
+}
+
+.management-dynamics-table-wrap {
+    max-height: 320px;
+    overflow: auto;
+}
+
+.management-dynamics-empty {
+    min-height: 72px;
+    display: flex;
+    align-items: center;
+    padding: 12px;
+    border: 1px dashed var(--gd-line);
+    border-radius: 6px;
+    color: var(--gd-muted);
+    font-size: 13px;
+    font-weight: 800;
+}
+
+.management-dynamics-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.management-dynamics-table th,
+.management-dynamics-table td {
+    padding: 9px 10px;
+    border-bottom: 1px solid var(--gd-line);
+    color: var(--gd-text);
+    font-size: 13px;
+    font-weight: 800;
+    line-height: 1.2;
+    text-align: left;
+    white-space: nowrap;
+}
+
+.management-dynamics-table th {
+    color: var(--gd-muted);
+    font-size: 10px;
+    font-weight: 900;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+}
+
+.management-dynamics-table tr:last-child td {
+    border-bottom: 0;
+}
+
+.management-dynamics-signals {
+    display: grid;
+    gap: 8px;
+}
+
+.management-dynamics-signal {
+    min-height: 48px;
+    padding: 9px 10px 9px 13px;
+    border: 1px solid var(--gd-line);
+    border-left: 5px solid var(--gd-muted);
+    border-radius: 5px;
+    background: var(--gd-panel-soft);
+    color: var(--gd-muted);
+    font-size: 13px;
+    font-weight: 800;
+    line-height: 1.25;
+}
+
+.management-dynamics-signal.is-green {
+    border-left-color: var(--gd-green);
+    color: var(--gd-text);
+}
+
+.management-dynamics-signal.is-cyan {
+    border-left-color: var(--gd-cyan);
+    color: var(--gd-text);
+}
+
+.management-dynamics-signal.is-neutral {
+    border-left-color: var(--gd-line-strong);
 }
 
 .management-dynamics-bars {
@@ -21280,7 +21684,9 @@ a.management-shift-card:hover {
 .dispatcher-day .management-dynamics-chart,
 .dispatcher-day .management-dynamics-bar-row,
 .dispatcher-day .management-dynamics-excavators,
-.dispatcher-day .management-dynamics-excavator-chip span {
+.dispatcher-day .management-dynamics-excavator-chip span,
+.dispatcher-day .management-dynamics-selector-popover,
+.dispatcher-day .management-dynamics-signal {
     background: #ffffff;
 }
 
@@ -23888,6 +24294,22 @@ body.mining-master-screen .dispatcher-complex-card .complex-truck-tile {
         grid-template-columns: repeat(3, minmax(0, 1fr));
     }
 
+    .management-dynamics-filters {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .management-dynamics-excavators {
+        grid-column: 1 / -1;
+    }
+
+    .management-dynamics-kpis {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .management-dynamics-grid {
+        grid-template-columns: 1fr;
+    }
+
     .management-dashboard-layout {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
@@ -23939,6 +24361,17 @@ body.mining-master-screen .dispatcher-complex-card .complex-truck-tile {
         width: 100%;
     }
 
+    .management-dynamics-page .management-dashboard-header,
+    .management-dynamics-page .management-dashboard-header-meta,
+    .management-dynamics-page .management-dashboard-header-actions {
+        grid-template-columns: 1fr;
+    }
+
+    .management-dynamics-page .management-dashboard-header-title h1 {
+        font-size: clamp(28px, 10vw, 42px);
+        white-space: normal;
+    }
+
     .dispatcher-shell {
         padding: 6px;
     }
@@ -23987,13 +24420,35 @@ body.mining-master-screen .dispatcher-complex-card .complex-truck-tile {
     .dispatcher-reports-layout,
     .dispatcher-management-layout,
     .management-dashboard-kpis,
+    .management-dynamics-kpis,
     .management-dashboard-layout {
         grid-template-columns: 1fr;
     }
 
     .management-dashboard-filters,
+    .management-dynamics-filters,
     .management-shift-card {
         grid-template-columns: 1fr;
+    }
+
+    .management-dynamics-selector-popover {
+        left: 0;
+        right: 0;
+        width: auto;
+        max-height: 360px;
+    }
+
+    .management-dynamics-chart-card {
+        min-height: 360px;
+    }
+
+    .management-dynamics-chart {
+        min-height: 0;
+    }
+
+    .management-dynamics-chart svg {
+        height: auto;
+        min-height: 240px;
     }
 
     .dispatcher-clock {
@@ -27409,10 +27864,11 @@ body.excavator-operator-screen {
     --eo-red: #ff4540;
     --eo-blue: #2f8cf0;
     --eo-orange: #ff9a36;
+    --eo-bottom-nav-gap: 10px;
     position: relative;
     display: grid;
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: 42px minmax(0, 1fr) 66px;
+    grid-template-rows: 42px minmax(0, 1fr) calc(66px + var(--eo-bottom-nav-gap));
     width: min(100vw, 390px);
     height: 100dvh;
     min-height: 0;
@@ -27993,7 +28449,7 @@ body.excavator-operator-screen {
 }
 
 .eo-shell[data-eo-active-tab="trucks"] {
-    grid-template-rows: minmax(0, 1fr) 66px;
+    grid-template-rows: minmax(0, 1fr) calc(66px + var(--eo-bottom-nav-gap));
 }
 
 .eo-shell[data-eo-active-tab="trucks"] .eo-topbar {
@@ -28513,11 +28969,13 @@ body.excavator-operator-screen {
 }
 
 .eo-primary-action {
+    position: relative;
     display: grid;
     place-items: center;
     width: 100%;
     min-height: 46px;
     margin-top: auto;
+    overflow: hidden;
     border: 1px solid #58df52;
     border-radius: 7px;
     background: rgba(40, 130, 42, .18);
@@ -28532,6 +28990,8 @@ body.excavator-operator-screen {
     cursor: pointer;
     box-shadow: inset 0 0 22px rgba(88, 223, 82, .08), 0 12px 22px rgba(0, 0, 0, .26);
     transition: transform .16s ease, box-shadow .16s ease, filter .16s ease, background .16s ease;
+    touch-action: none;
+    user-select: none;
 }
 
 .eo-primary-action.is-danger {
@@ -28556,31 +29016,142 @@ body.excavator-operator-screen {
     opacity: .78;
 }
 
+.eo-hold-action {
+    position: relative;
+    overflow: hidden;
+    touch-action: none;
+    user-select: none;
+}
+
+.eo-hold-action::before {
+    content: "";
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: var(--eo-action-hold, 0%);
+    background: linear-gradient(90deg, rgba(88, 223, 82, .34), rgba(88, 223, 82, .1));
+    transition: width .08s linear;
+}
+
+.eo-hold-action.status-red::before,
+.eo-hold-action.is-danger::before {
+    background: linear-gradient(90deg, rgba(255, 69, 64, .36), rgba(255, 69, 64, .1));
+}
+
+.eo-hold-action.status-yellow::before {
+    background: linear-gradient(90deg, rgba(255, 216, 0, .34), rgba(255, 216, 0, .1));
+}
+
+.eo-hold-action.status-orange::before {
+    background: linear-gradient(90deg, rgba(255, 154, 54, .34), rgba(255, 154, 54, .1));
+}
+
+.eo-hold-action.status-blue::before {
+    background: linear-gradient(90deg, rgba(110, 178, 255, .34), rgba(110, 178, 255, .1));
+}
+
+.eo-hold-action.is-holding {
+    filter: brightness(1.08);
+}
+
+.eo-hold-action.is-pending {
+    cursor: progress;
+}
+
 .eo-shift-metrics {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 8px;
+    gap: 7px;
 }
 
 .eo-shift-metrics .eo-field-card {
-    min-height: 94px;
-    padding: 10px;
+    min-height: 76px;
+    padding: 9px 10px;
 }
 
 .eo-shift-metrics input {
-    font-size: 25px;
+    font-size: clamp(23px, 3.7dvh, 27px);
+}
+
+.eo-shift-metric-value {
+    display: flex;
+    align-items: baseline;
+    justify-content: flex-end;
+    gap: 6px;
+    min-width: 0;
+}
+
+.eo-shift-metric-value em {
+    flex: 0 0 auto;
+    color: rgba(203, 214, 220, .74);
+    font-size: 13px;
+    font-style: normal;
+    font-weight: 900;
+    line-height: 1;
+}
+
+.eo-shift-section {
+    display: grid;
+    gap: 8px;
+    width: 100%;
+    min-width: 0;
+    padding: 10px;
+    border: 1px solid rgba(139, 159, 170, .26);
+    border-radius: 9px;
+    background: rgba(9, 15, 19, .54);
+    box-sizing: border-box;
+}
+
+.eo-shift-section + .eo-shift-section {
+    margin-top: 8px;
+}
+
+.eo-shift-section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    min-width: 0;
+}
+
+.eo-shift-section-head span {
+    overflow: hidden;
+    color: #cbd6dc;
+    font-size: 13px;
+    font-weight: 900;
+    line-height: 1;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.eo-shift-section-head b {
+    flex: 0 0 auto;
+    display: inline-grid;
+    place-items: center;
+    width: auto;
+    min-height: 26px;
+    padding: 0 10px;
+    border: 1px solid rgba(139, 159, 170, .34);
+    border-radius: 999px;
+    background: rgba(18, 26, 32, .78);
+    color: #dce5e9;
+    font-size: 12px;
+    font-weight: 900;
+    line-height: 1;
+    letter-spacing: 0;
+    text-transform: none;
 }
 
 .eo-shift-face {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px;
-    margin-top: 10px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 7px;
 }
 
 .eo-shift-face > div {
-    min-height: 104px;
-    padding: 14px;
+    min-height: 72px;
+    padding: 10px;
     border: 1px solid var(--eo-line);
     border-radius: 7px;
     background: rgba(18, 26, 32, .9);
@@ -28589,19 +29160,142 @@ body.excavator-operator-screen {
 
 .eo-shift-face span {
     display: block;
-    margin-bottom: 6px;
+    margin-bottom: 5px;
     color: var(--eo-muted);
-    font-size: 17px;
+    font-size: 13px;
     font-weight: 800;
+    line-height: 1;
 }
 
 .eo-shift-face strong {
     display: block;
     overflow: hidden;
     color: #f3f7f8;
-    font-size: 31px;
+    font-size: clamp(23px, 3.8dvh, 29px);
     font-weight: 900;
     line-height: 1;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.eo-shift-dump-panel {
+    border-color: rgba(255, 210, 0, .34);
+    background:
+        linear-gradient(180deg, rgba(255, 210, 0, .05), transparent 52%),
+        rgba(9, 15, 19, .54);
+}
+
+.eo-shift-dump-list {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px;
+}
+
+.eo-shift-dump-chip {
+    display: grid;
+    align-content: center;
+    min-width: 0;
+    min-height: 58px;
+    padding: 9px 10px;
+    border: 1px solid rgba(139, 159, 170, .34);
+    border-radius: 8px;
+    background: rgba(18, 26, 32, .86);
+    color: #dce5e9;
+    text-align: left;
+    box-sizing: border-box;
+}
+
+.eo-shift-dump-chip.is-primary {
+    border-color: var(--eo-yellow);
+    background: rgba(76, 55, 0, .7);
+    color: var(--eo-yellow);
+}
+
+.eo-shift-dump-chip strong {
+    overflow: hidden;
+    font-size: 18px;
+    font-weight: 900;
+    line-height: 1.05;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.eo-shift-dump-chip span {
+    margin-top: 5px;
+    overflow: hidden;
+    color: currentColor;
+    opacity: .72;
+    font-size: 12px;
+    font-weight: 800;
+    line-height: 1;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.eo-shift-dump-empty {
+    grid-column: 1 / -1;
+    min-height: 58px;
+    display: grid;
+    place-items: center;
+    border: 1px dashed rgba(139, 159, 170, .34);
+    border-radius: 8px;
+    color: var(--eo-muted);
+    font-size: 17px;
+    font-weight: 900;
+    text-align: center;
+}
+
+.eo-shift-result-panel {
+    border-color: rgba(88, 223, 82, .26);
+}
+
+.eo-shift-result-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px;
+}
+
+.eo-shift-result-grid > div {
+    min-height: 58px;
+    padding: 10px;
+    border: 1px solid rgba(139, 159, 170, .28);
+    border-radius: 7px;
+    background: rgba(18, 26, 32, .82);
+    box-sizing: border-box;
+}
+
+.eo-shift-result-grid span {
+    display: block;
+    margin-bottom: 5px;
+    color: var(--eo-muted);
+    font-size: 12px;
+    font-weight: 900;
+    line-height: 1;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+}
+
+.eo-shift-result-grid strong {
+    display: block;
+    overflow: hidden;
+    color: #f3f7f8;
+    font-size: clamp(22px, 3.5dvh, 28px);
+    font-weight: 900;
+    line-height: 1;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.eo-shift-result-grid em {
+    display: block;
+    overflow: hidden;
+    margin-top: 2px;
+    color: rgba(203, 214, 220, .72);
+    font-size: 11px;
+    font-style: normal;
+    font-weight: 900;
+    line-height: 1;
+    text-transform: uppercase;
     white-space: nowrap;
     text-overflow: ellipsis;
 }
@@ -29090,6 +29784,7 @@ body.excavator-operator-screen {
 
 body.excavator-operator-screen .mm-mobile-bottom-nav {
     grid-row: 3;
+    align-self: end;
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
     width: 100%;
@@ -29112,19 +29807,30 @@ body.excavator-operator-screen .eo-screen.mm-mobile-shift-form {
     min-height: 0;
 }
 
+body.excavator-operator-screen .eo-shift-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 112px;
+    gap: 8px;
+    width: 100%;
+    margin-top: auto;
+    min-width: 0;
+}
+
 body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .mm-mobile-shift-button {
     appearance: none;
+    position: relative;
     display: grid;
     place-items: center;
     width: 100%;
     min-height: 46px;
-    margin-top: auto;
+    margin-top: 0;
+    overflow: hidden;
     border: 1px solid #58df52;
     border-radius: 7px;
     background: rgba(40, 130, 42, .18);
     color: #58df52 !important;
     font: inherit;
-    font-size: 21px;
+    font-size: 18px;
     font-weight: 900;
     letter-spacing: 0;
     line-height: 1.12;
@@ -29133,6 +29839,8 @@ body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .mm-mobile-shift-
     cursor: pointer;
     box-shadow: inset 0 0 22px rgba(88, 223, 82, .08), 0 12px 22px rgba(0, 0, 0, .26);
     transition: transform .16s ease, box-shadow .16s ease, filter .16s ease, background .16s ease;
+    touch-action: none;
+    user-select: none;
     box-sizing: border-box;
 }
 
@@ -29143,12 +29851,524 @@ body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .mm-mobile-shift-
     box-shadow: inset 0 0 22px rgba(255, 69, 64, .08), 0 12px 22px rgba(0, 0, 0, .26);
 }
 
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .mm-mobile-shift-button.is-danger::before {
+    content: "";
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: var(--eo-shift-hold, 0%);
+    background: linear-gradient(90deg, rgba(255, 69, 64, .38), rgba(255, 69, 64, .12));
+    transition: width .08s linear;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .mm-mobile-shift-button span {
+    position: relative;
+    z-index: 1;
+    white-space: nowrap;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .mm-mobile-shift-button.is-holding {
+    filter: brightness(1.08);
+}
+
 body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .mm-mobile-shift-button:disabled {
     border-color: rgba(133, 153, 164, .32);
     color: rgba(176, 190, 198, .42);
     background: rgba(24, 34, 41, .44);
     box-shadow: none;
     cursor: not-allowed;
+}
+
+body.excavator-operator-screen .eo-logout-button {
+    appearance: none;
+    position: relative;
+    display: grid;
+    place-items: center;
+    min-width: 0;
+    min-height: 46px;
+    padding: 0 10px;
+    overflow: hidden;
+    border: 1px solid rgba(139, 159, 170, .44);
+    border-radius: 7px;
+    background: rgba(18, 26, 32, .76);
+    color: #cbd6dc;
+    font: inherit;
+    font-size: 18px;
+    font-weight: 900;
+    line-height: 1;
+    letter-spacing: 0;
+    text-align: center;
+    text-transform: uppercase;
+    cursor: pointer;
+    box-shadow: inset 0 0 18px rgba(139, 159, 170, .06), 0 12px 22px rgba(0, 0, 0, .22);
+    touch-action: none;
+    user-select: none;
+    box-sizing: border-box;
+}
+
+body.excavator-operator-screen .eo-logout-button::before {
+    content: "";
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: var(--eo-logout-hold, 0%);
+    background: linear-gradient(90deg, rgba(139, 159, 170, .28), rgba(139, 159, 170, .08));
+    transition: width .08s linear;
+}
+
+body.excavator-operator-screen .eo-logout-button span {
+    position: relative;
+    z-index: 1;
+    white-space: nowrap;
+}
+
+body.excavator-operator-screen .eo-logout-button.is-holding {
+    filter: brightness(1.08);
+}
+
+body.excavator-operator-screen .eo-logout-button.is-pending,
+body.excavator-operator-screen .eo-logout-button:disabled {
+    border-color: rgba(133, 153, 164, .32);
+    background: rgba(24, 34, 41, .44);
+    color: rgba(176, 190, 198, .62);
+    box-shadow: none;
+    cursor: progress;
+}
+
+@media (max-width: 370px) {
+    body.excavator-operator-screen .eo-shift-actions {
+        grid-template-columns: minmax(0, 1fr) 96px;
+        gap: 7px;
+    }
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .mm-mobile-shift-button,
+    body.excavator-operator-screen .eo-logout-button {
+        font-size: 16px;
+    }
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form {
+    gap: 0;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form h1 {
+    margin-bottom: 7px;
+    font-size: 32px;
+    line-height: 1;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-section {
+    gap: 6px;
+    padding: 8px;
+    border-radius: 8px;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-section + .eo-shift-section {
+    margin-top: 6px;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-section-head span {
+    font-size: 12px;
+    letter-spacing: .08em;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-section-head b {
+    min-height: 24px;
+    padding: 0 9px;
+    font-size: 11.5px;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-metrics {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 6px;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-metrics .eo-field-card {
+    display: grid;
+    grid-template-columns: minmax(96px, .85fr) minmax(130px, 1.15fr);
+    align-items: center;
+    gap: 10px;
+    min-height: clamp(40px, 5.4dvh, 46px);
+    padding: 6px 12px;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-metrics .eo-field-card span,
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-face span {
+    margin-bottom: 0;
+    font-size: 12px;
+    font-weight: 800;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-metrics input {
+    overflow: hidden;
+    font-size: clamp(22px, 3.1dvh, 26px);
+    line-height: 1;
+    text-align: right;
+    text-overflow: ellipsis;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-metric-value {
+    justify-self: end;
+    width: 100%;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-metric-value em {
+    font-size: 12px;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-face {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-face > div {
+    min-height: 54px;
+    padding: 8px 10px;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-face .eo-shift-rock {
+    grid-column: 1 / -1;
+    min-height: 54px;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-face strong {
+    font-size: clamp(20px, 2.8dvh, 24px);
+    line-height: 1.08;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-face .eo-shift-rock strong {
+    overflow: visible;
+    white-space: normal;
+    text-overflow: clip;
+    overflow-wrap: anywhere;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-dump-list {
+    gap: 6px;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-dump-chip,
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-dump-empty {
+    min-height: 48px;
+    padding: 8px 10px;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-dump-chip strong {
+    font-size: 17px;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-grid {
+    gap: 6px;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-grid > div {
+    min-height: 46px;
+    padding: 6px 10px;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-grid span {
+    margin-bottom: 2px;
+    font-size: 10px;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-grid strong {
+    font-size: clamp(18px, 2.55dvh, 21px);
+    line-height: 1.05;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-grid em {
+    margin-top: 1px;
+    font-size: 9px;
+}
+
+body.excavator-operator-screen .eo-shift-titlebar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 7px;
+}
+
+body.excavator-operator-screen .eo-shell {
+    max-width: 100%;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-titlebar h1 {
+    min-width: 0;
+    margin: 0;
+    font-size: clamp(28px, 4.3dvh, 31px);
+    font-weight: 700;
+    letter-spacing: 0;
+    line-height: 1;
+}
+
+body.excavator-operator-screen .eo-shift-update-button {
+    appearance: none;
+    display: inline-grid;
+    grid-template-columns: auto minmax(0, auto);
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-width: 0;
+    min-height: 32px;
+    max-width: 132px;
+    padding: 0 10px;
+    border: 1px solid rgba(139, 159, 170, .44);
+    border-radius: 999px;
+    background: rgba(18, 27, 33, .7);
+    color: #cbd6dc;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1;
+    cursor: pointer;
+    box-shadow: inset 0 0 16px rgba(139, 159, 170, .05), 0 8px 18px rgba(0, 0, 0, .18);
+    box-sizing: border-box;
+}
+
+body.excavator-operator-screen .eo-shift-update-button > span {
+    position: relative;
+    display: block;
+    width: 14px;
+    height: 14px;
+    border: 2px solid currentColor;
+    border-left-color: transparent;
+    border-radius: 50%;
+    opacity: .82;
+}
+
+body.excavator-operator-screen .eo-shift-update-button > span::after {
+    content: "";
+    position: absolute;
+    top: -3px;
+    right: -4px;
+    width: 0;
+    height: 0;
+    border-top: 4px solid transparent;
+    border-bottom: 4px solid transparent;
+    border-left: 5px solid currentColor;
+    transform: rotate(-35deg);
+}
+
+body.excavator-operator-screen .eo-shift-update-button b,
+body.excavator-operator-screen .eo-shift-update-button em {
+    min-width: 0;
+    overflow: hidden;
+    font-style: normal;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+body.excavator-operator-screen .eo-shift-update-button em {
+    grid-column: 1 / -1;
+    color: #58df52;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .02em;
+}
+
+body.excavator-operator-screen .eo-shift-update-button.has-pwa-update {
+    grid-template-columns: auto minmax(0, auto);
+    border-color: rgba(255, 216, 0, .7);
+    background: rgba(74, 60, 0, .28);
+    color: #ffd800;
+}
+
+body.excavator-operator-screen .eo-shift-update-button.is-current {
+    border-color: rgba(88, 223, 82, .5);
+    color: #58df52;
+}
+
+body.excavator-operator-screen .eo-shift-update-button.is-checking > span {
+    animation: eo-update-spin .78s linear infinite;
+}
+
+body.excavator-operator-screen .eo-shift-update-button:disabled {
+    opacity: .78;
+    cursor: progress;
+}
+
+@keyframes eo-update-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+body.excavator-operator-screen .eo-topbar-cell strong {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0;
+}
+
+body.excavator-operator-screen .eo-face-cell strong {
+    font-size: 11px;
+    font-weight: 650;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-section-head span {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: .055em;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-section-head b {
+    font-size: 11px;
+    font-weight: 700;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-metrics .eo-field-card span,
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-face span {
+    color: rgba(203, 214, 220, .78);
+    font-size: 13px;
+    font-weight: 500;
+    letter-spacing: 0;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-metrics input {
+    font-size: clamp(20px, 2.65dvh, 23px);
+    font-weight: 700;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-metric-value em {
+    color: rgba(203, 214, 220, .72);
+    font-size: 12px;
+    font-weight: 500;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-face strong {
+    font-size: clamp(19px, 2.55dvh, 22px);
+    font-weight: 700;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-face .eo-shift-rock strong {
+    font-size: clamp(18px, 2.35dvh, 21px);
+    line-height: 1.12;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-dump-chip strong {
+    font-size: 16px;
+    font-weight: 700;
+    line-height: 1.05;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-dump-chip span {
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-grid span {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: .055em;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-grid strong {
+    font-size: clamp(18px, 2.45dvh, 20px);
+    font-weight: 700;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-grid em {
+    color: rgba(203, 214, 220, .72);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .mm-mobile-shift-button,
+body.excavator-operator-screen .eo-logout-button {
+    min-height: 44px;
+    font-size: 16px;
+    font-weight: 800;
+    letter-spacing: .02em;
+}
+
+@media (max-width: 370px) {
+    body.excavator-operator-screen .eo-shift-titlebar {
+        gap: 8px;
+    }
+
+    body.excavator-operator-screen .eo-shift-update-button {
+        max-width: 112px;
+        padding: 0 8px;
+        font-size: 11px;
+    }
+}
+
+@media (max-height: 760px) {
+    body.excavator-operator-screen .eo-shift-titlebar {
+        margin-bottom: 5px;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-titlebar h1 {
+        font-size: 29px !important;
+    }
+
+    body.excavator-operator-screen .eo-shift-update-button {
+        min-height: 30px !important;
+        height: 30px !important;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-section {
+        gap: 5px;
+        padding: 5px 8px !important;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-section + .eo-shift-section {
+        margin-top: 5px;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-section-head b {
+        min-height: 22px;
+        padding: 0 8px;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-metrics {
+        gap: 4px;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-metrics .eo-field-card {
+        min-height: 34px !important;
+        height: 34px !important;
+        padding: 3px 10px !important;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-metrics input {
+        font-size: 20px !important;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-face > div,
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-face .eo-shift-rock {
+        min-height: 46px !important;
+        height: 46px !important;
+        padding: 6px 9px !important;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-face strong {
+        font-size: 19px !important;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-dump-chip,
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-dump-empty {
+        min-height: 40px !important;
+        height: 40px !important;
+        padding: 5px 9px !important;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-grid > div {
+        min-height: 50px !important;
+        height: 50px !important;
+        padding: 5px 10px !important;
+    }
+
+    body.excavator-operator-screen .eo-shift-actions {
+        gap: 6px;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .mm-mobile-shift-button,
+    body.excavator-operator-screen .eo-logout-button {
+        min-height: 40px !important;
+        height: 40px !important;
+    }
 }
 
 body.excavator-operator-screen .mm-mobile-nav-item {

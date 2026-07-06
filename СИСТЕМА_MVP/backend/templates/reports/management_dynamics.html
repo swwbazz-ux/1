@@ -1,12 +1,12 @@
 {% extends "base.html" %}
 
 {% block title %}Динамика экскаваторов{% endblock %}
-{% block body_class %}dispatcher-control-screen{% endblock %}
+{% block body_class %}dispatcher-control-screen management-dynamics-page{% endblock %}
 
 {% block body %}
 <main class="dispatcher-shell dispatcher-analytics-shell management-linked-report" data-dispatcher-theme>
     <section class="dispatcher-analytics-board management-dashboard-board management-linked-report-board" aria-label="Динамика экскаваторов" data-management-dynamics-refresh-root>
-        {% include "reports/includes/management_report_header.html" with active="dynamics" title="Динамика экскаваторов" subtitle="Выработка экскаваторов по периоду, сменам, часам и месяцам." %}
+        {% include "reports/includes/management_report_header.html" with active="dynamics" title="Динамика экскаваторов" subtitle="Выработка экскаваторов по периоду, сменам, часам и месяцам." section_label="Динамика" %}
         <div class="management-linked-report-content management-dynamics-content">
             <form class="dispatcher-report-filters management-dashboard-filters management-dynamics-filters" method="get" data-auto-filter-form>
                 <label>
@@ -17,28 +17,64 @@
                     <span>По дату</span>
                     <input type="date" name="date_to" value="{{ date_to_value }}">
                 </label>
-                <label>
+                <div class="management-dynamics-filter-field management-dynamics-scale-field">
                     <span>Масштаб</span>
-                    <select name="granularity">
-                        <option value="hour" {% if granularity == 'hour' %}selected{% endif %}>Часы</option>
-                        <option value="shift" {% if granularity == 'shift' %}selected{% endif %}>Смены</option>
-                        <option value="day" {% if granularity == 'day' %}selected{% endif %}>Дни</option>
-                        <option value="month" {% if granularity == 'month' %}selected{% endif %}>Месяцы</option>
-                    </select>
-                </label>
+                    <input type="hidden" name="granularity" value="{{ granularity }}" data-management-dynamics-granularity-input>
+                    <div class="management-dynamics-segments" role="group" aria-label="Масштаб графика">
+                        <button type="button" class="management-dynamics-segment {% if granularity == 'hour' %}is-active{% endif %}" data-management-dynamics-granularity="hour">Часы</button>
+                        <button type="button" class="management-dynamics-segment {% if granularity == 'shift' %}is-active{% endif %}" data-management-dynamics-granularity="shift">Смены</button>
+                        <button type="button" class="management-dynamics-segment {% if granularity == 'day' %}is-active{% endif %}" data-management-dynamics-granularity="day">Дни</button>
+                        <button type="button" class="management-dynamics-segment {% if granularity == 'month' %}is-active{% endif %}" data-management-dynamics-granularity="month">Мес.</button>
+                    </div>
+                </div>
+                <div class="management-dynamics-filter-field management-dynamics-shift-field">
+                    <span>Смена</span>
+                    <input type="hidden" name="shift_type" value="{{ shift_type }}" data-management-dynamics-shift-input>
+                    <div class="management-dynamics-shift-segments" role="group" aria-label="Смена графика">
+                        <button type="button" class="management-dynamics-segment {% if shift_type == 'day' %}is-active{% endif %}" data-management-dynamics-shift="day">День</button>
+                        <button type="button" class="management-dynamics-segment {% if shift_type == 'night' %}is-active{% endif %}" data-management-dynamics-shift="night">Ночь</button>
+                    </div>
+                </div>
                 <fieldset class="management-dynamics-excavators">
                     <legend>Экскаваторы</legend>
-                    <label class="management-dynamics-excavator-chip management-dynamics-excavator-all">
-                        <input type="checkbox" data-management-dynamics-all {% if not selected_excavator_ids %}checked{% endif %}>
-                        <span>Все</span>
-                    </label>
-                    <div class="management-dynamics-excavator-list">
-                        {% for excavator in excavator_choices %}
-                            <label class="management-dynamics-excavator-chip" title="{% if excavator.garage_number %}Экскаватор {{ excavator.garage_number }}{% else %}{{ excavator }}{% endif %}">
-                                <input type="checkbox" name="excavators" value="{{ excavator.id }}" {% if excavator.id in selected_excavator_ids %}checked{% endif %}>
-                                <span>{% if excavator.garage_number %}{{ excavator.garage_number }}{% else %}{{ excavator }}{% endif %}</span>
-                            </label>
-                        {% endfor %}
+                    <div class="management-dynamics-selector-head">
+                        <strong data-management-dynamics-selection-summary>
+                            {% if selected_excavator_ids %}
+                                Выбрано: {{ selected_excavator_ids|length }}
+                            {% else %}
+                                Все активные экскаваторы
+                            {% endif %}
+                        </strong>
+                        <button class="management-dynamics-selector-toggle" type="button" data-management-dynamics-selector-toggle>Изменить</button>
+                    </div>
+                    <div class="management-dynamics-selector-popover" data-management-dynamics-selector-popover hidden>
+                        <div class="management-dynamics-selector-panel" role="dialog" aria-modal="true" aria-label="Выбор экскаваторов">
+                            <div class="management-dynamics-selector-note">
+                                <span>Выбор экскаваторов</span>
+                                <button type="button" data-management-dynamics-selector-close>Закрыть</button>
+                            </div>
+                            <p class="management-dynamics-selector-help">Можно выбрать один экскаватор, несколько машин или всю текущую активную технику из справочника.</p>
+                            <div class="management-dynamics-selector-actions">
+                                <button type="button" data-management-dynamics-select-all>Все</button>
+                                <button type="button" data-management-dynamics-clear-all>Снять</button>
+                            </div>
+                            <div class="management-dynamics-excavator-list">
+                                <label class="management-dynamics-excavator-chip management-dynamics-excavator-all">
+                                    <input type="checkbox" data-management-dynamics-all {% if not selected_excavator_ids %}checked{% endif %}>
+                                    <span>Все активные</span>
+                                </label>
+                                {% for excavator in excavator_choices %}
+                                    <label class="management-dynamics-excavator-chip" title="{% if excavator.garage_number %}Экскаватор {{ excavator.garage_number }}{% else %}{{ excavator }}{% endif %}">
+                                        <input type="checkbox" name="excavators" value="{{ excavator.id }}" data-excavator-label="{% if excavator.garage_number %}{{ excavator.garage_number }}{% else %}{{ excavator }}{% endif %}" {% if excavator.id in selected_excavator_ids %}checked{% endif %}>
+                                        <span>{% if excavator.garage_number %}ЭКС {{ excavator.garage_number }}{% else %}{{ excavator }}{% endif %}</span>
+                                    </label>
+                                {% endfor %}
+                            </div>
+                            <div class="management-dynamics-selector-footer">
+                                <button type="button" data-management-dynamics-selector-close>Отмена</button>
+                                <button type="submit">Применить</button>
+                            </div>
+                        </div>
                     </div>
                 </fieldset>
                 <button type="submit">Показать</button>
@@ -46,87 +82,125 @@
 
             <section class="management-dashboard-kpis management-dynamics-kpis" aria-label="Ключевые показатели динамики">
                 <article class="dispatcher-report-tile success">
-                    <div class="dispatcher-report-tile-head"><h2>Объем</h2><span>{{ dynamics.granularity_label }}</span></div>
-                    <strong>{{ dynamics.total_volume_display }} м3</strong>
-                    <p>по выбранным экскаваторам</p>
+                    <div class="dispatcher-report-tile-head"><h2>Общий объем</h2><span>м3</span></div>
+                    <strong>{{ dynamics.total_volume_display }}</strong>
+                    <p>{{ dynamics.granularity_label }}</p>
                 </article>
-                <article class="dispatcher-report-tile">
-                    <div class="dispatcher-report-tile-head"><h2>Рейсы</h2><span>отгрузка</span></div>
+                <article class="dispatcher-report-tile success">
+                    <div class="dispatcher-report-tile-head"><h2>Рейсов</h2><span>учтено</span></div>
                     <strong>{{ dynamics.trip_count }}</strong>
-                    <p>учтенные рейсы загрузки</p>
+                    <p>загрузки за период</p>
                 </article>
                 <article class="dispatcher-report-tile">
-                    <div class="dispatcher-report-tile-head"><h2>Экскаваторы</h2><span>в выборке</span></div>
+                    <div class="dispatcher-report-tile-head"><h2>Экскаваторов</h2><span>выборка</span></div>
                     <strong>{{ dynamics.excavator_count }}</strong>
                     <p>с объемом за период</p>
                 </article>
                 <article class="dispatcher-report-tile">
-                    <div class="dispatcher-report-tile-head"><h2>Периоды</h2><span>точки графика</span></div>
-                    <strong>{{ dynamics.bucket_count }}</strong>
-                    <p>максимум {{ dynamics.max_bucket_volume_display }} м3</p>
+                    <div class="dispatcher-report-tile-head"><h2>Лучший</h2><span>период</span></div>
+                    <strong>{% if dynamics.best_excavator %}{{ dynamics.best_excavator.label }}{% else %}—{% endif %}</strong>
+                    <p>{% if dynamics.best_excavator %}{{ dynamics.best_excavator.volume_display }} м3{% else %}нет данных{% endif %}</p>
+                </article>
+                <article class="dispatcher-report-tile">
+                    <div class="dispatcher-report-tile-head"><h2>Максимум</h2><span>точка</span></div>
+                    <strong>{% if dynamics.peak_bucket %}{{ dynamics.peak_bucket.volume_display }} м3{% else %}—{% endif %}</strong>
+                    <p>{% if dynamics.peak_bucket %}{{ dynamics.peak_bucket.label }}{% else %}нет данных{% endif %}</p>
                 </article>
             </section>
 
             <article class="dispatcher-report-card dispatcher-report-card-wide management-dynamics-chart-card">
                 <div class="dispatcher-report-card-head">
-                    <h2>График выработки</h2>
-                    <span>{{ dynamics.granularity_label }}</span>
-                </div>
-                {% if dynamics.bucket_rows %}
-                    <div class="management-dynamics-chart" aria-label="График объема по времени">
-                        <svg viewBox="0 0 1000 260" role="img" aria-label="Динамика объема">
-                            <line x1="32" y1="40" x2="32" y2="220"></line>
-                            <line x1="32" y1="220" x2="968" y2="220"></line>
-                            <line class="grid" x1="32" y1="160" x2="968" y2="160"></line>
-                            <line class="grid" x1="32" y1="100" x2="968" y2="100"></line>
-                            <polyline points="{{ dynamics.chart_points }}"></polyline>
-                        </svg>
-                        <div class="management-dynamics-chart-labels">
-                            {% for row in dynamics.bucket_rows %}
-                                <span>{{ row.label }}</span>
-                            {% endfor %}
-                        </div>
+                    <div>
+                        <h2>График выработки</h2>
+                        <span>Ось X — {{ dynamics.granularity_label }}, ось Y — кубы</span>
                     </div>
-                {% else %}
-                    <div class="message info">За выбранный период отгрузки по экскаваторам пока нет.</div>
-                {% endif %}
+                    <div class="management-dynamics-legend">
+                        {% for series in dynamics.chart_series %}
+                            <span><i style="background: {{ series.color }};"></i>{{ series.label }}</span>
+                        {% endfor %}
+                    </div>
+                </div>
+                <div class="management-dynamics-chart">
+                    {% if dynamics.bucket_rows %}
+                        <svg viewBox="0 0 1000 320" role="img" aria-label="Динамика объема">
+                            <defs>
+                                <linearGradient id="management-dynamics-area-gradient" x1="0" y1="250" x2="0" y2="36" gradientUnits="userSpaceOnUse">
+                                    <stop offset="0%" stop-color="#7de05e" stop-opacity="0.42"></stop>
+                                    <stop offset="55%" stop-color="#7de05e" stop-opacity="0.24"></stop>
+                                    <stop offset="100%" stop-color="#7de05e" stop-opacity="0.10"></stop>
+                                </linearGradient>
+                            </defs>
+                            {% for series in dynamics.chart_series %}
+                                {% if series.area_points %}
+                                    <path class="management-dynamics-area" d="{{ series.area_path }}" fill="url(#management-dynamics-area-gradient)" fill-opacity="1"></path>
+                                {% endif %}
+                            {% endfor %}
+                            {% for tick in dynamics.chart_y_axis_ticks %}
+                                <line class="grid" x1="45" y1="{{ tick.y }}" x2="998" y2="{{ tick.y }}"></line>
+                                <text class="axis-label axis-label-y" x="36" y="{{ tick.text_y }}" text-anchor="end">{{ tick.label }}</text>
+                            {% endfor %}
+                            {% for tick in dynamics.chart_x_axis_ticks %}
+                                <line class="grid" x1="{{ tick.x }}" y1="36" x2="{{ tick.x }}" y2="250"></line>
+                                <text class="axis-label axis-label-x" x="{{ tick.x }}" y="{{ tick.y }}" text-anchor="{{ tick.anchor }}">{{ tick.label }}</text>
+                            {% endfor %}
+                            <line class="axis" x1="45" y1="36" x2="45" y2="250"></line>
+                            <line class="axis" x1="45" y1="250" x2="998" y2="250"></line>
+                            <text class="axis-label axis-title axis-title-y" x="16" y="143" text-anchor="middle" transform="rotate(-90 16 143)">м3</text>
+                            <text class="axis-label axis-title axis-title-x" x="525" y="312" text-anchor="middle">часы</text>
+                            {% for series in dynamics.chart_series %}
+                                <polyline class="{% if series.is_total %}is-total{% endif %}" points="{{ series.points }}" fill="none" style="fill: none; stroke: {{ series.color }};"></polyline>
+                            {% endfor %}
+                        </svg>
+                    {% else %}
+                        <div class="management-dynamics-empty">За выбранный период отгрузки по экскаваторам пока нет.</div>
+                    {% endif %}
+                </div>
             </article>
 
             <section class="management-dynamics-grid">
-                <article class="dispatcher-report-card dispatcher-report-card-wide">
+                <article class="dispatcher-report-card">
                     <div class="dispatcher-report-card-head">
-                        <h2>Периоды</h2>
-                        <span>объем и рейсы</span>
+                        <h2>Выбранные экскаваторы</h2>
+                        <span>сравнение за период</span>
                     </div>
-                    <div class="management-dynamics-bars">
-                        {% for row in dynamics.bucket_rows %}
-                            <div class="management-dynamics-bar-row">
-                                <strong>{{ row.label }}</strong>
-                                <span>{{ row.volume_display }} м3</span>
-                                <em>{{ row.trip_count }} рейс.</em>
-                                <i><b style="width: {{ row.bar }}%;"></b></i>
-                            </div>
-                        {% empty %}
-                            <div class="message info">Нет данных для отображения.</div>
-                        {% endfor %}
+                    <div class="management-dynamics-table-wrap">
+                        <table class="management-dynamics-table">
+                            <thead>
+                            <tr>
+                                <th>Экскаватор</th>
+                                <th>Объем</th>
+                                <th>Рейсы</th>
+                                <th>Средний период</th>
+                                <th>Доля</th>
+                            </tr>
+                            </thead>
+                            <tbody>
+                            {% for row in dynamics.excavator_rows %}
+                                <tr>
+                                    <td>{{ row.label }}</td>
+                                    <td>{{ row.volume_display }} м3</td>
+                                    <td>{{ row.trip_count }}</td>
+                                    <td>{{ row.average_bucket_volume_display }} м3</td>
+                                    <td>{{ row.total_share }}%</td>
+                                </tr>
+                            {% empty %}
+                                <tr><td colspan="5">Экскаваторы в выбранной выборке не найдены.</td></tr>
+                            {% endfor %}
+                            </tbody>
+                        </table>
                     </div>
                 </article>
 
-                <article class="dispatcher-report-card dispatcher-report-card-wide">
+                <article class="dispatcher-report-card">
                     <div class="dispatcher-report-card-head">
-                        <h2>Экскаваторы</h2>
-                        <span>доля в выбранном периоде</span>
+                        <h2>Сигналы анализа</h2>
+                        <span>короткие выводы</span>
                     </div>
-                    <div class="management-dynamics-bars">
-                        {% for row in dynamics.excavator_rows %}
-                            <div class="management-dynamics-bar-row">
-                                <strong>{{ row.label }}</strong>
-                                <span>{{ row.volume_display }} м3</span>
-                                <em>{{ row.trip_count }} рейс.</em>
-                                <i><b style="width: {{ row.bar }}%;"></b></i>
-                            </div>
+                    <div class="management-dynamics-signals">
+                        {% for signal in dynamics.analysis_signals %}
+                            <div class="management-dynamics-signal is-{{ signal.kind }}">{{ signal.text }}</div>
                         {% empty %}
-                            <div class="message info">Экскаваторы в выбранной выборке не найдены.</div>
+                            <div class="management-dynamics-empty">Недостаточно данных для анализа.</div>
                         {% endfor %}
                     </div>
                 </article>
@@ -157,8 +231,45 @@
             }, delay || 0);
         }
 
+        var granularityInput = form.querySelector("[data-management-dynamics-granularity-input]");
+        var granularityButtons = Array.prototype.slice.call(form.querySelectorAll("[data-management-dynamics-granularity]"));
+        var shiftInput = form.querySelector("[data-management-dynamics-shift-input]");
+        var shiftButtons = Array.prototype.slice.call(form.querySelectorAll("[data-management-dynamics-shift]"));
+        var dateControls = Array.prototype.slice.call(form.querySelectorAll('input[type="date"]'));
         var allExcavatorsControl = form.querySelector("[data-management-dynamics-all]");
         var excavatorControls = Array.prototype.slice.call(form.querySelectorAll('input[name="excavators"]'));
+        var selectorToggle = form.querySelector("[data-management-dynamics-selector-toggle]");
+        var selectorPopover = form.querySelector("[data-management-dynamics-selector-popover]");
+        var selectorClose = form.querySelector("[data-management-dynamics-selector-close]");
+        var selectorCloseButtons = Array.prototype.slice.call(form.querySelectorAll("[data-management-dynamics-selector-close]"));
+        var selectAllButton = form.querySelector("[data-management-dynamics-select-all]");
+        var clearAllButton = form.querySelector("[data-management-dynamics-clear-all]");
+        var selectionSummary = form.querySelector("[data-management-dynamics-selection-summary]");
+
+        function setSelectorOpen(isOpen) {
+            if (!selectorPopover) {
+                return;
+            }
+            form.classList.toggle("is-excavator-selector-open", Boolean(isOpen));
+            selectorPopover.hidden = !isOpen;
+        }
+
+        function updateSelectionSummary() {
+            if (!selectionSummary) {
+                return;
+            }
+            var selected = excavatorControls.filter(function (input) {
+                return input.checked;
+            });
+            if (!selected.length) {
+                selectionSummary.textContent = "Все активные экскаваторы";
+                return;
+            }
+            var labels = selected.map(function (input) {
+                return input.getAttribute("data-excavator-label") || input.value;
+            });
+            selectionSummary.textContent = labels.length <= 4 ? "Выбрано: " + labels.join(", ") : "Выбрано: " + labels.length;
+        }
 
         function syncExcavatorSelection(changedControl) {
             if (!allExcavatorsControl) {
@@ -168,25 +279,114 @@
                 excavatorControls.forEach(function (input) {
                     input.checked = false;
                 });
+                updateSelectionSummary();
                 return;
             }
             var hasSelectedExcavator = excavatorControls.some(function (input) {
                 return input.checked;
             });
             allExcavatorsControl.checked = !hasSelectedExcavator;
+            updateSelectionSummary();
         }
 
-        form.querySelectorAll("select").forEach(function (select) {
-            select.addEventListener("change", function () {
+        granularityButtons.forEach(function (button) {
+            button.addEventListener("click", function () {
+                if (!granularityInput) {
+                    return;
+                }
+                granularityInput.value = button.dataset.managementDynamicsGranularity || "day";
+                granularityButtons.forEach(function (item) {
+                    item.classList.toggle("is-active", item === button);
+                });
                 submitAutoFilter(0);
             });
+        });
+
+        shiftButtons.forEach(function (button) {
+            button.addEventListener("click", function () {
+                if (!shiftInput) {
+                    return;
+                }
+                shiftInput.value = button.dataset.managementDynamicsShift || "day";
+                shiftButtons.forEach(function (item) {
+                    item.classList.toggle("is-active", item === button);
+                });
+                submitAutoFilter(0);
+            });
+        });
+
+        if (selectorToggle) {
+            selectorToggle.addEventListener("click", function () {
+                setSelectorOpen(!form.classList.contains("is-excavator-selector-open"));
+            });
+        }
+
+        if (selectorClose) {
+            selectorCloseButtons.forEach(function (button) {
+                button.addEventListener("click", function () {
+                    setSelectorOpen(false);
+                });
+            });
+        }
+
+        if (selectAllButton) {
+            selectAllButton.addEventListener("click", function () {
+                if (allExcavatorsControl) {
+                    allExcavatorsControl.checked = true;
+                }
+                excavatorControls.forEach(function (input) {
+                    input.checked = false;
+                });
+                updateSelectionSummary();
+            });
+        }
+
+        if (clearAllButton) {
+            clearAllButton.addEventListener("click", function () {
+                if (allExcavatorsControl) {
+                    allExcavatorsControl.checked = false;
+                }
+                excavatorControls.forEach(function (input) {
+                    input.checked = false;
+                });
+                updateSelectionSummary();
+            });
+        }
+
+        if (selectorPopover) {
+            selectorPopover.addEventListener("click", function (event) {
+                if (event.target === selectorPopover) {
+                    setSelectorOpen(false);
+                }
+            });
+        }
+
+        document.addEventListener("keydown", function (event) {
+            if (event.key === "Escape") {
+                setSelectorOpen(false);
+            }
+        });
+
+        if (selectorClose) {
+            selectorClose.addEventListener("click", function () {
+                setSelectorOpen(false);
+            });
+        }
+
+        document.addEventListener("click", function (event) {
+            if (!selectorPopover || !form.classList.contains("is-excavator-selector-open")) {
+                return;
+            }
+            if (!form.contains(event.target)) {
+                setSelectorOpen(false);
+            }
         });
 
         form.querySelectorAll("input").forEach(function (input) {
             var inputType = (input.getAttribute("type") || "text").toLowerCase();
             if (inputType === "date") {
                 input.addEventListener("change", function () {
-                    submitAutoFilter(0);
+                    submitAutoFilter(80);
                 });
                 if (input.showPicker) {
                     input.addEventListener("click", function () {
@@ -196,10 +396,11 @@
             } else if (inputType === "checkbox" && (input === allExcavatorsControl || input.name === "excavators")) {
                 input.addEventListener("change", function () {
                     syncExcavatorSelection(input);
-                    submitAutoFilter(0);
                 });
             }
         });
+
+        updateSelectionSummary();
     }
 
     function rebindManagementDynamicsControls(root) {

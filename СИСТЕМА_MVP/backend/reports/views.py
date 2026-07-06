@@ -2151,6 +2151,9 @@ def management_dynamics_report_context(request):
     granularity = request.GET.get('granularity', 'day').strip()
     if granularity not in {'hour', 'shift', 'day', 'month'}:
         granularity = 'day'
+    shift_type = request.GET.get('shift_type', 'day').strip()
+    if shift_type not in {'day', 'night'}:
+        shift_type = 'day'
 
     selected_excavator_ids = [
         int(item)
@@ -2162,12 +2165,13 @@ def management_dynamics_report_context(request):
         .filter(is_active=True, equipment_type__name__icontains='Экскаватор')
         .order_by('garage_number', 'id')
     )
-    dynamics = build_excavator_dynamics(date_from, date_to, granularity, selected_excavator_ids)
+    dynamics = build_excavator_dynamics(date_from, date_to, granularity, selected_excavator_ids, shift_type=shift_type)
     return {
         'dynamics': dynamics,
         'date_from_value': date_from.strftime('%Y-%m-%d'),
         'date_to_value': date_to.strftime('%Y-%m-%d'),
         'granularity': granularity,
+        'shift_type': shift_type,
         'excavator_choices': excavator_choices,
         'selected_excavator_ids': selected_excavator_ids,
         'query_string': request.GET.urlencode(),

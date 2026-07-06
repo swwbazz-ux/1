@@ -207,6 +207,41 @@ class ShiftAnalyticsReportTests(TestCase):
         self.assertEqual(dynamics['excavator_count'], 1)
         self.assertEqual(dynamics['bucket_rows'][0]['volume_display'], '78')
         self.assertIn('Экскаватор 4', dynamics['excavator_rows'][0]['label'])
+        self.assertEqual(dynamics['best_excavator']['volume_display'], '78')
+        self.assertTrue(dynamics['chart_series'])
+        self.assertTrue(dynamics['analysis_signals'])
+
+    def test_management_dynamics_hour_range_keeps_start_and_end_dates(self):
+        previous_date = self.date - timedelta(days=1)
+        previous_created_at = timezone.make_aware(
+            datetime.combine(previous_date, time(16, 0)),
+            timezone.get_current_timezone(),
+        )
+        previous_trip = Trip.objects.create(
+            excavator=self.excavator,
+            truck=self.truck,
+            excavator_operator=self.operator,
+            driver=self.driver,
+            loading_shift=self.operator_shift,
+            unloading_shift=self.driver_shift,
+            rock_type=self.rock,
+            dump_point=self.dump_point,
+            actual_dump_point=self.dump_point,
+            volume_m3=Decimal('12.00'),
+            tonnage=Decimal('24.00'),
+            status=TripStatus.COMPLETED,
+            completed_at=previous_created_at,
+        )
+        Trip.objects.filter(pk=previous_trip.pk).update(created_at=previous_created_at)
+
+        dynamics = build_excavator_dynamics(previous_date, self.date, 'hour', [self.excavator.id], shift_type='day')
+
+        self.assertEqual(dynamics['date_from'], previous_date)
+        self.assertEqual(dynamics['date_to'], self.date)
+        self.assertEqual(len(dynamics['bucket_rows']), 26)
+        self.assertEqual(dynamics['total_volume'], Decimal('90.00'))
+        self.assertEqual(dynamics['bucket_rows'][0]['label'], f'{previous_date:%d.%m} 07:00')
+        self.assertEqual(dynamics['bucket_rows'][-1]['label'], f'{self.date:%d.%m} 19:00')
 
     def test_management_dynamics_page_renders_graph(self):
         response = self.client.get(
@@ -224,6 +259,10 @@ class ShiftAnalyticsReportTests(TestCase):
         self.assertContains(response, '78 м3')
         self.assertContains(response, 'management-dynamics-excavator-chip')
         self.assertContains(response, 'data-management-dynamics-all')
+        self.assertContains(response, 'data-management-dynamics-selector-toggle')
+        self.assertContains(response, 'management-dynamics-selector-popover')
+        self.assertContains(response, 'management-dynamics-table')
+        self.assertContains(response, 'management-dynamics-signals')
         self.assertContains(response, 'name="excavators"')
         self.assertNotContains(response, 'select name="excavators" multiple')
         self.assertContains(response, 'data-management-dynamics-refresh-root')
