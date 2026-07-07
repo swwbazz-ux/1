@@ -22,18 +22,18 @@
                     <input type="hidden" name="granularity" value="{{ granularity }}" data-management-dynamics-granularity-input>
                     <input type="hidden" name="chart_mode" value="{{ dynamics.chart_mode }}" data-management-dynamics-chart-mode-input>
                     <div class="management-dynamics-segments" role="group" aria-label="Масштаб графика">
-                        <button type="button" class="management-dynamics-segment {% if granularity == 'hour' %}is-active{% endif %}" data-management-dynamics-granularity="hour">Часы</button>
-                        <button type="button" class="management-dynamics-segment {% if granularity == 'shift' %}is-active{% endif %}" data-management-dynamics-granularity="shift">Смены</button>
-                        <button type="button" class="management-dynamics-segment {% if granularity == 'day' %}is-active{% endif %}" data-management-dynamics-granularity="day">Дни</button>
-                        <button type="button" class="management-dynamics-segment {% if granularity == 'month' %}is-active{% endif %}" data-management-dynamics-granularity="month">Мес.</button>
+                        <button type="button" class="management-dynamics-segment {% if granularity == 'hour' %}is-active{% endif %}" data-management-dynamics-granularity="hour" data-active="{% if granularity == 'hour' %}true{% else %}false{% endif %}" aria-pressed="{% if granularity == 'hour' %}true{% else %}false{% endif %}">Часы</button>
+                        <button type="button" class="management-dynamics-segment {% if granularity == 'shift' %}is-active{% endif %}" data-management-dynamics-granularity="shift" data-active="{% if granularity == 'shift' %}true{% else %}false{% endif %}" aria-pressed="{% if granularity == 'shift' %}true{% else %}false{% endif %}">Смены</button>
+                        <button type="button" class="management-dynamics-segment {% if granularity == 'day' %}is-active{% endif %}" data-management-dynamics-granularity="day" data-active="{% if granularity == 'day' %}true{% else %}false{% endif %}" aria-pressed="{% if granularity == 'day' %}true{% else %}false{% endif %}">Дни</button>
+                        <button type="button" class="management-dynamics-segment {% if granularity == 'month' %}is-active{% endif %}" data-management-dynamics-granularity="month" data-active="{% if granularity == 'month' %}true{% else %}false{% endif %}" aria-pressed="{% if granularity == 'month' %}true{% else %}false{% endif %}">Мес.</button>
                     </div>
                 </div>
                 <div class="management-dynamics-filter-field management-dynamics-shift-field">
                     <span>Смена</span>
                     <input type="hidden" name="shift_type" value="{{ shift_type }}" data-management-dynamics-shift-input>
                     <div class="management-dynamics-shift-segments" role="group" aria-label="Смена графика">
-                        <button type="button" class="management-dynamics-segment {% if shift_type == 'day' %}is-active{% endif %}" data-management-dynamics-shift="day">День</button>
-                        <button type="button" class="management-dynamics-segment {% if shift_type == 'night' %}is-active{% endif %}" data-management-dynamics-shift="night">Ночь</button>
+                        <button type="button" class="management-dynamics-segment {% if shift_type == 'day' %}is-active{% endif %}" data-management-dynamics-shift="day" data-active="{% if shift_type == 'day' %}true{% else %}false{% endif %}" aria-pressed="{% if shift_type == 'day' %}true{% else %}false{% endif %}">День</button>
+                        <button type="button" class="management-dynamics-segment {% if shift_type == 'night' %}is-active{% endif %}" data-management-dynamics-shift="night" data-active="{% if shift_type == 'night' %}true{% else %}false{% endif %}" aria-pressed="{% if shift_type == 'night' %}true{% else %}false{% endif %}">Ночь</button>
                     </div>
                 </div>
                 <fieldset class="management-dynamics-excavators">
@@ -114,7 +114,7 @@
                     <div class="management-dynamics-chart-head-actions">
                         <div class="management-dynamics-chart-mode" role="group" aria-label="Режим графика">
                             {% for mode in dynamics.chart_mode_choices %}
-                                <button type="button" class="management-dynamics-chart-mode-button {% if dynamics.chart_mode == mode.code %}is-active{% endif %}" data-management-dynamics-chart-mode="{{ mode.code }}">{{ mode.label }}</button>
+                                <button type="button" class="management-dynamics-chart-mode-button {% if dynamics.chart_mode == mode.code %}is-active{% endif %}" data-management-dynamics-chart-mode="{{ mode.code }}" data-active="{% if dynamics.chart_mode == mode.code %}true{% else %}false{% endif %}" aria-pressed="{% if dynamics.chart_mode == mode.code %}true{% else %}false{% endif %}" title="{{ mode.label }}">{% if mode.code == "cumulative" %}Накопит. м3{% else %}{{ mode.label }}{% endif %}</button>
                             {% endfor %}
                         </div>
                         <div class="management-dynamics-legend">
@@ -297,6 +297,18 @@
         var clearAllButton = form.querySelector("[data-management-dynamics-clear-all]");
         var selectionSummary = form.querySelector("[data-management-dynamics-selection-summary]");
 
+        function setActiveButtonState(button, isActive) {
+            button.classList.toggle("is-active", isActive);
+            button.dataset.active = isActive ? "true" : "false";
+            button.setAttribute("aria-pressed", isActive ? "true" : "false");
+        }
+
+        function syncActiveButtonGroup(buttons, activeButton) {
+            buttons.forEach(function (item) {
+                setActiveButtonState(item, item === activeButton);
+            });
+        }
+
         function setSelectorOpen(isOpen) {
             if (!selectorPopover) {
                 return;
@@ -346,9 +358,7 @@
                     return;
                 }
                 granularityInput.value = button.dataset.managementDynamicsGranularity || "day";
-                granularityButtons.forEach(function (item) {
-                    item.classList.toggle("is-active", item === button);
-                });
+                syncActiveButtonGroup(granularityButtons, button);
                 submitAutoFilter(0);
             });
         });
@@ -359,9 +369,7 @@
                     return;
                 }
                 shiftInput.value = button.dataset.managementDynamicsShift || "day";
-                shiftButtons.forEach(function (item) {
-                    item.classList.toggle("is-active", item === button);
-                });
+                syncActiveButtonGroup(shiftButtons, button);
                 submitAutoFilter(0);
             });
         });
@@ -372,9 +380,7 @@
                     return;
                 }
                 chartModeInput.value = button.dataset.managementDynamicsChartMode || "cumulative";
-                chartModeButtons.forEach(function (item) {
-                    item.classList.toggle("is-active", item === button);
-                });
+                syncActiveButtonGroup(chartModeButtons, button);
                 submitAutoFilter(0);
             });
         });
