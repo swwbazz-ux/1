@@ -1,5 +1,5 @@
 from collections import defaultdict
-from datetime import timedelta
+from datetime import datetime, time, timedelta
 from decimal import Decimal
 
 from django.db.models import Q
@@ -7,7 +7,7 @@ from django.utils import timezone
 
 from downtimes.models import DowntimeEvent
 from references.models import TruckCapacityRule
-from trips.models import OPEN_TRIP_STATUSES, Trip, TripStatus
+from trips.models import OPEN_TRIP_STATUSES, Trip, TripClientAction, TripStatus
 
 
 SHIFT_LABELS = {
@@ -21,6 +21,25 @@ DYNAMICS_GRANULARITY_LABELS = {
     'shift': 'по сменам',
     'day': 'по дням',
     'month': 'по месяцам',
+}
+
+DYNAMICS_CHART_MODE_LABELS = {
+    'cumulative': 'накопительно м3',
+    'rate': 'темп м3/час',
+    'trips': 'рейсы',
+}
+
+DYNAMICS_CHART_MODE_AXIS_LABELS = {
+    'cumulative': 'м3',
+    'rate': 'м3/час',
+    'trips': 'рейсы',
+}
+
+DYNAMICS_CHART_X_AXIS_LABELS = {
+    'hour': 'часы',
+    'shift': 'смены',
+    'day': 'дни',
+    'month': 'месяцы',
 }
 
 
@@ -220,6 +239,24 @@ def build_chart_area_path(points):
     return f'M {first_x} {int(CHART_BOTTOM)} L {path_points} L {last_x} {int(CHART_BOTTOM)} Z'
 
 
+def chart_time_x(event_at, range_start, range_end):
+    total_seconds = max((range_end - range_start).total_seconds(), 1)
+    event_seconds = (event_at - range_start).total_seconds()
+    event_seconds = min(max(event_seconds, 0), total_seconds)
+    return CHART_LEFT + (Decimal(str(event_seconds)) / Decimal(str(total_seconds)) * CHART_WIDTH)
+
+
+def build_time_chart_points(rows, max_value, range_start, range_end):
+    if not rows or not max_value:
+        return ''
+    points = []
+    for row in rows:
+        x = chart_time_x(row['event_at'], range_start, range_end)
+        y = chart_y(row['value'], max_value)
+        points.append(f'{int(x)},{int(y)}')
+    return ' '.join(points)
+
+
 def build_chart_y_axis_ticks(max_volume):
     if not max_volume:
         return []
@@ -265,6 +302,62 @@ def build_chart_x_axis_ticks(rows, granularity='day'):
         }
         for index in indexes
     ]
+
+
+def dynamics_time_range(date_from, date_to, granularity, shift_type):
+    tz = timezone.get_current_timezone()
+    if granularity == 'hour':
+        if shift_type == 'night':
+            range_start = timezone.make_aware(
+                datetime.combine(date_from, time(hour=NIGHT_SHIFT_START_HOUR)),
+                tz,
+            )
+            range_end = timezone.make_aware(
+                datetime.combine(date_to + timedelta(days=1), time(hour=NIGHT_SHIFT_END_HOUR)),
+                tz,
+            )
+        else:
+            range_start = timezone.make_aware(
+                datetime.combine(date_from, time(hour=DAY_SHIFT_START_HOUR)),
+                tz,
+            )
+            range_end = timezone.make_aware(
+                datetime.combine(date_to, time(hour=DAY_SHIFT_END_HOUR)),
+                tz,
+            )
+        return range_start, range_end
+    range_start = timezone.make_aware(datetime.combine(date_from, time.min), tz)
+    range_end = timezone.make_aware(datetime.combine(date_to + timedelta(days=1), time.min), tz)
+    return range_start, range_end
+
+
+def build_time_chart_x_axis_ticks(range_start, range_end, granularity, shift_type):
+    ticks = []
+    if granularity == 'hour':
+        total_hours = max(int((range_end - range_start).total_seconds() // 3600), 1)
+        step_hours = 1 if total_hours <= 12 else max(2, (total_hours + 11) // 12)
+        tick_at = range_start
+        while tick_at <= range_end:
+            x = int(chart_time_x(tick_at, range_start, range_end))
+            ticks.append({
+                'label': timezone.localtime(tick_at).strftime('%H:%M'),
+                'x': x,
+                'y': 286,
+                'anchor': 'start' if tick_at == range_start else 'end' if tick_at == range_end else 'middle',
+            })
+            tick_at += timedelta(hours=step_hours)
+        if ticks[-1]['x'] != int(CHART_RIGHT):
+            ticks.append({
+                'label': timezone.localtime(range_end).strftime('%H:%M'),
+                'x': int(CHART_RIGHT),
+                'y': 286,
+                'anchor': 'end',
+            })
+        return ticks
+    return build_chart_x_axis_ticks([
+        {'label': timezone.localtime(range_start).strftime('%d.%m')},
+        {'label': timezone.localtime(range_end - timedelta(seconds=1)).strftime('%d.%m')},
+    ], granularity)
 
 
 def empty_dynamics_bucket(bucket_key, bucket_label):
@@ -362,17 +455,83 @@ def build_dynamics_chart_series(bucket_rows, excavator_rows, max_volume):
     return series
 
 
-def build_excavator_dynamics(date_from, date_to, granularity='day', excavator_ids=None, shift_type='day'):
+def trip_loaded_action_times(trips):
+    trip_ids = [trip.id for trip in trips if trip.id]
+    if not trip_ids:
+        return {}
+    action_times = {}
+    for trip_id, created_at in (
+        TripClientAction.objects
+        .filter(action_type='truck_loaded', trip_id__in=trip_ids)
+        .order_by('created_at')
+        .values_list('trip_id', 'created_at')
+    ):
+        action_times.setdefault(trip_id, created_at)
+    return action_times
+
+
+def build_event_chart_rows(events, chart_mode, range_start, range_end):
+    if not events:
+        return []
+    rows = [{'event_at': range_start, 'value': Decimal('0')}]
+    if chart_mode == 'rate':
+        window = timedelta(minutes=60)
+        for event in events:
+            event_at = event['event_at']
+            value = sum(
+                (item['volume_m3'] for item in events if event_at - window < item['event_at'] <= event_at),
+                Decimal('0'),
+            )
+            rows.append({'event_at': event_at, 'value': value})
+        rows.append({'event_at': range_end, 'value': rows[-1]['value']})
+        return rows
+
+    running_value = Decimal('0')
+    for event in events:
+        running_value += Decimal('1') if chart_mode == 'trips' else event['volume_m3']
+        rows.append({'event_at': event['event_at'], 'value': running_value})
+    rows.append({'event_at': range_end, 'value': running_value})
+    return rows
+
+
+def build_dynamics_event_chart_series(events, excavator_rows, chart_mode, range_start, range_end):
+    rows = build_event_chart_rows(events, chart_mode, range_start, range_end)
+    max_value = max((row['value'] for row in rows), default=Decimal('0'))
+    if not rows or not max_value:
+        return [], Decimal('0')
+    points = build_time_chart_points(rows, max_value, range_start, range_end)
+    if not points:
+        return [], max_value
+    if len(excavator_rows) == 1:
+        label = excavator_rows[0]['label']
+    else:
+        label = 'Сумма'
+    return [{
+        'label': label,
+        'color': '#7de05e',
+        'points': points,
+        'area_points': build_chart_area_points(points),
+        'area_path': build_chart_area_path(points),
+        'is_total': True,
+    }], max_value
+
+
+def build_excavator_dynamics(date_from, date_to, granularity='day', excavator_ids=None, shift_type='day', chart_mode='cumulative'):
     granularity = granularity if granularity in DYNAMICS_GRANULARITY_LABELS else 'day'
     shift_type = shift_type if shift_type in {'day', 'night'} else 'day'
+    chart_mode = chart_mode if chart_mode in DYNAMICS_CHART_MODE_LABELS else 'cumulative'
     excavator_ids = [int(item) for item in (excavator_ids or []) if str(item).isdigit()]
     query_date_to = date_to + timedelta(days=1) if granularity == 'hour' and shift_type == 'night' else date_to
     trips = trip_queryset_for_loading_range(date_from, query_date_to)
     if excavator_ids:
         trips = trips.filter(excavator_id__in=excavator_ids)
+    trips = list(trips)
+    loaded_action_times = trip_loaded_action_times(trips)
+    chart_range_start, chart_range_end = dynamics_time_range(date_from, date_to, granularity, shift_type)
 
     buckets = {}
     excavators = {}
+    event_rows = []
     total_volume = Decimal('0')
     total_trips = 0
 
@@ -395,6 +554,13 @@ def build_excavator_dynamics(date_from, date_to, granularity='day', excavator_id
         bucket['excavators'][excavator_key] = bucket['excavators'].get(excavator_key, Decimal('0')) + volume
         excavator['volume_m3'] += volume
         excavator['trip_count'] += 1
+        event_at = loaded_action_times.get(trip.id, trip.created_at)
+        if chart_range_start <= event_at <= chart_range_end:
+            event_rows.append({
+                'event_at': event_at,
+                'volume_m3': volume,
+                'excavator_id': trip.excavator_id,
+            })
         total_volume += volume
         total_trips += 1
 
@@ -421,6 +587,17 @@ def build_excavator_dynamics(date_from, date_to, granularity='day', excavator_id
 
     best_excavator = excavator_rows[0] if excavator_rows else None
     peak_bucket = max(bucket_rows, key=lambda item: item['volume_m3'], default=None)
+    event_rows = sorted(event_rows, key=lambda item: item['event_at'])
+    chart_series, chart_max_value = build_dynamics_event_chart_series(
+        event_rows,
+        excavator_rows,
+        chart_mode,
+        chart_range_start,
+        chart_range_end,
+    )
+    if not chart_series:
+        chart_max_value = max_bucket_volume
+        chart_series = build_dynamics_chart_series(bucket_rows, excavator_rows, max_bucket_volume)
     analysis_signals = []
     if best_excavator:
         analysis_signals.append({
@@ -444,14 +621,22 @@ def build_excavator_dynamics(date_from, date_to, granularity='day', excavator_id
         'date_to': date_to,
         'granularity': granularity,
         'shift_type': shift_type,
+        'chart_mode': chart_mode,
+        'chart_mode_label': DYNAMICS_CHART_MODE_LABELS[chart_mode],
+        'chart_mode_choices': [
+            {'code': code, 'label': label}
+            for code, label in DYNAMICS_CHART_MODE_LABELS.items()
+        ],
+        'chart_y_axis_title': DYNAMICS_CHART_MODE_AXIS_LABELS[chart_mode],
+        'chart_x_axis_title': DYNAMICS_CHART_X_AXIS_LABELS[granularity],
         'granularity_label': DYNAMICS_GRANULARITY_LABELS[granularity],
         'selected_excavator_ids': excavator_ids,
         'bucket_rows': bucket_rows,
         'excavator_rows': excavator_rows,
         'chart_points': build_chart_points(bucket_rows, max_bucket_volume),
-        'chart_series': build_dynamics_chart_series(bucket_rows, excavator_rows, max_bucket_volume),
-        'chart_y_axis_ticks': build_chart_y_axis_ticks(max_bucket_volume),
-        'chart_x_axis_ticks': build_chart_x_axis_ticks(bucket_rows, granularity),
+        'chart_series': chart_series,
+        'chart_y_axis_ticks': build_chart_y_axis_ticks(chart_max_value),
+        'chart_x_axis_ticks': build_time_chart_x_axis_ticks(chart_range_start, chart_range_end, granularity, shift_type),
         'max_bucket_volume_display': format_volume(max_bucket_volume),
         'best_excavator': best_excavator,
         'peak_bucket': peak_bucket,

@@ -8,7 +8,7 @@
     <section class="dispatcher-analytics-board management-dashboard-board management-linked-report-board" aria-label="Динамика экскаваторов" data-management-dynamics-refresh-root>
         {% include "reports/includes/management_report_header.html" with active="dynamics" title="Динамика экскаваторов" subtitle="Выработка экскаваторов по периоду, сменам, часам и месяцам." section_label="Динамика" %}
         <div class="management-linked-report-content management-dynamics-content">
-            <form class="dispatcher-report-filters management-dashboard-filters management-dynamics-filters" method="get" data-auto-filter-form>
+            <form id="management-dynamics-filter-form" class="dispatcher-report-filters management-dashboard-filters management-dynamics-filters" method="get" data-auto-filter-form>
                 <label>
                     <span>С даты</span>
                     <input type="date" name="date_from" value="{{ date_from_value }}">
@@ -20,6 +20,7 @@
                 <div class="management-dynamics-filter-field management-dynamics-scale-field">
                     <span>Масштаб</span>
                     <input type="hidden" name="granularity" value="{{ granularity }}" data-management-dynamics-granularity-input>
+                    <input type="hidden" name="chart_mode" value="{{ dynamics.chart_mode }}" data-management-dynamics-chart-mode-input>
                     <div class="management-dynamics-segments" role="group" aria-label="Масштаб графика">
                         <button type="button" class="management-dynamics-segment {% if granularity == 'hour' %}is-active{% endif %}" data-management-dynamics-granularity="hour">Часы</button>
                         <button type="button" class="management-dynamics-segment {% if granularity == 'shift' %}is-active{% endif %}" data-management-dynamics-granularity="shift">Смены</button>
@@ -92,11 +93,6 @@
                     <p>загрузки за период</p>
                 </article>
                 <article class="dispatcher-report-tile">
-                    <div class="dispatcher-report-tile-head"><h2>Экскаваторов</h2><span>выборка</span></div>
-                    <strong>{{ dynamics.excavator_count }}</strong>
-                    <p>с объемом за период</p>
-                </article>
-                <article class="dispatcher-report-tile">
                     <div class="dispatcher-report-tile-head"><h2>Лучший</h2><span>период</span></div>
                     <strong>{% if dynamics.best_excavator %}{{ dynamics.best_excavator.label }}{% else %}—{% endif %}</strong>
                     <p>{% if dynamics.best_excavator %}{{ dynamics.best_excavator.volume_display }} м3{% else %}нет данных{% endif %}</p>
@@ -108,20 +104,28 @@
                 </article>
             </section>
 
-            <article class="dispatcher-report-card dispatcher-report-card-wide management-dynamics-chart-card">
-                <div class="dispatcher-report-card-head">
+            <section class="management-dynamics-main-grid">
+                <article class="dispatcher-report-card dispatcher-report-card-wide management-dynamics-chart-card">
+                <div class="dispatcher-report-card-head management-dynamics-chart-head">
                     <div>
                         <h2>График выработки</h2>
-                        <span>Ось X — {{ dynamics.granularity_label }}, ось Y — кубы</span>
+                        <span>Ось X — {{ dynamics.granularity_label }}, ось Y — {{ dynamics.chart_y_axis_title }}</span>
                     </div>
-                    <div class="management-dynamics-legend">
-                        {% for series in dynamics.chart_series %}
-                            <span><i style="background: {{ series.color }};"></i>{{ series.label }}</span>
-                        {% endfor %}
+                    <div class="management-dynamics-chart-head-actions">
+                        <div class="management-dynamics-chart-mode" role="group" aria-label="Режим графика">
+                            {% for mode in dynamics.chart_mode_choices %}
+                                <button type="button" class="management-dynamics-chart-mode-button {% if dynamics.chart_mode == mode.code %}is-active{% endif %}" data-management-dynamics-chart-mode="{{ mode.code }}">{{ mode.label }}</button>
+                            {% endfor %}
+                        </div>
+                        <div class="management-dynamics-legend">
+                            {% for series in dynamics.chart_series %}
+                                <span><i style="background: {{ series.color }};"></i>{{ series.label }}</span>
+                            {% endfor %}
+                        </div>
                     </div>
                 </div>
                 <div class="management-dynamics-chart">
-                    {% if dynamics.bucket_rows %}
+                    {% if dynamics.chart_series %}
                         <svg viewBox="0 0 1000 320" role="img" aria-label="Динамика объема">
                             <defs>
                                 <linearGradient id="management-dynamics-area-gradient" x1="0" y1="250" x2="0" y2="36" gradientUnits="userSpaceOnUse">
@@ -145,8 +149,8 @@
                             {% endfor %}
                             <line class="axis" x1="45" y1="36" x2="45" y2="250"></line>
                             <line class="axis" x1="45" y1="250" x2="998" y2="250"></line>
-                            <text class="axis-label axis-title axis-title-y" x="16" y="143" text-anchor="middle" transform="rotate(-90 16 143)">м3</text>
-                            <text class="axis-label axis-title axis-title-x" x="525" y="312" text-anchor="middle">часы</text>
+                            <text class="axis-label axis-title axis-title-y" x="16" y="143" text-anchor="middle" transform="rotate(-90 16 143)">{{ dynamics.chart_y_axis_title }}</text>
+                            <text class="axis-label axis-title axis-title-x" x="525" y="312" text-anchor="middle">{{ dynamics.chart_x_axis_title }}</text>
                             {% for series in dynamics.chart_series %}
                                 <polyline class="{% if series.is_total %}is-total{% endif %}" points="{{ series.points }}" fill="none" style="fill: none; stroke: {{ series.color }};"></polyline>
                             {% endfor %}
@@ -155,10 +159,25 @@
                         <div class="management-dynamics-empty">За выбранный период отгрузки по экскаваторам пока нет.</div>
                     {% endif %}
                 </div>
-            </article>
+                </article>
+
+                <article class="dispatcher-report-card management-dynamics-insights-card">
+                    <div class="dispatcher-report-card-head">
+                        <h2>Сигналы анализа</h2>
+                        <span>короткие выводы</span>
+                    </div>
+                    <div class="management-dynamics-signals">
+                        {% for signal in dynamics.analysis_signals %}
+                            <div class="management-dynamics-signal is-{{ signal.kind }}">{{ signal.text }}</div>
+                        {% empty %}
+                            <div class="management-dynamics-empty">Недостаточно данных для анализа.</div>
+                        {% endfor %}
+                    </div>
+                </article>
+            </section>
 
             <section class="management-dynamics-grid">
-                <article class="dispatcher-report-card">
+                <article class="dispatcher-report-card management-dynamics-table-card">
                     <div class="dispatcher-report-card-head">
                         <h2>Выбранные экскаваторы</h2>
                         <span>сравнение за период</span>
@@ -188,20 +207,6 @@
                             {% endfor %}
                             </tbody>
                         </table>
-                    </div>
-                </article>
-
-                <article class="dispatcher-report-card">
-                    <div class="dispatcher-report-card-head">
-                        <h2>Сигналы анализа</h2>
-                        <span>короткие выводы</span>
-                    </div>
-                    <div class="management-dynamics-signals">
-                        {% for signal in dynamics.analysis_signals %}
-                            <div class="management-dynamics-signal is-{{ signal.kind }}">{{ signal.text }}</div>
-                        {% empty %}
-                            <div class="management-dynamics-empty">Недостаточно данных для анализа.</div>
-                        {% endfor %}
                     </div>
                 </article>
             </section>
@@ -235,6 +240,9 @@
         var granularityButtons = Array.prototype.slice.call(form.querySelectorAll("[data-management-dynamics-granularity]"));
         var shiftInput = form.querySelector("[data-management-dynamics-shift-input]");
         var shiftButtons = Array.prototype.slice.call(form.querySelectorAll("[data-management-dynamics-shift]"));
+        var root = form.closest("[data-management-dynamics-refresh-root]") || document;
+        var chartModeInput = form.querySelector("[data-management-dynamics-chart-mode-input]");
+        var chartModeButtons = Array.prototype.slice.call(root.querySelectorAll("[data-management-dynamics-chart-mode]"));
         var dateControls = Array.prototype.slice.call(form.querySelectorAll('input[type="date"]'));
         var allExcavatorsControl = form.querySelector("[data-management-dynamics-all]");
         var excavatorControls = Array.prototype.slice.call(form.querySelectorAll('input[name="excavators"]'));
@@ -309,6 +317,19 @@
                 }
                 shiftInput.value = button.dataset.managementDynamicsShift || "day";
                 shiftButtons.forEach(function (item) {
+                    item.classList.toggle("is-active", item === button);
+                });
+                submitAutoFilter(0);
+            });
+        });
+
+        chartModeButtons.forEach(function (button) {
+            button.addEventListener("click", function () {
+                if (!chartModeInput) {
+                    return;
+                }
+                chartModeInput.value = button.dataset.managementDynamicsChartMode || "cumulative";
+                chartModeButtons.forEach(function (item) {
                     item.classList.toggle("is-active", item === button);
                 });
                 submitAutoFilter(0);

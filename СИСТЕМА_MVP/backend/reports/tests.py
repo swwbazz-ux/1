@@ -8,7 +8,7 @@ from django.utils import timezone
 from downtimes.models import DowntimeEvent, DowntimeReason
 from references.models import DumpPoint, Equipment, EquipmentModel, EquipmentType, RockType, TruckCapacityRule
 from shifts.models import EmployeeShift, ShiftPlan
-from trips.models import Trip, TripStatus
+from trips.models import Trip, TripClientAction, TripStatus
 from users.models import Employee, EmployeeAccess, Role
 
 from .shift_analytics import build_excavator_dynamics, build_shift_analytics
@@ -94,7 +94,7 @@ class ShiftAnalyticsReportTests(TestCase):
             equipment=self.excavator,
             opened_at=opened_at,
         )
-        Trip.objects.create(
+        self.completed_trip = Trip.objects.create(
             excavator=self.excavator,
             truck=self.truck,
             excavator_operator=self.operator,
@@ -111,7 +111,7 @@ class ShiftAnalyticsReportTests(TestCase):
             status=TripStatus.COMPLETED,
             completed_at=opened_at,
         )
-        Trip.objects.create(
+        self.open_trip = Trip.objects.create(
             excavator=self.excavator,
             truck=self.open_truck,
             excavator_operator=self.operator,
@@ -243,6 +243,92 @@ class ShiftAnalyticsReportTests(TestCase):
         self.assertEqual(dynamics['bucket_rows'][0]['label'], f'{previous_date:%d.%m} 07:00')
         self.assertEqual(dynamics['bucket_rows'][-1]['label'], f'{self.date:%d.%m} 19:00')
 
+    def test_management_dynamics_chart_modes_use_loaded_events(self):
+        event_at = timezone.make_aware(
+            datetime.combine(self.date, time(11, 15)),
+            timezone.get_current_timezone(),
+        )
+        action = TripClientAction.objects.create(
+            action_type='truck_loaded',
+            client_action_id='dyn-loaded-1',
+            trip=self.completed_trip,
+            actor=self.operator,
+        )
+        TripClientAction.objects.filter(pk=action.pk).update(created_at=event_at)
+
+        dynamics = build_excavator_dynamics(
+            self.date,
+            self.date,
+            'hour',
+            [self.excavator.id],
+            shift_type='day',
+            chart_mode='trips',
+        )
+
+        self.assertEqual(dynamics['chart_mode'], 'trips')
+        self.assertEqual(dynamics['chart_y_axis_title'], 'рейсы')
+        self.assertTrue(dynamics['chart_series'])
+        self.assertTrue(dynamics['chart_series'][0]['area_path'])
+        self.assertIn('11:00', [tick['label'] for tick in dynamics['chart_x_axis_ticks']])
+
+    def test_management_dynamics_loaded_event_does_not_move_report_bucket(self):
+        created_at = timezone.make_aware(
+            datetime.combine(self.date, time(10, 45)),
+            timezone.get_current_timezone(),
+        )
+        loaded_at = timezone.make_aware(
+            datetime.combine(self.date, time(11, 15)),
+            timezone.get_current_timezone(),
+        )
+        other_excavator = Equipment.objects.create(
+            equipment_type=self.excavator_type,
+            model=self.excavator_model,
+            garage_number='9',
+        )
+        other_operator_shift = EmployeeShift.objects.create(
+            employee=self.operator,
+            shift_type='day',
+            equipment=other_excavator,
+            opened_at=created_at,
+        )
+        trip = Trip.objects.create(
+            excavator=other_excavator,
+            truck=self.truck,
+            excavator_operator=self.operator,
+            driver=self.driver,
+            loading_shift=other_operator_shift,
+            unloading_shift=self.driver_shift,
+            rock_type=self.rock,
+            dump_point=self.dump_point,
+            actual_dump_point=self.dump_point,
+            volume_m3=Decimal('40.00'),
+            tonnage=Decimal('80.00'),
+            status=TripStatus.COMPLETED,
+            completed_at=loaded_at,
+        )
+        Trip.objects.filter(pk=trip.pk).update(created_at=created_at)
+        action = TripClientAction.objects.create(
+            action_type='truck_loaded',
+            client_action_id='dyn-loaded-bucket-check',
+            trip=trip,
+            actor=self.operator,
+        )
+        TripClientAction.objects.filter(pk=action.pk).update(created_at=loaded_at)
+
+        dynamics = build_excavator_dynamics(
+            self.date,
+            self.date,
+            'hour',
+            [other_excavator.id],
+            shift_type='day',
+            chart_mode='trips',
+        )
+
+        rows_by_label = {row['label'][-5:]: row for row in dynamics['bucket_rows']}
+        self.assertEqual(rows_by_label['10:00']['volume_m3'], Decimal('40.00'))
+        self.assertEqual(rows_by_label['11:00']['volume_m3'], Decimal('0'))
+        self.assertTrue(dynamics['chart_series'])
+
     def test_management_dynamics_page_renders_graph(self):
         response = self.client.get(
             reverse('management_dynamics'),
@@ -265,6 +351,9 @@ class ShiftAnalyticsReportTests(TestCase):
         self.assertContains(response, 'management-dynamics-signals')
         self.assertContains(response, 'name="excavators"')
         self.assertNotContains(response, 'select name="excavators" multiple')
+        self.assertContains(response, 'name="chart_mode"')
+        self.assertContains(response, 'data-management-dynamics-chart-mode')
+        self.assertContains(response, 'management-dynamics-chart-mode')
         self.assertContains(response, 'data-management-dynamics-refresh-root')
         self.assertContains(response, 'refreshManagementDynamicsFromServer')
         self.assertContains(response, 'window.applyOperationalStateRefresh')
