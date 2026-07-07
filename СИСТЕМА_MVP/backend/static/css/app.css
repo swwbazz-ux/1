@@ -21424,7 +21424,7 @@ a.management-shift-card:hover {
 
 .management-dynamics-chart-head-actions {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(120px, auto);
+    grid-template-columns: minmax(0, 1fr) minmax(120px, auto) 32px;
     align-items: center;
     gap: 8px;
     min-width: 0;
@@ -21472,6 +21472,7 @@ a.management-shift-card:hover {
 }
 
 .management-dynamics-chart {
+    position: relative;
     display: grid;
     gap: 6px;
     min-height: 0;
@@ -21541,6 +21542,145 @@ a.management-shift-card:hover {
 .management-dynamics-chart polyline.is-total {
     stroke-width: 2.2;
     opacity: 1;
+}
+
+.management-dynamics-chart-expand,
+.management-dynamics-chart-close {
+    display: inline-grid;
+    place-items: center;
+    border: 1px solid var(--gd-line);
+    border-radius: 4px;
+    background: rgba(15, 35, 35, .72);
+    color: var(--gd-text);
+    cursor: pointer;
+    font-weight: 900;
+    line-height: 1;
+}
+
+.management-dynamics-chart-expand {
+    width: 30px;
+    height: 30px;
+    font-size: 17px;
+}
+
+.management-dynamics-chart-expand:hover,
+.management-dynamics-chart-expand:focus-visible {
+    border-color: var(--gd-green);
+    color: var(--gd-green);
+}
+
+.management-dynamics-chart-tooltip {
+    position: absolute;
+    z-index: 25;
+    display: grid;
+    gap: 4px;
+    max-width: min(260px, calc(100% - 16px));
+    padding: 9px 10px;
+    border: 1px solid rgba(126, 150, 162, .38);
+    border-radius: 5px;
+    background: rgba(6, 16, 18, .96);
+    color: var(--gd-text);
+    box-shadow: 0 12px 28px rgba(0, 0, 0, .34);
+    pointer-events: none;
+}
+
+.management-dynamics-chart-tooltip[hidden] {
+    display: none;
+}
+
+.management-dynamics-chart-tooltip strong,
+.management-dynamics-chart-tooltip b,
+.management-dynamics-chart-tooltip span {
+    display: block;
+    line-height: 1.2;
+}
+
+.management-dynamics-chart-tooltip strong {
+    color: var(--gd-green);
+    font-size: 11px;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+}
+
+.management-dynamics-chart-tooltip b {
+    color: var(--gd-text);
+    font-size: 15px;
+}
+
+.management-dynamics-chart-tooltip span {
+    color: var(--gd-muted);
+    font-size: 12px;
+}
+
+.management-dynamics-chart-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 10000;
+    display: grid;
+    place-items: center;
+    padding: 4vh 2vw;
+}
+
+.management-dynamics-chart-overlay-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, .72);
+}
+
+.management-dynamics-chart-dialog {
+    position: relative;
+    z-index: 1;
+    width: min(96vw, 1880px);
+    height: min(88vh, 980px);
+    padding: 14px;
+    border: 1px solid rgba(126, 150, 162, .34);
+    border-radius: 8px;
+    background: var(--gd-panel);
+    box-shadow: 0 24px 70px rgba(0, 0, 0, .56);
+}
+
+.management-dynamics-chart-dialog-body,
+.management-dynamics-chart-card.is-expanded {
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+}
+
+.management-dynamics-chart-card.is-expanded {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+}
+
+.management-dynamics-chart-card.is-expanded .management-dynamics-chart {
+    height: 100%;
+    min-height: 0;
+}
+
+.management-dynamics-chart-card.is-expanded .management-dynamics-chart svg {
+    height: 100%;
+    min-height: 0;
+}
+
+.management-dynamics-chart-card.is-expanded .management-dynamics-chart-expand {
+    display: none;
+}
+
+.management-dynamics-chart-close {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    z-index: 3;
+    width: 32px;
+    height: 32px;
+    border-color: rgba(239, 91, 88, .6);
+    color: #ff5b58;
+    font-size: 26px;
+}
+
+.management-dynamics-chart-close:hover,
+.management-dynamics-chart-close:focus-visible {
+    border-color: #ff5b58;
+    background: rgba(239, 91, 88, .16);
 }
 
 .management-dynamics-legend {
@@ -21880,7 +22020,7 @@ a.management-shift-card:hover {
 }
 
 .management-dynamics-page .management-dynamics-chart-head-actions {
-    grid-template-columns: minmax(0, auto) minmax(92px, auto);
+    grid-template-columns: minmax(0, auto) minmax(92px, auto) 30px;
     justify-content: end;
     gap: 7px;
 }
@@ -24752,7 +24892,7 @@ body.mining-master-screen .dispatcher-complex-card .complex-truck-tile {
     }
 
     .management-dynamics-chart-head-actions {
-        grid-template-columns: 1fr;
+        grid-template-columns: minmax(0, 1fr) minmax(80px, auto) 30px;
         width: 100%;
     }
 
@@ -30828,6 +30968,10 @@ body.excavator-operator-screen .mm-mobile-nav-item span {
     .management-dynamics-page .management-dynamics-chart-head,
     .management-dynamics-page .management-dynamics-chart-head-actions {
         grid-template-columns: 1fr;
+    }
+
+    .management-dynamics-page .management-dynamics-chart-head-actions {
+        grid-template-columns: minmax(0, 1fr) minmax(76px, auto) 30px;
     }
 
     .management-dynamics-page .management-dynamics-chart-mode {

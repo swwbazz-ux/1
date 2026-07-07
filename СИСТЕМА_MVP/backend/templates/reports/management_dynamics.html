@@ -105,7 +105,7 @@
             </section>
 
             <section class="management-dynamics-main-grid">
-                <article class="dispatcher-report-card dispatcher-report-card-wide management-dynamics-chart-card">
+                <article class="dispatcher-report-card dispatcher-report-card-wide management-dynamics-chart-card" data-management-dynamics-chart-card>
                 <div class="dispatcher-report-card-head management-dynamics-chart-head">
                     <div>
                         <h2>График выработки</h2>
@@ -114,7 +114,7 @@
                     <div class="management-dynamics-chart-head-actions">
                         <div class="management-dynamics-chart-mode" role="group" aria-label="Режим графика">
                             {% for mode in dynamics.chart_mode_choices %}
-                                <button type="button" class="management-dynamics-chart-mode-button {% if dynamics.chart_mode == mode.code %}is-active{% endif %}" data-management-dynamics-chart-mode="{{ mode.code }}" data-active="{% if dynamics.chart_mode == mode.code %}true{% else %}false{% endif %}" aria-pressed="{% if dynamics.chart_mode == mode.code %}true{% else %}false{% endif %}" title="{{ mode.label }}">{% if mode.code == "cumulative" %}Накопит. м3{% else %}{{ mode.label }}{% endif %}</button>
+                                <button type="button" class="management-dynamics-chart-mode-button {% if dynamics.chart_mode == mode.code %}is-active{% endif %}" data-management-dynamics-chart-mode="{{ mode.code }}" data-active="{% if dynamics.chart_mode == mode.code %}true{% else %}false{% endif %}" aria-pressed="{% if dynamics.chart_mode == mode.code %}true{% else %}false{% endif %}" title="{{ mode.label }}" aria-label="{{ mode.label }}">{% if mode.code == "cumulative" %}Накопит. м3{% else %}{{ mode.label }}{% endif %}</button>
                             {% endfor %}
                         </div>
                         <div class="management-dynamics-legend">
@@ -122,10 +122,14 @@
                                 <span><i style="background: {{ series.color }};"></i>{{ series.label }}</span>
                             {% endfor %}
                         </div>
+                        <button type="button" class="management-dynamics-chart-expand" data-management-dynamics-chart-expand title="Развернуть график" aria-label="Развернуть график">
+                            <span aria-hidden="true">⛶</span>
+                        </button>
                     </div>
                 </div>
-                <div class="management-dynamics-chart">
+                <div class="management-dynamics-chart" data-management-dynamics-chart data-management-dynamics-current-mode="{{ dynamics.chart_mode }}">
                     {% if dynamics.chart_series %}
+                        <script type="application/json" data-management-dynamics-tooltip-data>{{ dynamics.chart_tooltip_json|safe }}</script>
                         <svg viewBox="0 0 1000 320" role="img" aria-label="Динамика объема">
                             <defs>
                                 <linearGradient id="management-dynamics-area-gradient" x1="0" y1="250" x2="0" y2="36" gradientUnits="userSpaceOnUse">
@@ -152,7 +156,7 @@
                             <text class="axis-label axis-title axis-title-y" x="16" y="143" text-anchor="middle" transform="rotate(-90 16 143)">{{ dynamics.chart_y_axis_title }}</text>
                             <text class="axis-label axis-title axis-title-x" x="525" y="312" text-anchor="middle">{{ dynamics.chart_x_axis_title }}</text>
                             {% for series in dynamics.chart_series %}
-                                <polyline class="{% if series.is_total %}is-total{% endif %}" points="{{ series.points }}" fill="none" style="fill: none; stroke: {{ series.color }};"></polyline>
+                                <polyline class="{% if series.is_total %}is-total{% endif %}" points="{{ series.points }}" fill="none" style="fill: none; stroke: {{ series.color }};" data-management-dynamics-series data-series-label="{{ series.label }}" data-series-color="{{ series.color }}"></polyline>
                             {% endfor %}
                         </svg>
                     {% else %}
@@ -285,7 +289,7 @@
         var shiftButtons = Array.prototype.slice.call(form.querySelectorAll("[data-management-dynamics-shift]"));
         var root = form.closest("[data-management-dynamics-refresh-root]") || document;
         var chartModeInput = form.querySelector("[data-management-dynamics-chart-mode-input]");
-        var chartModeButtons = Array.prototype.slice.call(root.querySelectorAll("[data-management-dynamics-chart-mode]"));
+        var chartModeButtons = Array.prototype.slice.call(root.querySelectorAll("button[data-management-dynamics-chart-mode]"));
         var dateControls = Array.prototype.slice.call(form.querySelectorAll('input[type="date"]'));
         var allExcavatorsControl = form.querySelector("[data-management-dynamics-all]");
         var excavatorControls = Array.prototype.slice.call(form.querySelectorAll('input[name="excavators"]'));
@@ -478,8 +482,241 @@
         updateSelectionSummary();
     }
 
+    function parseChartPayload(chart) {
+        var payloadNode = chart ? chart.querySelector("[data-management-dynamics-tooltip-data]") : null;
+        if (!payloadNode) {
+            return null;
+        }
+        try {
+            return JSON.parse(payloadNode.textContent || "{}");
+        } catch (error) {
+            return null;
+        }
+    }
+
+    function modeValueText(mode, value, unit) {
+        if (mode === "rate") {
+            return "Темп: " + value + " " + unit;
+        }
+        if (mode === "trips") {
+            return "Рейсов: " + value;
+        }
+        return "Накопительно: " + value + " " + unit;
+    }
+
+    function svgPointFromEvent(svg, event) {
+        var point = svg.createSVGPoint();
+        point.x = event.clientX;
+        point.y = event.clientY;
+        return point.matrixTransform(svg.getScreenCTM().inverse());
+    }
+
+    function nearestChartPoint(payload, pointer) {
+        var nearest = null;
+        if (!payload || !Array.isArray(payload.series)) {
+            return nearest;
+        }
+        payload.series.forEach(function (series) {
+            (series.points || []).forEach(function (point) {
+                var dx = Number(point.x || 0) - pointer.x;
+                var dy = Number(point.y || 0) - pointer.y;
+                var score = Math.sqrt(dx * dx + dy * dy);
+                if (!nearest || score < nearest.score) {
+                    nearest = {
+                        score: score,
+                        series: series,
+                        point: point
+                    };
+                }
+            });
+        });
+        return nearest;
+    }
+
+    function ensureChartTooltip(chart) {
+        var tooltip = chart.querySelector("[data-management-dynamics-chart-tooltip]");
+        if (!tooltip) {
+            tooltip = document.createElement("div");
+            tooltip.className = "management-dynamics-chart-tooltip";
+            tooltip.setAttribute("data-management-dynamics-chart-tooltip", "");
+            tooltip.hidden = true;
+            chart.appendChild(tooltip);
+        }
+        return tooltip;
+    }
+
+    function placeChartTooltip(chart, tooltip, event) {
+        var chartRect = chart.getBoundingClientRect();
+        var tooltipRect = tooltip.getBoundingClientRect();
+        var left = event.clientX - chartRect.left + 14;
+        var top = event.clientY - chartRect.top + 14;
+        if (left + tooltipRect.width > chartRect.width - 8) {
+            left = event.clientX - chartRect.left - tooltipRect.width - 14;
+        }
+        if (top + tooltipRect.height > chartRect.height - 8) {
+            top = event.clientY - chartRect.top - tooltipRect.height - 14;
+        }
+        tooltip.style.left = Math.max(8, left) + "px";
+        tooltip.style.top = Math.max(8, top) + "px";
+    }
+
+    function renderChartTooltip(tooltip, payload, nearest) {
+        var point = nearest.point;
+        var series = nearest.series;
+        tooltip.innerHTML = [
+            '<strong>' + (series.label || "Экскаватор") + '</strong>',
+            '<span>' + (point.period || "Период не указан") + '</span>',
+            '<b>' + modeValueText(payload.mode, point.value || "0", payload.unit || "") + '</b>'
+        ].join("");
+    }
+
+    function uniquifySvgGradientIds(root) {
+        var suffix = "expanded-" + Date.now() + "-" + Math.floor(Math.random() * 1000);
+        root.querySelectorAll("svg").forEach(function (svg) {
+            svg.querySelectorAll("linearGradient[id]").forEach(function (gradient) {
+                var oldId = gradient.id;
+                var newId = oldId + "-" + suffix;
+                gradient.id = newId;
+                svg.querySelectorAll('[fill="url(#' + oldId + ')"]').forEach(function (item) {
+                    item.setAttribute("fill", "url(#" + newId + ")");
+                });
+            });
+        });
+    }
+
+    function closeManagementDynamicsChartOverlay(restoreScroll) {
+        var overlay = document.querySelector("[data-management-dynamics-chart-overlay]");
+        if (!overlay) {
+            return;
+        }
+        var scrollY = Number(overlay.dataset.scrollY || 0);
+        if (window.__managementDynamicsChartOverlayEscHandler) {
+            document.removeEventListener("keydown", window.__managementDynamicsChartOverlayEscHandler, true);
+            window.__managementDynamicsChartOverlayEscHandler = null;
+        }
+        overlay.remove();
+        document.body.classList.remove("management-dynamics-chart-modal-open");
+        window.__managementDynamicsChartOverlayOpen = false;
+        if (restoreScroll !== false) {
+            window.requestAnimationFrame(function () {
+                window.scrollTo({top: scrollY, behavior: "auto"});
+            });
+        }
+    }
+
+    function bindOverlayControls(overlay) {
+        overlay.querySelectorAll("button[data-management-dynamics-chart-mode]").forEach(function (button) {
+            button.addEventListener("click", function () {
+                var mode = button.dataset.managementDynamicsChartMode;
+                var root = document.querySelector("[data-management-dynamics-refresh-root]");
+                var originalButton = root ? root.querySelector('[data-management-dynamics-chart-mode="' + mode + '"]') : null;
+                window.__managementDynamicsReopenChartOverlay = true;
+                if (originalButton) {
+                    originalButton.click();
+                }
+            });
+        });
+    }
+
+    function openManagementDynamicsChartOverlay(sourceCard) {
+        var card = sourceCard || document.querySelector("[data-management-dynamics-chart-card]");
+        if (!card) {
+            return;
+        }
+        closeManagementDynamicsChartOverlay(false);
+        var scrollY = window.scrollY || window.pageYOffset || 0;
+        var overlay = document.createElement("div");
+        overlay.className = "management-dynamics-chart-overlay";
+        overlay.setAttribute("data-management-dynamics-chart-overlay", "");
+        overlay.dataset.scrollY = String(scrollY);
+        overlay.innerHTML = [
+            '<div class="management-dynamics-chart-overlay-backdrop" data-management-dynamics-chart-close></div>',
+            '<section class="management-dynamics-chart-dialog" role="dialog" aria-modal="true" aria-label="Увеличенный график выработки">',
+            '<button type="button" class="management-dynamics-chart-close" data-management-dynamics-chart-close title="Закрыть" aria-label="Закрыть увеличенный график">×</button>',
+            '<div class="management-dynamics-chart-dialog-body"></div>',
+            '</section>'
+        ].join("");
+        var clone = card.cloneNode(true);
+        clone.querySelectorAll("[data-management-dynamics-chart]").forEach(function (chart) {
+            delete chart.dataset.managementDynamicsChartBound;
+            var tooltip = chart.querySelector("[data-management-dynamics-chart-tooltip]");
+            if (tooltip) {
+                tooltip.remove();
+            }
+        });
+        clone.querySelectorAll("[data-management-dynamics-chart-expand]").forEach(function (button) {
+            delete button.dataset.managementDynamicsExpandBound;
+        });
+        clone.classList.add("is-expanded");
+        uniquifySvgGradientIds(clone);
+        overlay.querySelector(".management-dynamics-chart-dialog-body").appendChild(clone);
+        document.body.appendChild(overlay);
+        document.body.classList.add("management-dynamics-chart-modal-open");
+        window.__managementDynamicsChartOverlayOpen = true;
+        initManagementDynamicsChartInteractions(overlay, true);
+        bindOverlayControls(overlay);
+        overlay.querySelectorAll("[data-management-dynamics-chart-close]").forEach(function (button) {
+            button.addEventListener("click", function () {
+                closeManagementDynamicsChartOverlay(true);
+            });
+        });
+        function closeOnEsc(event) {
+            if (event.key !== "Escape" || !document.body.contains(overlay)) {
+                return;
+            }
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            closeManagementDynamicsChartOverlay(true);
+        }
+        window.__managementDynamicsChartOverlayEscHandler = closeOnEsc;
+        document.addEventListener("keydown", closeOnEsc, true);
+    }
+
+    function initManagementDynamicsChartInteractions(root, isOverlay) {
+        (root || document).querySelectorAll("[data-management-dynamics-chart]").forEach(function (chart) {
+            if (chart.dataset.managementDynamicsChartBound === "1") {
+                return;
+            }
+            chart.dataset.managementDynamicsChartBound = "1";
+            var svg = chart.querySelector("svg");
+            var payload = parseChartPayload(chart);
+            var tooltip = ensureChartTooltip(chart);
+            if (svg && payload) {
+                svg.addEventListener("pointermove", function (event) {
+                    var pointer = svgPointFromEvent(svg, event);
+                    var nearest = nearestChartPoint(payload, pointer);
+                    if (!nearest) {
+                        tooltip.hidden = true;
+                        return;
+                    }
+                    renderChartTooltip(tooltip, payload, nearest);
+                    tooltip.hidden = false;
+                    placeChartTooltip(chart, tooltip, event);
+                });
+                svg.addEventListener("pointerleave", function () {
+                    tooltip.hidden = true;
+                });
+                if (!isOverlay) {
+                    chart.addEventListener("dblclick", function () {
+                        openManagementDynamicsChartOverlay(chart.closest("[data-management-dynamics-chart-card]"));
+                    });
+                }
+            }
+        });
+        (root || document).querySelectorAll("[data-management-dynamics-chart-expand]").forEach(function (button) {
+            if (button.dataset.managementDynamicsExpandBound === "1") {
+                return;
+            }
+            button.dataset.managementDynamicsExpandBound = "1";
+            button.addEventListener("click", function () {
+                openManagementDynamicsChartOverlay(button.closest("[data-management-dynamics-chart-card]"));
+            });
+        });
+    }
+
     function rebindManagementDynamicsControls(root) {
         (root || document).querySelectorAll("[data-auto-filter-form]").forEach(initAutoFilterForm);
+        initManagementDynamicsChartInteractions(root || document, false);
         if (typeof window.initManagementReportTheme === "function") {
             window.initManagementReportTheme();
         }
@@ -509,8 +746,18 @@
             if (!fresh) {
                 return {deferred: true, reason: "management_dynamics_fragment_missing"};
             }
+            var reopenChartOverlay = Boolean(window.__managementDynamicsReopenChartOverlay);
+            if (window.__managementDynamicsChartOverlayOpen) {
+                closeManagementDynamicsChartOverlay(false);
+            }
             root.innerHTML = fresh.innerHTML;
             rebindManagementDynamicsControls(root);
+            if (reopenChartOverlay) {
+                window.__managementDynamicsReopenChartOverlay = false;
+                window.requestAnimationFrame(function () {
+                    openManagementDynamicsChartOverlay(root.querySelector("[data-management-dynamics-chart-card]"));
+                });
+            }
             if (typeof restoreScrollY === "number") {
                 window.requestAnimationFrame(function () {
                     var body = document.body || {};

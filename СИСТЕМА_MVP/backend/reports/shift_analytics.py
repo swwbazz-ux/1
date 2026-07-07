@@ -1,3 +1,4 @@
+import json
 from collections import defaultdict
 from datetime import datetime, time, timedelta
 from decimal import Decimal
@@ -216,6 +217,52 @@ def build_chart_points(rows, max_volume):
     return ' '.join(points)
 
 
+def split_svg_points(points):
+    result = []
+    for part in (points or '').split():
+        if ',' not in part:
+            continue
+        x, y = part.split(',', 1)
+        result.append({'x': int(x), 'y': int(y)})
+    return result
+
+
+def tooltip_period_label(row):
+    if row.get('event_at'):
+        return timezone.localtime(row['event_at']).strftime('%d.%m.%Y %H:%M')
+    return row.get('label', '')
+
+
+def build_chart_tooltip_points(rows, points):
+    coords = split_svg_points(points)
+    tooltip_points = []
+    for row, coord in zip(rows, coords):
+        value = row.get('value', row.get('volume_m3', Decimal('0')))
+        tooltip_points.append({
+            'x': coord['x'],
+            'y': coord['y'],
+            'period': tooltip_period_label(row),
+            'value': format_volume(value),
+        })
+    return tooltip_points
+
+
+def build_chart_tooltip_payload(chart_series, chart_mode):
+    return json.dumps({
+        'mode': chart_mode,
+        'modeLabel': DYNAMICS_CHART_MODE_LABELS[chart_mode],
+        'unit': DYNAMICS_CHART_MODE_AXIS_LABELS[chart_mode],
+        'series': [
+            {
+                'label': series['label'],
+                'color': series['color'],
+                'points': series.get('tooltip_points', []),
+            }
+            for series in chart_series
+        ],
+    }, ensure_ascii=False)
+
+
 def build_chart_area_points(points):
     if not points:
         return ''
@@ -426,6 +473,7 @@ def build_dynamics_chart_series(bucket_rows, excavator_rows, max_volume):
                 'label': 'Сумма',
                 'color': '#7de05e',
                 'points': total_points,
+                'tooltip_points': build_chart_tooltip_points(bucket_rows, total_points),
                 'area_points': '',
                 'area_path': '',
                 'is_total': True,
@@ -436,6 +484,7 @@ def build_dynamics_chart_series(bucket_rows, excavator_rows, max_volume):
         rows = []
         for bucket in bucket_rows:
             rows.append({
+                'label': bucket['label'],
                 'volume_m3': bucket.get('excavators', {}).get(excavator_key, Decimal('0')),
             })
         points = build_chart_points(rows, max_volume)
@@ -445,6 +494,7 @@ def build_dynamics_chart_series(bucket_rows, excavator_rows, max_volume):
             'label': excavator['label'],
             'color': colors[index % len(colors)],
             'points': points,
+            'tooltip_points': build_chart_tooltip_points(rows, points),
             'area_points': '',
             'area_path': '',
             'is_total': False,
@@ -510,6 +560,7 @@ def build_dynamics_event_chart_series(events, excavator_rows, chart_mode, range_
         'label': label,
         'color': '#7de05e',
         'points': points,
+        'tooltip_points': build_chart_tooltip_points(rows, points),
         'area_points': build_chart_area_points(points),
         'area_path': build_chart_area_path(points),
         'is_total': True,
@@ -635,6 +686,7 @@ def build_excavator_dynamics(date_from, date_to, granularity='day', excavator_id
         'excavator_rows': excavator_rows,
         'chart_points': build_chart_points(bucket_rows, max_bucket_volume),
         'chart_series': chart_series,
+        'chart_tooltip_json': build_chart_tooltip_payload(chart_series, chart_mode),
         'chart_y_axis_ticks': build_chart_y_axis_ticks(chart_max_value),
         'chart_x_axis_ticks': build_time_chart_x_axis_ticks(chart_range_start, chart_range_end, granularity, shift_type),
         'max_bucket_volume_display': format_volume(max_bucket_volume),
