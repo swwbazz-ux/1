@@ -225,14 +225,57 @@
         form.dataset.managementDynamicsAutoFilterBound = "1";
         var submitTimer = null;
 
+        function getMaxWindowScrollY() {
+            var body = document.body || {};
+            var html = document.documentElement || {};
+            return Math.max(0, body.scrollHeight || 0, html.scrollHeight || 0) - window.innerHeight;
+        }
+
+        function restoreWindowScroll(scrollY) {
+            if (typeof scrollY !== "number") {
+                return;
+            }
+            window.requestAnimationFrame(function () {
+                window.scrollTo({
+                    top: Math.max(0, Math.min(scrollY, getMaxWindowScrollY())),
+                    behavior: "auto"
+                });
+            });
+        }
+
+        function updateUrlFromForm() {
+            var url = new URL(window.location.href);
+            var formData = new FormData(form);
+            Array.prototype.slice.call(form.elements).forEach(function (element) {
+                if (element.name) {
+                    url.searchParams.delete(element.name);
+                }
+            });
+            url.searchParams.delete("_management_dynamics_refresh");
+            formData.forEach(function (value, key) {
+                url.searchParams.append(key, value);
+            });
+            window.history.replaceState(window.history.state, "", url.toString());
+        }
+
+        function submitFormPreservingScroll() {
+            var scrollY = window.scrollY || window.pageYOffset || 0;
+            updateUrlFromForm();
+            if (typeof window.refreshManagementDynamicsFromServer === "function") {
+                window.refreshManagementDynamicsFromServer(scrollY).then(function (result) {
+                    if (!result || !result.applied) {
+                        restoreWindowScroll(scrollY);
+                    }
+                });
+            } else {
+                restoreWindowScroll(scrollY);
+            }
+        }
+
         function submitAutoFilter(delay) {
             window.clearTimeout(submitTimer);
             submitTimer = window.setTimeout(function () {
-                if (form.requestSubmit) {
-                    form.requestSubmit();
-                } else {
-                    form.submit();
-                }
+                submitFormPreservingScroll();
             }, delay || 0);
         }
 
@@ -421,6 +464,11 @@
             }
         });
 
+        form.addEventListener("submit", function (event) {
+            event.preventDefault();
+            submitFormPreservingScroll();
+        });
+
         updateSelectionSummary();
     }
 
@@ -431,7 +479,7 @@
         }
     }
 
-    function refreshManagementDynamicsFromServer() {
+    function refreshManagementDynamicsFromServer(restoreScrollY) {
         var root = document.querySelector("[data-management-dynamics-refresh-root]");
         if (!root || !window.fetch || !window.DOMParser) {
             return Promise.resolve({deferred: true, reason: "management_dynamics_refresh_unavailable"});
@@ -457,6 +505,17 @@
             }
             root.innerHTML = fresh.innerHTML;
             rebindManagementDynamicsControls(root);
+            if (typeof restoreScrollY === "number") {
+                window.requestAnimationFrame(function () {
+                    var body = document.body || {};
+                    var html = document.documentElement || {};
+                    var maxScrollY = Math.max(0, body.scrollHeight || 0, html.scrollHeight || 0) - window.innerHeight;
+                    window.scrollTo({
+                        top: Math.max(0, Math.min(restoreScrollY, maxScrollY)),
+                        behavior: "auto"
+                    });
+                });
+            }
             return {applied: true};
         }).catch(function () {
             return {deferred: true, reason: "management_dynamics_refresh_failed"};

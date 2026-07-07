@@ -21749,12 +21749,13 @@ a.management-shift-card:hover {
 }
 
 .management-dynamics-page .management-dynamics-content {
-    gap: 9px;
+    gap: 8px;
 }
 
 .management-dynamics-page .management-dynamics-filters {
     gap: 8px;
-    padding: 10px;
+    padding: 8px;
+    align-items: end;
 }
 
 .management-dynamics-page .management-dynamics-filters label,
@@ -21764,20 +21765,43 @@ a.management-shift-card:hover {
 
 .management-dynamics-page .management-dynamics-filters input[type="date"],
 .management-dynamics-page .management-dynamics-segment {
-    min-height: 34px;
+    min-height: 30px;
+    height: 30px;
+}
+
+.management-dynamics-page .management-dynamics-filters input[type="date"] {
+    padding: 0 10px;
+    font-size: 12px;
+}
+
+.management-dynamics-page .management-dynamics-segments,
+.management-dynamics-page .management-dynamics-shift-segments {
+    gap: 4px;
+}
+
+.management-dynamics-page .management-dynamics-segment {
+    padding: 0 10px;
+    border-color: rgba(126, 150, 162, .28);
+    background: rgba(80, 214, 74, .08);
+    color: var(--gd-muted);
+    font-size: 11px;
+    letter-spacing: .045em;
 }
 
 .management-dynamics-page .management-dynamics-excavators {
-    min-height: 48px;
-    padding: 7px 9px;
+    min-height: 44px;
+    padding: 6px 8px;
 }
 
 .management-dynamics-page .management-dynamics-selector-head strong {
-    font-size: 13px;
+    font-size: 12px;
 }
 
 .management-dynamics-page .management-dynamics-selector-toggle {
     min-height: 30px;
+    height: 30px;
+    font-size: 11px;
+    letter-spacing: .045em;
 }
 
 .management-dynamics-page .management-dynamics-kpis {
@@ -21786,12 +21810,19 @@ a.management-shift-card:hover {
 }
 
 .management-dynamics-page .management-dynamics-kpis .dispatcher-report-tile {
-    min-height: 104px;
-    padding: 12px 14px;
+    min-height: 84px;
+    padding: 10px 12px;
+}
+
+.management-dynamics-page .management-dynamics-kpis .dispatcher-report-tile-head span {
+    max-width: 92px;
+    padding: 2px 7px;
+    font-size: 9px;
+    letter-spacing: .045em;
 }
 
 .management-dynamics-page .management-dynamics-kpis .dispatcher-report-tile > strong {
-    font-size: clamp(24px, 2.2vw, 38px);
+    font-size: clamp(22px, 1.9vw, 30px);
     line-height: 1;
 }
 
@@ -21799,7 +21830,7 @@ a.management-shift-card:hover {
     display: grid;
     grid-template-columns: minmax(0, 3fr) minmax(260px, 1fr);
     gap: 9px;
-    align-items: stretch;
+    align-items: start;
 }
 
 .management-dynamics-main-grid > * {
@@ -21818,7 +21849,7 @@ a.management-shift-card:hover {
 
 .management-dynamics-page .management-dynamics-chart-card {
     display: grid;
-    grid-template-rows: auto minmax(360px, 1fr);
+    grid-template-rows: auto auto;
 }
 
 .management-dynamics-page .management-dynamics-chart-head {
@@ -21834,18 +21865,27 @@ a.management-shift-card:hover {
 }
 
 .management-dynamics-page .management-dynamics-chart-head-actions {
-    grid-template-columns: minmax(0, 1fr) minmax(92px, auto);
+    grid-template-columns: minmax(0, auto) minmax(92px, auto);
+    justify-content: end;
     gap: 7px;
 }
 
 .management-dynamics-page .management-dynamics-chart-mode {
-    width: min(560px, 100%);
+    display: inline-flex;
+    grid-template-columns: none;
+    justify-self: end;
+    width: auto;
+    max-width: 100%;
+    gap: 4px;
 }
 
 .management-dynamics-page .management-dynamics-chart-mode-button {
     min-height: 28px;
-    padding: 0 8px;
-    font-size: 9px;
+    height: 28px;
+    min-width: 82px;
+    padding: 0 10px;
+    font-size: 10px;
+    letter-spacing: .045em;
 }
 
 .management-dynamics-page .management-dynamics-legend {
@@ -21854,17 +21894,18 @@ a.management-shift-card:hover {
 }
 
 .management-dynamics-page .management-dynamics-chart {
-    min-height: 360px;
+    min-height: 320px;
     padding: 8px;
 }
 
 .management-dynamics-page .management-dynamics-chart svg {
-    min-height: 340px;
+    min-height: 310px;
 }
 
 .management-dynamics-page .management-dynamics-insights-card {
     display: grid;
-    grid-template-rows: auto 1fr;
+    grid-template-rows: auto auto;
+    align-self: start;
 }
 
 .management-dynamics-page .management-dynamics-signals {
@@ -21882,7 +21923,8 @@ a.management-shift-card:hover {
 }
 
 .management-dynamics-page .management-dynamics-table-wrap {
-    max-height: 230px;
+    max-height: 178px;
+    overflow: auto;
 }
 
 .management-dynamics-page .management-dynamics-table th,
@@ -24660,12 +24702,15 @@ body.mining-master-screen .dispatcher-complex-card .complex-truck-tile {
     }
 
     .management-dynamics-chart-mode {
-        width: 100%;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
+        display: flex;
+        width: auto;
+        max-width: 100%;
+        flex-wrap: wrap;
     }
 
     .management-dynamics-chart-mode-button {
-        padding: 0 6px;
+        min-width: 82px;
+        padding: 0 8px;
     }
 
     .management-dynamics-selector-popover {
