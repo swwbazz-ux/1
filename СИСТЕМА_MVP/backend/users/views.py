@@ -107,7 +107,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v21'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v32'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -1673,12 +1673,9 @@ def driver_shift_view(request):
     driver_status_class = 'is-empty'
     driver_target_label = '—'
     if active_trip:
-        driver_status = 'ГРУЖЕНЫЙ'
+        driver_status = 'ЗАГРУЖЕН'
         driver_status_class = 'is-loaded'
         driver_target_label = active_trip.actual_dump_point or active_trip.dump_point
-    elif pending_assignment:
-        driver_status = 'ПРИНЯТЬ'
-        driver_status_class = 'is-attention'
     elif active_downtime:
         driver_status = 'ПРОСТОЙ'
         driver_status_class = 'is-downtime'
