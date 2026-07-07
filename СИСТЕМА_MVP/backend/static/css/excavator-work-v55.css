@@ -1,0 +1,3465 @@
+body.excavator-operator-screen .eo-shift-titlebar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 7px;
+}
+
+body.excavator-operator-screen .eo-shell {
+    max-width: 100%;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-titlebar h1 {
+    min-width: 0;
+    margin: 0;
+    font-size: clamp(28px, 4.3dvh, 31px);
+    font-weight: 700;
+    letter-spacing: 0;
+    line-height: 1;
+}
+
+body.excavator-operator-screen .eo-shift-update-button {
+    appearance: none;
+    display: inline-grid;
+    grid-template-columns: auto minmax(0, auto);
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-width: 0;
+    min-height: 32px;
+    max-width: 132px;
+    padding: 0 10px;
+    border: 1px solid rgba(139, 159, 170, .44);
+    border-radius: 999px;
+    background: rgba(18, 27, 33, .7);
+    color: #cbd6dc;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1;
+    cursor: pointer;
+    box-shadow: inset 0 0 16px rgba(139, 159, 170, .05), 0 8px 18px rgba(0, 0, 0, .18);
+    box-sizing: border-box;
+}
+
+body.excavator-operator-screen .eo-shift-update-button > span {
+    position: relative;
+    display: block;
+    width: 14px;
+    height: 14px;
+    border: 2px solid currentColor;
+    border-left-color: transparent;
+    border-radius: 50%;
+    opacity: .82;
+}
+
+body.excavator-operator-screen .eo-shift-update-button > span::after {
+    content: "";
+    position: absolute;
+    top: -3px;
+    right: -4px;
+    width: 0;
+    height: 0;
+    border-top: 4px solid transparent;
+    border-bottom: 4px solid transparent;
+    border-left: 5px solid currentColor;
+    transform: rotate(-35deg);
+}
+
+body.excavator-operator-screen .eo-shift-update-button b,
+body.excavator-operator-screen .eo-shift-update-button em {
+    min-width: 0;
+    overflow: hidden;
+    font-style: normal;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+body.excavator-operator-screen .eo-shift-update-button em {
+    grid-column: 1 / -1;
+    color: #58df52;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .02em;
+}
+
+body.excavator-operator-screen .eo-shift-update-button.has-pwa-update {
+    border-color: rgba(255, 216, 0, .7);
+    background: rgba(74, 60, 0, .28);
+    color: #ffd800;
+}
+
+body.excavator-operator-screen .eo-shift-update-button.is-current {
+    border-color: rgba(88, 223, 82, .5);
+    color: #58df52;
+}
+
+body.excavator-operator-screen .eo-shift-update-button.is-checking > span {
+    animation: eo-update-spin .78s linear infinite;
+}
+
+body.excavator-operator-screen .eo-shift-update-button:disabled {
+    opacity: .78;
+    cursor: progress;
+}
+
+/* Unified mobile operator sizing contract. Keep these scoped to the Excavator PWA. */
+body.excavator-operator-screen {
+    min-height: 100dvh;
+    overflow: hidden;
+}
+
+body.excavator-operator-screen .eo-shell {
+    --eo-safe-bottom: env(safe-area-inset-bottom, 0px);
+    --eo-page-x: clamp(10px, 3.35vw, 16px);
+    --eo-page-top: clamp(6px, .9dvh, 10px);
+    --eo-gap-1: clamp(4px, .55dvh, 6px);
+    --eo-gap-2: clamp(6px, .9dvh, 9px);
+    --eo-gap-3: clamp(8px, 1.2dvh, 12px);
+    --eo-radius-sm: 6px;
+    --eo-radius-md: 8px;
+    --eo-topbar-h: clamp(38px, 5.35dvh, 44px);
+    --eo-nav-h: clamp(62px, 8.45dvh, 72px);
+    --eo-nav-gap: clamp(8px, 1.15dvh, 12px);
+    --eo-title-size: clamp(29px, 5.15dvh, 38px);
+    --eo-section-title-size: clamp(12px, 1.75dvh, 14px);
+    --eo-label-size: clamp(12px, 1.72dvh, 14px);
+    --eo-value-size: clamp(20px, 3.05dvh, 25px);
+    --eo-button-size: clamp(15px, 2.25dvh, 18px);
+    width: min(100vw, 430px);
+    height: 100dvh;
+    max-height: 100dvh;
+    grid-template-rows: var(--eo-topbar-h) minmax(0, 1fr) calc(var(--eo-nav-h) + var(--eo-nav-gap) + var(--eo-safe-bottom));
+    padding: var(--eo-page-top) var(--eo-page-x) calc(8px + var(--eo-safe-bottom));
+}
+
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] {
+    grid-template-rows: minmax(0, 1fr) calc(var(--eo-nav-h) + var(--eo-nav-gap) + var(--eo-safe-bottom));
+}
+
+body.excavator-operator-screen .eo-topbar {
+    height: var(--eo-topbar-h);
+    grid-template-columns: .94fr 1.12fr .98fr 1.18fr;
+    border-radius: var(--eo-radius-md);
+}
+
+body.excavator-operator-screen .eo-topbar-cell {
+    gap: 4px;
+    padding: 0 4px;
+}
+
+body.excavator-operator-screen .eo-topbar-cell img,
+body.excavator-operator-screen .eo-clock-icon,
+body.excavator-operator-screen .eo-pin-icon {
+    width: clamp(15px, 4.1vw, 18px);
+    height: clamp(15px, 4.1vw, 18px);
+}
+
+body.excavator-operator-screen .eo-topbar-cell strong,
+body.excavator-operator-screen .eo-face-cell strong {
+    font-size: clamp(10px, 2.85vw, 12px);
+    font-weight: 750;
+    letter-spacing: 0;
+}
+
+body.excavator-operator-screen .eo-status-cell > span {
+    flex: 0 0 auto;
+    width: 8px;
+    height: 8px;
+}
+
+body.excavator-operator-screen .eo-screen {
+    min-height: 0;
+    padding-top: var(--eo-gap-3);
+    overflow: hidden;
+}
+
+body.excavator-operator-screen .eo-screen h1,
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-titlebar h1 {
+    margin: 0 0 var(--eo-gap-2);
+    font-size: var(--eo-title-size);
+    font-weight: 800;
+    line-height: .98;
+    letter-spacing: 0;
+}
+
+body.excavator-operator-screen .mm-mobile-bottom-nav {
+    grid-row: 3;
+    align-self: end;
+    height: var(--eo-nav-h);
+    margin-top: var(--eo-nav-gap);
+    margin-bottom: var(--eo-safe-bottom);
+    border-radius: var(--eo-radius-md);
+}
+
+body.excavator-operator-screen .mm-mobile-nav-item {
+    min-height: 0;
+    padding: clamp(5px, .85dvh, 7px) 2px;
+    font-size: clamp(8px, 2.2vw, 10px);
+}
+
+body.excavator-operator-screen .mm-mobile-nav-item img,
+body.excavator-operator-screen .mm-mobile-nav-item .eo-nav-clock,
+body.excavator-operator-screen .mm-mobile-nav-item .eo-nav-bell {
+    width: clamp(21px, 6.2vw, 26px);
+    height: clamp(21px, 6.2vw, 26px);
+}
+
+body.excavator-operator-screen .eo-topbar-cell strong {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0;
+}
+
+body.excavator-operator-screen .eo-face-cell strong {
+    font-size: 11px;
+    font-weight: 650;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-section-head span {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: .055em;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-section-head b {
+    font-size: 11px;
+    font-weight: 700;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-metrics .eo-field-card span,
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-face span {
+    color: rgba(203, 214, 220, .78);
+    font-size: 13px;
+    font-weight: 500;
+    letter-spacing: 0;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-metrics input {
+    font-size: clamp(20px, 2.65dvh, 23px);
+    font-weight: 700;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-metric-value em {
+    color: rgba(203, 214, 220, .72);
+    font-size: 12px;
+    font-weight: 500;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-face strong {
+    font-size: clamp(19px, 2.55dvh, 22px);
+    font-weight: 700;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-face .eo-shift-rock strong {
+    font-size: clamp(18px, 2.35dvh, 21px);
+    line-height: 1.12;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-dump-chip strong {
+    font-size: 16px;
+    font-weight: 700;
+    line-height: 1.05;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-dump-chip span {
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-grid span {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: .055em;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-grid strong {
+    font-size: clamp(18px, 2.45dvh, 20px);
+    font-weight: 700;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-grid em {
+    color: rgba(203, 214, 220, .72);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .mm-mobile-shift-button,
+body.excavator-operator-screen .eo-logout-button {
+    min-height: 44px;
+    font-size: 16px;
+    font-weight: 800;
+    letter-spacing: .02em;
+}
+
+body.excavator-operator-screen .eo-shift-titlebar {
+    gap: var(--eo-gap-2);
+    margin-bottom: var(--eo-gap-2);
+}
+
+body.excavator-operator-screen .eo-shift-update-button {
+    min-height: clamp(30px, 4.35dvh, 36px);
+    max-width: clamp(108px, 31vw, 126px);
+    padding: 0 9px;
+    font-size: clamp(11px, 2.85vw, 12px);
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form {
+    gap: 0;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-section {
+    gap: var(--eo-gap-1);
+    padding: clamp(6px, .95dvh, 9px);
+    border-radius: var(--eo-radius-md);
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-section + .eo-shift-section {
+    margin-top: var(--eo-gap-2);
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-section-head span {
+    font-size: var(--eo-section-title-size);
+    font-weight: 750;
+    letter-spacing: .07em;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-section-head b {
+    min-height: clamp(22px, 3.3dvh, 26px);
+    padding: 0 9px;
+    font-size: clamp(11px, 2.75vw, 12px);
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-metrics {
+    gap: var(--eo-gap-1);
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-metrics .eo-field-card {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    min-height: clamp(40px, 6.15dvh, 52px);
+    height: auto;
+    padding: clamp(5px, .85dvh, 8px) 10px;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-metrics .eo-field-card span,
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-face span {
+    font-size: var(--eo-label-size);
+    font-weight: 550;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-metrics input {
+    font-size: var(--eo-value-size);
+    font-weight: 750;
+    text-align: right;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-metric-value em {
+    font-size: clamp(11px, 2.75vw, 12px);
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-face {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--eo-gap-1);
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-face > div,
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-face .eo-shift-rock {
+    min-height: clamp(44px, 6.6dvh, 58px);
+    height: auto;
+    padding: clamp(6px, .9dvh, 9px) 9px;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-face .eo-shift-rock {
+    grid-column: 1 / -1;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-face strong,
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-face .eo-shift-rock strong {
+    font-size: var(--eo-value-size);
+    font-weight: 750;
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-dump-list {
+    gap: var(--eo-gap-1);
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-dump-chip,
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-dump-empty {
+    min-height: clamp(40px, 5.9dvh, 50px);
+    height: auto;
+    padding: 6px 9px;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-dump-chip strong {
+    font-size: clamp(15px, 3.55vw, 17px);
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-grid > div {
+    min-height: clamp(46px, 6.65dvh, 56px);
+    height: auto;
+    padding: 7px 9px;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-grid strong {
+    font-size: clamp(19px, 4.45vw, 22px);
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--eo-gap-1);
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-grid > div {
+    min-height: clamp(40px, 5.15dvh, 48px);
+    padding: 6px 8px;
+}
+
+body.excavator-operator-screen .eo-shift-actions {
+    margin-top: auto;
+    padding-top: var(--eo-gap-3);
+    gap: var(--eo-gap-2);
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .mm-mobile-shift-button,
+body.excavator-operator-screen .eo-logout-button,
+body.excavator-operator-screen .eo-primary-action {
+    min-height: clamp(42px, 6.1dvh, 50px);
+    height: auto;
+    border-radius: var(--eo-radius-md);
+    font-size: var(--eo-button-size);
+    font-weight: 800;
+}
+
+body.excavator-operator-screen .eo-logout-button {
+    color: #cbd6dc;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-metrics .eo-field-card {
+    min-height: 42px !important;
+    height: 42px !important;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-face > div,
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-face .eo-shift-rock {
+    min-height: 48px !important;
+    height: 48px !important;
+}
+
+body.excavator-operator-screen .eo-screen[data-eo-screen="face"] {
+    display: grid;
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
+    gap: var(--eo-gap-2);
+}
+
+body.excavator-operator-screen .eo-screen[data-eo-screen="face"] h1 {
+    margin-bottom: 0;
+}
+
+body.excavator-operator-screen .eo-face-form {
+    gap: var(--eo-gap-2);
+}
+
+body.excavator-operator-screen .eo-large-field {
+    min-height: clamp(50px, 7.15dvh, 62px);
+    padding: clamp(6px, 1dvh, 9px) 12px;
+    border-radius: var(--eo-radius-md);
+}
+
+body.excavator-operator-screen .eo-large-field span {
+    font-size: var(--eo-label-size);
+    font-weight: 600;
+}
+
+body.excavator-operator-screen .eo-large-field input,
+body.excavator-operator-screen .eo-large-field select {
+    font-size: clamp(21px, 3.6dvh, 27px);
+    font-weight: 780;
+    line-height: 1.08;
+}
+
+body.excavator-operator-screen .eo-unload-grid-settings {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-auto-rows: minmax(clamp(54px, 8.1dvh, 72px), 1fr);
+    align-content: stretch;
+    min-height: 0;
+    margin-top: 0;
+    gap: var(--eo-gap-2);
+    overflow: hidden;
+}
+
+body.excavator-operator-screen .eo-unload-grid-settings .eo-unload-card {
+    min-height: 0;
+    padding: 7px 8px;
+    border-radius: var(--eo-radius-md);
+}
+
+body.excavator-operator-screen .eo-unload-grid-settings .eo-unload-card strong {
+    display: -webkit-box;
+    font-size: clamp(17px, 4.4vw, 22px);
+    font-weight: 760;
+    line-height: 1.05;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+}
+
+body.excavator-operator-screen .eo-screen[data-eo-screen="face"] .eo-primary-action {
+    margin-top: 0;
+}
+
+body.excavator-operator-screen .eo-dashboard-screen {
+    gap: var(--eo-gap-2);
+}
+
+body.excavator-operator-screen .eo-dashboard-head {
+    grid-template-columns: minmax(0, 1fr) clamp(70px, 19vw, 88px);
+    gap: var(--eo-gap-3);
+}
+
+body.excavator-operator-screen .eo-dashboard-driver-card span,
+body.excavator-operator-screen .eo-dashboard-info span,
+body.excavator-operator-screen .eo-dashboard-title span,
+body.excavator-operator-screen .eo-dashboard-unload-label {
+    font-size: clamp(9px, 2.45vw, 11px);
+    letter-spacing: .07em;
+}
+
+body.excavator-operator-screen .eo-dashboard-driver-card strong {
+    font-size: clamp(14px, 3.5vw, 17px);
+}
+
+body.excavator-operator-screen .eo-dashboard-driver-card b {
+    font-size: clamp(35px, 9.4vw, 46px);
+}
+
+body.excavator-operator-screen .eo-dashboard-info {
+    min-height: clamp(50px, 7.25dvh, 62px);
+}
+
+body.excavator-operator-screen .eo-dashboard-info div {
+    gap: 4px;
+    padding: 6px 5px;
+}
+
+body.excavator-operator-screen .eo-dashboard-info strong {
+    font-size: clamp(13px, 3.35vw, 16px);
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-grid {
+    height: clamp(150px, 23dvh, 214px);
+    gap: clamp(5px, .75dvh, 7px);
+    overflow: visible;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-grid.is-many {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-auto-rows: minmax(clamp(48px, 7dvh, 61px), 1fr);
+    height: clamp(150px, 22dvh, 188px);
+    overflow: visible;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-grid.is-many .eo-dashboard-truck-card {
+    grid-template-rows: auto auto;
+    align-content: center;
+    justify-items: center;
+    gap: 2px;
+    padding: 5px 5px 4px;
+    border-radius: var(--eo-radius-sm);
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-grid.is-many .eo-dashboard-truck-card i {
+    justify-content: center;
+    height: 20px;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-grid.is-many .eo-dashboard-truck-card i::after,
+body.excavator-operator-screen .eo-dashboard-truck-grid.is-many .eo-dashboard-truck-card small,
+body.excavator-operator-screen .eo-dashboard-truck-grid.is-many .eo-dashboard-truck-card em {
+    display: none;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-grid.is-many .eo-dashboard-truck-card img {
+    width: 34px;
+    height: 20px;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-grid.is-many .eo-dashboard-truck-card strong {
+    justify-self: center;
+    font-size: clamp(18px, 5vw, 22px);
+    line-height: .94;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-grid.is-many .eo-dashboard-truck-card span {
+    font-size: 8px;
+    line-height: 1;
+    text-align: center;
+}
+
+body.excavator-operator-screen .eo-truck-card.is-inactive:not(.is-pending)::after {
+    content: "В рейсе";
+}
+
+body.excavator-operator-screen .eo-dashboard-divider {
+    min-height: clamp(14px, 2.1dvh, 18px);
+}
+
+body.excavator-operator-screen .eo-dashboard-unload-grid {
+    gap: var(--eo-gap-2);
+}
+
+body.excavator-operator-screen .eo-dashboard-unload-card {
+    padding: clamp(9px, 1.35dvh, 12px);
+}
+
+body.excavator-operator-screen .eo-dashboard-unload-top strong {
+    font-size: clamp(19px, 5.4vw, 27px);
+}
+
+body.excavator-operator-screen .eo-title-row {
+    align-items: center;
+    gap: var(--eo-gap-2);
+}
+
+body.excavator-operator-screen .eo-refresh-button {
+    width: clamp(38px, 10.5vw, 44px);
+    height: clamp(38px, 5.7dvh, 44px);
+    border-radius: var(--eo-radius-md);
+    font-size: clamp(24px, 6.4vw, 28px);
+}
+
+body.excavator-operator-screen .eo-downtime-card {
+    grid-template-columns: clamp(52px, 15vw, 70px) minmax(0, 1fr);
+    min-height: clamp(84px, 12.4dvh, 108px);
+    margin-bottom: var(--eo-gap-2);
+    padding: clamp(9px, 1.35dvh, 12px);
+    border-radius: var(--eo-radius-md);
+}
+
+body.excavator-operator-screen .eo-downtime-state-dot {
+    width: clamp(46px, 12vw, 62px);
+    height: clamp(46px, 12vw, 62px);
+}
+
+body.excavator-operator-screen .eo-downtime-card strong {
+    font-size: clamp(21px, 5.55vw, 28px);
+}
+
+body.excavator-operator-screen .eo-downtime-card b {
+    font-size: clamp(37px, 10.2vw, 52px);
+    line-height: .95;
+}
+
+body.excavator-operator-screen .eo-downtime-card em {
+    font-size: clamp(17px, 4.25vw, 21px);
+}
+
+body.excavator-operator-screen .eo-reason-grid {
+    gap: var(--eo-gap-2);
+    margin-bottom: var(--eo-gap-3);
+}
+
+body.excavator-operator-screen .eo-reason-grid button {
+    min-height: 0;
+    padding: 5px 6px;
+    border-radius: var(--eo-radius-md);
+    font-size: clamp(15px, 4vw, 19px);
+    font-weight: 800;
+    line-height: 1.05;
+}
+
+@media (max-height: 760px) {
+    body.excavator-operator-screen .eo-shell {
+        --eo-page-top: 5px;
+        --eo-page-x: 10px;
+        --eo-topbar-h: 38px;
+        --eo-nav-h: 60px;
+        --eo-nav-gap: 8px;
+        --eo-title-size: 28px;
+        --eo-label-size: 12px;
+        --eo-value-size: 20px;
+        --eo-button-size: 15px;
+    }
+
+    body.excavator-operator-screen .eo-screen {
+        padding-top: 8px;
+    }
+
+    body.excavator-operator-screen .eo-dashboard-head {
+        grid-template-columns: minmax(0, 1fr) 68px;
+    }
+
+    body.excavator-operator-screen .eo-dashboard-driver-card b {
+        font-size: 34px;
+    }
+
+    body.excavator-operator-screen .eo-dashboard-info {
+        min-height: 48px;
+    }
+
+    body.excavator-operator-screen .eo-dashboard-truck-grid {
+        height: 138px;
+    }
+
+    body.excavator-operator-screen .eo-dashboard-truck-grid.is-many {
+        height: 142px;
+        grid-auto-rows: minmax(44px, 1fr);
+    }
+
+    body.excavator-operator-screen .eo-dashboard-divider {
+        min-height: 12px;
+    }
+
+    body.excavator-operator-screen .eo-large-field {
+        min-height: 46px;
+        padding: 5px 10px;
+    }
+
+    body.excavator-operator-screen .eo-unload-grid-settings {
+        grid-auto-rows: minmax(48px, 1fr);
+    }
+
+    body.excavator-operator-screen .eo-downtime-card {
+        min-height: 76px;
+        grid-template-columns: 48px minmax(0, 1fr);
+    }
+
+    body.excavator-operator-screen .eo-downtime-state-dot {
+        width: 42px;
+        height: 42px;
+    }
+
+    body.excavator-operator-screen .eo-downtime-card b {
+        font-size: 36px;
+    }
+
+    body.excavator-operator-screen .eo-reason-grid {
+        gap: 6px;
+    }
+
+    body.excavator-operator-screen .eo-reason-grid button {
+        font-size: 15px;
+        padding: 4px 5px;
+    }
+}
+
+@media (max-width: 370px) {
+    body.excavator-operator-screen .eo-shell {
+        --eo-page-x: 9px;
+        --eo-title-size: 28px;
+    }
+
+    body.excavator-operator-screen .eo-topbar-cell strong,
+    body.excavator-operator-screen .eo-face-cell strong {
+        font-size: 10px;
+    }
+
+    body.excavator-operator-screen .eo-dashboard-truck-grid.is-many {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+}
+
+@media (max-height: 760px) {
+    body.excavator-operator-screen .eo-shift-titlebar {
+        margin-bottom: 5px;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-titlebar h1 {
+        font-size: 29px !important;
+    }
+
+    body.excavator-operator-screen .eo-shift-update-button {
+        min-height: 30px !important;
+        height: 30px !important;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-section {
+        gap: 5px;
+        padding: 5px 8px !important;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-section + .eo-shift-section {
+        margin-top: 5px;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-section-head b {
+        min-height: 22px;
+        padding: 0 8px;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-metrics {
+        gap: 4px;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-metrics .eo-field-card {
+        min-height: 34px !important;
+        height: 34px !important;
+        padding: 3px 10px !important;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-metrics input {
+        font-size: 20px !important;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-face > div,
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-face .eo-shift-rock {
+        min-height: 46px !important;
+        height: 46px !important;
+        padding: 6px 9px !important;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-face strong {
+        font-size: 19px !important;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-dump-chip,
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-dump-empty {
+        min-height: 40px !important;
+        height: 40px !important;
+        padding: 5px 9px !important;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-grid > div {
+        min-height: 50px !important;
+        height: 50px !important;
+        padding: 5px 10px !important;
+    }
+
+    body.excavator-operator-screen .eo-shift-actions {
+        gap: 6px;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .mm-mobile-shift-button,
+    body.excavator-operator-screen .eo-logout-button {
+        min-height: 40px !important;
+        height: 40px !important;
+    }
+}
+
+/* v38 mobile balance pass: one scale system for real phones. */
+body.excavator-operator-screen .eo-shell {
+    --eo-safe-bottom: max(12px, env(safe-area-inset-bottom, 0px));
+    --eo-page-x: clamp(11px, 2.9vw, 14px);
+    --eo-page-top: clamp(6px, .8dvh, 9px);
+    --eo-gap-1: clamp(4px, .48dvh, 6px);
+    --eo-gap-2: clamp(6px, .72dvh, 8px);
+    --eo-gap-3: clamp(8px, .96dvh, 11px);
+    --eo-topbar-h: clamp(38px, 4.8dvh, 42px);
+    --eo-nav-h: clamp(58px, 7.2dvh, 66px);
+    --eo-nav-gap: clamp(10px, 1.35dvh, 14px);
+    --eo-title-size: clamp(30px, 4.25dvh, 35px);
+    --eo-section-title-size: clamp(12px, 1.62dvh, 13px);
+    --eo-label-size: clamp(12px, 1.58dvh, 13px);
+    --eo-value-size: clamp(20px, 2.7dvh, 23px);
+    --eo-button-size: clamp(15px, 2.05dvh, 17px);
+    grid-template-rows: var(--eo-topbar-h) minmax(0, 1fr) calc(var(--eo-nav-h) + var(--eo-nav-gap) + var(--eo-safe-bottom));
+    padding-bottom: calc(6px + var(--eo-safe-bottom));
+}
+
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] {
+    grid-template-rows: minmax(0, 1fr) calc(var(--eo-nav-h) + var(--eo-nav-gap) + var(--eo-safe-bottom));
+}
+
+body.excavator-operator-screen .mm-mobile-bottom-nav {
+    height: var(--eo-nav-h);
+    margin-top: var(--eo-nav-gap);
+    margin-bottom: var(--eo-safe-bottom);
+}
+
+body.excavator-operator-screen .mm-mobile-nav-item {
+    padding: clamp(4px, .7dvh, 6px) 2px;
+    font-size: clamp(8px, 2.05vw, 10px);
+}
+
+body.excavator-operator-screen .mm-mobile-nav-item img,
+body.excavator-operator-screen .mm-mobile-nav-item .eo-nav-clock,
+body.excavator-operator-screen .mm-mobile-nav-item .eo-nav-bell {
+    width: clamp(20px, 5.5vw, 24px);
+    height: clamp(20px, 5.5vw, 24px);
+}
+
+body.excavator-operator-screen .eo-topbar-cell strong,
+body.excavator-operator-screen .eo-face-cell strong {
+    font-size: clamp(10px, 2.55vw, 12px);
+}
+
+body.excavator-operator-screen .eo-screen h1,
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-titlebar h1 {
+    font-size: var(--eo-title-size) !important;
+    font-weight: 780;
+}
+
+body.excavator-operator-screen .eo-dashboard-screen {
+    gap: var(--eo-gap-2);
+}
+
+body.excavator-operator-screen .eo-dashboard-head {
+    grid-template-columns: minmax(0, 1fr) clamp(66px, 17vw, 78px);
+    gap: var(--eo-gap-2);
+}
+
+body.excavator-operator-screen .eo-dashboard-driver-card b {
+    font-size: clamp(34px, 8.6vw, 42px);
+}
+
+body.excavator-operator-screen .eo-dashboard-info {
+    min-height: clamp(46px, 6dvh, 54px);
+}
+
+body.excavator-operator-screen .eo-dashboard-info div {
+    padding: 5px 4px;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-grid {
+    height: clamp(182px, 24dvh, 224px);
+    gap: clamp(6px, .72dvh, 8px);
+    overflow: visible;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-grid.is-many {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-auto-rows: minmax(clamp(56px, 7dvh, 66px), 1fr);
+    height: clamp(236px, 29dvh, 278px);
+    gap: clamp(6px, .74dvh, 8px);
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-grid.is-many .eo-dashboard-truck-card {
+    min-height: 56px;
+    grid-template-rows: auto auto auto;
+    align-content: center;
+    justify-items: center;
+    gap: 1px;
+    padding: 5px 6px;
+    border-radius: var(--eo-radius-md);
+    touch-action: none;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-grid.is-many .eo-dashboard-truck-card i {
+    height: 22px;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-grid.is-many .eo-dashboard-truck-card img {
+    width: clamp(38px, 10vw, 44px);
+    height: clamp(22px, 5.8vw, 26px);
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-grid.is-many .eo-dashboard-truck-card strong {
+    font-size: clamp(22px, 5.5vw, 27px);
+    line-height: .92;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-grid.is-many .eo-dashboard-truck-card span {
+    max-width: 100%;
+    color: rgba(203, 214, 220, .78);
+    font-size: clamp(8px, 2.1vw, 10px);
+    line-height: 1;
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-grid.is-many .eo-dashboard-truck-card i::after,
+body.excavator-operator-screen .eo-dashboard-truck-grid.is-many .eo-dashboard-truck-card small,
+body.excavator-operator-screen .eo-dashboard-truck-grid.is-many .eo-dashboard-truck-card em {
+    display: none;
+}
+
+body.excavator-operator-screen .eo-dashboard-divider {
+    min-height: clamp(10px, 1.45dvh, 14px);
+}
+
+body.excavator-operator-screen .eo-dashboard-unload-grid.is-single {
+    flex: 0 0 clamp(164px, 21.5dvh, 202px);
+    min-height: clamp(164px, 21.5dvh, 202px);
+}
+
+body.excavator-operator-screen .eo-dashboard-unload-grid.is-single .eo-dashboard-unload-card {
+    min-height: 0;
+    padding: clamp(10px, 1.2dvh, 13px);
+}
+
+body.excavator-operator-screen .eo-dashboard-unload-top strong {
+    font-size: clamp(22px, 5.8vw, 29px);
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form {
+    padding-top: var(--eo-gap-2);
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-titlebar {
+    margin-bottom: var(--eo-gap-2);
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-section {
+    padding: clamp(6px, .8dvh, 8px) 9px !important;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-section + .eo-shift-section {
+    margin-top: var(--eo-gap-2);
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-metrics .eo-field-card {
+    min-height: clamp(38px, 5.1dvh, 44px) !important;
+    height: clamp(38px, 5.1dvh, 44px) !important;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-face > div,
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-face .eo-shift-rock {
+    min-height: clamp(43px, 5.6dvh, 50px) !important;
+    height: clamp(43px, 5.6dvh, 50px) !important;
+}
+
+body.excavator-operator-screen .eo-shift-cycle-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--eo-gap-1);
+}
+
+body.excavator-operator-screen .eo-shift-cycle-grid > div {
+    display: grid;
+    align-content: center;
+    gap: 2px;
+    min-height: clamp(42px, 5.55dvh, 50px);
+    padding: 6px 8px;
+    border: 1px solid rgba(139, 159, 170, .24);
+    border-radius: var(--eo-radius-sm);
+    background: rgba(18, 27, 33, .66);
+    box-shadow: inset 0 0 18px rgba(139, 159, 170, .04);
+}
+
+body.excavator-operator-screen .eo-shift-cycle-grid span {
+    color: rgba(203, 214, 220, .68);
+    font-size: clamp(10px, 2.4vw, 11px);
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: .035em;
+    text-transform: uppercase;
+}
+
+body.excavator-operator-screen .eo-shift-cycle-grid strong {
+    color: #eff7dd;
+    font-size: clamp(17px, 4.1vw, 20px);
+    font-weight: 800;
+    line-height: 1;
+}
+
+body.excavator-operator-screen .eo-shift-actions {
+    padding-top: var(--eo-gap-3);
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .mm-mobile-shift-button,
+body.excavator-operator-screen .eo-logout-button,
+body.excavator-operator-screen .eo-primary-action {
+    min-height: clamp(42px, 5.6dvh, 48px) !important;
+    height: clamp(42px, 5.6dvh, 48px) !important;
+    font-size: var(--eo-button-size);
+}
+
+body.excavator-operator-screen .eo-screen[data-eo-screen="face"] {
+    gap: var(--eo-gap-2);
+}
+
+body.excavator-operator-screen .eo-large-field {
+    min-height: clamp(48px, 6.35dvh, 58px);
+}
+
+body.excavator-operator-screen .eo-large-field input,
+body.excavator-operator-screen .eo-large-field select {
+    font-size: clamp(22px, 5.3vw, 28px);
+}
+
+body.excavator-operator-screen .eo-unload-grid-settings {
+    grid-auto-rows: minmax(clamp(60px, 8.1dvh, 78px), 1fr);
+}
+
+body.excavator-operator-screen .eo-unload-grid-settings .eo-unload-card strong {
+    font-size: clamp(17px, 4.1vw, 21px);
+}
+
+body.excavator-operator-screen .eo-downtime-card b {
+    font-size: clamp(36px, 9vw, 46px);
+}
+
+body.excavator-operator-screen .eo-reason-grid button {
+    font-size: clamp(14px, 3.45vw, 17px);
+    line-height: 1.08;
+}
+
+body.excavator-operator-screen .app-realtime-status,
+body.excavator-operator-screen .app-realtime-update {
+    bottom: calc(96px + var(--eo-nav-h, 60px)) !important;
+    left: var(--eo-page-x, 12px) !important;
+    right: var(--eo-page-x, 12px) !important;
+    width: auto !important;
+    max-width: none !important;
+    transform: none !important;
+}
+
+@media (max-height: 760px) {
+    body.excavator-operator-screen .eo-shell {
+        --eo-title-size: 29px;
+        --eo-nav-h: 58px;
+        --eo-nav-gap: 10px;
+    }
+
+    body.excavator-operator-screen .eo-dashboard-head {
+        grid-template-columns: minmax(0, 1fr) 62px;
+    }
+
+    body.excavator-operator-screen .eo-dashboard-driver-card b {
+        font-size: 31px;
+    }
+
+    body.excavator-operator-screen .eo-dashboard-info {
+        min-height: 44px;
+    }
+
+    body.excavator-operator-screen .eo-dashboard-truck-grid.is-many {
+        height: 222px;
+        grid-auto-rows: minmax(52px, 1fr);
+    }
+
+    body.excavator-operator-screen .eo-dashboard-unload-grid.is-single {
+        flex-basis: 154px;
+        min-height: 154px;
+    }
+
+    body.excavator-operator-screen .eo-shift-cycle-grid > div {
+        min-height: 38px;
+    }
+}
+
+/* v38 final phone-fit correction after rendered QA. */
+body.excavator-operator-screen .eo-dashboard-truck-grid.is-many {
+    height: clamp(252px, 31dvh, 286px);
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-grid.is-many .eo-dashboard-truck-card {
+    grid-template-rows: 20px 23px 9px;
+    min-height: 0;
+    gap: 0;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-grid.is-many .eo-dashboard-truck-card i {
+    height: 20px;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-grid.is-many .eo-dashboard-truck-card img {
+    width: clamp(35px, 9.2vw, 40px);
+    height: clamp(20px, 5.2vw, 23px);
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-grid.is-many .eo-dashboard-truck-card strong {
+    font-size: clamp(21px, 5.2vw, 24px);
+    line-height: .9;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-grid.is-many .eo-dashboard-truck-card span {
+    font-size: clamp(7px, 1.9vw, 8px);
+    line-height: 1;
+}
+
+body.excavator-operator-screen .eo-dashboard-unload-grid.is-single {
+    flex-basis: clamp(176px, 22dvh, 206px);
+    min-height: clamp(176px, 22dvh, 206px);
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--eo-gap-1);
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-grid > div {
+    min-height: clamp(39px, 5dvh, 46px) !important;
+    height: auto !important;
+    padding: 5px 8px !important;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-grid strong {
+    font-size: clamp(17px, 4.1vw, 20px);
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-grid em {
+    font-size: clamp(9px, 2.2vw, 11px);
+}
+
+@media (max-height: 760px) {
+    body.excavator-operator-screen .eo-dashboard-truck-grid.is-many {
+        height: 258px;
+    }
+
+    body.excavator-operator-screen .eo-dashboard-unload-grid.is-single {
+        flex-basis: 166px;
+        min-height: 166px;
+    }
+}
+
+/* v39 real-phone safe area correction.
+   Some Android devices report a viewport that still reaches under the system nav bar.
+   Keep the app nav above it and compact the screens instead of letting actions disappear. */
+body.excavator-operator-screen .eo-shell {
+    --eo-safe-bottom: max(clamp(34px, 5.2dvh, 48px), env(safe-area-inset-bottom, 0px));
+    --eo-topbar-h: clamp(36px, 4.6dvh, 40px);
+    --eo-nav-h: clamp(54px, 6.7dvh, 60px);
+    --eo-nav-gap: clamp(8px, 1dvh, 10px);
+    --eo-title-size: clamp(28px, 4dvh, 33px);
+    --eo-gap-1: clamp(3px, .42dvh, 5px);
+    --eo-gap-2: clamp(5px, .64dvh, 7px);
+    --eo-gap-3: clamp(7px, .84dvh, 9px);
+}
+
+body.excavator-operator-screen .eo-screen {
+    padding-top: var(--eo-gap-2);
+}
+
+body.excavator-operator-screen .mm-mobile-bottom-nav {
+    height: var(--eo-nav-h);
+    margin-top: var(--eo-nav-gap);
+    margin-bottom: var(--eo-safe-bottom);
+}
+
+body.excavator-operator-screen .mm-mobile-nav-item {
+    padding: 3px 2px;
+}
+
+body.excavator-operator-screen .mm-mobile-nav-item img,
+body.excavator-operator-screen .mm-mobile-nav-item .eo-nav-clock,
+body.excavator-operator-screen .mm-mobile-nav-item .eo-nav-bell {
+    width: clamp(19px, 5.1vw, 23px);
+    height: clamp(19px, 5.1vw, 23px);
+}
+
+body.excavator-operator-screen .eo-dashboard-head {
+    grid-template-columns: minmax(0, 1fr) clamp(58px, 15vw, 70px);
+}
+
+body.excavator-operator-screen .eo-dashboard-driver-card span,
+body.excavator-operator-screen .eo-dashboard-title span,
+body.excavator-operator-screen .eo-dashboard-info span,
+body.excavator-operator-screen .eo-dashboard-unload-label {
+    font-size: clamp(8px, 2.25vw, 10px);
+}
+
+body.excavator-operator-screen .eo-dashboard-driver-card strong {
+    font-size: clamp(13px, 3.25vw, 15px);
+}
+
+body.excavator-operator-screen .eo-dashboard-driver-card b {
+    font-size: clamp(30px, 7.8vw, 38px);
+}
+
+body.excavator-operator-screen .eo-dashboard-plan-ring {
+    width: clamp(58px, 15vw, 70px);
+    height: clamp(58px, 15vw, 70px);
+}
+
+body.excavator-operator-screen .eo-dashboard-info {
+    min-height: clamp(40px, 5.3dvh, 48px);
+}
+
+body.excavator-operator-screen .eo-dashboard-info strong {
+    font-size: clamp(12px, 3vw, 14px);
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-grid.is-many {
+    height: clamp(218px, 27dvh, 252px);
+    grid-auto-rows: minmax(clamp(50px, 6.3dvh, 58px), 1fr);
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-grid.is-many .eo-dashboard-truck-card {
+    min-height: 50px;
+    grid-template-rows: 18px 21px 8px;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-grid.is-many .eo-dashboard-truck-card i {
+    height: 18px;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-grid.is-many .eo-dashboard-truck-card img {
+    width: clamp(32px, 8.4vw, 38px);
+    height: clamp(18px, 4.8vw, 22px);
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-grid.is-many .eo-dashboard-truck-card strong {
+    font-size: clamp(20px, 5vw, 23px);
+}
+
+body.excavator-operator-screen .eo-dashboard-unload-grid.is-single {
+    flex-basis: clamp(140px, 17.8dvh, 168px);
+    min-height: clamp(140px, 17.8dvh, 168px);
+}
+
+body.excavator-operator-screen .eo-dashboard-unload-top strong {
+    font-size: clamp(21px, 5.2vw, 26px);
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-titlebar {
+    margin-bottom: var(--eo-gap-1);
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-titlebar h1 {
+    font-size: var(--eo-title-size) !important;
+}
+
+body.excavator-operator-screen .eo-shift-update-button {
+    min-height: clamp(28px, 3.6dvh, 32px) !important;
+    height: clamp(28px, 3.6dvh, 32px) !important;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-section {
+    padding: 5px 8px !important;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-section + .eo-shift-section {
+    margin-top: var(--eo-gap-1);
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-section-head b {
+    min-height: 20px;
+    padding: 0 8px;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-metrics .eo-field-card {
+    min-height: clamp(34px, 4.25dvh, 39px) !important;
+    height: clamp(34px, 4.25dvh, 39px) !important;
+    padding: 3px 9px !important;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-face > div,
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-face .eo-shift-rock {
+    min-height: clamp(38px, 4.8dvh, 44px) !important;
+    height: clamp(38px, 4.8dvh, 44px) !important;
+    padding: 4px 8px !important;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-dump-chip,
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-dump-empty {
+    min-height: clamp(34px, 4.2dvh, 40px) !important;
+    height: clamp(34px, 4.2dvh, 40px) !important;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-grid > div {
+    min-height: clamp(34px, 4.25dvh, 40px) !important;
+    padding: 4px 8px !important;
+}
+
+body.excavator-operator-screen .eo-shift-actions {
+    padding-top: var(--eo-gap-2);
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .mm-mobile-shift-button,
+body.excavator-operator-screen .eo-logout-button,
+body.excavator-operator-screen .eo-primary-action {
+    min-height: clamp(38px, 4.8dvh, 44px) !important;
+    height: clamp(38px, 4.8dvh, 44px) !important;
+}
+
+body.excavator-operator-screen .eo-large-field {
+    min-height: clamp(43px, 5.5dvh, 52px);
+}
+
+body.excavator-operator-screen .eo-large-field input,
+body.excavator-operator-screen .eo-large-field select {
+    font-size: clamp(20px, 4.8vw, 25px);
+}
+
+body.excavator-operator-screen .eo-unload-grid-settings {
+    grid-auto-rows: minmax(clamp(50px, 6.5dvh, 64px), 1fr);
+}
+
+body.excavator-operator-screen .eo-unload-grid-settings .eo-unload-card strong {
+    font-size: clamp(15px, 3.8vw, 19px);
+}
+
+body.excavator-operator-screen .eo-downtime-card {
+    min-height: clamp(70px, 9.2dvh, 88px);
+    grid-template-columns: clamp(44px, 11.5vw, 56px) minmax(0, 1fr);
+    padding: clamp(7px, .9dvh, 9px);
+}
+
+body.excavator-operator-screen .eo-downtime-state-dot {
+    width: clamp(38px, 10vw, 50px);
+    height: clamp(38px, 10vw, 50px);
+}
+
+body.excavator-operator-screen .eo-downtime-card strong {
+    font-size: clamp(18px, 4.6vw, 23px);
+}
+
+body.excavator-operator-screen .eo-downtime-card b {
+    font-size: clamp(31px, 7.8vw, 40px);
+}
+
+body.excavator-operator-screen .eo-downtime-card em {
+    font-size: clamp(14px, 3.45vw, 18px);
+}
+
+body.excavator-operator-screen .eo-reason-grid {
+    gap: var(--eo-gap-1);
+    margin-bottom: var(--eo-gap-2);
+}
+
+body.excavator-operator-screen .eo-reason-grid button {
+    font-size: clamp(13px, 3.2vw, 16px);
+    padding: 3px 5px;
+}
+
+@media (max-height: 760px) {
+    body.excavator-operator-screen .eo-shell {
+        --eo-safe-bottom: max(42px, env(safe-area-inset-bottom, 0px));
+        --eo-title-size: 27px;
+        --eo-nav-h: 54px;
+    }
+
+    body.excavator-operator-screen .eo-dashboard-truck-grid.is-many {
+        height: 216px;
+    }
+
+    body.excavator-operator-screen .eo-dashboard-unload-grid.is-single {
+        flex-basis: 134px;
+        min-height: 134px;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form {
+        gap: 0;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-titlebar {
+        margin-bottom: 2px;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-titlebar h1 {
+        font-size: 25px !important;
+        line-height: .96;
+    }
+
+    body.excavator-operator-screen .eo-shift-update-button {
+        min-height: 25px !important;
+        height: 25px !important;
+        padding: 0 8px;
+        font-size: 10px;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-section {
+        padding: 3px 7px !important;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-section + .eo-shift-section {
+        margin-top: 3px;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-section-head {
+        min-height: 18px;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-section-head span {
+        font-size: 10px;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-section-head b {
+        min-height: 18px;
+        padding: 0 7px;
+        font-size: 10px;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-metrics {
+        gap: 3px;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-metrics .eo-field-card {
+        min-height: 30px !important;
+        height: 30px !important;
+        padding: 2px 8px !important;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-metrics input {
+        font-size: 18px !important;
+        line-height: 1;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-metric-value em {
+        font-size: 10px;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-face {
+        gap: 3px;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-face > div,
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-face .eo-shift-rock {
+        min-height: 32px !important;
+        height: 32px !important;
+        padding: 3px 7px !important;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-face strong,
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-face .eo-shift-rock strong {
+        font-size: 18px;
+        line-height: 1;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-dump-list {
+        gap: 3px;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-dump-chip,
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-dump-empty {
+        min-height: 30px !important;
+        height: 30px !important;
+        padding: 2px 8px !important;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-dump-chip strong {
+        font-size: 14px;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-grid {
+        gap: 3px;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-grid > div {
+        min-height: 30px !important;
+        padding: 3px 7px !important;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-grid strong {
+        font-size: 16px;
+        line-height: 1;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-grid em {
+        font-size: 9px;
+    }
+
+    body.excavator-operator-screen .eo-shift-actions {
+        gap: 5px;
+        padding-top: 4px;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .mm-mobile-shift-button,
+    body.excavator-operator-screen .eo-logout-button {
+        min-height: 36px !important;
+        height: 36px !important;
+        font-size: 14px !important;
+    }
+}
+
+/* v40 functional space redistribution.
+   Do not only fit the app into Android Chrome; give spare height back to
+   touch targets and shift data that the operator actually uses. */
+@media (min-height: 761px) {
+    body.excavator-operator-screen .eo-dashboard-screen {
+        gap: clamp(6px, .78dvh, 8px);
+    }
+
+    body.excavator-operator-screen .eo-dashboard-truck-grid.is-many {
+        height: clamp(278px, 34.5dvh, 304px);
+        grid-auto-rows: minmax(62px, 1fr);
+        gap: clamp(7px, .85dvh, 9px);
+    }
+
+    body.excavator-operator-screen .eo-dashboard-truck-grid.is-many .eo-dashboard-truck-card {
+        min-height: 62px;
+        grid-template-rows: 21px 25px 10px;
+        padding: 5px 7px;
+    }
+
+    body.excavator-operator-screen .eo-dashboard-truck-grid.is-many .eo-dashboard-truck-card i {
+        height: 21px;
+    }
+
+    body.excavator-operator-screen .eo-dashboard-truck-grid.is-many .eo-dashboard-truck-card img {
+        width: clamp(36px, 9.4vw, 42px);
+        height: clamp(21px, 5.4vw, 24px);
+    }
+
+    body.excavator-operator-screen .eo-dashboard-truck-grid.is-many .eo-dashboard-truck-card strong {
+        font-size: clamp(22px, 5.45vw, 25px);
+    }
+
+    body.excavator-operator-screen .eo-dashboard-truck-grid.is-many .eo-dashboard-truck-card span {
+        font-size: clamp(8px, 2vw, 9px);
+    }
+
+    body.excavator-operator-screen .eo-dashboard-unload-grid.is-single {
+        flex-basis: clamp(148px, 17.6dvh, 158px);
+        min-height: clamp(148px, 17.6dvh, 158px);
+    }
+
+    body.excavator-operator-screen .eo-dashboard-unload-grid.is-single .eo-dashboard-unload-card {
+        padding: clamp(9px, 1.05dvh, 11px);
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form {
+        gap: clamp(4px, .56dvh, 6px);
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-section {
+        padding: clamp(7px, .9dvh, 9px) 10px !important;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-section + .eo-shift-section {
+        margin-top: clamp(5px, .72dvh, 7px);
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-metrics {
+        gap: clamp(5px, .65dvh, 7px);
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-metrics .eo-field-card {
+        min-height: clamp(45px, 5.75dvh, 52px) !important;
+        height: clamp(45px, 5.75dvh, 52px) !important;
+        padding: 5px 10px !important;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-metrics input {
+        font-size: clamp(22px, 5.5vw, 27px) !important;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-face {
+        gap: clamp(5px, .65dvh, 7px);
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-face > div,
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-face .eo-shift-rock {
+        min-height: clamp(50px, 6.25dvh, 57px) !important;
+        height: clamp(50px, 6.25dvh, 57px) !important;
+        padding: 6px 10px !important;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-face strong,
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-face .eo-shift-rock strong {
+        font-size: clamp(21px, 5.25vw, 25px);
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-dump-chip,
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-dump-empty {
+        min-height: clamp(40px, 5.05dvh, 46px) !important;
+        height: clamp(40px, 5.05dvh, 46px) !important;
+        padding: 5px 10px !important;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-grid {
+        gap: clamp(5px, .65dvh, 7px);
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-grid > div {
+        min-height: clamp(46px, 5.75dvh, 52px) !important;
+        padding: 5px 10px !important;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-grid strong {
+        font-size: clamp(19px, 4.75vw, 22px);
+    }
+
+    body.excavator-operator-screen .eo-shift-actions {
+        padding-top: clamp(8px, 1dvh, 10px);
+    }
+}
+
+/* v40 correction: keep shift actions inside the fixed work area. */
+@media (min-height: 761px) {
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form {
+        gap: 0;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-section {
+        padding: 5px 8px !important;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-section + .eo-shift-section {
+        margin-top: var(--eo-gap-1);
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-metrics {
+        gap: var(--eo-gap-1);
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-metrics .eo-field-card {
+        min-height: clamp(37px, 4.75dvh, 42px) !important;
+        height: clamp(37px, 4.75dvh, 42px) !important;
+        padding: 3px 9px !important;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-metrics input {
+        font-size: clamp(20px, 5vw, 24px) !important;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-face {
+        gap: var(--eo-gap-1);
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-face > div,
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-face .eo-shift-rock {
+        min-height: clamp(41px, 5.25dvh, 47px) !important;
+        height: clamp(41px, 5.25dvh, 47px) !important;
+        padding: 4px 8px !important;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-face strong,
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-face .eo-shift-rock strong {
+        font-size: clamp(19px, 4.75vw, 23px);
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-dump-chip,
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-dump-empty {
+        min-height: clamp(34px, 4.2dvh, 40px) !important;
+        height: clamp(34px, 4.2dvh, 40px) !important;
+        padding: 3px 9px !important;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-grid {
+        gap: var(--eo-gap-1);
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-grid > div {
+        min-height: clamp(52px, 6.7dvh, 58px) !important;
+        padding: 5px 9px !important;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-grid strong {
+        font-size: clamp(17px, 4.1vw, 20px);
+    }
+
+    body.excavator-operator-screen .eo-shift-actions {
+        padding-top: var(--eo-gap-2);
+    }
+}
+
+/* v41 fixed full-width mobile tab bar.
+   Bottom navigation is a persistent phone control, not a row inside a page grid. */
+body.excavator-operator-screen {
+    --eo-fixed-nav-h: clamp(74px, 9.2dvh, 86px);
+    --eo-fixed-nav-safe: env(safe-area-inset-bottom, 0px);
+    --eo-fixed-nav-reserve: calc(var(--eo-fixed-nav-h) + var(--eo-fixed-nav-safe));
+}
+
+body.excavator-operator-screen .eo-shell {
+    --eo-nav-h: var(--eo-fixed-nav-h) !important;
+    --eo-nav-gap: 0px !important;
+    width: 100vw !important;
+    max-width: 430px !important;
+    height: 100dvh !important;
+    max-height: 100dvh !important;
+    grid-template-rows: var(--eo-topbar-h) minmax(0, 1fr) !important;
+    padding-bottom: calc(var(--eo-fixed-nav-reserve) + 8px) !important;
+}
+
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] {
+    grid-template-rows: minmax(0, 1fr) !important;
+}
+
+body.excavator-operator-screen .mm-mobile-bottom-nav {
+    position: fixed !important;
+    z-index: 120 !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    grid-row: auto !important;
+    align-self: auto !important;
+    display: grid !important;
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+    width: 100vw !important;
+    max-width: none !important;
+    height: var(--eo-fixed-nav-reserve) !important;
+    min-height: var(--eo-fixed-nav-reserve) !important;
+    margin: 0 !important;
+    padding: 0 0 var(--eo-fixed-nav-safe) !important;
+    border-right: 0 !important;
+    border-bottom: 0 !important;
+    border-left: 0 !important;
+    border-radius: 0 !important;
+    background: rgba(8, 19, 27, .96) !important;
+    box-shadow: inset 0 1px 0 rgba(139, 159, 170, .35), 0 -12px 28px rgba(0, 0, 0, .45) !important;
+}
+
+body.excavator-operator-screen .mm-mobile-nav-item {
+    min-height: var(--eo-fixed-nav-h) !important;
+    height: var(--eo-fixed-nav-h) !important;
+    gap: clamp(4px, .7dvh, 6px) !important;
+    padding: clamp(7px, .95dvh, 9px) 2px clamp(6px, .85dvh, 8px) !important;
+    font-size: clamp(11px, 2.8vw, 13px) !important;
+    font-weight: 850 !important;
+    line-height: 1 !important;
+}
+
+body.excavator-operator-screen .mm-mobile-nav-item img,
+body.excavator-operator-screen .mm-mobile-nav-item .eo-nav-clock,
+body.excavator-operator-screen .mm-mobile-nav-item .eo-nav-bell {
+    width: clamp(28px, 7.6vw, 34px) !important;
+    height: clamp(28px, 7.6vw, 34px) !important;
+}
+
+body.excavator-operator-screen .mm-mobile-nav-item.is-active::before {
+    left: 20% !important;
+    right: 20% !important;
+    height: 5px !important;
+}
+
+body.excavator-operator-screen .app-realtime-status,
+body.excavator-operator-screen .app-realtime-update {
+    bottom: calc(var(--eo-fixed-nav-reserve) + 14px) !important;
+}
+
+/* v42 fixed full-width mobile app header.
+   The operator shell now has two stable rails: header above and tabs below. */
+body.excavator-operator-screen {
+    --eo-fixed-header-safe: env(safe-area-inset-top, 0px);
+    --eo-fixed-header-h: clamp(48px, 6.35dvh, 56px);
+    --eo-fixed-header-reserve: calc(var(--eo-fixed-header-safe) + var(--eo-fixed-header-h));
+    --eo-fixed-header-gap: clamp(8px, 1.05dvh, 12px);
+}
+
+body.excavator-operator-screen .eo-shell,
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] {
+    --eo-topbar-h: var(--eo-fixed-header-h) !important;
+    grid-template-rows: minmax(0, 1fr) !important;
+    align-content: start !important;
+    align-items: start !important;
+    padding-top: calc(var(--eo-fixed-header-reserve) + var(--eo-fixed-header-gap)) !important;
+    padding-right: var(--eo-page-x) !important;
+    padding-left: var(--eo-page-x) !important;
+}
+
+body.excavator-operator-screen .eo-topbar,
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-topbar {
+    position: fixed !important;
+    z-index: 116 !important;
+    top: 0 !important;
+    right: 0 !important;
+    left: 0 !important;
+    display: grid !important;
+    width: 100vw !important;
+    max-width: none !important;
+    height: var(--eo-fixed-header-reserve) !important;
+    min-height: var(--eo-fixed-header-reserve) !important;
+    margin: 0 !important;
+    padding: var(--eo-fixed-header-safe) 0 0 !important;
+    overflow: hidden !important;
+    border-top: 0 !important;
+    border-right: 0 !important;
+    border-left: 0 !important;
+    border-radius: 0 !important;
+    background: rgba(8, 19, 27, .96) !important;
+    box-shadow: inset 0 -1px 0 rgba(139, 159, 170, .35), 0 12px 28px rgba(0, 0, 0, .35) !important;
+}
+
+body.excavator-operator-screen .eo-topbar-cell {
+    min-width: 0 !important;
+    height: var(--eo-fixed-header-h) !important;
+    min-height: var(--eo-fixed-header-h) !important;
+    padding: 0 clamp(5px, 1.35vw, 8px) !important;
+}
+
+body.excavator-operator-screen .eo-topbar-cell img,
+body.excavator-operator-screen .eo-clock-icon,
+body.excavator-operator-screen .eo-pin-icon {
+    width: clamp(20px, 5.3vw, 25px) !important;
+    height: clamp(20px, 5.3vw, 25px) !important;
+    flex: 0 0 auto !important;
+}
+
+body.excavator-operator-screen .eo-topbar-cell strong,
+body.excavator-operator-screen .eo-face-cell strong {
+    min-width: 0 !important;
+    max-width: 100% !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+    font-size: clamp(12px, 3.1vw, 14px) !important;
+    font-weight: 850 !important;
+    line-height: 1 !important;
+}
+
+body.excavator-operator-screen .eo-status-cell > span {
+    width: 9px !important;
+    height: 9px !important;
+    flex: 0 0 auto !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-screen,
+body.excavator-operator-screen .eo-screen {
+    grid-row: 1 !important;
+    align-self: start !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    height: calc(100dvh - var(--eo-fixed-header-reserve) - var(--eo-fixed-header-gap) - var(--eo-fixed-nav-reserve) - 8px) !important;
+    max-height: calc(100dvh - var(--eo-fixed-header-reserve) - var(--eo-fixed-header-gap) - var(--eo-fixed-nav-reserve) - 8px) !important;
+    min-height: 0 !important;
+}
+
+body.excavator-operator-screen .eo-screen[hidden] {
+    display: none !important;
+}
+
+/* v45 final guard: keep the loading workspace ergonomic after older compatibility layers. */
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-screen {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: clamp(6px, 1dvh, 9px) !important;
+    overflow: hidden !important;
+}
+
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-main-zone {
+    flex: 0 0 70% !important;
+    min-height: 0 !important;
+    gap: clamp(5px, .9dvh, 8px) !important;
+}
+
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-dump-zone {
+    flex: 0 0 30% !important;
+    min-height: 0 !important;
+    padding: 0 !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-head {
+    flex: 0 0 clamp(68px, 10dvh, 88px) !important;
+    gap: clamp(8px, 2.2vw, 12px) !important;
+    margin: 0 !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-driver-card {
+    display: flex !important;
+    flex: 1 1 auto !important;
+    justify-content: center !important;
+    min-width: 0 !important;
+    padding: clamp(7px, 1.1dvh, 10px) clamp(9px, 2.6vw, 13px) !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-driver-card strong {
+    color: var(--eo-green) !important;
+    font-size: clamp(20px, 5.5vw, 28px) !important;
+    line-height: .98 !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-driver-card b {
+    display: none !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-plan-widget {
+    display: grid !important;
+    flex: 0 0 clamp(82px, 22vw, 104px) !important;
+    place-items: center !important;
+    align-content: center !important;
+    gap: 3px !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-plan-widget small {
+    color: var(--eo-muted) !important;
+    font-size: clamp(7px, 1.9vw, 9px) !important;
+    font-weight: 800 !important;
+    letter-spacing: .08em !important;
+    line-height: 1.05 !important;
+    text-align: center !important;
+    text-transform: uppercase !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-plan-ring {
+    width: clamp(50px, 13.5vw, 64px) !important;
+    height: clamp(50px, 13.5vw, 64px) !important;
+}
+
+body.excavator-operator-screen .eo-sun-icon {
+    position: relative !important;
+    width: 18px !important;
+    height: 18px !important;
+    border-radius: 50% !important;
+    background: radial-gradient(circle, #fff8a7 0 38%, #ffe15d 39% 58%, transparent 60%) !important;
+    box-shadow: 0 0 10px rgba(255, 216, 76, .55) !important;
+}
+
+body.excavator-operator-screen .eo-sun-icon::before {
+    content: "" !important;
+    position: absolute !important;
+    inset: -6px !important;
+    border: 0 !important;
+    border-radius: 50% !important;
+    background: repeating-conic-gradient(from 0deg, #ffe46c 0deg 10deg, transparent 10deg 24deg) !important;
+    -webkit-mask: radial-gradient(circle, transparent 0 49%, #000 51% 100%) !important;
+    mask: radial-gradient(circle, transparent 0 49%, #000 51% 100%) !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-grid {
+    flex: 1 1 auto !important;
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    grid-auto-rows: 1fr !important;
+    gap: clamp(6px, 1.2dvh, 10px) clamp(7px, 2.2vw, 10px) !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-card {
+    display: grid !important;
+    grid-template-areas: "icon badge" "number number" "target target" !important;
+    grid-template-columns: 1fr auto !important;
+    grid-template-rows: auto 1fr auto !important;
+    align-items: center !important;
+    padding: clamp(7px, 1.2dvh, 10px) clamp(8px, 2.1vw, 11px) !important;
+    overflow: hidden !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-card i {
+    grid-area: icon !important;
+    justify-self: start !important;
+    align-self: start !important;
+    width: clamp(30px, 9vw, 42px) !important;
+    height: clamp(22px, 6.5vw, 30px) !important;
+    margin: 0 !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-card span {
+    grid-area: badge !important;
+    justify-self: end !important;
+    align-self: start !important;
+    max-width: clamp(42px, 18vw, 74px) !important;
+    min-height: 18px !important;
+    padding: 3px 6px !important;
+    border: 1px solid rgba(238, 246, 248, .18) !important;
+    border-radius: 999px !important;
+    background: rgba(3, 13, 17, .68) !important;
+    font-size: clamp(7px, 1.9vw, 9px) !important;
+    line-height: 1 !important;
+    overflow: hidden !important;
+    text-align: center !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-card strong {
+    grid-area: number !important;
+    place-self: center !important;
+    font-size: clamp(25px, 8.8vw, 44px) !important;
+    line-height: .92 !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-card small {
+    display: none !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-card em {
+    display: block !important;
+    grid-area: target !important;
+    justify-self: center !important;
+    max-width: 100% !important;
+    font-size: clamp(7px, 2vw, 9px) !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-card.is-inactive {
+    background: repeating-linear-gradient(135deg, rgba(255, 255, 255, .035) 0 8px, transparent 8px 18px), rgba(8, 18, 22, .52) !important;
+    border-style: dashed !important;
+    opacity: .68 !important;
+    filter: saturate(.72) !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-card.is-inactive::after {
+    display: none !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-unload-card,
+body.excavator-operator-screen .eo-dashboard-unload-card * {
+    word-break: normal !important;
+    overflow-wrap: normal !important;
+    hyphens: none !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-unload-card {
+    grid-template-rows: 1fr auto auto 1fr !important;
+    align-content: center !important;
+    justify-items: center !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-unload-top {
+    display: grid !important;
+    grid-template-columns: 1fr auto !important;
+    align-items: center !important;
+    justify-items: center !important;
+    width: 100% !important;
+    gap: 8px !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-unload-top strong {
+    min-width: 0 !important;
+    max-width: 100% !important;
+    font-size: clamp(18px, 5.1vw, 26px) !important;
+    line-height: 1.05 !important;
+    overflow: hidden !important;
+    text-align: center !important;
+    text-overflow: ellipsis !important;
+    white-space: normal !important;
+}
+
+/* v46 final guard: overrides the legacy v45 guard above. */
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-topbar {
+    grid-template-columns: minmax(100px, .8fr) clamp(42px, 10vw, 48px) minmax(0, 2.18fr) !important;
+}
+
+body.excavator-operator-screen .eo-face-cell-full {
+    gap: clamp(5px, 1.5vw, 7px) !important;
+    padding-left: clamp(7px, 2vw, 10px) !important;
+    padding-right: clamp(7px, 2vw, 10px) !important;
+}
+
+body.excavator-operator-screen .eo-face-cell-full strong {
+    display: block !important;
+    min-width: 0 !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+    white-space: normal !important;
+    font-size: clamp(9px, 2.55vw, 12px) !important;
+    line-height: 1.08 !important;
+}
+
+body.excavator-operator-screen .eo-sun-icon {
+    position: relative !important;
+    width: 16px !important;
+    height: 16px !important;
+    border-radius: 50% !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    filter: none !important;
+}
+
+body.excavator-operator-screen .eo-sun-icon::before {
+    content: "" !important;
+    position: absolute !important;
+    inset: -5px !important;
+    border: 0 !important;
+    border-radius: 50% !important;
+    background: repeating-conic-gradient(from 0deg, #ffe46c 0deg 9deg, transparent 9deg 27deg) !important;
+    -webkit-mask: radial-gradient(circle, transparent 0 44%, #000 46% 100%) !important;
+    mask: radial-gradient(circle, transparent 0 44%, #000 46% 100%) !important;
+}
+
+body.excavator-operator-screen .eo-sun-icon::after {
+    content: "" !important;
+    position: absolute !important;
+    inset: 3px !important;
+    border-radius: 50% !important;
+    background: #ffe46c !important;
+    box-shadow: none !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-head {
+    flex: 0 0 clamp(72px, 10.4dvh, 92px) !important;
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) clamp(66px, 18vw, 82px) !important;
+    align-items: center !important;
+    gap: clamp(8px, 2.2vw, 12px) !important;
+    padding: 0 !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-driver-card {
+    display: flex !important;
+    min-width: 0 !important;
+    flex-direction: column !important;
+    justify-content: center !important;
+    align-items: flex-start !important;
+    gap: 4px !important;
+    align-content: center !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-driver-card span {
+    color: var(--eo-muted) !important;
+    font-size: clamp(9px, 2.35vw, 11px) !important;
+    font-weight: 900 !important;
+    letter-spacing: .12em !important;
+    line-height: 1.12 !important;
+    text-transform: uppercase !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-driver-card strong {
+    display: -webkit-box !important;
+    max-width: 100% !important;
+    overflow: hidden !important;
+    -webkit-box-orient: vertical !important;
+    -webkit-line-clamp: 2 !important;
+    color: var(--eo-green) !important;
+    font-size: clamp(20px, 5.3vw, 26px) !important;
+    font-weight: 900 !important;
+    letter-spacing: 0 !important;
+    line-height: 1.03 !important;
+    text-align: left !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-plan-widget {
+    display: grid !important;
+    width: clamp(66px, 18vw, 82px) !important;
+    flex: 0 0 clamp(66px, 18vw, 82px) !important;
+    justify-items: center !important;
+    align-items: center !important;
+    align-content: center !important;
+    gap: 3px !important;
+    text-align: center !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-plan-ring {
+    justify-self: center !important;
+    width: clamp(52px, 14.2vw, 66px) !important;
+    height: clamp(52px, 14.2vw, 66px) !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-plan-widget small {
+    display: block !important;
+    width: 100% !important;
+    max-width: clamp(58px, 16vw, 72px) !important;
+    margin: 0 auto !important;
+    text-align: center !important;
+    line-height: 1.05 !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-grid {
+    flex: 1 1 0 !important;
+    display: grid !important;
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    grid-template-rows: none !important;
+    grid-auto-rows: clamp(74px, 10.2dvh, 92px) !important;
+    align-content: space-evenly !important;
+    justify-content: stretch !important;
+    gap: clamp(7px, 1.3dvh, 13px) clamp(8px, 2.2vw, 11px) !important;
+    padding: clamp(5px, 1.2dvh, 14px) 0 !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-grid.is-many {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    grid-template-rows: none !important;
+    grid-auto-rows: clamp(66px, 8.9dvh, 82px) !important;
+    align-content: space-evenly !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-grid.is-single,
+body.excavator-operator-screen .eo-dashboard-truck-grid.is-pair {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    grid-auto-rows: clamp(76px, 10.5dvh, 94px) !important;
+    align-content: center !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-card {
+    display: grid !important;
+    height: auto !important;
+    min-height: 0 !important;
+    grid-template-areas: "icon badge" "number number" "target target" !important;
+    grid-template-columns: auto minmax(0, 1fr) !important;
+    grid-template-rows: auto auto auto !important;
+    align-content: center !important;
+    justify-content: stretch !important;
+    align-items: center !important;
+    justify-items: center !important;
+    row-gap: clamp(2px, .45dvh, 4px) !important;
+    column-gap: 6px !important;
+    padding: clamp(5px, .8dvh, 8px) clamp(5px, 1.5vw, 8px) !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-card i {
+    align-self: center !important;
+    justify-self: start !important;
+    width: clamp(25px, 7.2vw, 32px) !important;
+    height: clamp(17px, 5.1vw, 23px) !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-card i img {
+    width: 100% !important;
+    height: 100% !important;
+    object-fit: contain !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-card span {
+    align-self: center !important;
+    justify-self: end !important;
+    max-width: clamp(48px, 15vw, 62px) !important;
+    min-height: 18px !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-card strong {
+    place-self: center !important;
+    font-size: clamp(27px, 7.6vw, 38px) !important;
+    line-height: .9 !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-card em {
+    font-size: clamp(7px, 2vw, 9px) !important;
+    line-height: 1.05 !important;
+}
+
+@media (max-height: 760px) {
+    body.excavator-operator-screen .eo-dashboard-head {
+        flex-basis: clamp(66px, 9.4dvh, 78px) !important;
+    }
+
+    body.excavator-operator-screen .eo-dashboard-truck-grid {
+        grid-auto-rows: clamp(62px, 8.4dvh, 76px) !important;
+        gap: clamp(5px, .8dvh, 9px) clamp(7px, 2vw, 10px) !important;
+        padding-block: clamp(3px, .7dvh, 8px) !important;
+    }
+
+    body.excavator-operator-screen .eo-dashboard-truck-grid.is-many {
+        grid-auto-rows: clamp(56px, 7.6dvh, 68px) !important;
+    }
+
+    body.excavator-operator-screen .eo-dashboard-truck-card strong {
+        font-size: clamp(23px, 7vw, 32px) !important;
+    }
+}
+
+/* v46 loading polish: keep 70/30 zones, but make truck cards compact and aligned. */
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-topbar {
+    grid-template-columns: minmax(100px, .8fr) clamp(42px, 10vw, 48px) minmax(0, 2.18fr) !important;
+}
+
+body.excavator-operator-screen .eo-face-cell-full {
+    gap: clamp(5px, 1.5vw, 7px) !important;
+    padding-left: clamp(7px, 2vw, 10px) !important;
+    padding-right: clamp(7px, 2vw, 10px) !important;
+}
+
+body.excavator-operator-screen .eo-face-cell-full strong {
+    display: block !important;
+    min-width: 0 !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+    white-space: normal !important;
+    font-size: clamp(9px, 2.55vw, 12px) !important;
+    line-height: 1.08 !important;
+}
+
+body.excavator-operator-screen .eo-sun-icon {
+    position: relative !important;
+    width: 16px !important;
+    height: 16px !important;
+    border-radius: 50% !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    filter: none !important;
+}
+
+body.excavator-operator-screen .eo-sun-icon::before {
+    content: "" !important;
+    position: absolute !important;
+    inset: -5px !important;
+    border: 0 !important;
+    border-radius: 50% !important;
+    background: repeating-conic-gradient(from 0deg, #ffe46c 0deg 9deg, transparent 9deg 27deg) !important;
+    -webkit-mask: radial-gradient(circle, transparent 0 44%, #000 46% 100%) !important;
+    mask: radial-gradient(circle, transparent 0 44%, #000 46% 100%) !important;
+}
+
+body.excavator-operator-screen .eo-sun-icon::after {
+    content: "" !important;
+    position: absolute !important;
+    inset: 3px !important;
+    border-radius: 50% !important;
+    background: #ffe46c !important;
+    box-shadow: none !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-head {
+    flex: 0 0 clamp(72px, 10.4dvh, 92px) !important;
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) clamp(66px, 18vw, 82px) !important;
+    align-items: center !important;
+    gap: clamp(8px, 2.2vw, 12px) !important;
+    padding: 0 !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-driver-card {
+    display: flex !important;
+    min-width: 0 !important;
+    flex-direction: column !important;
+    justify-content: center !important;
+    align-items: flex-start !important;
+    gap: 4px !important;
+    align-content: center !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-driver-card span {
+    color: var(--eo-muted) !important;
+    font-size: clamp(9px, 2.35vw, 11px) !important;
+    font-weight: 900 !important;
+    letter-spacing: .12em !important;
+    line-height: 1.12 !important;
+    text-transform: uppercase !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-driver-card strong {
+    display: -webkit-box !important;
+    max-width: 100% !important;
+    overflow: hidden !important;
+    -webkit-box-orient: vertical !important;
+    -webkit-line-clamp: 2 !important;
+    color: var(--eo-green) !important;
+    font-size: clamp(20px, 5.3vw, 26px) !important;
+    font-weight: 900 !important;
+    letter-spacing: 0 !important;
+    line-height: 1.03 !important;
+    text-align: left !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-plan-widget {
+    display: grid !important;
+    width: clamp(66px, 18vw, 82px) !important;
+    flex: 0 0 clamp(66px, 18vw, 82px) !important;
+    justify-items: center !important;
+    align-items: center !important;
+    align-content: center !important;
+    gap: 3px !important;
+    text-align: center !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-plan-ring {
+    justify-self: center !important;
+    width: clamp(52px, 14.2vw, 66px) !important;
+    height: clamp(52px, 14.2vw, 66px) !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-plan-widget small {
+    display: block !important;
+    width: 100% !important;
+    max-width: clamp(58px, 16vw, 72px) !important;
+    margin: 0 auto !important;
+    text-align: center !important;
+    line-height: 1.05 !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-grid {
+    flex: 1 1 0 !important;
+    display: grid !important;
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    grid-auto-rows: clamp(74px, 10.2dvh, 92px) !important;
+    align-content: space-evenly !important;
+    justify-content: stretch !important;
+    gap: clamp(7px, 1.3dvh, 13px) clamp(8px, 2.2vw, 11px) !important;
+    padding: clamp(5px, 1.2dvh, 14px) 0 !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-grid.is-many {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    grid-template-rows: none !important;
+    grid-auto-rows: clamp(66px, 8.9dvh, 82px) !important;
+    align-content: space-evenly !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-grid.is-single,
+body.excavator-operator-screen .eo-dashboard-truck-grid.is-pair {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    grid-auto-rows: clamp(76px, 10.5dvh, 94px) !important;
+    align-content: center !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-card {
+    display: grid !important;
+    height: auto !important;
+    min-height: 0 !important;
+    grid-template-areas: "icon badge" "number number" "target target" !important;
+    grid-template-columns: auto minmax(0, 1fr) !important;
+    grid-template-rows: auto auto auto !important;
+    align-content: center !important;
+    justify-content: stretch !important;
+    align-items: center !important;
+    justify-items: center !important;
+    row-gap: clamp(2px, .45dvh, 4px) !important;
+    column-gap: 6px !important;
+    padding: clamp(5px, .8dvh, 8px) clamp(5px, 1.5vw, 8px) !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-card i {
+    align-self: center !important;
+    justify-self: start !important;
+    width: clamp(25px, 7.2vw, 32px) !important;
+    height: clamp(17px, 5.1vw, 23px) !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-card i img {
+    width: 100% !important;
+    height: 100% !important;
+    object-fit: contain !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-card span {
+    align-self: center !important;
+    justify-self: end !important;
+    max-width: clamp(48px, 15vw, 62px) !important;
+    min-height: 18px !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-card strong {
+    place-self: center !important;
+    font-size: clamp(27px, 7.6vw, 38px) !important;
+    line-height: .9 !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-card em {
+    font-size: clamp(7px, 2vw, 9px) !important;
+    line-height: 1.05 !important;
+}
+
+@media (max-height: 760px) {
+    body.excavator-operator-screen .eo-dashboard-head {
+        flex-basis: clamp(66px, 9.4dvh, 78px) !important;
+    }
+
+    body.excavator-operator-screen .eo-dashboard-truck-grid {
+        grid-auto-rows: clamp(62px, 8.4dvh, 76px) !important;
+        gap: clamp(5px, .8dvh, 9px) clamp(7px, 2vw, 10px) !important;
+        padding-block: clamp(3px, .7dvh, 8px) !important;
+    }
+
+    body.excavator-operator-screen .eo-dashboard-truck-grid.is-many {
+        grid-auto-rows: clamp(56px, 7.6dvh, 68px) !important;
+    }
+
+    body.excavator-operator-screen .eo-dashboard-truck-card strong {
+        font-size: clamp(23px, 7vw, 32px) !important;
+    }
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-card.is-inactive {
+    border-style: dashed !important;
+    opacity: .66 !important;
+    filter: saturate(.72) brightness(.82) !important;
+    cursor: not-allowed !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-card.is-inactive i,
+body.excavator-operator-screen .eo-dashboard-truck-card.is-inactive strong,
+body.excavator-operator-screen .eo-dashboard-truck-card.is-inactive em {
+    opacity: .54 !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-card.is-inactive span {
+    opacity: .82 !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-unload-card.is-selected {
+    outline: 2px solid rgba(84, 248, 99, .72) !important;
+    outline-offset: -2px !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-unload-card.is-last-dump {
+    box-shadow:
+        inset 0 0 0 2px rgba(84, 248, 99, .72),
+        0 0 24px rgba(84, 248, 99, .28) !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-unload-card.is-selected,
+body.excavator-operator-screen .eo-dashboard-unload-card.is-last-dump {
+    border-color: var(--eo-yellow) !important;
+    background: radial-gradient(circle at 50% 35%, rgba(255, 210, 31, .19), transparent 56%), rgba(58, 43, 0, .76) !important;
+}
+
+/* v45 loading screen refinement: compact context, larger working zones, no local status guesses. */
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-screen {
+    display: flex !important;
+    flex: 1 1 auto !important;
+    flex-direction: column !important;
+    gap: clamp(6px, 1dvh, 9px) !important;
+    overflow: hidden !important;
+    padding-top: 0 !important;
+}
+
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-main-zone {
+    flex: 0 0 70% !important;
+    min-height: 0 !important;
+    gap: clamp(5px, .9dvh, 8px) !important;
+}
+
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-dump-zone {
+    flex: 0 0 30% !important;
+    min-height: 0 !important;
+    padding: 0 !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-head {
+    flex: 0 0 clamp(68px, 10dvh, 88px) !important;
+    align-items: stretch !important;
+    gap: clamp(8px, 2.2vw, 12px) !important;
+    margin: 0 !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-driver-card {
+    display: flex !important;
+    flex: 1 1 auto !important;
+    justify-content: center !important;
+    min-width: 0 !important;
+    padding: clamp(7px, 1.1dvh, 10px) clamp(9px, 2.6vw, 13px) !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-driver-card span {
+    font-size: clamp(8px, 2.25vw, 10px) !important;
+    letter-spacing: .16em !important;
+    line-height: 1.05 !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-driver-card strong {
+    color: var(--eo-green) !important;
+    font-size: clamp(20px, 5.5vw, 28px) !important;
+    line-height: .98 !important;
+    max-width: 100% !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: normal !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-driver-card b {
+    display: none !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-plan-widget {
+    display: grid !important;
+    flex: 0 0 clamp(82px, 22vw, 104px) !important;
+    place-items: center !important;
+    align-content: center !important;
+    gap: 3px !important;
+    min-width: 0 !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-plan-ring {
+    width: clamp(50px, 13.5vw, 64px) !important;
+    height: clamp(50px, 13.5vw, 64px) !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-plan-ring span {
+    font-size: clamp(16px, 4.5vw, 22px) !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-plan-widget small {
+    max-width: 100% !important;
+    color: var(--eo-muted) !important;
+    font-size: clamp(7px, 1.9vw, 9px) !important;
+    font-weight: 800 !important;
+    letter-spacing: .08em !important;
+    line-height: 1.05 !important;
+    text-align: center !important;
+    text-transform: uppercase !important;
+}
+
+body.excavator-operator-screen .eo-sun-icon {
+    position: relative !important;
+    width: 18px !important;
+    height: 18px !important;
+    border-radius: 50% !important;
+    background: radial-gradient(circle, #fff8a7 0 38%, #ffe15d 39% 58%, transparent 60%) !important;
+    box-shadow: 0 0 10px rgba(255, 216, 76, .55) !important;
+}
+
+body.excavator-operator-screen .eo-sun-icon::before {
+    content: "" !important;
+    position: absolute !important;
+    inset: -6px !important;
+    border: 0 !important;
+    border-radius: 50% !important;
+    background: repeating-conic-gradient(from 0deg, #ffe46c 0deg 10deg, transparent 10deg 24deg) !important;
+    -webkit-mask: radial-gradient(circle, transparent 0 49%, #000 51% 100%) !important;
+    mask: radial-gradient(circle, transparent 0 49%, #000 51% 100%) !important;
+}
+
+body.excavator-operator-screen .eo-sun-icon::after {
+    content: "" !important;
+    position: absolute !important;
+    inset: 4px !important;
+    border-radius: 50% !important;
+    background: #ffd21f !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-grid {
+    flex: 1 1 auto !important;
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    grid-auto-rows: 1fr !important;
+    align-content: stretch !important;
+    gap: clamp(6px, 1.2dvh, 10px) clamp(7px, 2.2vw, 10px) !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-grid.is-single {
+    grid-template-columns: minmax(96px, 42%) !important;
+    justify-content: center !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-grid.is-pair {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-card {
+    display: grid !important;
+    grid-template-areas:
+        "icon badge"
+        "number number"
+        "target target" !important;
+    grid-template-columns: 1fr auto !important;
+    grid-template-rows: auto 1fr auto !important;
+    align-items: center !important;
+    min-height: 0 !important;
+    padding: clamp(7px, 1.2dvh, 10px) clamp(8px, 2.1vw, 11px) !important;
+    overflow: hidden !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-card i {
+    grid-area: icon !important;
+    justify-self: start !important;
+    align-self: start !important;
+    width: clamp(30px, 9vw, 42px) !important;
+    height: clamp(22px, 6.5vw, 30px) !important;
+    margin: 0 !important;
+    opacity: .98 !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-card i img {
+    width: 100% !important;
+    height: 100% !important;
+    object-fit: contain !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-card span {
+    grid-area: badge !important;
+    justify-self: end !important;
+    align-self: start !important;
+    max-width: clamp(42px, 18vw, 74px) !important;
+    min-height: 18px !important;
+    padding: 3px 6px !important;
+    border: 1px solid rgba(238, 246, 248, .18) !important;
+    border-radius: 999px !important;
+    background: rgba(3, 13, 17, .68) !important;
+    color: currentColor !important;
+    font-size: clamp(7px, 1.9vw, 9px) !important;
+    font-weight: 900 !important;
+    letter-spacing: .04em !important;
+    line-height: 1 !important;
+    overflow: hidden !important;
+    text-align: center !important;
+    text-overflow: ellipsis !important;
+    text-transform: uppercase !important;
+    white-space: nowrap !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-card strong {
+    grid-area: number !important;
+    place-self: center !important;
+    font-size: clamp(25px, 8.8vw, 44px) !important;
+    line-height: .92 !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-card small {
+    display: none !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-card em {
+    grid-area: target !important;
+    justify-self: center !important;
+    max-width: 100% !important;
+    color: currentColor !important;
+    font-size: clamp(7px, 2vw, 9px) !important;
+    font-style: normal !important;
+    font-weight: 800 !important;
+    letter-spacing: .02em !important;
+    line-height: 1.05 !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-card.is-inactive {
+    background:
+        repeating-linear-gradient(135deg, rgba(255, 255, 255, .035) 0 8px, transparent 8px 18px),
+        rgba(8, 18, 22, .52) !important;
+    border-style: dashed !important;
+    opacity: .68 !important;
+    filter: saturate(.72) !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-card.is-inactive::after {
+    display: none !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-card.is-inactive i {
+    opacity: .46 !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-card.is-inactive strong,
+body.excavator-operator-screen .eo-dashboard-truck-card.is-inactive em {
+    opacity: .74 !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-unload-card {
+    grid-template-rows: 1fr auto auto 1fr !important;
+    align-content: center !important;
+    justify-items: center !important;
+    padding: clamp(9px, 1.4dvh, 13px) clamp(9px, 2.4vw, 12px) !important;
+    word-break: normal !important;
+    overflow-wrap: normal !important;
+    hyphens: none !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-unload-top {
+    display: grid !important;
+    grid-template-columns: 1fr auto !important;
+    align-items: center !important;
+    justify-items: center !important;
+    width: 100% !important;
+    gap: 8px !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-unload-top strong {
+    min-width: 0 !important;
+    max-width: 100% !important;
+    font-size: clamp(18px, 5.1vw, 26px) !important;
+    line-height: 1.05 !important;
+    overflow: hidden !important;
+    overflow-wrap: normal !important;
+    text-align: center !important;
+    text-overflow: ellipsis !important;
+    white-space: normal !important;
+    word-break: normal !important;
+    hyphens: none !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-unload-top small {
+    min-width: clamp(28px, 7vw, 36px) !important;
+    height: clamp(28px, 7vw, 36px) !important;
+    border-radius: 999px !important;
+    font-size: clamp(14px, 4vw, 20px) !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-unload-label,
+body.excavator-operator-screen .eo-dashboard-unload-badges,
+body.excavator-operator-screen .eo-dashboard-unload-card em {
+    justify-self: center !important;
+    text-align: center !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-unload-badges b {
+    min-width: clamp(30px, 8vw, 40px) !important;
+    padding: 4px 8px !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-unload-card.is-selected,
+body.excavator-operator-screen .eo-dashboard-unload-card.is-last-dump {
+    border-color: var(--eo-yellow) !important;
+    background:
+        radial-gradient(circle at 50% 35%, rgba(255, 210, 31, .19), transparent 56%),
+        rgba(58, 43, 0, .76) !important;
+    box-shadow: inset 0 0 0 1px rgba(255, 210, 31, .28), 0 0 20px rgba(255, 210, 31, .16) !important;
+}
+
+body.excavator-operator-screen .eo-dump-queue-modal[hidden] {
+    display: none !important;
+}
+
+body.excavator-operator-screen .eo-dump-queue-modal {
+    position: fixed !important;
+    inset: 0 !important;
+    z-index: 90 !important;
+    display: grid !important;
+    place-items: end center !important;
+    padding: 16px var(--eo-page-x) calc(var(--eo-fixed-nav-reserve) + 14px) !important;
+}
+
+body.excavator-operator-screen .eo-dump-queue-backdrop {
+    position: absolute !important;
+    inset: 0 !important;
+    background: rgba(0, 6, 8, .72) !important;
+    backdrop-filter: blur(6px) !important;
+}
+
+body.excavator-operator-screen .eo-dump-queue-dialog {
+    position: relative !important;
+    z-index: 1 !important;
+    display: grid !important;
+    gap: 10px !important;
+    width: min(100%, 430px) !important;
+    max-height: min(66dvh, 560px) !important;
+    overflow: hidden !important;
+    border: 1px solid rgba(255, 210, 31, .72) !important;
+    border-radius: 18px !important;
+    background: linear-gradient(180deg, rgba(15, 27, 32, .98), rgba(4, 14, 17, .98)) !important;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, .58), 0 0 28px rgba(255, 210, 31, .14) !important;
+    padding: 18px !important;
+    color: var(--eo-text) !important;
+}
+
+body.excavator-operator-screen .eo-dump-queue-close {
+    position: absolute !important;
+    top: 10px !important;
+    right: 10px !important;
+    width: 40px !important;
+    height: 40px !important;
+    border: 1px solid rgba(238, 246, 248, .18) !important;
+    border-radius: 12px !important;
+    background: rgba(12, 23, 29, .9) !important;
+    color: var(--eo-text) !important;
+    font: 900 26px/1 var(--eo-font-display) !important;
+}
+
+body.excavator-operator-screen .eo-dump-queue-kicker {
+    color: var(--eo-muted) !important;
+    font-size: 10px !important;
+    font-weight: 900 !important;
+    letter-spacing: .18em !important;
+    text-transform: uppercase !important;
+}
+
+body.excavator-operator-screen .eo-dump-queue-dialog h2 {
+    max-width: calc(100% - 48px) !important;
+    margin: 0 !important;
+    color: var(--eo-yellow) !important;
+    font-size: clamp(25px, 7vw, 34px) !important;
+    line-height: .98 !important;
+}
+
+body.excavator-operator-screen .eo-dump-queue-list {
+    display: grid !important;
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    gap: 8px !important;
+    max-height: 28dvh !important;
+    overflow-y: auto !important;
+    padding-right: 2px !important;
+}
+
+body.excavator-operator-screen .eo-dump-queue-item {
+    display: grid !important;
+    place-items: center !important;
+    gap: 4px !important;
+    min-height: 78px !important;
+    border: 1px dashed rgba(77, 255, 89, .62) !important;
+    border-radius: 12px !important;
+    background: rgba(8, 24, 17, .68) !important;
+    color: var(--eo-green) !important;
+    font-weight: 900 !important;
+    touch-action: none !important;
+}
+
+body.excavator-operator-screen .eo-dump-queue-item img {
+    width: 36px !important;
+    height: 24px !important;
+    object-fit: contain !important;
+    opacity: .76 !important;
+}
+
+body.excavator-operator-screen .eo-dump-return-zone {
+    display: grid !important;
+    place-items: center !important;
+    min-height: 76px !important;
+    border: 1px dashed rgba(238, 246, 248, .32) !important;
+    border-radius: 14px !important;
+    background: rgba(7, 18, 22, .75) !important;
+    color: var(--eo-muted) !important;
+    text-align: center !important;
+}
+
+body.excavator-operator-screen .eo-dump-return-zone.is-drop-ready {
+    border-color: var(--eo-green) !important;
+    color: var(--eo-green) !important;
+    box-shadow: inset 0 0 0 1px rgba(77, 255, 89, .22) !important;
+}
+
+body.excavator-operator-screen .eo-dump-return-zone strong {
+    font-size: 16px !important;
+}
+
+body.excavator-operator-screen .eo-dump-return-zone span,
+body.excavator-operator-screen .eo-dump-queue-note {
+    margin: 0 !important;
+    color: var(--eo-muted) !important;
+    font-size: 11px !important;
+    line-height: 1.25 !important;
+}
+
+body.excavator-operator-screen .eo-dump-queue-note.is-error {
+    color: var(--eo-red) !important;
+}
+
+/* v44 loading screen contract:
+   fixed app rails, no page scroll on "Погрузка", 70/30 work area split. */
+body.excavator-operator-screen .eo-topbar,
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-topbar {
+    grid-template-columns: minmax(98px, .82fr) clamp(46px, 11vw, 54px) minmax(0, 1.86fr) !important;
+}
+
+body.excavator-operator-screen .eo-shift-kind-cell {
+    padding: 0 !important;
+}
+
+body.excavator-operator-screen .eo-sun-icon {
+    position: relative;
+    display: block;
+    width: clamp(19px, 5vw, 24px);
+    height: clamp(19px, 5vw, 24px);
+    border-radius: 50%;
+    background: #ffd800;
+    box-shadow: 0 0 0 3px rgba(255, 216, 0, .18), 0 0 14px rgba(255, 216, 0, .52);
+}
+
+body.excavator-operator-screen .eo-sun-icon::before {
+    content: "";
+    position: absolute;
+    inset: -6px;
+    border: 2px solid rgba(255, 216, 0, .48);
+    border-radius: inherit;
+}
+
+body.excavator-operator-screen .eo-face-cell-full {
+    justify-content: flex-start !important;
+    padding-right: clamp(8px, 2vw, 12px) !important;
+}
+
+body.excavator-operator-screen .eo-face-cell-full strong {
+    overflow: visible !important;
+    text-overflow: clip !important;
+    white-space: nowrap !important;
+    font-size: clamp(12px, 3.05vw, 14px) !important;
+}
+
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-screen {
+    display: flex !important;
+    flex: 1 1 0 !important;
+    flex-direction: column !important;
+    gap: var(--eo-gap-2) !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    padding-top: 0 !important;
+    overflow: hidden !important;
+    overscroll-behavior: none !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-main-zone {
+    display: flex;
+    flex: 7 1 0;
+    flex-direction: column;
+    gap: var(--eo-gap-2);
+    min-height: 0;
+    min-width: 0;
+    overflow: hidden;
+}
+
+body.excavator-operator-screen .eo-dashboard-dump-zone {
+    display: flex;
+    flex: 3 1 0;
+    min-height: 0;
+    min-width: 0;
+    overflow: hidden;
+}
+
+body.excavator-operator-screen .eo-dashboard-head {
+    flex: 0 0 clamp(92px, 15.2dvh, 126px) !important;
+    grid-template-columns: minmax(0, 1fr) clamp(68px, 18vw, 86px) !important;
+    align-items: start !important;
+    gap: var(--eo-gap-2) !important;
+    min-height: 0 !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-driver-card {
+    align-content: start;
+    gap: clamp(3px, .55dvh, 5px);
+}
+
+body.excavator-operator-screen .eo-dashboard-driver-card span {
+    font-size: clamp(9px, 2.55vw, 11px) !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-driver-card strong {
+    font-size: clamp(14px, 3.7vw, 17px) !important;
+    line-height: 1.03 !important;
+    -webkit-line-clamp: 2;
+}
+
+body.excavator-operator-screen .eo-dashboard-driver-card b {
+    font-size: clamp(37px, 9.8vw, 52px) !important;
+    line-height: .9 !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-plan-ring {
+    width: clamp(68px, 18vw, 86px) !important;
+    height: clamp(68px, 18vw, 86px) !important;
+    justify-self: end !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-plan-ring span {
+    font-size: clamp(18px, 4.7vw, 23px) !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-grid {
+    position: relative !important;
+    z-index: 6 !important;
+    display: grid !important;
+    flex: 1 1 0 !important;
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    grid-auto-rows: minmax(0, 1fr) !important;
+    align-content: stretch !important;
+    gap: clamp(6px, .9dvh, 9px) clamp(7px, 2vw, 10px) !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    overflow: hidden !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-grid.is-many {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    grid-template-rows: repeat(4, minmax(0, 1fr)) !important;
+    grid-auto-rows: minmax(0, 1fr) !important;
+    height: auto !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-grid.is-single,
+body.excavator-operator-screen .eo-dashboard-truck-grid.is-pair {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    grid-auto-rows: minmax(0, 1fr) !important;
+    height: auto !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-grid.is-single .eo-dashboard-truck-card {
+    grid-column: auto !important;
+    width: auto !important;
+    justify-self: stretch !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-card {
+    grid-template-rows: minmax(19px, auto) minmax(20px, auto) minmax(12px, auto) !important;
+    align-content: center !important;
+    justify-items: center !important;
+    gap: clamp(1px, .35dvh, 3px) !important;
+    min-height: 0 !important;
+    height: 100% !important;
+    padding: clamp(4px, .65dvh, 7px) clamp(4px, 1.4vw, 7px) !important;
+    border-radius: var(--eo-radius-sm) !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-card i {
+    justify-content: center !important;
+    height: clamp(18px, 3.9dvh, 28px) !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-card i::after {
+    display: none !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-card img {
+    width: clamp(34px, 10.5vw, 50px) !important;
+    height: clamp(19px, 5.7vw, 29px) !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-card strong {
+    justify-self: center !important;
+    font-size: clamp(22px, 6vw, 30px) !important;
+    line-height: .9 !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-card span {
+    justify-self: center !important;
+    font-size: clamp(8px, 2.35vw, 10px) !important;
+    line-height: 1.02 !important;
+    text-align: center !important;
+    white-space: normal !important;
+    overflow-wrap: anywhere !important;
+    text-overflow: clip !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-card small,
+body.excavator-operator-screen .eo-dashboard-truck-card em {
+    display: none !important;
+}
+
+body.excavator-operator-screen .eo-truck-card.is-inactive:not(.is-pending)::after {
+    content: "В рейсе" !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-unload-grid {
+    display: flex !important;
+    flex: 1 1 0 !important;
+    flex-direction: row !important;
+    align-items: stretch !important;
+    gap: var(--eo-gap-2) !important;
+    width: 100% !important;
+    height: 100% !important;
+    min-height: 0 !important;
+    min-width: 0 !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-unload-card {
+    display: grid !important;
+    flex: 1 1 0 !important;
+    grid-column: auto !important;
+    align-content: stretch !important;
+    min-width: 0 !important;
+    width: auto !important;
+    max-width: none !important;
+    height: 100% !important;
+    padding: clamp(9px, 1.35dvh, 13px) clamp(9px, 2.5vw, 12px) !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-unload-top {
+    align-items: flex-start !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-unload-top strong {
+    font-size: clamp(24px, 6.8vw, 34px) !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-unload-label {
+    place-self: center !important;
+    font-size: clamp(10px, 2.8vw, 13px) !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-unload-badges {
+    justify-content: center !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-unload-card em {
+    justify-self: center !important;
+    font-size: clamp(12px, 3.3vw, 15px) !important;
+}
+
+@media (max-height: 760px) {
+    body.excavator-operator-screen .eo-dashboard-head {
+        flex-basis: clamp(82px, 13.8dvh, 104px) !important;
+    }
+
+    body.excavator-operator-screen .eo-dashboard-driver-card b {
+        font-size: clamp(33px, 9.2vw, 43px) !important;
+    }
+
+    body.excavator-operator-screen .eo-dashboard-plan-ring {
+        width: clamp(62px, 17vw, 74px) !important;
+        height: clamp(62px, 17vw, 74px) !important;
+    }
+}
+
+body.excavator-operator-screen .eo-dashboard-screen {
+    padding-top: 0 !important;
+}
+
+/* v43 scroll contract: fixed rails, only the active screen scrolls.
+   This maps the product contract app-header / screen-content / bottom-tab-bar
+   to the current excavator classes eo-topbar / eo-screen / mm-mobile-bottom-nav. */
+body.excavator-operator-screen .eo-shell,
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    justify-content: flex-start !important;
+    gap: 0 !important;
+    width: 100vw !important;
+    max-width: 430px !important;
+    height: 100dvh !important;
+    min-height: 0 !important;
+    max-height: 100dvh !important;
+    overflow: hidden !important;
+    grid-template-rows: none !important;
+    padding-top: calc(var(--eo-fixed-header-reserve) + var(--eo-fixed-header-gap)) !important;
+    padding-right: var(--eo-page-x) !important;
+    padding-bottom: calc(var(--eo-fixed-nav-reserve) + 8px) !important;
+    padding-left: var(--eo-page-x) !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-screen,
+body.excavator-operator-screen .eo-screen {
+    flex: 1 1 auto !important;
+    grid-row: auto !important;
+    align-self: stretch !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+    overscroll-behavior: contain !important;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+}
+
+body.excavator-operator-screen .eo-dashboard-screen::-webkit-scrollbar,
+body.excavator-operator-screen .eo-screen::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+}
+
+body.excavator-operator-screen .eo-screen[hidden] {
+    display: none !important;
+}
+
+/* v45 final cascade guard after legacy scroll/nav compatibility rules. */
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-screen {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: clamp(6px, 1dvh, 9px) !important;
+    overflow: hidden !important;
+}
+
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-main-zone {
+    flex: 0 0 70% !important;
+    min-height: 0 !important;
+}
+
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-dump-zone {
+    flex: 0 0 30% !important;
+    min-height: 0 !important;
+    padding: 0 !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-head {
+    flex: 0 0 clamp(68px, 10dvh, 88px) !important;
+    gap: clamp(8px, 2.2vw, 12px) !important;
+    margin: 0 !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-driver-card b {
+    display: none !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-driver-card strong {
+    color: var(--eo-green) !important;
+    font-size: clamp(20px, 5.5vw, 28px) !important;
+    line-height: .98 !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-plan-widget {
+    display: grid !important;
+    flex: 0 0 clamp(82px, 22vw, 104px) !important;
+    place-items: center !important;
+    align-content: center !important;
+    gap: 3px !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-plan-widget small {
+    color: var(--eo-muted) !important;
+    font-size: clamp(7px, 1.9vw, 9px) !important;
+    font-weight: 800 !important;
+    letter-spacing: .08em !important;
+    line-height: 1.05 !important;
+    text-align: center !important;
+    text-transform: uppercase !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-plan-ring {
+    width: clamp(50px, 13.5vw, 64px) !important;
+    height: clamp(50px, 13.5vw, 64px) !important;
+}
+
+body.excavator-operator-screen .eo-sun-icon {
+    position: relative !important;
+    width: 18px !important;
+    height: 18px !important;
+    border-radius: 50% !important;
+    background: radial-gradient(circle, #fff8a7 0 38%, #ffe15d 39% 58%, transparent 60%) !important;
+    box-shadow: 0 0 10px rgba(255, 216, 76, .55) !important;
+}
+
+body.excavator-operator-screen .eo-sun-icon::before {
+    content: "" !important;
+    position: absolute !important;
+    inset: -6px !important;
+    border: 0 !important;
+    border-radius: 50% !important;
+    background: repeating-conic-gradient(from 0deg, #ffe46c 0deg 10deg, transparent 10deg 24deg) !important;
+    -webkit-mask: radial-gradient(circle, transparent 0 49%, #000 51% 100%) !important;
+    mask: radial-gradient(circle, transparent 0 49%, #000 51% 100%) !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-grid {
+    flex: 1 1 auto !important;
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    grid-auto-rows: 1fr !important;
+    gap: clamp(6px, 1.2dvh, 10px) clamp(7px, 2.2vw, 10px) !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-card {
+    display: grid !important;
+    grid-template-areas: "icon badge" "number number" "target target" !important;
+    grid-template-columns: auto minmax(0, 1fr) !important;
+    grid-template-rows: auto 1fr auto !important;
+    column-gap: 6px !important;
+    align-items: center !important;
+    overflow: hidden !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-card i {
+    grid-area: icon !important;
+    justify-self: start !important;
+    align-self: start !important;
+    width: clamp(24px, 7.2vw, 31px) !important;
+    height: clamp(18px, 5.4vw, 24px) !important;
+    margin: 0 !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-card span {
+    grid-area: badge !important;
+    justify-self: end !important;
+    align-self: start !important;
+    max-width: clamp(44px, 14.8vw, 58px) !important;
+    min-height: 18px !important;
+    padding: 3px 6px !important;
+    border: 1px solid rgba(238, 246, 248, .18) !important;
+    border-radius: 999px !important;
+    background: rgba(3, 13, 17, .68) !important;
+    font-size: clamp(7px, 1.9vw, 9px) !important;
+    line-height: 1 !important;
+    overflow: hidden !important;
+    text-align: center !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-card strong {
+    grid-area: number !important;
+    place-self: center !important;
+    font-size: clamp(25px, 8.8vw, 44px) !important;
+    line-height: .92 !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-card small {
+    display: none !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-card em {
+    display: block !important;
+    grid-area: target !important;
+    justify-self: center !important;
+    max-width: 100% !important;
+    font-size: clamp(7px, 2vw, 9px) !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-card.is-inactive::after {
+    display: none !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-unload-card,
+body.excavator-operator-screen .eo-dashboard-unload-card * {
+    word-break: normal !important;
+    overflow-wrap: normal !important;
+    hyphens: none !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-unload-top strong {
+    min-width: 0 !important;
+    max-width: 100% !important;
+    font-size: clamp(18px, 5.1vw, 26px) !important;
+    line-height: 1.05 !important;
+    overflow: hidden !important;
+    text-align: center !important;
+    text-overflow: ellipsis !important;
+    white-space: normal !important;
+}

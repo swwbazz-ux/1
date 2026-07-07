@@ -5,7 +5,9 @@
 {% block body_class %}excavator-operator-screen{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v41.css' %}">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}">
 <meta name="theme-color" content="#030708">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Погрузка">
@@ -20,6 +22,7 @@
     data-eo-settings-url="{% url 'excavator_work_settings' %}"
     data-eo-shift-url="{% url 'excavator_shift_action' %}"
     data-eo-truck-loaded-url="{% url 'excavator_truck_loaded' %}"
+    data-eo-truck-loaded-cancel-url="{% url 'excavator_truck_loaded_cancel' %}"
     data-eo-truck-green-icon="{% static 'img/equipment/truck-green.png' %}"
 >
     {% if messages %}
@@ -43,17 +46,14 @@
                 <img src="{% static 'img/equipment/excavator-yellow.png' %}" alt="">
                 <strong>{{ excavator_label }}</strong>
             </div>
-            <div class="eo-topbar-cell">
-                <span class="eo-clock-icon" aria-hidden="true"></span>
-                <strong>{{ shift_time_label }}</strong>
+            <div class="eo-topbar-cell eo-shift-kind-cell" aria-label="Дневная смена">
+                <span class="eo-sun-icon" aria-hidden="true"></span>
             </div>
-            <div class="eo-topbar-cell eo-status-cell {% if open_shift %}is-work{% else %}is-idle{% endif %}">
-                <span></span>
-                <strong>{% if open_shift %}Работает{% else %}Простой{% endif %}</strong>
-            </div>
-            <div class="eo-topbar-cell eo-face-cell">
+            <div class="eo-topbar-cell eo-face-cell eo-face-cell-full">
                 <span class="eo-pin-icon" aria-hidden="true"></span>
-                <strong title="Горизонт {{ face_horizon|default:"125" }} / Блок {{ face_block|default:"4" }}">Гор.{{ face_horizon|default:"125" }} / Бл.{{ face_block|default:"4" }}</strong>
+                <strong title="Горизонт {{ face_horizon|default:"125" }} / Блок {{ face_block|default:"4" }}{% if current_rock %} / Порода: {{ current_rock }}{% endif %}">
+                    Гор.{{ face_horizon|default:"125" }} / Бл.{{ face_block|default:"4" }}{% if current_rock %} / {{ current_rock }}{% endif %}
+                </strong>
             </div>
         </header>
 
@@ -69,7 +69,6 @@
             <div class="eo-shift-section eo-shift-check-panel">
                 <div class="eo-shift-section-head">
                     <span>Показатели техники</span>
-                    <b>Проверьте</b>
                 </div>
                 <div class="eo-shift-metrics">
                     <label class="eo-field-card">
@@ -93,35 +92,6 @@
                             <em>м/ч</em>
                         </span>
                     </label>
-                </div>
-            </div>
-
-            <div class="eo-shift-section eo-shift-face-panel">
-                <div class="eo-shift-section-head">
-                    <span>Забой</span>
-                    <b>Зафиксировано</b>
-                </div>
-                <div class="eo-shift-face">
-                    <div><span>Горизонт</span><strong>{{ face_horizon|default:"125" }}</strong></div>
-                    <div><span>Блок</span><strong>{{ face_block|default:"4" }}</strong></div>
-                    <div class="eo-shift-rock"><span>Порода</span><strong>{% if current_rock %}{{ current_rock }}{% else %}Руда{% endif %}</strong></div>
-                </div>
-            </div>
-
-            <div class="eo-shift-section eo-shift-dump-panel">
-                <div class="eo-shift-section-head">
-                    <span>Точки разгрузки</span>
-                    <b>{{ selected_dump_point_ids|length }} точ.</b>
-                </div>
-                <div class="eo-shift-dump-list" aria-label="Зафиксированные точки разгрузки">
-                    {% for card in dump_cards %}
-                        <span class="eo-shift-dump-chip status-{{ card.status_key }}{% if card.is_default %} is-primary{% endif %}">
-                            <strong>{{ card.name }}</strong>
-                            {% if card.is_default %}<span>Основная</span>{% else %}<span>Зафиксирована</span>{% endif %}
-                        </span>
-                    {% empty %}
-                        <span class="eo-shift-dump-empty">Не задано</span>
-                    {% endfor %}
                 </div>
             </div>
 
@@ -195,109 +165,95 @@
         </section>
 
         <section class="eo-screen eo-dashboard-screen" data-eo-screen="trucks">
-            <div class="eo-dashboard-head">
-                <div class="eo-dashboard-driver-card">
-                    <span>Машинист экскаватора</span>
-                    <strong>{{ access.employee.full_name|default:"-" }}</strong>
-                    <b>{{ excavator_label }}</b>
-                </div>
-                <div class="eo-dashboard-plan-ring" style="--eo-dashboard-progress: {{ shift_plan_percent|default:0 }}%;" role="img" aria-label="Выполнение плана смены {{ shift_plan_percent|default:0 }}%">
-                    <span>{{ shift_plan_percent|default:0 }}%</span>
-                </div>
-            </div>
-
-            <div class="eo-dashboard-info" aria-label="Параметры текущего забоя">
-                <div>
-                    <span>Горизонт</span>
-                    <strong>Гор.{{ face_horizon|default:"-" }}</strong>
-                </div>
-                <div>
-                    <span>Блок</span>
-                    <strong>{{ face_block|default:"-" }}</strong>
-                </div>
-                <div>
-                    <span>Порода</span>
-                    <strong>{% if current_rock %}{{ current_rock }}{% else %}-{% endif %}</strong>
-                </div>
-                <div>
-                    <span>Итого</span>
-                    <strong>{{ completed_today_count }} рейс.</strong>
-                </div>
-            </div>
-
-            <div class="eo-dashboard-title">
-                <span>Назначенные самосвалы</span>
-                <strong>{{ available_assignments_count }} шт.</strong>
-            </div>
-            <div class="eo-truck-grid eo-dashboard-truck-grid{% if not truck_cards %} is-empty{% elif truck_cards|length == 1 %} is-single{% elif truck_cards|length == 2 %} is-pair{% elif truck_cards|length > 6 %} is-many{% endif %}" aria-label="Назначенные самосвалы">
-                {% for card in truck_cards %}
-                    <button
-                        class="eo-truck-card eo-dashboard-truck-card status-{{ card.status_key }}{% if card.is_selected %} is-selected{% endif %}{% if card.is_locked %} is-inactive{% endif %}"
-                        type="button"
-                        draggable="{% if card.can_drag %}true{% else %}false{% endif %}"
-                        style="--eo-truck-progress: {{ card.plan_percent|default:0 }}%;"
-                        data-eo-truck-card
-                        data-eo-dashboard-truck
-                        data-assignment-id="{{ card.assignment.id }}"
-                        data-truck-id="{{ card.assignment.truck.id }}"
-                        data-eo-equipment-state="{{ card.equipment_state_code }}"
-                        data-eo-plan-percent="{{ card.plan_percent|default:0 }}"
-                        {% if card.is_locked %}data-eo-truck-inactive="1" aria-disabled="true"{% endif %}
-                    >
-                        <i aria-hidden="true"><img src="{% static card.icon %}" alt=""></i>
-                        <strong>{{ card.number }}</strong>
-                        <span>{{ card.status_label }}</span>
-                        <small>{{ card.plan_percent|default:0 }}%</small>
-                        {% if card.target_label %}<em>{{ card.target_label }}</em>{% endif %}
-                    </button>
-                {% empty %}
-                    <div class="eo-empty-state eo-dashboard-empty">
-                        <img src="{% static 'img/equipment/truck-gray.png' %}" alt="">
-                        <strong>Нет погрузки</strong>
-                        <span>Назначает горный мастер</span>
+            <div class="eo-dashboard-main-zone">
+                <div class="eo-dashboard-head">
+                    <div class="eo-dashboard-driver-card">
+                        <span>Машинист экскаватора</span>
+                        <strong>{{ access.employee.full_name|default:"-" }}</strong>
                     </div>
-                {% endfor %}
-            </div>
-
-            <div class="eo-dashboard-divider" aria-hidden="true">
-                <span></span>
-                <b></b>
-                <span></span>
-            </div>
-
-            <div class="eo-dashboard-title">
-                <span>Точки разгрузки</span>
-                <strong>{{ dump_cards|length }} точ.</strong>
-            </div>
-            <div class="eo-unload-grid eo-unload-grid-work eo-dashboard-unload-grid{% if dump_cards|length == 1 %} is-single{% endif %}" aria-label="Точки разгрузки">
-                {% for card in dump_cards %}
-                    <button class="eo-unload-card eo-dashboard-unload-card status-{{ card.status_key }}{% if card.is_default %} is-selected{% endif %}" type="button" data-eo-dump-target="{{ card.point.id }}">
-                        <span class="eo-dashboard-unload-top">
-                            <strong>{{ card.name }}</strong>
-                            <small>{{ card.completed_count|default:0 }}</small>
-                        </span>
-                        <span class="eo-dashboard-unload-label">Разгружено</span>
-                        <span class="eo-dashboard-unload-badges" aria-label="Назначены, не разгружены">
-                            {% for truck in card.pending_trucks %}
-                                <b class="status-{{ truck.status_key }}">{{ truck.number }}</b>
-                            {% empty %}
-                                <b class="is-muted">нет</b>
-                            {% endfor %}
-                        </span>
-                        {% if card.is_default %}<em>Отпустить сюда</em>{% endif %}
-                    </button>
-                {% empty %}
-                    <div class="eo-empty-state eo-empty-state-compact">
-                        <strong>Нет точек</strong>
-                        <span>Настройте забой</span>
+                    <div class="eo-dashboard-plan-widget">
+                        <div class="eo-dashboard-plan-ring" style="--eo-dashboard-progress: {{ shift_plan_percent|default:0 }}%;" role="img" aria-label="Выполнение нормы {{ shift_plan_percent|default:0 }}%">
+                            <span>{{ shift_plan_percent|default:0 }}%</span>
+                        </div>
                     </div>
-                {% endfor %}
+                </div>
+
+                <div class="eo-truck-grid eo-dashboard-truck-grid{% if not truck_cards %} is-empty{% elif truck_cards|length > 9 %} is-many is-rows-4{% else %} is-rows-3{% endif %}" aria-label="Самосвалы">
+                    {% for card in truck_cards %}
+                        <button
+                            class="eo-truck-card eo-dashboard-truck-card status-{{ card.status_key }}{% if card.is_selected %} is-selected{% endif %}{% if card.is_locked %} is-inactive{% endif %}"
+                            type="button"
+                            draggable="{% if card.can_drag %}true{% else %}false{% endif %}"
+                            style="--eo-truck-progress: {{ card.plan_percent|default:0 }}%;"
+                            data-eo-truck-card
+                            data-eo-dashboard-truck
+                            data-assignment-id="{{ card.assignment.id }}"
+                            data-truck-id="{{ card.assignment.truck.id }}"
+                            data-eo-equipment-state="{{ card.equipment_state_code }}"
+                            data-eo-plan-percent="{{ card.plan_percent|default:0 }}"
+                            {% if card.is_locked %}data-eo-truck-inactive="1" aria-disabled="true"{% endif %}
+                        >
+                            <i aria-hidden="true"><img src="{% static card.icon %}" alt=""></i>
+                            <strong>{{ card.number }}</strong>
+                            <span>{{ card.status_label }}</span>
+                            <small>{{ card.plan_percent|default:0 }}%</small>
+                            {% if card.target_label %}<em>{{ card.target_label }}</em>{% endif %}
+                        </button>
+                    {% empty %}
+                        <div class="eo-empty-state eo-dashboard-empty">
+                            <img src="{% static 'img/equipment/truck-gray.png' %}" alt="">
+                            <strong>Нет погрузки</strong>
+                            <span>Назначает горный мастер</span>
+                        </div>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <div class="eo-dashboard-dump-zone">
+                <div class="eo-unload-grid eo-unload-grid-work eo-dashboard-unload-grid{% if dump_cards|length == 1 %} is-single{% endif %}" aria-label="Точки разгрузки">
+                    {% for card in dump_cards %}
+                        <button class="eo-unload-card eo-dashboard-unload-card status-{{ card.status_key }}{% if card.is_default %} is-selected{% endif %}" type="button" data-eo-dump-target="{{ card.point.id }}" data-eo-dump-name="{{ card.name }}">
+                            <span class="eo-dashboard-unload-top">
+                                <strong>{{ card.name }}</strong>
+                                <small>{{ card.completed_count|default:0 }}</small>
+                            </span>
+                            <span class="eo-dashboard-unload-label">Разгружено</span>
+                            <span class="eo-dashboard-unload-badges" aria-label="Назначены, не разгружены">
+                                {% for truck in card.pending_trucks %}
+                                    <b class="status-{{ truck.status_key }}" data-eo-queue-truck data-truck-id="{{ truck.truck_id }}" data-trip-id="{{ truck.trip_id }}" data-eo-truck-number="{{ truck.number }}">{{ truck.number }}</b>
+                                {% empty %}
+                                    <b class="is-muted">нет</b>
+                                {% endfor %}
+                            </span>
+                        </button>
+                    {% empty %}
+                        <div class="eo-empty-state eo-empty-state-compact">
+                            <strong>Нет точек</strong>
+                            <span>Настройте забой</span>
+                        </div>
+                    {% endfor %}
+                </div>
             </div>
         </section>
 
+        <div class="eo-dump-queue-modal" data-eo-dump-queue-modal hidden aria-hidden="true">
+            <div class="eo-dump-queue-backdrop" data-eo-dump-queue-close></div>
+            <section class="eo-dump-queue-dialog" role="dialog" aria-modal="true" aria-labelledby="eo-dump-queue-title">
+                <button class="eo-dump-queue-close" type="button" data-eo-dump-queue-close aria-label="Закрыть">×</button>
+                <span class="eo-dump-queue-kicker">Очередь на разгрузку</span>
+                <h2 id="eo-dump-queue-title" data-eo-dump-queue-title>Точка разгрузки</h2>
+                <div class="eo-dump-queue-list" data-eo-dump-queue-list></div>
+                <div class="eo-dump-return-zone" data-eo-dump-return-zone>
+                    <strong>Вернуть в самосвалы</strong>
+                    <span>Перетащите сюда, чтобы отменить отправку</span>
+                </div>
+                <p class="eo-dump-queue-note" data-eo-dump-queue-note hidden></p>
+            </section>
+        </div>
+
         <section class="eo-screen" data-eo-screen="events">
             <div class="eo-title-row">
-                <h1>События</h1>
+                <h1>Простои</h1>
                 <button class="eo-refresh-button" type="button" aria-label="Обновить" data-eo-refresh-work>↻</button>
             </div>
             <div class="eo-downtime-card status-{{ active_downtime_state.color_group }}{% if active_downtime %} is-active{% endif %}" data-eo-active-downtime-id="{% if active_downtime %}{{ active_downtime.id }}{% endif %}" data-eo-active-started-at="{{ active_downtime_started_at }}" data-eo-active-elapsed-seconds="{{ active_downtime_elapsed_seconds }}" data-eo-downtime-state="{% if active_downtime %}{{ active_downtime_state.code }}{% endif %}">
@@ -337,7 +293,7 @@
         </button>
         <button class="mm-mobile-nav-item" type="button" data-eo-tab="events" data-eo-pwa-update-nav-target>
             <span class="eo-nav-bell"></span>
-            <span>События</span>
+            <span>Простои</span>
             <span class="mm-mobile-update-badge" data-eo-pwa-update-badge hidden aria-hidden="true"></span>
         </button>
     </nav>
@@ -365,7 +321,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v41";
+var excavatorShellVersion = "excavator-mobile-shell-v55";
 var excavatorRelevantEvents = {
     assignment_changed: true,
     trip_changed: true,
@@ -515,8 +471,10 @@ window.initExcavatorWorkShell = function () {
     var settingsUrl = shell.dataset.eoSettingsUrl || "";
     var shiftUrl = shell.dataset.eoShiftUrl || "";
     var truckLoadedUrl = shell.dataset.eoTruckLoadedUrl || "";
+    var truckLoadedCancelUrl = shell.dataset.eoTruckLoadedCancelUrl || "";
     var truckGreenIcon = shell.dataset.eoTruckGreenIcon || "";
     var activeTruckDrag = null;
+    var activeQueueDrag = null;
     var shiftButton = shell.querySelector("[data-eo-shift-button]");
     var shiftLabel = shell.querySelector("[data-eo-shift-label]");
     var shiftHoldTimer = null;
@@ -529,6 +487,24 @@ window.initExcavatorWorkShell = function () {
     var logoutHoldFrame = null;
     var logoutHoldStart = 0;
     var logoutHoldMs = 2000;
+
+    function fitTopbarLocationText() {
+        var faceText = shell.querySelector(".eo-face-cell-full strong");
+        var excavatorText = shell.querySelector(".eo-topbar-cell:first-child strong");
+        if (!faceText || !excavatorText) return;
+        faceText.style.removeProperty("font-size");
+        var excavatorSize = parseFloat(window.getComputedStyle(excavatorText).fontSize) || 14;
+        var currentSize = parseFloat(window.getComputedStyle(faceText).fontSize) || excavatorSize;
+        var nextSize = Math.min(currentSize, excavatorSize);
+        faceText.style.setProperty("font-size", nextSize + "px", "important");
+        while (nextSize > 10 && faceText.scrollWidth > faceText.clientWidth) {
+            nextSize -= 0.5;
+            faceText.style.setProperty("font-size", nextSize + "px", "important");
+        }
+    }
+
+    window.requestAnimationFrame(fitTopbarLocationText);
+    window.addEventListener("resize", fitTopbarLocationText);
 
     function isInactiveTruck(card) {
         return !!(card && card.dataset.eoTruckInactive === "1");
@@ -861,6 +837,268 @@ window.initExcavatorWorkShell = function () {
         }
     }
 
+    function markLastDumpTarget(target) {
+        if (!target) return;
+        shell.querySelectorAll("[data-eo-dump-target].is-last-dump").forEach(function (item) {
+            item.classList.remove("is-last-dump");
+        });
+        target.classList.add("is-last-dump");
+        selectDump(target.dataset.eoDumpTarget);
+    }
+
+    function pendingBadgeList(dumpTarget) {
+        return dumpTarget ? dumpTarget.querySelector(".eo-dashboard-unload-badges") : null;
+    }
+
+    function removeMutedPendingBadge(list) {
+        if (!list) return;
+        list.querySelectorAll(".is-muted").forEach(function (item) {
+            item.remove();
+        });
+    }
+
+    function ensureMutedPendingBadge(list) {
+        if (!list || list.querySelector("[data-eo-queue-truck]")) return;
+        if (!list.querySelector(".is-muted")) {
+            var muted = document.createElement("b");
+            muted.className = "is-muted";
+            muted.textContent = "нет";
+            list.appendChild(muted);
+        }
+    }
+
+    function addPendingTruckBadge(dumpTarget, card, tripId) {
+        var list = pendingBadgeList(dumpTarget);
+        if (!list || !card) return null;
+        var truckId = card.dataset.truckId || "";
+        removeMutedPendingBadge(list);
+        list.querySelectorAll('[data-eo-queue-truck][data-truck-id="' + truckId + '"]').forEach(function (item) {
+            item.remove();
+        });
+        var badge = document.createElement("b");
+        badge.className = "status-green";
+        badge.dataset.eoQueueTruck = "1";
+        badge.dataset.truckId = truckId;
+        badge.dataset.tripId = tripId || "";
+        badge.dataset.eoTruckNumber = card.querySelector("strong") ? card.querySelector("strong").textContent.trim() : "";
+        badge.textContent = badge.dataset.eoTruckNumber || truckId;
+        list.appendChild(badge);
+        return badge;
+    }
+
+    function removePendingTruckBadge(dumpTarget, truckId, tripId) {
+        var list = pendingBadgeList(dumpTarget);
+        if (!list) return;
+        var selector = "[data-eo-queue-truck]";
+        list.querySelectorAll(selector).forEach(function (item) {
+            var sameTruck = truckId && item.dataset.truckId === String(truckId);
+            var sameTrip = tripId && item.dataset.tripId === String(tripId);
+            if (sameTruck || sameTrip) item.remove();
+        });
+        ensureMutedPendingBadge(list);
+    }
+
+    function updatePendingTruckBadgeTrip(dumpTarget, truckId, tripId) {
+        var list = pendingBadgeList(dumpTarget);
+        if (!list) return;
+        var badge = list.querySelector('[data-eo-queue-truck][data-truck-id="' + truckId + '"]');
+        if (badge && tripId) {
+            badge.dataset.tripId = String(tripId);
+        }
+    }
+
+    function restoreTruckAfterLoadedCancel(card, data) {
+        if (!card) return;
+        card.classList.remove("status-green", "status-yellow", "status-gray", "status-red", "status-orange", "is-inactive", "is-pending");
+        card.classList.add("status-" + (data.status_key || "blue"));
+        delete card.dataset.eoTruckInactive;
+        card.dataset.eoEquipmentState = data.equipment_state || "assigned";
+        card.setAttribute("draggable", "true");
+        card.removeAttribute("aria-disabled");
+        var status = card.querySelector("span");
+        if (status) status.textContent = data.status_label || "назначена";
+        var targetText = card.querySelector("em");
+        if (targetText) targetText.remove();
+        selectTruck(card);
+    }
+
+    function cardByTruckId(truckId) {
+        return shell.querySelector('[data-eo-truck-card][data-truck-id="' + truckId + '"]');
+    }
+
+    function queueModalElements() {
+        var modal = shell.querySelector("[data-eo-dump-queue-modal]");
+        return {
+            modal: modal,
+            title: modal ? modal.querySelector("[data-eo-dump-queue-title]") : null,
+            list: modal ? modal.querySelector("[data-eo-dump-queue-list]") : null,
+            note: modal ? modal.querySelector("[data-eo-dump-queue-note]") : null,
+            returnZone: modal ? modal.querySelector("[data-eo-dump-return-zone]") : null
+        };
+    }
+
+    function showQueueNote(text, isError) {
+        var parts = queueModalElements();
+        if (!parts.note) return;
+        parts.note.hidden = false;
+        parts.note.textContent = text || "";
+        parts.note.classList.toggle("is-error", !!isError);
+    }
+
+    function closeDumpQueueModal() {
+        var parts = queueModalElements();
+        if (!parts.modal) return;
+        parts.modal.hidden = true;
+        parts.modal.setAttribute("aria-hidden", "true");
+        activeQueueDrag = null;
+        if (parts.returnZone) parts.returnZone.classList.remove("is-drop-ready");
+    }
+
+    function queueItemFromBadge(badge, dumpTarget) {
+        var item = document.createElement("button");
+        item.className = "eo-dump-queue-item status-green";
+        item.type = "button";
+        item.dataset.truckId = badge.dataset.truckId || "";
+        item.dataset.tripId = badge.dataset.tripId || "";
+        item.dataset.dumpPointId = dumpTarget.dataset.eoDumpTarget || "";
+        item.dataset.truckNumber = badge.dataset.eoTruckNumber || badge.textContent.trim();
+        item.innerHTML = '<img src="' + truckGreenIcon + '" alt=""><strong>' + item.dataset.truckNumber + '</strong>';
+        item.addEventListener("pointerdown", beginQueueDrag);
+        return item;
+    }
+
+    function openDumpQueueModal(dumpTarget) {
+        var parts = queueModalElements();
+        if (!parts.modal || !parts.title || !parts.list) return;
+        var name = dumpTarget.dataset.eoDumpName || (dumpTarget.querySelector("strong") ? dumpTarget.querySelector("strong").textContent.trim() : "Точка разгрузки");
+        parts.title.textContent = name;
+        parts.list.innerHTML = "";
+        if (parts.note) {
+            parts.note.hidden = true;
+            parts.note.textContent = "";
+        }
+        var badges = Array.prototype.slice.call(dumpTarget.querySelectorAll("[data-eo-queue-truck]"));
+        if (!badges.length) {
+            var empty = document.createElement("div");
+            empty.className = "eo-empty-state eo-empty-state-compact";
+            empty.innerHTML = "<strong>Очереди нет</strong><span>На эту точку пока никто не отправлен</span>";
+            parts.list.appendChild(empty);
+        } else {
+            badges.forEach(function (badge) {
+                parts.list.appendChild(queueItemFromBadge(badge, dumpTarget));
+            });
+        }
+        parts.modal.hidden = false;
+        parts.modal.setAttribute("aria-hidden", "false");
+    }
+
+    function beginQueueDrag(event) {
+        if (event.button !== undefined && event.button !== 0) return;
+        var item = event.currentTarget;
+        activeQueueDrag = {
+            item: item,
+            pointerId: event.pointerId,
+            startX: event.clientX,
+            startY: event.clientY,
+            started: false
+        };
+        if (item.setPointerCapture) {
+            try {
+                item.setPointerCapture(event.pointerId);
+            } catch (error) {}
+        }
+        item.addEventListener("pointermove", updateQueueDrag);
+        item.addEventListener("pointerup", finishQueueDrag);
+        item.addEventListener("pointercancel", cancelQueueDrag);
+    }
+
+    function updateQueueDrag(event) {
+        if (!activeQueueDrag || event.pointerId !== activeQueueDrag.pointerId) return;
+        var dx = event.clientX - activeQueueDrag.startX;
+        var dy = event.clientY - activeQueueDrag.startY;
+        if (!activeQueueDrag.started && Math.abs(dx) + Math.abs(dy) < 8) return;
+        event.preventDefault();
+        activeQueueDrag.started = true;
+        activeQueueDrag.item.style.transform = "translate3d(" + dx + "px, " + dy + "px, 0) scale(.98)";
+        var parts = queueModalElements();
+        var element = document.elementFromPoint(event.clientX, event.clientY);
+        var isReturn = !!(parts.returnZone && element && element.closest("[data-eo-dump-return-zone]"));
+        if (parts.returnZone) parts.returnZone.classList.toggle("is-drop-ready", isReturn);
+    }
+
+    function finishQueueDrag(event) {
+        if (!activeQueueDrag || event.pointerId !== activeQueueDrag.pointerId) return;
+        var state = activeQueueDrag;
+        activeQueueDrag = null;
+        state.item.style.transform = "";
+        state.item.removeEventListener("pointermove", updateQueueDrag);
+        state.item.removeEventListener("pointerup", finishQueueDrag);
+        state.item.removeEventListener("pointercancel", cancelQueueDrag);
+        var parts = queueModalElements();
+        if (parts.returnZone) parts.returnZone.classList.remove("is-drop-ready");
+        if (!state.started) return;
+        event.preventDefault();
+        var element = document.elementFromPoint(event.clientX, event.clientY);
+        if (parts.returnZone && element && element.closest("[data-eo-dump-return-zone]")) {
+            cancelLoadedTripFromQueue(state.item);
+        }
+    }
+
+    function cancelQueueDrag(event) {
+        if (!activeQueueDrag || event.pointerId !== activeQueueDrag.pointerId) return;
+        activeQueueDrag.item.style.transform = "";
+        activeQueueDrag = null;
+        var parts = queueModalElements();
+        if (parts.returnZone) parts.returnZone.classList.remove("is-drop-ready");
+    }
+
+    function cancelLoadedTripFromQueue(item) {
+        if (!truckLoadedCancelUrl || !item || !item.dataset.tripId) {
+            showQueueNote("Серверная отмена для этого рейса недоступна.", true);
+            return;
+        }
+        item.disabled = true;
+        showQueueNote("Отменяю назначение на сервере...", false);
+        fetch(truckLoadedCancelUrl, {
+            method: "POST",
+            credentials: "same-origin",
+            headers: {
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "X-CSRFToken": csrfToken,
+                "X-Requested-With": "XMLHttpRequest"
+            },
+            body: JSON.stringify({
+                client_action_id: generateClientActionId("truck-loaded-cancel"),
+                trip_id: item.dataset.tripId || "",
+                truck_id: item.dataset.truckId || "",
+                dump_point_id: item.dataset.dumpPointId || ""
+            })
+        }).then(function (response) {
+            return response.json().catch(function () { return {}; }).then(function (data) {
+                if (!response.ok || !data.ok) {
+                    throw new Error(data.error || "Назначение не отменено");
+                }
+                return data;
+            });
+        }).then(function (data) {
+            var dumpTarget = shell.querySelector('[data-eo-dump-target="' + (data.dump_point_id || item.dataset.dumpPointId) + '"]');
+            removePendingTruckBadge(dumpTarget, data.truck_id || item.dataset.truckId, data.trip_id || item.dataset.tripId);
+            restoreTruckAfterLoadedCancel(cardByTruckId(data.truck_id || item.dataset.truckId), data);
+            item.remove();
+            showQueueNote("Самосвал возвращен в назначенные.", false);
+            if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
+                window.AppRealtime.wake("truck_loaded_cancel");
+            }
+        }).catch(function (error) {
+            item.disabled = false;
+            showQueueNote(error.message || "Назначение не отменено", true);
+            if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
+                window.AppRealtime.wake("truck_loaded_cancel_error");
+            }
+        });
+    }
+
     function selectedDumpPointIds() {
         var ids = [];
         shell.querySelectorAll("[data-eo-dump-select].is-selected").forEach(function (button) {
@@ -976,6 +1214,8 @@ window.initExcavatorWorkShell = function () {
     function postTruckLoaded(card, dumpTarget) {
         if (!card || isInactiveTruck(card) || !dumpTarget || !truckLoadedUrl) return;
         var snapshot = snapshotTruckCard(card);
+        var optimisticBadge = null;
+        var truckId = card.dataset.truckId || "";
         var payload = {
             client_action_id: generateClientActionId("truck-loaded"),
             truck_id: card.dataset.truckId || "",
@@ -989,7 +1229,9 @@ window.initExcavatorWorkShell = function () {
             downtime_text: downtimeInput ? downtimeInput.value : "",
             note: shell.querySelector("input[name='note']") ? shell.querySelector("input[name='note']").value : ""
         };
+        markLastDumpTarget(dumpTarget);
         applyTruckPending(card, dumpTarget);
+        optimisticBadge = addPendingTruckBadge(dumpTarget, card, "");
         fetch(truckLoadedUrl, {
             method: "POST",
             credentials: "same-origin",
@@ -1009,11 +1251,14 @@ window.initExcavatorWorkShell = function () {
             });
         }).then(function (data) {
             confirmTruckLoaded(card, data);
+            updatePendingTruckBadgeTrip(dumpTarget, truckId, data.trip_id || "");
             if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
                 window.AppRealtime.wake("truck_loaded");
             }
         }).catch(function (error) {
             restoreTruckCard(card, snapshot);
+            if (optimisticBadge) optimisticBadge.remove();
+            ensureMutedPendingBadge(pendingBadgeList(dumpTarget));
             window.alert(error.message || "Самосвал не отправлен");
             if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
                 window.AppRealtime.wake("truck_loaded_error");
@@ -1148,6 +1393,36 @@ window.initExcavatorWorkShell = function () {
     });
 
     shell.querySelectorAll("[data-eo-dump-target]").forEach(function (target) {
+        var queueHoldTimer = null;
+        var queueHoldX = 0;
+        var queueHoldY = 0;
+        function clearQueueHold() {
+            if (queueHoldTimer) {
+                window.clearTimeout(queueHoldTimer);
+                queueHoldTimer = null;
+            }
+        }
+        target.addEventListener("pointerdown", function (event) {
+            if (event.button !== undefined && event.button !== 0) return;
+            queueHoldX = event.clientX;
+            queueHoldY = event.clientY;
+            clearQueueHold();
+            queueHoldTimer = window.setTimeout(function () {
+                target.dataset.eoSuppressClick = "1";
+                openDumpQueueModal(target);
+                window.setTimeout(function () {
+                    delete target.dataset.eoSuppressClick;
+                }, 450);
+            }, 560);
+        });
+        target.addEventListener("pointermove", function (event) {
+            if (Math.abs(event.clientX - queueHoldX) > 8 || Math.abs(event.clientY - queueHoldY) > 8) {
+                clearQueueHold();
+            }
+        });
+        ["pointerup", "pointercancel", "pointerleave"].forEach(function (eventName) {
+            target.addEventListener(eventName, clearQueueHold);
+        });
         target.addEventListener("dragover", function (event) {
             event.preventDefault();
             target.classList.add("is-drop-ready");
@@ -1165,12 +1440,19 @@ window.initExcavatorWorkShell = function () {
             postTruckLoaded(selectedTruck, target);
         });
         target.addEventListener("click", function () {
+            if (target.dataset.eoSuppressClick === "1") {
+                return;
+            }
             selectDump(target.dataset.eoDumpTarget);
             if (!selectedTruck || isInactiveTruck(selectedTruck)) {
                 return;
             }
             postTruckLoaded(selectedTruck, target);
         });
+    });
+
+    shell.querySelectorAll("[data-eo-dump-queue-close]").forEach(function (button) {
+        button.addEventListener("click", closeDumpQueueModal);
     });
 
     function postDowntimeAction(payload) {

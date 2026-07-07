@@ -393,7 +393,7 @@ EXCAVATOR_MANIFEST = {
 }
 
 EXCAVATOR_SERVICE_WORKER_JS = r"""
-const CACHE_NAME = "excavator-mobile-shell-v41";
+const CACHE_NAME = "excavator-mobile-shell-v55";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const CORE_ASSETS = [
@@ -401,7 +401,9 @@ const CORE_ASSETS = [
   MANIFEST_URL,
   "/static/js/realtime-client.js",
   "/static/css/app.css",
-  "/static/css/excavator-work-v41.css",
+  "/static/css/excavator-work-v55.css",
+  "/static/css/excavator-work-v55-final.css",
+  "/static/css/excavator-work-v55-shift.css",
   "/static/favicon.ico",
   "/static/img/pwa/mining-master-180.png",
   "/static/img/pwa/mining-master-192.png",
@@ -2405,6 +2407,103 @@ def excavator_truck_loaded_view(request):
 
 
 @require_POST
+def excavator_truck_loaded_cancel_view(request):
+    access = excavator_access_from_request(request)
+    if not access:
+        return JsonResponse({'ok': False, 'error': 'РќРµС‚ РґРѕСЃС‚СѓРїР° Рє СЌРєСЂР°РЅСѓ Р­РєСЃРєР°РІР°С‚РѕСЂС‰РёРєР°.'}, status=403)
+    open_shift = get_excavator_open_shift(access.employee)
+    current_excavator = open_shift.equipment if open_shift else None
+    if not current_excavator:
+        return JsonResponse({'ok': False, 'error': 'РЎРЅР°С‡Р°Р»Р° РЅСѓР¶РЅРѕ РѕС‚РєСЂС‹С‚СЊ СЃРјРµРЅСѓ РЅР° СЌРєСЃРєР°РІР°С‚РѕСЂРµ.'}, status=409)
+
+    payload = excavator_json_payload(request)
+    client_action_id = str(payload.get('client_action_id') or '').strip()
+    if not client_action_id:
+        return JsonResponse({'ok': False, 'error': 'РќРµ РїРµСЂРµРґР°РЅ client_action_id.'}, status=400)
+
+    with transaction.atomic():
+        existing_action = (
+            TripClientAction.objects
+            .select_related('trip')
+            .filter(action_type='truck_loaded_cancel', client_action_id=client_action_id)
+            .first()
+        )
+        if existing_action:
+            state_ui = equipment_state_ui(get_equipment_state_ui_map(), 'assigned')
+            return JsonResponse({
+                'ok': True,
+                'deduplicated': True,
+                'trip_id': existing_action.trip_id,
+                'truck_id': existing_action.trip.truck_id,
+                'status': existing_action.trip.status,
+                'equipment_state': 'assigned',
+                'status_label': state_ui['label'],
+                'status_key': state_ui['color_group'],
+                'version': get_operational_state_version(),
+            })
+
+        try:
+            trip_id = int(payload.get('trip_id') or 0)
+            truck_id = int(payload.get('truck_id') or 0)
+            dump_point_id = int(payload.get('dump_point_id') or 0)
+        except (TypeError, ValueError):
+            return JsonResponse({'ok': False, 'error': 'РќРµРєРѕСЂСЂРµРєС‚РЅС‹Рµ РїР°СЂР°РјРµС‚СЂС‹ РґРµР№СЃС‚РІРёСЏ.'}, status=400)
+
+        trip = (
+            Trip.objects
+            .select_for_update()
+            .select_related('truck', 'dump_point', 'excavator')
+            .filter(
+                id=trip_id,
+                truck_id=truck_id,
+                excavator=current_excavator,
+                status=TripStatus.LOADED_WAITING_UNLOAD,
+            )
+            .first()
+        )
+        if not trip:
+            return JsonResponse({'ok': False, 'error': 'РќРµР·Р°РєСЂС‹С‚С‹Р№ СЂРµР№СЃ РґР»СЏ РѕС‚РјРµРЅС‹ РЅРµ РЅР°Р№РґРµРЅ.'}, status=409)
+        current_dump_point_id = trip.assigned_dump_point_id or trip.actual_dump_point_id or trip.dump_point_id
+        if dump_point_id and dump_point_id != current_dump_point_id:
+            return JsonResponse({'ok': False, 'error': 'РўРѕС‡РєР° СЂР°Р·РіСЂСѓР·РєРё РІ РґРµР№СЃС‚РІРёРё РЅРµ СЃРѕРІРїР°РґР°РµС‚ СЃ СЂРµР№СЃРѕРј.'}, status=409)
+
+        trip.status = TripStatus.CANCELLED
+        trip.save(update_fields=['status'])
+        TripClientAction.objects.create(
+            action_type='truck_loaded_cancel',
+            client_action_id=client_action_id,
+            trip=trip,
+            actor=access.employee,
+        )
+        state = bump_operational_state(
+            'Trip:truck_loaded_cancel',
+            event_type='trip_changed',
+            object_type='Trip',
+            object_id=trip.id,
+            payload={
+                'action': 'truck_loaded_cancel',
+                'trip_id': trip.id,
+                'truck_id': trip.truck_id,
+                'excavator_id': trip.excavator_id,
+                'dump_point_id': current_dump_point_id,
+                'status': TripStatus.CANCELLED,
+            },
+        )
+        state_ui = equipment_state_ui(get_equipment_state_ui_map(), 'assigned')
+        return JsonResponse({
+            'ok': True,
+            'trip_id': trip.id,
+            'truck_id': trip.truck_id,
+            'dump_point_id': current_dump_point_id,
+            'status': TripStatus.CANCELLED,
+            'equipment_state': 'assigned',
+            'status_label': state_ui['label'],
+            'status_key': state_ui['color_group'],
+            'version': state.version,
+        })
+
+
+@require_POST
 def excavator_work_settings_view(request):
     access = excavator_access_from_request(request)
     if not access:
@@ -2670,6 +2769,7 @@ def excavator_work_view(request):
         )
 
     available_assignments = list(form.fields['assignment'].queryset)
+    assignment_truck_ids = [assignment.truck_id for assignment in available_assignments if assignment.truck_id]
     active_trips_queryset = (
         Trip.objects
         .filter(status__in=OPEN_TRIP_STATUSES)
@@ -2681,8 +2781,16 @@ def excavator_work_view(request):
     else:
         active_trips_queryset = active_trips_queryset.filter(excavator_operator=access.employee)
     active_trips = list(active_trips_queryset[:20])
-    active_truck_ids = {trip.truck_id for trip in active_trips}
-    active_trip_by_truck_id = {trip.truck_id: trip for trip in active_trips}
+    blocking_trips = []
+    if assignment_truck_ids:
+        blocking_trips = list(
+            Trip.objects
+            .filter(truck_id__in=assignment_truck_ids, status__in=OPEN_TRIP_STATUSES)
+            .select_related('truck', 'excavator', 'rock_type', 'dump_point')
+            .order_by('-created_at')
+        )
+    active_truck_ids = {trip.truck_id for trip in blocking_trips}
+    active_trip_by_truck_id = {trip.truck_id: trip for trip in blocking_trips}
     first_ready_assignment_id = next((assignment.id for assignment in available_assignments if assignment.truck_id not in active_truck_ids), None)
     for assignment in available_assignments:
         assignment.has_active_trip = assignment.truck_id in active_truck_ids
@@ -2699,7 +2807,6 @@ def excavator_work_view(request):
         return equipment_short_name(equipment)
 
     equipment_state_map = get_equipment_state_ui_map()
-    assignment_truck_ids = [assignment.truck_id for assignment in available_assignments if assignment.truck_id]
     truck_downtime_by_equipment_id = {}
     if assignment_truck_ids:
         for downtime in (
@@ -2837,20 +2944,17 @@ def excavator_work_view(request):
 
     completed_shift_count = completed_queryset.count()
     completed_shift_volume = completed_queryset.aggregate(total=Sum('volume_m3'))['total'] or Decimal('0')
-    shift_fact_meta = ''
-    if completed_shift_volume > 0:
-        shift_fact_label = 'Факт'
-        shift_fact_value = format_whole_value_with_unit(completed_shift_volume, 'м³')
-        shift_fact_meta = f'{completed_shift_count} маш.' if completed_shift_count else ''
-    else:
-        shift_fact_label = 'Отгружено'
-        shift_fact_value = f'{completed_shift_count} маш.'
+    shift_fact_label = 'Факт'
+    shift_fact_value = format_whole_value_with_unit(completed_shift_volume, 'м³')
+    shift_fact_meta = f'{completed_shift_count} маш.'
 
     for card in dump_cards:
         point_id = card['point'].id
         card['completed_count'] = completed_by_dump_id[point_id]
         card['pending_trucks'] = [
             {
+                'truck_id': trip.truck_id,
+                'trip_id': trip.id,
                 'number': equipment_number(trip.truck),
                 'status_key': 'green',
             }

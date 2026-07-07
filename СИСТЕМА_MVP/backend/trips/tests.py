@@ -458,10 +458,14 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, 'customRefresh: true')
         self.assertContains(response, reverse('excavator_manifest'))
         self.assertContains(response, 'rel="manifest"')
-        self.assertContains(response, '/static/css/excavator-work-v41.css')
+        self.assertContains(response, '/static/css/excavator-work-v55.css')
+        self.assertContains(response, '/static/css/excavator-work-v55-final.css')
+        self.assertContains(response, '/static/css/excavator-work-v55-shift.css')
         self.assertContains(response, '/excavator-sw.js')
         self.assertContains(response, 'scope: "/excavator/"')
-        self.assertContains(response, 'excavator-mobile-shell-v41')
+        self.assertContains(response, 'excavator-mobile-shell-v55')
+        self.assertContains(response, 'Простои')
+        self.assertNotContains(response, 'Отпустить сюда')
         self.assertContains(response, 'resolveExcavatorUpdateVersion')
         self.assertContains(response, 'renderUpdateModal')
         self.assertContains(response, 'fetchServerVersion')
@@ -469,6 +473,9 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, 'data-eo-pwa-update-check')
         self.assertContains(response, 'data-eo-pwa-update-check-label')
         self.assertContains(response, 'data-eo-pwa-update-check-version')
+        self.assertNotContains(response, 'Сверьте с фактом')
+        self.assertNotContains(response, 'eo-shift-attention-label')
+        self.assertContains(response, 'Обновить')
         self.assertContains(response, 'runManualUpdateCheck')
         self.assertContains(response, 'Проверка...')
         self.assertContains(response, 'registration && registration.active')
@@ -476,7 +483,9 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertNotContains(response, 'registration.active || navigator.serviceWorker.controller')
         self.assertContains(response, reverse('excavator_work_settings'))
         self.assertContains(response, reverse('excavator_shift_action'))
+        self.assertContains(response, reverse('excavator_truck_loaded_cancel'))
         self.assertContains(response, 'data-eo-shift-url')
+        self.assertContains(response, 'data-eo-truck-loaded-cancel-url')
         self.assertContains(response, 'data-eo-shift-button')
         self.assertContains(response, 'data-eo-shift-action="close"')
         self.assertContains(response, reverse('logout'))
@@ -485,18 +494,23 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, 'data-eo-shift-label')
         self.assertContains(response, '--eo-shift-hold: 0%')
         self.assertContains(response, 'Показатели техники')
-        self.assertContains(response, 'Точки разгрузки')
-        self.assertContains(response, 'eo-shift-rock')
-        self.assertContains(response, 'Зафиксировано')
         self.assertContains(response, 'Итог смены')
+        self.assertNotContains(response, 'eo-shift-face-panel')
+        self.assertNotContains(response, 'eo-shift-dump-panel')
+        self.assertNotContains(response, 'eo-shift-rock')
+        self.assertNotContains(response, 'eo-shift-dump-list')
+        self.assertContains(response, 'data-eo-screen="face"')
+        self.assertContains(response, 'Забой')
+        self.assertContains(response, 'Точки разгрузки')
         self.assertContains(response, 'Назначено')
         self.assertContains(response, 'В пути')
         self.assertContains(response, 'data-eo-shift-fuel')
         self.assertContains(response, '<em>л</em>')
         self.assertContains(response, '<em>км</em>')
         self.assertContains(response, '<em>м/ч</em>')
-        self.assertContains(response, 'Отгружено')
-        self.assertContains(response, '0 маш.')
+        self.assertContains(response, 'Факт')
+        self.assertContains(response, '0 м³')
+        self.assertContains(response, '<em>0 маш.</em>')
         self.assertNotContains(response, 'Факт</span><strong>0 рейс.</strong>')
         self.assertNotContains(response, 'data-eo-open-face-settings')
         self.assertNotContains(response, '+ Добавить')
@@ -521,6 +535,16 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, 'data-eo-refresh-work')
         self.assertContains(response, 'refreshExcavatorWorkFromServer({ preserveTab: true })')
         self.assertContains(response, 'class="eo-dashboard-head"')
+        self.assertContains(response, 'class="eo-dashboard-main-zone"')
+        self.assertContains(response, 'class="eo-dashboard-dump-zone"')
+        self.assertContains(response, 'class="eo-dashboard-plan-widget"')
+        self.assertContains(response, 'aria-label="Выполнение нормы')
+        self.assertNotContains(response, '<small>Выполнение нормы</small>')
+        self.assertContains(response, 'class="eo-topbar-cell eo-shift-kind-cell"')
+        self.assertContains(response, 'class="eo-sun-icon"')
+        self.assertContains(response, 'Гор.125 / Бл.4 / Руда')
+        self.assertNotContains(response, 'class="eo-dashboard-info"')
+        self.assertNotContains(response, 'Назначенные самосвалы')
         self.assertContains(response, 'data-eo-dashboard-truck')
         self.assertContains(response, 'class="mm-mobile-bottom-nav"')
         self.assertNotContains(response, 'class="bottom-nav"')
@@ -528,9 +552,12 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertNotContains(response, 'class="eo-event-actions"')
         self.assertIn('Перегон', [card['name'] for card in response.context['downtime_reason_cards']])
         self.assertContains(response, 'data-eo-dump-target')
-        self.assertContains(response, 'class="eo-truck-grid eo-dashboard-truck-grid is-single"')
+        self.assertContains(response, 'class="eo-truck-grid eo-dashboard-truck-grid is-rows-3"')
         self.assertContains(response, 'addEventListener("pointerdown"')
         self.assertContains(response, 'document.elementFromPoint')
+        self.assertContains(response, 'data-eo-dump-queue-modal')
+        self.assertContains(response, 'data-eo-dump-return-zone')
+        self.assertContains(response, 'truck_loaded_cancel')
         self.assertContains(response, 'Ожидание самосвалов')
         self.assertContains(response, 'Дробилка')
         self.assertContains(response, 'Руда')
@@ -839,12 +866,14 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/excavator/')
-        self.assertIn('excavator-mobile-shell-v41', script)
+        self.assertIn('excavator-mobile-shell-v55', script)
         self.assertIn(reverse('excavator_work'), script)
         self.assertIn(reverse('excavator_manifest'), script)
         self.assertIn('/static/js/realtime-client.js', script)
         self.assertIn('/static/css/app.css', script)
-        self.assertIn('/static/css/excavator-work-v41.css', script)
+        self.assertIn('/static/css/excavator-work-v55.css', script)
+        self.assertIn('/static/css/excavator-work-v55-final.css', script)
+        self.assertIn('/static/css/excavator-work-v55-shift.css', script)
         self.assertIn('ignoreSearch: true', script)
         self.assertIn('request.headers.get("X-Requested-With") === "XMLHttpRequest"', script)
         self.assertIn('networkOnly(request)', script)
@@ -901,6 +930,31 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, 'class="eo-truck-card eo-dashboard-truck-card status-green is-inactive"')
         self.assertContains(response, 'draggable="false"')
         self.assertContains(response, 'data-eo-equipment-state="loaded_waiting_unload"')
+        self.assertContains(response, 'data-eo-truck-inactive="1"')
+
+    def test_excavator_work_locks_truck_with_open_trip_on_other_excavator(self):
+        active_trip = Trip.objects.create(
+            excavator=self.other_excavator,
+            truck=self.truck,
+            excavator_operator=self.operator,
+            rock_type=self.rock,
+            dump_point=self.dump_point,
+            status=TripStatus.LOADED_WAITING_UNLOAD,
+            loading_horizon='12',
+            loading_block='1',
+        )
+
+        response = self.client.get(reverse('excavator_work'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context['active_trips_count'], 0)
+        first_card = response.context['truck_cards'][0]
+        self.assertEqual(first_card['number'], str(self.truck.garage_number))
+        self.assertEqual(first_card['equipment_state_code'], 'loaded_waiting_unload')
+        self.assertEqual(first_card['status_key'], 'green')
+        self.assertEqual(first_card['target_label'], str(active_trip.dump_point))
+        self.assertTrue(first_card['is_locked'])
+        self.assertFalse(first_card['can_drag'])
         self.assertContains(response, 'data-eo-truck-inactive="1"')
 
     def test_excavator_work_marks_loaded_truck_as_waiting_unload_state(self):
@@ -1023,6 +1077,57 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         ).first()
         self.assertIsNotNone(event)
 
+    def test_truck_loaded_cancel_returns_truck_to_assigned_state(self):
+        load_response = self.post_truck_loaded(client_action_id='cancel-load')
+        trip = Trip.objects.get(id=json.loads(load_response.content.decode('utf-8'))['trip_id'])
+
+        response = self.post_truck_loaded_cancel(trip)
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.content.decode('utf-8'))
+        trip.refresh_from_db()
+        self.assertEqual(trip.status, TripStatus.CANCELLED)
+        self.assertEqual(payload['equipment_state'], 'assigned')
+        self.assertEqual(payload['status'], TripStatus.CANCELLED)
+        self.assertTrue(
+            TripClientAction.objects.filter(
+                action_type='truck_loaded_cancel',
+                client_action_id='cancel-1',
+                trip=trip,
+                actor=self.operator,
+            ).exists()
+        )
+
+    def test_truck_loaded_cancel_reuses_same_client_action_id(self):
+        load_response = self.post_truck_loaded(client_action_id='cancel-same-load')
+        trip = Trip.objects.get(id=json.loads(load_response.content.decode('utf-8'))['trip_id'])
+
+        first_response = self.post_truck_loaded_cancel(trip, client_action_id='same-cancel')
+        second_response = self.post_truck_loaded_cancel(trip, client_action_id='same-cancel')
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(second_response.status_code, 200)
+        second_payload = json.loads(second_response.content.decode('utf-8'))
+        self.assertTrue(second_payload['deduplicated'])
+        self.assertEqual(TripClientAction.objects.filter(action_type='truck_loaded_cancel').count(), 1)
+
+    def test_truck_loaded_cancel_publishes_operational_state_event(self):
+        load_response = self.post_truck_loaded(client_action_id='cancel-event-load')
+        trip = Trip.objects.get(id=json.loads(load_response.content.decode('utf-8'))['trip_id'])
+
+        response = self.post_truck_loaded_cancel(trip, client_action_id='cancel-event')
+
+        self.assertEqual(response.status_code, 200)
+        event = OperationalStateEvent.objects.filter(
+            event_type='trip_changed',
+            object_type='Trip',
+            object_id=str(trip.id),
+            reason='Trip:truck_loaded_cancel',
+            payload__action='truck_loaded_cancel',
+            payload__status=TripStatus.CANCELLED,
+        ).first()
+        self.assertIsNotNone(event)
+
     def test_excavator_downtime_action_creates_and_closes_downtime_event(self):
         start_response = self.client.post(
             reverse('excavator_downtime_action'),
@@ -1077,6 +1182,18 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
                 'action': 'start',
                 'reason_id': wrong_reason.id,
                 'client_action_id': 'wrong-reason',
+            }),
+            content_type='application/json',
+        )
+
+    def post_truck_loaded_cancel(self, trip, *, client_action_id='cancel-1'):
+        return self.client.post(
+            reverse('excavator_truck_loaded_cancel'),
+            data=json.dumps({
+                'client_action_id': client_action_id,
+                'truck_id': trip.truck_id,
+                'trip_id': trip.id,
+                'dump_point_id': trip.assigned_dump_point_id or trip.actual_dump_point_id or trip.dump_point_id,
             }),
             content_type='application/json',
         )
