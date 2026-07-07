@@ -544,7 +544,7 @@ def build_event_chart_rows(events, chart_mode, range_start, range_end):
     return rows
 
 
-def build_dynamics_event_chart_series(events, excavator_rows, chart_mode, range_start, range_end):
+def build_dynamics_event_chart_series(events, excavator_rows, chart_mode, range_start, range_end, all_active_selected=False):
     rows = build_event_chart_rows(events, chart_mode, range_start, range_end)
     max_value = max((row['value'] for row in rows), default=Decimal('0'))
     if not rows or not max_value:
@@ -554,8 +554,10 @@ def build_dynamics_event_chart_series(events, excavator_rows, chart_mode, range_
         return [], max_value
     if len(excavator_rows) == 1:
         label = excavator_rows[0]['label']
+    elif all_active_selected:
+        label = 'Все активные'
     else:
-        label = 'Сумма'
+        label = 'Итого по выбранным'
     return [{
         'label': label,
         'color': '#7de05e',
@@ -645,6 +647,7 @@ def build_excavator_dynamics(date_from, date_to, granularity='day', excavator_id
         chart_mode,
         chart_range_start,
         chart_range_end,
+        all_active_selected=not excavator_ids,
     )
     if not chart_series:
         chart_max_value = max_bucket_volume

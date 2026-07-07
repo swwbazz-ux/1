@@ -511,13 +511,46 @@
         return point.matrixTransform(svg.getScreenCTM().inverse());
     }
 
-    function nearestChartPoint(payload, pointer) {
+    function distanceToSegment(pointer, start, end) {
+        var startX = Number(start.x || 0);
+        var startY = Number(start.y || 0);
+        var endX = Number(end.x || 0);
+        var endY = Number(end.y || 0);
+        var deltaX = endX - startX;
+        var deltaY = endY - startY;
+        var lengthSquared = deltaX * deltaX + deltaY * deltaY;
+        if (!lengthSquared) {
+            var pointDx = pointer.x - startX;
+            var pointDy = pointer.y - startY;
+            return Math.sqrt(pointDx * pointDx + pointDy * pointDy);
+        }
+        var ratio = ((pointer.x - startX) * deltaX + (pointer.y - startY) * deltaY) / lengthSquared;
+        var clampedRatio = Math.max(0, Math.min(1, ratio));
+        var projectionX = startX + clampedRatio * deltaX;
+        var projectionY = startY + clampedRatio * deltaY;
+        var dx = pointer.x - projectionX;
+        var dy = pointer.y - projectionY;
+        return Math.sqrt(dx * dx + dy * dy);
+    }
+
+    function tooltipHitLimit(svg, isOverlay) {
+        var rect = svg.getBoundingClientRect();
+        var viewBox = svg.viewBox && svg.viewBox.baseVal;
+        if (!rect.width || !rect.height || !viewBox || !viewBox.width || !viewBox.height) {
+            return isOverlay ? 10 : 8;
+        }
+        var cssPixels = isOverlay ? 16 : 12;
+        return cssPixels * Math.max(viewBox.width / rect.width, viewBox.height / rect.height);
+    }
+
+    function nearestChartPoint(payload, pointer, hitLimit) {
         var nearest = null;
         if (!payload || !Array.isArray(payload.series)) {
             return nearest;
         }
         payload.series.forEach(function (series) {
-            (series.points || []).forEach(function (point) {
+            var points = series.points || [];
+            points.forEach(function (point) {
                 var dx = Number(point.x || 0) - pointer.x;
                 var dy = Number(point.y || 0) - pointer.y;
                 var score = Math.sqrt(dx * dx + dy * dy);
@@ -529,7 +562,32 @@
                     };
                 }
             });
+            points.forEach(function (point, index) {
+                var nextPoint = points[index + 1];
+                if (!nextPoint) {
+                    return;
+                }
+                var score = distanceToSegment(pointer, point, nextPoint);
+                if (!nearest || score < nearest.score) {
+                    var pointScore = Math.sqrt(
+                        Math.pow(Number(point.x || 0) - pointer.x, 2) +
+                        Math.pow(Number(point.y || 0) - pointer.y, 2)
+                    );
+                    var nextPointScore = Math.sqrt(
+                        Math.pow(Number(nextPoint.x || 0) - pointer.x, 2) +
+                        Math.pow(Number(nextPoint.y || 0) - pointer.y, 2)
+                    );
+                    nearest = {
+                        score: score,
+                        series: series,
+                        point: pointScore <= nextPointScore ? point : nextPoint
+                    };
+                }
+            });
         });
+        if (nearest && nearest.score > hitLimit) {
+            return null;
+        }
         return nearest;
     }
 
@@ -563,11 +621,14 @@
     function renderChartTooltip(tooltip, payload, nearest) {
         var point = nearest.point;
         var series = nearest.series;
-        tooltip.innerHTML = [
-            '<strong>' + (series.label || "Экскаватор") + '</strong>',
-            '<span>' + (point.period || "Период не указан") + '</span>',
-            '<b>' + modeValueText(payload.mode, point.value || "0", payload.unit || "") + '</b>'
-        ].join("");
+        tooltip.replaceChildren();
+        var title = document.createElement("strong");
+        var period = document.createElement("span");
+        var value = document.createElement("b");
+        title.textContent = series.label || "Экскаватор";
+        period.textContent = point.period || "Период не указан";
+        value.textContent = modeValueText(payload.mode, point.value || "0", payload.unit || "");
+        tooltip.append(title, period, value);
     }
 
     function uniquifySvgGradientIds(root) {
@@ -632,7 +693,7 @@
         overlay.innerHTML = [
             '<div class="management-dynamics-chart-overlay-backdrop" data-management-dynamics-chart-close></div>',
             '<section class="management-dynamics-chart-dialog" role="dialog" aria-modal="true" aria-label="Увеличенный график выработки">',
-            '<button type="button" class="management-dynamics-chart-close" data-management-dynamics-chart-close title="Закрыть" aria-label="Закрыть увеличенный график">×</button>',
+            '<button type="button" class="management-dynamics-chart-close" data-management-dynamics-chart-close title="Закрыть график" aria-label="Закрыть увеличенный график">×</button>',
             '<div class="management-dynamics-chart-dialog-body"></div>',
             '</section>'
         ].join("");
@@ -684,7 +745,7 @@
             if (svg && payload) {
                 svg.addEventListener("pointermove", function (event) {
                     var pointer = svgPointFromEvent(svg, event);
-                    var nearest = nearestChartPoint(payload, pointer);
+                    var nearest = nearestChartPoint(payload, pointer, tooltipHitLimit(svg, isOverlay));
                     if (!nearest) {
                         tooltip.hidden = true;
                         return;
