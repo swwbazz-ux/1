@@ -178,27 +178,32 @@
                     </div>
                 </div>
 
-                <div class="eo-truck-grid eo-dashboard-truck-grid{% if not truck_cards %} is-empty{% elif truck_cards|length > 9 %} is-many is-rows-4{% else %} is-rows-3{% endif %}" aria-label="Самосвалы">
+                <div class="eo-truck-grid eo-dashboard-truck-grid{% if not truck_cards %} is-empty{% elif truck_cards|length > 9 %} is-many is-rows-3{% else %} is-rows-3{% endif %}" aria-label="Самосвалы">
                     {% for card in truck_cards %}
-                        <button
-                            class="eo-truck-card eo-dashboard-truck-card status-{{ card.status_key }}{% if card.is_selected %} is-selected{% endif %}{% if card.is_locked %} is-inactive{% endif %}"
-                            type="button"
-                            draggable="{% if card.can_drag %}true{% else %}false{% endif %}"
-                            style="--eo-truck-progress: {{ card.plan_percent|default:0 }}%;"
-                            data-eo-truck-card
-                            data-eo-dashboard-truck
-                            data-assignment-id="{{ card.assignment.id }}"
-                            data-truck-id="{{ card.assignment.truck.id }}"
-                            data-eo-equipment-state="{{ card.equipment_state_code }}"
-                            data-eo-plan-percent="{{ card.plan_percent|default:0 }}"
-                            {% if card.is_locked %}data-eo-truck-inactive="1" aria-disabled="true"{% endif %}
-                        >
-                            <i aria-hidden="true"><img src="{% static card.icon %}" alt=""></i>
-                            <strong>{{ card.number }}</strong>
-                            <span>{{ card.status_label }}</span>
-                            <small>{{ card.plan_percent|default:0 }}%</small>
-                            {% if card.target_label %}<em>{{ card.target_label }}</em>{% endif %}
-                        </button>
+                        {% if forloop.counter <= 9 %}
+                            <button
+                                class="eo-truck-card eo-dashboard-truck-card status-{{ card.status_key }}{% if card.is_selected %} is-selected{% endif %}{% if card.is_locked %} is-inactive{% endif %}"
+                                type="button"
+                                draggable="{% if card.can_drag %}true{% else %}false{% endif %}"
+                                style="--eo-truck-progress: {{ card.plan_percent|default:0 }}%;"
+                                data-eo-truck-card
+                                data-eo-dashboard-truck
+                                data-assignment-id="{{ card.assignment.id }}"
+                                data-truck-id="{{ card.assignment.truck.id }}"
+                                data-eo-equipment-state="{{ card.equipment_state_code }}"
+                                data-eo-plan-percent="{{ card.plan_percent|default:0 }}"
+                                {% if card.is_locked %}data-eo-truck-inactive="1" aria-disabled="true"{% endif %}
+                            >
+                                <i aria-hidden="true"><img src="{% static card.icon %}" alt=""></i>
+                                <strong>{{ card.number }}</strong>
+                                <span>{{ card.status_label }}</span>
+                                <small>{{ card.plan_percent|default:0 }}%</small>
+                                {% if card.target_label %}<em>{{ card.target_label }}</em>{% endif %}
+                                {% if forloop.counter == 9 and truck_cards|length > 9 %}
+                                    <b class="eo-dashboard-truck-overflow" aria-hidden="true">+{{ truck_cards|length|add:"-9" }}</b>
+                                {% endif %}
+                            </button>
+                        {% endif %}
                     {% empty %}
                         <div class="eo-empty-state eo-dashboard-empty">
                             <img src="{% static 'img/equipment/truck-gray.png' %}" alt="">
@@ -321,7 +326,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v56";
+var excavatorShellVersion = "excavator-mobile-shell-v57";
 var excavatorRelevantEvents = {
     assignment_changed: true,
     trip_changed: true,
