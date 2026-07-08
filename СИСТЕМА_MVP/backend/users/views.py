@@ -107,7 +107,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v32'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v33'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -149,6 +149,7 @@ DRIVER_MANIFEST = {
 
 DRIVER_SERVICE_WORKER_JS = f"""
 const CACHE_NAME = "{DRIVER_SHELL_VERSION}";
+const CACHE_PREFIX = "driver-mobile-shell-";
 const APP_SHELL_URL = "/driver/";
 const LEGACY_SHELL_URL = "/driver/shift/";
 const MANIFEST_URL = "/driver.webmanifest";
@@ -178,7 +179,7 @@ self.addEventListener("activate", (event) => {{
     event.waitUntil(
         caches.keys().then((keys) => Promise.all(
             keys
-                .filter((key) => key.startsWith("driver-mobile-shell-") && key !== CACHE_NAME)
+                .filter((key) => key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME)
                 .map((key) => caches.delete(key))
         )).then(() => self.clients.claim())
     );
@@ -187,7 +188,8 @@ self.addEventListener("activate", (event) => {{
 async function networkFirst(request, fallbackUrl) {{
     const cache = await caches.open(CACHE_NAME);
     try {{
-        const response = await fetch(request);
+        const freshRequest = new Request(request, {{ cache: "no-store" }});
+        const response = await fetch(freshRequest);
         if (response && response.ok) {{
             cache.put(request, response.clone());
         }}
@@ -1616,22 +1618,22 @@ def driver_shift_view(request):
 
     open_shift = EmployeeShift.objects.filter(employee=access.employee, closed_at__isnull=True).order_by('-opened_at').first()
     current_truck = open_shift.equipment if open_shift else None
-    pending_assignment = None
-    accepted_assignment = None
+    current_assignment = None
     active_trip = None
     active_downtime = None
     shift_trips = []
     if current_truck:
-        pending_assignment = HaulAssignment.objects.filter(
-            truck=current_truck,
-            status=AssignmentStatus.PENDING,
-            ended_at__isnull=True,
-        ).select_related('truck', 'excavator').order_by('-assigned_at').first()
-        accepted_assignment = HaulAssignment.objects.filter(
-            truck=current_truck,
-            status=AssignmentStatus.ACCEPTED,
-            ended_at__isnull=True,
-        ).select_related('truck', 'excavator').order_by('-accepted_at', '-assigned_at').first()
+        current_assignment = (
+            HaulAssignment.objects
+            .filter(
+                truck=current_truck,
+                ended_at__isnull=True,
+            )
+            .exclude(status=AssignmentStatus.CANCELLED)
+            .select_related('truck', 'excavator')
+            .order_by('-assigned_at')
+            .first()
+        )
         active_trip = Trip.objects.filter(
             truck=current_truck,
             status__in=OPEN_TRIP_STATUSES,
@@ -1657,6 +1659,22 @@ def driver_shift_view(request):
             .distinct()
             .order_by('created_at')[:30]
         )
+
+    for trip in shift_trips:
+        started_at = timezone.localtime(trip.created_at) if trip.created_at else None
+        completed_at = timezone.localtime(trip.completed_at) if trip.completed_at else None
+        finish_for_duration = completed_at or timezone.localtime(timezone.now())
+        duration_seconds = 0
+        if started_at:
+            duration_seconds = max(0, int((finish_for_duration - started_at).total_seconds()))
+        duration_minutes = max(1, round(duration_seconds / 60)) if duration_seconds else 0
+        trip.driver_excavator_label = trip.excavator.garage_number if trip.excavator_id else '—'
+        driver_dump_point = trip.actual_dump_point or trip.dump_point or trip.assigned_dump_point
+        trip.driver_dump_point_label = str(driver_dump_point) if driver_dump_point else '—'
+        started_label = started_at.strftime('%H:%M') if started_at else '—'
+        completed_label = completed_at.strftime('%H:%M') if completed_at else '...'
+        trip.driver_time_range_label = f'{started_label}–{completed_label}'
+        trip.driver_duration_label = f'{duration_minutes}м' if completed_at else 'в рейсе'
 
     completed_shift_trips = [trip for trip in shift_trips if trip.status == TripStatus.COMPLETED]
     shift_trip_count = len(completed_shift_trips)
@@ -1730,7 +1748,7 @@ def driver_shift_view(request):
             form_initial['truck'] = selected_truck_id
         form = DriverOpenShiftForm(initial=form_initial, employee=access.employee)
 
-    return render(
+    response = render(
         request,
         'users/driver_shift.html',
         {
@@ -1738,8 +1756,7 @@ def driver_shift_view(request):
             'registration': registration,
             'current_truck': current_truck,
             'open_shift': open_shift,
-            'pending_assignment': pending_assignment,
-            'accepted_assignment': accepted_assignment,
+            'current_assignment': current_assignment,
             'active_trip': active_trip,
             'form': form,
             'close_form': DriverCloseShiftForm(instance=open_shift) if open_shift else None,
@@ -1761,8 +1778,11 @@ def driver_shift_view(request):
             'active_trip_assigned_dump_point': active_trip_assigned_dump_point,
             'active_trip_actual_dump_point_id': active_trip_actual_dump_point_id,
             'trip_status_loaded': TripStatus.LOADED_WAITING_UNLOAD,
+            'driver_shell_version': DRIVER_SHELL_VERSION,
         },
     )
+    response['Cache-Control'] = 'no-cache'
+    return response
 
 
 def driver_close_shift_view(request):
@@ -1789,33 +1809,6 @@ def driver_close_shift_view(request):
             shift.closed_by = access.employee
             shift.save(update_fields=['end_fuel', 'end_mileage', 'end_engine_hours', 'closed_at', 'closed_by'])
             messages.success(request, 'Смена закрыта.')
-    return redirect('driver_work')
-
-
-def driver_accept_assignment_view(request, assignment_id):
-    access_id = request.session.get('employee_access_id')
-    if not access_id:
-        return redirect('login')
-    access = EmployeeAccess.objects.select_related('employee', 'role').filter(id=access_id, is_active=True).first()
-    if not access or access.role.code != 'driver':
-        return redirect('role_home')
-    registration = getattr(access.employee, 'driver_registration', None)
-    if not registration:
-        return redirect('driver_registration')
-    open_shift = EmployeeShift.objects.filter(employee=access.employee, closed_at__isnull=True).order_by('-opened_at').first()
-    if not open_shift or not open_shift.equipment:
-        messages.error(request, 'Нельзя принять назначение: открытая смена с самосвалом не найдена.')
-        return redirect('driver_work')
-
-    assignment = HaulAssignment.objects.filter(
-        id=assignment_id,
-        truck=open_shift.equipment,
-        status=AssignmentStatus.PENDING,
-    ).first()
-    if assignment and request.method == 'POST':
-        assignment.status = AssignmentStatus.ACCEPTED
-        assignment.accepted_at = timezone.now()
-        assignment.save(update_fields=['status', 'accepted_at'])
     return redirect('driver_work')
 
 

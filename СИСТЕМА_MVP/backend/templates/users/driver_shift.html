@@ -122,6 +122,31 @@ body.driver-mobile-screen .driver-messages .message {
     line-height: 1.2;
 }
 
+body.driver-mobile-screen .driver-toast[hidden] {
+    display: none !important;
+}
+
+body.driver-mobile-screen .driver-toast {
+    position: absolute;
+    left: var(--driver-edge);
+    right: var(--driver-edge);
+    bottom: calc(var(--driver-nav-h) + 18px);
+    z-index: 6;
+    min-height: 56px;
+    border: 1px solid rgba(255, 91, 80, 0.42);
+    border-radius: 8px;
+    padding: 14px 16px;
+    display: grid;
+    align-items: center;
+    color: #ffe7e4;
+    background: linear-gradient(145deg, rgba(73, 19, 22, 0.97), rgba(22, 12, 15, 0.97));
+    box-shadow: 0 18px 54px rgba(0,0,0,0.45), 0 0 22px rgba(255, 91, 80, 0.18);
+    text-transform: uppercase;
+    font-size: 16px;
+    line-height: 1.12;
+    font-weight: 800;
+}
+
 body.driver-mobile-screen .driver-header {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
@@ -232,8 +257,8 @@ body.driver-mobile-screen .driver-panel.is-active {
 body.driver-mobile-screen .driver-work-screen.is-active {
     display: grid;
     grid-template-rows: auto minmax(0, 1fr) auto;
-    gap: clamp(12px, 2.3dvh, 20px);
-    padding: clamp(14px, 2.5dvh, 22px) 0 clamp(10px, 1.8dvh, 16px);
+    gap: clamp(10px, 2dvh, 18px);
+    padding: clamp(10px, 2dvh, 18px) 0 clamp(10px, 1.8dvh, 16px);
     overflow: hidden;
 }
 
@@ -245,7 +270,7 @@ body.driver-mobile-screen .driver-work-cards {
 
 body.driver-mobile-screen .driver-work-card {
     position: relative;
-    min-height: clamp(82px, 12dvh, 104px);
+    min-height: clamp(74px, 10dvh, 92px);
     overflow: hidden;
     border: 1px solid rgba(127, 163, 177, 0.26);
     border-radius: 8px;
@@ -301,17 +326,49 @@ body.driver-mobile-screen .driver-work-dial-zone {
     display: grid;
     align-content: center;
     justify-items: center;
+    padding: 2px 0;
 }
 
 body.driver-mobile-screen .driver-work-dial {
     --driver-progress: 0;
     --driver-hold: 0;
     position: relative;
-    width: min(76vw, 320px, 42dvh);
+    width: min(88vw, 372px, 51dvh);
     aspect-ratio: 1 / 1;
     display: grid;
     place-items: center;
     isolation: isolate;
+}
+
+body.driver-mobile-screen .driver-work-dial::before,
+body.driver-mobile-screen .driver-work-dial::after {
+    content: "";
+    position: absolute;
+    border-radius: 50%;
+    pointer-events: none;
+}
+
+body.driver-mobile-screen .driver-work-dial::before {
+    inset: -4%;
+    z-index: -2;
+    background:
+        repeating-conic-gradient(from -2deg, rgba(213, 237, 231, 0.30) 0 1.4deg, transparent 1.4deg 7.5deg),
+        radial-gradient(circle at 50% 50%, rgba(7, 19, 24, 0) 56%, rgba(158, 185, 191, 0.20) 57% 58%, rgba(3, 10, 13, 0.96) 61% 100%);
+    box-shadow:
+        inset 0 0 26px rgba(255,255,255,0.07),
+        inset 0 -24px 54px rgba(0,0,0,0.72),
+        0 24px 58px rgba(0,0,0,0.42);
+}
+
+body.driver-mobile-screen .driver-work-dial::after {
+    inset: 9%;
+    z-index: -1;
+    background:
+        radial-gradient(circle at 50% 43%, rgba(199, 229, 230, 0.12), rgba(15, 38, 45, 0.34) 46%, rgba(3, 11, 15, 0.88) 72%);
+    box-shadow:
+        inset 0 0 38px rgba(255,255,255,0.05),
+        inset 0 -18px 38px rgba(0,0,0,0.56),
+        0 0 46px rgba(32, 217, 230, 0.10);
 }
 
 body.driver-mobile-screen .driver-work-dial-form {
@@ -337,16 +394,16 @@ body.driver-mobile-screen .driver-work-hold-progress {
 }
 
 body.driver-mobile-screen .driver-work-track {
-    stroke: rgba(94, 109, 116, 0.68);
-    stroke-width: 8;
+    stroke: rgba(94, 109, 116, 0.76);
+    stroke-width: 7;
 }
 
 body.driver-mobile-screen .driver-work-progress {
     stroke: var(--driver-green-soft);
-    stroke-width: 8;
+    stroke-width: 9;
     stroke-dasharray: 282.743;
     stroke-dashoffset: calc(282.743 - (282.743 * var(--driver-progress) / 100));
-    filter: drop-shadow(0 0 10px rgba(141, 255, 46, 0.14));
+    filter: drop-shadow(0 0 12px rgba(141, 255, 46, 0.20));
 }
 
 body.driver-mobile-screen .driver-work-hold-progress {
@@ -378,16 +435,20 @@ body.driver-mobile-screen .driver-work-dial-button {
 
 body.driver-mobile-screen .driver-work-dial-core {
     position: absolute;
-    width: 68%;
+    width: 66%;
     aspect-ratio: 1 / 1;
     border-radius: 50%;
     display: grid;
     place-items: center;
     align-content: center;
     gap: 9px;
-    background: radial-gradient(circle at 50% 46%, rgba(110, 137, 146, 0.35), rgba(36, 61, 68, 0.72) 66%, rgba(13, 30, 35, 0.92));
-    border: 1px solid rgba(187, 214, 220, 0.34);
-    box-shadow: inset 0 0 42px rgba(255,255,255,0.06), 0 0 42px rgba(140,255,46,0.10);
+    background:
+        radial-gradient(circle at 50% 38%, rgba(224, 244, 243, 0.18), rgba(76, 99, 105, 0.22) 26%, rgba(18, 38, 44, 0.92) 69%, rgba(5, 14, 18, 0.98) 100%);
+    border: 1px solid rgba(187, 214, 220, 0.30);
+    box-shadow:
+        inset 0 0 48px rgba(255,255,255,0.07),
+        inset 0 -22px 34px rgba(0,0,0,0.52),
+        0 0 42px rgba(140,255,46,0.08);
     text-align: center;
 }
 
@@ -431,24 +492,49 @@ body.driver-mobile-screen .driver-work-note {
 }
 
 body.driver-mobile-screen .driver-work-dial-button.is-loaded {
+    color: var(--driver-green);
     cursor: pointer;
 }
 
+body.driver-mobile-screen .driver-work-dial-button.is-loaded .driver-work-progress {
+    stroke: var(--driver-green);
+    filter: drop-shadow(0 0 14px rgba(140,255,46,0.76));
+}
+
+body.driver-mobile-screen .driver-work-dial-button.is-loaded .driver-work-dial-core {
+    border-color: rgba(140,255,46,0.42);
+    box-shadow:
+        inset 0 0 48px rgba(255,255,255,0.07),
+        inset 0 -22px 34px rgba(0,0,0,0.52),
+        0 0 56px rgba(140,255,46,0.30);
+}
+
 body.driver-mobile-screen .driver-work-dial-button.is-empty {
-    color: rgba(206, 223, 226, 0.78);
+    color: rgba(198, 213, 217, 0.76);
 }
 
 body.driver-mobile-screen .driver-work-dial-button.is-empty .driver-work-progress {
-    stroke: rgba(187, 211, 218, 0.48);
+    stroke: rgba(155, 171, 177, 0.52);
+    filter: drop-shadow(0 0 10px rgba(170, 188, 194, 0.12));
+}
+
+body.driver-mobile-screen .driver-work-dial-button.is-empty .driver-work-dial-core {
+    background:
+        radial-gradient(circle at 50% 38%, rgba(214, 226, 226, 0.12), rgba(80, 96, 102, 0.18) 30%, rgba(28, 39, 43, 0.92) 70%, rgba(8, 14, 17, 0.98) 100%);
+    border-color: rgba(176, 194, 199, 0.24);
+    box-shadow:
+        inset 0 0 44px rgba(255,255,255,0.05),
+        inset 0 -22px 34px rgba(0,0,0,0.56),
+        0 0 34px rgba(180, 198, 204, 0.08);
 }
 
 body.driver-mobile-screen .driver-work-dial-button.is-pending {
-    color: #ffe05c;
+    color: var(--driver-cyan);
     pointer-events: none;
 }
 
 body.driver-mobile-screen .driver-work-dial-button.is-pending .driver-work-progress {
-    stroke: #ffe05c;
+    stroke: var(--driver-cyan);
 }
 
 body.driver-mobile-screen .driver-work-dial-button.is-error {
@@ -679,7 +765,7 @@ body.driver-mobile-screen [data-driver-tab-panel="manifest"].is-active {
 
 body.driver-mobile-screen .driver-trip-list {
     display: grid;
-    gap: 12px;
+    gap: 8px;
 }
 
 body.driver-mobile-screen .driver-trip-row {
@@ -687,12 +773,12 @@ body.driver-mobile-screen .driver-trip-row {
 }
 
 body.driver-mobile-screen .driver-trip-row summary {
-    min-height: 92px;
+    min-height: 54px;
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr) auto auto;
+    grid-template-columns: 2.4em minmax(0, 1.15fr) minmax(0, 0.75fr) minmax(5.7em, auto) minmax(3.3em, auto);
     align-items: center;
-    gap: 12px;
-    padding: 14px;
+    gap: 8px;
+    padding: 9px 10px;
     list-style: none;
 }
 
@@ -702,21 +788,61 @@ body.driver-mobile-screen .driver-trip-row summary::-webkit-details-marker {
 
 body.driver-mobile-screen .driver-trip-row summary span {
     color: var(--driver-green);
-    font-size: 28px;
+    font-size: 20px;
     font-weight: 900;
 }
 
 body.driver-mobile-screen .driver-trip-row summary strong,
 body.driver-mobile-screen .driver-trip-row summary em,
-body.driver-mobile-screen .driver-trip-row summary b {
+body.driver-mobile-screen .driver-trip-row summary b,
+body.driver-mobile-screen .driver-trip-row summary small {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     font-style: normal;
+    font-size: 16px;
+    line-height: 1;
+    font-weight: 800;
+}
+
+body.driver-mobile-screen .driver-trip-row summary > * + * {
+    min-width: 0;
+    border-left: 1px solid rgba(140,255,46,0.18);
+    padding-left: 8px;
 }
 
 body.driver-mobile-screen .driver-trip-row summary b {
     color: var(--driver-green);
+}
+
+body.driver-mobile-screen .driver-trip-row summary small {
+    color: rgba(224, 238, 231, 0.76);
+}
+
+body.driver-mobile-screen .driver-trip-row dl {
+    margin: 0;
+    padding: 0 12px 12px;
+    border-top: 1px solid rgba(127, 163, 177, 0.16);
+    display: grid;
+    gap: 7px;
+}
+
+body.driver-mobile-screen .driver-trip-row dl div {
+    display: grid;
+    grid-template-columns: minmax(92px, auto) minmax(0, 1fr);
+    gap: 10px;
+}
+
+body.driver-mobile-screen .driver-trip-row dt,
+body.driver-mobile-screen .driver-trip-row dd {
+    margin: 0;
+    color: var(--driver-muted);
+    font-size: 15px;
+    line-height: 1.15;
+}
+
+body.driver-mobile-screen .driver-trip-row dd {
+    color: var(--driver-ink);
 }
 
 body.driver-mobile-screen .driver-empty-state,
@@ -1001,7 +1127,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
     }
 
     body.driver-mobile-screen .driver-work-dial {
-        width: min(72vw, 285px, 40dvh);
+        width: min(83vw, 328px, 46dvh);
     }
 
     body.driver-mobile-screen .driver-work-card {
@@ -1017,7 +1143,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
 {% endblock %}
 
 {% block body %}
-<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="driver-mobile-shell-v32">
+<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v33' }}">
     {% if messages %}
         <div class="driver-messages">
             {% for message in messages %}
@@ -1025,6 +1151,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
             {% endfor %}
         </div>
     {% endif %}
+    <div class="driver-toast" data-driver-toast hidden role="status" aria-live="polite"></div>
 
     <header class="driver-header">
         <div>
@@ -1042,7 +1169,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
         <div class="driver-work-cards">
             <article class="driver-work-card">
                 <span>Экскаватор</span>
-                <strong>{% if active_trip %}{{ active_trip.excavator.garage_number|default:active_trip.excavator }}{% elif pending_assignment %}{{ pending_assignment.excavator.garage_number|default:pending_assignment.excavator }}{% elif accepted_assignment %}{{ accepted_assignment.excavator.garage_number|default:accepted_assignment.excavator }}{% else %}—{% endif %}</strong>
+                <strong>{% if active_trip %}{{ active_trip.excavator.garage_number|default:active_trip.excavator }}{% elif current_assignment %}{{ current_assignment.excavator.garage_number|default:current_assignment.excavator }}{% else %}—{% endif %}</strong>
                 <img class="driver-work-excavator" src="{% static 'img/equipment/excavator-green.png' %}" alt="">
             </article>
             <article class="driver-work-card driver-work-card-target{% if active_trip %} is-action{% endif %}"{% if active_trip %} role="button" tabindex="0" data-driver-point-open{% endif %}>
@@ -1188,15 +1315,17 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
                 <details class="driver-trip-row">
                     <summary>
                         <span>{{ forloop.counter|stringformat:"02d" }}</span>
-                        <strong>{{ trip.excavator }}</strong>
-                        <em>{{ trip.dump_point }}</em>
-                        <b>{% if trip.completed_at %}{{ trip.completed_at|date:"H:i" }}{% else %}в рейсе{% endif %}</b>
+                        <strong>{{ trip.driver_excavator_label }}</strong>
+                        <em>{{ trip.driver_dump_point_label }}</em>
+                        <b>{{ trip.driver_time_range_label }}</b>
+                        <small>{{ trip.driver_duration_label }}</small>
                     </summary>
                     <dl>
                         <div><dt>Статус</dt><dd>{{ trip.get_status_display }}</dd></div>
                         <div><dt>Порода</dt><dd>{{ trip.rock_type }}</dd></div>
                         <div><dt>Объем</dt><dd>{{ trip.volume_m3|default:"—" }}</dd></div>
                         <div><dt>Время создания</dt><dd>{{ trip.created_at|date:"H:i" }}</dd></div>
+                        <div><dt>Время разгрузки</dt><dd>{% if trip.completed_at %}{{ trip.completed_at|date:"H:i" }}{% else %}—{% endif %}</dd></div>
                     </dl>
                 </details>
             {% empty %}
@@ -1358,6 +1487,20 @@ window.bindDriverMobileShell = function () {
         if (messages && shell.dataset.activeTab === "downtimes") {
             messages.innerHTML = "";
         }
+    }
+    function showDriverToast(message) {
+        var toast = shell.querySelector("[data-driver-toast]");
+        if (!toast) {
+            return;
+        }
+        toast.textContent = message || "Действие не выполнено";
+        toast.hidden = false;
+        if (window.driverToastTimerId) {
+            window.clearTimeout(window.driverToastTimerId);
+        }
+        window.driverToastTimerId = window.setTimeout(function () {
+            toast.hidden = true;
+        }, 3600);
     }
     function openDriverTab(tab) {
         shell.dataset.activeTab = tab;
@@ -1530,7 +1673,7 @@ window.bindDriverMobileShell = function () {
                     window.AppRealtime.wake("driver_downtime_saved");
                 }
             }).catch(function (error) {
-                window.alert(error.message || "Простой не сохранен");
+                showDriverToast(error.message || "Простой не сохранен");
                 button.classList.remove("is-selected");
             }).finally(function () {
                 button.disabled = false;
@@ -1558,7 +1701,7 @@ window.bindDriverMobileShell = function () {
                     window.AppRealtime.wake("driver_downtime_closed");
                 }
             }).catch(function (error) {
-                window.alert(error.message || "Простой не завершен");
+                showDriverToast(error.message || "Простой не завершен");
                 downtimeClose.disabled = false;
                 downtimeClose.classList.remove("is-disabled");
                 downtimeClose.removeAttribute("aria-disabled");
@@ -1677,7 +1820,7 @@ window.bindDriverMobileShell = function () {
         if (!("serviceWorker" in navigator)) {
             return;
         }
-        var currentShellVersion = shell.dataset.driverPwaVersion || "driver-mobile-shell-v32";
+        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v33' }}";
         var updateModal = document.querySelector("[data-driver-pwa-update-modal]");
         var updateBadge = document.querySelector("[data-driver-pwa-update-badge]");
         var updateTarget = document.querySelector("[data-driver-pwa-update-nav-target]");

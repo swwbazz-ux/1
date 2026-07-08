@@ -105,12 +105,13 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, reverse('driver_manifest'))
         self.assertContains(response, 'rel="manifest"')
         self.assertContains(response, '/driver-sw.js')
-        self.assertContains(response, 'driver-mobile-shell-v32')
+        self.assertContains(response, 'driver-mobile-shell-v33')
         self.assertContains(response, 'data-driver-pwa-update-modal')
         self.assertContains(response, 'data-driver-pwa-update-badge')
         self.assertContains(response, 'mode: "custom", path: "^/driver/(?:shift/?)?$"')
         self.assertContains(response, 'window.applyOperationalStateRefresh')
         self.assertContains(response, 'window.bindDriverMobileShell')
+        self.assertNotContains(response, 'window.' + 'alert')
 
     def test_driver_manifest_is_installable_pwa_manifest(self):
         response = self.client.get(reverse('driver_manifest'), HTTP_HOST='localhost')
@@ -131,7 +132,7 @@ class AccessLoginTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Service-Worker-Allowed'], '/driver/')
-        self.assertIn('driver-mobile-shell-v32', script)
+        self.assertIn('driver-mobile-shell-v33', script)
         self.assertIn('/driver/', script)
         self.assertIn('/driver/shift/', script)
         self.assertIn('/driver.webmanifest', script)
@@ -139,6 +140,9 @@ class AccessLoginTests(TestCase):
         self.assertIn('ignoreSearch: true', script)
         self.assertIn('GET_VERSION', script)
         self.assertIn('SKIP_WAITING', script)
+        self.assertIn('skipWaiting', script)
+        self.assertIn('clients.claim', script)
+        self.assertIn('key.startsWith(CACHE_PREFIX)', script)
 
     def test_admin_opens_system_admin_dashboard(self):
         admin_role = Role.objects.create(code='admin', name='Администратор')
@@ -1192,7 +1196,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(next_open_response, 'value="2600')
         self.assertContains(next_open_response, 'value="712')
 
-    def test_driver_can_accept_haul_assignment(self):
+    def test_driver_sees_assigned_excavator_without_accept_action(self):
         truck_type = EquipmentType.objects.create(name='Самосвал')
         excavator_type = EquipmentType.objects.create(name='Экскаватор')
         truck = Equipment.objects.create(equipment_type=truck_type, garage_number='10')
@@ -1219,23 +1223,26 @@ class AccessLoginTests(TestCase):
         shift_response = self.client.get('/driver/shift/', HTTP_HOST='localhost')
         self.assertContains(shift_response, 'ПУСТОЙ')
         self.assertContains(shift_response, '1')
-        self.assertNotContains(shift_response, 'Новое назначение')
-        self.assertNotContains(shift_response, 'Принять')
+        self.assertContains(shift_response, '<span>Ехать</span>', html=True)
+        self.assertContains(shift_response, '<strong>—</strong>', html=True)
+        self.assertContains(shift_response, 'driver-work-dial-button is-empty')
+        forbidden_driver_labels = (
+            'НОВОЕ ' + 'НАЗНАЧЕНИЕ',
+            'ПРИН' + 'ЯТЬ',
+            'принять ' + 'назначение',
+        )
+        for label in forbidden_driver_labels:
+            self.assertNotContains(shift_response, label)
 
         accept_response = self.client.post(
             f'/driver/assignment/{assignment.id}/accept/',
-            follow=True,
             HTTP_HOST='localhost',
         )
         assignment.refresh_from_db()
 
-        self.assertEqual(accept_response.status_code, 200)
-        self.assertEqual(assignment.status, AssignmentStatus.ACCEPTED)
-        self.assertIsNotNone(assignment.accepted_at)
-        self.assertNotContains(accept_response, 'Новое назначение')
-        self.assertNotContains(accept_response, 'принять назначение')
-        self.assertContains(accept_response, 'ПУСТОЙ')
-        self.assertContains(accept_response, '1')
+        self.assertEqual(accept_response.status_code, 404)
+        self.assertEqual(assignment.status, AssignmentStatus.PENDING)
+        self.assertIsNone(assignment.accepted_at)
 
     def test_excavator_creates_trip_and_driver_completes_it(self):
         truck_type = EquipmentType.objects.create(name='Самосвал')
@@ -1431,7 +1438,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(driver_shift_response, 'ККД')
         self.assertContains(driver_shift_response, 'window.applyOperationalStateRefresh')
         self.assertContains(driver_shift_response, 'data-realtime-mode="custom"')
-        self.assertContains(driver_shift_response, 'driver-mobile-shell-v32')
+        self.assertContains(driver_shift_response, 'driver-mobile-shell-v33')
 
     def test_driver_downtime_buttons_are_rendered_from_server_reference(self):
         truck = self.create_registered_driver_shift()
