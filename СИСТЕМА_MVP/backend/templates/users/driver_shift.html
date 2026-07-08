@@ -14,14 +14,14 @@
 <link rel="apple-touch-icon" href="{% static 'img/pwa/mining-master-180.png' %}">
 <style>
 body.driver-mobile-screen {
-    --driver-safe-bottom: max(env(safe-area-inset-bottom, 0px), 22px);
-    --driver-nav-content-h: 86px;
+    --driver-safe-bottom: max(env(safe-area-inset-bottom, 0px), 16px);
+    --driver-nav-content-h: clamp(78px, 10dvh, 96px);
     --driver-nav-total-h: calc(var(--driver-nav-content-h) + var(--driver-safe-bottom));
     margin: 0;
     width: 100vw;
     min-width: 0;
-    height: 100svh;
-    min-height: 100svh;
+    height: 100dvh;
+    min-height: 100dvh;
     overflow: hidden;
     background:
         radial-gradient(circle at 66% 4%, rgba(45, 214, 125, 0.16), transparent 23%),
@@ -69,18 +69,20 @@ body.driver-mobile-screen .driver-shell {
     --driver-ink: #f2ffe8;
     --driver-muted: #8ca0a8;
     --driver-line: rgba(144, 173, 184, 0.24);
-    --driver-edge: clamp(22px, 6vw, 34px);
-    --driver-header-h: clamp(176px, 22svh, 204px);
-    --driver-safe-bottom: max(env(safe-area-inset-bottom, 0px), 22px);
-    --driver-nav-content-h: 86px;
+    --driver-edge: clamp(16px, 5vw, 34px);
+    --driver-header-h: clamp(150px, 22dvh, 220px);
+    --driver-safe-bottom: max(env(safe-area-inset-bottom, 0px), 16px);
+    --driver-nav-content-h: clamp(78px, 10dvh, 96px);
     --driver-nav-total-h: calc(var(--driver-nav-content-h) + var(--driver-safe-bottom));
-    width: min(100vw, 430px);
-    height: 100svh;
-    min-height: 100svh;
-    margin: 0 auto;
+    --driver-dial-size: clamp(260px, 76vw, 520px);
+    width: 100%;
+    max-width: none;
+    min-width: 320px;
+    height: 100dvh;
+    min-height: 100dvh;
     display: grid;
     grid-template-rows: var(--driver-header-h) minmax(0, 1fr);
-    padding: 0 var(--driver-edge) var(--driver-nav-total-h);
+    padding: 0 var(--driver-edge) calc(var(--driver-nav-total-h) + 16px);
     overflow: hidden;
     position: relative;
     background:
@@ -351,7 +353,7 @@ body.driver-mobile-screen .driver-work-dial {
     --driver-progress: 0;
     --driver-hold: 0;
     position: relative;
-    width: min(88vw, 372px, 51dvh);
+    width: var(--driver-dial-size);
     aspect-ratio: 1 / 1;
     display: grid;
     place-items: center;
@@ -930,13 +932,13 @@ body.driver-mobile-screen .driver-unload-cancel {
 
 body.driver-mobile-screen .driver-bottom-nav {
     position: fixed;
-    left: 50%;
+    left: 0;
+    right: 0;
     bottom: 0;
-    transform: translateX(-50%);
     z-index: 100;
-    width: min(100vw, 430px);
-    height: var(--driver-nav-total-h, 108px);
-    padding-bottom: var(--driver-safe-bottom, 22px);
+    width: 100%;
+    height: var(--driver-nav-total-h, 94px);
+    padding-bottom: max(env(safe-area-inset-bottom, 0px), 16px);
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
     border-top: 1px solid rgba(127, 163, 177, 0.24);
@@ -947,7 +949,7 @@ body.driver-mobile-screen .driver-bottom-nav {
 body.driver-mobile-screen .driver-bottom-nav .mm-mobile-nav-item {
     position: relative;
     min-width: 0;
-    height: var(--driver-nav-content-h, 86px);
+    height: var(--driver-nav-content-h, 78px);
     border: 0;
     border-right: 1px solid rgba(127, 163, 177, 0.14);
     display: grid;
@@ -1128,21 +1130,12 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
 }
 
 @media (max-height: 780px) {
-    body.driver-mobile-screen .driver-shell {
-        --driver-header-h: clamp(150px, 20svh, 176px);
-        --driver-edge: clamp(18px, 5vw, 24px);
-    }
-
     body.driver-mobile-screen .driver-header h1 {
         font-size: clamp(32px, 9vw, 38px);
     }
 
     body.driver-mobile-screen .driver-header p {
         margin-top: 12px;
-    }
-
-    body.driver-mobile-screen .driver-work-dial {
-        width: min(83vw, 328px, 46dvh);
     }
 
     body.driver-mobile-screen .driver-work-card {
@@ -1154,11 +1147,39 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
         max-height: min(39dvh, 330px);
     }
 }
+
+@media (min-width: 900px) and (max-height: 820px) {
+    body.driver-mobile-screen .driver-work-screen.is-active {
+        grid-template-columns: minmax(280px, 0.42fr) minmax(320px, 0.58fr);
+        grid-template-rows: minmax(0, 1fr) auto;
+        align-items: center;
+    }
+
+    body.driver-mobile-screen .driver-work-cards {
+        grid-column: 1;
+        grid-row: 1;
+        align-content: center;
+    }
+
+    body.driver-mobile-screen .driver-work-dial-zone {
+        grid-column: 2;
+        grid-row: 1;
+    }
+
+    body.driver-mobile-screen .driver-work-dial {
+        width: min(var(--driver-dial-size), 52dvh);
+    }
+
+    body.driver-mobile-screen .driver-work-caption {
+        grid-column: 1 / -1;
+        grid-row: 2;
+    }
+}
 </style>
 {% endblock %}
 
 {% block body %}
-<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v34' }}">
+<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v35' }}">
     {% if messages %}
         <div class="driver-messages">
             {% for message in messages %}
@@ -1842,7 +1863,7 @@ window.bindDriverMobileShell = function () {
         if (!("serviceWorker" in navigator)) {
             return;
         }
-        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v34' }}";
+        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v35' }}";
         var updateModal = document.querySelector("[data-driver-pwa-update-modal]");
         var updateBadge = document.querySelector("[data-driver-pwa-update-badge]");
         var updateTarget = document.querySelector("[data-driver-pwa-update-nav-target]");
