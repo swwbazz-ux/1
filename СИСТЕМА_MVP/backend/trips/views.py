@@ -147,6 +147,20 @@ def format_progress_percent(value):
     return int(max(Decimal('0'), min(Decimal('100'), value)).quantize(Decimal('1')))
 
 
+def plan_progress_status_key(percent):
+    try:
+        value = int(percent)
+    except (TypeError, ValueError):
+        value = 0
+    if value <= 0:
+        return 'empty'
+    if value < 50:
+        return 'low'
+    if value < 80:
+        return 'warning'
+    return 'good'
+
+
 def downtime_event_payload(event, *, action='', closed=False):
     now = timezone.now()
     started_at = event.started_at or now
@@ -393,7 +407,7 @@ EXCAVATOR_MANIFEST = {
 }
 
 EXCAVATOR_SERVICE_WORKER_JS = r"""
-const CACHE_NAME = "excavator-mobile-shell-v64";
+const CACHE_NAME = "excavator-mobile-shell-v65";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const CORE_ASSETS = [
@@ -3062,7 +3076,9 @@ def excavator_work_view(request):
         truck_progress = None
         if shift_date and shift_type:
             truck_progress = calculate_equipment_shift_progress(card['assignment'].truck, shift_date, shift_type)
-        card['plan_percent'] = format_progress_percent(truck_progress.get('progress_percent') if truck_progress else None)
+        plan_percent = format_progress_percent(truck_progress.get('progress_percent') if truck_progress else None)
+        card['plan_percent'] = plan_percent
+        card['plan_status_key'] = plan_progress_status_key(plan_percent)
 
     active_trips_by_dump_id = defaultdict(list)
     for trip in active_trips:
