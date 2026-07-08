@@ -14,11 +14,14 @@
 <link rel="apple-touch-icon" href="{% static 'img/pwa/mining-master-180.png' %}">
 <style>
 body.driver-mobile-screen {
+    --driver-safe-bottom: max(env(safe-area-inset-bottom, 0px), 22px);
+    --driver-nav-content-h: 86px;
+    --driver-nav-total-h: calc(var(--driver-nav-content-h) + var(--driver-safe-bottom));
     margin: 0;
     width: 100vw;
     min-width: 0;
-    height: 100dvh;
-    min-height: 100dvh;
+    height: 100svh;
+    min-height: 100svh;
     overflow: hidden;
     background:
         radial-gradient(circle at 66% 4%, rgba(45, 214, 125, 0.16), transparent 23%),
@@ -67,15 +70,17 @@ body.driver-mobile-screen .driver-shell {
     --driver-muted: #8ca0a8;
     --driver-line: rgba(144, 173, 184, 0.24);
     --driver-edge: clamp(22px, 6vw, 34px);
-    --driver-header-h: clamp(176px, 22dvh, 204px);
-    --driver-nav-h: clamp(88px, 11dvh, 100px);
+    --driver-header-h: clamp(176px, 22svh, 204px);
+    --driver-safe-bottom: max(env(safe-area-inset-bottom, 0px), 22px);
+    --driver-nav-content-h: 86px;
+    --driver-nav-total-h: calc(var(--driver-nav-content-h) + var(--driver-safe-bottom));
     width: min(100vw, 430px);
-    height: 100dvh;
-    min-height: 100dvh;
+    height: 100svh;
+    min-height: 100svh;
     margin: 0 auto;
     display: grid;
-    grid-template-rows: var(--driver-header-h) minmax(0, 1fr) var(--driver-nav-h);
-    padding: 0 var(--driver-edge);
+    grid-template-rows: var(--driver-header-h) minmax(0, 1fr);
+    padding: 0 var(--driver-edge) var(--driver-nav-total-h);
     overflow: hidden;
     position: relative;
     background:
@@ -94,8 +99,6 @@ body.driver-mobile-screen .driver-shell::before {
 
 body.driver-mobile-screen .driver-header,
 body.driver-mobile-screen .driver-panel,
-body.driver-mobile-screen .driver-work-bottom-nav,
-body.driver-mobile-screen .driver-bottom-nav,
 body.driver-mobile-screen .driver-messages {
     position: relative;
     z-index: 1;
@@ -130,7 +133,7 @@ body.driver-mobile-screen .driver-toast {
     position: absolute;
     left: var(--driver-edge);
     right: var(--driver-edge);
-    bottom: calc(var(--driver-nav-h) + 18px);
+    bottom: calc(var(--driver-nav-total-h) + 18px);
     z-index: 6;
     min-height: 56px;
     border: 1px solid rgba(255, 91, 80, 0.42);
@@ -252,6 +255,21 @@ body.driver-mobile-screen .driver-panel {
 
 body.driver-mobile-screen .driver-panel.is-active {
     display: block;
+    min-height: 0;
+    height: 100%;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding-bottom: 18px;
+}
+
+body.driver-mobile-screen .driver-panel[data-driver-tab-panel="shift"].is-active,
+body.driver-mobile-screen .driver-panel[data-driver-tab-panel="downtimes"].is-active,
+body.driver-mobile-screen .driver-panel[data-driver-tab-panel="manifest"].is-active {
+    min-height: 0;
+    height: 100%;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding-bottom: 18px;
 }
 
 body.driver-mobile-screen .driver-work-screen.is-active {
@@ -758,9 +776,7 @@ body.driver-mobile-screen .driver-trip-list,
 body.driver-mobile-screen [data-driver-tab-panel="shift"].is-active,
 body.driver-mobile-screen [data-driver-tab-panel="downtimes"].is-active,
 body.driver-mobile-screen [data-driver-tab-panel="manifest"].is-active {
-    overflow-y: auto;
     min-height: 0;
-    padding-bottom: 14px;
 }
 
 body.driver-mobile-screen .driver-trip-list {
@@ -856,7 +872,7 @@ body.driver-mobile-screen .driver-unload-sheet {
     position: absolute;
     left: var(--driver-edge);
     right: var(--driver-edge);
-    bottom: calc(var(--driver-nav-h) + 10px);
+    bottom: calc(var(--driver-nav-total-h) + 10px);
     z-index: 4;
     max-height: min(58dvh, 430px);
     overflow-y: auto;
@@ -912,23 +928,26 @@ body.driver-mobile-screen .driver-unload-cancel {
     text-transform: uppercase;
 }
 
-body.driver-mobile-screen .driver-work-bottom-nav,
 body.driver-mobile-screen .driver-bottom-nav {
-    height: var(--driver-nav-h);
-    width: calc(100% + (var(--driver-edge) * 2));
-    margin: 0 calc(var(--driver-edge) * -1);
+    position: fixed;
+    left: 50%;
+    bottom: 0;
+    transform: translateX(-50%);
+    z-index: 100;
+    width: min(100vw, 430px);
+    height: var(--driver-nav-total-h, 108px);
+    padding-bottom: var(--driver-safe-bottom, 22px);
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
     border-top: 1px solid rgba(127, 163, 177, 0.24);
-    background: rgba(3, 16, 21, 0.90);
-    box-shadow: 0 -16px 32px rgba(0,0,0,0.20);
+    background: rgba(3, 16, 21, 0.96);
+    box-shadow: 0 -16px 32px rgba(0,0,0,0.28);
 }
 
-body.driver-mobile-screen .driver-work-bottom-nav .mm-mobile-nav-item,
 body.driver-mobile-screen .driver-bottom-nav .mm-mobile-nav-item {
     position: relative;
     min-width: 0;
-    height: 100%;
+    height: var(--driver-nav-content-h, 86px);
     border: 0;
     border-right: 1px solid rgba(127, 163, 177, 0.14);
     display: grid;
@@ -943,7 +962,6 @@ body.driver-mobile-screen .driver-bottom-nav .mm-mobile-nav-item {
     font-weight: 400;
 }
 
-body.driver-mobile-screen .driver-work-bottom-nav .mm-mobile-nav-item::before,
 body.driver-mobile-screen .driver-bottom-nav .mm-mobile-nav-item::before {
     content: "";
     position: absolute;
@@ -955,12 +973,10 @@ body.driver-mobile-screen .driver-bottom-nav .mm-mobile-nav-item::before {
     background: transparent;
 }
 
-body.driver-mobile-screen .driver-work-bottom-nav .mm-mobile-nav-item.is-active,
 body.driver-mobile-screen .driver-bottom-nav .mm-mobile-nav-item.is-active {
     color: var(--driver-green);
 }
 
-body.driver-mobile-screen .driver-work-bottom-nav .mm-mobile-nav-item.is-active::before,
 body.driver-mobile-screen .driver-bottom-nav .mm-mobile-nav-item.is-active::before {
     background: var(--driver-green);
     box-shadow: 0 0 12px rgba(140,255,46,0.65);
@@ -1113,8 +1129,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
 
 @media (max-height: 780px) {
     body.driver-mobile-screen .driver-shell {
-        --driver-header-h: clamp(150px, 20dvh, 176px);
-        --driver-nav-h: 86px;
+        --driver-header-h: clamp(150px, 20svh, 176px);
         --driver-edge: clamp(18px, 5vw, 24px);
     }
 
@@ -1143,7 +1158,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
 {% endblock %}
 
 {% block body %}
-<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v33' }}">
+<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v34' }}">
     {% if messages %}
         <div class="driver-messages">
             {% for message in messages %}
@@ -1334,26 +1349,27 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
         </div>
     </section>
 
-    <nav class="mm-mobile-bottom-nav driver-bottom-nav driver-work-bottom-nav" aria-label="Навигация водителя">
-        <button class="mm-mobile-nav-item {% if active_tab == 'work' %}is-active{% endif %}" type="button" data-driver-tab-open="work">
-            <img class="driver-nav-icon driver-nav-truck" src="{% static 'img/equipment/truck-green.png' %}" alt="">
-            <span>Работа</span>
-        </button>
-        <button class="mm-mobile-nav-item {% if active_tab == 'shift' %}is-active{% endif %}" type="button" data-driver-tab-open="shift">
-            <span class="driver-nav-icon driver-nav-clock" aria-hidden="true"></span>
-            <span>Смена</span>
-        </button>
-        <button class="mm-mobile-nav-item {% if active_tab == 'downtimes' %}is-active{% endif %}" type="button" data-driver-tab-open="downtimes">
-            <span class="driver-nav-icon driver-nav-alert" aria-hidden="true"></span>
-            <span>Простои</span>
-        </button>
-        <button class="mm-mobile-nav-item {% if active_tab == 'manifest' %}is-active{% endif %}" type="button" data-driver-tab-open="manifest" data-driver-pwa-update-nav-target>
-            <span class="driver-nav-icon driver-nav-doc" aria-hidden="true"></span>
-            <span>Путевка</span>
-            <span class="driver-mobile-update-badge" data-driver-pwa-update-badge hidden aria-hidden="true"></span>
-        </button>
-    </nav>
 </main>
+
+<nav class="mm-mobile-bottom-nav driver-bottom-nav" aria-label="Навигация водителя" data-driver-bottom-nav>
+    <button class="mm-mobile-nav-item {% if active_tab == 'work' %}is-active{% endif %}" type="button" data-driver-tab-open="work">
+        <img class="driver-nav-icon driver-nav-truck" src="{% static 'img/equipment/truck-green.png' %}" alt="">
+        <span>Работа</span>
+    </button>
+    <button class="mm-mobile-nav-item {% if active_tab == 'shift' %}is-active{% endif %}" type="button" data-driver-tab-open="shift">
+        <span class="driver-nav-icon driver-nav-clock" aria-hidden="true"></span>
+        <span>Смена</span>
+    </button>
+    <button class="mm-mobile-nav-item {% if active_tab == 'downtimes' %}is-active{% endif %}" type="button" data-driver-tab-open="downtimes">
+        <span class="driver-nav-icon driver-nav-alert" aria-hidden="true"></span>
+        <span>Простои</span>
+    </button>
+    <button class="mm-mobile-nav-item {% if active_tab == 'manifest' %}is-active{% endif %}" type="button" data-driver-tab-open="manifest" data-driver-pwa-update-nav-target>
+        <span class="driver-nav-icon driver-nav-doc" aria-hidden="true"></span>
+        <span>Путевка</span>
+        <span class="driver-mobile-update-badge" data-driver-pwa-update-badge hidden aria-hidden="true"></span>
+    </button>
+</nav>
 
 <div class="driver-mobile-update-modal" data-driver-pwa-update-modal hidden aria-live="polite" aria-modal="true" role="dialog">
     <div class="driver-mobile-update-dialog">
@@ -1412,6 +1428,12 @@ window.applyOperationalStateRefresh = function (context) {
         var oldModal = document.querySelector("[data-driver-pwa-update-modal]");
         if (freshModal && oldModal) {
             oldModal.replaceWith(freshModal);
+        }
+
+        var freshNav = doc.querySelector("[data-driver-bottom-nav]");
+        var oldNav = document.querySelector("[data-driver-bottom-nav]");
+        if (freshNav && oldNav) {
+            oldNav.replaceWith(freshNav);
         }
 
         if (doc.body && doc.body.dataset.operationalStateVersion) {
@@ -1507,7 +1529,7 @@ window.bindDriverMobileShell = function () {
         shell.querySelectorAll("[data-driver-tab-panel]").forEach(function (panel) {
             panel.classList.toggle("is-active", panel.dataset.driverTabPanel === tab);
         });
-        shell.querySelectorAll("[data-driver-tab-open]").forEach(function (button) {
+        document.querySelectorAll("[data-driver-tab-open]").forEach(function (button) {
             button.classList.toggle("is-active", button.dataset.driverTabOpen === tab);
         });
         if (window.history && window.history.replaceState) {
@@ -1517,7 +1539,7 @@ window.bindDriverMobileShell = function () {
         }
         clearDriverMessages();
     }
-    shell.querySelectorAll("[data-driver-tab-open]").forEach(function (button) {
+    document.querySelectorAll("[data-driver-tab-open]").forEach(function (button) {
         button.addEventListener("click", function () {
             openDriverTab(button.dataset.driverTabOpen);
         });
@@ -1820,7 +1842,7 @@ window.bindDriverMobileShell = function () {
         if (!("serviceWorker" in navigator)) {
             return;
         }
-        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v33' }}";
+        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v34' }}";
         var updateModal = document.querySelector("[data-driver-pwa-update-modal]");
         var updateBadge = document.querySelector("[data-driver-pwa-update-badge]");
         var updateTarget = document.querySelector("[data-driver-pwa-update-nav-target]");
