@@ -37,7 +37,7 @@ Backend является основным рабочим приложением.
 - Маршруты: `/driver/`, `/driver/shift/`.
 - Manifest: `/driver.webmanifest`.
 - Service worker: `/driver-sw.js`.
-- Shell: `driver-mobile-shell-v37`.
+- Shell: `driver-mobile-shell-v38`.
 
 ### Машинист экскаватора
 
