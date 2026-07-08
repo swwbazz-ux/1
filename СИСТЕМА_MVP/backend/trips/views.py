@@ -19,7 +19,7 @@ from downtimes.models import DowntimeEvent, DowntimeReason
 from references.equipment_states import DEFAULT_EQUIPMENT_STATES
 from references.models import DumpPoint, Equipment, EquipmentState, RockType, TruckCapacityRule
 from shifts.models import EmployeeShift
-from shifts.services import calculate_equipment_shift_progress, calculate_open_shift_progress
+from shifts.services import calculate_equipment_shift_progress, calculate_open_shift_progress, calculate_truck_progress_for_excavator_shift
 from users.access_auth import find_employee_access_by_credentials
 from users.models import EmployeeAccess
 from users.session_device import get_session_device_kind, set_session_device_kind
@@ -407,7 +407,7 @@ EXCAVATOR_MANIFEST = {
 }
 
 EXCAVATOR_SERVICE_WORKER_JS = r"""
-const CACHE_NAME = "excavator-mobile-shell-v65";
+const CACHE_NAME = "excavator-mobile-shell-v66";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const CORE_ASSETS = [
@@ -3067,15 +3067,13 @@ def excavator_work_view(request):
     face_block = work_settings['face_block']
     current_rock = work_settings['current_rock']
     selected_dump_point = dump_points[0] if dump_points else None
-    shift_date = timezone.localtime(open_shift.opened_at).date() if open_shift else None
-    shift_type = open_shift.shift_type if open_shift else ''
     shift_progress = calculate_open_shift_progress(open_shift)
     shift_plan_percent = format_progress_percent(shift_progress.get('progress_percent') if shift_progress else None)
 
     for card in truck_cards:
         truck_progress = None
-        if shift_date and shift_type:
-            truck_progress = calculate_equipment_shift_progress(card['assignment'].truck, shift_date, shift_type)
+        if open_shift:
+            truck_progress = calculate_truck_progress_for_excavator_shift(card['assignment'].truck, open_shift)
         plan_percent = format_progress_percent(truck_progress.get('progress_percent') if truck_progress else None)
         card['plan_percent'] = plan_percent
         card['plan_status_key'] = plan_progress_status_key(plan_percent)

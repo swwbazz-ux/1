@@ -98,9 +98,8 @@ def equipment_shift_trip_queryset(equipment, date, shift_type):
     return Trip.objects.filter(status=TripStatus.COMPLETED).filter(query)
 
 
-def calculate_equipment_shift_progress(equipment, date, shift_type):
+def calculate_progress_from_trip_queryset(equipment, date, shift_type, trips):
     plan = get_equipment_shift_plan(equipment, date, shift_type)
-    trips = equipment_shift_trip_queryset(equipment, date, shift_type)
     facts = trips.aggregate(
         trip_count=Count('id'),
         volume_m3=Sum('volume_m3'),
@@ -145,6 +144,24 @@ def calculate_equipment_shift_progress(equipment, date, shift_type):
         'tonnage': tonnage,
         'progress_percent': progress_percent,
     }
+
+
+def calculate_equipment_shift_progress(equipment, date, shift_type):
+    trips = equipment_shift_trip_queryset(equipment, date, shift_type)
+    return calculate_progress_from_trip_queryset(equipment, date, shift_type, trips)
+
+
+def calculate_truck_progress_for_excavator_shift(truck, excavator_shift):
+    if not truck or not excavator_shift:
+        return None
+    date = timezone.localtime(excavator_shift.opened_at).date()
+    shift_type = excavator_shift.shift_type
+    trips = Trip.objects.filter(
+        status=TripStatus.COMPLETED,
+        truck=truck,
+        loading_shift=excavator_shift,
+    )
+    return calculate_progress_from_trip_queryset(truck, date, shift_type, trips)
 
 
 def calculate_open_shift_progress(open_shift):

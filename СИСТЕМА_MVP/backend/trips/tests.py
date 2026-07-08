@@ -21,7 +21,7 @@ from references.models import (
     EquipmentType,
     RockType,
 )
-from shifts.models import EmployeeShift, EquipmentShiftPlan, PlanCalculationMode, ShiftPlan
+from shifts.models import EmployeeShift, EquipmentShiftPlan, PlanCalculationMode, ShiftPlan, ShiftPlanScope
 from trips.models import Trip, TripClientAction, TripStatus
 from trips.views import build_dispatcher_dashboard_context
 from users.models import DriverPrimaryRegistration, Employee, EmployeeAccess, Role
@@ -507,7 +507,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/static/css/excavator-work-v55-shift.css')
         self.assertContains(response, '/excavator-sw.js')
         self.assertContains(response, 'scope: "/excavator/"')
-        self.assertContains(response, 'excavator-mobile-shell-v65')
+        self.assertContains(response, 'excavator-mobile-shell-v66')
         self.assertContains(response, 'Простои')
         self.assertNotContains(response, 'Отпустить сюда')
         self.assertContains(response, 'resolveExcavatorUpdateVersion')
@@ -624,10 +624,16 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, 'class="mm-mobile-shift-button is-danger"')
 
     def test_excavator_work_renders_individual_truck_plan_percent(self):
-        opened_at = self.truck_shift.opened_at
+        loading_shift = EmployeeShift.objects.get(employee=self.operator, equipment=self.excavator)
+        loading_shift.shift_type = 'night'
+        loading_shift.save(update_fields=['shift_type'])
+        self.truck_shift.shift_type = 'day'
+        self.truck_shift.save(update_fields=['shift_type'])
+        opened_at = loading_shift.opened_at
         shift_plan = ShiftPlan.objects.create(
+            plan_scope=ShiftPlanScope.NIGHT_SHIFT,
             date=timezone.localtime(opened_at).date(),
-            shift_type='day',
+            shift_type='night',
             name='План самосвала 21',
             is_active=True,
         )
@@ -638,7 +644,6 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
             calculation_mode=PlanCalculationMode.VOLUME,
             is_active=True,
         )
-        loading_shift = EmployeeShift.objects.get(employee=self.operator, equipment=self.excavator)
         Trip.objects.create(
             excavator=self.excavator,
             truck=self.truck,
@@ -649,7 +654,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
             rock_type=self.rock,
             dump_point=self.dump_point,
             actual_dump_point=self.dump_point,
-            volume_m3='50.00',
+            volume_m3='49.40',
             status=TripStatus.COMPLETED,
             completed_at=opened_at,
         )
@@ -659,11 +664,11 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         first_card = response.context['truck_cards'][0]
         self.assertEqual(first_card['number'], '21')
-        self.assertEqual(first_card['plan_percent'], 50)
-        self.assertEqual(first_card['plan_status_key'], 'warning')
-        self.assertContains(response, 'data-plan-percent="50"')
-        self.assertContains(response, 'data-plan-status="warning"')
-        self.assertContains(response, '--eo-truck-progress: 50%;')
+        self.assertEqual(first_card['plan_percent'], 49)
+        self.assertEqual(first_card['plan_status_key'], 'low')
+        self.assertContains(response, 'data-plan-percent="49"')
+        self.assertContains(response, 'data-plan-status="low"')
+        self.assertContains(response, '--eo-truck-progress: 49%;')
 
     def test_excavator_work_renders_face_settings_from_server_references(self):
         second_dump = DumpPoint.objects.create(name='Отвал')
@@ -961,7 +966,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/excavator/')
-        self.assertIn('excavator-mobile-shell-v65', script)
+        self.assertIn('excavator-mobile-shell-v66', script)
         self.assertIn(reverse('excavator_work'), script)
         self.assertIn(reverse('excavator_manifest'), script)
         self.assertIn('/static/js/realtime-client.js', script)
