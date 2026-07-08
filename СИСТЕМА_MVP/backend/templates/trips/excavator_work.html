@@ -215,7 +215,7 @@
             </div>
 
             <div class="eo-dashboard-dump-zone">
-                <div class="eo-unload-grid eo-unload-grid-work eo-dashboard-unload-grid{% if dump_cards|length == 1 %} is-single{% endif %}" aria-label="Точки разгрузки">
+                <div class="eo-unload-grid eo-unload-grid-work eo-dashboard-unload-grid is-count-{{ dump_cards|length }}{% if dump_cards|length == 1 %} is-single{% endif %}" aria-label="Точки разгрузки">
                     {% for card in dump_cards %}
                         <button class="eo-unload-card eo-dashboard-unload-card status-{{ card.status_key }}{% if card.is_default %} is-selected{% endif %}" type="button" data-eo-dump-target="{{ card.point.id }}" data-eo-dump-name="{{ card.name }}">
                             <span class="eo-dashboard-unload-top">
@@ -326,7 +326,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v57";
+var excavatorShellVersion = "excavator-mobile-shell-v58";
 var excavatorRelevantEvents = {
     assignment_changed: true,
     trip_changed: true,

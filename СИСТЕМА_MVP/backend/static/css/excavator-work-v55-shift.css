@@ -127,15 +127,18 @@ body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-logout-button
     }
 }
 
-/* v56 adaptive loading workspace. Keep the fixed header and bottom nav rails intact. */
+/* v58 adaptive loading workspace. Keep the fixed header and bottom nav rails intact. */
 body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] {
     --eo-work-x: clamp(10px, 2.1vw, 28px);
-    --eo-work-gap: clamp(8px, 1.25dvh, 16px);
+    --eo-work-gap: clamp(10px, 1.35dvh, 14px);
+    --eo-truck-grid-gap-y: clamp(7px, 1.1dvh, 11px);
+    --eo-truck-grid-gap-x: clamp(8px, 1.45vw, 16px);
     --eo-truck-card-min: clamp(92px, 16vw, 170px);
     --eo-truck-card-min-h: clamp(86px, 13.5dvh, 142px);
     --eo-truck-card-max-inline: 100%;
     --eo-dump-card-min: clamp(132px, 21vw, 240px);
-    --eo-dump-card-min-h: clamp(72px, 11.5dvh, 128px);
+    --eo-dump-card-min-h: clamp(106px, 15dvh, 174px);
+    --eo-dump-zone-min-h: clamp(112px, 18dvh, 216px);
     max-width: none !important;
     padding-right: var(--eo-work-x) !important;
     padding-bottom: calc(var(--eo-fixed-nav-reserve) + var(--eo-work-gap)) !important;
@@ -144,7 +147,8 @@ body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] {
 
 body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-screen {
     display: grid !important;
-    grid-template-rows: minmax(0, 1fr) auto !important;
+    grid-template-rows: auto minmax(var(--eo-dump-zone-min-h), 1fr) !important;
+    align-content: stretch !important;
     gap: var(--eo-work-gap) !important;
     height: 100% !important;
     min-height: 0 !important;
@@ -155,19 +159,26 @@ body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashbo
 
 body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-main-zone {
     display: grid !important;
-    grid-template-rows: auto minmax(0, 1fr) !important;
+    grid-template-rows: auto auto !important;
+    align-content: start !important;
     gap: var(--eo-work-gap) !important;
     flex: none !important;
     min-height: 0 !important;
-    overflow: hidden !important;
+    position: relative !important;
+    z-index: 40 !important;
+    overflow: visible !important;
 }
 
 body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-dump-zone {
     display: grid !important;
+    align-self: stretch !important;
     flex: none !important;
-    min-height: 0 !important;
+    min-height: var(--eo-dump-zone-min-h) !important;
+    height: 100% !important;
     padding: 0 !important;
-    overflow: hidden !important;
+    position: relative !important;
+    z-index: 20 !important;
+    overflow: visible !important;
 }
 
 body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-head {
@@ -189,17 +200,19 @@ body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashbo
 body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-grid.is-rows-4 {
     display: grid !important;
     grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
-    grid-template-rows: repeat(3, auto) !important;
+    grid-template-rows: none !important;
     grid-auto-rows: auto !important;
     grid-auto-flow: row !important;
     align-content: start !important;
     align-items: start !important;
     justify-content: stretch !important;
     min-height: 0 !important;
-    height: 100% !important;
-    gap: clamp(7px, 1.1dvh, 14px) clamp(8px, 1.45vw, 16px) !important;
-    overflow-x: hidden !important;
-    overflow-y: auto !important;
+    height: auto !important;
+    max-height: none !important;
+    gap: var(--eo-truck-grid-gap-y) var(--eo-truck-grid-gap-x) !important;
+    position: relative !important;
+    z-index: 1 !important;
+    overflow: visible !important;
 }
 
 body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-card {
@@ -213,10 +226,25 @@ body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashbo
     min-height: 0 !important;
     height: auto !important;
     max-height: none !important;
+    z-index: 3 !important;
+    will-change: transform !important;
 }
 
 body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-card span {
     max-width: min(100%, 9.5rem) !important;
+}
+
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-card.is-dragging {
+    z-index: 10050 !important;
+    cursor: grabbing !important;
+    opacity: .96 !important;
+    pointer-events: none !important;
+    transition: none !important;
+    box-shadow: inset 0 0 22px rgba(255, 255, 255, .07), 0 22px 42px rgba(0, 0, 0, .5) !important;
+}
+
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-main-zone:has(.eo-dashboard-truck-card.is-dragging) {
+    z-index: 10040 !important;
 }
 
 body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-overflow {
@@ -243,32 +271,57 @@ body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashbo
 body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-unload-grid.is-single {
     display: grid !important;
     grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--eo-dump-card-min)), 1fr)) !important;
-    grid-auto-rows: minmax(var(--eo-dump-card-min-h), auto) !important;
+    grid-auto-rows: minmax(var(--eo-dump-card-min-h), 1fr) !important;
     align-items: stretch !important;
+    align-content: stretch !important;
     width: 100% !important;
-    height: auto !important;
+    height: 100% !important;
     max-height: 100% !important;
-    min-height: 0 !important;
+    min-height: var(--eo-dump-zone-min-h) !important;
     gap: clamp(7px, 1.05dvh, 14px) clamp(8px, 1.45vw, 16px) !important;
-    overflow-x: hidden !important;
-    overflow-y: auto !important;
+    position: relative !important;
+    z-index: 20 !important;
+    overflow: visible !important;
+}
+
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-unload-grid.is-count-1,
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-unload-grid.is-single {
+    grid-template-columns: minmax(0, 1fr) !important;
+}
+
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-unload-grid.is-count-2 {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+}
+
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-unload-grid.is-count-3 {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
 }
 
 body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-unload-card {
+    position: relative !important;
+    z-index: 5 !important;
     width: auto !important;
     min-width: 0 !important;
     min-height: var(--eo-dump-card-min-h) !important;
-    height: auto !important;
+    height: 100% !important;
+}
+
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-unload-card.is-drop-ready {
+    z-index: 25 !important;
+    transform: scale(.992) !important;
 }
 
 @media (max-width: 480px) {
     body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] {
         --eo-work-x: clamp(10px, 2.9vw, 14px);
-        --eo-work-gap: clamp(7px, 1.05dvh, 10px);
+        --eo-work-gap: clamp(10px, 1.35dvh, 12px);
+        --eo-truck-grid-gap-y: clamp(7px, 1.05dvh, 10px);
+        --eo-truck-grid-gap-x: clamp(8px, 2.1vw, 10px);
         --eo-truck-card-min: clamp(92px, 28vw, 118px);
         --eo-truck-card-min-h: clamp(82px, 12.5dvh, 112px);
         --eo-dump-card-min: clamp(132px, 41vw, 178px);
-        --eo-dump-card-min-h: clamp(68px, 10dvh, 96px);
+        --eo-dump-card-min-h: clamp(104px, 15dvh, 128px);
+        --eo-dump-zone-min-h: clamp(110px, 16dvh, 136px);
     }
 
     body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-head {
@@ -279,12 +332,15 @@ body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashbo
 @media (min-width: 720px) {
     body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] {
         --eo-work-x: clamp(18px, 3vw, 44px);
-        --eo-work-gap: clamp(10px, 1.45dvh, 18px);
+        --eo-work-gap: clamp(12px, 1.45dvh, 14px);
+        --eo-truck-grid-gap-y: clamp(10px, 1.25dvh, 14px);
+        --eo-truck-grid-gap-x: clamp(12px, 1.6vw, 18px);
         --eo-truck-card-min: clamp(132px, 15vw, 190px);
         --eo-truck-card-min-h: clamp(104px, 16dvh, 150px);
         --eo-truck-card-max-inline: clamp(150px, 18vw, 220px);
         --eo-dump-card-min: clamp(180px, 20vw, 280px);
-        --eo-dump-card-min-h: clamp(88px, 13dvh, 132px);
+        --eo-dump-card-min-h: clamp(136px, 18dvh, 220px);
+        --eo-dump-zone-min-h: clamp(150px, 22dvh, 260px);
     }
 
     body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-card {
