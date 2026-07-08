@@ -21,7 +21,8 @@ from references.models import (
     EquipmentType,
     RockType,
 )
-from shifts.models import EmployeeShift, EquipmentShiftPlan, PlanCalculationMode, ShiftPlan, ShiftPlanScope
+from shifts.models import EmployeeShift, EquipmentPlanGroup, PlanAssignmentStatus, PlanCalculationMode
+from shifts.services import assign_shift_plan_snapshot
 from trips.models import Trip, TripClientAction, TripStatus
 from trips.views import build_dispatcher_dashboard_context
 from users.models import DriverPrimaryRegistration, Employee, EmployeeAccess, Role
@@ -507,7 +508,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/static/css/excavator-work-v55-shift.css')
         self.assertContains(response, '/excavator-sw.js')
         self.assertContains(response, 'scope: "/excavator/"')
-        self.assertContains(response, 'excavator-mobile-shell-v66')
+        self.assertContains(response, 'excavator-mobile-shell-v67')
         self.assertContains(response, 'Простои')
         self.assertNotContains(response, 'Отпустить сюда')
         self.assertContains(response, 'resolveExcavatorUpdateVersion')
@@ -582,7 +583,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, 'class="eo-dashboard-main-zone"')
         self.assertContains(response, 'class="eo-dashboard-dump-zone"')
         self.assertContains(response, 'class="eo-dashboard-plan-widget"')
-        self.assertContains(response, 'aria-label="Выполнение нормы')
+        self.assertContains(response, 'aria-label="Нет активного плана"')
         self.assertNotContains(response, '<small>Выполнение нормы</small>')
         self.assertContains(response, 'class="eo-topbar-cell eo-shift-kind-cell"')
         self.assertContains(response, 'class="eo-sun-icon"')
@@ -590,8 +591,9 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertNotContains(response, 'class="eo-dashboard-info"')
         self.assertNotContains(response, 'Назначенные самосвалы')
         self.assertContains(response, 'data-eo-dashboard-truck')
-        self.assertContains(response, 'data-plan-percent="0"')
-        self.assertContains(response, 'data-plan-status="empty"')
+        self.assertContains(response, 'data-plan-percent=""')
+        self.assertContains(response, 'data-plan-status="no_active_plan"')
+        self.assertContains(response, 'data-plan-status="no_plan_group"')
         self.assertContains(response, 'class="mm-mobile-bottom-nav"')
         self.assertNotContains(response, 'class="bottom-nav"')
         self.assertContains(response, 'class="eo-reason-grid"')
@@ -612,8 +614,10 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.context['truck_cards'][0]['equipment_state_code'], 'assigned')
         self.assertEqual(response.context['truck_cards'][0]['status_key'], 'blue')
         self.assertEqual(response.context['truck_cards'][0]['status_label'], 'Назначена')
-        self.assertEqual(response.context['truck_cards'][0]['plan_percent'], 0)
-        self.assertEqual(response.context['truck_cards'][0]['plan_status_key'], 'empty')
+        self.assertIsNone(response.context['truck_cards'][0]['plan_percent'])
+        self.assertEqual(response.context['truck_cards'][0]['plan_status'], 'no_plan_group')
+        self.assertEqual(response.context['truck_cards'][0]['plan_status_key'], 'no_plan_group')
+        self.assertContains(response, 'data-plan-status="no_plan_group"')
         self.assertTrue(response.context['truck_cards'][0]['can_drag'])
         self.assertFalse(response.context['truck_cards'][0]['is_locked'])
         self.assertContains(response, 'Назначена')
@@ -625,25 +629,17 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
 
     def test_excavator_work_renders_individual_truck_plan_percent(self):
         loading_shift = EmployeeShift.objects.get(employee=self.operator, equipment=self.excavator)
-        loading_shift.shift_type = 'night'
-        loading_shift.save(update_fields=['shift_type'])
-        self.truck_shift.shift_type = 'day'
-        self.truck_shift.save(update_fields=['shift_type'])
         opened_at = loading_shift.opened_at
-        shift_plan = ShiftPlan.objects.create(
-            plan_scope=ShiftPlanScope.NIGHT_SHIFT,
-            date=timezone.localtime(opened_at).date(),
-            shift_type='night',
-            name='План самосвала 21',
-            is_active=True,
-        )
-        EquipmentShiftPlan.objects.create(
-            shift_plan=shift_plan,
-            equipment=self.truck,
-            plan_volume_m3='100.00',
+        group = EquipmentPlanGroup.objects.create(
+            name='Самосвалы БелАЗ карточка',
+            code='belaz-excavator-card-test',
             calculation_mode=PlanCalculationMode.VOLUME,
+            plan_value='100.00',
             is_active=True,
         )
+        group.equipment.add(self.truck)
+        assign_shift_plan_snapshot(self.truck_shift)
+        self.truck_shift.refresh_from_db()
         Trip.objects.create(
             excavator=self.excavator,
             truck=self.truck,
@@ -665,9 +661,11 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         first_card = response.context['truck_cards'][0]
         self.assertEqual(first_card['number'], '21')
         self.assertEqual(first_card['plan_percent'], 49)
+        self.assertEqual(first_card['plan_status'], PlanAssignmentStatus.ASSIGNED)
         self.assertEqual(first_card['plan_status_key'], 'low')
         self.assertContains(response, 'data-plan-percent="49"')
-        self.assertContains(response, 'data-plan-status="low"')
+        self.assertContains(response, 'data-plan-status="assigned"')
+        self.assertContains(response, 'data-plan-progress-status="low"')
         self.assertContains(response, '--eo-truck-progress: 49%;')
 
     def test_excavator_work_renders_face_settings_from_server_references(self):
@@ -789,6 +787,14 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
 
     def test_excavator_shift_action_opens_shift_when_none_is_open(self):
         EmployeeShift.objects.filter(employee=self.operator, closed_at__isnull=True).update(closed_at=timezone.now())
+        group = EquipmentPlanGroup.objects.create(
+            name='Экскаваторы 4000 endpoint',
+            code='excavators-4000-open-test',
+            calculation_mode=PlanCalculationMode.VOLUME,
+            plan_value='4200.00',
+            is_active=True,
+        )
+        group.equipment.add(self.excavator)
 
         response = self.client.post(
             reverse('excavator_shift_action'),
@@ -814,6 +820,13 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(str(shift.start_fuel), '90.00')
         self.assertEqual(str(shift.start_mileage), '0.00')
         self.assertEqual(str(shift.start_engine_hours), '1210.00')
+        self.assertEqual(shift.plan_status, PlanAssignmentStatus.ASSIGNED)
+        self.assertEqual(shift.plan_group_name, 'Экскаваторы 4000 endpoint')
+        self.assertEqual(shift.plan_calculation_mode, PlanCalculationMode.VOLUME)
+        self.assertEqual(str(shift.plan_value), '4200.00')
+        self.assertEqual(payload['plan_status'], 'assigned')
+        self.assertEqual(payload['calculation_mode'], 'volume_m3')
+        self.assertEqual(payload['plan_value'], '4200.00')
 
     def test_excavator_downtime_reasons_come_from_role_reference_without_limit(self):
         waiting_state = EquipmentState.objects.get(code='waiting')
@@ -966,7 +979,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/excavator/')
-        self.assertIn('excavator-mobile-shell-v66', script)
+        self.assertIn('excavator-mobile-shell-v67', script)
         self.assertIn(reverse('excavator_work'), script)
         self.assertIn(reverse('excavator_manifest'), script)
         self.assertIn('/static/js/realtime-client.js', script)

@@ -28,7 +28,7 @@ from references.models import (
     TruckCapacityRule,
 )
 from reports.models import PilotFeedback, ReportTemplate, ReportType
-from shifts.models import EmployeeShift, EquipmentShiftPlan, ShiftPlan
+from shifts.models import EmployeeShift, EquipmentPlanGroup, EquipmentShiftPlan, PlanAssignmentStatus, PlanCalculationMode, ShiftPlan
 from trips.models import DispatcherActionLog, DispatcherActionType, Trip, TripClientAction, TripStatus
 
 from .forms import AdminEmployeeEditForm
@@ -105,7 +105,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, reverse('driver_manifest'))
         self.assertContains(response, 'rel="manifest"')
         self.assertContains(response, '/driver-sw.js')
-        self.assertContains(response, 'driver-mobile-shell-v44')
+        self.assertContains(response, 'driver-mobile-shell-v45')
         self.assertContains(response, 'data-driver-pwa-update-modal')
         self.assertContains(response, 'data-driver-pwa-update-badge')
         self.assertContains(response, 'mode: "custom", path: "^/driver/(?:shift/?)?$"')
@@ -175,7 +175,7 @@ class AccessLoginTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Service-Worker-Allowed'], '/driver/')
-        self.assertIn('driver-mobile-shell-v44', script)
+        self.assertIn('driver-mobile-shell-v45', script)
         self.assertIn('/driver/', script)
         self.assertIn('/driver/shift/', script)
         self.assertIn('/driver.webmanifest', script)
@@ -622,10 +622,12 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, 'Виды техники')
         self.assertContains(response, 'Породы')
         self.assertContains(response, 'Точки разгрузки')
-        self.assertContains(response, 'Сменные планы')
-        self.assertContains(response, 'Планы техники')
+        self.assertContains(response, 'Ежесменные планы техники')
+        self.assertContains(response, 'Сменные планы (история)')
+        self.assertContains(response, 'Планы техники (история)')
         self.assertContains(response, '/admin/references/equipmenttype/')
         self.assertContains(response, '/system-admin/references/equipment/')
+        self.assertContains(response, '/system-admin/references/equipment-plan-groups/')
         self.assertContains(response, '/system-admin/references/shift-plans/')
         self.assertContains(response, '/system-admin/references/equipment-shift-plans/')
 
@@ -648,6 +650,37 @@ class AccessLoginTests(TestCase):
         equipment = Equipment.objects.create(equipment_type=equipment_type, garage_number='25', is_active=True)
 
         self.client.post('/', {'access_code': '1000'}, follow=True, HTTP_HOST='localhost')
+        group_plan_page = self.client.get('/system-admin/references/equipment-plan-groups/', HTTP_HOST='localhost')
+        self.assertContains(group_plan_page, 'Ежесменные планы техники')
+        self.assertContains(group_plan_page, 'Группа техники')
+        self.assertContains(group_plan_page, 'Тип расчета')
+        self.assertContains(group_plan_page, 'Значение плана')
+        self.assertContains(group_plan_page, 'Техника в группе')
+        self.assertContains(group_plan_page, 'Дата начала действия')
+        self.assertNotContains(group_plan_page, 'Расчетная смена')
+
+        group_plan_response = self.client.post(
+            '/system-admin/references/equipment-plan-groups/',
+            {
+                'name': 'Самосвалы БелАЗ админ',
+                'code': 'belaz-admin-test',
+                'calculation_mode': PlanCalculationMode.TRIPS,
+                'plan_value': '18.00',
+                'equipment': [str(equipment.id)],
+                'is_active': 'on',
+                'active_from': timezone.localdate().isoformat(),
+                'comment': 'Ежесменный план без даты и day/night',
+            },
+            HTTP_HOST='localhost',
+        )
+        group_plan = EquipmentPlanGroup.objects.get(code='belaz-admin-test')
+
+        self.assertEqual(group_plan_response.status_code, 302)
+        self.assertEqual(group_plan.calculation_mode, PlanCalculationMode.TRIPS)
+        self.assertEqual(group_plan.plan_value, Decimal('18.00'))
+        self.assertEqual(group_plan.updated_by, admin_employee)
+        self.assertEqual(list(group_plan.equipment.all()), [equipment])
+
         shift_plan_page = self.client.get('/system-admin/references/shift-plans/', HTTP_HOST='localhost')
         self.assertContains(shift_plan_page, 'Тип плана')
         self.assertContains(shift_plan_page, 'План объема, м3')
@@ -1176,6 +1209,14 @@ class AccessLoginTests(TestCase):
     def test_driver_can_open_shift_after_registration(self):
         truck_type = EquipmentType.objects.create(name='Самосвал')
         truck = Equipment.objects.create(equipment_type=truck_type, garage_number='10')
+        group = EquipmentPlanGroup.objects.create(
+            name='Самосвалы БелАЗ водитель',
+            code='belaz-driver-start-test',
+            calculation_mode=PlanCalculationMode.TRIPS,
+            plan_value='18.00',
+            is_active=True,
+        )
+        group.equipment.add(truck)
         dormitory = Dormitory.objects.create(number='5')
         block = DormitoryBlock.objects.create(dormitory=dormitory, name='Блок 1')
         section = DormitorySection.objects.create(block=block, name='А')
@@ -1196,7 +1237,12 @@ class AccessLoginTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'Смена открыта')
-        self.assertTrue(self.employee.employeeshift_set.filter(closed_at__isnull=True).exists())
+        shift = self.employee.employeeshift_set.get(closed_at__isnull=True)
+        self.assertEqual(shift.plan_group_name, 'Самосвалы БелАЗ водитель')
+        self.assertEqual(shift.plan_status, PlanAssignmentStatus.ASSIGNED)
+        self.assertEqual(shift.plan_calculation_mode, PlanCalculationMode.TRIPS)
+        self.assertEqual(shift.plan_value, Decimal('18.00'))
+        self.assertFalse(ShiftPlan.objects.exists())
 
     def test_driver_can_close_shift_and_next_opening_uses_last_end_values(self):
         truck_type = EquipmentType.objects.create(name='Самосвал')
@@ -1685,7 +1731,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(driver_shift_response, 'ККД')
         self.assertContains(driver_shift_response, 'window.applyOperationalStateRefresh')
         self.assertContains(driver_shift_response, 'data-realtime-mode="custom"')
-        self.assertContains(driver_shift_response, 'driver-mobile-shell-v44')
+        self.assertContains(driver_shift_response, 'driver-mobile-shell-v45')
 
     def test_driver_downtime_buttons_are_rendered_from_server_reference(self):
         truck = self.create_registered_driver_shift()

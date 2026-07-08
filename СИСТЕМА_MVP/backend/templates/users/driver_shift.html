@@ -720,6 +720,19 @@ body.driver-mobile-screen .driver-work-percent::after {
     background: rgba(207, 226, 226, 0.26);
 }
 
+body.driver-mobile-screen .driver-work-dial.is-plan-missing .driver-work-percent {
+    grid-template-columns: 1fr;
+    min-width: 0;
+    max-width: 82%;
+    font-size: clamp(16px, 4.3vw, 22px);
+    line-height: 1.08;
+}
+
+body.driver-mobile-screen .driver-work-dial.is-plan-missing .driver-work-percent::before,
+body.driver-mobile-screen .driver-work-dial.is-plan-missing .driver-work-percent::after {
+    display: none;
+}
+
 body.driver-mobile-screen .driver-work-label {
     max-width: 92%;
     color: currentColor;
@@ -1544,7 +1557,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
 {% endblock %}
 
 {% block body %}
-<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v44' }}">
+<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v45' }}">
     {% if messages %}
         <div class="driver-messages">
             {% for message in messages %}
@@ -1573,7 +1586,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
         </section>
 
         <div class="driver-work-dial-zone">
-            <div class="driver-work-dial {% if active_trip %}is-loaded{% else %}is-empty{% endif %}" style="--driver-progress: {{ shift_plan_percent|default:40 }}; --driver-hold: 0;">
+            <div class="driver-work-dial {% if active_trip %}is-loaded{% else %}is-empty{% endif %}{% if not shift_plan_has_plan %} is-plan-missing{% endif %}" style="--driver-progress: {% if shift_plan_has_plan %}{{ shift_plan_percent }}{% else %}0{% endif %}; --driver-hold: 0;" data-plan-status="{{ shift_plan_status|default:'no_plan_group' }}">
                 {% if active_trip %}
                     <form method="post" action="{% url 'driver_complete_trip' active_trip.id %}" class="driver-work-dial-form" data-driver-hold-form>
                         {% csrf_token %}
@@ -1586,7 +1599,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
                             </svg>
                             <span class="driver-work-ticks" aria-hidden="true"></span>
                             <span class="driver-work-dial-core">
-                                <span class="driver-work-percent">{{ shift_plan_percent|default:40 }}%</span>
+                                <span class="driver-work-percent">{% if shift_plan_has_plan %}{{ shift_plan_percent }}%{% else %}{{ shift_plan_short_label }}{% endif %}</span>
                                 <strong class="driver-work-label" data-driver-dial-label>{{ driver_dial_label }}</strong>
                                 <em class="driver-work-note">{{ driver_dial_note }}</em>
                             </span>
@@ -1601,7 +1614,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
                         </svg>
                         <span class="driver-work-ticks" aria-hidden="true"></span>
                         <span class="driver-work-dial-core">
-                            <span class="driver-work-percent">{{ shift_plan_percent|default:40 }}%</span>
+                            <span class="driver-work-percent">{% if shift_plan_has_plan %}{{ shift_plan_percent }}%{% else %}{{ shift_plan_short_label }}{% endif %}</span>
                             <strong class="driver-work-label">{{ driver_dial_label }}</strong>
                             <em class="driver-work-note">{{ driver_dial_note }}</em>
                         </span>
@@ -1646,7 +1659,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
         {% if open_shift %}
             <div class="driver-section-title">
                 <span>Закрытие смены</span>
-                <strong>{{ shift_trip_count }} рейсов · {{ shift_plan_percent }}% плана</strong>
+                <strong>{{ shift_trip_count }} рейсов · {% if shift_plan_has_plan %}{{ shift_plan_percent }}% плана{% else %}{{ shift_plan_status_label }}{% endif %}</strong>
             </div>
             <form method="post" action="{% url 'driver_close_shift' %}" class="driver-form-card">
                 {% csrf_token %}
@@ -1710,7 +1723,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
     <section class="driver-panel driver-tab {% if active_tab == 'manifest' %}is-active{% endif %}" data-driver-tab-panel="manifest">
         <div class="driver-section-title">
             <span>Путевка</span>
-            <strong>{{ shift_trip_count }} рейсов · {{ shift_plan_percent }}% плана</strong>
+            <strong>{{ shift_trip_count }} рейсов · {% if shift_plan_has_plan %}{{ shift_plan_percent }}% плана{% else %}{{ shift_plan_status_label }}{% endif %}</strong>
         </div>
         <div class="driver-trip-list">
             {% for trip in shift_trips %}
@@ -2229,7 +2242,7 @@ window.bindDriverMobileShell = function () {
         if (!("serviceWorker" in navigator)) {
             return;
         }
-        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v44' }}";
+        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v45' }}";
         var updateModal = document.querySelector("[data-driver-pwa-update-modal]");
         var updateBadge = document.querySelector("[data-driver-pwa-update-badge]");
         var updateTarget = document.querySelector("[data-driver-pwa-update-nav-target]");

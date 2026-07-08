@@ -983,6 +983,22 @@ body.excavator-operator-screen .eo-topbar .eo-sun-icon::after {
     box-shadow: none !important;
 }
 
+body.excavator-operator-screen .eo-dashboard-plan-ring.is-plan-missing span {
+    max-width: 76%;
+    font-size: clamp(12px, 3.2vw, 15px) !important;
+    line-height: 1.05 !important;
+    text-align: center !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-card[data-plan-status="no_plan_group"] small,
+body.excavator-operator-screen .eo-dashboard-truck-card[data-plan-status="no_active_plan"] small {
+    max-width: 100%;
+    font-size: clamp(9px, 2.5vw, 11px) !important;
+    line-height: 1.05 !important;
+    text-align: center !important;
+    white-space: normal !important;
+}
+
 @media (max-height: 760px) {
     body.excavator-operator-screen .eo-screen.mm-mobile-shift-form {
         gap: 7px !important;

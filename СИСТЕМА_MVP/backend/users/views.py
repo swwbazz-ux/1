@@ -1,10 +1,12 @@
 ﻿import secrets
 import json
 from datetime import datetime
+from decimal import Decimal
 from io import BytesIO
 from urllib.parse import urlencode
 
 from django.contrib import messages
+from django.core.exceptions import FieldDoesNotExist
 from django.forms import modelform_factory
 from django.db import transaction
 from django.db.models import Count, Q
@@ -22,8 +24,8 @@ from core.models import OperationalStateEvent, bump_operational_state
 from downtimes.models import DowntimeEvent, DowntimeReason
 from references.models import Dormitory, DormitorySection, DumpPoint, Equipment, EquipmentState, EquipmentType, RockType
 from reports.models import ReportTemplate
-from shifts.models import EmployeeShift, EquipmentShiftPlan, PlanCalculationMode, ShiftPlan, ShiftPlanScope
-from shifts.services import calculate_open_shift_progress
+from shifts.models import EmployeeShift, EquipmentPlanGroup, EquipmentShiftPlan, PlanAssignmentStatus, PlanCalculationMode, ShiftPlan, ShiftPlanScope
+from shifts.services import assign_shift_plan_snapshot, calculate_open_shift_progress, plan_status_label, plan_unit_label
 from trips.models import DispatcherActionLog, OPEN_TRIP_STATUSES, Trip, TripClientAction, TripStatus
 
 from .access_auth import find_employee_access_by_credentials
@@ -107,7 +109,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v44'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v45'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -576,8 +578,9 @@ def system_admin_references_view(request):
                 {'name': 'Породы', 'count': RockType.objects.count(), 'url': '', 'external_url': '/admin/references/rocktype/', 'detail_code': 'rocks'},
                 {'name': 'Точки разгрузки', 'count': DumpPoint.objects.count(), 'url': '', 'external_url': '/admin/references/dumppoint/', 'detail_code': 'dump-points'},
                 {'name': 'Шаблоны отчетов', 'count': ReportTemplate.objects.count(), 'url': '', 'external_url': '/reports/templates/'},
-                {'name': 'Сменные планы', 'count': ShiftPlan.objects.count(), 'url': '', 'external_url': '/admin/shifts/shiftplan/', 'detail_code': 'shift-plans'},
-                {'name': 'Планы техники', 'count': EquipmentShiftPlan.objects.count(), 'url': '', 'external_url': '/admin/shifts/equipmentshiftplan/', 'detail_code': 'equipment-shift-plans'},
+                {'name': 'Ежесменные планы техники', 'count': EquipmentPlanGroup.objects.count(), 'url': '', 'external_url': '/admin/shifts/equipmentplangroup/', 'detail_code': 'equipment-plan-groups'},
+                {'name': 'Сменные планы (история)', 'count': ShiftPlan.objects.count(), 'url': '', 'external_url': '/admin/shifts/shiftplan/', 'detail_code': 'shift-plans'},
+                {'name': 'Планы техники (история)', 'count': EquipmentShiftPlan.objects.count(), 'url': '', 'external_url': '/admin/shifts/equipmentshiftplan/', 'detail_code': 'equipment-shift-plans'},
             ],
         },
         {
@@ -735,11 +738,30 @@ def get_system_admin_reference_configs():
             'preview_fields': ['name', 'is_active'],
             'admin_url': '/admin/references/dumppoint/',
         },
+        'equipment-plan-groups': {
+            'title': 'Ежесменные планы техники',
+            'section': 'Производство',
+            'model': EquipmentPlanGroup,
+            'description': 'Один активный план задается на группу техники и автоматически фиксируется snapshot при открытии смены.',
+            'fields': ['name', 'code', 'calculation_mode', 'plan_value', 'equipment', 'is_active', 'active_from', 'comment'],
+            'search_fields': ['name', 'code', 'comment', 'equipment__garage_number', 'equipment__equipment_type__name', 'equipment__model__name'],
+            'preview_fields': ['calculation_mode', 'plan_value', 'equipment', 'is_active', 'active_from', 'updated_by', 'updated_at'],
+            'select_related': ['updated_by'],
+            'prefetch_related': ['equipment', 'equipment__equipment_type', 'equipment__model'],
+            'initial': {'is_active': True},
+            'field_choices': {
+                'calculation_mode': [
+                    (PlanCalculationMode.TRIPS, 'По рейсам'),
+                    (PlanCalculationMode.VOLUME, 'По объему, м3'),
+                ],
+            },
+            'admin_url': '/admin/shifts/equipmentplangroup/',
+        },
         'shift-plans': {
-            'title': 'Сменные планы',
+            'title': 'Сменные планы (история)',
             'section': 'Производство',
             'model': ShiftPlan,
-            'description': 'Планы объема в кубах: месяц, сутки, дневная смена и ночная смена. Рейсы задаются только в планах конкретной техники.',
+            'description': 'Старая схема планов по дате и смене сохранена для истории и совместимости. Основной способ - ежесменные планы техники.',
             'fields': ['plan_scope', 'name', 'plan_volume_m3', 'is_active', 'comment'],
             'search_fields': ['name', 'comment'],
             'preview_fields': ['plan_scope', 'plan_volume_m3'],
@@ -749,10 +771,10 @@ def get_system_admin_reference_configs():
             'admin_url': '/admin/shifts/shiftplan/',
         },
         'equipment-shift-plans': {
-            'title': 'Планы техники',
+            'title': 'Планы техники (история)',
             'section': 'Производство',
             'model': EquipmentShiftPlan,
-            'description': 'Планы по конкретной технике: для самосвалов обычно рейсы, для экскаваторов объем в м3.',
+            'description': 'Старая схема планов по конкретной технике на дату/смену. Для новых смен используйте ежесменные планы техники.',
             'fields': ['shift_plan', 'equipment', 'employee', 'calculation_mode', 'plan_trips', 'plan_volume_m3', 'is_active', 'comment'],
             'search_fields': ['shift_plan__name', 'equipment__garage_number', 'equipment__equipment_type__name', 'employee__full_name', 'comment'],
             'preview_fields': ['shift_plan', 'equipment', 'employee', 'calculation_mode', 'plan_trips', 'plan_volume_m3'],
@@ -818,6 +840,8 @@ def prepare_reference_record_for_save(reference_code, record, access):
             record.created_by = access.employee
     elif reference_code == 'equipment-shift-plans':
         record.plan_tonnage = None
+    elif reference_code == 'equipment-plan-groups':
+        record.updated_by = access.employee
     return record
 
 
@@ -829,6 +853,9 @@ def build_reference_queryset(config):
     select_related = config.get('select_related') or []
     if select_related:
         queryset = queryset.select_related(*select_related)
+    prefetch_related = config.get('prefetch_related') or []
+    if prefetch_related:
+        queryset = queryset.prefetch_related(*prefetch_related)
     return queryset
 
 
@@ -848,15 +875,26 @@ def get_reference_status(record):
 def get_reference_record_preview(record, config):
     preview = []
     for field_name in config.get('preview_fields', []):
-        field = record._meta.get_field(field_name)
-        value = getattr(record, field_name)
-        if field.get_internal_type() == 'BooleanField':
-            value = 'Да' if value else 'Нет'
-        elif getattr(field, 'choices', None):
-            value = getattr(record, f'get_{field_name}_display')()
-        elif value in (None, ''):
-            value = 'Не указано'
-        preview.append({'label': field.verbose_name, 'value': value})
+        try:
+            field = record._meta.get_field(field_name)
+            label = field.verbose_name
+            value = getattr(record, field_name)
+            if getattr(field, 'many_to_many', False):
+                value = ', '.join(str(item) for item in value.all()) or 'Не указано'
+            elif field.get_internal_type() == 'BooleanField':
+                value = 'Да' if value else 'Нет'
+            elif getattr(field, 'choices', None):
+                value = getattr(record, f'get_{field_name}_display')()
+            elif value in (None, ''):
+                value = 'Не указано'
+        except FieldDoesNotExist:
+            label = field_name.replace('_', ' ')
+            value = getattr(record, field_name, '')
+            if callable(value):
+                value = value()
+            if value in (None, ''):
+                value = 'Не указано'
+        preview.append({'label': label, 'value': value})
     return preview
 
 
@@ -923,7 +961,7 @@ def system_admin_reference_detail_view(request, reference_code):
 
     records_queryset = build_reference_queryset(config)
     if query:
-        records_queryset = records_queryset.filter(build_reference_search_filter(config.get('search_fields', []), query))
+        records_queryset = records_queryset.filter(build_reference_search_filter(config.get('search_fields', []), query)).distinct()
     if status_filter and hasattr(model, 'is_active'):
         records_queryset = records_queryset.filter(is_active=status_filter == 'active')
 
@@ -1668,6 +1706,24 @@ def driver_assignment_countdown_label(assignment):
     return f'{minutes:02d}:{seconds:02d}'
 
 
+def shift_plan_display_context(progress):
+    status = progress.get('plan_status') if progress else ''
+    percent_value = progress.get('progress_percent') if progress else None
+    has_plan = percent_value is not None
+    plan_value = progress.get('plan_value') if progress else None
+    calculation_mode = progress.get('calculation_mode') if progress else ''
+    return {
+        'percent': int(percent_value.quantize(Decimal('1'))) if hasattr(percent_value, 'quantize') else percent_value,
+        'status': status or PlanAssignmentStatus.NO_PLAN_GROUP,
+        'status_label': plan_status_label(status),
+        'short_label': 'Нет группы' if status == PlanAssignmentStatus.NO_PLAN_GROUP else 'Нет плана' if status == PlanAssignmentStatus.NO_ACTIVE_PLAN else plan_status_label(status),
+        'has_plan': has_plan,
+        'value': plan_value,
+        'unit': plan_unit_label(calculation_mode),
+        'group_name': progress.get('plan_group_name') if progress else '',
+    }
+
+
 def driver_shift_view(request):
     access_id = request.session.get('employee_access_id')
     if not access_id:
@@ -1751,11 +1807,8 @@ def driver_shift_view(request):
     completed_shift_trips = [trip for trip in shift_trips if trip.status == TripStatus.COMPLETED]
     shift_trip_count = len(completed_shift_trips)
     shift_progress = calculate_open_shift_progress(open_shift)
-    if shift_progress and shift_progress['progress_percent'] is not None:
-        shift_plan_percent = shift_progress['progress_percent']
-    else:
-        shift_plan_trips = 20
-        shift_plan_percent = min(100, round((shift_trip_count / shift_plan_trips) * 100)) if shift_plan_trips else 0
+    shift_plan = shift_plan_display_context(shift_progress)
+    shift_plan_percent = shift_plan['percent']
     active_tab = request.GET.get('tab', 'work')
     if active_tab not in {'work', 'shift', 'downtimes', 'manifest'}:
         active_tab = 'work'
@@ -1865,6 +1918,7 @@ def driver_shift_view(request):
             shift.equipment = form.cleaned_data['truck']
             shift.opened_at = timezone.now()
             shift.save()
+            assign_shift_plan_snapshot(shift)
             messages.success(request, 'Смена открыта.')
             return redirect('driver_work')
     else:
@@ -1902,6 +1956,13 @@ def driver_shift_view(request):
             'shift_trips': shift_trips,
             'shift_trip_count': shift_trip_count,
             'shift_plan_percent': shift_plan_percent,
+            'shift_plan_status': shift_plan['status'],
+            'shift_plan_status_label': shift_plan['status_label'],
+            'shift_plan_short_label': shift_plan['short_label'],
+            'shift_plan_has_plan': shift_plan['has_plan'],
+            'shift_plan_value': shift_plan['value'],
+            'shift_plan_unit': shift_plan['unit'],
+            'shift_plan_group_name': shift_plan['group_name'],
             'driver_status': driver_status,
             'driver_status_class': driver_status_class,
             'driver_target_label': driver_target_label,

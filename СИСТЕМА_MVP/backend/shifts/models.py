@@ -7,6 +7,73 @@ class ShiftType(models.TextChoices):
     NIGHT = 'night', 'Ночная'
 
 
+class PlanCalculationMode(models.TextChoices):
+    TRIPS = 'trips', 'По рейсам'
+    VOLUME = 'volume_m3', 'По объему, м3'
+    TONNAGE = 'tonnage', 'По тоннажу'
+    MIXED = 'mixed', 'Смешанный'
+
+
+class PlanAssignmentStatus(models.TextChoices):
+    ASSIGNED = 'assigned', 'План назначен'
+    NO_PLAN_GROUP = 'no_plan_group', 'Нет группы плана'
+    NO_ACTIVE_PLAN = 'no_active_plan', 'Нет активного плана'
+
+
+class EquipmentPlanGroup(models.Model):
+    code = models.SlugField('Код группы', max_length=64, unique=True)
+    name = models.CharField('Группа техники', max_length=128, unique=True)
+    calculation_mode = models.CharField(
+        'Тип расчета',
+        max_length=16,
+        choices=PlanCalculationMode.choices,
+        default=PlanCalculationMode.TRIPS,
+    )
+    plan_value = models.DecimalField('Значение плана', max_digits=12, decimal_places=2, null=True, blank=True)
+    equipment = models.ManyToManyField(
+        'references.Equipment',
+        verbose_name='Техника в группе',
+        related_name='plan_groups',
+        blank=True,
+    )
+    is_active = models.BooleanField('Активен', default=True)
+    active_from = models.DateField('Дата начала действия', default=timezone.localdate)
+    comment = models.TextField('Комментарий', blank=True)
+    updated_by = models.ForeignKey(
+        'users.Employee',
+        verbose_name='Кто изменил',
+        on_delete=models.SET_NULL,
+        related_name='updated_equipment_plan_groups',
+        null=True,
+        blank=True,
+    )
+    created_at = models.DateTimeField('Создан', auto_now_add=True)
+    updated_at = models.DateTimeField('Изменен', auto_now=True)
+
+    class Meta:
+        verbose_name = 'Ежесменный план техники'
+        verbose_name_plural = 'Ежесменные планы техники'
+        ordering = ['name']
+
+    @property
+    def equipment_list(self):
+        items = list(self.equipment.select_related('equipment_type', 'model').order_by('equipment_type__name', 'garage_number'))
+        return ', '.join(str(item) for item in items) if items else 'Техника не выбрана'
+
+    @property
+    def plan_unit(self):
+        if self.calculation_mode == PlanCalculationMode.TRIPS:
+            return 'рейсов'
+        if self.calculation_mode == PlanCalculationMode.VOLUME:
+            return 'м³'
+        if self.calculation_mode == PlanCalculationMode.TONNAGE:
+            return 'т'
+        return ''
+
+    def __str__(self):
+        return self.name
+
+
 class WatchPeriod(models.Model):
     name = models.CharField('Название вахты', max_length=128)
     starts_on = models.DateField('Дата начала')
@@ -38,6 +105,29 @@ class EmployeeShift(models.Model):
     opened_by = models.ForeignKey('users.Employee', verbose_name='Кто открыл', on_delete=models.PROTECT, related_name='opened_shifts', null=True, blank=True)
     closed_by = models.ForeignKey('users.Employee', verbose_name='Кто закрыл', on_delete=models.PROTECT, related_name='closed_shifts', null=True, blank=True)
     is_service_closed = models.BooleanField('Служебное закрытие', default=False)
+    plan_group = models.ForeignKey(
+        EquipmentPlanGroup,
+        verbose_name='Группа плана',
+        on_delete=models.SET_NULL,
+        related_name='shift_snapshots',
+        null=True,
+        blank=True,
+    )
+    plan_group_name = models.CharField('Группа плана snapshot', max_length=128, blank=True)
+    plan_calculation_mode = models.CharField(
+        'Тип расчета snapshot',
+        max_length=16,
+        choices=PlanCalculationMode.choices,
+        blank=True,
+    )
+    plan_value = models.DecimalField('Значение плана snapshot', max_digits=12, decimal_places=2, null=True, blank=True)
+    plan_assigned_at = models.DateTimeField('План назначен', null=True, blank=True)
+    plan_status = models.CharField(
+        'Статус плана',
+        max_length=32,
+        choices=PlanAssignmentStatus.choices,
+        blank=True,
+    )
 
     class Meta:
         verbose_name = 'Смена сотрудника'
@@ -46,13 +136,6 @@ class EmployeeShift(models.Model):
 
     def __str__(self):
         return f'{self.employee} / {self.get_shift_type_display()} / {self.opened_at:%d.%m.%Y}'
-
-
-class PlanCalculationMode(models.TextChoices):
-    TRIPS = 'trips', 'По рейсам'
-    VOLUME = 'volume_m3', 'По объему, м3'
-    TONNAGE = 'tonnage', 'По тоннажу'
-    MIXED = 'mixed', 'Смешанный'
 
 
 class ShiftPlanScope(models.TextChoices):

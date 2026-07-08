@@ -5,9 +5,9 @@
 {% block body_class %}excavator-operator-screen{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v66">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v66">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v66">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v67">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v67">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v67">
 <meta name="theme-color" content="#030708">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Погрузка">
@@ -101,7 +101,7 @@
                     <b>Сейчас</b>
                 </div>
                 <div class="eo-shift-result-grid">
-                    <div><span>План</span><strong>{{ shift_plan_percent|default:0 }}%</strong></div>
+                    <div data-plan-status="{{ shift_plan_status|default:'no_plan_group' }}"><span>План</span><strong>{% if shift_plan_has_plan %}{{ shift_plan_percent }}%{% else %}{{ shift_plan_short_label }}{% endif %}</strong></div>
                     <div>
                         <span>{{ shift_fact_label }}</span>
                         <strong>{{ shift_fact_value }}</strong>
@@ -172,8 +172,8 @@
                         <strong>{{ access.employee.full_name|default:"-" }}</strong>
                     </div>
                     <div class="eo-dashboard-plan-widget">
-                        <div class="eo-dashboard-plan-ring" style="--eo-dashboard-progress: {{ shift_plan_percent|default:0 }}%;" role="img" aria-label="Выполнение нормы {{ shift_plan_percent|default:0 }}%">
-                            <span>{{ shift_plan_percent|default:0 }}%</span>
+                        <div class="eo-dashboard-plan-ring{% if not shift_plan_has_plan %} is-plan-missing{% endif %}" style="--eo-dashboard-progress: {% if shift_plan_has_plan %}{{ shift_plan_percent }}{% else %}0{% endif %}%;" role="img" aria-label="{% if shift_plan_has_plan %}Выполнение нормы {{ shift_plan_percent }}%{% else %}{{ shift_plan_status_label }}{% endif %}" data-plan-status="{{ shift_plan_status|default:'no_plan_group' }}">
+                            <span>{% if shift_plan_has_plan %}{{ shift_plan_percent }}%{% else %}{{ shift_plan_short_label }}{% endif %}</span>
                         </div>
                     </div>
                 </div>
@@ -185,21 +185,22 @@
                                 class="eo-truck-card eo-dashboard-truck-card status-{{ card.status_key }}{% if card.is_selected %} is-selected{% endif %}{% if card.is_locked %} is-inactive{% endif %}"
                                 type="button"
                                 draggable="{% if card.can_drag %}true{% else %}false{% endif %}"
-                                style="--eo-truck-progress: {{ card.plan_percent|default:0 }}%; --plan-progress: {{ card.plan_percent|default:0 }}%; --truck-plan-percent: {{ card.plan_percent|default:0 }};"
+                                style="--eo-truck-progress: {% if card.plan_has_plan %}{{ card.plan_percent }}{% else %}0{% endif %}%; --plan-progress: {% if card.plan_has_plan %}{{ card.plan_percent }}{% else %}0{% endif %}%; --truck-plan-percent: {% if card.plan_has_plan %}{{ card.plan_percent }}{% else %}0{% endif %};"
                                 data-eo-truck-card
                                 data-eo-dashboard-truck
                                 data-assignment-id="{{ card.assignment.id }}"
                                 data-truck-id="{{ card.assignment.truck.id }}"
                                 data-eo-equipment-state="{{ card.equipment_state_code }}"
-                                data-eo-plan-percent="{{ card.plan_percent|default:0 }}"
-                                data-plan-percent="{{ card.plan_percent|default:0 }}"
-                                data-plan-status="{{ card.plan_status_key|default:'empty' }}"
+                                data-eo-plan-percent="{% if card.plan_has_plan %}{{ card.plan_percent }}{% endif %}"
+                                data-plan-percent="{% if card.plan_has_plan %}{{ card.plan_percent }}{% endif %}"
+                                data-plan-status="{{ card.plan_status|default:'no_plan_group' }}"
+                                data-plan-progress-status="{{ card.plan_status_key|default:'empty' }}"
                                 {% if card.is_locked %}data-eo-truck-inactive="1" aria-disabled="true"{% endif %}
                             >
                                 <i aria-hidden="true"><img src="{% static card.icon %}" alt=""></i>
                                 <strong>{{ card.number }}</strong>
                                 <span>{{ card.status_label }}</span>
-                                <small>{{ card.plan_percent|default:0 }}%</small>
+                                <small>{% if card.plan_has_plan %}{{ card.plan_percent }}%{% else %}{{ card.plan_short_label }}{% endif %}</small>
                                 {% if card.target_label %}<em>{{ card.target_label }}</em>{% endif %}
                                 {% if forloop.counter == 9 and truck_cards|length > 9 %}
                                     <b class="eo-dashboard-truck-overflow" aria-hidden="true">+{{ truck_cards|length|add:"-9" }}</b>
@@ -328,7 +329,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v66";
+var excavatorShellVersion = "excavator-mobile-shell-v67";
 var excavatorRelevantEvents = {
     assignment_changed: true,
     trip_changed: true,

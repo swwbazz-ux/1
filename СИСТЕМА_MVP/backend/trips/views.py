@@ -19,7 +19,14 @@ from downtimes.models import DowntimeEvent, DowntimeReason
 from references.equipment_states import DEFAULT_EQUIPMENT_STATES
 from references.models import DumpPoint, Equipment, EquipmentState, RockType, TruckCapacityRule
 from shifts.models import EmployeeShift
-from shifts.services import calculate_equipment_shift_progress, calculate_open_shift_progress, calculate_truck_progress_for_excavator_shift
+from shifts.models import PlanAssignmentStatus
+from shifts.services import (
+    assign_shift_plan_snapshot,
+    calculate_open_shift_progress,
+    calculate_truck_progress_for_excavator_shift,
+    plan_status_label,
+    plan_unit_label,
+)
 from users.access_auth import find_employee_access_by_credentials
 from users.models import EmployeeAccess
 from users.session_device import get_session_device_kind, set_session_device_kind
@@ -139,19 +146,21 @@ def format_duration_label(seconds):
 
 def format_progress_percent(value):
     if value is None:
-        return 0
+        return None
     try:
         value = Decimal(value)
     except Exception:
-        return 0
-    return int(max(Decimal('0'), min(Decimal('100'), value)).quantize(Decimal('1')))
+        return None
+    return int(max(Decimal('0'), value).quantize(Decimal('1')))
 
 
-def plan_progress_status_key(percent):
+def plan_progress_status_key(percent, plan_status=''):
+    if plan_status in {PlanAssignmentStatus.NO_PLAN_GROUP, PlanAssignmentStatus.NO_ACTIVE_PLAN}:
+        return plan_status
     try:
         value = int(percent)
     except (TypeError, ValueError):
-        value = 0
+        return 'empty'
     if value <= 0:
         return 'empty'
     if value < 50:
@@ -159,6 +168,22 @@ def plan_progress_status_key(percent):
     if value < 80:
         return 'warning'
     return 'good'
+
+
+def plan_progress_display_context(progress):
+    status = progress.get('plan_status') if progress else PlanAssignmentStatus.NO_PLAN_GROUP
+    percent_value = format_progress_percent(progress.get('progress_percent') if progress else None)
+    calculation_mode = progress.get('calculation_mode') if progress else ''
+    return {
+        'percent': percent_value,
+        'status': status,
+        'status_label': plan_status_label(status),
+        'short_label': 'Нет группы' if status == PlanAssignmentStatus.NO_PLAN_GROUP else 'Нет плана' if status == PlanAssignmentStatus.NO_ACTIVE_PLAN else plan_status_label(status),
+        'has_plan': percent_value is not None,
+        'value': progress.get('plan_value') if progress else None,
+        'unit': plan_unit_label(calculation_mode),
+        'group_name': progress.get('plan_group_name') if progress else '',
+    }
 
 
 def downtime_event_payload(event, *, action='', closed=False):
@@ -407,7 +432,7 @@ EXCAVATOR_MANIFEST = {
 }
 
 EXCAVATOR_SERVICE_WORKER_JS = r"""
-const CACHE_NAME = "excavator-mobile-shell-v66";
+const CACHE_NAME = "excavator-mobile-shell-v67";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const CORE_ASSETS = [
@@ -2817,6 +2842,7 @@ def excavator_shift_action_view(request):
             })
 
         if open_shift:
+            shift_progress = calculate_open_shift_progress(open_shift)
             return JsonResponse({
                 'ok': True,
                 'action': 'shift_opened',
@@ -2824,6 +2850,9 @@ def excavator_shift_action_view(request):
                 'shift_id': open_shift.id,
                 'shift_open': True,
                 'deduplicated': True,
+                'plan_status': shift_progress.get('plan_status') if shift_progress else '',
+                'plan_value': str(shift_progress.get('plan_value') or '') if shift_progress else '',
+                'calculation_mode': shift_progress.get('calculation_mode') if shift_progress else '',
                 'version': get_operational_state_version(),
             })
 
@@ -2846,6 +2875,7 @@ def excavator_shift_action_view(request):
             opened_at=timezone.now(),
             opened_by=access.employee,
         )
+        shift_progress = assign_shift_plan_snapshot(shift)
         return JsonResponse({
             'ok': True,
             'action': 'shift_opened',
@@ -2853,6 +2883,9 @@ def excavator_shift_action_view(request):
             'shift_id': shift.id,
             'shift_open': True,
             'equipment_id': excavator.id,
+            'plan_status': shift_progress.get('plan_status'),
+            'plan_value': str(shift_progress.get('plan_value') or ''),
+            'calculation_mode': shift_progress.get('calculation_mode') or '',
             'version': get_operational_state_version(),
         })
 
@@ -3068,15 +3101,24 @@ def excavator_work_view(request):
     current_rock = work_settings['current_rock']
     selected_dump_point = dump_points[0] if dump_points else None
     shift_progress = calculate_open_shift_progress(open_shift)
-    shift_plan_percent = format_progress_percent(shift_progress.get('progress_percent') if shift_progress else None)
+    shift_plan = plan_progress_display_context(shift_progress)
+    shift_plan_percent = shift_plan['percent']
 
     for card in truck_cards:
         truck_progress = None
         if open_shift:
             truck_progress = calculate_truck_progress_for_excavator_shift(card['assignment'].truck, open_shift)
-        plan_percent = format_progress_percent(truck_progress.get('progress_percent') if truck_progress else None)
+        truck_plan = plan_progress_display_context(truck_progress)
+        plan_percent = truck_plan['percent']
         card['plan_percent'] = plan_percent
-        card['plan_status_key'] = plan_progress_status_key(plan_percent)
+        card['plan_status_key'] = plan_progress_status_key(plan_percent, truck_plan['status'])
+        card['plan_status'] = truck_plan['status']
+        card['plan_status_label'] = truck_plan['status_label']
+        card['plan_short_label'] = truck_plan['short_label']
+        card['plan_has_plan'] = truck_plan['has_plan']
+        card['plan_value'] = truck_plan['value']
+        card['plan_unit'] = truck_plan['unit']
+        card['plan_group_name'] = truck_plan['group_name']
 
     active_trips_by_dump_id = defaultdict(list)
     for trip in active_trips:
@@ -3153,6 +3195,13 @@ def excavator_work_view(request):
             'shift_time_label': '07:00-19:00' if not open_shift or open_shift.shift_type == 'day' else '19:00-07:00',
             'excavator_label': excavator_operator_label(current_excavator),
             'shift_plan_percent': shift_plan_percent,
+            'shift_plan_status': shift_plan['status'],
+            'shift_plan_status_label': shift_plan['status_label'],
+            'shift_plan_short_label': shift_plan['short_label'],
+            'shift_plan_has_plan': shift_plan['has_plan'],
+            'shift_plan_value': shift_plan['value'],
+            'shift_plan_unit': shift_plan['unit'],
+            'shift_plan_group_name': shift_plan['group_name'],
             'shift_fact_label': shift_fact_label,
             'shift_fact_value': shift_fact_value,
             'shift_fact_meta': shift_fact_meta,

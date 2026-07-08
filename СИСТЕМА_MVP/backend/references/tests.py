@@ -41,7 +41,8 @@ class EquipmentStateTests(TestCase):
 
 class ReferenceLoadTests(TestCase):
     def test_loader_counts_nebarit_as_ore_for_density_and_capacity(self):
-        source = Path('ПРОГРЕСС_ПРОЕКТА') / '11_ДАННЫЕ_СПРАВОЧНИКОВ_MVP'
+        project_root = Path(__file__).resolve().parents[3]
+        source = project_root / 'ПРОГРЕСС_ПРОЕКТА' / '11_ДАННЫЕ_СПРАВОЧНИКОВ_MVP'
 
         with TemporaryDirectory() as temp_dir:
             temp = Path(temp_dir)
