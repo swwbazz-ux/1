@@ -157,8 +157,8 @@ body.driver-mobile-screen .driver-header {
     grid-template-columns: minmax(0, 1fr);
     align-content: end;
     align-items: start;
-    gap: 14px;
-    padding: clamp(26px, 4.8dvh, 44px) 0 18px;
+    gap: 10px;
+    padding: clamp(18px, 3.4dvh, 32px) 0 clamp(12px, 2dvh, 16px);
     border-bottom: 1px solid var(--driver-line);
 }
 
@@ -179,10 +179,10 @@ body.driver-mobile-screen .driver-online span {
 }
 
 body.driver-mobile-screen .driver-header h1 {
-    margin: 12px 0 0;
+    margin: 8px 0 0;
     color: var(--driver-ink);
     text-transform: uppercase;
-    font-size: clamp(32px, 8.8vw, 40px);
+    font-size: clamp(31px, 8.4vw, 39px);
     line-height: 0.92;
     font-weight: 900;
     white-space: nowrap;
@@ -192,16 +192,33 @@ body.driver-mobile-screen .driver-header h1 {
 
 body.driver-mobile-screen .driver-header p {
     position: relative;
-    margin: 18px 0 0;
-    padding-left: 14px;
+    width: fit-content;
+    margin: 12px 0 0;
+    padding: 9px 14px 9px 18px;
+    border: 1px solid rgba(140, 255, 46, 0.26);
+    border-radius: 8px;
     color: var(--driver-green);
+    background: linear-gradient(100deg, rgba(140,255,46,0.12), rgba(32,217,230,0.05));
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 0 18px rgba(140,255,46,0.08);
     text-transform: uppercase;
-    font-size: clamp(18px, 5.2vw, 27px);
+    font-size: clamp(15px, 4.2vw, 21px);
     line-height: 1;
-    font-weight: 400;
+    font-weight: 800;
 }
 
-body.driver-mobile-screen .driver-header p::before,
+body.driver-mobile-screen .driver-header p::before {
+    content: "";
+    position: absolute;
+    left: 8px;
+    top: 50%;
+    width: 4px;
+    height: 1.05em;
+    border-radius: 4px;
+    transform: translateY(-50%);
+    background: var(--driver-green);
+    box-shadow: 0 0 12px rgba(140, 255, 46, 0.5);
+}
+
 body.driver-mobile-screen .driver-section-title span::before {
     content: "";
     position: absolute;
@@ -216,13 +233,13 @@ body.driver-mobile-screen .driver-section-title span::before {
 
 body.driver-mobile-screen .driver-online {
     position: absolute;
-    top: clamp(54px, 7.8dvh, 68px);
+    top: clamp(34px, 5.6dvh, 48px);
     right: 2px;
-    width: 66px;
+    width: 72px;
     display: grid;
     justify-items: center;
-    gap: 9px;
-    min-width: 62px;
+    gap: 7px;
+    min-width: 68px;
     color: var(--driver-cyan);
     text-transform: uppercase;
 }
@@ -240,8 +257,8 @@ body.driver-mobile-screen .driver-online::after {
 }
 
 body.driver-mobile-screen .driver-online strong {
-    width: 56px;
-    height: 56px;
+    width: 46px;
+    height: 46px;
     border-radius: 50%;
     background:
         radial-gradient(circle, #8cff2e 0 22%, rgba(140,255,46,0.33) 24% 42%, rgba(36,104,38,0.54) 44% 62%, rgba(7,39,45,0.78) 64% 100%);
@@ -277,57 +294,90 @@ body.driver-mobile-screen .driver-panel[data-driver-tab-panel="manifest"].is-act
 body.driver-mobile-screen .driver-work-screen.is-active {
     display: grid;
     grid-template-rows: auto minmax(0, 1fr) auto;
-    gap: clamp(10px, 2dvh, 18px);
-    padding: clamp(10px, 2dvh, 18px) 0 clamp(10px, 1.8dvh, 16px);
+    gap: clamp(8px, 1.5dvh, 14px);
+    padding: clamp(8px, 1.5dvh, 14px) 0 clamp(8px, 1.4dvh, 14px);
     overflow: hidden;
 }
 
 body.driver-mobile-screen .driver-work-cards {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 12px;
+    gap: clamp(10px, 3vw, 16px);
 }
 
 body.driver-mobile-screen .driver-work-card {
     position: relative;
-    min-height: clamp(74px, 10dvh, 92px);
+    min-height: clamp(78px, 10.4dvh, 98px);
     overflow: hidden;
-    border: 1px solid rgba(127, 163, 177, 0.26);
+    border: 1px solid rgba(134, 171, 181, 0.30);
     border-radius: 8px;
-    padding: 16px 14px 14px;
-    background: linear-gradient(140deg, rgba(13, 37, 47, 0.92), rgba(8, 25, 32, 0.82));
-    box-shadow: inset 0 1px 0 rgba(255,255,255,0.04), 0 18px 42px rgba(0,0,0,0.18);
+    padding: clamp(13px, 3.4vw, 18px) clamp(12px, 3.3vw, 17px) clamp(12px, 3vw, 15px);
+    background:
+        linear-gradient(180deg, rgba(255,255,255,0.045), transparent 34%),
+        linear-gradient(140deg, rgba(14, 42, 52, 0.96), rgba(6, 20, 27, 0.88));
+    box-shadow:
+        inset 0 1px 0 rgba(255,255,255,0.07),
+        inset 0 -16px 24px rgba(0,0,0,0.22),
+        0 16px 38px rgba(0,0,0,0.22);
+}
+
+body.driver-mobile-screen .driver-work-card::before {
+    content: "";
+    position: absolute;
+    left: 12px;
+    right: 12px;
+    top: 0;
+    height: 3px;
+    border-radius: 0 0 4px 4px;
+    background: linear-gradient(90deg, transparent, rgba(140,255,46,0.78), transparent);
+    opacity: 0.55;
+    box-shadow: 0 0 14px rgba(140,255,46,0.22);
 }
 
 body.driver-mobile-screen .driver-work-card span {
     display: block;
-    color: var(--driver-muted);
+    color: rgba(159, 183, 192, 0.88);
     text-transform: uppercase;
-    font-size: clamp(14px, 3.5vw, 16px);
+    font-size: clamp(12px, 3.1vw, 14px);
     line-height: 1;
-    font-weight: 500;
+    font-weight: 800;
 }
 
 body.driver-mobile-screen .driver-work-card strong {
     position: relative;
     z-index: 1;
-    display: block;
-    margin-top: clamp(14px, 2.3dvh, 18px);
+    display: flex;
+    min-height: 1.08em;
+    align-items: end;
+    margin-top: clamp(12px, 2dvh, 16px);
     color: var(--driver-ink);
     text-transform: uppercase;
-    font-size: clamp(24px, 7.4vw, 34px);
+    font-size: clamp(24px, 7.2vw, 34px);
     line-height: 0.95;
     font-weight: 900;
     overflow-wrap: anywhere;
+    text-shadow: 0 0 18px rgba(226, 255, 221, 0.10);
 }
 
 body.driver-mobile-screen .driver-work-excavator {
     position: absolute;
-    right: 12px;
-    bottom: 12px;
-    width: min(42%, 70px);
-    opacity: 0.32;
-    filter: saturate(0.65) brightness(1.18);
+    right: 8px;
+    bottom: 7px;
+    width: min(48%, 82px);
+    opacity: 0.42;
+    filter: saturate(0.74) brightness(1.2) drop-shadow(0 0 12px rgba(140,255,46,0.15));
+}
+
+body.driver-mobile-screen .driver-work-card-target.is-action {
+    border-color: rgba(140,255,46,0.42);
+    background:
+        linear-gradient(180deg, rgba(140,255,46,0.09), transparent 36%),
+        linear-gradient(140deg, rgba(16, 48, 47, 0.98), rgba(5, 23, 24, 0.90));
+    box-shadow:
+        inset 0 1px 0 rgba(255,255,255,0.08),
+        inset 0 -18px 28px rgba(0,0,0,0.24),
+        0 18px 42px rgba(0,0,0,0.24),
+        0 0 22px rgba(140,255,46,0.10);
 }
 
 body.driver-mobile-screen .driver-work-arrow {
@@ -346,14 +396,14 @@ body.driver-mobile-screen .driver-work-dial-zone {
     display: grid;
     align-content: center;
     justify-items: center;
-    padding: 2px 0;
+    padding: 0;
 }
 
 body.driver-mobile-screen .driver-work-dial {
     --driver-progress: 0;
     --driver-hold: 0;
     position: relative;
-    width: var(--driver-dial-size);
+    width: min(calc(var(--driver-dial-size) + clamp(18px, 5vw, 46px)), calc(100vw - (var(--driver-edge) * 2)));
     aspect-ratio: 1 / 1;
     display: grid;
     place-items: center;
@@ -369,26 +419,61 @@ body.driver-mobile-screen .driver-work-dial::after {
 }
 
 body.driver-mobile-screen .driver-work-dial::before {
-    inset: -4%;
+    inset: -6%;
     z-index: -2;
     background:
-        repeating-conic-gradient(from -2deg, rgba(213, 237, 231, 0.30) 0 1.4deg, transparent 1.4deg 7.5deg),
-        radial-gradient(circle at 50% 50%, rgba(7, 19, 24, 0) 56%, rgba(158, 185, 191, 0.20) 57% 58%, rgba(3, 10, 13, 0.96) 61% 100%);
+        repeating-conic-gradient(from -2deg, rgba(186, 204, 210, 0.28) 0 1.1deg, transparent 1.1deg 6deg),
+        repeating-conic-gradient(from 0deg, rgba(150, 166, 172, 0.22) 0 2deg, transparent 2deg 30deg),
+        radial-gradient(circle at 50% 50%, rgba(7, 19, 24, 0) 53%, rgba(158, 176, 181, 0.16) 55% 56%, rgba(3, 10, 13, 0.97) 62% 100%);
     box-shadow:
-        inset 0 0 26px rgba(255,255,255,0.07),
-        inset 0 -24px 54px rgba(0,0,0,0.72),
-        0 24px 58px rgba(0,0,0,0.42);
+        inset 0 0 28px rgba(255,255,255,0.05),
+        inset 0 -28px 58px rgba(0,0,0,0.74),
+        0 26px 62px rgba(0,0,0,0.48),
+        0 0 38px rgba(180,198,204,0.06);
 }
 
 body.driver-mobile-screen .driver-work-dial::after {
-    inset: 9%;
+    inset: 7%;
     z-index: -1;
     background:
-        radial-gradient(circle at 50% 43%, rgba(199, 229, 230, 0.12), rgba(15, 38, 45, 0.34) 46%, rgba(3, 11, 15, 0.88) 72%);
+        radial-gradient(circle at 50% 39%, rgba(226, 247, 241, 0.16), rgba(16, 42, 49, 0.40) 43%, rgba(3, 11, 15, 0.90) 72%);
     box-shadow:
-        inset 0 0 38px rgba(255,255,255,0.05),
-        inset 0 -18px 38px rgba(0,0,0,0.56),
-        0 0 46px rgba(32, 217, 230, 0.10);
+        inset 0 0 44px rgba(255,255,255,0.06),
+        inset 0 -22px 42px rgba(0,0,0,0.58),
+        0 0 54px rgba(32, 217, 230, 0.10);
+}
+
+body.driver-mobile-screen .driver-work-dial:has(.driver-work-dial-button.is-loaded)::before {
+    background:
+        repeating-conic-gradient(from -2deg, rgba(224, 250, 238, 0.42) 0 1.1deg, transparent 1.1deg 6deg),
+        repeating-conic-gradient(from 0deg, rgba(140,255,46,0.48) 0 2deg, transparent 2deg 30deg),
+        radial-gradient(circle at 50% 50%, rgba(7, 19, 24, 0) 53%, rgba(140,255,46,0.22) 55% 56%, rgba(3, 10, 13, 0.97) 62% 100%);
+    box-shadow:
+        inset 0 0 30px rgba(255,255,255,0.08),
+        inset 0 -28px 58px rgba(0,0,0,0.74),
+        0 28px 66px rgba(0,0,0,0.50),
+        0 0 72px rgba(140,255,46,0.18);
+}
+
+body.driver-mobile-screen .driver-work-dial:has(.driver-work-dial-button.is-empty)::before {
+    background:
+        repeating-conic-gradient(from -2deg, rgba(186, 204, 210, 0.28) 0 1.1deg, transparent 1.1deg 6deg),
+        repeating-conic-gradient(from 0deg, rgba(150, 166, 172, 0.22) 0 2deg, transparent 2deg 30deg),
+        radial-gradient(circle at 50% 50%, rgba(7, 19, 24, 0) 53%, rgba(158, 176, 181, 0.16) 55% 56%, rgba(3, 10, 13, 0.97) 62% 100%);
+    box-shadow:
+        inset 0 0 28px rgba(255,255,255,0.05),
+        inset 0 -28px 58px rgba(0,0,0,0.72),
+        0 24px 58px rgba(0,0,0,0.44),
+        0 0 38px rgba(180,198,204,0.06);
+}
+
+body.driver-mobile-screen .driver-work-dial:has(.driver-work-dial-button.is-empty)::after {
+    background:
+        radial-gradient(circle at 50% 39%, rgba(218, 231, 232, 0.10), rgba(44, 59, 64, 0.34) 43%, rgba(4, 11, 15, 0.92) 72%);
+    box-shadow:
+        inset 0 0 38px rgba(255,255,255,0.04),
+        inset 0 -22px 42px rgba(0,0,0,0.58),
+        0 0 34px rgba(180, 198, 204, 0.06);
 }
 
 body.driver-mobile-screen .driver-work-dial-form {
@@ -398,6 +483,7 @@ body.driver-mobile-screen .driver-work-dial-form {
 body.driver-mobile-screen .driver-work-dial-svg {
     position: absolute;
     inset: 0;
+    z-index: 0;
     width: 100%;
     height: 100%;
     transform: rotate(-90deg);
@@ -414,22 +500,22 @@ body.driver-mobile-screen .driver-work-hold-progress {
 }
 
 body.driver-mobile-screen .driver-work-track {
-    stroke: rgba(94, 109, 116, 0.76);
-    stroke-width: 7;
+    stroke: rgba(89, 106, 112, 0.78);
+    stroke-width: 8;
 }
 
 body.driver-mobile-screen .driver-work-progress {
     stroke: var(--driver-green-soft);
-    stroke-width: 9;
+    stroke-width: 10;
     stroke-dasharray: 282.743;
     stroke-dashoffset: calc(282.743 - (282.743 * var(--driver-progress) / 100));
-    filter: drop-shadow(0 0 12px rgba(141, 255, 46, 0.20));
+    filter: drop-shadow(0 0 14px rgba(141, 255, 46, 0.20));
 }
 
 body.driver-mobile-screen .driver-work-hold-progress {
     opacity: 0;
     stroke: var(--driver-green);
-    stroke-width: 4;
+    stroke-width: 5;
     stroke-dasharray: 226.195;
     stroke-dashoffset: calc(226.195 - (226.195 * var(--driver-hold) / 100));
     transition: opacity 0.12s ease;
@@ -451,10 +537,37 @@ body.driver-mobile-screen .driver-work-dial-button {
     background: transparent;
     cursor: default;
     touch-action: none;
+    isolation: isolate;
+}
+
+body.driver-mobile-screen .driver-work-dial-button::before,
+body.driver-mobile-screen .driver-work-dial-button::after {
+    content: "";
+    position: absolute;
+    border-radius: 50%;
+    pointer-events: none;
+}
+
+body.driver-mobile-screen .driver-work-dial-button::before {
+    inset: 12%;
+    z-index: 1;
+    background:
+        conic-gradient(from 210deg, rgba(140,255,46,0.00), rgba(140,255,46,0.18), rgba(32,217,230,0.10), rgba(140,255,46,0.00)),
+        radial-gradient(circle at 50% 42%, rgba(140,255,46,0.12), transparent 58%);
+    opacity: 0.42;
+    filter: blur(0.2px);
+}
+
+body.driver-mobile-screen .driver-work-dial-button::after {
+    inset: 22%;
+    z-index: 1;
+    border: 1px solid rgba(210, 237, 232, 0.18);
+    box-shadow: inset 0 0 20px rgba(255,255,255,0.04);
 }
 
 body.driver-mobile-screen .driver-work-dial-core {
     position: absolute;
+    z-index: 2;
     width: 66%;
     aspect-ratio: 1 / 1;
     border-radius: 50%;
@@ -516,31 +629,58 @@ body.driver-mobile-screen .driver-work-dial-button.is-loaded {
     cursor: pointer;
 }
 
+body.driver-mobile-screen .driver-work-dial-button.is-loaded::before {
+    opacity: 0.82;
+    box-shadow:
+        0 0 34px rgba(140,255,46,0.24),
+        inset 0 0 34px rgba(140,255,46,0.13);
+}
+
+body.driver-mobile-screen .driver-work-dial-button.is-loaded::after {
+    border-color: rgba(140,255,46,0.34);
+    box-shadow:
+        inset 0 0 28px rgba(140,255,46,0.08),
+        0 0 28px rgba(140,255,46,0.14);
+}
+
 body.driver-mobile-screen .driver-work-dial-button.is-loaded .driver-work-progress {
     stroke: var(--driver-green);
-    filter: drop-shadow(0 0 14px rgba(140,255,46,0.76));
+    filter: drop-shadow(0 0 18px rgba(140,255,46,0.88));
 }
 
 body.driver-mobile-screen .driver-work-dial-button.is-loaded .driver-work-dial-core {
     border-color: rgba(140,255,46,0.42);
+    background:
+        radial-gradient(circle at 50% 35%, rgba(234, 255, 224, 0.22), rgba(122, 190, 73, 0.24) 27%, rgba(16, 44, 33, 0.94) 68%, rgba(4, 15, 13, 0.99) 100%);
     box-shadow:
-        inset 0 0 48px rgba(255,255,255,0.07),
-        inset 0 -22px 34px rgba(0,0,0,0.52),
-        0 0 56px rgba(140,255,46,0.30);
+        inset 0 0 54px rgba(255,255,255,0.08),
+        inset 0 -26px 38px rgba(0,0,0,0.50),
+        0 0 72px rgba(140,255,46,0.38);
 }
 
 body.driver-mobile-screen .driver-work-dial-button.is-empty {
     color: rgba(198, 213, 217, 0.76);
 }
 
+body.driver-mobile-screen .driver-work-dial-button.is-empty::before {
+    opacity: 0.22;
+    background:
+        conic-gradient(from 210deg, rgba(180,198,204,0.00), rgba(180,198,204,0.12), rgba(180,198,204,0.00)),
+        radial-gradient(circle at 50% 42%, rgba(160,176,182,0.10), transparent 58%);
+}
+
+body.driver-mobile-screen .driver-work-dial-button.is-empty::after {
+    border-color: rgba(176,194,199,0.15);
+}
+
 body.driver-mobile-screen .driver-work-dial-button.is-empty .driver-work-progress {
-    stroke: rgba(155, 171, 177, 0.52);
-    filter: drop-shadow(0 0 10px rgba(170, 188, 194, 0.12));
+    stroke: rgba(142, 158, 164, 0.46);
+    filter: drop-shadow(0 0 8px rgba(170, 188, 194, 0.08));
 }
 
 body.driver-mobile-screen .driver-work-dial-button.is-empty .driver-work-dial-core {
     background:
-        radial-gradient(circle at 50% 38%, rgba(214, 226, 226, 0.12), rgba(80, 96, 102, 0.18) 30%, rgba(28, 39, 43, 0.92) 70%, rgba(8, 14, 17, 0.98) 100%);
+        radial-gradient(circle at 50% 38%, rgba(214, 226, 226, 0.10), rgba(80, 96, 102, 0.16) 30%, rgba(28, 39, 43, 0.94) 70%, rgba(8, 14, 17, 0.99) 100%);
     border-color: rgba(176, 194, 199, 0.24);
     box-shadow:
         inset 0 0 44px rgba(255,255,255,0.05),
@@ -570,6 +710,14 @@ body.driver-mobile-screen .driver-work-dial-button.is-pending .driver-work-hold-
     opacity: 1;
 }
 
+body.driver-mobile-screen .driver-work-dial-button.is-holding .driver-work-dial-core {
+    transform: scale(0.985);
+    box-shadow:
+        inset 0 0 58px rgba(255,255,255,0.08),
+        inset 0 -28px 40px rgba(0,0,0,0.54),
+        0 0 88px rgba(140,255,46,0.46);
+}
+
 body.driver-mobile-screen .driver-work-caption {
     width: 100%;
     display: grid;
@@ -578,7 +726,7 @@ body.driver-mobile-screen .driver-work-caption {
     gap: 18px;
     color: var(--driver-green);
     text-transform: uppercase;
-    font-size: clamp(20px, 5.4vw, 28px);
+    font-size: clamp(18px, 4.8vw, 25px);
     line-height: 1;
     font-weight: 700;
     text-align: center;
@@ -1167,7 +1315,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
     }
 
     body.driver-mobile-screen .driver-work-dial {
-        width: min(var(--driver-dial-size), 52dvh);
+        width: min(calc(var(--driver-dial-size) + clamp(18px, 5vw, 46px)), 58dvh);
     }
 
     body.driver-mobile-screen .driver-work-caption {
@@ -1179,7 +1327,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
 {% endblock %}
 
 {% block body %}
-<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v35' }}">
+<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v36' }}">
     {% if messages %}
         <div class="driver-messages">
             {% for message in messages %}
@@ -1863,7 +2011,7 @@ window.bindDriverMobileShell = function () {
         if (!("serviceWorker" in navigator)) {
             return;
         }
-        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v35' }}";
+        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v36' }}";
         var updateModal = document.querySelector("[data-driver-pwa-update-modal]");
         var updateBadge = document.querySelector("[data-driver-pwa-update-badge]");
         var updateTarget = document.querySelector("[data-driver-pwa-update-nav-target]");
