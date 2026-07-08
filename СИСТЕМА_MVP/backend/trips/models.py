@@ -3,6 +3,7 @@ from django.db import models
 
 class TripStatus(models.TextChoices):
     ACTIVE = 'active', 'Активный'
+    LOADED_WAITING_UNLOAD = 'loaded_waiting_unload', 'На разгрузку'
     COMPLETED = 'completed', 'Выполнен'
     CANCELLED = 'cancelled', 'Отменен'
 
@@ -23,6 +24,22 @@ class Trip(models.Model):
     unloading_shift = models.ForeignKey('shifts.EmployeeShift', verbose_name='Смена разгрузки', on_delete=models.PROTECT, related_name='unloaded_trips', null=True, blank=True)
     rock_type = models.ForeignKey('references.RockType', verbose_name='Порода', on_delete=models.PROTECT)
     dump_point = models.ForeignKey('references.DumpPoint', verbose_name='Точка разгрузки', on_delete=models.PROTECT)
+    assigned_dump_point = models.ForeignKey(
+        'references.DumpPoint',
+        verbose_name='Назначенная точка разгрузки',
+        on_delete=models.PROTECT,
+        related_name='assigned_trips',
+        null=True,
+        blank=True,
+    )
+    actual_dump_point = models.ForeignKey(
+        'references.DumpPoint',
+        verbose_name='Фактическая точка разгрузки',
+        on_delete=models.PROTECT,
+        related_name='actual_trips',
+        null=True,
+        blank=True,
+    )
     planned_volume_m3 = models.DecimalField('Плановое задание, м3', max_digits=10, decimal_places=2, null=True, blank=True)
     volume_m3 = models.DecimalField('Объем, м3', max_digits=10, decimal_places=2, null=True, blank=True)
     tonnage = models.DecimalField('Тоннаж', max_digits=10, decimal_places=2, null=True, blank=True)
@@ -31,7 +48,7 @@ class Trip(models.Model):
     transport_distance_km = models.DecimalField('Плечо транспортировки, км', max_digits=8, decimal_places=2, null=True, blank=True)
     downtime_text = models.CharField('Простои', max_length=255, blank=True)
     note = models.TextField('Примечание', blank=True)
-    status = models.CharField('Статус', max_length=16, choices=TripStatus.choices, default=TripStatus.ACTIVE)
+    status = models.CharField('Статус', max_length=32, choices=TripStatus.choices, default=TripStatus.ACTIVE)
     created_at = models.DateTimeField('Создан', auto_now_add=True)
     completed_at = models.DateTimeField('Выполнен', null=True, blank=True)
     is_carryover = models.BooleanField('Переходящий рейс', default=False)
@@ -43,6 +60,28 @@ class Trip(models.Model):
 
     def __str__(self):
         return f'{self.truck} -> {self.dump_point} ({self.rock_type})'
+
+
+OPEN_TRIP_STATUSES = (TripStatus.ACTIVE, TripStatus.LOADED_WAITING_UNLOAD)
+
+
+class TripClientAction(models.Model):
+    action_type = models.CharField('Тип действия клиента', max_length=64)
+    client_action_id = models.CharField('ID действия клиента', max_length=128)
+    trip = models.ForeignKey('trips.Trip', verbose_name='Рейс', on_delete=models.PROTECT, related_name='client_actions')
+    actor = models.ForeignKey('users.Employee', verbose_name='Кто выполнил действие', on_delete=models.PROTECT, related_name='trip_client_actions')
+    created_at = models.DateTimeField('Создано', auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Клиентское действие рейса'
+        verbose_name_plural = 'Клиентские действия рейсов'
+        ordering = ['-created_at']
+        constraints = [
+            models.UniqueConstraint(fields=['action_type', 'client_action_id'], name='unique_trip_client_action'),
+        ]
+
+    def __str__(self):
+        return f'{self.action_type}: {self.client_action_id}'
 
 
 class DispatcherActionLog(models.Model):

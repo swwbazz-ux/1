@@ -1,0 +1,175 @@
+{% extends "base.html" %}
+
+{% block title %}Автотранспорт{% endblock %}
+{% block body_class %}dispatcher-control-screen{% endblock %}
+
+{% block body %}
+<main class="dispatcher-shell dispatcher-analytics-shell" data-dispatcher-theme>
+    <section class="dispatcher-analytics-board" aria-label="Автотранспорт диспетчера">
+        <header class="dispatcher-topbar dispatcher-unified-topbar">
+            {% include "includes/dispatcher_header.html" with dispatcher_nav_active="transport" dispatcher_header_screen="Автотранспорт" %}
+        </header>
+        <div class="dispatcher-analytics-toolbar">
+            {% include "includes/dispatcher_analytics_tabs.html" with dispatcher_nav_active="transport" %}
+            <div class="dispatcher-report-actions">
+                <a href="{% url 'dispatcher_transport_export' %}{% if query_string %}?{{ query_string }}{% endif %}">Excel</a>
+                <button type="button" onclick="window.print()">Печать</button>
+            </div>
+        </div>
+
+        <form class="dispatcher-report-filters" method="get" data-auto-filter-form>
+            <label>
+                <span>Дата</span>
+                <input type="date" name="date" value="{{ filters.date_value }}">
+            </label>
+            <label>
+                <span>Смена</span>
+                <select name="shift_type">
+                    <option value="" {% if not filters.shift_type %}selected{% endif %}>Все смены</option>
+                    <option value="day" {% if filters.shift_type == 'day' %}selected{% endif %}>Дневная</option>
+                    <option value="night" {% if filters.shift_type == 'night' %}selected{% endif %}>Ночная</option>
+                </select>
+            </label>
+            <button type="submit">Показать</button>
+        </form>
+
+        <section class="dispatcher-analytics-grid dispatcher-transport-grid">
+            <article class="dispatcher-report-card">
+                <div class="dispatcher-report-card-head">
+                    <h2>Готовность данных</h2>
+                    <span>закрытие смен</span>
+                </div>
+                <div class="dispatcher-transport-readiness">
+                    <div>
+                        <strong>{{ kpis.closed }}</strong>
+                        <span>закрыто без пропусков</span>
+                    </div>
+                    <div class="{% if kpis.missing %}is-risk{% endif %}">
+                        <strong>{{ kpis.missing }}</strong>
+                        <span>не хватает конечных показаний</span>
+                    </div>
+                    <div class="{% if kpis.anomalies %}is-danger{% endif %}">
+                        <strong>{{ kpis.anomalies }}</strong>
+                        <span>аномальные дельты</span>
+                    </div>
+                </div>
+            </article>
+
+            <article class="dispatcher-report-card">
+                <div class="dispatcher-report-card-head">
+                    <h2>Производство</h2>
+                    <span>рейсы и объем</span>
+                </div>
+                <div class="dispatcher-transport-production">
+                    <div>
+                        <span>Рейсы</span>
+                        <strong>{{ kpis.trips }}</strong>
+                    </div>
+                    <div>
+                        <span>Объем</span>
+                        <strong>{{ kpis.volume }} м3</strong>
+                    </div>
+                    <div>
+                        <span>Средний расход</span>
+                        <strong>{{ kpis.fuel_per_km }} л/км</strong>
+                    </div>
+                </div>
+            </article>
+
+            <article class="dispatcher-report-card dispatcher-report-card-wide">
+                <div class="dispatcher-report-card-head">
+                    <h2>Расход по самосвалам</h2>
+                    <span>топливо за смену</span>
+                </div>
+                <div class="dispatcher-split-list">
+                    {% for row in fuel_leaders %}
+                        <div class="dispatcher-split-row dispatcher-transport-fuel-row is-{{ row.status }}">
+                            <span>{{ row.equipment_label }} / {{ row.driver }}</span>
+                            <strong>{{ row.fuel_display }} л</strong>
+                            <i><b style="width: {{ row.fuel_bar }}%"></b></i>
+                        </div>
+                    {% empty %}
+                        <p class="dispatcher-empty-note">Нет закрытых показаний топлива за выбранную смену.</p>
+                    {% endfor %}
+                </div>
+            </article>
+
+            <article class="dispatcher-report-card dispatcher-report-card-wide">
+                <div class="dispatcher-report-card-head">
+                    <h2>Требуют внимания</h2>
+                    <span>пропуски и аномалии</span>
+                </div>
+                <div class="dispatcher-transport-alerts">
+                    {% for row in attention_rows %}
+                        <div class="dispatcher-transport-alert is-{{ row.status }}">
+                            <strong>{{ row.equipment_label }}</strong>
+                            <span>{{ row.driver }}</span>
+                            <em>{% if row.has_negative_delta %}аномальные показания{% else %}не заполнен конец смены{% endif %}</em>
+                        </div>
+                    {% empty %}
+                        <p class="dispatcher-empty-note">Критичных пропусков и отрицательных дельт нет.</p>
+                    {% endfor %}
+                </div>
+            </article>
+
+            <article class="dispatcher-report-card dispatcher-report-card-wide dispatcher-report-card-table">
+                <div class="dispatcher-report-card-head">
+                    <h2>Сменные показания</h2>
+                    <span>топливо / пробег / моточасы</span>
+                </div>
+                <div class="dispatcher-transport-table-wrap">
+                    <table class="dispatcher-transport-table">
+                        <thead>
+                            <tr>
+                                <th>Самосвал</th>
+                                <th>Водитель</th>
+                                <th>Топливо</th>
+                                <th>Пробег</th>
+                                <th>Моточасы</th>
+                                <th>Рейсы</th>
+                                <th>Объем</th>
+                                <th>Статус</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for row in rows %}
+                                <tr class="is-{{ row.status }}">
+                                    <td><strong>{{ row.equipment_label }}</strong><small>{{ row.model }}</small></td>
+                                    <td>{{ row.driver }}<small>{{ row.shift_type }} {{ row.opened_at }}-{{ row.closed_at }}</small></td>
+                                    <td>{{ row.start_fuel|default:"-" }} -> {{ row.end_fuel|default:"-" }}<small>{{ row.fuel_display }} л</small></td>
+                                    <td>{{ row.start_mileage|default:"-" }} -> {{ row.end_mileage|default:"-" }}<small>{{ row.mileage_display }} км</small></td>
+                                    <td>{{ row.start_engine_hours|default:"-" }} -> {{ row.end_engine_hours|default:"-" }}<small>{{ row.hours_display }} ч</small></td>
+                                    <td>{{ row.trips }}</td>
+                                    <td>{{ row.volume_display }} м3</td>
+                                    <td>{% if row.status == 'danger' %}аномалия{% elif row.status == 'risk' %}проверить{% else %}норма{% endif %}</td>
+                                </tr>
+                            {% empty %}
+                                <tr><td colspan="8">Смен самосвалов за выбранную дату пока нет.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </article>
+        </section>
+    </section>
+</main>
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    var shell = document.querySelector("[data-dispatcher-theme]");
+    var saved = localStorage.getItem("dispatcher-theme") || "night";
+    function setTheme(theme) {
+        if (!shell) return;
+        shell.classList.toggle("dispatcher-night", theme === "night");
+        shell.classList.toggle("dispatcher-day", theme !== "night");
+        localStorage.setItem("dispatcher-theme", theme);
+    }
+    setTheme(saved);
+    document.querySelectorAll("[data-dispatcher-theme-toggle]").forEach(function (toggle) {
+        toggle.addEventListener("click", function () {
+            setTheme(shell.classList.contains("dispatcher-night") ? "day" : "night");
+        });
+    });
+});
+</script>
+{% endblock %}

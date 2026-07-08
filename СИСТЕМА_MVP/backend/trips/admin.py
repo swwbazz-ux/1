@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import DispatcherActionLog, Trip
+from .models import DispatcherActionLog, Trip, TripClientAction
 
 
 @admin.register(Trip)
@@ -28,4 +28,11 @@ class TripAdmin(admin.ModelAdmin):
 class DispatcherActionLogAdmin(admin.ModelAdmin):
     list_display = ('created_at', 'actor', 'action_type', 'target_summary', 'reason')
     search_fields = ('actor__full_name', 'target_summary', 'reason')
+    list_filter = ('action_type',)
+
+
+@admin.register(TripClientAction)
+class TripClientActionAdmin(admin.ModelAdmin):
+    list_display = ('created_at', 'action_type', 'client_action_id', 'trip', 'actor')
+    search_fields = ('action_type', 'client_action_id', 'trip__truck__garage_number', 'actor__full_name')
     list_filter = ('action_type',)

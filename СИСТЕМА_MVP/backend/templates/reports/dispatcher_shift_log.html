@@ -1,0 +1,169 @@
+{% extends "base.html" %}
+
+{% block title %}Журнал смены{% endblock %}
+{% block body_class %}dispatcher-control-screen{% endblock %}
+
+{% block body %}
+<main class="dispatcher-shell dispatcher-analytics-shell" data-dispatcher-theme>
+    <section class="dispatcher-analytics-board" aria-label="Журнал смены диспетчера">
+        <header class="dispatcher-topbar dispatcher-unified-topbar">
+            {% include "includes/dispatcher_header.html" with dispatcher_nav_active="shift_log" dispatcher_header_screen="Журнал смены" %}
+        </header>
+        <div class="dispatcher-analytics-toolbar">
+            <span class="dispatcher-toolbar-spacer"></span>
+            <div class="dispatcher-report-actions">
+                <a href="{% url 'dispatcher_shift_log_export' %}{% if query_string %}?{{ query_string }}{% endif %}">Excel</a>
+                <button type="button" onclick="window.print()">Печать</button>
+            </div>
+        </div>
+
+        <form class="dispatcher-report-filters" method="get" data-auto-filter-form>
+            <label>
+                <span>Дата</span>
+                <input type="date" name="date" value="{{ filters.date_value }}">
+            </label>
+            <label>
+                <span>Тип события</span>
+                <select name="event_type">
+                    {% for item in event_type_choices %}
+                        <option value="{{ item.code }}" {% if filters.event_type == item.code %}selected{% endif %}>{{ item.label }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <button type="submit">Показать</button>
+        </form>
+
+        <section class="dispatcher-analytics-grid dispatcher-shift-log-grid">
+            <article class="dispatcher-report-card dispatcher-report-card-wide dispatcher-shift-timeline-card">
+                <div class="dispatcher-report-card-head">
+                    <h2>Хронология смены</h2>
+                    <span>действия, простои и выполненные рейсы в одном потоке</span>
+                </div>
+                <div class="dispatcher-shift-timeline">
+                    {% for row in rows %}
+                        <div class="dispatcher-shift-event is-{{ row.status }}">
+                            <time>{{ row.time_display }}</time>
+                            <div>
+                                <span>{{ row.type_label }}</span>
+                                <strong>{{ row.title }}</strong>
+                                <p>{{ row.summary }}</p>
+                                <small>{{ row.equipment }} · {{ row.route }} · {{ row.volume }}</small>
+                            </div>
+                        </div>
+                    {% empty %}
+                        <p class="dispatcher-empty-note">За выбранную дату событий смены нет.</p>
+                    {% endfor %}
+                </div>
+            </article>
+
+            <article class="dispatcher-report-card dispatcher-shift-stack">
+                <div class="dispatcher-report-card-head">
+                    <h2>Действия</h2>
+                    <span>что менял диспетчер</span>
+                </div>
+                <div class="dispatcher-shift-mini-list">
+                    {% for row in action_rows %}
+                        <div class="dispatcher-shift-mini-row is-{{ row.status }}">
+                            <strong>{{ row.time_display }} · {{ row.title }}</strong>
+                            <span>{{ row.summary }}</span>
+                        </div>
+                    {% empty %}
+                        <p class="dispatcher-empty-note">Действий диспетчера нет.</p>
+                    {% endfor %}
+                </div>
+            </article>
+
+            <article class="dispatcher-report-card dispatcher-shift-stack">
+                <div class="dispatcher-report-card-head">
+                    <h2>Простои</h2>
+                    <span>потери и открытые события</span>
+                </div>
+                <div class="dispatcher-shift-mini-list">
+                    {% for row in downtime_rows %}
+                        <div class="dispatcher-shift-mini-row is-{{ row.status }}">
+                            <strong>{{ row.time_display }} · {{ row.equipment }}</strong>
+                            <span>{{ row.title }} / {{ row.volume }}</span>
+                        </div>
+                    {% empty %}
+                        <p class="dispatcher-empty-note">Простоев нет.</p>
+                    {% endfor %}
+                </div>
+            </article>
+
+            <article class="dispatcher-report-card dispatcher-report-card-wide">
+                <div class="dispatcher-report-card-head">
+                    <h2>Рейсы</h2>
+                    <span>последние выполненные перевозки</span>
+                </div>
+                <div class="dispatcher-shift-trip-grid">
+                    {% for row in trip_rows %}
+                        <div class="dispatcher-shift-trip is-{{ row.status }}">
+                            <strong>{{ row.equipment }}</strong>
+                            <span>{{ row.route }}</span>
+                            <small>{{ row.reason }} / {{ row.volume }}</small>
+                        </div>
+                    {% empty %}
+                        <p class="dispatcher-empty-note">Выполненных рейсов за дату нет.</p>
+                    {% endfor %}
+                </div>
+            </article>
+
+            <article class="dispatcher-report-card dispatcher-report-card-table">
+                <div class="dispatcher-report-card-head">
+                    <h2>События смены</h2>
+                    <span>табличная версия для сверки и печати</span>
+                </div>
+                <div class="dispatcher-transport-table-wrap">
+                    <table class="dispatcher-transport-table dispatcher-shift-table">
+                        <thead>
+                            <tr>
+                                <th>Время</th>
+                                <th>Тип</th>
+                                <th>Событие</th>
+                                <th>Объект</th>
+                                <th>Маршрут</th>
+                                <th>Участник</th>
+                                <th>Объем / потери</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for row in rows %}
+                                <tr class="is-{{ row.status }}">
+                                    <td>{{ row.time_display }}</td>
+                                    <td>{{ row.type_label }}</td>
+                                    <td><strong>{{ row.title }}</strong><small>{{ row.reason }}</small></td>
+                                    <td>{{ row.equipment }}</td>
+                                    <td>{{ row.route }}</td>
+                                    <td>{{ row.actor }}</td>
+                                    <td>{{ row.volume }}</td>
+                                </tr>
+                            {% empty %}
+                                <tr><td colspan="7">За выбранную дату событий смены нет.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </article>
+        </section>
+    </section>
+</main>
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    var shell = document.querySelector("[data-dispatcher-theme]");
+    var saved = localStorage.getItem("dispatcher-theme") || "night";
+    function setTheme(theme) {
+        if (!shell) return;
+        shell.classList.toggle("dispatcher-night", theme === "night");
+        shell.classList.toggle("dispatcher-day", theme !== "night");
+        localStorage.setItem("dispatcher-theme", theme);
+    }
+    setTheme(saved);
+    document.querySelectorAll("[data-dispatcher-theme-toggle]").forEach(function (toggle) {
+        toggle.addEventListener("click", function () {
+            setTheme(shell.classList.contains("dispatcher-night") ? "day" : "night");
+        });
+    });
+});
+</script>
+{% endblock %}

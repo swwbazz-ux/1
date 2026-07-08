@@ -2,7 +2,7 @@ from django.contrib import messages
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 
-from trips.models import Trip, TripStatus
+from trips.models import OPEN_TRIP_STATUSES, Trip
 from users.models import EmployeeAccess
 
 from .forms import MechanicDowntimeCreateForm
@@ -37,7 +37,7 @@ def mechanic_dashboard_view(request):
     access = get_mechanic_access(request)
     if not access:
         return redirect('login')
-    if access.role.code not in {'mechanic', 'admin'}:
+    if access.role.code not in {'mechanic', 'admin', 'manager'}:
         return redirect('role_home')
 
     open_events = list(
@@ -56,7 +56,7 @@ def mechanic_dashboard_view(request):
 
     source_trips = (
         Trip.objects
-        .filter(status=TripStatus.ACTIVE)
+        .filter(status__in=OPEN_TRIP_STATUSES)
         .exclude(downtime_text='')
         .select_related('excavator', 'excavator__equipment_type', 'rock_type', 'dump_point', 'excavator_operator')
         .order_by('-created_at')
@@ -118,7 +118,7 @@ def mechanic_create_downtime_view(request, trip_id):
     trip = get_object_or_404(
         Trip.objects.select_related('excavator', 'excavator__equipment_type'),
         id=trip_id,
-        status=TripStatus.ACTIVE,
+        status__in=OPEN_TRIP_STATUSES,
     )
     form = MechanicDowntimeCreateForm(
         request.POST,

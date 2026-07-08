@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+
+{% block title %}Активация доступа{% endblock %}
+{% block body_class %}login-page{% endblock %}
+
+{% block body %}
+<main class="login-card">
+    <div class="muted">Первичная активация</div>
+    <h1>Активировать доступ</h1>
+    <p>
+        Первичный пинкод принят для сотрудника {{ access.employee.full_name }}.
+        Введите номер телефона из личного дела и придумайте постоянный пинкод.
+        В дальнейшем вход будет выполняться по паре телефон + пинкод.
+    </p>
+    <form method="post" data-validated-activation>
+        {% csrf_token %}
+        {% if form.non_field_errors %}
+            <div class="message error">{{ form.non_field_errors }}</div>
+        {% endif %}
+        {% for field in form %}
+            <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+            {{ field }}
+            <small class="input-hint" data-input-hint-for="{{ field.id_for_label }}">
+                {% if field.name == "phone" %}
+                    Только цифры. Формат: 79000000000 или 89000000000.
+                {% elif field.name == "new_access_code" %}
+                    Только цифры, ровно 6 знаков.
+                {% else %}
+                    Повторите тот же пинкод из 6 цифр.
+                {% endif %}
+            </small>
+            {{ field.errors }}
+        {% endfor %}
+        <button type="submit">Активировать доступ</button>
+    </form>
+</main>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    var form = document.querySelector('[data-validated-activation]');
+    var submitButton = form ? form.querySelector('button[type="submit"]') : null;
+    var pinInputs = form ? Array.from(form.querySelectorAll('[data-pin-input]')) : [];
+
+    function refreshSubmitState() {
+        if (!form || !submitButton) return;
+        var inputs = Array.from(form.querySelectorAll('[data-phone-input], [data-pin-input]'));
+        var pinsMatch = pinInputs.length < 2 || !pinInputs[0].value || !pinInputs[1].value || pinInputs[0].value === pinInputs[1].value;
+        submitButton.disabled = inputs.some(function (input) { return !input.classList.contains('is-valid'); }) || !pinsMatch;
+    }
+
+    document.querySelectorAll('[data-phone-input], [data-pin-input]').forEach(function (input) {
+        var hint = document.querySelector('[data-input-hint-for="' + input.id + '"]');
+        var maxLength = Number(input.getAttribute('maxlength') || 0);
+        var isPhone = input.hasAttribute('data-phone-input');
+        var isPin = input.hasAttribute('data-pin-input');
+
+        function validate() {
+            var value = input.value.replace(/\D/g, '').slice(0, maxLength);
+            if (input.value !== value) input.value = value;
+
+            var valid = false;
+            var message = input.dataset.hint || '';
+            if (isPhone) {
+                valid = value.length === 11 && (value.indexOf('79') === 0 || value.indexOf('89') === 0);
+                if (value && value.length < 11) message = 'Нужно 11 цифр. Сейчас введено: ' + value.length + '.';
+                if (value.length === 11 && !valid) message = 'Российский мобильный номер должен начинаться с 79 или 89.';
+            }
+            if (isPin) {
+                valid = value.length === 6;
+                if (value && value.length < 6) message = 'Нужно ровно 6 цифр. Сейчас введено: ' + value.length + '.';
+            }
+            if (isPin && pinInputs.length === 2 && pinInputs[0].value && pinInputs[1].value && pinInputs[0].value !== pinInputs[1].value) {
+                valid = false;
+                message = 'Пинкоды не совпадают.';
+            }
+
+            input.classList.toggle('is-invalid', Boolean(value) && !valid);
+            input.classList.toggle('is-valid', valid);
+            if (hint) {
+                hint.textContent = valid ? 'Введено правильно.' : message;
+                hint.classList.toggle('is-invalid', Boolean(value) && !valid);
+                hint.classList.toggle('is-valid', valid);
+            }
+            refreshSubmitState();
+        }
+
+        input.addEventListener('input', function () {
+            validate();
+            pinInputs.forEach(function (pinInput) {
+                if (pinInput !== input) pinInput.dispatchEvent(new Event('blur'));
+            });
+        });
+        input.addEventListener('blur', validate);
+        validate();
+    });
+});
+</script>
+{% endblock %}

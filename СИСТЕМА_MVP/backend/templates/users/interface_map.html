@@ -18,9 +18,10 @@
     <section class="card">
         <h2>Демо-коды входа</h2>
         <div class="grid">
-            {% for code, role_name in demo_access_codes %}
+            {% for phone, code, role_name in demo_access_codes %}
                 <div class="tile">
-                    <strong>{{ code }}</strong>
+                    <strong>{{ phone }}</strong>
+                    <div>Пинкод: <b>{{ code }}</b></div>
                     <span class="muted">{{ role_name }}</span>
                 </div>
             {% endfor %}

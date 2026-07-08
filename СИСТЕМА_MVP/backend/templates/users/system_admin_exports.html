@@ -1,0 +1,240 @@
+{% extends "base.html" %}
+
+{% block title %}Выгрузки админки{% endblock %}
+{% block body_class %}system-admin-exports-screen{% endblock %}
+
+{% block body %}
+<div class="admin-shell admin-exports-shell admin-day" data-admin-theme>
+    <header class="admin-console-header" aria-label="Административная шапка">
+        <section class="admin-console-identity">
+            <span class="admin-console-avatar">{{ access.employee.full_name|first }}</span>
+            <span>
+                <strong>{{ access.employee.full_name }}</strong>
+                <em>Системный администратор</em>
+            </span>
+        </section>
+
+        <section class="admin-console-main">
+            <div class="admin-console-title">
+                <span>Админка MVP</span>
+                <h1>Выгрузки</h1>
+                <p>Excel-файлы для сверки сотрудников, доступов, журнала, конфликтов и рабочих отчетов.</p>
+            </div>
+            <nav class="admin-console-nav" aria-label="Разделы админки">
+                <a href="{% url 'system_admin_dashboard' %}">Сводка</a>
+                <a href="{% url 'system_admin_employees' %}">Сотрудники</a>
+                <a href="{% url 'system_admin_references' %}">Справочники</a>
+                <a href="{% url 'system_admin_conflicts' %}">Конфликты</a>
+                <a href="{% url 'system_admin_logs' %}">Журнал</a>
+                <a class="is-active" href="{% url 'system_admin_exports' %}">Выгрузки</a>
+            </nav>
+        </section>
+
+        <section class="admin-console-actions">
+            <button type="button" class="admin-theme-button" data-admin-theme-toggle title="День / Ночь">Д/Н</button>
+            <a class="admin-utility-link" href="{% url 'system_admin_dashboard' %}">Назад</a>
+            <a class="admin-utility-link" href="{% url 'logout' %}">Выйти</a>
+        </section>
+    </header>
+
+    <main class="admin-console-page exports-page">
+        <section class="export-metrics">
+            <div class="export-metric metric-neutral">
+                <span>Всего выгрузок</span>
+                <strong>{{ export_total }}</strong>
+                <small>доступных разделов</small>
+            </div>
+            <div class="export-metric metric-ok">
+                <span>Готовы</span>
+                <strong>{{ ready_total }}</strong>
+                <small>можно скачать сразу</small>
+            </div>
+            <div class="export-metric metric-warning">
+                <span>С вниманием</span>
+                <strong>{{ warning_total }}</strong>
+                <small>проверить перед выдачей</small>
+            </div>
+            <a class="export-metric metric-info" href="{% url 'system_admin_logs' %}">
+                <span>Источник контроля</span>
+                <strong>Журнал</strong>
+                <small>аудит действий</small>
+            </a>
+        </section>
+
+        <section class="exports-control-card">
+            <div class="admin-section-title">
+                <div>
+                    <h2>Поиск выгрузки</h2>
+                    <p>Фильтр работает сразу. Строка выгрузки открывает файл или отчетный раздел.</p>
+                </div>
+                <span class="admin-chip admin-chip-info" data-export-visible-count></span>
+            </div>
+            <div class="exports-filter-bar">
+                <div class="field">
+                    <label for="export-search">Поиск</label>
+                    <input id="export-search" type="search" placeholder="Название, раздел или описание" data-export-search>
+                </div>
+                <div class="field select-field">
+                    <label for="export-status">Состояние</label>
+                    <select id="export-status" data-export-status>
+                        <option value="">Все состояния</option>
+                        <option value="ok">Готово</option>
+                        <option value="warning">Требует внимания</option>
+                        <option value="neutral">Отчет</option>
+                    </select>
+                </div>
+                <button class="admin-button admin-button-secondary" type="button" data-export-reset>Сбросить</button>
+            </div>
+        </section>
+
+        <section class="exports-workspace">
+            <div class="exports-list-card">
+                <div class="admin-section-title">
+                    <div>
+                        <h2>Список выгрузок</h2>
+                        <p>Административные выгрузки скачиваются сразу, рабочие отчеты открывают свои фильтры.</p>
+                    </div>
+                    <span class="admin-chip">{{ export_total }} разделов</span>
+                </div>
+
+                <div class="exports-group-list">
+                    {% for group in export_groups %}
+                        <section class="exports-group" data-export-group="{{ group.title }}">
+                            <div class="exports-group-head">
+                                <h3>{{ group.title }}</h3>
+                                <span>{{ group.items|length }} выгрузки</span>
+                            </div>
+                            <div class="exports-list">
+                                {% for item in group.items %}
+                                    <a class="export-row export-row-{{ item.status_class }}" href="{% if item.url_name %}{% url item.url_name %}{% else %}{{ item.external_url }}{% endif %}" data-export-row data-status="{{ item.status_class }}" data-text="{{ group.title }} {{ item.title }} {{ item.description }}">
+                                        <span class="export-row-accent" aria-hidden="true"></span>
+                                        <div class="export-main">
+                                            <strong>{{ item.title }}</strong>
+                                            <span>{{ item.description }}</span>
+                                        </div>
+                                        <span class="export-count">{{ item.count }}</span>
+                                        <span class="admin-chip admin-chip-{{ item.status_class }}">{{ item.status_label }}</span>
+                                        <strong class="export-download">Excel</strong>
+                                    </a>
+                                {% endfor %}
+                            </div>
+                        </section>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <aside class="exports-side">
+                <section class="exports-side-card">
+                    <div class="admin-section-title compact">
+                        <div>
+                            <h2>Контроль</h2>
+                            <p>Что проверить перед выгрузкой.</p>
+                        </div>
+                    </div>
+                    <div class="admin-status-list">
+                        <div class="admin-status-row row-ok">
+                            <span>Сотрудники</span>
+                            <strong>статусы и телефоны</strong>
+                        </div>
+                        <div class="admin-status-row row-warning">
+                            <span>Доступы</span>
+                            <strong>пинкоды и входы</strong>
+                        </div>
+                        <div class="admin-status-row row-neutral">
+                            <span>Журнал</span>
+                            <strong>аудит действий</strong>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="exports-side-card">
+                    <div class="admin-section-title compact">
+                        <div>
+                            <h2>Переходы</h2>
+                            <p>Основные источники данных.</p>
+                        </div>
+                    </div>
+                    <div class="exports-side-actions">
+                        <a class="admin-button admin-button-primary" href="{% url 'system_admin_employees' %}">Сотрудники</a>
+                        <a class="admin-button admin-button-secondary" href="{% url 'system_admin_logs' %}">Журнал</a>
+                        <a class="admin-button admin-button-secondary" href="{% url 'system_admin_conflicts' %}">Конфликты</a>
+                    </div>
+                </section>
+            </aside>
+        </section>
+    </main>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    var search = document.querySelector('[data-export-search]');
+    var status = document.querySelector('[data-export-status]');
+    var reset = document.querySelector('[data-export-reset]');
+    var rows = Array.from(document.querySelectorAll('[data-export-row]'));
+    var groups = Array.from(document.querySelectorAll('[data-export-group]'));
+    var visibleCount = document.querySelector('[data-export-visible-count]');
+    var shell = document.querySelector('[data-admin-theme]');
+    var themeToggle = document.querySelector('[data-admin-theme-toggle]');
+
+    function setAdminTheme(theme) {
+        if (!shell) return;
+        var isNight = theme === 'night';
+        shell.classList.toggle('admin-night', isNight);
+        shell.classList.toggle('admin-day', !isNight);
+        if (themeToggle) themeToggle.setAttribute('data-theme-icon', isNight ? 'moon' : 'sun');
+        try {
+            window.localStorage.setItem('admin-theme', isNight ? 'night' : 'day');
+        } catch (error) {
+            return;
+        }
+    }
+
+    function normalize(value) {
+        return (value || '').toString().trim().toLowerCase();
+    }
+
+    function applyFilters() {
+        var query = normalize(search ? search.value : '');
+        var selectedStatus = status ? status.value : '';
+        var shown = 0;
+        rows.forEach(function (row) {
+            var matchesQuery = !query || normalize(row.dataset.text).indexOf(query) !== -1;
+            var matchesStatus = !selectedStatus || row.dataset.status === selectedStatus;
+            var isVisible = matchesQuery && matchesStatus;
+            row.hidden = !isVisible;
+            if (isVisible) shown += 1;
+        });
+        groups.forEach(function (group) {
+            var groupRows = Array.from(group.querySelectorAll('[data-export-row]'));
+            group.hidden = groupRows.every(function (row) { return row.hidden; });
+        });
+        if (visibleCount) visibleCount.textContent = shown + ' видно';
+    }
+
+    if (search) search.addEventListener('input', applyFilters);
+    if (status) status.addEventListener('input', applyFilters);
+    if (reset) {
+        reset.addEventListener('click', function () {
+            if (search) search.value = '';
+            if (status) status.value = '';
+            applyFilters();
+        });
+    }
+    if (shell) {
+        var savedTheme = 'day';
+        try {
+            savedTheme = window.localStorage.getItem('admin-theme') || 'day';
+        } catch (error) {
+            savedTheme = 'day';
+        }
+        setAdminTheme(savedTheme);
+    }
+    if (themeToggle) {
+        themeToggle.addEventListener('click', function () {
+            setAdminTheme(shell && shell.classList.contains('admin-night') ? 'day' : 'night');
+        });
+    }
+    applyFilters();
+});
+</script>
+{% endblock %}

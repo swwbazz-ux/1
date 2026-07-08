@@ -1,0 +1,225 @@
+{% extends "base.html" %}
+
+{% block title %}Админка MVP{% endblock %}
+{% block body_class %}system-admin-dashboard-screen{% endblock %}
+
+{% block body %}
+<div class="admin-shell admin-exports-shell admin-dashboard-shell admin-day" data-admin-theme>
+    <header class="admin-console-header" aria-label="Административная шапка">
+        <section class="admin-console-identity">
+            <span class="admin-console-avatar">{{ access.employee.full_name|first }}</span>
+            <span>
+                <strong>{{ access.employee.full_name }}</strong>
+                <em>Системный администратор</em>
+            </span>
+        </section>
+
+        <section class="admin-console-main">
+            <div class="admin-console-title">
+                <span>Админка MVP</span>
+                <h1>Сводка</h1>
+                <p>Состояние сотрудников, доступов, справочников и административных рисков.</p>
+            </div>
+            <nav class="admin-console-nav" aria-label="Разделы админки">
+                <a class="is-active" href="{% url 'system_admin_dashboard' %}">Сводка</a>
+                <a href="{% url 'system_admin_employees' %}">Сотрудники</a>
+                <a href="{% url 'system_admin_references' %}">Справочники</a>
+                <a href="{% url 'system_admin_conflicts' %}">Конфликты</a>
+                <a href="{% url 'system_admin_logs' %}">Журнал</a>
+                <a href="{% url 'system_admin_exports' %}">Выгрузки</a>
+            </nav>
+        </section>
+
+        <section class="admin-console-actions">
+            <button type="button" class="admin-theme-button" data-admin-theme-toggle title="День / Ночь">Д/Н</button>
+            <a class="admin-utility-link" href="{% url 'role_home' %}">Назад</a>
+            <a class="admin-utility-link" href="{% url 'logout' %}">Выйти</a>
+        </section>
+    </header>
+
+    <main class="admin-console-page admin-dashboard-page">
+        {% for message in messages %}
+            <div class="message success">{{ message }}</div>
+        {% endfor %}
+
+        <section class="dashboard-metrics" aria-label="Состояние системы">
+            <a class="dashboard-metric metric-neutral" href="{% url 'system_admin_employees' %}">
+                <span>Сотрудников</span>
+                <strong>{{ employee_total }}</strong>
+                <small>всего в базе</small>
+            </a>
+            <a class="dashboard-metric metric-ok" href="{% url 'system_admin_employees' %}?status=active">
+                <span>Активные</span>
+                <strong>{{ active_total }}</strong>
+                <small>работают сейчас</small>
+            </a>
+            <a class="dashboard-metric metric-warning" href="{% url 'system_admin_employees' %}?access_status=not_activated">
+                <span>Активация</span>
+                <strong>{{ not_activated_total }}</strong>
+                <small>ждут первого входа</small>
+            </a>
+            <a class="dashboard-metric metric-danger" href="{% url 'system_admin_conflicts' %}">
+                <span>Конфликты</span>
+                <strong>{{ open_conflicts|length }}</strong>
+                <small>открытые разборы</small>
+            </a>
+            <a class="dashboard-metric metric-danger" href="{% url 'system_admin_employees' %}?access_status=blocked">
+                <span>Блокировки</span>
+                <strong>{{ blocked_total }}</strong>
+                <small>доступ закрыт</small>
+            </a>
+            <a class="dashboard-metric metric-neutral" href="{% url 'system_admin_employees' %}?access_status=deactivated">
+                <span>Архив</span>
+                <strong>{{ deactivated_total }}</strong>
+                <small>деактивированы</small>
+            </a>
+        </section>
+
+        <section class="dashboard-top-grid">
+            <div class="dashboard-panel dashboard-system-panel">
+                <div class="admin-section-title">
+                    <div>
+                        <h2>Состояние системы</h2>
+                        <p>Короткая рабочая сводка по точкам, которые требуют внимания.</p>
+                    </div>
+                    <span class="admin-chip admin-chip-info">контроль</span>
+                </div>
+                <div class="admin-status-list">
+                    <a class="admin-status-row row-warning" href="{% url 'system_admin_employees' %}?access_status=not_activated">
+                        <span>Новые регистрации</span>
+                        <strong>{{ not_activated_total }} ожидают проверки</strong>
+                    </a>
+                    <a class="admin-status-row row-danger" href="{% url 'system_admin_conflicts' %}">
+                        <span>Административные конфликты</span>
+                        <strong>{{ open_conflicts|length }} открыто</strong>
+                    </a>
+                    <a class="admin-status-row row-ok" href="{% url 'system_admin_references' %}">
+                        <span>Справочники</span>
+                        <strong>{{ reference_counts|length }} разделов</strong>
+                    </a>
+                </div>
+            </div>
+
+            <div class="dashboard-panel dashboard-quick-panel">
+                <div class="admin-section-title">
+                    <div>
+                        <h2>Быстрые действия</h2>
+                        <p>Основные переходы администратора первого этапа.</p>
+                    </div>
+                </div>
+                <div class="dashboard-quick-actions">
+                    <a class="admin-button admin-button-primary" href="{% url 'system_admin_employee_create' %}">Создать сотрудника</a>
+                    <a class="admin-button admin-button-secondary" href="{% url 'system_admin_employees' %}">Список сотрудников</a>
+                    <a class="admin-button admin-button-secondary" href="{% url 'system_admin_references' %}">Справочники</a>
+                    <a class="admin-button admin-button-danger" href="{% url 'system_admin_conflicts' %}">Конфликты</a>
+                    <a class="admin-button admin-button-secondary" href="{% url 'system_admin_logs' %}">Журнал действий</a>
+                    <a class="admin-button admin-button-secondary" href="{% url 'system_admin_exports' %}">Выгрузки</a>
+                    <form method="post"
+                          action="{% url 'system_admin_reset_shift_test_data' %}"
+                          class="dashboard-reset-form"
+                          data-confirm="Сбросить тестовые показатели смены? Будут удалены рейсы, простои, оперативные события и журналы действий. Сотрудники, техника, справочники и планы останутся."
+                          data-confirm-delay="3"
+                          data-confirm-accept="Сбросить">
+                        {% csrf_token %}
+                        <button class="admin-button admin-button-danger" type="submit">
+                            Сброс тестов{% if shift_fact_total %} · {{ shift_fact_total }}{% endif %}
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </section>
+
+        <section class="dashboard-workspace">
+            <div class="dashboard-main-column">
+                <section class="dashboard-panel dashboard-list-panel">
+                    <div class="admin-section-title">
+                        <div>
+                            <h2>Последние действия</h2>
+                            <p>История важных изменений в админке.</p>
+                        </div>
+                        <a class="admin-chip admin-chip-info" href="{% url 'system_admin_logs' %}">журнал</a>
+                    </div>
+                    <div class="dashboard-row-list">
+                        {% for log in recent_logs %}
+                            <a class="dashboard-row row-neutral" href="{% url 'system_admin_logs' %}">
+                                <span class="dashboard-row-main">{{ log.created_at|date:"H:i" }} · {{ log.action }}</span>
+                                <span>{{ log.actor.full_name|default:"-" }}</span>
+                                <strong>
+                                    {% if log.object_type == 'EmployeeAccess' %}
+                                        доступ
+                                    {% elif log.object_type == 'Employee' %}
+                                        сотрудник
+                                    {% elif log.object_type == 'AdminConflict' %}
+                                        конфликт
+                                    {% else %}
+                                        журнал
+                                    {% endif %}
+                                </strong>
+                            </a>
+                        {% empty %}
+                            <div class="dashboard-empty">Действий пока нет.</div>
+                        {% endfor %}
+                    </div>
+                </section>
+
+            </div>
+
+            <aside class="dashboard-side-column">
+                <section class="dashboard-panel dashboard-list-panel dashboard-recent-employees-panel">
+                    <div class="admin-section-title compact">
+                        <div>
+                            <h2>Последние сотрудники</h2>
+                            <p>Недавно созданные карточки.</p>
+                        </div>
+                    </div>
+                    <div class="dashboard-row-list compact">
+                        {% for employee in recent_employees|slice:":4" %}
+                            <a class="dashboard-row status-{{ employee.status }}" href="{% url 'system_admin_employee_detail' employee.id %}">
+                                <span class="dashboard-row-main">{{ employee.full_name }}</span>
+                                <span>{{ employee.get_status_display }}</span>
+                                <strong>{{ employee.phone|default:"-" }}</strong>
+                            </a>
+                        {% empty %}
+                            <div class="dashboard-empty">Сотрудников пока нет.</div>
+                        {% endfor %}
+                    </div>
+                </section>
+            </aside>
+        </section>
+    </main>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    var shell = document.querySelector('[data-admin-theme]');
+    var themeToggle = document.querySelector('[data-admin-theme-toggle]');
+
+    function setAdminTheme(theme) {
+        if (!shell) return;
+        var isNight = theme === 'night';
+        shell.classList.toggle('admin-night', isNight);
+        shell.classList.toggle('admin-day', !isNight);
+        if (themeToggle) themeToggle.setAttribute('data-theme-icon', isNight ? 'moon' : 'sun');
+        try {
+            window.localStorage.setItem('admin-theme', isNight ? 'night' : 'day');
+        } catch (error) {
+            return;
+        }
+    }
+
+    var savedTheme = 'day';
+    try {
+        savedTheme = window.localStorage.getItem('admin-theme') || 'day';
+    } catch (error) {
+        savedTheme = 'day';
+    }
+    setAdminTheme(savedTheme);
+
+    if (themeToggle) {
+        themeToggle.addEventListener('click', function () {
+            setAdminTheme(shell && shell.classList.contains('admin-night') ? 'day' : 'night');
+        });
+    }
+});
+</script>
+{% endblock %}

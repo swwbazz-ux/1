@@ -43,4 +43,34 @@ class HaulAssignment(models.Model):
     def __str__(self):
         return f'{self.truck} под {self.excavator}'
 
+class ExcavatorPlacement(models.Model):
+    class Zone(models.TextChoices):
+        ACTIVE = 'active', 'Активная смена'
+        INACTIVE = 'inactive', 'Неактивная смена'
+
+    excavator = models.OneToOneField(
+        'references.Equipment',
+        verbose_name='Экскаватор',
+        on_delete=models.CASCADE,
+        related_name='excavator_placement',
+    )
+    zone = models.CharField('Зона', max_length=16, choices=Zone.choices, default=Zone.INACTIVE)
+    changed_by = models.ForeignKey(
+        'users.Employee',
+        verbose_name='Кто изменил',
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+    )
+    changed_at = models.DateTimeField('Изменено', auto_now=True)
+
+    class Meta:
+        verbose_name = 'Размещение экскаватора'
+        verbose_name_plural = 'Размещения экскаваторов'
+        ordering = ['excavator__garage_number']
+
+    def __str__(self):
+        return f'{self.excavator} / {self.get_zone_display()}'
+
+
 # Create your models here.

@@ -1,13 +1,20 @@
+﻿import json
 from datetime import datetime, timedelta
 from decimal import Decimal
 from io import BytesIO
+from tempfile import TemporaryDirectory
 
+from django.core.files.base import ContentFile
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
-from django.test import TestCase
+from django.test import TestCase, override_settings
+from django.urls import reverse
 from django.utils import timezone
 from openpyxl import load_workbook
+from PIL import Image
 
-from assignments.models import AssignmentStatus, HaulAssignment
+from assignments.models import AssignmentStatus, ExcavatorPlacement, HaulAssignment
+from core.models import OperationalStateEvent
 from downtimes.models import DowntimeEvent, DowntimeReason
 from references.models import (
     Dormitory,
@@ -21,10 +28,11 @@ from references.models import (
     TruckCapacityRule,
 )
 from reports.models import PilotFeedback, ReportTemplate, ReportType
-from shifts.models import EmployeeShift
-from trips.models import DispatcherActionLog, DispatcherActionType, Trip, TripStatus
+from shifts.models import EmployeeShift, EquipmentShiftPlan, ShiftPlan
+from trips.models import DispatcherActionLog, DispatcherActionType, Trip, TripClientAction, TripStatus
 
-from .models import DriverPrimaryRegistration, Employee, EmployeeAccess, Role
+from .forms import AdminEmployeeEditForm
+from .models import AdminActionLog, AdminConflict, DriverPrimaryRegistration, Employee, EmployeeAccess, Role
 
 
 class AccessLoginTests(TestCase):
@@ -37,6 +45,28 @@ class AccessLoginTests(TestCase):
             access_code='2000',
         )
 
+    def create_registered_driver_shift(self, truck=None):
+        truck_type = truck.equipment_type if truck else EquipmentType.objects.create(name='Самосвал')
+        truck = truck or Equipment.objects.create(equipment_type=truck_type, garage_number='10')
+        dormitory = Dormitory.objects.create(number='5')
+        block = DormitoryBlock.objects.create(dormitory=dormitory, name='Блок 1')
+        section = DormitorySection.objects.create(block=block, name='А')
+        DriverPrimaryRegistration.objects.create(
+            employee=self.employee,
+            dormitory_section=section,
+        )
+        EmployeeShift.objects.create(
+            employee=self.employee,
+            shift_type='day',
+            equipment=truck,
+            opened_at=timezone.now(),
+            opened_by=self.employee,
+        )
+        session = self.client.session
+        session['employee_access_id'] = self.access.id
+        session.save()
+        return truck
+
     def test_registered_driver_opens_shift_screen(self):
         truck_type = EquipmentType.objects.create(name='Самосвал')
         truck = Equipment.objects.create(equipment_type=truck_type, garage_number='10')
@@ -45,29 +75,903 @@ class AccessLoginTests(TestCase):
         section = DormitorySection.objects.create(block=block, name='А')
         DriverPrimaryRegistration.objects.create(
             employee=self.employee,
-            shift_type='day',
-            truck=truck,
             dormitory_section=section,
         )
 
         response = self.client.post('/', {'access_code': '2000'}, follow=True, HTTP_HOST='localhost')
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'Смена водителя')
+        self.assertContains(response, 'Работа водителя')
         self.assertContains(response, 'Открыть смену')
         self.assertEqual(self.client.session.get('employee_access_id'), self.access.id)
+
+    def test_driver_screen_includes_own_pwa_install_metadata(self):
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        Equipment.objects.create(equipment_type=truck_type, garage_number='10')
+        dormitory = Dormitory.objects.create(number='5')
+        block = DormitoryBlock.objects.create(dormitory=dormitory, name='Блок 1')
+        section = DormitorySection.objects.create(block=block, name='А')
+        DriverPrimaryRegistration.objects.create(
+            employee=self.employee,
+            dormitory_section=section,
+        )
+        session = self.client.session
+        session['employee_access_id'] = self.access.id
+        session.save()
+
+        response = self.client.get(reverse('driver_work'), HTTP_HOST='localhost')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, reverse('driver_manifest'))
+        self.assertContains(response, 'rel="manifest"')
+        self.assertContains(response, '/driver-sw.js')
+        self.assertContains(response, 'driver-mobile-shell-v32')
+        self.assertContains(response, 'data-driver-pwa-update-modal')
+        self.assertContains(response, 'data-driver-pwa-update-badge')
+        self.assertContains(response, 'mode: "custom", path: "^/driver/(?:shift/?)?$"')
+        self.assertContains(response, 'window.applyOperationalStateRefresh')
+        self.assertContains(response, 'window.bindDriverMobileShell')
+
+    def test_driver_manifest_is_installable_pwa_manifest(self):
+        response = self.client.get(reverse('driver_manifest'), HTTP_HOST='localhost')
+        payload = response.json()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('application/manifest+json', response['Content-Type'])
+        self.assertEqual(payload['name'], 'Водитель самосвала')
+        self.assertEqual(payload['start_url'], '/driver/')
+        self.assertEqual(payload['scope'], '/driver/')
+        self.assertEqual(payload['display'], 'standalone')
+        self.assertEqual(payload['orientation'], 'portrait')
+        self.assertTrue(payload['icons'])
+
+    def test_driver_service_worker_caches_driver_assets_and_reports_version(self):
+        response = self.client.get(reverse('driver_service_worker'), HTTP_HOST='localhost')
+        script = response.content.decode('utf-8')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response['Service-Worker-Allowed'], '/driver/')
+        self.assertIn('driver-mobile-shell-v32', script)
+        self.assertIn('/driver/', script)
+        self.assertIn('/driver/shift/', script)
+        self.assertIn('/driver.webmanifest', script)
+        self.assertIn('/static/css/app.css', script)
+        self.assertIn('ignoreSearch: true', script)
+        self.assertIn('GET_VERSION', script)
+        self.assertIn('SKIP_WAITING', script)
+
+    def test_admin_opens_system_admin_dashboard(self):
+        admin_role = Role.objects.create(code='admin', name='Администратор')
+        admin_employee = Employee.objects.create(full_name='Администратор MVP', status=Employee.Status.ACTIVE)
+        EmployeeAccess.objects.create(
+            employee=admin_employee,
+            role=admin_role,
+            access_code='1000',
+            status=EmployeeAccess.Status.ACTIVATED,
+        )
+
+        login_response = self.client.post('/', {'access_code': '1000'}, follow=True, HTTP_HOST='localhost')
+        dashboard_response = self.client.get('/system-admin/', HTTP_HOST='localhost')
+
+        self.assertRedirects(login_response, '/system-admin/', target_status_code=200)
+        self.assertEqual(dashboard_response.status_code, 200)
+        self.assertContains(dashboard_response, 'Админка MVP')
+        self.assertContains(dashboard_response, 'Создать сотрудника')
+        self.assertContains(dashboard_response, 'Справочники')
+        self.assertContains(dashboard_response, 'href="/system-admin/employees/"')
+        self.assertContains(dashboard_response, 'href="/system-admin/employees/?status=active"')
+        self.assertContains(dashboard_response, 'href="/system-admin/employees/?access_status=not_activated"')
+        self.assertContains(dashboard_response, 'href="/system-admin/employees/?access_status=blocked"')
+        self.assertContains(dashboard_response, 'href="/system-admin/employees/?access_status=deactivated"')
+        self.assertContains(dashboard_response, 'Журнал действий')
+
+    def test_admin_can_reset_shift_test_data_without_deleting_base_data(self):
+        admin_role = Role.objects.create(code='admin', name='Администратор')
+        driver_role = Role.objects.create(code='driver_reset_test', name='Водитель самосвала')
+        admin_employee = Employee.objects.create(full_name='Администратор MVP', status=Employee.Status.ACTIVE)
+        driver = Employee.objects.create(full_name='Тестовый водитель', status=Employee.Status.ACTIVE)
+        admin_access = EmployeeAccess.objects.create(
+            employee=admin_employee,
+            role=admin_role,
+            access_code='1000',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+        EmployeeAccess.objects.create(
+            employee=driver,
+            role=driver_role,
+            access_code='2000',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+        equipment_type = EquipmentType.objects.create(name='Самосвал')
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        truck = Equipment.objects.create(equipment_type=equipment_type, garage_number='10')
+        excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='8')
+        rock_type = RockType.objects.create(name='Руда', density=Decimal('2.6'))
+        dump_point = DumpPoint.objects.create(name='ККД')
+        shift = EmployeeShift.objects.create(
+            employee=driver,
+            shift_type='day',
+            equipment=truck,
+            opened_at=timezone.now(),
+            opened_by=driver,
+        )
+        plan = ShiftPlan.objects.create(name='Дневной план', plan_volume_m3=Decimal('1000'))
+        downtime_reason, _ = DowntimeReason.objects.get_or_create(
+            name='Ожидание разгрузки',
+            defaults={'show_for_truck_driver': True},
+        )
+        trip = Trip.objects.create(
+            excavator=excavator,
+            truck=truck,
+            driver=driver,
+            unloading_shift=shift,
+            rock_type=rock_type,
+            dump_point=dump_point,
+            volume_m3=Decimal('49.4'),
+            tonnage=Decimal('128.44'),
+            status=TripStatus.COMPLETED,
+            completed_at=timezone.now(),
+        )
+        TripClientAction.objects.create(
+            action_type='trip_unloaded',
+            client_action_id='reset-test-action',
+            trip=trip,
+            actor=driver,
+        )
+        DispatcherActionLog.objects.create(
+            actor=admin_employee,
+            action_type=DispatcherActionType.COMPLETE_TRIP,
+            trip=trip,
+            target_summary='Тестовый рейс',
+        )
+        DowntimeEvent.objects.create(
+            equipment=truck,
+            employee=driver,
+            reason=downtime_reason,
+            started_at=timezone.now() - timedelta(minutes=20),
+            ended_at=timezone.now(),
+        )
+        OperationalStateEvent.objects.create(
+            key='production',
+            version=1,
+            event_type='trip_changed',
+            object_type='Trip',
+            object_id=str(trip.id),
+        )
+
+        session = self.client.session
+        session['employee_access_id'] = admin_access.id
+        session.save()
+        response = self.client.post(reverse('system_admin_reset_shift_test_data'), follow=True, HTTP_HOST='localhost')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(Trip.objects.count(), 0)
+        self.assertEqual(TripClientAction.objects.count(), 0)
+        self.assertEqual(DispatcherActionLog.objects.count(), 0)
+        self.assertEqual(DowntimeEvent.objects.count(), 0)
+        self.assertTrue(Employee.objects.filter(id=admin_employee.id).exists())
+        self.assertTrue(Employee.objects.filter(id=driver.id).exists())
+        self.assertTrue(Equipment.objects.filter(id=truck.id).exists())
+        self.assertTrue(Equipment.objects.filter(id=excavator.id).exists())
+        self.assertTrue(RockType.objects.filter(id=rock_type.id).exists())
+        self.assertTrue(DumpPoint.objects.filter(id=dump_point.id).exists())
+        self.assertTrue(EmployeeShift.objects.filter(id=shift.id).exists())
+        self.assertTrue(ShiftPlan.objects.filter(id=plan.id).exists())
+        self.assertTrue(OperationalStateEvent.objects.filter(event_type='test_shift_data_reset').exists())
+        self.assertTrue(AdminActionLog.objects.filter(action='Сброшены тестовые показатели смены').exists())
+
+    def test_admin_employee_list_can_filter_by_access_status(self):
+        admin_role = Role.objects.create(code='admin', name='Администратор')
+        driver_role = Role.objects.create(code='driver_access_filter', name='Водитель самосвала')
+        admin_employee = Employee.objects.create(full_name='Администратор MVP', status=Employee.Status.ACTIVE)
+        waiting_employee = Employee.objects.create(full_name='Ожидает активации', status=Employee.Status.NOT_ACTIVATED)
+        active_employee = Employee.objects.create(full_name='Активный водитель', status=Employee.Status.ACTIVE)
+        EmployeeAccess.objects.create(
+            employee=admin_employee,
+            role=admin_role,
+            access_code='1000',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+        EmployeeAccess.objects.create(
+            employee=waiting_employee,
+            role=driver_role,
+            access_code='200001',
+            status=EmployeeAccess.Status.NOT_ACTIVATED,
+            is_active=True,
+        )
+        EmployeeAccess.objects.create(
+            employee=active_employee,
+            role=driver_role,
+            access_code='200002',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+
+        self.client.post('/', {'access_code': '1000'}, follow=True, HTTP_HOST='localhost')
+        response = self.client.get('/system-admin/employees/?access_status=not_activated', HTTP_HOST='localhost')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Ожидает активации')
+        self.assertNotContains(response, 'Активный водитель')
+        self.assertContains(response, 'name="access_status"')
+
+    def test_admin_cannot_block_own_access(self):
+        admin_role = Role.objects.create(code='admin', name='Администратор')
+        admin_employee = Employee.objects.create(full_name='Администратор MVP', status=Employee.Status.ACTIVE)
+        admin_access = EmployeeAccess.objects.create(
+            employee=admin_employee,
+            role=admin_role,
+            access_code='1000',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+
+        self.client.post('/', {'access_code': '1000'}, follow=True, HTTP_HOST='localhost')
+        response = self.client.post(
+            f'/system-admin/accesses/{admin_access.id}/block/',
+            {'reason': 'Случайная самоблокировка'},
+            follow=True,
+            HTTP_HOST='localhost',
+        )
+        admin_access.refresh_from_db()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(admin_access.status, EmployeeAccess.Status.ACTIVATED)
+        self.assertTrue(admin_access.is_active)
+
+    def test_admin_cannot_deactivate_own_employee_card(self):
+        admin_role = Role.objects.create(code='admin', name='Администратор')
+        admin_employee = Employee.objects.create(full_name='Администратор MVP', status=Employee.Status.ACTIVE)
+        EmployeeAccess.objects.create(
+            employee=admin_employee,
+            role=admin_role,
+            access_code='1000',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+
+        self.client.post('/', {'access_code': '1000'}, follow=True, HTTP_HOST='localhost')
+        response = self.client.post(
+            f'/system-admin/employees/{admin_employee.id}/deactivate/',
+            follow=True,
+            HTTP_HOST='localhost',
+        )
+        admin_employee.refresh_from_db()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(admin_employee.status, Employee.Status.ACTIVE)
+        self.assertTrue(admin_employee.is_active)
+
+    def test_admin_employee_card_has_photo_upload_block(self):
+        admin_role = Role.objects.create(code='admin', name='Admin')
+        admin_employee = Employee.objects.create(full_name='Admin MVP', status=Employee.Status.ACTIVE)
+        employee = Employee.objects.create(full_name='Employee With Photo')
+        EmployeeAccess.objects.create(
+            employee=admin_employee,
+            role=admin_role,
+            access_code='1000',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+
+        self.client.post('/', {'access_code': '1000'}, follow=True, HTTP_HOST='localhost')
+        response = self.client.get(f'/system-admin/employees/{employee.id}/', HTTP_HOST='localhost')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'employee-profile-head')
+        self.assertContains(response, 'employee-photo-card')
+        self.assertContains(response, 'employee-photo-plus')
+        self.assertContains(response, 'employee-photo-controls')
+        self.assertContains(response, 'name="position"')
+        self.assertContains(response, 'Должность')
+        self.assertContains(response, 'type="file"')
+
+    def test_admin_employee_card_keeps_selected_role_and_primary_pin_status(self):
+        admin_role = Role.objects.create(code='admin', name='Администратор')
+        driver_role = Role.objects.create(code='driver_primary_pin', name='Водитель самосвала')
+        admin_employee = Employee.objects.create(full_name='Администратор MVP', status=Employee.Status.ACTIVE)
+        employee = Employee.objects.create(full_name='Водитель с доступом', status=Employee.Status.ACTIVE)
+        employee_access = EmployeeAccess.objects.create(
+            employee=employee,
+            role=driver_role,
+            access_code='246824',
+            status=EmployeeAccess.Status.NOT_ACTIVATED,
+            primary_code_issued_at=timezone.now(),
+            is_active=True,
+        )
+        EmployeeAccess.objects.create(
+            employee=admin_employee,
+            role=admin_role,
+            access_code='1000',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+
+        self.client.post('/', {'access_code': '1000'}, follow=True, HTTP_HOST='localhost')
+        response = self.client.get(f'/system-admin/employees/{employee.id}/', HTTP_HOST='localhost')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, f'<option value="{driver_role.id}" selected>', html=False)
+        self.assertContains(response, '2468')
+        self.assertContains(response, 'ожидает первого входа')
+
+        employee_access.access_code = '8642'
+        employee_access.status = EmployeeAccess.Status.ACTIVATED
+        employee_access.activated_at = timezone.now()
+        employee_access.last_login_at = timezone.now()
+        employee_access.save(update_fields=['access_code', 'status', 'activated_at', 'last_login_at'])
+
+        activated_response = self.client.get(f'/system-admin/employees/{employee.id}/', HTTP_HOST='localhost')
+
+        self.assertContains(activated_response, f'<option value="{driver_role.id}" selected>', html=False)
+        self.assertContains(activated_response, 'Пинкод активирован')
+        self.assertNotContains(activated_response, '8642')
+
+        reset_response = self.client.post(
+            f'/system-admin/employees/{employee.id}/generate-access/',
+            {'role': driver_role.id},
+            follow=True,
+            HTTP_HOST='localhost',
+        )
+        employee_access.refresh_from_db()
+
+        self.assertEqual(reset_response.status_code, 200)
+        self.assertEqual(employee_access.status, EmployeeAccess.Status.NOT_ACTIVATED)
+        self.assertIsNone(employee_access.activated_at)
+        self.assertNotEqual(employee_access.access_code, '8642')
+        self.assertContains(reset_response, employee_access.access_code)
+        self.assertContains(reset_response, 'ожидает первого входа')
+        self.assertNotContains(reset_response, '8642')
+
+    def test_admin_employee_card_with_photo_has_remove_confirmation_and_modal(self):
+        with TemporaryDirectory() as media_root:
+            with override_settings(MEDIA_ROOT=media_root):
+                admin_role = Role.objects.create(code='admin', name='Admin')
+                admin_employee = Employee.objects.create(full_name='Admin MVP', status=Employee.Status.ACTIVE)
+                employee = Employee.objects.create(full_name='Employee With Photo', status=Employee.Status.ACTIVE)
+                employee.photo.save('employee_photos/current.jpg', ContentFile(b'photo'), save=True)
+                EmployeeAccess.objects.create(
+                    employee=admin_employee,
+                    role=admin_role,
+                    access_code='1000',
+                    status=EmployeeAccess.Status.ACTIVATED,
+                    is_active=True,
+                )
+
+                self.client.post('/', {'access_code': '1000'}, follow=True, HTTP_HOST='localhost')
+                response = self.client.get(f'/system-admin/employees/{employee.id}/', HTTP_HOST='localhost')
+
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, 'employee-photo-control add')
+                self.assertContains(response, 'employee-photo-control remove')
+                self.assertContains(response, 'data-confirm="Удалить фото сотрудника?"')
+                self.assertContains(response, 'app-confirm-modal')
+                self.assertContains(response, 'data-confirm-accept')
+                self.assertContains(response, 'data-confirm-cancel')
+                self.assertNotContains(response, 'onclick="return window.confirm')
+                self.assertContains(response, 'employee-photo-modal')
+
+    def test_employee_photo_rejects_non_image_file(self):
+        employee = Employee.objects.create(full_name='Employee Photo Validation')
+        upload = SimpleUploadedFile('note.txt', b'not-image', content_type='text/plain')
+
+        form = AdminEmployeeEditForm(
+            data={'full_name': employee.full_name, 'status': Employee.Status.ACTIVE},
+            files={'photo': upload},
+            instance=employee,
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn('photo', form.errors)
+
+    def test_employee_photo_upload_is_converted_to_jpeg(self):
+        employee = Employee.objects.create(full_name='Employee Photo Compression')
+        image_buffer = BytesIO()
+        image = Image.new('RGB', (900, 700), color=(40, 180, 150))
+        image.save(image_buffer, format='PNG')
+        upload = SimpleUploadedFile('photo.png', image_buffer.getvalue(), content_type='image/png')
+
+        form = AdminEmployeeEditForm(
+            data={'full_name': employee.full_name, 'status': Employee.Status.ACTIVE},
+            files={'photo': upload},
+            instance=employee,
+        )
+
+        self.assertTrue(form.is_valid(), form.errors)
+        photo = form.cleaned_data['photo']
+        self.assertTrue(photo.name.endswith('.jpg'))
+        self.assertLessEqual(photo.size, 5 * 1024 * 1024)
+
+    def test_admin_can_replace_existing_employee_photo(self):
+        with TemporaryDirectory() as media_root:
+            with override_settings(MEDIA_ROOT=media_root):
+                admin_role = Role.objects.create(code='admin', name='Admin')
+                admin_employee = Employee.objects.create(full_name='Admin MVP', status=Employee.Status.ACTIVE)
+                employee = Employee.objects.create(full_name='Employee Replace Photo', status=Employee.Status.ACTIVE)
+                employee.photo.save('employee_photos/old.jpg', ContentFile(b'old-photo'), save=True)
+                old_photo_name = employee.photo.name
+                EmployeeAccess.objects.create(
+                    employee=admin_employee,
+                    role=admin_role,
+                    access_code='1000',
+                    status=EmployeeAccess.Status.ACTIVATED,
+                    is_active=True,
+                )
+                image_buffer = BytesIO()
+                Image.new('RGB', (700, 700), color=(120, 80, 40)).save(image_buffer, format='PNG')
+                upload = SimpleUploadedFile('new-photo.png', image_buffer.getvalue(), content_type='image/png')
+
+                self.client.post('/', {'access_code': '1000'}, follow=True, HTTP_HOST='localhost')
+                response = self.client.post(
+                    f'/system-admin/employees/{employee.id}/',
+                    {'full_name': employee.full_name, 'status': Employee.Status.ACTIVE, 'photo': upload},
+                    follow=True,
+                    HTTP_HOST='localhost',
+                )
+                employee.refresh_from_db()
+
+                self.assertEqual(response.status_code, 200)
+                self.assertNotEqual(employee.photo.name, old_photo_name)
+                self.assertTrue(employee.photo.name.endswith('.jpg'))
+                self.assertFalse(employee.photo.storage.exists(old_photo_name))
+                self.assertTrue(employee.photo.storage.exists(employee.photo.name))
+
+    def test_admin_can_remove_existing_employee_photo(self):
+        with TemporaryDirectory() as media_root:
+            with override_settings(MEDIA_ROOT=media_root):
+                admin_role = Role.objects.create(code='admin', name='Admin')
+                admin_employee = Employee.objects.create(full_name='Admin MVP', status=Employee.Status.ACTIVE)
+                employee = Employee.objects.create(full_name='Employee Remove Photo', status=Employee.Status.ACTIVE)
+                employee.photo.save('employee_photos/remove.jpg', ContentFile(b'old-photo'), save=True)
+                old_photo_name = employee.photo.name
+                EmployeeAccess.objects.create(
+                    employee=admin_employee,
+                    role=admin_role,
+                    access_code='1000',
+                    status=EmployeeAccess.Status.ACTIVATED,
+                    is_active=True,
+                )
+
+                self.client.post('/', {'access_code': '1000'}, follow=True, HTTP_HOST='localhost')
+                response = self.client.post(
+                    f'/system-admin/employees/{employee.id}/',
+                    {'remove_photo': '1'},
+                    follow=True,
+                    HTTP_HOST='localhost',
+                )
+                employee.refresh_from_db()
+
+                self.assertEqual(response.status_code, 200)
+                self.assertFalse(employee.photo)
+                self.assertFalse(employee.photo.storage.exists(old_photo_name))
+                self.assertTrue(
+                    AdminActionLog.objects.filter(
+                        object_repr=str(employee),
+                        action='Удалено фото сотрудника',
+                    ).exists()
+                )
+
+    def test_admin_opens_references_registry(self):
+        admin_role = Role.objects.create(code='admin', name='Администратор')
+        admin_employee = Employee.objects.create(full_name='Администратор MVP', status=Employee.Status.ACTIVE)
+        EmployeeAccess.objects.create(
+            employee=admin_employee,
+            role=admin_role,
+            access_code='1000',
+            status=EmployeeAccess.Status.ACTIVATED,
+        )
+        EquipmentType.objects.create(name='Самосвал')
+        RockType.objects.create(name='Руда')
+        DumpPoint.objects.create(name='ККД')
+
+        self.client.post('/', {'access_code': '1000'}, follow=True, HTTP_HOST='localhost')
+        response = self.client.get('/system-admin/references/', HTTP_HOST='localhost')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Справочники админки')
+        self.assertContains(response, 'Виды техники')
+        self.assertContains(response, 'Породы')
+        self.assertContains(response, 'Точки разгрузки')
+        self.assertContains(response, 'Сменные планы')
+        self.assertContains(response, 'Планы техники')
+        self.assertContains(response, '/admin/references/equipmenttype/')
+        self.assertContains(response, '/system-admin/references/equipment/')
+        self.assertContains(response, '/system-admin/references/shift-plans/')
+        self.assertContains(response, '/system-admin/references/equipment-shift-plans/')
+
+        detail_response = self.client.get('/system-admin/references/equipment/', HTTP_HOST='localhost')
+
+        self.assertEqual(detail_response.status_code, 200)
+        self.assertContains(detail_response, 'reference-detail-page')
+        self.assertContains(detail_response, '/admin/references/equipment/')
+
+    def test_admin_saves_shift_plans_from_reference_screen(self):
+        admin_role = Role.objects.create(code='admin', name='Администратор')
+        admin_employee = Employee.objects.create(full_name='Администратор MVP', status=Employee.Status.ACTIVE)
+        EmployeeAccess.objects.create(
+            employee=admin_employee,
+            role=admin_role,
+            access_code='1000',
+            status=EmployeeAccess.Status.ACTIVATED,
+        )
+        equipment_type = EquipmentType.objects.create(name='Самосвал')
+        equipment = Equipment.objects.create(equipment_type=equipment_type, garage_number='25', is_active=True)
+
+        self.client.post('/', {'access_code': '1000'}, follow=True, HTTP_HOST='localhost')
+        shift_plan_page = self.client.get('/system-admin/references/shift-plans/', HTTP_HOST='localhost')
+        self.assertContains(shift_plan_page, 'Тип плана')
+        self.assertContains(shift_plan_page, 'План объема, м3')
+        self.assertNotContains(shift_plan_page, 'Дата смены')
+        self.assertNotContains(shift_plan_page, 'План тоннажа')
+        self.assertNotContains(shift_plan_page, 'План рейсов')
+
+        shift_plan_response = self.client.post(
+            '/system-admin/references/shift-plans/',
+            {
+                'plan_scope': 'day_shift',
+                'name': 'План дневной смены',
+                'plan_volume_m3': '2500.00',
+                'is_active': 'on',
+                'comment': 'Ручной план администратора',
+            },
+            HTTP_HOST='localhost',
+        )
+        shift_plan = ShiftPlan.objects.get(name='План дневной смены')
+
+        self.assertEqual(shift_plan_response.status_code, 302)
+        self.assertEqual(shift_plan.plan_scope, 'day_shift')
+        self.assertEqual(shift_plan.plan_volume_m3, Decimal('2500.00'))
+        self.assertIsNone(shift_plan.plan_trips)
+        self.assertIsNone(shift_plan.plan_tonnage)
+
+        equipment_plan_response = self.client.post(
+            '/system-admin/references/equipment-shift-plans/',
+            {
+                'shift_plan': str(shift_plan.id),
+                'equipment': str(equipment.id),
+                'employee': '',
+                'plan_trips': '20',
+                'plan_volume_m3': '500.00',
+                'calculation_mode': 'trips',
+                'is_active': 'on',
+                'comment': 'План самосвала',
+            },
+            HTTP_HOST='localhost',
+        )
+        equipment_plan = EquipmentShiftPlan.objects.get(shift_plan=shift_plan, equipment=equipment)
+
+        self.assertEqual(equipment_plan_response.status_code, 302)
+        self.assertEqual(equipment_plan.plan_trips, 20)
+        self.assertIsNone(equipment_plan.plan_tonnage)
+        self.assertEqual(equipment_plan.calculation_mode, 'trips')
+
+    def test_reference_detail_save_keeps_selected_record_and_filters(self):
+        admin_role = Role.objects.create(code='admin', name='Администратор')
+        admin_employee = Employee.objects.create(full_name='Администратор MVP', status=Employee.Status.ACTIVE)
+        EmployeeAccess.objects.create(
+            employee=admin_employee,
+            role=admin_role,
+            access_code='1000',
+            status=EmployeeAccess.Status.ACTIVATED,
+        )
+        equipment_type = EquipmentType.objects.create(name='Самосвал')
+        equipment = Equipment.objects.create(equipment_type=equipment_type, garage_number='A-101', is_active=True)
+
+        self.client.post('/', {'access_code': '1000'}, follow=True, HTTP_HOST='localhost')
+        response = self.client.post(
+            f'/system-admin/references/equipment/?q=A&status=active&edit={equipment.id}',
+            {
+                'action': 'save',
+                'record_id': str(equipment.id),
+                'equipment_type': str(equipment_type.id),
+                'model': '',
+                'garage_number': 'A-102',
+                'vin': '',
+                'is_own': 'on',
+                'is_active': 'on',
+            },
+            HTTP_HOST='localhost',
+        )
+        equipment.refresh_from_db()
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(equipment.garage_number, 'A-102')
+        self.assertIn(f'/system-admin/references/equipment/?q=A&status=active&edit={equipment.id}', response['Location'])
+
+    def test_admin_opens_conflicts_registry(self):
+        admin_role = Role.objects.create(code='admin', name='Администратор')
+        admin_employee = Employee.objects.create(full_name='Администратор MVP', status=Employee.Status.ACTIVE)
+        EmployeeAccess.objects.create(
+            employee=admin_employee,
+            role=admin_role,
+            access_code='1000',
+            status=EmployeeAccess.Status.ACTIVATED,
+        )
+        employee = Employee.objects.create(full_name='Сотрудник с конфликтом')
+        AdminConflict.objects.create(
+            employee=employee,
+            role=admin_role,
+            conflict_type='Тестовый конфликт',
+            process='Админка MVP',
+            description='Проверка журнала конфликтов',
+        )
+
+        self.client.post('/', {'access_code': '1000'}, follow=True, HTTP_HOST='localhost')
+        response = self.client.get('/system-admin/conflicts/', HTTP_HOST='localhost')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Конфликты админки')
+        self.assertContains(response, 'Тестовый конфликт')
+        self.assertContains(response, 'Сотрудник с конфликтом')
+        self.assertContains(response, 'Excel')
+
+    def test_admin_updates_conflict_status(self):
+        admin_role = Role.objects.create(code='admin', name='Администратор')
+        admin_employee = Employee.objects.create(full_name='Администратор MVP', status=Employee.Status.ACTIVE)
+        EmployeeAccess.objects.create(
+            employee=admin_employee,
+            role=admin_role,
+            access_code='1000',
+            status=EmployeeAccess.Status.ACTIVATED,
+        )
+        conflict = AdminConflict.objects.create(
+            employee=admin_employee,
+            role=admin_role,
+            conflict_type='Проверка статуса',
+            process='Админка MVP',
+            description='Проверка смены статуса конфликта',
+        )
+
+        self.client.post('/', {'access_code': '1000'}, follow=True, HTTP_HOST='localhost')
+        response = self.client.post(
+            f'/system-admin/conflicts/{conflict.id}/in-progress/',
+            follow=True,
+            HTTP_HOST='localhost',
+        )
+        conflict.refresh_from_db()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(conflict.status, AdminConflict.Status.IN_PROGRESS)
+        self.assertEqual(conflict.resolved_by, admin_employee)
+        self.assertIsNotNone(conflict.resolved_at)
+        self.assertTrue(AdminActionLog.objects.filter(action='Изменен статус административного конфликта').exists())
+
+    def test_admin_opens_action_log_registry(self):
+        admin_role = Role.objects.create(code='admin', name='Администратор')
+        admin_employee = Employee.objects.create(full_name='Администратор MVP', status=Employee.Status.ACTIVE)
+        EmployeeAccess.objects.create(
+            employee=admin_employee,
+            role=admin_role,
+            access_code='1000',
+            status=EmployeeAccess.Status.ACTIVATED,
+        )
+        AdminActionLog.objects.create(
+            actor=admin_employee,
+            action='Тестовое действие',
+            object_type='Employee',
+            object_repr='Тестовый объект',
+            comment='Проверка журнала действий',
+        )
+
+        self.client.post('/', {'access_code': '1000'}, follow=True, HTTP_HOST='localhost')
+        response = self.client.get('/system-admin/logs/?q=Тестовое', HTTP_HOST='localhost')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Журнал действий админки')
+        self.assertContains(response, 'Тестовое действие')
+        self.assertContains(response, 'Тестовый объект')
+        self.assertContains(response, 'Excel')
+
+    def test_admin_creates_employee_with_primary_pin_and_exports_accesses(self):
+        admin_role = Role.objects.create(code='admin', name='Администратор')
+        driver_role = self.role
+        admin_employee = Employee.objects.create(full_name='Администратор MVP', status=Employee.Status.ACTIVE)
+        EmployeeAccess.objects.create(
+            employee=admin_employee,
+            role=admin_role,
+            access_code='1000',
+            status=EmployeeAccess.Status.ACTIVATED,
+        )
+
+        self.client.post('/', {'access_code': '1000'}, follow=True, HTTP_HOST='localhost')
+        create_response = self.client.post(
+            '/system-admin/employees/create/',
+            {
+                'full_name': 'Новый водитель',
+                'personnel_number': '001',
+                'phone': '+79990000000',
+                'status': Employee.Status.NOT_ACTIVATED,
+                'comment': 'Первичная загрузка',
+                'role': driver_role.id,
+                'generate_access': 'on',
+            },
+            follow=True,
+            HTTP_HOST='localhost',
+        )
+
+        employee = Employee.objects.get(full_name='Новый водитель')
+        access = EmployeeAccess.objects.get(employee=employee)
+
+        self.assertEqual(create_response.status_code, 200)
+        self.assertEqual(access.role, driver_role)
+        self.assertEqual(access.status, EmployeeAccess.Status.NOT_ACTIVATED)
+        self.assertEqual(len(access.access_code), 6)
+        self.assertTrue(access.access_code.isdigit())
+        self.assertTrue(AdminActionLog.objects.filter(action='Создан сотрудник и выдан первичный пинкод').exists())
+
+        block_response = self.client.post(
+            f'/system-admin/accesses/{access.id}/block/',
+            {'reason': 'Проверка блокировки'},
+            follow=True,
+            HTTP_HOST='localhost',
+        )
+        access.refresh_from_db()
+
+        self.assertEqual(block_response.status_code, 200)
+        self.assertEqual(access.status, EmployeeAccess.Status.BLOCKED)
+        self.assertFalse(access.is_active)
+
+        export_response = self.client.get('/system-admin/export/accesses/', HTTP_HOST='localhost')
+        self.assertEqual(export_response.status_code, 200)
+        workbook = load_workbook(BytesIO(export_response.content))
+        self.assertIn('Доступы', workbook.sheetnames)
+        values = [cell.value for row in workbook['Доступы'].iter_rows() for cell in row]
+        self.assertIn('Новый водитель', values)
+        self.assertIn('Водитель самосвала', values)
+
+    def test_primary_pin_requires_activation_and_becomes_invalid(self):
+        driver_role = self.role
+        employee = Employee.objects.create(full_name='Водитель с первичным пинкодом', phone='+79000001111')
+        access = EmployeeAccess.objects.create(
+            employee=employee,
+            role=driver_role,
+            access_code='246824',
+            status=EmployeeAccess.Status.NOT_ACTIVATED,
+            primary_code_issued_at=timezone.now(),
+        )
+
+        login_response = self.client.post(
+            '/',
+            {'phone': '+79000001111', 'access_code': '246824'},
+            follow=True,
+            HTTP_HOST='localhost',
+        )
+        self.assertRedirects(login_response, '/activate-access/', target_status_code=200)
+        self.assertContains(login_response, 'Активировать доступ')
+        self.assertContains(login_response, 'name="phone"')
+        self.assertContains(login_response, 'name="new_access_code"')
+
+        activation_response = self.client.post(
+            '/activate-access/',
+            {'phone': '+7 (900) 000-11-11', 'new_access_code': '864286', 'confirm_access_code': '864286'},
+            follow=True,
+            HTTP_HOST='localhost',
+        )
+        access.refresh_from_db()
+        employee.refresh_from_db()
+
+        self.assertEqual(activation_response.status_code, 200)
+        self.assertEqual(access.access_code, '864286')
+        self.assertEqual(access.status, EmployeeAccess.Status.ACTIVATED)
+        self.assertEqual(employee.status, Employee.Status.ACTIVE)
+        self.assertIsNone(EmployeeAccess.objects.filter(access_code='246824').first())
+
+        self.client.get('/logout/', follow=True, HTTP_HOST='localhost')
+        old_code_response = self.client.post('/', {'access_code': '246824'}, follow=True, HTTP_HOST='localhost')
+        self.assertContains(old_code_response, 'Телефон или пинкод указаны неверно.')
+
+        new_code_response = self.client.post(
+            '/',
+            {'phone': '+79000001111', 'access_code': access.access_code},
+            follow=True,
+            HTTP_HOST='localhost',
+        )
+        self.assertEqual(new_code_response.status_code, 200)
+        self.assertEqual(self.client.session.get('employee_access_id'), access.id)
+
+    def test_activation_allows_same_pin_for_different_phone_numbers(self):
+        driver_role = self.role
+        first_employee = Employee.objects.create(full_name='Водитель с постоянным пинкодом', phone='+79000001111')
+        EmployeeAccess.objects.create(
+            employee=first_employee,
+            role=driver_role,
+            access_code='864286',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+        second_employee = Employee.objects.create(full_name='Водитель с первичным пинкодом', phone='+79000002222')
+        EmployeeAccess.objects.create(
+            employee=second_employee,
+            role=driver_role,
+            access_code='246824',
+            status=EmployeeAccess.Status.NOT_ACTIVATED,
+            primary_code_issued_at=timezone.now(),
+            is_active=True,
+        )
+
+        self.client.post('/', {'phone': '+79000002222', 'access_code': '246824'}, follow=True, HTTP_HOST='localhost')
+        response = self.client.post(
+            '/activate-access/',
+            {'phone': '+7 900 000-22-22', 'new_access_code': '864286', 'confirm_access_code': '864286'},
+            follow=True,
+            HTTP_HOST='localhost',
+        )
+        second_access = EmployeeAccess.objects.get(employee=second_employee)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, 'Этот пинкод нельзя использовать')
+        self.assertNotContains(response, 'Такой пинкод уже используется')
+        self.assertEqual(second_access.access_code, '864286')
+        self.assertEqual(second_access.status, EmployeeAccess.Status.ACTIVATED)
+
+    def test_admin_can_delete_employee_without_production_history(self):
+        admin_role = Role.objects.create(code='admin', name='Администратор')
+        admin_employee = Employee.objects.create(full_name='Администратор MVP', status=Employee.Status.ACTIVE)
+        EmployeeAccess.objects.create(
+            employee=admin_employee,
+            role=admin_role,
+            access_code='1000',
+            status=EmployeeAccess.Status.ACTIVATED,
+        )
+        employee = Employee.objects.create(full_name='Сотрудник без истории')
+
+        self.client.post('/', {'access_code': '1000'}, follow=True, HTTP_HOST='localhost')
+        response = self.client.post(
+            f'/system-admin/employees/{employee.id}/delete/',
+            follow=True,
+            HTTP_HOST='localhost',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Employee.objects.filter(id=employee.id).exists())
+        self.assertContains(response, 'удален')
+
+    def test_admin_cannot_delete_employee_with_production_history(self):
+        admin_role = Role.objects.create(code='admin', name='Администратор')
+        admin_employee = Employee.objects.create(full_name='Администратор MVP', status=Employee.Status.ACTIVE)
+        EmployeeAccess.objects.create(
+            employee=admin_employee,
+            role=admin_role,
+            access_code='1000',
+            status=EmployeeAccess.Status.ACTIVATED,
+        )
+        employee = Employee.objects.create(full_name='Сотрудник с историей')
+        EmployeeShift.objects.create(
+            employee=employee,
+            shift_type='day',
+            opened_at=timezone.now(),
+        )
+
+        self.client.post('/', {'access_code': '1000'}, follow=True, HTTP_HOST='localhost')
+        response = self.client.post(
+            f'/system-admin/employees/{employee.id}/delete/',
+            follow=True,
+            HTTP_HOST='localhost',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(Employee.objects.filter(id=employee.id).exists())
+        self.assertTrue(AdminConflict.objects.filter(employee=employee, conflict_type='Попытка удаления сотрудника с историей').exists())
+        self.assertContains(response, 'Удаление запрещено')
 
     def test_wrong_access_code_stays_on_login(self):
         response = self.client.post('/', {'access_code': 'wrong'}, follow=True, HTTP_HOST='localhost')
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'Доступ не найден или отключен.')
+        self.assertContains(response, 'Телефон или пинкод указаны неверно.')
         self.assertIsNone(self.client.session.get('employee_access_id'))
+        self.assertContains(response, 'login-page')
 
     def test_interface_map_opens_without_login(self):
         response = self.client.get('/interfaces/', HTTP_HOST='localhost')
 
         self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Назад')
+        self.assertContains(response, 'Главная')
+        self.assertContains(response, 'Карта интерфейсов')
         self.assertContains(response, 'Карта интерфейсов MVP')
         self.assertContains(response, '/reports/volume/')
         self.assertContains(response, '/reports/templates/')
@@ -76,6 +980,10 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, '/reports/pilot-checklist/')
         self.assertContains(response, '/reports/pilot-scenario/')
         self.assertContains(response, '/reports/pilot-feedback/')
+        self.assertContains(response, '/system-admin/employees/')
+        self.assertContains(response, '/system-admin/references/')
+        self.assertContains(response, '/system-admin/conflicts/')
+        self.assertContains(response, '/system-admin/logs/')
         self.assertContains(response, 'Excel-выгрузка витрины руководства')
         self.assertContains(response, 'Чеклист пилотной проверки отчетов')
         self.assertContains(response, 'Сценарий пилотного запуска')
@@ -208,8 +1116,6 @@ class AccessLoginTests(TestCase):
         registration_response = self.client.post(
             '/driver/registration/',
             {
-                'shift_type': 'day',
-                'truck': truck.id,
                 'dormitory_section': section.id,
             },
             follow=True,
@@ -230,13 +1136,13 @@ class AccessLoginTests(TestCase):
         self.client.post('/', {'access_code': '2000'}, follow=True, HTTP_HOST='localhost')
         self.client.post(
             '/driver/registration/',
-            {'shift_type': 'day', 'truck': truck.id, 'dormitory_section': section.id},
+            {'dormitory_section': section.id},
             follow=True,
             HTTP_HOST='localhost',
         )
         response = self.client.post(
             '/driver/shift/',
-            {'start_fuel': '100', 'start_mileage': '2500', 'start_engine_hours': '700'},
+            {'shift_type': 'day', 'truck': truck.id, 'start_fuel': '100', 'start_mileage': '2500', 'start_engine_hours': '700'},
             follow=True,
             HTTP_HOST='localhost',
         )
@@ -255,13 +1161,13 @@ class AccessLoginTests(TestCase):
         self.client.post('/', {'access_code': '2000'}, follow=True, HTTP_HOST='localhost')
         self.client.post(
             '/driver/registration/',
-            {'shift_type': 'day', 'truck': truck.id, 'dormitory_section': section.id},
+            {'dormitory_section': section.id},
             follow=True,
             HTTP_HOST='localhost',
         )
         self.client.post(
             '/driver/shift/',
-            {'start_fuel': '100', 'start_mileage': '2500', 'start_engine_hours': '700'},
+            {'shift_type': 'day', 'truck': truck.id, 'start_fuel': '100', 'start_mileage': '2500', 'start_engine_hours': '700'},
             follow=True,
             HTTP_HOST='localhost',
         )
@@ -281,7 +1187,7 @@ class AccessLoginTests(TestCase):
         self.assertEqual(shift.end_mileage, 2600)
         self.assertEqual(shift.end_engine_hours, 712)
 
-        next_open_response = self.client.get('/driver/shift/', HTTP_HOST='localhost')
+        next_open_response = self.client.get(f'/driver/shift/?truck={truck.id}', HTTP_HOST='localhost')
         self.assertContains(next_open_response, 'value="90')
         self.assertContains(next_open_response, 'value="2600')
         self.assertContains(next_open_response, 'value="712')
@@ -298,15 +1204,23 @@ class AccessLoginTests(TestCase):
         self.client.post('/', {'access_code': '2000'}, follow=True, HTTP_HOST='localhost')
         self.client.post(
             '/driver/registration/',
-            {'shift_type': 'day', 'truck': truck.id, 'dormitory_section': section.id},
+            {'dormitory_section': section.id},
+            follow=True,
+            HTTP_HOST='localhost',
+        )
+        self.client.post(
+            '/driver/shift/',
+            {'shift_type': 'day', 'truck': truck.id, 'start_fuel': '100', 'start_mileage': '2500', 'start_engine_hours': '700'},
             follow=True,
             HTTP_HOST='localhost',
         )
         assignment = HaulAssignment.objects.create(truck=truck, excavator=excavator)
 
         shift_response = self.client.get('/driver/shift/', HTTP_HOST='localhost')
-        self.assertContains(shift_response, 'Новое назначение')
-        self.assertContains(shift_response, 'Принял')
+        self.assertContains(shift_response, 'ПУСТОЙ')
+        self.assertContains(shift_response, '1')
+        self.assertNotContains(shift_response, 'Новое назначение')
+        self.assertNotContains(shift_response, 'Принять')
 
         accept_response = self.client.post(
             f'/driver/assignment/{assignment.id}/accept/',
@@ -318,6 +1232,10 @@ class AccessLoginTests(TestCase):
         self.assertEqual(accept_response.status_code, 200)
         self.assertEqual(assignment.status, AssignmentStatus.ACCEPTED)
         self.assertIsNotNone(assignment.accepted_at)
+        self.assertNotContains(accept_response, 'Новое назначение')
+        self.assertNotContains(accept_response, 'принять назначение')
+        self.assertContains(accept_response, 'ПУСТОЙ')
+        self.assertContains(accept_response, '1')
 
     def test_excavator_creates_trip_and_driver_completes_it(self):
         truck_type = EquipmentType.objects.create(name='Самосвал')
@@ -326,6 +1244,7 @@ class AccessLoginTests(TestCase):
         excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='1')
         rock = RockType.objects.create(name='Руда')
         dump_point = DumpPoint.objects.create(name='ККД')
+        skdr_point = DumpPoint.objects.create(name='СКДР')
         dormitory = Dormitory.objects.create(number='5')
         block = DormitoryBlock.objects.create(dormitory=dormitory, name='Блок 1')
         section = DormitorySection.objects.create(block=block, name='А')
@@ -343,13 +1262,13 @@ class AccessLoginTests(TestCase):
         driver_client.post('/', {'access_code': '2000'}, follow=True, HTTP_HOST='localhost')
         driver_client.post(
             '/driver/registration/',
-            {'shift_type': 'day', 'truck': truck.id, 'dormitory_section': section.id},
+            {'dormitory_section': section.id},
             follow=True,
             HTTP_HOST='localhost',
         )
         driver_client.post(
             '/driver/shift/',
-            {'start_fuel': '100', 'start_mileage': '2500', 'start_engine_hours': '700'},
+            {'shift_type': 'day', 'truck': truck.id, 'start_fuel': '100', 'start_mileage': '2500', 'start_engine_hours': '700'},
             follow=True,
             HTTP_HOST='localhost',
         )
@@ -391,11 +1310,36 @@ class AccessLoginTests(TestCase):
         self.assertContains(next_trip_form_response, 'value="3.10"')
 
         driver_shift_response = driver_client.get('/driver/shift/', HTTP_HOST='localhost')
-        self.assertContains(driver_shift_response, 'Активный рейс')
-        self.assertContains(driver_shift_response, 'Выполнено')
+        self.assertContains(driver_shift_response, 'ЗАГРУЖЕН')
+        self.assertContains(driver_shift_response, 'удерживать')
+        self.assertContains(driver_shift_response, 'Выбор точки')
+        self.assertNotContains(driver_shift_response, 'Активный рейс')
+        self.assertNotContains(driver_shift_response, 'Разгрузился')
+
+        change_point_response = driver_client.post(
+            f'/driver/trip/{trip.id}/change-unload-point/',
+            {'client_action_id': 'driver-change-point-1', 'dump_point': skdr_point.id},
+            follow=True,
+            HTTP_HOST='localhost',
+        )
+        trip.refresh_from_db()
+
+        self.assertEqual(change_point_response.status_code, 200)
+        self.assertEqual(trip.assigned_dump_point, dump_point)
+        self.assertEqual(trip.actual_dump_point, skdr_point)
+        self.assertEqual(trip.dump_point, skdr_point)
+        self.assertTrue(
+            TripClientAction.objects.filter(
+                action_type='change_actual_unload_point',
+                client_action_id='driver-change-point-1',
+                trip=trip,
+                actor=self.employee,
+            ).exists()
+        )
 
         complete_response = driver_client.post(
             f'/driver/trip/{trip.id}/complete/',
+            {'client_action_id': 'driver-unload-test-1'},
             follow=True,
             HTTP_HOST='localhost',
         )
@@ -406,6 +1350,210 @@ class AccessLoginTests(TestCase):
         self.assertEqual(trip.driver, self.employee)
         self.assertIsNotNone(trip.completed_at)
         self.assertFalse(trip.is_carryover)
+        self.assertTrue(
+            TripClientAction.objects.filter(
+                action_type='trip_unloaded',
+                client_action_id='driver-unload-test-1',
+                trip=trip,
+                actor=self.employee,
+            ).exists()
+        )
+
+    def test_driver_sees_truck_loaded_event_from_excavator_realtime_shell(self):
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        truck = Equipment.objects.create(equipment_type=truck_type, garage_number='10')
+        excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='1')
+        rock = RockType.objects.create(name='Руда')
+        dump_point = DumpPoint.objects.create(name='ККД')
+        dormitory = Dormitory.objects.create(number='5')
+        block = DormitoryBlock.objects.create(dormitory=dormitory, name='Блок 1')
+        section = DormitorySection.objects.create(block=block, name='А')
+        excavator_role = Role.objects.create(code='excavator_operator', name='Машинист экскаватора')
+        excavator_operator = Employee.objects.create(full_name='Тестовый машинист')
+        EmployeeAccess.objects.create(employee=excavator_operator, role=excavator_role, access_code='3000')
+        EmployeeShift.objects.create(
+            employee=excavator_operator,
+            shift_type='day',
+            equipment=excavator,
+            opened_at=timezone.now(),
+        )
+
+        driver_client = self.client
+        driver_client.post('/', {'access_code': '2000'}, follow=True, HTTP_HOST='localhost')
+        driver_client.post(
+            '/driver/registration/',
+            {'dormitory_section': section.id},
+            follow=True,
+            HTTP_HOST='localhost',
+        )
+        driver_client.post(
+            '/driver/shift/',
+            {
+                'shift_type': 'day',
+                'truck': truck.id,
+                'start_fuel': '100',
+                'start_mileage': '2500',
+                'start_engine_hours': '700',
+            },
+            follow=True,
+            HTTP_HOST='localhost',
+        )
+        assignment = HaulAssignment.objects.create(
+            truck=truck,
+            excavator=excavator,
+            status=AssignmentStatus.ACCEPTED,
+        )
+
+        operator_client = self.client_class(HTTP_HOST='localhost')
+        operator_client.post('/', {'access_code': '3000'}, follow=True, HTTP_HOST='localhost')
+        response = operator_client.post(
+            '/excavator/truck-loaded/',
+            data=json.dumps({
+                'client_action_id': 'truck-loaded-driver-sync-1',
+                'truck_id': truck.id,
+                'excavator_id': excavator.id,
+                'dump_point_id': dump_point.id,
+                'rock_type_id': rock.id,
+            }),
+            content_type='application/json',
+            HTTP_HOST='localhost',
+        )
+        trip = Trip.objects.get()
+        driver_shift_response = driver_client.get('/driver/shift/', HTTP_HOST='localhost')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['action'], 'truck_loaded')
+        self.assertEqual(trip.status, TripStatus.LOADED_WAITING_UNLOAD)
+        self.assertEqual(trip.assigned_dump_point, dump_point)
+        self.assertEqual(assignment.truck, truck)
+        self.assertContains(driver_shift_response, 'ЗАГРУЖЕН')
+        self.assertContains(driver_shift_response, 'ККД')
+        self.assertContains(driver_shift_response, 'window.applyOperationalStateRefresh')
+        self.assertContains(driver_shift_response, 'data-realtime-mode="custom"')
+        self.assertContains(driver_shift_response, 'driver-mobile-shell-v32')
+
+    def test_driver_downtime_buttons_are_rendered_from_server_reference(self):
+        truck = self.create_registered_driver_shift()
+        DowntimeReason.objects.all().update(show_for_truck_driver=False)
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        waiting_reason = DowntimeReason.objects.create(
+            name='Тест водитель фронт работ',
+            short_label='Фронт',
+            show_for_truck_driver=True,
+            sort_order=10,
+        )
+        truck_reason = DowntimeReason.objects.create(
+            name='Тест водитель чистка кузова',
+            short_label='Кузов',
+            equipment_type=truck.equipment_type,
+            show_for_truck_driver=True,
+            sort_order=20,
+        )
+        hidden_reason = DowntimeReason.objects.create(
+            name='Тест водитель скрытый простой',
+            short_label='Скрытый',
+            show_for_truck_driver=False,
+        )
+        excavator_reason = DowntimeReason.objects.create(
+            name='Тест водитель чужой экскаватор',
+            short_label='Забой',
+            equipment_type=excavator_type,
+            show_for_truck_driver=True,
+        )
+
+        response = self.client.get('/driver/?tab=downtimes', HTTP_HOST='localhost')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'class="driver-downtime-list"')
+        self.assertContains(response, f'data-driver-downtime-reason-id="{waiting_reason.id}"')
+        self.assertContains(response, f'name="reason_id" value="{waiting_reason.id}"')
+        self.assertContains(response, 'Фронт')
+        self.assertContains(response, f'data-driver-downtime-reason-id="{truck_reason.id}"')
+        self.assertContains(response, 'Кузов')
+        self.assertNotContains(response, hidden_reason.button_label)
+        self.assertNotContains(response, excavator_reason.button_label)
+
+    def test_driver_downtime_empty_state_uses_reference_message(self):
+        self.create_registered_driver_shift()
+        DowntimeReason.objects.all().update(show_for_truck_driver=False)
+
+        response = self.client.get('/driver/?tab=downtimes', HTTP_HOST='localhost')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Активные причины простоев для самосвалов не найдены')
+
+    def test_driver_downtime_action_validates_reason_by_workplace_and_equipment_type(self):
+        truck = self.create_registered_driver_shift()
+        DowntimeReason.objects.all().update(show_for_truck_driver=False)
+        allowed_reason = DowntimeReason.objects.create(
+            name='Тест водитель ожидание разгрузки',
+            short_label='Разгрузка',
+            show_for_truck_driver=True,
+        )
+        forbidden_reason = DowntimeReason.objects.create(
+            name='Тест водитель диагностика механика',
+            short_label='Диагностика',
+            equipment_type=truck.equipment_type,
+            show_for_truck_driver=False,
+            show_for_mechanic=True,
+        )
+
+        forbidden_response = self.client.post(
+            reverse('driver_downtime_action'),
+            {'reason_id': forbidden_reason.id},
+            follow=True,
+            HTTP_HOST='localhost',
+        )
+        allowed_response = self.client.post(
+            reverse('driver_downtime_action'),
+            {'reason_id': allowed_reason.id},
+            follow=True,
+            HTTP_HOST='localhost',
+        )
+
+        self.assertEqual(forbidden_response.status_code, 200)
+        self.assertContains(forbidden_response, 'Причина простоя не найдена')
+        self.assertEqual(DowntimeEvent.objects.count(), 1)
+        event = DowntimeEvent.objects.get()
+        self.assertEqual(event.reason, allowed_reason)
+        self.assertEqual(event.equipment, truck)
+        self.assertEqual(event.employee, self.employee)
+
+    def test_driver_downtime_reference_change_is_visible_after_server_refresh(self):
+        self.create_registered_driver_shift()
+        DowntimeReason.objects.all().update(show_for_truck_driver=False)
+        DowntimeReason.objects.create(
+            name='Тест водитель ожидание погрузки',
+            short_label='Погрузка',
+            show_for_truck_driver=True,
+        )
+
+        initial_response = self.client.get('/driver/?tab=downtimes', HTTP_HOST='localhost')
+        new_reason = DowntimeReason.objects.create(
+            name='Тест водитель климатические условия',
+            short_label='Погода',
+            show_for_truck_driver=True,
+            sort_order=30,
+        )
+        refreshed_response = self.client.get(
+            '/driver/?tab=downtimes&_driver_refresh=1',
+            HTTP_HOST='localhost',
+            HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+        )
+
+        self.assertContains(initial_response, 'Погрузка')
+        self.assertNotContains(initial_response, 'Погода')
+        self.assertContains(refreshed_response, f'data-driver-downtime-reason-id="{new_reason.id}"')
+        self.assertContains(refreshed_response, 'Погода')
+        self.assertContains(refreshed_response, 'window.applyOperationalStateRefresh')
+        self.assertTrue(
+            OperationalStateEvent.objects.filter(
+                event_type='reference_changed',
+                object_type='DowntimeReason',
+                object_id=str(new_reason.id),
+            ).exists()
+        )
 
     def test_trip_becomes_carryover_when_loading_and_unloading_shift_types_differ(self):
         truck_type = EquipmentType.objects.create(name='Самосвал')
@@ -429,13 +1577,13 @@ class AccessLoginTests(TestCase):
         self.client.post('/', {'access_code': '2000'}, follow=True, HTTP_HOST='localhost')
         self.client.post(
             '/driver/registration/',
-            {'shift_type': 'night', 'truck': truck.id, 'dormitory_section': section.id},
+            {'dormitory_section': section.id},
             follow=True,
             HTTP_HOST='localhost',
         )
         self.client.post(
             '/driver/shift/',
-            {'start_fuel': '100', 'start_mileage': '2500', 'start_engine_hours': '700'},
+            {'shift_type': 'night', 'truck': truck.id, 'start_fuel': '100', 'start_mileage': '2500', 'start_engine_hours': '700'},
             follow=True,
             HTTP_HOST='localhost',
         )
@@ -450,7 +1598,12 @@ class AccessLoginTests(TestCase):
             volume_m3='57.00',
         )
 
-        self.client.post(f'/driver/trip/{trip.id}/complete/', follow=True, HTTP_HOST='localhost')
+        self.client.post(
+            f'/driver/trip/{trip.id}/complete/',
+            {'client_action_id': 'driver-unload-carryover-1'},
+            follow=True,
+            HTTP_HOST='localhost',
+        )
         trip.refresh_from_db()
 
         self.assertEqual(trip.status, TripStatus.COMPLETED)
@@ -472,6 +1625,12 @@ class AccessLoginTests(TestCase):
         excavator_role = Role.objects.create(code='excavator_operator', name='Машинист экскаватора')
         excavator_operator = Employee.objects.create(full_name='Тестовый машинист')
         EmployeeAccess.objects.create(employee=excavator_operator, role=excavator_role, access_code='3000')
+        EmployeeShift.objects.create(
+            employee=excavator_operator,
+            shift_type='day',
+            equipment=excavator,
+            opened_at=timezone.now(),
+        )
         assignment = HaulAssignment.objects.create(truck=truck, excavator=excavator, status=AssignmentStatus.ACCEPTED)
         TruckCapacityRule.objects.create(equipment_model=truck_model, rock_type=rock, volume_m3='38.00')
 
@@ -525,6 +1684,401 @@ class AccessLoginTests(TestCase):
             'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         )
 
+    def test_dispatcher_can_open_mining_volumes_dashboard_and_export_it(self):
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        truck = Equipment.objects.create(equipment_type=truck_type, garage_number='10')
+        excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='1')
+        rock = RockType.objects.create(name='Руда')
+        dump_point = DumpPoint.objects.create(name='ККД')
+        dispatcher_role = Role.objects.create(code='dispatcher', name='Диспетчер')
+        dispatcher = Employee.objects.create(full_name='Тестовый диспетчер')
+        EmployeeAccess.objects.create(employee=dispatcher, role=dispatcher_role, access_code='5000')
+        EmployeeShift.objects.create(employee=dispatcher, shift_type='day', opened_at=timezone.now(), opened_by=dispatcher)
+        Trip.objects.create(
+            excavator=excavator,
+            truck=truck,
+            rock_type=rock,
+            dump_point=dump_point,
+            loading_horizon='245',
+            loading_block='7',
+            status=TripStatus.COMPLETED,
+            planned_volume_m3='100.00',
+            volume_m3='57.00',
+            tonnage='142.50',
+            completed_at=timezone.now(),
+        )
+
+        self.client.post('/', {'access_code': '5000'}, follow=True, HTTP_HOST='localhost')
+        response = self.client.get('/dispatcher/mining-volumes/', HTTP_HOST='localhost')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Горные объемы')
+        self.assertContains(response, '57')
+        self.assertContains(response, 'ККД')
+
+        export_response = self.client.get('/dispatcher/mining-volumes/export/', HTTP_HOST='localhost')
+        workbook = load_workbook(BytesIO(export_response.content))
+        values = [
+            cell
+            for row in workbook.active.iter_rows(values_only=True)
+            for cell in row
+            if cell not in {None, ''}
+        ]
+
+        self.assertEqual(export_response.status_code, 200)
+        self.assertEqual(
+            export_response['Content-Type'],
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+        self.assertIn('Горные объемы диспетчера', values)
+        self.assertIn('ККД', values)
+
+    def test_dispatcher_can_open_transport_dashboard_and_export_it(self):
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        truck = Equipment.objects.create(equipment_type=truck_type, garage_number='15')
+        excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='1')
+        rock = RockType.objects.create(name='Руда')
+        dump_point = DumpPoint.objects.create(name='ККД')
+        driver = Employee.objects.create(full_name='Водитель автотранспорта MVP')
+        dispatcher_role = Role.objects.create(code='dispatcher', name='Диспетчер')
+        dispatcher = Employee.objects.create(full_name='Тестовый диспетчер')
+        EmployeeAccess.objects.create(employee=dispatcher, role=dispatcher_role, access_code='5010')
+        selected_date = timezone.localdate()
+        opened_at = timezone.make_aware(datetime.combine(selected_date, datetime.min.time().replace(hour=8)))
+        closed_at = timezone.make_aware(datetime.combine(selected_date, datetime.min.time().replace(hour=12)))
+        EmployeeShift.objects.create(
+            employee=driver,
+            shift_type='day',
+            equipment=truck,
+            start_fuel=Decimal('100.00'),
+            end_fuel=Decimal('80.00'),
+            start_mileage=Decimal('2500.00'),
+            end_mileage=Decimal('2600.00'),
+            start_engine_hours=Decimal('700.00'),
+            end_engine_hours=Decimal('712.00'),
+            opened_at=opened_at,
+            closed_at=closed_at,
+        )
+        Trip.objects.create(
+            excavator=excavator,
+            truck=truck,
+            rock_type=rock,
+            dump_point=dump_point,
+            status=TripStatus.COMPLETED,
+            volume_m3='57.00',
+            tonnage='142.50',
+            completed_at=closed_at,
+        )
+
+        self.client.post('/', {'access_code': '5010'}, follow=True, HTTP_HOST='localhost')
+        response = self.client.get('/dispatcher/transport/', HTTP_HOST='localhost')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Автотранспорт')
+        self.assertContains(response, '15')
+        self.assertContains(response, 'Водитель автотранспорта MVP')
+        self.assertContains(response, '20,0')
+
+        export_response = self.client.get('/dispatcher/transport/export/', HTTP_HOST='localhost')
+        workbook = load_workbook(BytesIO(export_response.content))
+        values = [
+            cell
+            for row in workbook.active.iter_rows(values_only=True)
+            for cell in row
+            if cell not in {None, ''}
+        ]
+
+        self.assertEqual(export_response.status_code, 200)
+        self.assertEqual(
+            export_response['Content-Type'],
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+        self.assertIn('Автотранспорт диспетчера', values)
+        self.assertIn('15', values)
+        self.assertIn('Водитель автотранспорта MVP', values)
+
+    def test_dispatcher_can_open_downtimes_dashboard_and_export_it(self):
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='6')
+        truck = Equipment.objects.create(equipment_type=truck_type, garage_number='34')
+        dispatcher_role = Role.objects.create(code='dispatcher', name='Диспетчер')
+        dispatcher = Employee.objects.create(full_name='Тестовый диспетчер')
+        EmployeeAccess.objects.create(employee=dispatcher, role=dispatcher_role, access_code='5020')
+        critical_reason = DowntimeReason.objects.create(
+            name='Аварийная поломка',
+            equipment_type=excavator_type,
+            is_critical=True,
+        )
+        waiting_reason = DowntimeReason.objects.get(name='Ожидание разгрузки')
+        waiting_reason.equipment_type = truck_type
+        waiting_reason.save(update_fields=['equipment_type'])
+        selected_date = timezone.localdate()
+        started_at = timezone.make_aware(datetime.combine(selected_date, datetime.min.time().replace(hour=9)))
+        DowntimeEvent.objects.create(
+            equipment=excavator,
+            employee=dispatcher,
+            reason=critical_reason,
+            started_at=started_at,
+            comment='Демо диагностика',
+        )
+        DowntimeEvent.objects.create(
+            equipment=truck,
+            employee=dispatcher,
+            reason=waiting_reason,
+            started_at=started_at,
+            ended_at=started_at + timedelta(minutes=45),
+        )
+
+        self.client.post('/', {'access_code': '5020'}, follow=True, HTTP_HOST='localhost')
+        response = self.client.get('/dispatcher/downtimes/', HTTP_HOST='localhost')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Простои и отклонения')
+        self.assertContains(response, 'Аварийная поломка')
+        self.assertContains(response, '6')
+        self.assertContains(response, '34')
+
+        export_response = self.client.get('/dispatcher/downtimes/export/', HTTP_HOST='localhost')
+        workbook = load_workbook(BytesIO(export_response.content))
+        values = [
+            cell
+            for row in workbook.active.iter_rows(values_only=True)
+            for cell in row
+            if cell not in {None, ''}
+        ]
+
+        self.assertEqual(export_response.status_code, 200)
+        self.assertEqual(
+            export_response['Content-Type'],
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+        self.assertIn('Простои и отклонения диспетчера', values)
+        self.assertIn('Аварийная поломка', values)
+        self.assertIn('Экскаватор 6', values)
+
+    def test_dispatcher_can_open_shift_log_and_export_it(self):
+        excavator_type = EquipmentType.objects.create(name='Excavator')
+        truck_type = EquipmentType.objects.create(name='Truck')
+        excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='1')
+        truck = Equipment.objects.create(equipment_type=truck_type, garage_number='10')
+        rock = RockType.objects.create(name='Oxide')
+        dump_point = DumpPoint.objects.create(name='KKD')
+        dispatcher_role = Role.objects.create(code='dispatcher', name='Dispatcher')
+        dispatcher = Employee.objects.create(full_name='Shift log dispatcher')
+        driver = Employee.objects.create(full_name='Shift log driver')
+        EmployeeAccess.objects.create(employee=dispatcher, role=dispatcher_role, access_code='5030')
+        event_time = timezone.now()
+        trip = Trip.objects.create(
+            excavator=excavator,
+            truck=truck,
+            driver=driver,
+            rock_type=rock,
+            dump_point=dump_point,
+            loading_horizon='245',
+            loading_block='7',
+            status=TripStatus.COMPLETED,
+            volume_m3='57.00',
+            tonnage='142.50',
+            completed_at=event_time,
+        )
+        DispatcherActionLog.objects.create(
+            actor=dispatcher,
+            action_type=DispatcherActionType.COMPLETE_TRIP,
+            trip=trip,
+            target_summary='Trip 10 completed manually',
+            reason='Shift reconciliation demo',
+        )
+        reason = DowntimeReason.objects.create(name='Shift log diagnostics', equipment_type=excavator_type, is_critical=True)
+        DowntimeEvent.objects.create(
+            equipment=excavator,
+            employee=dispatcher,
+            reason=reason,
+            started_at=event_time,
+            comment='Shift timeline check',
+        )
+
+        self.client.post('/', {'access_code': '5030'}, follow=True, HTTP_HOST='localhost')
+        response = self.client.get('/dispatcher/shift-log/', HTTP_HOST='localhost')
+        export_response = self.client.get('/dispatcher/shift-log/export/', HTTP_HOST='localhost')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Trip 10 completed manually')
+        self.assertContains(response, 'Shift log diagnostics')
+        self.assertContains(response, 'Truck 10')
+        self.assertEqual(
+            export_response['Content-Type'],
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+        workbook = load_workbook(BytesIO(export_response.content))
+        values = [
+            cell
+            for row in workbook.active.iter_rows(values_only=True)
+            for cell in row
+            if cell not in {None, ''}
+        ]
+        self.assertIn('Журнал смены диспетчера', values)
+        self.assertIn('Trip 10 completed manually', values)
+        self.assertIn('Shift log diagnostics', values)
+
+    def test_dispatcher_can_open_reports_center_and_export_it(self):
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        truck = Equipment.objects.create(equipment_type=truck_type, garage_number='15')
+        excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='1')
+        rock = RockType.objects.create(name='Руда')
+        dump_point = DumpPoint.objects.create(name='ККД')
+        dispatcher_role = Role.objects.create(code='dispatcher', name='Диспетчер')
+        dispatcher = Employee.objects.create(full_name='Диспетчер отчетов')
+        driver = Employee.objects.create(full_name='Водитель отчетов')
+        EmployeeAccess.objects.create(employee=dispatcher, role=dispatcher_role, access_code='5040')
+        selected_date = timezone.localdate()
+        opened_at = timezone.make_aware(datetime.combine(selected_date, datetime.min.time().replace(hour=8)))
+        closed_at = timezone.make_aware(datetime.combine(selected_date, datetime.min.time().replace(hour=12)))
+        EmployeeShift.objects.create(
+            employee=driver,
+            shift_type='day',
+            equipment=truck,
+            start_fuel=Decimal('100.00'),
+            end_fuel=Decimal('80.00'),
+            start_mileage=Decimal('2500.00'),
+            end_mileage=Decimal('2600.00'),
+            start_engine_hours=Decimal('700.00'),
+            end_engine_hours=Decimal('712.00'),
+            opened_at=opened_at,
+            closed_at=closed_at,
+        )
+        trip = Trip.objects.create(
+            excavator=excavator,
+            truck=truck,
+            driver=driver,
+            rock_type=rock,
+            dump_point=dump_point,
+            status=TripStatus.COMPLETED,
+            planned_volume_m3='100.00',
+            volume_m3='57.00',
+            tonnage='142.50',
+            completed_at=closed_at,
+        )
+        DispatcherActionLog.objects.create(
+            actor=dispatcher,
+            action_type=DispatcherActionType.COMPLETE_TRIP,
+            trip=trip,
+            target_summary='Отчетный рейс закрыт',
+        )
+        ReportTemplate.objects.create(
+            name='Демо шаблон диспетчера',
+            report_type=ReportType.SHIFT_VOLUME,
+            columns=['truck', 'volume_m3'],
+            created_by=dispatcher,
+        )
+
+        self.client.post('/', {'access_code': '5040'}, follow=True, HTTP_HOST='localhost')
+        response = self.client.get('/dispatcher/reports/', HTTP_HOST='localhost')
+        export_response = self.client.get('/dispatcher/reports/export/', HTTP_HOST='localhost')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Отчеты диспетчера')
+        self.assertContains(response, 'Сменные объемы')
+        self.assertContains(response, 'Автотранспорт')
+        self.assertContains(response, 'Конструктор')
+        self.assertEqual(
+            export_response['Content-Type'],
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+        workbook = load_workbook(BytesIO(export_response.content))
+        values = [
+            cell
+            for row in workbook.active.iter_rows(values_only=True)
+            for cell in row
+            if cell not in {None, ''}
+        ]
+        self.assertIn('Отчеты диспетчерской', values)
+        self.assertIn('Сменные объемы', values)
+        self.assertIn('Демо шаблон диспетчера', values)
+
+    def test_dispatcher_can_open_management_showcase_and_export_it(self):
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        truck = Equipment.objects.create(equipment_type=truck_type, garage_number='15')
+        excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='1')
+        rock = RockType.objects.create(name='Руда')
+        dump_point = DumpPoint.objects.create(name='ККД')
+        dispatcher_role = Role.objects.create(code='dispatcher', name='Диспетчер')
+        dispatcher = Employee.objects.create(full_name='Диспетчер витрины')
+        driver = Employee.objects.create(full_name='Водитель витрины')
+        EmployeeAccess.objects.create(employee=dispatcher, role=dispatcher_role, access_code='5050')
+        selected_date = timezone.localdate()
+        opened_at = timezone.make_aware(datetime.combine(selected_date, datetime.min.time().replace(hour=8)))
+        closed_at = timezone.make_aware(datetime.combine(selected_date, datetime.min.time().replace(hour=12)))
+        EmployeeShift.objects.create(
+            employee=driver,
+            shift_type='day',
+            equipment=truck,
+            start_fuel=Decimal('100.00'),
+            end_fuel=None,
+            start_mileage=Decimal('2500.00'),
+            end_mileage=None,
+            start_engine_hours=Decimal('700.00'),
+            end_engine_hours=None,
+            opened_at=opened_at,
+        )
+        trip = Trip.objects.create(
+            excavator=excavator,
+            truck=truck,
+            driver=driver,
+            rock_type=rock,
+            dump_point=dump_point,
+            status=TripStatus.COMPLETED,
+            planned_volume_m3='100.00',
+            volume_m3='96.00',
+            tonnage='240.00',
+            loading_horizon='245',
+            loading_block='7',
+            completed_at=closed_at,
+        )
+        DispatcherActionLog.objects.create(
+            actor=dispatcher,
+            action_type=DispatcherActionType.COMPLETE_TRIP,
+            trip=trip,
+            target_summary='Рейс витрины закрыт',
+        )
+        reason = DowntimeReason.objects.create(name='Диагностика витрины', equipment_type=truck_type, is_critical=True)
+        DowntimeEvent.objects.create(
+            equipment=truck,
+            employee=dispatcher,
+            reason=reason,
+            started_at=opened_at,
+            comment='Проверка витрины',
+        )
+
+        self.client.post('/', {'access_code': '5050'}, follow=True, HTTP_HOST='localhost')
+        response = self.client.get('/dispatcher/management/', HTTP_HOST='localhost')
+        export_response = self.client.get('/dispatcher/management/export/', HTTP_HOST='localhost')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Витрина диспетчерской')
+        self.assertContains(response, 'Итог смены')
+        self.assertContains(response, 'Комплексы')
+        self.assertContains(response, 'ККД')
+        self.assertEqual(
+            export_response['Content-Type'],
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+        workbook = load_workbook(BytesIO(export_response.content))
+        values = [
+            cell
+            for row in workbook.active.iter_rows(values_only=True)
+            for cell in row
+            if cell not in {None, ''}
+        ]
+        self.assertIn('Витрина диспетчерской', values)
+        self.assertIn('Итог смены', values)
+        self.assertIn('К-1', values)
+        self.assertIn('ККД', values)
+
     def test_dispatcher_opens_control_panel_with_active_trips_and_pending_assignments(self):
         truck_type = EquipmentType.objects.create(name='Самосвал')
         excavator_type = EquipmentType.objects.create(name='Экскаватор')
@@ -536,6 +2090,7 @@ class AccessLoginTests(TestCase):
         dispatcher_role = Role.objects.create(code='dispatcher', name='Диспетчер')
         dispatcher = Employee.objects.create(full_name='Тестовый диспетчер')
         EmployeeAccess.objects.create(employee=dispatcher, role=dispatcher_role, access_code='5000')
+        EmployeeShift.objects.create(employee=dispatcher, shift_type='day', opened_at=timezone.now(), opened_by=dispatcher)
         Trip.objects.create(
             excavator=excavator,
             truck=truck,
@@ -610,6 +2165,7 @@ class AccessLoginTests(TestCase):
         dispatcher_role = Role.objects.create(code='dispatcher', name='Диспетчер')
         dispatcher = Employee.objects.create(full_name='Тестовый диспетчер')
         EmployeeAccess.objects.create(employee=dispatcher, role=dispatcher_role, access_code='5000')
+        EmployeeShift.objects.create(employee=dispatcher, shift_type='day', opened_at=timezone.now(), opened_by=dispatcher)
         HaulAssignment.objects.create(
             truck=truck,
             excavator=excavator,
@@ -623,17 +2179,90 @@ class AccessLoginTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'Принятых назначений в работе сейчас нет.')
 
+    def test_dispatcher_cannot_change_complexes_without_open_shift(self):
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        truck = Equipment.objects.create(equipment_type=truck_type, garage_number='10')
+        excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='1')
+        dispatcher_role = Role.objects.create(code='dispatcher', name='Диспетчер')
+        dispatcher = Employee.objects.create(full_name='Тестовый диспетчер')
+        access = EmployeeAccess.objects.create(employee=dispatcher, role=dispatcher_role, access_code='5000')
+        ExcavatorPlacement.objects.create(excavator=excavator, zone=ExcavatorPlacement.Zone.INACTIVE)
+        session = self.client.session
+        session['employee_access_id'] = access.id
+        session.save()
+
+        response = self.client.post(
+            '/dispatcher/control/truck/assign/',
+            data=json.dumps({
+                'action': 'assign',
+                'truck_id': truck.id,
+                'excavator_id': excavator.id,
+            }),
+            content_type='application/json',
+            HTTP_HOST='localhost',
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertFalse(HaulAssignment.objects.filter(truck=truck, excavator=excavator).exists())
+        placement = ExcavatorPlacement.objects.get(excavator=excavator)
+        self.assertEqual(placement.zone, ExcavatorPlacement.Zone.INACTIVE)
+
+    def test_dispatcher_shift_metrics_start_from_open_shift(self):
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        truck = Equipment.objects.create(equipment_type=truck_type, garage_number='10')
+        excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='1')
+        rock = RockType.objects.create(name='Руда')
+        dump_point = DumpPoint.objects.create(name='ККД')
+        dispatcher_role = Role.objects.create(code='dispatcher', name='Диспетчер')
+        dispatcher = Employee.objects.create(full_name='Тестовый диспетчер')
+        access = EmployeeAccess.objects.create(employee=dispatcher, role=dispatcher_role, access_code='5000')
+        old_trip = Trip.objects.create(
+            excavator=excavator,
+            truck=truck,
+            rock_type=rock,
+            dump_point=dump_point,
+            status=TripStatus.ACTIVE,
+            volume_m3=Decimal('57.00'),
+        )
+        old_trip.created_at = timezone.now() - timedelta(hours=2)
+        old_trip.save(update_fields=['created_at'])
+        EmployeeShift.objects.create(
+            employee=dispatcher,
+            shift_type='day',
+            opened_at=timezone.now() - timedelta(hours=1),
+            opened_by=dispatcher,
+        )
+        Trip.objects.create(
+            excavator=excavator,
+            truck=truck,
+            rock_type=rock,
+            dump_point=dump_point,
+            status=TripStatus.ACTIVE,
+            volume_m3=Decimal('22.00'),
+        )
+        session = self.client.session
+        session['employee_access_id'] = access.id
+        session.save()
+
+        response = self.client.get('/dispatcher/control/', HTTP_HOST='localhost')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context['dispatcher_dashboard']['dispatcher_kpis']['fact_tons'], '22')
+
     def test_dispatcher_service_action_preserves_current_filters(self):
-        truck_type = EquipmentType.objects.create(name='РЎР°РјРѕСЃРІР°Р»')
-        excavator_type = EquipmentType.objects.create(name='Р­РєСЃРєР°РІР°С‚РѕСЂ')
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
         truck = Equipment.objects.create(equipment_type=truck_type, garage_number='10')
         second_truck = Equipment.objects.create(equipment_type=truck_type, garage_number='11')
         excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='1')
-        rock = RockType.objects.create(name='Р СѓРґР°')
-        dump_point = DumpPoint.objects.create(name='РљРљР”')
-        dispatcher_role = Role.objects.create(code='dispatcher', name='Р”РёСЃРїРµС‚С‡РµСЂ')
-        dispatcher = Employee.objects.create(full_name='РўРµСЃС‚РѕРІС‹Р№ РґРёСЃРїРµС‚С‡РµСЂ')
+        rock = RockType.objects.create(name='Руда')
+        dump_point = DumpPoint.objects.create(name='ККД')
+        dispatcher_role = Role.objects.create(code='dispatcher', name='Диспетчер')
+        dispatcher = Employee.objects.create(full_name='Тестовый диспетчер')
         EmployeeAccess.objects.create(employee=dispatcher, role=dispatcher_role, access_code='5000')
+        EmployeeShift.objects.create(employee=dispatcher, shift_type='day', opened_at=timezone.now(), opened_by=dispatcher)
         target_trip = Trip.objects.create(
             excavator=excavator,
             truck=truck,
@@ -655,7 +2284,7 @@ class AccessLoginTests(TestCase):
         response = self.client.post(
             f'/dispatcher/trips/{target_trip.id}/cancel/',
             {
-                'reason': 'Р¤РёР»СЊС‚СЂ РґРѕР»Р¶РµРЅ СЃРѕС…СЂР°РЅРёС‚СЊСЃСЏ',
+                'reason': 'Фильтр должен сохраниться',
                 'truck': str(truck.id),
                 'show_active_trips': '1',
                 'show_pending_assignments': '0',
@@ -683,6 +2312,7 @@ class AccessLoginTests(TestCase):
         driver = Employee.objects.create(full_name='Тестовый водитель')
         EmployeeAccess.objects.create(employee=dispatcher, role=dispatcher_role, access_code='5000')
         EmployeeAccess.objects.create(employee=driver, role=driver_role, access_code='2100')
+        EmployeeShift.objects.create(employee=dispatcher, shift_type='day', opened_at=timezone.now(), opened_by=dispatcher)
         shift = EmployeeShift.objects.create(
             employee=driver,
             shift_type='day',
@@ -755,6 +2385,7 @@ class AccessLoginTests(TestCase):
         dispatcher_role = Role.objects.create(code='dispatcher', name='Диспетчер')
         dispatcher = Employee.objects.create(full_name='Тестовый диспетчер')
         EmployeeAccess.objects.create(employee=dispatcher, role=dispatcher_role, access_code='5000')
+        EmployeeShift.objects.create(employee=dispatcher, shift_type='day', opened_at=timezone.now(), opened_by=dispatcher)
         assignment = HaulAssignment.objects.create(
             truck=truck,
             excavator=excavator,
@@ -786,6 +2417,7 @@ class AccessLoginTests(TestCase):
         dispatcher_role = Role.objects.create(code='dispatcher', name='Диспетчер')
         dispatcher = Employee.objects.create(full_name='Тестовый диспетчер')
         EmployeeAccess.objects.create(employee=dispatcher, role=dispatcher_role, access_code='5000')
+        EmployeeShift.objects.create(employee=dispatcher, shift_type='day', opened_at=timezone.now(), opened_by=dispatcher)
         assignment = HaulAssignment.objects.create(
             truck=truck,
             excavator=excavator,
@@ -819,6 +2451,7 @@ class AccessLoginTests(TestCase):
         driver = Employee.objects.create(full_name='Тестовый водитель')
         EmployeeAccess.objects.create(employee=dispatcher, role=dispatcher_role, access_code='5000')
         EmployeeAccess.objects.create(employee=driver, role=driver_role, access_code='2102')
+        EmployeeShift.objects.create(employee=dispatcher, shift_type='day', opened_at=timezone.now(), opened_by=dispatcher)
         unloading_shift = EmployeeShift.objects.create(
             employee=driver,
             shift_type='day',
@@ -864,6 +2497,7 @@ class AccessLoginTests(TestCase):
         dispatcher_role = Role.objects.create(code='dispatcher', name='Диспетчер')
         dispatcher = Employee.objects.create(full_name='Тестовый диспетчер')
         EmployeeAccess.objects.create(employee=dispatcher, role=dispatcher_role, access_code='5000')
+        EmployeeShift.objects.create(employee=dispatcher, shift_type='day', opened_at=timezone.now(), opened_by=dispatcher)
         trip = Trip.objects.create(
             excavator=excavator,
             truck=truck,
@@ -895,6 +2529,7 @@ class AccessLoginTests(TestCase):
         dispatcher_role = Role.objects.create(code='dispatcher', name='Диспетчер')
         dispatcher = Employee.objects.create(full_name='Тестовый диспетчер')
         EmployeeAccess.objects.create(employee=dispatcher, role=dispatcher_role, access_code='5000')
+        EmployeeShift.objects.create(employee=dispatcher, shift_type='day', opened_at=timezone.now(), opened_by=dispatcher)
         trip = Trip.objects.create(
             excavator=excavator,
             truck=truck,
@@ -1272,34 +2907,78 @@ class AccessLoginTests(TestCase):
         self.assertIn('Средневзвешенное плечо', reconciliation_values)
 
     def test_seed_demo_scenario_command_creates_ready_demo_data(self):
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        truck_model = EquipmentModel.objects.create(equipment_type=truck_type, name='БЕЛАЗ тест')
+        excavator_model = EquipmentModel.objects.create(equipment_type=excavator_type, name='Экскаватор тест')
+        for garage_number in ('10', '11', '12'):
+            Equipment.objects.create(
+                equipment_type=truck_type,
+                model=truck_model,
+                garage_number=garage_number,
+                is_active=True,
+            )
+        Equipment.objects.create(
+            equipment_type=excavator_type,
+            model=excavator_model,
+            garage_number='1',
+            is_active=True,
+        )
+
         call_command('seed_demo_scenario')
 
-        self.assertTrue(EmployeeAccess.objects.filter(access_code='2000', is_active=True).exists())
-        self.assertTrue(EmployeeAccess.objects.filter(access_code='5000', is_active=True).exists())
-        self.assertTrue(EmployeeAccess.objects.filter(access_code='6000', is_active=True).exists())
-        self.assertTrue(EmployeeAccess.objects.filter(access_code='7000', is_active=True).exists())
+        self.assertTrue(EmployeeAccess.objects.filter(access_code='200000', is_active=True).exists())
+        self.assertTrue(EmployeeAccess.objects.filter(access_code='500000', is_active=True).exists())
+        self.assertTrue(EmployeeAccess.objects.filter(access_code='600000', is_active=True).exists())
+        self.assertTrue(EmployeeAccess.objects.filter(access_code='700000', is_active=True).exists())
         self.assertTrue(DriverPrimaryRegistration.objects.exists())
         self.assertTrue(EmployeeShift.objects.filter(closed_at__isnull=True).exists())
         self.assertTrue(HaulAssignment.objects.filter(status=AssignmentStatus.ACCEPTED).exists())
-        self.assertTrue(Trip.objects.filter(status=TripStatus.ACTIVE).exists())
+        self.assertTrue(Trip.objects.filter(status=TripStatus.LOADED_WAITING_UNLOAD).exists())
         self.assertTrue(DowntimeEvent.objects.filter(ended_at__isnull=True).exists())
         self.assertTrue(DowntimeEvent.objects.filter(ended_at__isnull=False).exists())
         self.assertTrue(DowntimeEvent.objects.filter(reason__is_critical=True, ended_at__isnull=True).exists())
         self.assertTrue(DowntimeEvent.objects.filter(reason__is_critical=False, ended_at__isnull=False).exists())
         self.assertTrue(ReportTemplate.objects.filter(name='Демо отчет по объемам', is_active=True).exists())
         self.assertTrue(PilotFeedback.objects.filter(title__startswith='Демо-замечание').exists())
+        self.assertFalse(Equipment.objects.filter(garage_number__startswith='ДЕМО').exists())
+
+    def test_seed_demo_scenario_reuses_reference_trucks_without_demo_trucks(self):
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        truck_model = EquipmentModel.objects.create(equipment_type=truck_type, name='БЕЛАЗ тест')
+        excavator_model = EquipmentModel.objects.create(equipment_type=excavator_type, name='Экскаватор тест')
+        for garage_number in ('10', '11', '12'):
+            Equipment.objects.create(
+                equipment_type=truck_type,
+                model=truck_model,
+                garage_number=garage_number,
+                is_active=True,
+            )
+        Equipment.objects.create(
+            equipment_type=excavator_type,
+            model=excavator_model,
+            garage_number='1',
+            is_active=True,
+        )
+
+        call_command('seed_demo_scenario')
+
+        self.assertFalse(Equipment.objects.filter(garage_number__startswith='ДЕМО').exists())
+        self.assertTrue(HaulAssignment.objects.filter(truck__garage_number='11', status=AssignmentStatus.PENDING).exists())
+        self.assertTrue(Trip.objects.filter(truck__garage_number='12', status=TripStatus.COMPLETED).exists())
 
     def test_mechanic_opens_dashboard_and_creates_downtime_event(self):
-        excavator_type = EquipmentType.objects.create(name='Р­РєСЃРєР°РІР°С‚РѕСЂ')
-        truck_type = EquipmentType.objects.create(name='РЎР°РјРѕСЃРІР°Р»')
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        truck_type = EquipmentType.objects.create(name='Самосвал')
         excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='1')
         truck = Equipment.objects.create(equipment_type=truck_type, garage_number='10')
-        rock = RockType.objects.create(name='Р СѓРґР°')
-        dump_point = DumpPoint.objects.create(name='РљРљР”')
-        mechanic_role = Role.objects.create(code='mechanic', name='РњРµС…Р°РЅРёРє')
-        operator_role = Role.objects.create(code='excavator_operator', name='РњР°С€РёРЅРёСЃС‚ СЌРєСЃРєР°РІР°С‚РѕСЂР°')
-        mechanic = Employee.objects.create(full_name='РўРµСЃС‚РѕРІС‹Р№ РјРµС…Р°РЅРёРє')
-        operator = Employee.objects.create(full_name='РўРµСЃС‚РѕРІС‹Р№ РјР°С€РёРЅРёСЃС‚')
+        rock = RockType.objects.create(name='Руда')
+        dump_point = DumpPoint.objects.create(name='ККД')
+        mechanic_role = Role.objects.create(code='mechanic', name='Механик')
+        operator_role = Role.objects.create(code='excavator_operator', name='Машинист экскаватора')
+        mechanic = Employee.objects.create(full_name='Тестовый механик')
+        operator = Employee.objects.create(full_name='Тестовый машинист')
         EmployeeAccess.objects.create(employee=mechanic, role=mechanic_role, access_code='7000')
         EmployeeAccess.objects.create(employee=operator, role=operator_role, access_code='3000')
         trip = Trip.objects.create(
@@ -1309,9 +2988,9 @@ class AccessLoginTests(TestCase):
             dump_point=dump_point,
             excavator_operator=operator,
             status=TripStatus.ACTIVE,
-            downtime_text='РѕР¶РёРґР°РЅРёРµ РјРµС…Р°РЅРёРєР°',
+            downtime_text='ожидание механика',
         )
-        reason = DowntimeReason.objects.create(name='Р”РёР°РіРЅРѕСЃС‚РёРєР°', equipment_type=excavator_type)
+        reason = DowntimeReason.objects.create(name='Тестовая диагностика механика', equipment_type=excavator_type, show_for_mechanic=True)
 
         login_response = self.client.post('/', {'access_code': '7000'}, follow=True, HTTP_HOST='localhost')
         dashboard_response = self.client.get('/mechanic/downtimes/', HTTP_HOST='localhost')
@@ -1319,7 +2998,7 @@ class AccessLoginTests(TestCase):
             f'/mechanic/downtimes/create/{trip.id}/',
             {
                 f'trip_{trip.id}-reason': str(reason.id),
-                f'trip_{trip.id}-comment': 'Р’С‹РµС…Р°Р»Рё РЅР° РґРёР°РіРЅРѕСЃС‚РёРєСѓ',
+                f'trip_{trip.id}-comment': 'Выехали на диагностику',
             },
             follow=True,
             HTTP_HOST='localhost',
@@ -1346,7 +3025,7 @@ class AccessLoginTests(TestCase):
         mechanic = Employee.objects.create(full_name='Mechanic MVP')
         operator = Employee.objects.create(full_name='Operator MVP')
         EmployeeAccess.objects.create(employee=mechanic, role=mechanic_role, access_code='7000')
-        reason = DowntimeReason.objects.create(name='Diagnostics', equipment_type=excavator_type)
+        reason = DowntimeReason.objects.create(name='Diagnostics', equipment_type=excavator_type, show_for_mechanic=True)
         existing_reason = DowntimeReason.objects.create(name='Engine', equipment_type=excavator_type)
         DowntimeEvent.objects.create(
             equipment=excavator,
@@ -1379,18 +3058,18 @@ class AccessLoginTests(TestCase):
         self.assertEqual(DowntimeEvent.objects.filter(equipment=excavator, ended_at__isnull=True).count(), 1)
 
     def test_mechanic_can_close_open_downtime_event(self):
-        excavator_type = EquipmentType.objects.create(name='Р­РєСЃРєР°РІР°С‚РѕСЂ')
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
         excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='1')
-        mechanic_role = Role.objects.create(code='mechanic', name='РњРµС…Р°РЅРёРє')
-        mechanic = Employee.objects.create(full_name='РўРµСЃС‚РѕРІС‹Р№ РјРµС…Р°РЅРёРє')
+        mechanic_role = Role.objects.create(code='mechanic', name='Механик')
+        mechanic = Employee.objects.create(full_name='Тестовый механик')
         EmployeeAccess.objects.create(employee=mechanic, role=mechanic_role, access_code='7000')
-        reason = DowntimeReason.objects.create(name='РўРµРєСѓС‰РёР№ СЂРµРјРѕРЅС‚', equipment_type=excavator_type)
+        reason = DowntimeReason.objects.create(name='Тестовый текущий ремонт', equipment_type=excavator_type)
         event = DowntimeEvent.objects.create(
             equipment=excavator,
             employee=mechanic,
             reason=reason,
             started_at=timezone.now() - timedelta(minutes=25),
-            comment='РџСЂРѕРІРµСЂРєР°',
+            comment='Проверка',
         )
 
         self.client.post('/', {'access_code': '7000'}, follow=True, HTTP_HOST='localhost')
@@ -1507,8 +3186,12 @@ class AccessLoginTests(TestCase):
         dispatcher_role = Role.objects.create(code='dispatcher', name='Диспетчер')
         dispatcher = Employee.objects.create(full_name='Тестовый диспетчер')
         EmployeeAccess.objects.create(employee=dispatcher, role=dispatcher_role, access_code='5000')
-        kkd_reason = DowntimeReason.objects.create(name='Ожидание разгрузки ККД', equipment_type=truck_type)
-        skdr_reason = DowntimeReason.objects.create(name='Ожидание разгрузки СКДР', equipment_type=truck_type)
+        kkd_reason = DowntimeReason.objects.get(name='Ожидание разгрузки ККД')
+        skdr_reason = DowntimeReason.objects.get(name='Ожидание разгрузки СКДР')
+        kkd_reason.equipment_type = truck_type
+        skdr_reason.equipment_type = truck_type
+        kkd_reason.save(update_fields=['equipment_type'])
+        skdr_reason.save(update_fields=['equipment_type'])
         started_at = timezone.make_aware(datetime(2026, 6, 17, 9, 0))
         DowntimeEvent.objects.create(
             equipment=truck_10,
@@ -1731,3 +3414,4 @@ class AccessLoginTests(TestCase):
         self.assertIn(98.8, values)
 
 # Create your tests here.
+

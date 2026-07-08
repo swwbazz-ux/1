@@ -1,0 +1,191 @@
+{% extends "base.html" %}
+
+{% block title %}Простои и отклонения{% endblock %}
+{% block body_class %}dispatcher-control-screen{% endblock %}
+
+{% block body %}
+<main class="dispatcher-shell dispatcher-analytics-shell" data-dispatcher-theme>
+    <section class="dispatcher-analytics-board" aria-label="Простои и отклонения диспетчера">
+        <header class="dispatcher-topbar dispatcher-unified-topbar">
+            {% include "includes/dispatcher_header.html" with dispatcher_nav_active="downtimes" dispatcher_header_screen="Простои" %}
+        </header>
+        <div class="dispatcher-analytics-toolbar">
+            {% include "includes/dispatcher_analytics_tabs.html" with dispatcher_nav_active="downtimes" %}
+            <div class="dispatcher-report-actions">
+                <a href="{% url 'dispatcher_downtimes_export' %}{% if query_string %}?{{ query_string }}{% endif %}">Excel</a>
+                <button type="button" onclick="window.print()">Печать</button>
+            </div>
+        </div>
+
+        <form class="dispatcher-report-filters" method="get" data-auto-filter-form>
+            <label>
+                <span>Дата</span>
+                <input type="date" name="date" value="{{ filters.date_value }}">
+            </label>
+            <label>
+                <span>Статус</span>
+                <select name="status">
+                    {% for item in status_choices %}
+                        <option value="{{ item.code }}" {% if filters.status == item.code %}selected{% endif %}>{{ item.label }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <button type="submit">Показать</button>
+        </form>
+
+        <section class="dispatcher-analytics-grid dispatcher-downtime-grid">
+            <article class="dispatcher-report-card dispatcher-report-card-wide">
+                <div class="dispatcher-report-card-head">
+                    <h2>Открытые простои</h2>
+                    <span>что требует реакции сейчас</span>
+                </div>
+                <div class="dispatcher-downtime-events">
+                    {% for row in open_rows %}
+                        <button type="button" class="dispatcher-downtime-event is-{{ row.status }}">
+                            <strong>{{ row.equipment_number }}</strong>
+                            <span>{{ row.reason }}</span>
+                            <em>{{ row.started_at_display }} / {{ row.duration_display }} ч</em>
+                        </button>
+                    {% empty %}
+                        <p class="dispatcher-empty-note">Открытых простоев за выбранную дату нет.</p>
+                    {% endfor %}
+                </div>
+            </article>
+
+            <article class="dispatcher-report-card">
+                <div class="dispatcher-report-card-head">
+                    <h2>Критические</h2>
+                    <span>повышенный приоритет</span>
+                </div>
+                <div class="dispatcher-downtime-critical">
+                    {% for row in critical_rows %}
+                        <div class="dispatcher-downtime-critical-item is-{{ row.status }}">
+                            <strong>{{ row.equipment_number }}</strong>
+                            <span>{{ row.reason }}</span>
+                            <small>{{ row.duration_display }} ч</small>
+                        </div>
+                    {% empty %}
+                        <p class="dispatcher-empty-note">Критических простоев нет.</p>
+                    {% endfor %}
+                </div>
+            </article>
+
+            <article class="dispatcher-report-card">
+                <div class="dispatcher-report-card-head">
+                    <h2>Виды техники</h2>
+                    <span>где теряем время</span>
+                </div>
+                <div class="dispatcher-ring-list">
+                    {% for row in equipment_type_rows %}
+                        <div class="dispatcher-ring-row">
+                            <div class="dispatcher-mini-ring dispatcher-downtime-ring is-{{ row.status }}" style="--ring: {{ row.bar }}%"><span>{{ row.count }}</span></div>
+                            <div>
+                                <strong>{{ row.name }}</strong>
+                                <small>{{ row.duration_display }} ч / открыто {{ row.open_count }}</small>
+                            </div>
+                        </div>
+                    {% empty %}
+                        <p class="dispatcher-empty-note">Данных по технике нет.</p>
+                    {% endfor %}
+                </div>
+            </article>
+
+            <article class="dispatcher-report-card dispatcher-report-card-wide">
+                <div class="dispatcher-report-card-head">
+                    <h2>Причины потерь</h2>
+                    <span>сортировка по открытым и длительности</span>
+                </div>
+                <div class="dispatcher-split-list">
+                    {% for row in reason_rows %}
+                        <div class="dispatcher-split-row dispatcher-downtime-split is-{{ row.status }}">
+                            <span>{{ row.name }}</span>
+                            <strong>{{ row.duration_display }} ч</strong>
+                            <small>{{ row.count }} событий / открыто {{ row.open_count }} / критично {{ row.critical_count }}</small>
+                            <i><b style="width: {{ row.bar }}%"></b></i>
+                        </div>
+                    {% empty %}
+                        <p class="dispatcher-empty-note">Причины простоев за выбранную дату не зафиксированы.</p>
+                    {% endfor %}
+                </div>
+            </article>
+
+            <article class="dispatcher-report-card dispatcher-report-card-wide">
+                <div class="dispatcher-report-card-head">
+                    <h2>Техника по потерям</h2>
+                    <span>единицы с максимальным простоем</span>
+                </div>
+                <div class="dispatcher-downtime-equipment-grid">
+                    {% for row in equipment_rows %}
+                        <div class="dispatcher-downtime-equipment is-{{ row.status }}">
+                            <strong>{{ row.name }}</strong>
+                            <span>{{ row.duration_display }} ч</span>
+                            <small>{{ row.count }} событий / открыто {{ row.open_count }}</small>
+                            <i><b style="width: {{ row.bar }}%"></b></i>
+                        </div>
+                    {% empty %}
+                        <p class="dispatcher-empty-note">Потери по единицам техники не зафиксированы.</p>
+                    {% endfor %}
+                </div>
+            </article>
+
+            <article class="dispatcher-report-card dispatcher-report-card-table">
+                <div class="dispatcher-report-card-head">
+                    <h2>Лента простоев</h2>
+                    <span>первые 120 событий за дату</span>
+                </div>
+                <div class="dispatcher-transport-table-wrap">
+                    <table class="dispatcher-transport-table dispatcher-downtime-table">
+                        <thead>
+                            <tr>
+                                <th>Начало</th>
+                                <th>Окончание</th>
+                                <th>Техника</th>
+                                <th>Вид</th>
+                                <th>Причина</th>
+                                <th>Потери</th>
+                                <th>Кто зафиксировал</th>
+                                <th>Комментарий</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for row in rows %}
+                                <tr class="is-{{ row.status }}">
+                                    <td>{{ row.started_at_display }}</td>
+                                    <td>{{ row.ended_at_display }}</td>
+                                    <td><strong>{{ row.equipment_number }}</strong><small>{{ row.equipment }}</small></td>
+                                    <td>{{ row.equipment_type }}</td>
+                                    <td>{{ row.reason }}<small>{{ row.status_label }}</small></td>
+                                    <td>{{ row.duration_display }} ч</td>
+                                    <td>{{ row.employee }}</td>
+                                    <td>{{ row.comment }}</td>
+                                </tr>
+                            {% empty %}
+                                <tr><td colspan="8">Простоев за выбранную дату нет.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </article>
+        </section>
+    </section>
+</main>
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    var shell = document.querySelector("[data-dispatcher-theme]");
+    var saved = localStorage.getItem("dispatcher-theme") || "night";
+    function setTheme(theme) {
+        if (!shell) return;
+        shell.classList.toggle("dispatcher-night", theme === "night");
+        shell.classList.toggle("dispatcher-day", theme !== "night");
+        localStorage.setItem("dispatcher-theme", theme);
+    }
+    setTheme(saved);
+    document.querySelectorAll("[data-dispatcher-theme-toggle]").forEach(function (toggle) {
+        toggle.addEventListener("click", function () {
+            setTheme(shell.classList.contains("dispatcher-night") ? "day" : "night");
+        });
+    });
+});
+</script>
+{% endblock %}

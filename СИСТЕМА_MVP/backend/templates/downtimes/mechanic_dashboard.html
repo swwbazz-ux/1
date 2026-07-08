@@ -1,19 +1,14 @@
 {% extends "base.html" %}
 
 {% block title %}Механическая служба{% endblock %}
+{% block body_class %}dispatcher-control-screen{% endblock %}
 
 {% block body %}
-<header class="app-header">
-    <div class="header-inner">
-        <div class="topline">
-            <span>{{ access.employee.full_name }}</span>
-            <a href="{% url 'logout' %}">Выйти</a>
-        </div>
-        <h1>Механическая служба</h1>
-        <p>Первый рабочий экран механиков: открытие и закрытие механических простоев по технике, где простой уже зафиксирован в смене.</p>
-    </div>
-</header>
-<main class="page">
+<main class="dispatcher-shell dispatcher-analytics-shell management-linked-report" data-dispatcher-theme>
+    <section class="dispatcher-analytics-board management-dashboard-board management-linked-report-board" aria-label="Механики">
+        {% include "reports/includes/management_report_header.html" with active="mechanic" title="Механики" subtitle="Открытие и закрытие механических простоев по технике." %}
+        <div class="management-linked-report-content">
+
     {% if messages %}
         {% for message in messages %}
             <div class="message {% if message.tags %}{{ message.tags }}{% else %}success{% endif %}">{{ message }}</div>
@@ -164,5 +159,8 @@
             </table>
         </div>
     </section>
+</div>
+</section>
 </main>
+{% include "reports/includes/management_report_theme.html" %}
 {% endblock %}

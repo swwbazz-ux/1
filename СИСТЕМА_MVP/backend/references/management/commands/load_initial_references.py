@@ -4,13 +4,16 @@ from pathlib import Path
 
 from django.core.management.base import BaseCommand
 
+from downtimes.defaults import infer_downtime_reason_state_code
 from downtimes.models import DowntimeReason
+from references.equipment_states import upsert_default_equipment_states
 from references.models import (
     Dormitory,
     DormitoryBlock,
     DormitorySection,
     DumpPoint,
     Equipment,
+    EquipmentState,
     EquipmentModel,
     EquipmentType,
     RockType,
@@ -57,6 +60,7 @@ class Command(BaseCommand):
         truck_type, _ = EquipmentType.objects.get_or_create(name='Самосвал')
         excavator_type, _ = EquipmentType.objects.get_or_create(name='Экскаватор')
 
+        self.load_equipment_states()
         self.load_trucks(source_dir / 'sam_domain_trucks.csv', truck_type)
         self.load_excavators(source_dir / 'excavators.csv', excavator_type)
         self.load_dump_points(source_dir / 'dump_points.csv')
@@ -67,6 +71,10 @@ class Command(BaseCommand):
         self.load_initial_dormitories()
 
         self.stdout.write(self.style.SUCCESS('Стартовые справочники загружены.'))
+
+    def load_equipment_states(self):
+        count = upsert_default_equipment_states()
+        self.stdout.write(f'Состояния техники: {count}')
 
     def load_initial_dormitories(self):
         count = 0
@@ -225,9 +233,21 @@ class Command(BaseCommand):
             name = str(row.get('reason_name_ru') or '').strip()
             if name:
                 names.add(name)
-        for name in sorted(names):
-            DowntimeReason.objects.get_or_create(
+        state_by_code = {state.code: state for state in EquipmentState.objects.all()}
+        for index, name in enumerate(sorted(names), start=1):
+            state_code = infer_downtime_reason_state_code(name)
+            reason, created = DowntimeReason.objects.get_or_create(
                 name=name,
-                defaults={'equipment_type': truck_type, 'is_active': True},
+                defaults={
+                    'short_label': name[:80],
+                    'equipment_type': truck_type,
+                    'equipment_state': state_by_code.get(state_code),
+                    'show_for_truck_driver': True,
+                    'sort_order': 400 + index,
+                    'is_active': True,
+                },
             )
+            if not created and reason.equipment_state_id is None:
+                reason.equipment_state = state_by_code.get(state_code)
+                reason.save(update_fields=['equipment_state'])
         self.stdout.write(f'Причины простоев самосвалов: {len(names)}')

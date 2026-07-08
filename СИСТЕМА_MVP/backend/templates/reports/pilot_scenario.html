@@ -36,7 +36,9 @@
     <section class="card">
         <h2>Как пользоваться</h2>
         <p class="muted">Идем по шагам сверху вниз. Если на шаге появляется ошибка, лишнее действие или расхождение со старой Excel-формой, фиксируем это в журнале замечаний пилота.</p>
+        <p class="muted">Для проверки следующей роли нажмите <strong>Выйти</strong> и войдите заново под кодом, указанным в карточке шага. Например: 4000 - горный мастер, 3000 - машинист экскаватора, 2000 - водитель, 7000 - механик.</p>
         <div class="actions">
+            <a class="button-link" href="{% url 'system_admin_dashboard' %}">Админка MVP</a>
             <a class="button-link" href="{% url 'pilot_feedback' %}">Журнал замечаний</a>
             <a class="button-link" href="{% url 'pilot_report_checklist' %}">Чеклист отчетов</a>
             <a class="button-link button-secondary" href="{% url 'interface_map' %}">Карта интерфейсов</a>
@@ -54,7 +56,9 @@
                 <div class="checklist-items">
                     {% for check in step.checks %}
                         <div class="checklist-item">
-                            <div class="check-mark">□</div>
+                            <label class="check-mark" aria-label="Отметить пункт">
+                                <input class="pilot-check" type="checkbox" data-check-key="step-{{ forloop.parentloop.counter }}-{{ forloop.counter }}">
+                            </label>
                             <div><p>{{ check }}</p></div>
                         </div>
                     {% endfor %}
@@ -69,7 +73,9 @@
         <div class="checklist-items">
             {% for question in feedback_questions %}
                 <div class="checklist-item">
-                    <div class="check-mark">□</div>
+                    <label class="check-mark" aria-label="Отметить вопрос">
+                        <input class="pilot-check" type="checkbox" data-check-key="question-{{ forloop.counter }}">
+                    </label>
                     <div><p>{{ question }}</p></div>
                 </div>
             {% endfor %}
@@ -77,4 +83,22 @@
         <p class="muted">Итоги и замечания фиксируются на странице /reports/pilot-feedback/ и в документе ПРОГРЕСС_ПРОЕКТА/31_ЖУРНАЛ_ЗАМЕЧАНИЙ_ПИЛОТА.md.</p>
     </section>
 </main>
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    var storagePrefix = "pilot-scenario:";
+    document.querySelectorAll(".pilot-check").forEach(function (checkbox) {
+        var key = storagePrefix + checkbox.dataset.checkKey;
+        checkbox.checked = localStorage.getItem(key) === "1";
+        checkbox.closest(".checklist-item").classList.toggle("is-done", checkbox.checked);
+        checkbox.addEventListener("change", function () {
+            if (checkbox.checked) {
+                localStorage.setItem(key, "1");
+            } else {
+                localStorage.removeItem(key);
+            }
+            checkbox.closest(".checklist-item").classList.toggle("is-done", checkbox.checked);
+        });
+    });
+});
+</script>
 {% endblock %}

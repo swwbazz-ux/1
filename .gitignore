@@ -22,6 +22,31 @@ outputs/
 *.pdf
 .tmp_analysis/
 
+# Local QA artifacts
+backups/
+driver-v*.png
+driver-work-v*.png
+СИСТЕМА_MVP/backend/driver-v*.png
+СИСТЕМА_MVP/backend/driver-work-v*.png
+СИСТЕМА_MVP/backend/excavator-*.png
+СИСТЕМА_MVP/backend/mining-master-*.png
+
+# Uploaded local media
+СИСТЕМА_MVP/backend/media/
+СИСТЕМА_MVP/backend/employee_photos/
+
+# Local server logs
+ENV_BACKUP_*/
+server-*.log
+server-supervisor*.log
+localhostrun*.log
+localtunnel*.log
+*/backend/runserver*.log
+*/backend/.server-stop
+
+# Local project backups
+РЕЗЕРВНЫЕ_КОПИИ/
+
 # OS / editor
 .DS_Store
 Thumbs.db

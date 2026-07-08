@@ -1,99 +1,1832 @@
 {% extends "base.html" %}
+{% load static l10n %}
 
-{% block title %}Смена водителя{% endblock %}
+{% block title %}Работа водителя{% endblock %}
+{% block body_class %}driver-mobile-screen{% endblock %}
+{% block realtime_screen %}driver-shift{% endblock %}
+{% block realtime_mode %}custom{% endblock %}
+{% block realtime_role %}driver{% endblock %}
+{% block extra_head %}
+<meta name="theme-color" content="#030708">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Самосвал">
+<link rel="manifest" href="{% url 'driver_manifest' %}">
+<link rel="apple-touch-icon" href="{% static 'img/pwa/mining-master-180.png' %}">
+<style>
+body.driver-mobile-screen {
+    margin: 0;
+    width: 100vw;
+    min-width: 0;
+    height: 100dvh;
+    min-height: 100dvh;
+    overflow: hidden;
+    background:
+        radial-gradient(circle at 66% 4%, rgba(45, 214, 125, 0.16), transparent 23%),
+        radial-gradient(circle at 18% 22%, rgba(16, 79, 92, 0.16), transparent 28%),
+        linear-gradient(180deg, #061015 0%, #02080b 100%);
+    color: #eff7dd;
+    font-family: "Roboto Condensed", "Arial Narrow", "Segoe UI", Arial, sans-serif;
+    letter-spacing: 0;
+    -webkit-font-smoothing: antialiased;
+    touch-action: manipulation;
+}
+
+body.driver-mobile-screen,
+body.driver-mobile-screen * {
+    box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-touch-callout: none;
+    user-select: none;
+}
+
+body.driver-mobile-screen input,
+body.driver-mobile-screen textarea,
+body.driver-mobile-screen select {
+    user-select: text;
+    -webkit-user-select: text;
+}
+
+body.driver-mobile-screen button,
+body.driver-mobile-screen input,
+body.driver-mobile-screen textarea,
+body.driver-mobile-screen select {
+    font: inherit;
+}
+
+body.driver-mobile-screen img,
+body.driver-mobile-screen svg {
+    -webkit-user-drag: none;
+    user-select: none;
+}
+
+body.driver-mobile-screen .driver-shell {
+    --driver-green: #8cff2e;
+    --driver-green-soft: #c9f1ad;
+    --driver-cyan: #20d9e6;
+    --driver-ink: #f2ffe8;
+    --driver-muted: #8ca0a8;
+    --driver-line: rgba(144, 173, 184, 0.24);
+    --driver-edge: clamp(22px, 6vw, 34px);
+    --driver-header-h: clamp(176px, 22dvh, 204px);
+    --driver-nav-h: clamp(88px, 11dvh, 100px);
+    width: min(100vw, 430px);
+    height: 100dvh;
+    min-height: 100dvh;
+    margin: 0 auto;
+    display: grid;
+    grid-template-rows: var(--driver-header-h) minmax(0, 1fr) var(--driver-nav-h);
+    padding: 0 var(--driver-edge);
+    overflow: hidden;
+    position: relative;
+    background:
+        radial-gradient(circle at 78% 7%, rgba(58, 227, 127, 0.15), transparent 18%),
+        radial-gradient(circle at 58% 40%, rgba(112, 255, 48, 0.08), transparent 33%),
+        linear-gradient(180deg, #061016 0%, #07151b 52%, #030c10 100%);
+}
+
+body.driver-mobile-screen .driver-shell::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: linear-gradient(90deg, rgba(0,0,0,0.42), transparent 13%, transparent 87%, rgba(0,0,0,0.42));
+}
+
+body.driver-mobile-screen .driver-header,
+body.driver-mobile-screen .driver-panel,
+body.driver-mobile-screen .driver-work-bottom-nav,
+body.driver-mobile-screen .driver-bottom-nav,
+body.driver-mobile-screen .driver-messages {
+    position: relative;
+    z-index: 1;
+}
+
+body.driver-mobile-screen .driver-messages {
+    position: absolute;
+    top: 14px;
+    left: var(--driver-edge);
+    right: var(--driver-edge);
+    display: grid;
+    gap: 8px;
+    z-index: 5;
+    pointer-events: none;
+}
+
+body.driver-mobile-screen .driver-messages .message {
+    min-height: 44px;
+    border-radius: 12px;
+    padding: 11px 14px;
+    background: rgba(221, 255, 244, 0.95);
+    color: #0a3b35;
+    font-size: 17px;
+    line-height: 1.2;
+}
+
+body.driver-mobile-screen .driver-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    align-content: end;
+    align-items: start;
+    gap: 14px;
+    padding: clamp(26px, 4.8dvh, 44px) 0 18px;
+    border-bottom: 1px solid var(--driver-line);
+}
+
+body.driver-mobile-screen .driver-header > div:first-child {
+    min-width: 0;
+    max-width: calc(100% - 86px);
+}
+
+body.driver-mobile-screen .driver-header span,
+body.driver-mobile-screen .driver-section-title strong,
+body.driver-mobile-screen label > span,
+body.driver-mobile-screen .driver-online span {
+    color: var(--driver-muted);
+    text-transform: uppercase;
+    font-size: clamp(13px, 3.3vw, 16px);
+    font-weight: 500;
+    line-height: 1;
+}
+
+body.driver-mobile-screen .driver-header h1 {
+    margin: 12px 0 0;
+    color: var(--driver-ink);
+    text-transform: uppercase;
+    font-size: clamp(32px, 8.8vw, 40px);
+    line-height: 0.92;
+    font-weight: 900;
+    white-space: nowrap;
+    letter-spacing: 0;
+    text-shadow: 0 0 16px rgba(236, 255, 221, 0.12);
+}
+
+body.driver-mobile-screen .driver-header p {
+    position: relative;
+    margin: 18px 0 0;
+    padding-left: 14px;
+    color: var(--driver-green);
+    text-transform: uppercase;
+    font-size: clamp(18px, 5.2vw, 27px);
+    line-height: 1;
+    font-weight: 400;
+}
+
+body.driver-mobile-screen .driver-header p::before,
+body.driver-mobile-screen .driver-section-title span::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0.05em;
+    width: 4px;
+    height: 1.05em;
+    border-radius: 4px;
+    background: var(--driver-green);
+    box-shadow: 0 0 12px rgba(140, 255, 46, 0.5);
+}
+
+body.driver-mobile-screen .driver-online {
+    position: absolute;
+    top: clamp(54px, 7.8dvh, 68px);
+    right: 2px;
+    width: 66px;
+    display: grid;
+    justify-items: center;
+    gap: 9px;
+    min-width: 62px;
+    color: var(--driver-cyan);
+    text-transform: uppercase;
+}
+
+body.driver-mobile-screen .driver-online::after {
+    content: "";
+    position: absolute;
+    top: 4px;
+    right: -10px;
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    background: var(--driver-cyan);
+    box-shadow: 0 0 14px rgba(32, 217, 230, 0.85);
+}
+
+body.driver-mobile-screen .driver-online strong {
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background:
+        radial-gradient(circle, #8cff2e 0 22%, rgba(140,255,46,0.33) 24% 42%, rgba(36,104,38,0.54) 44% 62%, rgba(7,39,45,0.78) 64% 100%);
+    border: 1px solid rgba(32, 217, 230, 0.22);
+    box-shadow: 0 0 0 10px rgba(32, 217, 230, 0.04), 0 0 26px rgba(140,255,46,0.24);
+}
+
+body.driver-mobile-screen .driver-panel {
+    display: none;
+    min-height: 0;
+    overflow: hidden;
+}
+
+body.driver-mobile-screen .driver-panel.is-active {
+    display: block;
+}
+
+body.driver-mobile-screen .driver-work-screen.is-active {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    gap: clamp(12px, 2.3dvh, 20px);
+    padding: clamp(14px, 2.5dvh, 22px) 0 clamp(10px, 1.8dvh, 16px);
+    overflow: hidden;
+}
+
+body.driver-mobile-screen .driver-work-cards {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+
+body.driver-mobile-screen .driver-work-card {
+    position: relative;
+    min-height: clamp(82px, 12dvh, 104px);
+    overflow: hidden;
+    border: 1px solid rgba(127, 163, 177, 0.26);
+    border-radius: 8px;
+    padding: 16px 14px 14px;
+    background: linear-gradient(140deg, rgba(13, 37, 47, 0.92), rgba(8, 25, 32, 0.82));
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.04), 0 18px 42px rgba(0,0,0,0.18);
+}
+
+body.driver-mobile-screen .driver-work-card span {
+    display: block;
+    color: var(--driver-muted);
+    text-transform: uppercase;
+    font-size: clamp(14px, 3.5vw, 16px);
+    line-height: 1;
+    font-weight: 500;
+}
+
+body.driver-mobile-screen .driver-work-card strong {
+    position: relative;
+    z-index: 1;
+    display: block;
+    margin-top: clamp(14px, 2.3dvh, 18px);
+    color: var(--driver-ink);
+    text-transform: uppercase;
+    font-size: clamp(24px, 7.4vw, 34px);
+    line-height: 0.95;
+    font-weight: 900;
+    overflow-wrap: anywhere;
+}
+
+body.driver-mobile-screen .driver-work-excavator {
+    position: absolute;
+    right: 12px;
+    bottom: 12px;
+    width: min(42%, 70px);
+    opacity: 0.32;
+    filter: saturate(0.65) brightness(1.18);
+}
+
+body.driver-mobile-screen .driver-work-arrow {
+    position: absolute;
+    right: 18px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--driver-green);
+    font-size: 36px;
+    line-height: 1;
+    font-weight: 900;
+}
+
+body.driver-mobile-screen .driver-work-dial-zone {
+    min-height: 0;
+    display: grid;
+    align-content: center;
+    justify-items: center;
+}
+
+body.driver-mobile-screen .driver-work-dial {
+    --driver-progress: 0;
+    --driver-hold: 0;
+    position: relative;
+    width: min(76vw, 320px, 42dvh);
+    aspect-ratio: 1 / 1;
+    display: grid;
+    place-items: center;
+    isolation: isolate;
+}
+
+body.driver-mobile-screen .driver-work-dial-form {
+    display: contents;
+}
+
+body.driver-mobile-screen .driver-work-dial-svg {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    transform: rotate(-90deg);
+    overflow: visible;
+    pointer-events: none;
+}
+
+body.driver-mobile-screen .driver-work-track,
+body.driver-mobile-screen .driver-work-progress,
+body.driver-mobile-screen .driver-work-hold-progress {
+    fill: none;
+    vector-effect: non-scaling-stroke;
+    stroke-linecap: butt;
+}
+
+body.driver-mobile-screen .driver-work-track {
+    stroke: rgba(94, 109, 116, 0.68);
+    stroke-width: 8;
+}
+
+body.driver-mobile-screen .driver-work-progress {
+    stroke: var(--driver-green-soft);
+    stroke-width: 8;
+    stroke-dasharray: 282.743;
+    stroke-dashoffset: calc(282.743 - (282.743 * var(--driver-progress) / 100));
+    filter: drop-shadow(0 0 10px rgba(141, 255, 46, 0.14));
+}
+
+body.driver-mobile-screen .driver-work-hold-progress {
+    opacity: 0;
+    stroke: var(--driver-green);
+    stroke-width: 4;
+    stroke-dasharray: 226.195;
+    stroke-dashoffset: calc(226.195 - (226.195 * var(--driver-hold) / 100));
+    transition: opacity 0.12s ease;
+    filter: drop-shadow(0 0 8px rgba(140,255,46,0.65));
+}
+
+body.driver-mobile-screen .driver-work-dial-button {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    width: 100%;
+    height: 100%;
+    border: 0;
+    border-radius: 50%;
+    padding: 0;
+    display: grid;
+    place-items: center;
+    color: var(--driver-green);
+    background: transparent;
+    cursor: default;
+    touch-action: none;
+}
+
+body.driver-mobile-screen .driver-work-dial-core {
+    position: absolute;
+    width: 68%;
+    aspect-ratio: 1 / 1;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    align-content: center;
+    gap: 9px;
+    background: radial-gradient(circle at 50% 46%, rgba(110, 137, 146, 0.35), rgba(36, 61, 68, 0.72) 66%, rgba(13, 30, 35, 0.92));
+    border: 1px solid rgba(187, 214, 220, 0.34);
+    box-shadow: inset 0 0 42px rgba(255,255,255,0.06), 0 0 42px rgba(140,255,46,0.10);
+    text-align: center;
+}
+
+body.driver-mobile-screen .driver-work-percent {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    gap: 12px;
+    min-width: 58%;
+    color: rgba(219, 232, 230, 0.72);
+    font-size: clamp(23px, 6vw, 32px);
+    line-height: 1;
+    font-weight: 700;
+}
+
+body.driver-mobile-screen .driver-work-percent::before,
+body.driver-mobile-screen .driver-work-percent::after {
+    content: "";
+    height: 1px;
+    background: rgba(207, 226, 226, 0.26);
+}
+
+body.driver-mobile-screen .driver-work-label {
+    max-width: 92%;
+    color: currentColor;
+    text-transform: uppercase;
+    font-size: clamp(28px, 8.2vw, 38px);
+    line-height: 0.86;
+    font-weight: 900;
+    white-space: nowrap;
+    text-shadow: 0 0 24px rgba(140,255,46,0.26);
+}
+
+body.driver-mobile-screen .driver-work-note {
+    color: rgba(221, 234, 231, 0.55);
+    text-transform: uppercase;
+    font-size: clamp(12px, 3vw, 15px);
+    line-height: 1.05;
+    font-style: normal;
+    font-weight: 500;
+}
+
+body.driver-mobile-screen .driver-work-dial-button.is-loaded {
+    cursor: pointer;
+}
+
+body.driver-mobile-screen .driver-work-dial-button.is-empty {
+    color: rgba(206, 223, 226, 0.78);
+}
+
+body.driver-mobile-screen .driver-work-dial-button.is-empty .driver-work-progress {
+    stroke: rgba(187, 211, 218, 0.48);
+}
+
+body.driver-mobile-screen .driver-work-dial-button.is-pending {
+    color: #ffe05c;
+    pointer-events: none;
+}
+
+body.driver-mobile-screen .driver-work-dial-button.is-pending .driver-work-progress {
+    stroke: #ffe05c;
+}
+
+body.driver-mobile-screen .driver-work-dial-button.is-error {
+    color: #ff5a50;
+}
+
+body.driver-mobile-screen .driver-work-dial-button.is-error .driver-work-progress {
+    stroke: #ff5a50;
+}
+
+body.driver-mobile-screen .driver-work-dial-button.is-holding .driver-work-hold-progress,
+body.driver-mobile-screen .driver-work-dial-button.is-pending .driver-work-hold-progress {
+    opacity: 1;
+}
+
+body.driver-mobile-screen .driver-work-caption {
+    width: 100%;
+    display: grid;
+    grid-template-columns: minmax(24px, 1fr) auto minmax(24px, 1fr);
+    align-items: center;
+    gap: 18px;
+    color: var(--driver-green);
+    text-transform: uppercase;
+    font-size: clamp(20px, 5.4vw, 28px);
+    line-height: 1;
+    font-weight: 700;
+    text-align: center;
+}
+
+body.driver-mobile-screen .driver-work-caption::before,
+body.driver-mobile-screen .driver-work-caption::after {
+    content: "";
+    height: 1px;
+    background: rgba(141, 255, 46, 0.18);
+}
+
+body.driver-mobile-screen .driver-section-title {
+    position: relative;
+    display: grid;
+    gap: 10px;
+    margin: 20px 0 14px;
+    padding-left: 14px;
+}
+
+body.driver-mobile-screen .driver-section-title span {
+    position: relative;
+    color: var(--driver-green);
+    text-transform: uppercase;
+    font-size: clamp(22px, 6vw, 28px);
+    line-height: 1;
+}
+
+body.driver-mobile-screen .driver-form-card,
+body.driver-mobile-screen .driver-trip-row,
+body.driver-mobile-screen .driver-downtime-card {
+    border: 1px solid rgba(127, 163, 177, 0.25);
+    border-radius: 8px;
+    background: linear-gradient(145deg, rgba(13, 38, 48, 0.90), rgba(7, 21, 27, 0.88));
+}
+
+body.driver-mobile-screen .driver-form-card {
+    display: grid;
+    gap: 18px;
+    padding: 16px;
+}
+
+body.driver-mobile-screen .driver-form-card label {
+    display: grid;
+    gap: 8px;
+}
+
+body.driver-mobile-screen .driver-form-card input,
+body.driver-mobile-screen .driver-form-card select,
+body.driver-mobile-screen .driver-form-card textarea {
+    width: 100%;
+    min-height: 64px;
+    border: 1px solid rgba(137, 169, 180, 0.26);
+    border-radius: 8px;
+    padding: 12px;
+    color: var(--driver-ink);
+    background: rgba(2, 12, 17, 0.74);
+    outline: none;
+}
+
+body.driver-mobile-screen .driver-primary-action {
+    width: 100%;
+    min-height: 68px;
+    border: 1px solid rgba(140,255,46,0.30);
+    border-radius: 8px;
+    color: #061016;
+    background: linear-gradient(180deg, #a9ff46 0%, #72d729 100%);
+    text-transform: uppercase;
+    font-size: clamp(21px, 6vw, 28px);
+    font-weight: 900;
+    letter-spacing: 0;
+    box-shadow: 0 0 22px rgba(140,255,46,0.24);
+}
+
+body.driver-mobile-screen .driver-primary-action.is-disabled,
+body.driver-mobile-screen .driver-primary-action:disabled {
+    color: rgba(215, 224, 221, 0.28);
+    background: rgba(255,255,255,0.06);
+    border-color: rgba(255,255,255,0.10);
+    box-shadow: none;
+}
+
+body.driver-mobile-screen .driver-downtime-card {
+    min-height: 104px;
+    display: grid;
+    grid-template-columns: 58px minmax(0, 1fr);
+    align-items: center;
+    gap: 14px;
+    margin: 18px 0 20px;
+    padding: 12px 16px;
+    border-color: rgba(255, 207, 29, 0.95);
+    background: linear-gradient(90deg, rgba(74, 63, 8, 0.82), rgba(26, 31, 19, 0.82));
+    box-shadow: 0 0 24px rgba(255, 207, 29, 0.16);
+}
+
+body.driver-mobile-screen .driver-downtime-state-dot {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    border: 5px solid #ffd11d;
+    box-shadow: 0 0 0 12px rgba(255,209,29,0.12), 0 0 26px rgba(255,209,29,0.55);
+}
+
+body.driver-mobile-screen .driver-downtime-card strong,
+body.driver-mobile-screen .driver-downtime-card b,
+body.driver-mobile-screen .driver-downtime-card em {
+    display: block;
+    text-transform: uppercase;
+    font-style: normal;
+    line-height: 1;
+}
+
+body.driver-mobile-screen .driver-downtime-card strong {
+    color: #ffd11d;
+    font-size: clamp(19px, 5vw, 25px);
+    font-weight: 900;
+}
+
+body.driver-mobile-screen .driver-downtime-card b {
+    margin-top: 2px;
+    color: #ffd11d;
+    font-size: clamp(30px, 8vw, 42px);
+    font-weight: 900;
+}
+
+body.driver-mobile-screen .driver-downtime-card em {
+    margin-top: 3px;
+    color: var(--driver-ink);
+    font-size: clamp(15px, 4vw, 18px);
+    text-transform: none;
+}
+
+body.driver-mobile-screen .driver-downtime-list {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+    max-height: min(43dvh, 390px);
+    overflow-y: auto;
+    padding-bottom: 8px;
+    scrollbar-width: thin;
+}
+
+body.driver-mobile-screen .driver-downtime-list form {
+    min-width: 0;
+}
+
+body.driver-mobile-screen .driver-downtime-list button {
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    min-height: 0;
+    border: 1px solid rgba(137, 169, 180, 0.28);
+    border-radius: 8px;
+    padding: 8px;
+    display: grid;
+    place-items: center;
+    color: var(--driver-ink);
+    background: rgba(10, 28, 36, 0.92);
+    text-transform: uppercase;
+    font-size: clamp(16px, 4.6vw, 21px);
+    line-height: 0.88;
+    font-weight: 900;
+    text-align: center;
+}
+
+body.driver-mobile-screen .driver-downtime-list button strong {
+    display: none;
+}
+
+body.driver-mobile-screen .driver-downtime-list button.status-yellow,
+body.driver-mobile-screen .driver-downtime-list button.status-warning {
+    color: #ffd11d;
+    border-color: #ffd11d;
+}
+
+body.driver-mobile-screen .driver-downtime-list button.status-red,
+body.driver-mobile-screen .driver-downtime-list button.status-danger {
+    color: #ff5a50;
+    border-color: #ff5a50;
+}
+
+body.driver-mobile-screen .driver-downtime-list button.status-orange {
+    color: #ff9b2e;
+    border-color: #ff9b2e;
+}
+
+body.driver-mobile-screen .driver-downtime-list button.status-green,
+body.driver-mobile-screen .driver-downtime-list button.status-success {
+    color: var(--driver-green);
+    border-color: var(--driver-green);
+}
+
+body.driver-mobile-screen .driver-downtime-close {
+    margin-top: 10px;
+}
+
+body.driver-mobile-screen .driver-trip-list,
+body.driver-mobile-screen [data-driver-tab-panel="shift"].is-active,
+body.driver-mobile-screen [data-driver-tab-panel="downtimes"].is-active,
+body.driver-mobile-screen [data-driver-tab-panel="manifest"].is-active {
+    overflow-y: auto;
+    min-height: 0;
+    padding-bottom: 14px;
+}
+
+body.driver-mobile-screen .driver-trip-list {
+    display: grid;
+    gap: 12px;
+}
+
+body.driver-mobile-screen .driver-trip-row {
+    padding: 0;
+}
+
+body.driver-mobile-screen .driver-trip-row summary {
+    min-height: 92px;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: 12px;
+    padding: 14px;
+    list-style: none;
+}
+
+body.driver-mobile-screen .driver-trip-row summary::-webkit-details-marker {
+    display: none;
+}
+
+body.driver-mobile-screen .driver-trip-row summary span {
+    color: var(--driver-green);
+    font-size: 28px;
+    font-weight: 900;
+}
+
+body.driver-mobile-screen .driver-trip-row summary strong,
+body.driver-mobile-screen .driver-trip-row summary em,
+body.driver-mobile-screen .driver-trip-row summary b {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-style: normal;
+}
+
+body.driver-mobile-screen .driver-trip-row summary b {
+    color: var(--driver-green);
+}
+
+body.driver-mobile-screen .driver-empty-state,
+body.driver-mobile-screen .driver-inline-note {
+    color: var(--driver-muted);
+    font-size: 16px;
+    line-height: 1.25;
+}
+
+body.driver-mobile-screen .driver-unload-sheet {
+    position: absolute;
+    left: var(--driver-edge);
+    right: var(--driver-edge);
+    bottom: calc(var(--driver-nav-h) + 10px);
+    z-index: 4;
+    max-height: min(58dvh, 430px);
+    overflow-y: auto;
+    border: 1px solid rgba(127, 163, 177, 0.32);
+    border-radius: 10px;
+    padding: 14px;
+    background: rgba(5, 17, 22, 0.97);
+    box-shadow: 0 -22px 60px rgba(0,0,0,0.45);
+}
+
+body.driver-mobile-screen .driver-unload-head {
+    display: grid;
+    gap: 5px;
+    margin-bottom: 12px;
+    text-transform: uppercase;
+}
+
+body.driver-mobile-screen .driver-unload-head span {
+    color: var(--driver-green);
+    font-size: 22px;
+}
+
+body.driver-mobile-screen .driver-unload-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+}
+
+body.driver-mobile-screen .driver-unload-tile {
+    width: 100%;
+    min-height: 80px;
+    border: 1px solid rgba(137,169,180,0.28);
+    border-radius: 8px;
+    background: rgba(10, 30, 38, 0.88);
+    color: var(--driver-ink);
+    text-transform: uppercase;
+    font-weight: 900;
+}
+
+body.driver-mobile-screen .driver-unload-tile.is-current {
+    border-color: var(--driver-green);
+    color: var(--driver-green);
+}
+
+body.driver-mobile-screen .driver-unload-cancel {
+    width: 100%;
+    min-height: 48px;
+    margin-top: 12px;
+    border: 1px solid rgba(137,169,180,0.28);
+    border-radius: 8px;
+    background: rgba(255,255,255,0.06);
+    color: var(--driver-muted);
+    text-transform: uppercase;
+}
+
+body.driver-mobile-screen .driver-work-bottom-nav,
+body.driver-mobile-screen .driver-bottom-nav {
+    height: var(--driver-nav-h);
+    width: calc(100% + (var(--driver-edge) * 2));
+    margin: 0 calc(var(--driver-edge) * -1);
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    border-top: 1px solid rgba(127, 163, 177, 0.24);
+    background: rgba(3, 16, 21, 0.90);
+    box-shadow: 0 -16px 32px rgba(0,0,0,0.20);
+}
+
+body.driver-mobile-screen .driver-work-bottom-nav .mm-mobile-nav-item,
+body.driver-mobile-screen .driver-bottom-nav .mm-mobile-nav-item {
+    position: relative;
+    min-width: 0;
+    height: 100%;
+    border: 0;
+    border-right: 1px solid rgba(127, 163, 177, 0.14);
+    display: grid;
+    align-content: center;
+    justify-items: center;
+    gap: 7px;
+    color: rgba(142, 162, 171, 0.82);
+    background: transparent;
+    text-transform: uppercase;
+    font-size: clamp(12px, 3.1vw, 14px);
+    line-height: 1;
+    font-weight: 400;
+}
+
+body.driver-mobile-screen .driver-work-bottom-nav .mm-mobile-nav-item::before,
+body.driver-mobile-screen .driver-bottom-nav .mm-mobile-nav-item::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 20%;
+    right: 20%;
+    height: 4px;
+    border-radius: 0 0 6px 6px;
+    background: transparent;
+}
+
+body.driver-mobile-screen .driver-work-bottom-nav .mm-mobile-nav-item.is-active,
+body.driver-mobile-screen .driver-bottom-nav .mm-mobile-nav-item.is-active {
+    color: var(--driver-green);
+}
+
+body.driver-mobile-screen .driver-work-bottom-nav .mm-mobile-nav-item.is-active::before,
+body.driver-mobile-screen .driver-bottom-nav .mm-mobile-nav-item.is-active::before {
+    background: var(--driver-green);
+    box-shadow: 0 0 12px rgba(140,255,46,0.65);
+}
+
+body.driver-mobile-screen .driver-nav-icon {
+    width: 30px;
+    height: 30px;
+    display: block;
+    opacity: 0.72;
+}
+
+body.driver-mobile-screen .mm-mobile-nav-item.is-active .driver-nav-icon {
+    opacity: 1;
+}
+
+body.driver-mobile-screen .driver-nav-clock,
+body.driver-mobile-screen .driver-nav-alert,
+body.driver-mobile-screen .driver-nav-doc {
+    position: relative;
+    border: 3px solid currentColor;
+    border-radius: 50%;
+}
+
+body.driver-mobile-screen .driver-nav-clock::before {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 20%;
+    width: 2px;
+    height: 32%;
+    background: currentColor;
+    transform-origin: bottom;
+    transform: translateX(-50%) rotate(0deg);
+}
+
+body.driver-mobile-screen .driver-nav-clock::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 30%;
+    height: 2px;
+    background: currentColor;
+    transform-origin: left;
+    transform: rotate(215deg);
+}
+
+body.driver-mobile-screen .driver-nav-alert {
+    border: 0;
+}
+
+body.driver-mobile-screen .driver-nav-alert::before {
+    content: "!";
+    display: grid;
+    place-items: center;
+    width: 100%;
+    height: 100%;
+    font-size: 30px;
+    line-height: 1;
+    font-weight: 900;
+}
+
+body.driver-mobile-screen .driver-nav-doc {
+    border-radius: 6px;
+}
+
+body.driver-mobile-screen .driver-nav-doc::before,
+body.driver-mobile-screen .driver-nav-doc::after {
+    content: "";
+    position: absolute;
+    left: 8px;
+    right: 8px;
+    height: 2px;
+    background: currentColor;
+}
+
+body.driver-mobile-screen .driver-nav-doc::before { top: 9px; }
+body.driver-mobile-screen .driver-nav-doc::after { top: 17px; }
+
+body.driver-mobile-screen .driver-mobile-update-badge {
+    position: absolute;
+    top: 18px;
+    right: 18px;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #ff4b43;
+    box-shadow: 0 0 12px rgba(255,75,67,0.75);
+}
+
+body.driver-mobile-screen .driver-mobile-update-modal[hidden] {
+    display: none !important;
+}
+
+body.driver-mobile-screen .driver-mobile-update-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    background: rgba(2, 8, 12, 0.78);
+    backdrop-filter: blur(8px);
+}
+
+body.driver-mobile-screen .driver-mobile-update-dialog {
+    width: min(100%, 390px);
+    border: 1px solid rgba(140,255,46,0.28);
+    border-radius: 12px;
+    padding: 18px;
+    background: linear-gradient(145deg, rgba(9, 31, 39, 0.98), rgba(4, 15, 20, 0.98));
+    color: var(--driver-ink);
+    box-shadow: 0 24px 70px rgba(0,0,0,0.55);
+}
+
+body.driver-mobile-screen .driver-mobile-update-dialog strong {
+    color: var(--driver-green);
+    text-transform: uppercase;
+    font-size: 24px;
+}
+
+body.driver-mobile-screen .driver-mobile-update-dialog p,
+body.driver-mobile-screen .driver-mobile-update-versions {
+    color: var(--driver-muted);
+    font-size: 16px;
+}
+
+body.driver-mobile-screen .driver-mobile-update-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-top: 16px;
+}
+
+body.driver-mobile-screen .driver-mobile-update-actions button {
+    min-height: 52px;
+    border: 1px solid rgba(137,169,180,0.28);
+    border-radius: 8px;
+    color: var(--driver-ink);
+    background: rgba(255,255,255,0.06);
+    text-transform: uppercase;
+    font-weight: 900;
+}
+
+body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-apply] {
+    color: #061016;
+    background: linear-gradient(180deg, #a9ff46 0%, #72d729 100%);
+}
+
+@media (max-height: 780px) {
+    body.driver-mobile-screen .driver-shell {
+        --driver-header-h: clamp(150px, 20dvh, 176px);
+        --driver-nav-h: 86px;
+        --driver-edge: clamp(18px, 5vw, 24px);
+    }
+
+    body.driver-mobile-screen .driver-header h1 {
+        font-size: clamp(32px, 9vw, 38px);
+    }
+
+    body.driver-mobile-screen .driver-header p {
+        margin-top: 12px;
+    }
+
+    body.driver-mobile-screen .driver-work-dial {
+        width: min(72vw, 285px, 40dvh);
+    }
+
+    body.driver-mobile-screen .driver-work-card {
+        min-height: 80px;
+        padding: 13px 12px 12px;
+    }
+
+    body.driver-mobile-screen .driver-downtime-list {
+        max-height: min(39dvh, 330px);
+    }
+}
+</style>
+{% endblock %}
 
 {% block body %}
-<header class="app-header">
-    <div class="header-inner">
-        <div class="topline">
-            <span>{{ access.employee.full_name }}</span>
-            <a href="{% url 'logout' %}">Выйти</a>
+<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="driver-mobile-shell-v32">
+    {% if messages %}
+        <div class="driver-messages">
+            {% for message in messages %}
+                <div class="message {% if message.tags %}{{ message.tags }}{% else %}success{% endif %}">{{ message }}</div>
+            {% endfor %}
         </div>
-        <h1>Смена водителя</h1>
-        <p>Рабочий экран водителя: открыть смену, принять назначение, выполнить рейс и закрыть смену.</p>
-    </div>
-</header>
-<main class="page compact-page">
-    {% for message in messages %}
-        <div class="message success">{{ message }}</div>
-    {% endfor %}
+    {% endif %}
 
-    <section class="card">
-        <h2>Закрепленные данные</h2>
-        <div class="grid">
-            <div class="tile"><strong>Смена</strong>{{ registration.get_shift_type_display }}</div>
-            <div class="tile"><strong>Самосвал</strong>{{ registration.truck }}</div>
-            <div class="tile"><strong>Проживание</strong>{{ registration.dormitory_section }}</div>
+    <header class="driver-header">
+        <div>
+            <span>Водитель</span>
+            <h1>{% if current_truck %}Самосвал {{ current_truck.garage_number|default:current_truck }}{% else %}Самосвал{% endif %}</h1>
+            <p>{% if open_shift %}Активная смена{% else %}Смена не открыта{% endif %}</p>
         </div>
+        <div class="driver-online" role="status" aria-label="Онлайн">
+            <span>онлайн</span>
+            <strong></strong>
+        </div>
+    </header>
+
+    <section class="driver-panel driver-tab driver-work-screen {% if active_tab == 'work' %}is-active{% endif %}" data-driver-tab-panel="work">
+        <div class="driver-work-cards">
+            <article class="driver-work-card">
+                <span>Экскаватор</span>
+                <strong>{% if active_trip %}{{ active_trip.excavator.garage_number|default:active_trip.excavator }}{% elif pending_assignment %}{{ pending_assignment.excavator.garage_number|default:pending_assignment.excavator }}{% elif accepted_assignment %}{{ accepted_assignment.excavator.garage_number|default:accepted_assignment.excavator }}{% else %}—{% endif %}</strong>
+                <img class="driver-work-excavator" src="{% static 'img/equipment/excavator-green.png' %}" alt="">
+            </article>
+            <article class="driver-work-card driver-work-card-target{% if active_trip %} is-action{% endif %}"{% if active_trip %} role="button" tabindex="0" data-driver-point-open{% endif %}>
+                <span>Ехать</span>
+                <strong>{% if active_trip %}{{ driver_target_label }}{% else %}—{% endif %}</strong>
+                {% if active_trip %}<b class="driver-work-arrow" aria-hidden="true">›</b>{% endif %}
+            </article>
+        </div>
+
+        <div class="driver-work-dial-zone">
+            <div class="driver-work-dial" style="--driver-progress: {{ shift_plan_percent|default:40 }}; --driver-hold: 0;">
+                {% if active_trip %}
+                    <form method="post" action="{% url 'driver_complete_trip' active_trip.id %}" class="driver-work-dial-form" data-driver-hold-form>
+                        {% csrf_token %}
+                        <input type="hidden" name="client_action_id" value="" data-driver-client-action>
+                        <button class="driver-work-dial-button is-loaded" type="submit" data-driver-hold-button data-driver-pending-label="ОТПРАВКА">
+                            <svg class="driver-work-dial-svg" viewBox="0 0 100 100" aria-hidden="true">
+                                <circle class="driver-work-track" cx="50" cy="50" r="45" pathLength="100"></circle>
+                                <circle class="driver-work-progress" cx="50" cy="50" r="45" pathLength="100"></circle>
+                                <circle class="driver-work-hold-progress" cx="50" cy="50" r="36" pathLength="100"></circle>
+                            </svg>
+                            <span class="driver-work-dial-core">
+                                <span class="driver-work-percent">{{ shift_plan_percent|default:40 }}%</span>
+                                <strong class="driver-work-label" data-driver-dial-label>ЗАГРУЖЕН</strong>
+                                <em class="driver-work-note">удерживать<br>2 сек</em>
+                            </span>
+                        </button>
+                    </form>
+                {% else %}
+                    <div class="driver-work-dial-button is-empty" aria-disabled="true">
+                        <svg class="driver-work-dial-svg" viewBox="0 0 100 100" aria-hidden="true">
+                            <circle class="driver-work-track" cx="50" cy="50" r="45" pathLength="100"></circle>
+                            <circle class="driver-work-progress" cx="50" cy="50" r="45" pathLength="100"></circle>
+                            <circle class="driver-work-hold-progress" cx="50" cy="50" r="36" pathLength="100"></circle>
+                        </svg>
+                        <span class="driver-work-dial-core">
+                            <span class="driver-work-percent">{{ shift_plan_percent|default:40 }}%</span>
+                            <strong class="driver-work-label">ПУСТОЙ</strong>
+                        </span>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="driver-work-caption">Точковка</div>
     </section>
 
-    <section class="card">
-        {% if open_shift %}
-            <h2>Смена открыта</h2>
-            <div class="grid">
-                <div class="tile"><strong>Открыта</strong>{{ open_shift.opened_at|date:"d.m.Y H:i" }}</div>
-                <div class="tile"><strong>Топливо</strong>{{ open_shift.start_fuel }}</div>
-                <div class="tile"><strong>Пробег</strong>{{ open_shift.start_mileage }}</div>
-                <div class="tile"><strong>Моточасы</strong>{{ open_shift.start_engine_hours }}</div>
+    {% if active_trip %}
+        <section class="driver-unload-sheet" data-driver-point-sheet hidden>
+            <div class="driver-unload-head">
+                <span>Выбор точки</span>
+                <strong>Назначено: {{ active_trip_assigned_dump_point }}</strong>
             </div>
-            {% if active_trip %}
-                <p class="muted">Есть активный рейс. Смена может быть закрыта, а состояние рейса останется в системе для следующей смены.</p>
-            {% endif %}
-            <form method="post" action="{% url 'driver_close_shift' %}">
+            <div class="driver-unload-grid">
+                {% for point in unload_points %}
+                    <form method="post" action="{% url 'driver_change_unload_point' active_trip.id %}" class="driver-unload-tile-form">
+                        {% csrf_token %}
+                        <input type="hidden" name="client_action_id" value="" data-driver-client-action>
+                        <input type="hidden" name="dump_point" value="{{ point.id }}">
+                        <button class="driver-unload-tile{% if point.id == active_trip_actual_dump_point_id %} is-current{% endif %}" type="submit">
+                            <span>{% if point.id == active_trip_actual_dump_point_id %}?{% endif %}</span>
+                            <strong class="{% if point.name|length > 15 %}is-extra-long{% elif point.name|length > 8 %}is-long{% endif %}">{{ point.name }}</strong>
+                        </button>
+                    </form>
+                {% endfor %}
+            </div>
+            <button class="driver-unload-cancel" type="button" data-driver-point-close>Отмена</button>
+        </section>
+    {% endif %}
+
+    <section class="driver-panel driver-tab {% if active_tab == 'shift' %}is-active{% endif %}" data-driver-tab-panel="shift">
+        {% if open_shift %}
+            <div class="driver-section-title">
+                <span>Закрытие смены</span>
+                <strong>{{ shift_trip_count }} рейсов · {{ shift_plan_percent }}% плана</strong>
+            </div>
+            <form method="post" action="{% url 'driver_close_shift' %}" class="driver-form-card">
                 {% csrf_token %}
                 {% for field in close_form %}
-                    <label for="{{ field.id_for_label }}">{{ field.label }}</label>
-                    {{ field }}
-                    {{ field.errors }}
+                    <label>
+                        <span>{{ field.label }}</span>
+                        {{ field }}
+                        {{ field.errors }}
+                    </label>
                 {% endfor %}
-                <button type="submit">Закрыть смену</button>
+                <button class="driver-primary-action" type="submit">Закрыть смену</button>
             </form>
         {% else %}
-            <h2>Открыть смену</h2>
-            <p class="muted">Проверьте показатели техники на начало смены. Если фактические значения отличаются, укажите фактические.</p>
+            <div class="driver-section-title">
+                <span>Открытие смены</span>
+                <strong>{{ registration.dormitory_section }}</strong>
+            </div>
             {% if last_closed_shift %}
-                <div class="message success">По умолчанию подставлены показатели на конец предыдущей закрытой смены по этому самосвалу.</div>
+                <div class="driver-inline-note">Подставлены показатели предыдущей закрытой смены по самосвалу.</div>
             {% endif %}
-            <form method="post">
+            <form method="post" class="driver-form-card">
                 {% csrf_token %}
                 {% for field in form %}
-                    <label for="{{ field.id_for_label }}">{{ field.label }}</label>
-                    {{ field }}
-                    {{ field.errors }}
+                    <label>
+                        <span>{{ field.label }}</span>
+                        {{ field }}
+                        {{ field.errors }}
+                    </label>
                 {% endfor %}
-                <button type="submit">Открыть смену</button>
+                <button class="driver-primary-action" type="submit">Открыть смену</button>
             </form>
         {% endif %}
     </section>
 
-    {% if pending_assignment %}
-        <section class="card highlight-warning">
-            <h2>Новое назначение</h2>
-            <div class="grid">
-                <div class="tile"><strong>Самосвал</strong>{{ pending_assignment.truck }}</div>
-                <div class="tile"><strong>Экскаватор</strong>{{ pending_assignment.excavator }}</div>
+    <section class="driver-panel driver-tab {% if active_tab == 'downtimes' %}is-active{% endif %}" data-driver-tab-panel="downtimes" data-driver-downtime-url="{% url 'driver_downtime_action' %}">
+        <div class="driver-downtime-card status-{{ active_downtime_status_key }}{% if active_downtime %} is-active{% endif %}" data-driver-active-downtime-id="{% if active_downtime %}{{ active_downtime.id }}{% endif %}" data-driver-active-started-at="{{ active_downtime_started_at }}" data-driver-active-elapsed-seconds="{{ active_downtime_elapsed_seconds }}">
+            <span class="driver-downtime-state-dot" data-driver-downtime-indicator aria-hidden="true"></span>
+            <div>
+                <strong data-driver-active-title>{% if active_downtime %}Активный простой{% else %}Простоя нет{% endif %}</strong>
+                <b data-driver-active-duration>{{ active_downtime_elapsed_label }}</b>
+                <em data-driver-active-reason>{% if active_downtime %}{{ active_downtime.reason }}{% else %}Выберите причину для начала{% endif %}</em>
             </div>
-            <form method="post" action="{% url 'driver_accept_assignment' pending_assignment.id %}">
-                {% csrf_token %}
-                <button type="submit">Принял</button>
-            </form>
-        </section>
-    {% endif %}
+        </div>
+        <div class="driver-downtime-list">
+            {% for reason in downtime_reasons %}
+                <form method="post" action="{% url 'driver_downtime_action' %}" data-driver-downtime-reason-id="{{ reason.id }}">
+                    {% csrf_token %}
+                    <input type="hidden" name="reason_id" value="{{ reason.id }}">
+                    <button class="status-{{ reason.effective_color_group }}{% if active_downtime and active_downtime.reason_id == reason.id %} is-selected{% endif %}" type="submit" data-driver-downtime-reason-button data-driver-downtime-reason-id="{{ reason.id }}" data-driver-reason="{{ reason }}" data-driver-status-key="{{ reason.effective_color_group }}">
+                        <span>{{ reason.button_label }}</span>
+                        <strong>›</strong>
+                    </button>
+                </form>
+            {% empty %}
+                <div class="driver-inline-note">Активные причины простоев для самосвалов не найдены.</div>
+            {% endfor %}
+        </div>
+        <button class="driver-primary-action driver-downtime-close{% if not active_downtime %} is-disabled{% endif %}" type="button" data-driver-close-downtime {% if not active_downtime %}disabled aria-disabled="true"{% endif %}>Завершить простой</button>
+    </section>
 
-    {% if active_trip %}
-        <section class="card highlight-success">
-            <h2>Активный рейс</h2>
-            <div class="grid">
-                <div class="tile"><strong>От экскаватора</strong>{{ active_trip.excavator }}</div>
-                <div class="tile"><strong>Порода</strong>{{ active_trip.rock_type }}</div>
-                <div class="tile"><strong>Точка разгрузки</strong>{{ active_trip.dump_point }}</div>
-                <div class="tile"><strong>Объем</strong>{{ active_trip.volume_m3|default:"-" }}</div>
-            </div>
-            <form method="post" action="{% url 'driver_complete_trip' active_trip.id %}">
-                {% csrf_token %}
-                <button type="submit">Выполнено</button>
-            </form>
-        </section>
-    {% endif %}
+    <section class="driver-panel driver-tab {% if active_tab == 'manifest' %}is-active{% endif %}" data-driver-tab-panel="manifest">
+        <div class="driver-section-title">
+            <span>Путевка</span>
+            <strong>{{ shift_trip_count }} рейсов · {{ shift_plan_percent }}% плана</strong>
+        </div>
+        <div class="driver-trip-list">
+            {% for trip in shift_trips %}
+                <details class="driver-trip-row">
+                    <summary>
+                        <span>{{ forloop.counter|stringformat:"02d" }}</span>
+                        <strong>{{ trip.excavator }}</strong>
+                        <em>{{ trip.dump_point }}</em>
+                        <b>{% if trip.completed_at %}{{ trip.completed_at|date:"H:i" }}{% else %}в рейсе{% endif %}</b>
+                    </summary>
+                    <dl>
+                        <div><dt>Статус</dt><dd>{{ trip.get_status_display }}</dd></div>
+                        <div><dt>Порода</dt><dd>{{ trip.rock_type }}</dd></div>
+                        <div><dt>Объем</dt><dd>{{ trip.volume_m3|default:"—" }}</dd></div>
+                        <div><dt>Время создания</dt><dd>{{ trip.created_at|date:"H:i" }}</dd></div>
+                    </dl>
+                </details>
+            {% empty %}
+                <div class="driver-empty-state">Рейсов за текущую смену пока нет.</div>
+            {% endfor %}
+        </div>
+    </section>
+
+    <nav class="mm-mobile-bottom-nav driver-bottom-nav driver-work-bottom-nav" aria-label="Навигация водителя">
+        <button class="mm-mobile-nav-item {% if active_tab == 'work' %}is-active{% endif %}" type="button" data-driver-tab-open="work">
+            <img class="driver-nav-icon driver-nav-truck" src="{% static 'img/equipment/truck-green.png' %}" alt="">
+            <span>Работа</span>
+        </button>
+        <button class="mm-mobile-nav-item {% if active_tab == 'shift' %}is-active{% endif %}" type="button" data-driver-tab-open="shift">
+            <span class="driver-nav-icon driver-nav-clock" aria-hidden="true"></span>
+            <span>Смена</span>
+        </button>
+        <button class="mm-mobile-nav-item {% if active_tab == 'downtimes' %}is-active{% endif %}" type="button" data-driver-tab-open="downtimes">
+            <span class="driver-nav-icon driver-nav-alert" aria-hidden="true"></span>
+            <span>Простои</span>
+        </button>
+        <button class="mm-mobile-nav-item {% if active_tab == 'manifest' %}is-active{% endif %}" type="button" data-driver-tab-open="manifest" data-driver-pwa-update-nav-target>
+            <span class="driver-nav-icon driver-nav-doc" aria-hidden="true"></span>
+            <span>Путевка</span>
+            <span class="driver-mobile-update-badge" data-driver-pwa-update-badge hidden aria-hidden="true"></span>
+        </button>
+    </nav>
 </main>
+
+<div class="driver-mobile-update-modal" data-driver-pwa-update-modal hidden aria-live="polite" aria-modal="true" role="dialog">
+    <div class="driver-mobile-update-dialog">
+        <strong>Доступно обновление</strong>
+        <p data-driver-pwa-update-status>Можно установить новую версию экрана водителя.</p>
+        <div class="driver-mobile-update-versions">
+            <span>Сейчас: <b data-driver-pwa-current-version>v1</b></span>
+            <span>Новая: <b data-driver-pwa-new-version>v1</b></span>
+        </div>
+        <div class="driver-mobile-update-actions">
+            <button type="button" data-driver-pwa-update-later>Позже</button>
+            <button type="button" data-driver-pwa-update-apply>Обновить</button>
+        </div>
+    </div>
+</div>
+
+<script>
+window.applyOperationalStateRefresh = function (context) {
+    var currentShell = document.querySelector("[data-driver-shell]");
+    if (!currentShell || !window.fetch || !window.DOMParser) {
+        return Promise.resolve(false);
+    }
+    var activeTab = currentShell.dataset.activeTab || "work";
+    var url = new URL(window.location.href);
+    url.searchParams.set("_driver_refresh", Date.now());
+    return fetch(url.toString(), {
+        method: "GET",
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: {
+            "Accept": "text/html",
+            "X-Requested-With": "XMLHttpRequest"
+        }
+    }).then(function (response) {
+        if (!response.ok) {
+            return false;
+        }
+        return response.text();
+    }).then(function (html) {
+        if (!html) {
+            return false;
+        }
+        var doc = new DOMParser().parseFromString(html, "text/html");
+        var freshShell = doc.querySelector("[data-driver-shell]");
+        if (!freshShell) {
+            return false;
+        }
+        var oldShell = document.querySelector("[data-driver-shell]");
+        if (!oldShell) {
+            return false;
+        }
+        freshShell.dataset.activeTab = activeTab;
+        oldShell.replaceWith(freshShell);
+
+        var freshModal = doc.querySelector("[data-driver-pwa-update-modal]");
+        var oldModal = document.querySelector("[data-driver-pwa-update-modal]");
+        if (freshModal && oldModal) {
+            oldModal.replaceWith(freshModal);
+        }
+
+        if (doc.body && doc.body.dataset.operationalStateVersion) {
+            document.body.dataset.operationalStateVersion = doc.body.dataset.operationalStateVersion;
+        } else if (context && context.version) {
+            document.body.dataset.operationalStateVersion = String(context.version);
+        }
+        if (typeof window.bindDriverMobileShell === "function") {
+            window.bindDriverMobileShell();
+        }
+        return true;
+    }).catch(function () {
+        return false;
+    });
+};
+
+window.bindDriverMobileShell = function () {
+    var shell = document.querySelector("[data-driver-shell]");
+    if (!shell) {
+        return;
+    }
+    if (shell.dataset.driverShellBound === "true") {
+        return;
+    }
+    shell.dataset.driverShellBound = "true";
+    function isTextEditable(target) {
+        return Boolean(target && target.closest && target.closest("input, textarea, select, option, [contenteditable='true'], [contenteditable='']"));
+    }
+    function clearDriverSelection() {
+        var selection = window.getSelection ? window.getSelection() : null;
+        if (selection && selection.removeAllRanges) {
+            selection.removeAllRanges();
+        }
+    }
+    shell.addEventListener("selectstart", function (event) {
+        if (!isTextEditable(event.target)) {
+            event.preventDefault();
+            clearDriverSelection();
+        }
+    });
+    shell.addEventListener("dragstart", function (event) {
+        if (event.target && event.target.closest && event.target.closest("img, svg, canvas, video")) {
+            event.preventDefault();
+        }
+    });
+    shell.addEventListener("pointerdown", function (event) {
+        if (!isTextEditable(event.target)) {
+            clearDriverSelection();
+        }
+    }, true);
+    shell.querySelectorAll(".driver-unload-tile strong").forEach(function (label) {
+        var length = label.textContent.trim().length;
+        if (length > 15) {
+            label.classList.add("is-extra-long");
+        } else if (length > 8) {
+            label.classList.add("is-long");
+        }
+    });
+    function generateClientActionId(prefix) {
+        if (window.crypto && window.crypto.randomUUID) {
+            return prefix + "-" + window.crypto.randomUUID();
+        }
+        return prefix + "-" + Date.now() + "-" + Math.random().toString(16).slice(2);
+    }
+    function fillClientAction(form, prefix) {
+        var input = form.querySelector("[data-driver-client-action]");
+        if (input && !input.value) {
+            input.value = generateClientActionId(prefix);
+        }
+    }
+    function clearDriverMessages() {
+        var messages = shell.querySelector(".driver-messages");
+        if (messages && shell.dataset.activeTab === "downtimes") {
+            messages.innerHTML = "";
+        }
+    }
+    function openDriverTab(tab) {
+        shell.dataset.activeTab = tab;
+        shell.querySelectorAll("[data-driver-tab-panel]").forEach(function (panel) {
+            panel.classList.toggle("is-active", panel.dataset.driverTabPanel === tab);
+        });
+        shell.querySelectorAll("[data-driver-tab-open]").forEach(function (button) {
+            button.classList.toggle("is-active", button.dataset.driverTabOpen === tab);
+        });
+        if (window.history && window.history.replaceState) {
+            var url = new URL(window.location.href);
+            url.searchParams.set("tab", tab);
+            window.history.replaceState({}, "", url.toString());
+        }
+        clearDriverMessages();
+    }
+    shell.querySelectorAll("[data-driver-tab-open]").forEach(function (button) {
+        button.addEventListener("click", function () {
+            openDriverTab(button.dataset.driverTabOpen);
+        });
+    });
+    shell.querySelectorAll("form").forEach(function (form) {
+        if (!form.matches("[data-driver-hold-form]")) {
+            form.addEventListener("submit", function () {
+                fillClientAction(form, "driver-action");
+            });
+        }
+    });
+    clearDriverMessages();
+
+    var downtimePanel = shell.querySelector("[data-driver-tab-panel='downtimes']");
+    var downtimeCard = shell.querySelector("[data-driver-active-downtime-id]");
+    var downtimeDuration = shell.querySelector("[data-driver-active-duration]");
+    var downtimeTitle = shell.querySelector("[data-driver-active-title]");
+    var downtimeReason = shell.querySelector("[data-driver-active-reason]");
+    var downtimeClose = shell.querySelector("[data-driver-close-downtime]");
+    var downtimeUrl = downtimePanel ? downtimePanel.dataset.driverDowntimeUrl : "";
+    var downtimeCsrfInput = downtimePanel ? downtimePanel.querySelector("input[name='csrfmiddlewaretoken']") : null;
+    var downtimeCsrfToken = downtimeCsrfInput ? downtimeCsrfInput.value : "";
+
+    function formatDriverDowntimeDuration(seconds) {
+        seconds = Math.max(0, Math.floor(Number(seconds) || 0));
+        var hours = Math.floor(seconds / 3600);
+        var minutes = Math.floor((seconds % 3600) / 60);
+        var rest = seconds % 60;
+        return [hours, minutes, rest].map(function (part) {
+            return String(part).padStart(2, "0");
+        }).join(":");
+    }
+
+    function clearDriverDowntimeTimer() {
+        if (window.driverDowntimeTimerId) {
+            window.clearInterval(window.driverDowntimeTimerId);
+            window.driverDowntimeTimerId = null;
+        }
+    }
+
+    function startDriverDowntimeTimer(startedAt, fallbackElapsedSeconds) {
+        clearDriverDowntimeTimer();
+        if (!downtimeDuration) {
+            return;
+        }
+        var startedAtMs = startedAt ? Date.parse(startedAt) : NaN;
+        var fallbackStartedAtMs = Date.now() - (Math.max(0, Number(fallbackElapsedSeconds) || 0) * 1000);
+        var startMs = Number.isNaN(startedAtMs) ? fallbackStartedAtMs : startedAtMs;
+        function tick() {
+            downtimeDuration.textContent = formatDriverDowntimeDuration((Date.now() - startMs) / 1000);
+        }
+        tick();
+        window.driverDowntimeTimerId = window.setInterval(tick, 1000);
+    }
+
+    function setDriverDowntimeStatusClass(statusKey) {
+        if (!downtimeCard) {
+            return;
+        }
+        ["status-gray", "status-yellow", "status-green", "status-blue", "status-orange", "status-red"].forEach(function (className) {
+            downtimeCard.classList.remove(className);
+        });
+        downtimeCard.classList.add("status-" + (statusKey || "yellow"));
+    }
+
+    function applyDriverActiveDowntime(payload) {
+        if (!downtimeCard || !payload || !payload.event_id) {
+            return;
+        }
+        downtimeCard.dataset.driverActiveDowntimeId = payload.event_id;
+        downtimeCard.dataset.driverActiveStartedAt = payload.started_at || "";
+        downtimeCard.dataset.driverActiveElapsedSeconds = String(payload.elapsed_seconds || 0);
+        downtimeCard.classList.add("is-active");
+        setDriverDowntimeStatusClass(payload.status_key || "red");
+        if (downtimeTitle) downtimeTitle.textContent = "Активный простой";
+        if (downtimeReason) downtimeReason.textContent = payload.reason || "";
+        startDriverDowntimeTimer(payload.started_at, payload.elapsed_seconds);
+        if (downtimeClose) {
+            downtimeClose.disabled = false;
+            downtimeClose.classList.remove("is-disabled");
+            downtimeClose.removeAttribute("aria-disabled");
+        }
+    }
+
+    function clearDriverActiveDowntime(payload) {
+        clearDriverDowntimeTimer();
+        if (downtimeTitle) downtimeTitle.textContent = "Простоя нет";
+        if (downtimeReason) downtimeReason.textContent = "Выберите причину для начала";
+        if (downtimeDuration) downtimeDuration.textContent = "00:00:00";
+        if (downtimeCard) {
+            downtimeCard.dataset.driverActiveDowntimeId = "";
+            downtimeCard.dataset.driverActiveStartedAt = "";
+            downtimeCard.dataset.driverActiveElapsedSeconds = String((payload && payload.elapsed_seconds) || 0);
+            downtimeCard.classList.remove("is-active");
+            setDriverDowntimeStatusClass("yellow");
+        }
+        if (downtimeClose) {
+            downtimeClose.disabled = true;
+            downtimeClose.classList.add("is-disabled");
+            downtimeClose.setAttribute("aria-disabled", "true");
+        }
+        shell.querySelectorAll("[data-driver-downtime-reason-button]").forEach(function (button) {
+            button.classList.remove("is-selected");
+        });
+    }
+
+    function postDriverDowntimeAction(payload) {
+        if (!downtimeUrl) {
+            return Promise.reject(new Error("Адрес действия простоя не найден"));
+        }
+        return fetch(downtimeUrl, {
+            method: "POST",
+            credentials: "same-origin",
+            headers: {
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "X-CSRFToken": downtimeCsrfToken,
+                "X-Requested-With": "XMLHttpRequest"
+            },
+            body: JSON.stringify(payload || {})
+        }).then(function (response) {
+            return response.json().catch(function () { return {}; }).then(function (data) {
+                if (!response.ok || !data.ok) {
+                    throw new Error(data.error || "Действие простоя не сохранено");
+                }
+                return data;
+            });
+        });
+    }
+
+    shell.querySelectorAll("form[data-driver-downtime-reason-id]").forEach(function (form) {
+        form.addEventListener("submit", function (event) {
+            event.preventDefault();
+            var button = form.querySelector("[data-driver-downtime-reason-button]");
+            if (!button || button.disabled) {
+                return;
+            }
+            shell.querySelectorAll("[data-driver-downtime-reason-button]").forEach(function (item) {
+                item.classList.remove("is-selected");
+            });
+            button.classList.add("is-selected");
+            if (downtimeReason) {
+                downtimeReason.textContent = button.dataset.driverReason || button.textContent.trim();
+            }
+            button.disabled = true;
+            postDriverDowntimeAction({
+                action: "start",
+                reason_id: button.dataset.driverDowntimeReasonId,
+                client_action_id: generateClientActionId("driver-downtime")
+            }).then(function (payload) {
+                applyDriverActiveDowntime(payload);
+                if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
+                    window.AppRealtime.wake("driver_downtime_saved");
+                }
+            }).catch(function (error) {
+                window.alert(error.message || "Простой не сохранен");
+                button.classList.remove("is-selected");
+            }).finally(function () {
+                button.disabled = false;
+            });
+        });
+    });
+
+    if (downtimeClose) {
+        downtimeClose.addEventListener("click", function () {
+            if (downtimeClose.disabled || downtimeClose.getAttribute("aria-disabled") === "true") {
+                return;
+            }
+            if (!downtimeCard || !downtimeCard.dataset.driverActiveDowntimeId) {
+                clearDriverActiveDowntime();
+                return;
+            }
+            downtimeClose.disabled = true;
+            downtimeClose.classList.add("is-pending");
+            postDriverDowntimeAction({
+                action: "close",
+                client_action_id: generateClientActionId("driver-downtime-close")
+            }).then(function (payload) {
+                clearDriverActiveDowntime(payload);
+                if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
+                    window.AppRealtime.wake("driver_downtime_closed");
+                }
+            }).catch(function (error) {
+                window.alert(error.message || "Простой не завершен");
+                downtimeClose.disabled = false;
+                downtimeClose.classList.remove("is-disabled");
+                downtimeClose.removeAttribute("aria-disabled");
+            }).finally(function () {
+                downtimeClose.classList.remove("is-pending");
+            });
+        });
+    }
+
+    if (downtimeCard && downtimeCard.dataset.driverActiveDowntimeId && downtimeCard.dataset.driverActiveStartedAt) {
+        startDriverDowntimeTimer(downtimeCard.dataset.driverActiveStartedAt, downtimeCard.dataset.driverActiveElapsedSeconds);
+    } else if (downtimeDuration) {
+        downtimeDuration.textContent = "00:00:00";
+        clearDriverDowntimeTimer();
+    }
+
+    var holdForm = shell.querySelector("[data-driver-hold-form]");
+    var holdButton = shell.querySelector("[data-driver-hold-button]");
+    if (holdForm && holdButton) {
+        var holdTimer = null;
+        var holdStart = 0;
+        var holdFrame = null;
+        var holdMs = 2000;
+        function resetHold() {
+            window.clearTimeout(holdTimer);
+            if (holdFrame) {
+                window.cancelAnimationFrame(holdFrame);
+            }
+            holdTimer = null;
+            holdStart = 0;
+            holdButton.classList.remove("is-holding");
+            holdButton.style.setProperty("--driver-hold", "0");
+        }
+        function drawHold() {
+            if (!holdStart) {
+                return;
+            }
+            var elapsed = Date.now() - holdStart;
+            var percent = Math.max(0, Math.min(100, Math.round((elapsed / holdMs) * 100)));
+            holdButton.style.setProperty("--driver-hold", String(percent));
+            if (percent < 100) {
+                holdFrame = window.requestAnimationFrame(drawHold);
+            }
+        }
+        function completeHold() {
+            fillClientAction(holdForm, "trip-unloaded");
+            holdForm.dataset.holdComplete = "true";
+            holdButton.classList.remove("is-loaded");
+            holdButton.classList.add("is-pending");
+            var dialLabel = holdButton.querySelector("[data-driver-dial-label]");
+            if (dialLabel) {
+                dialLabel.textContent = holdButton.dataset.driverPendingLabel || "ОТПРАВКА";
+            }
+            holdButton.disabled = true;
+            holdForm.submit();
+        }
+        holdButton.addEventListener("pointerdown", function (event) {
+            if (holdButton.disabled) {
+                return;
+            }
+            event.preventDefault();
+            resetHold();
+            holdStart = Date.now();
+            holdButton.classList.add("is-holding");
+            holdButton.setPointerCapture?.(event.pointerId);
+            drawHold();
+            holdTimer = window.setTimeout(completeHold, holdMs);
+        });
+        ["pointerup", "pointercancel", "pointerleave"].forEach(function (eventName) {
+            holdButton.addEventListener(eventName, function () {
+                if (holdForm.dataset.holdComplete !== "true") {
+                    resetHold();
+                }
+            });
+        });
+        holdForm.addEventListener("submit", function (event) {
+            if (holdForm.dataset.holdComplete !== "true") {
+                event.preventDefault();
+                resetHold();
+            }
+        });
+    }
+
+    var pointSheet = shell.querySelector("[data-driver-point-sheet]");
+    var pointOpen = shell.querySelector("[data-driver-point-open]");
+    function setPointSheet(open) {
+        if (!pointSheet) {
+            return;
+        }
+        pointSheet.hidden = !open;
+        shell.classList.toggle("is-point-sheet-open", open);
+    }
+    if (pointOpen && pointSheet) {
+        pointOpen.addEventListener("click", function () {
+            setPointSheet(true);
+        });
+        pointOpen.addEventListener("keydown", function (event) {
+            if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                setPointSheet(true);
+            }
+        });
+        pointSheet.querySelectorAll("[data-driver-point-close]").forEach(function (button) {
+            button.addEventListener("click", function () {
+                setPointSheet(false);
+            });
+        });
+        pointSheet.querySelectorAll("form").forEach(function (form) {
+            form.addEventListener("submit", function () {
+                fillClientAction(form, "change-unload-point");
+            });
+        });
+    }
+
+    (function initDriverPwaUpdates() {
+        if (!("serviceWorker" in navigator)) {
+            return;
+        }
+        var currentShellVersion = shell.dataset.driverPwaVersion || "driver-mobile-shell-v32";
+        var updateModal = document.querySelector("[data-driver-pwa-update-modal]");
+        var updateBadge = document.querySelector("[data-driver-pwa-update-badge]");
+        var updateTarget = document.querySelector("[data-driver-pwa-update-nav-target]");
+        var statusNode = document.querySelector("[data-driver-pwa-update-status]");
+        var currentVersionNode = document.querySelector("[data-driver-pwa-current-version]");
+        var newVersionNode = document.querySelector("[data-driver-pwa-new-version]");
+        var applyButton = document.querySelector("[data-driver-pwa-update-apply]");
+        var laterButton = document.querySelector("[data-driver-pwa-update-later]");
+        var waitingWorker = null;
+        var reloading = false;
+
+        function formatVersion(version) {
+            var match = String(version || "").match(/driver-mobile-shell-v(\d+)/);
+            return match ? "v" + match[1] : String(version || "v1");
+        }
+        function setBadge(visible) {
+            if (updateBadge) {
+                updateBadge.hidden = !visible;
+            }
+            if (updateTarget) {
+                updateTarget.classList.toggle("has-update", visible);
+            }
+        }
+        function setStatus(text) {
+            if (statusNode) {
+                statusNode.textContent = text;
+            }
+        }
+        function showUpdate(nextVersion, worker) {
+            waitingWorker = worker || waitingWorker;
+            setBadge(true);
+            if (currentVersionNode) {
+                currentVersionNode.textContent = formatVersion(currentShellVersion);
+            }
+            if (newVersionNode) {
+                newVersionNode.textContent = formatVersion(nextVersion);
+            }
+            setStatus("Можно установить новую версию экрана водителя.");
+        }
+        function requestWorkerVersion(worker) {
+            if (!worker || !worker.postMessage || !window.MessageChannel) {
+                return Promise.resolve("");
+            }
+            return new Promise(function (resolve) {
+                var channel = new MessageChannel();
+                var timeout = window.setTimeout(function () {
+                    resolve("");
+                }, 1200);
+                channel.port1.onmessage = function (event) {
+                    window.clearTimeout(timeout);
+                    resolve(event.data && event.data.version ? event.data.version : "");
+                };
+                worker.postMessage({ type: "GET_VERSION" }, [channel.port2]);
+            });
+        }
+        function fetchLatestVersion() {
+            return fetch("/driver-sw.js?version_check=" + Date.now(), { cache: "no-store" })
+                .then(function (response) { return response.ok ? response.text() : ""; })
+                .then(function (text) {
+                    var match = text.match(/driver-mobile-shell-v\d+/);
+                    return match ? match[0] : "";
+                })
+                .catch(function () { return ""; });
+        }
+        function revealModal() {
+            if (updateModal) {
+                updateModal.hidden = false;
+            }
+        }
+        function hideModal() {
+            if (updateModal) {
+                updateModal.hidden = true;
+            }
+        }
+        function applyUpdate(registration) {
+            setStatus("Устанавливаем обновление...");
+            var worker = waitingWorker || (registration && registration.waiting);
+            if (worker) {
+                worker.postMessage({ type: "SKIP_WAITING" });
+                return;
+            }
+            if (registration && registration.update) {
+                registration.update().then(function () {
+                    worker = registration.waiting || waitingWorker;
+                    if (worker) {
+                        worker.postMessage({ type: "SKIP_WAITING" });
+                    } else {
+                        window.location.reload();
+                    }
+                }).catch(function () {
+                    setStatus("Не удалось установить обновление. Попробуйте еще раз.");
+                });
+            }
+        }
+
+        navigator.serviceWorker.addEventListener("controllerchange", function () {
+            if (!reloading) {
+                reloading = true;
+                window.location.reload();
+            }
+        });
+
+        navigator.serviceWorker.register("/driver-sw.js", { scope: "/driver/" }).then(function (registration) {
+            if (registration.waiting) {
+                requestWorkerVersion(registration.waiting).then(function (version) {
+                    if (version && version !== currentShellVersion) {
+                        showUpdate(version, registration.waiting);
+                    }
+                });
+            }
+            registration.addEventListener("updatefound", function () {
+                var worker = registration.installing;
+                if (!worker) {
+                    return;
+                }
+                worker.addEventListener("statechange", function () {
+                    if (worker.state === "installed" && navigator.serviceWorker.controller) {
+                        requestWorkerVersion(worker).then(function (version) {
+                            showUpdate(version || currentShellVersion, worker);
+                        });
+                    }
+                });
+            });
+            fetchLatestVersion().then(function (latestVersion) {
+                if (latestVersion && latestVersion !== currentShellVersion) {
+                    showUpdate(latestVersion, registration.waiting);
+                }
+            });
+            if (applyButton) {
+                applyButton.addEventListener("click", function () {
+                    applyUpdate(registration);
+                });
+            }
+        }).catch(function () {
+            setBadge(false);
+        });
+
+        if (laterButton) {
+            laterButton.addEventListener("click", hideModal);
+        }
+        if (updateTarget) {
+            updateTarget.addEventListener("click", function () {
+                if (updateBadge && !updateBadge.hidden) {
+                    revealModal();
+                }
+            }, true);
+        }
+    })();
+};
+document.addEventListener("DOMContentLoaded", window.bindDriverMobileShell);
+</script>
 {% endblock %}

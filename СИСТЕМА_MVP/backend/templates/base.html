@@ -5,9 +5,773 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% block title %}MVP учетной системы{% endblock %}</title>
-    <link rel="stylesheet" href="{% static 'css/app.css' %}">
+    <link rel="icon" href="{% static 'favicon.ico' %}">
+    <link rel="stylesheet" href="{% static 'css/app.css' %}?v={% now 'U' %}">
+    <style>
+        .app-sync-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 10000;
+            display: grid;
+            place-items: center;
+            padding: 24px;
+            background: rgba(4, 12, 18, 0.84);
+            color: #f7fafc;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 160ms ease;
+        }
+        .app-sync-overlay.is-visible {
+            opacity: 1;
+            pointer-events: auto;
+        }
+        .app-sync-overlay[hidden] {
+            display: none;
+        }
+        .app-sync-overlay__panel {
+            width: min(420px, 100%);
+            display: grid;
+            gap: 12px;
+            justify-items: center;
+            padding: 28px 24px;
+            border: 1px solid rgba(148, 163, 184, 0.28);
+            border-radius: 8px;
+            background: rgba(15, 23, 42, 0.96);
+            box-shadow: 0 28px 70px rgba(0, 0, 0, 0.42);
+            text-align: center;
+        }
+        .app-sync-overlay__spinner {
+            width: 42px;
+            height: 42px;
+            border: 4px solid rgba(148, 163, 184, 0.34);
+            border-top-color: #38bdf8;
+            border-radius: 50%;
+            animation: app-sync-spin 0.9s linear infinite;
+        }
+        .app-sync-overlay__title {
+            font-size: 20px;
+            font-weight: 800;
+            letter-spacing: 0;
+        }
+        .app-sync-overlay__text {
+            max-width: 32ch;
+            color: #cbd5e1;
+            font-size: 15px;
+            line-height: 1.45;
+        }
+        @keyframes app-sync-spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+        .app-realtime-status {
+            position: fixed;
+            left: 50%;
+            bottom: max(14px, env(safe-area-inset-bottom));
+            z-index: 10001;
+            min-width: min(360px, calc(100vw - 28px));
+            max-width: calc(100vw - 28px);
+            transform: translate(-50%, 12px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            padding: 11px 14px;
+            border: 1px solid rgba(255, 212, 91, .58);
+            border-radius: 8px;
+            background: rgba(19, 16, 8, .94);
+            color: #ffe8a8;
+            font-size: 13px;
+            font-weight: 800;
+            line-height: 1.2;
+            box-shadow: 0 14px 42px rgba(0, 0, 0, .34);
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 160ms ease, transform 160ms ease;
+        }
+        .app-realtime-status::before {
+            content: "";
+            width: 9px;
+            height: 9px;
+            border-radius: 50%;
+            background: #ffd45b;
+            box-shadow: 0 0 14px rgba(255, 212, 91, .82);
+        }
+        .app-realtime-status.is-visible {
+            opacity: 1;
+            transform: translate(-50%, 0);
+        }
+        .app-realtime-status[hidden] {
+            display: none;
+        }
+        .app-realtime-update {
+            position: fixed;
+            left: 50%;
+            bottom: calc(max(14px, env(safe-area-inset-bottom)) + 58px);
+            z-index: 10000;
+            width: min(420px, calc(100vw - 28px));
+            transform: translate(-50%, 12px);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 10px 12px 10px 14px;
+            border: 1px solid rgba(96, 165, 250, .5);
+            border-radius: 8px;
+            background: rgba(10, 22, 38, .95);
+            color: #dbeafe;
+            font-size: 13px;
+            font-weight: 800;
+            line-height: 1.25;
+            box-shadow: 0 14px 42px rgba(0, 0, 0, .34);
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 160ms ease, transform 160ms ease;
+        }
+        .app-realtime-update.is-visible {
+            opacity: 1;
+            pointer-events: auto;
+            transform: translate(-50%, 0);
+        }
+        .app-realtime-update[hidden] {
+            display: none;
+        }
+        .app-realtime-update__button {
+            flex: 0 0 auto;
+            border: 0;
+            border-radius: 6px;
+            padding: 8px 10px;
+            background: #60a5fa;
+            color: #07131f;
+            font: inherit;
+            font-size: 12px;
+            font-weight: 900;
+            cursor: pointer;
+        }
+        .app-realtime-update__button:focus-visible {
+            outline: 2px solid #bfdbfe;
+            outline-offset: 2px;
+        }
+        @media (max-width: 520px) {
+            .app-realtime-update {
+                align-items: stretch;
+                flex-direction: column;
+            }
+            .app-realtime-update__button {
+                width: 100%;
+            }
+        }
+    </style>
+    {% block extra_head %}{% endblock %}
 </head>
-<body class="{% block body_class %}{% endblock %}">
+<body class="{% block body_class %}{% endblock %}" data-realtime-screen="{% block realtime_screen %}{% endblock %}" data-realtime-mode="{% block realtime_mode %}{% endblock %}" data-realtime-role="{% block realtime_role %}{% endblock %}" data-operational-state-version="{{ operational_state_version|default:0 }}">
 {% block body %}{% endblock %}
+
+<div class="app-sync-overlay" data-app-sync-overlay hidden aria-live="polite" aria-busy="true">
+    <div class="app-sync-overlay__panel" role="status">
+        <div class="app-sync-overlay__spinner" aria-hidden="true"></div>
+        <strong class="app-sync-overlay__title" data-app-sync-title>Обновляем данные</strong>
+        <span class="app-sync-overlay__text" data-app-sync-text>Сверяем экран с сервером. Это займет несколько секунд.</span>
+    </div>
+</div>
+
+<div class="app-realtime-status" data-app-realtime-status hidden role="status" aria-live="polite">
+    Связь с сервером потеряна. Экран может отставать.
+</div>
+
+<div class="app-realtime-update" data-app-realtime-update hidden role="status" aria-live="polite">
+    <span data-app-realtime-update-text>На сервере появились новые данные.</span>
+    <button class="app-realtime-update__button" type="button" data-app-realtime-update-button>Обновить</button>
+</div>
+
+<div class="app-confirm-modal" id="app-confirm-modal" hidden>
+    <div class="app-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="app-confirm-title">
+        <button class="app-confirm-close" type="button" aria-label="Закрыть" data-confirm-close>×</button>
+        <div class="app-confirm-accent" aria-hidden="true"></div>
+        <div class="app-confirm-icon">!</div>
+        <div class="app-confirm-content">
+            <h2 id="app-confirm-title">Подтвердите действие</h2>
+            <p id="app-confirm-message">Выполнить действие?</p>
+        </div>
+        <div class="app-confirm-shift-summary" id="app-confirm-shift-summary" hidden>
+            <h3>Текущая смена</h3>
+            <div class="app-confirm-shift-grid">
+                <div>
+                    <span>Дата</span>
+                    <strong data-confirm-shift-date>-</strong>
+                </div>
+                <div>
+                    <span>Время начала</span>
+                    <strong data-confirm-shift-time>-</strong>
+                </div>
+                <div>
+                    <span data-confirm-shift-person-label>Ответственный</span>
+                    <strong data-confirm-shift-person>-</strong>
+                </div>
+            </div>
+        </div>
+        <div class="app-confirm-actions">
+            <button class="secondary" type="button" data-confirm-cancel>Отмена</button>
+            <button class="danger" type="button" data-confirm-accept>Подтвердить</button>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    var logoutPath = "{% url 'logout' %}";
+    var roleHomePath = "{% url 'role_home' %}";
+    var confirmModal = document.getElementById("app-confirm-modal");
+    var confirmMessage = document.getElementById("app-confirm-message");
+    var confirmAccept = confirmModal ? confirmModal.querySelector("[data-confirm-accept]") : null;
+    var confirmCancel = confirmModal ? confirmModal.querySelector("[data-confirm-cancel]") : null;
+    var confirmClose = confirmModal ? confirmModal.querySelector("[data-confirm-close]") : null;
+    var confirmTitle = document.getElementById("app-confirm-title");
+    var confirmShiftSummary = document.getElementById("app-confirm-shift-summary");
+    var confirmShiftDate = confirmModal ? confirmModal.querySelector("[data-confirm-shift-date]") : null;
+    var confirmShiftTime = confirmModal ? confirmModal.querySelector("[data-confirm-shift-time]") : null;
+    var confirmShiftPersonLabel = confirmModal ? confirmModal.querySelector("[data-confirm-shift-person-label]") : null;
+    var confirmShiftPerson = confirmModal ? confirmModal.querySelector("[data-confirm-shift-person]") : null;
+    var syncOverlay = document.querySelector("[data-app-sync-overlay]");
+    var syncOverlayTitle = syncOverlay ? syncOverlay.querySelector("[data-app-sync-title]") : null;
+    var syncOverlayText = syncOverlay ? syncOverlay.querySelector("[data-app-sync-text]") : null;
+    var pendingConfirmAction = null;
+    var pendingConfirmTimer = null;
+    var backTargets = [
+        {pattern: /^\/system-admin\/employees\/create\/?$/, target: "{% url 'system_admin_employees' %}"},
+        {pattern: /^\/system-admin\/employees\/\d+\/?$/, target: "{% url 'system_admin_employees' %}"},
+        {pattern: /^\/system-admin\/employees\/?$/, target: "{% url 'system_admin_dashboard' %}"},
+        {pattern: /^\/system-admin\/references\/?$/, target: "{% url 'system_admin_dashboard' %}"},
+        {pattern: /^\/system-admin\/conflicts\/?$/, target: "{% url 'system_admin_dashboard' %}"},
+        {pattern: /^\/system-admin\/logs\/?$/, target: "{% url 'system_admin_dashboard' %}"},
+        {pattern: /^\/system-admin\/exports\/?$/, target: "{% url 'system_admin_dashboard' %}"},
+        {pattern: /^\/system-admin\/?$/, target: roleHomePath},
+        {pattern: /^\/reports\/pilot-scenario\/?$/, target: "{% url 'interface_map' %}"},
+        {pattern: /^\/reports\/pilot-feedback\/?$/, target: "{% url 'pilot_launch_scenario' %}"},
+        {pattern: /^\/reports\/pilot-checklist\/?$/, target: "{% url 'pilot_launch_scenario' %}"},
+        {pattern: /^\/reports\/management\/?$/, target: roleHomePath},
+        {pattern: /^\/reports\/customer-daily\/?$/, target: "{% url 'management_dashboard' %}"},
+        {pattern: /^\/reports\/volume\/?$/, target: "{% url 'management_dashboard' %}"},
+        {pattern: /^\/reports\/downtimes\/?$/, target: "{% url 'management_dashboard' %}"},
+        {pattern: /^\/driver\/registration\/?$/, target: roleHomePath},
+        {pattern: /^\/driver\/shift\/?$/, target: roleHomePath},
+        {pattern: /^\/dispatcher\/control\/?$/, target: roleHomePath},
+        {pattern: /^\/mining-master\/assignments\/?$/, target: roleHomePath},
+        {pattern: /^\/excavator\/work\/?$/, target: roleHomePath},
+        {pattern: /^\/mechanic\/downtimes\/?$/, target: roleHomePath},
+        {pattern: /^\/interfaces\/?$/, target: roleHomePath}
+    ];
+
+    function showAppSyncOverlay(options) {
+        if (!syncOverlay) {
+            return;
+        }
+        options = options || {};
+        if (syncOverlayTitle && options.title) {
+            syncOverlayTitle.textContent = options.title;
+        }
+        if (syncOverlayText && options.text) {
+            syncOverlayText.textContent = options.text;
+        }
+        syncOverlay.hidden = false;
+        window.requestAnimationFrame(function () {
+            syncOverlay.classList.add("is-visible");
+        });
+    }
+
+    function hideAppSyncOverlay() {
+        if (!syncOverlay) {
+            return;
+        }
+        syncOverlay.classList.remove("is-visible");
+        window.setTimeout(function () {
+            if (!syncOverlay.classList.contains("is-visible")) {
+                syncOverlay.hidden = true;
+            }
+        }, 180);
+    }
+
+    window.showAppSyncOverlay = showAppSyncOverlay;
+    window.hideAppSyncOverlay = hideAppSyncOverlay;
+    window.addEventListener("app-sync-show", function (event) {
+        showAppSyncOverlay(event.detail || {});
+    });
+    window.addEventListener("app-sync-hide", hideAppSyncOverlay);
+
+    function getBackTarget() {
+        var currentPath = window.location.pathname;
+        for (var index = 0; index < backTargets.length; index += 1) {
+            if (backTargets[index].pattern.test(currentPath)) {
+                return backTargets[index].target;
+            }
+        }
+        return roleHomePath;
+    }
+
+    function resetConfirmAccept(acceptLabel) {
+        if (!confirmAccept) {
+            return;
+        }
+        confirmAccept.disabled = false;
+        confirmAccept.textContent = acceptLabel || "Подтвердить";
+    }
+
+    function syncConfirmTheme() {
+        if (!confirmModal) {
+            return;
+        }
+        var dispatcherShell = document.querySelector("[data-dispatcher-theme]");
+        var adminShell = document.querySelector("[data-admin-theme]");
+        confirmModal.classList.remove("dispatcher-day", "dispatcher-night", "admin-day", "admin-night");
+        if (adminShell) {
+            confirmModal.classList.add(adminShell.classList.contains("admin-night") ? "admin-night" : "admin-day");
+            return;
+        }
+        if (!dispatcherShell) {
+            return;
+        }
+        confirmModal.classList.add(dispatcherShell.classList.contains("dispatcher-night") ? "dispatcher-night" : "dispatcher-day");
+    }
+
+    function clearConfirmVariant() {
+        if (!confirmModal) {
+            return;
+        }
+        confirmModal.classList.remove("is-shift-end-confirm");
+        if (confirmTitle) {
+            confirmTitle.textContent = "Подтвердите действие";
+        }
+        if (confirmShiftSummary) {
+            confirmShiftSummary.hidden = true;
+        }
+    }
+
+    function applyConfirmVariant(options) {
+        clearConfirmVariant();
+        options = options || {};
+        var variant = options.confirmVariant || options.variant;
+        if (variant !== "shift-end" || !confirmModal) {
+            if (confirmTitle && (options.confirmTitle || options.title)) {
+                confirmTitle.textContent = options.confirmTitle || options.title;
+            }
+            return;
+        }
+        confirmModal.classList.add("is-shift-end-confirm");
+        if (confirmTitle) {
+            confirmTitle.textContent = options.confirmTitle || options.title || "Завершение смены";
+        }
+        if (confirmShiftSummary) {
+            confirmShiftSummary.hidden = false;
+        }
+        if (confirmShiftDate) {
+            confirmShiftDate.textContent = options.confirmDate || options.date || "-";
+        }
+        if (confirmShiftTime) {
+            confirmShiftTime.textContent = options.confirmTime || options.time || "-";
+        }
+        if (confirmShiftPersonLabel) {
+            confirmShiftPersonLabel.textContent = options.confirmPersonLabel || options.personLabel || "Ответственный";
+        }
+        if (confirmShiftPerson) {
+            confirmShiftPerson.textContent = options.confirmPerson || options.person || "-";
+        }
+    }
+
+    function openConfirmDialog(message, action, delaySeconds, acceptLabel, options) {
+        if (!confirmModal || !confirmMessage || !confirmAccept || !confirmCancel) {
+            return;
+        }
+        window.clearInterval(pendingConfirmTimer);
+        syncConfirmTheme();
+        applyConfirmVariant(options);
+        pendingConfirmAction = action;
+        confirmMessage.textContent = (options && (options.confirmDescription || options.description)) || message || "Выполнить действие?";
+        delaySeconds = Number(delaySeconds || 0);
+        if (delaySeconds > 0) {
+            var remaining = delaySeconds;
+            confirmAccept.disabled = true;
+            confirmAccept.textContent = "ОК через " + remaining;
+            pendingConfirmTimer = window.setInterval(function () {
+                remaining -= 1;
+                if (remaining <= 0) {
+                    window.clearInterval(pendingConfirmTimer);
+                    confirmAccept.disabled = false;
+                    confirmAccept.textContent = acceptLabel || "ОК";
+                    return;
+                }
+                confirmAccept.textContent = "ОК через " + remaining;
+            }, 1000);
+        } else {
+            resetConfirmAccept(acceptLabel);
+        }
+        confirmModal.hidden = false;
+        document.body.classList.add("modal-open");
+        if (delaySeconds > 0) {
+            confirmCancel.focus();
+        } else {
+            confirmAccept.focus();
+        }
+    }
+
+    window.openAppConfirmDialog = openConfirmDialog;
+
+    function closeConfirmDialog() {
+        if (!confirmModal) {
+            return;
+        }
+        confirmModal.hidden = true;
+        document.body.classList.remove("modal-open");
+        pendingConfirmAction = null;
+        window.clearInterval(pendingConfirmTimer);
+        clearConfirmVariant();
+        resetConfirmAccept();
+    }
+
+    if (confirmAccept) {
+        confirmAccept.addEventListener("click", function () {
+            var action = pendingConfirmAction;
+            closeConfirmDialog();
+            if (action) {
+                action();
+            }
+        });
+    }
+
+    if (confirmCancel) {
+        confirmCancel.addEventListener("click", closeConfirmDialog);
+    }
+    if (confirmClose) {
+        confirmClose.addEventListener("click", closeConfirmDialog);
+    }
+
+    if (confirmModal) {
+        confirmModal.addEventListener("click", function (event) {
+            if (event.target === confirmModal) {
+                closeConfirmDialog();
+            }
+        });
+    }
+
+    document.addEventListener("keydown", function (event) {
+        if (event.key === "Escape" && confirmModal && !confirmModal.hidden) {
+            closeConfirmDialog();
+        }
+    });
+
+    document.querySelectorAll(".topline").forEach(function (topline) {
+        if (topline.querySelector(".topline-nav")) {
+            return;
+        }
+
+        var existingLinks = Array.from(topline.querySelectorAll(":scope > a"));
+        if (!existingLinks.length) {
+            return;
+        }
+
+        var nav = document.createElement("span");
+        nav.className = "topline-nav";
+
+        var backButton = document.createElement("button");
+        backButton.type = "button";
+        backButton.className = "link-button";
+        backButton.textContent = "Назад";
+        backButton.addEventListener("click", function () {
+            window.location.href = getBackTarget();
+        });
+
+        nav.appendChild(backButton);
+        if (!window.location.pathname.startsWith("/system-admin/") && window.location.pathname !== roleHomePath) {
+            var homeLink = document.createElement("a");
+            homeLink.href = roleHomePath;
+            homeLink.textContent = "Главная";
+            nav.appendChild(homeLink);
+        }
+        existingLinks.forEach(function (link) {
+            nav.appendChild(link);
+        });
+        topline.appendChild(nav);
+    });
+
+    document.addEventListener("click", function (event) {
+        var link = event.target.closest("a");
+        if (!link) {
+            return;
+        }
+        var message = link.dataset.confirm;
+        if (!message && link.getAttribute("href") === logoutPath) {
+            message = "Выйти из системы?";
+        }
+        if (message) {
+            event.preventDefault();
+            var acceptLabel = (link.textContent || "").trim();
+            if (acceptLabel && link.dataset.confirmVariant !== "shift-end") {
+                acceptLabel = "ОК, " + acceptLabel;
+            }
+            openConfirmDialog(message, function () {
+                window.location.href = link.href;
+            }, link.dataset.confirmDelay || 0, acceptLabel, link.dataset || {});
+        }
+    });
+
+    function bindAppConfirmForm(form) {
+        if (!form || form.dataset.confirmBound === "true") {
+            return;
+        }
+        form.dataset.confirmBound = "true";
+        form.addEventListener("submit", function (event) {
+            if (form.dataset.confirmed === "1") {
+                delete form.dataset.confirmed;
+                return;
+            }
+
+            var submitter = event.submitter;
+            var message = submitter && submitter.dataset ? submitter.dataset.confirm : "";
+            if (!message && form.dataset.confirm) {
+                message = form.dataset.confirm;
+            }
+            if (!message) {
+                return;
+            }
+
+            event.preventDefault();
+            var delay = submitter && submitter.dataset ? submitter.dataset.confirmDelay : "";
+            if (!delay && form.dataset.confirmDelay) {
+                delay = form.dataset.confirmDelay;
+            }
+            var acceptLabel = submitter ? (submitter.textContent || submitter.value || "").trim() : "";
+            if (acceptLabel && (!submitter || submitter.dataset.confirmVariant !== "shift-end")) {
+                acceptLabel = "ОК, " + acceptLabel;
+            }
+            openConfirmDialog(message, function () {
+                form.dataset.confirmed = "1";
+                if (submitter && submitter.name) {
+                    var hidden = document.createElement("input");
+                    hidden.type = "hidden";
+                    hidden.name = submitter.name;
+                    hidden.value = submitter.value || "1";
+                    form.appendChild(hidden);
+                }
+                form.submit();
+            }, delay || 0, acceptLabel, submitter && submitter.dataset ? submitter.dataset : form.dataset);
+        });
+    }
+
+    function initAppConfirmForms() {
+        document.querySelectorAll("form").forEach(bindAppConfirmForm);
+    }
+
+    window.initAppConfirmForms = initAppConfirmForms;
+    initAppConfirmForms();
+
+    document.querySelectorAll("[data-auto-filter-form]").forEach(function (form) {
+        var submitTimer = null;
+
+        function submitAutoFilter(delay) {
+            window.clearTimeout(submitTimer);
+            submitTimer = window.setTimeout(function () {
+                if (form.requestSubmit) {
+                    form.requestSubmit();
+                } else {
+                    form.submit();
+                }
+            }, delay || 0);
+        }
+
+        function openDatePicker(input) {
+            if (!input || !input.showPicker) {
+                return;
+            }
+            try {
+                input.showPicker();
+            } catch (error) {
+                return;
+            }
+        }
+
+        form.querySelectorAll("select").forEach(function (select) {
+            select.addEventListener("change", function () {
+                submitAutoFilter(0);
+            });
+        });
+
+        form.querySelectorAll("input").forEach(function (input) {
+            var inputType = (input.getAttribute("type") || "text").toLowerCase();
+            if (inputType === "hidden") {
+                return;
+            }
+            if (inputType === "date") {
+                input.addEventListener("change", function () {
+                    submitAutoFilter(0);
+                });
+                input.addEventListener("click", function () {
+                    openDatePicker(input);
+                });
+                input.addEventListener("focus", function () {
+                    openDatePicker(input);
+                });
+                return;
+            }
+            input.addEventListener("input", function () {
+                submitAutoFilter(450);
+            });
+        });
+
+        form.querySelectorAll("label").forEach(function (label) {
+            var dateInput = label.querySelector("input[type='date']");
+            if (!dateInput) {
+                return;
+            }
+            label.addEventListener("click", function (event) {
+                if (event.target === dateInput) {
+                    return;
+                }
+                dateInput.focus();
+                openDatePicker(dateInput);
+            });
+        });
+    });
+
+    function updateDispatcherThemeIcons() {
+        document.querySelectorAll("[data-dispatcher-theme-toggle]").forEach(function (toggle) {
+            var shell = toggle.closest("[data-dispatcher-theme]") || document.querySelector("[data-dispatcher-theme]");
+            var isNight = shell ? shell.classList.contains("dispatcher-night") : (localStorage.getItem("dispatcher-theme") || "night") === "night";
+            toggle.textContent = "";
+            toggle.dataset.themeIcon = isNight ? "moon" : "sun";
+            toggle.setAttribute("aria-label", isNight ? "Переключить на дневной режим" : "Переключить на ночной режим");
+            toggle.setAttribute("title", isNight ? "Дневной режим" : "Ночной режим");
+        });
+    }
+
+    function bindDispatcherThemeToggle(toggle) {
+        if (!toggle || toggle.dataset.themeBound === "true") {
+            return;
+        }
+        toggle.dataset.themeBound = "true";
+        toggle.addEventListener("click", function () {
+            window.setTimeout(updateDispatcherThemeIcons, 0);
+        });
+    }
+
+    function initDispatcherThemeControls() {
+        updateDispatcherThemeIcons();
+        document.querySelectorAll("[data-dispatcher-theme-toggle]").forEach(bindDispatcherThemeToggle);
+    }
+
+    window.initDispatcherThemeControls = initDispatcherThemeControls;
+    initDispatcherThemeControls();
+
+    function padDispatcherClockPart(value) {
+        return String(value).padStart(2, "0");
+    }
+
+    function initDispatcherRadialClocks() {
+        document.querySelectorAll(".dispatcher-radial-clock").forEach(function (clock) {
+            if (clock.dataset.clockBound === "true") return;
+            clock.dataset.clockBound = "true";
+            var stopTimer = null;
+            var timeNode = clock.querySelector(".dispatcher-radial-clock-face strong");
+            var dateNode = clock.querySelector(".dispatcher-radial-clock-face span");
+
+            function updateClockTime() {
+                var now = new Date();
+                if (timeNode) {
+                    timeNode.innerHTML = '<span class="dispatcher-radial-clock-hour">' + padDispatcherClockPart(now.getHours()) + '</span><span class="dispatcher-radial-clock-separator" aria-hidden="true">:</span><span class="dispatcher-radial-clock-minute">' + padDispatcherClockPart(now.getMinutes()) + '</span>';
+                }
+                if (dateNode) {
+                    dateNode.textContent = padDispatcherClockPart(now.getDate()) + "." + padDispatcherClockPart(now.getMonth() + 1) + "." + now.getFullYear();
+                }
+            }
+
+            function isMusicModeSaved() {
+                try {
+                    return window.sessionStorage.getItem("dispatcher-radial-clock-music") === "true";
+                } catch (error) {
+                    return false;
+                }
+            }
+
+            function saveMusicMode(isActive) {
+                try {
+                    window.sessionStorage.setItem("dispatcher-radial-clock-music", isActive ? "true" : "false");
+                } catch (error) {}
+            }
+
+            function setClockMusicActive(isActive) {
+                window.clearTimeout(stopTimer);
+                clock.classList.toggle("is-music", isActive);
+                clock.classList.remove("is-music-stopping");
+                clock.setAttribute("aria-pressed", isActive ? "true" : "false");
+                clock.setAttribute("title", isActive ? "Выключить визуальный режим" : "Включить визуальный режим");
+            }
+
+            function toggleClockMusic() {
+                if (!clock.classList.contains("is-music")) {
+                    setClockMusicActive(true);
+                    saveMusicMode(true);
+                    return;
+                }
+
+                window.clearTimeout(stopTimer);
+                clock.classList.remove("is-music");
+                clock.classList.add("is-music-stopping");
+                clock.setAttribute("aria-pressed", "false");
+                clock.setAttribute("title", "Включить визуальный режим");
+                saveMusicMode(false);
+                stopTimer = window.setTimeout(function () {
+                    clock.classList.remove("is-music-stopping");
+                }, 700);
+            }
+
+            updateClockTime();
+            window.setInterval(updateClockTime, 1000);
+            clock.setAttribute("role", "button");
+            clock.setAttribute("tabindex", "0");
+            setClockMusicActive(isMusicModeSaved());
+            clock.addEventListener("click", toggleClockMusic);
+            clock.addEventListener("keydown", function (event) {
+                if (event.key !== "Enter" && event.key !== " ") {
+                    return;
+                }
+                event.preventDefault();
+                toggleClockMusic();
+            });
+        });
+    }
+
+    window.initDispatcherRadialClocks = initDispatcherRadialClocks;
+    initDispatcherRadialClocks();
+});
+</script>
+<script>
+window.AppRealtimeConfig = {
+    stateUrl: "{% url 'operational_state_version' %}",
+    initialVersion: Number(document.body.dataset.operationalStateVersion || 0),
+    pollIntervalMs: 1000,
+    idleDelayMs: 2500,
+    pollTimeoutMs: 8000,
+    maxSilentMs: 7000,
+    mobileQueueKey: "mining-master-mobile-sync-queue-v1",
+    screens: [
+        {name: "dispatcher-control", role: "dispatcher", mode: "custom", path: "^/dispatcher/control/?$", customRefresh: true},
+        {name: "dispatcher-reports", role: "dispatcher", mode: "manual", path: "^/dispatcher/"},
+        {name: "mining-master", role: "mining_master", mode: "custom", path: "^/mining-master/", customRefresh: true},
+        {name: "excavator", role: "excavator_operator", mode: "custom", path: "^/excavator/work/?$", customRefresh: true},
+        {name: "driver", role: "driver", mode: "custom", path: "^/driver/(?:shift/?)?$", customRefresh: true},
+        {name: "system-admin", role: "system_admin", mode: "observer", path: "^/system-admin/", customRefresh: true},
+        {name: "management-shift-analytics", role: "management", mode: "custom", path: "^/reports/shift-analytics/?$", customRefresh: true},
+        {name: "management-dynamics", role: "management", mode: "custom", path: "^/reports/management/dynamics/?$", customRefresh: true},
+        {name: "management-reports", role: "management", mode: "manual", path: "^/reports/"}
+    ],
+    customRefreshPaths: [
+        "^/mining-master/",
+        "^/excavator/work/?$",
+        "^/driver/(?:shift/?)?$",
+        "^/system-admin/",
+        "^/reports/shift-analytics/?$",
+        "^/reports/management/dynamics/?$"
+    ]
+};
+</script>
+<script src="{% static 'js/realtime-client.js' %}?v={% now 'U' %}"></script>
 </body>
 </html>

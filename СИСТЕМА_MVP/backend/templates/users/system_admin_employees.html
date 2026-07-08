@@ -1,0 +1,575 @@
+{% extends "base.html" %}
+
+{% block title %}Сотрудники{% endblock %}
+{% block body_class %}system-admin-employees-screen{% endblock %}
+
+{% block body %}
+<div class="admin-shell admin-exports-shell admin-employees-shell admin-day" data-admin-theme>
+    <header class="admin-console-header" aria-label="Административная шапка">
+        <section class="admin-console-identity">
+            <span class="admin-console-avatar">{{ access.employee.full_name|first }}</span>
+            <span>
+                <strong>{{ access.employee.full_name }}</strong>
+                <em>Системный администратор</em>
+            </span>
+        </section>
+
+        <section class="admin-console-main">
+            <div class="admin-console-title">
+                <span>Админка MVP</span>
+                <h1>Сотрудники</h1>
+                <p>Управление сотрудниками, доступами и административными действиями.</p>
+            </div>
+            <nav class="admin-console-nav" aria-label="Разделы админки">
+                <a href="{% url 'system_admin_dashboard' %}">Сводка</a>
+                <a class="is-active" href="{% url 'system_admin_employees' %}">Сотрудники</a>
+                <a href="{% url 'system_admin_references' %}">Справочники</a>
+                <a href="{% url 'system_admin_conflicts' %}">Конфликты</a>
+                <a href="{% url 'system_admin_logs' %}">Журнал</a>
+                <a href="{% url 'system_admin_exports' %}">Выгрузки</a>
+            </nav>
+        </section>
+
+        <section class="admin-console-actions">
+            <button type="button" class="admin-theme-button" data-admin-theme-toggle title="День / Ночь">Д/Н</button>
+            <a class="admin-utility-link" href="{% url 'system_admin_dashboard' %}">Назад</a>
+            <a class="admin-utility-link" href="{% url 'logout' %}">Выйти</a>
+        </section>
+    </header>
+
+<main class="admin-console-page employees-page">
+    {% for message in messages %}
+        <div class="message success">{{ message }}</div>
+    {% endfor %}
+
+    <section class="employees-control-card">
+        <div class="admin-section-title employee-list-toolbar">
+            <div>
+                <h2>Поиск и управление</h2>
+                <p>Фильтры применяются сразу. Создание и выгрузка вынесены в рабочие действия.</p>
+            </div>
+            <div class="employee-list-actions">
+                <a class="admin-button admin-button-primary" href="{% url 'system_admin_employee_create' %}">Создать сотрудника</a>
+                <a class="admin-button admin-button-secondary" href="{% url 'system_admin_employee_export' %}">Excel</a>
+            </div>
+        </div>
+
+        <form method="get" class="employee-list-filters employees-filter-bar" data-employee-filter-form>
+            <div class="field admin-search-field">
+                <label for="employee-search">Поиск по ФИО</label>
+                <input id="employee-search" name="q" value="{{ query }}" placeholder="Введите ФИО" autocomplete="off" data-auto-filter-search>
+            </div>
+            <div class="field select-field">
+                <label for="employee-role">Роль</label>
+                <select id="employee-role" name="role">
+                    <option value="">Все роли</option>
+                    {% for role in roles %}
+                        <option value="{{ role.id }}" {% if selected_role == role.id|stringformat:"s" %}selected{% endif %}>{{ role.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="field select-field">
+                <label for="employee-status">Статус сотрудника</label>
+                <select id="employee-status" name="status">
+                    <option value="">Все статусы</option>
+                    {% for value, label in statuses %}
+                        <option value="{{ value }}" {% if selected_status == value %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="field select-field">
+                <label for="employee-access-status">Статус доступа</label>
+                <select id="employee-access-status" name="access_status">
+                    <option value="">Все доступы</option>
+                    {% for value, label in access_statuses %}
+                        <option value="{{ value }}" {% if selected_access_status == value %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="field field-submit">
+                <a class="admin-button admin-button-secondary filter-reset-link" href="{% url 'system_admin_employees' %}" title="Сбросить все фильтры" aria-label="Сбросить все фильтры">Сбросить</a>
+            </div>
+        </form>
+    </section>
+
+    <section class="admin-employee-workspace">
+        <div class="admin-employee-list-card">
+            <div class="admin-section-title section-title-row">
+                <div>
+                    <h2>Список сотрудников</h2>
+                    <p class="muted">Двойной клик открывает карточку. Цвет строки показывает состояние.</p>
+                </div>
+                <span class="admin-chip admin-chip-info" data-employee-count>{{ employees|length }} найдено</span>
+            </div>
+
+            <div class="admin-employee-list" data-employee-list>
+                {% for employee in employees %}
+                    <article class="admin-employee-row status-{{ employee.status }}" draggable="true" tabindex="0" data-employee-row data-employee-id="{{ employee.id }}" data-detail-url="{% url 'system_admin_employee_detail' employee.id %}" data-employee-name="{{ employee.full_name }}" data-employee-status="{{ employee.get_status_display }}" data-access-status="{% with primary_access=employee.accesses.all.0 %}{% if primary_access %}{{ primary_access.get_status_display }}{% else %}Нет доступа{% endif %}{% endwith %}">
+                        <div class="employee-mini-cell">
+                            <div class="employee-mini-card">
+                                <span class="employee-mini-avatar">
+                                    {% if employee.photo %}
+                                        <img src="{{ employee.photo.url }}" alt="Фото {{ employee.full_name }}">
+                                    {% else %}
+                                        <span>{{ employee.full_name|slice:":1" }}</span>
+                                    {% endif %}
+                                </span>
+                                <span class="employee-mini-main">
+                                    <strong>{{ employee.full_name }}</strong>
+                                    <small>
+                                        {% for access_item in employee.accesses.all %}
+                                            {{ access_item.role.name }}{% if not forloop.last %}, {% endif %}
+                                        {% empty %}
+                                            Роль не назначена
+                                        {% endfor %}
+                                    </small>
+                                </span>
+                            </div>
+                        </div>
+
+                        <span class="employee-state-cell">
+                            <span class="employee-state-badge employee-state-{{ employee.status }}">
+                                <span class="chip-label">Сотрудник</span>
+                                {{ employee.get_status_display }}
+                            </span>
+                        </span>
+
+                        <span class="employee-mini-phone">{{ employee.phone|default:"Телефон не указан" }}</span>
+
+                        <span class="employee-mini-accesses">
+                            {% for access_item in employee.accesses.all %}
+                                <span class="status-chip access-{{ access_item.status }}">
+                                    <span class="chip-label">Вход</span>
+                                    {{ access_item.get_status_display }}
+                                </span>
+                            {% empty %}
+                                <span class="status-chip access-not_activated">
+                                    <span class="chip-label">Вход</span>
+                                    Нет доступа
+                                </span>
+                            {% endfor %}
+                        </span>
+
+                        <span class="employee-mini-residence">{{ employee.residence_text|default:"-" }}</span>
+
+                        {% with primary_access=employee.accesses.all.0 %}
+                            {% if primary_access %}
+                                <form hidden method="post" action="{% url 'system_admin_access_action' primary_access.id 'block' %}" data-dnd-form="block_access" data-confirm="Заблокировать доступ сотрудника?">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                                    <input type="hidden" name="reason" data-block-reason>
+                                </form>
+                                <form hidden method="post" action="{% url 'system_admin_access_action' primary_access.id 'unblock' %}" data-dnd-form="unblock_access" data-confirm="Разблокировать доступ сотрудника?">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                                </form>
+                            {% endif %}
+                        {% endwith %}
+                        <form hidden method="post" action="{% url 'system_admin_employee_status_action' employee.id 'deactivate' %}" data-dnd-form="deactivate" data-confirm="Деактивировать сотрудника? Его доступы будут отключены.">
+                            {% csrf_token %}
+                            <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                        </form>
+                        <form hidden method="post" action="{% url 'system_admin_employee_status_action' employee.id 'archive' %}" data-dnd-form="archive" data-confirm="Отправить сотрудника в архив? Его доступы будут отключены.">
+                            {% csrf_token %}
+                            <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                        </form>
+                    </article>
+                {% empty %}
+                    <div class="empty-state">Сотрудников по выбранным фильтрам не найдено.</div>
+                {% endfor %}
+            </div>
+        </div>
+
+        <aside class="admin-dnd-panel" aria-label="Drag-and-drop действия">
+            <div class="dnd-panel-head">
+                <h2>Действия</h2>
+                <p class="muted">Перетащите сотрудника в нужную зону.</p>
+            </div>
+            <div class="dnd-group-label">Доступ</div>
+            <button class="dnd-zone success" type="button" data-dnd-action="unblock_access">
+                <strong>Разблокировать</strong>
+                <span>Вернуть вход</span>
+            </button>
+            <button class="dnd-zone danger" type="button" data-dnd-action="block_access">
+                <strong>Заблокировать</strong>
+                <span>Нужна причина</span>
+            </button>
+            <div class="dnd-group-label">Сотрудник</div>
+            <button class="dnd-zone danger" type="button" data-dnd-action="deactivate">
+                <strong>Деактивировать</strong>
+                <span>Отключить сотрудника</span>
+            </button>
+            <button class="dnd-zone warning" type="button" data-dnd-action="archive">
+                <strong>В архив</strong>
+                <span>Убрать из активных</span>
+            </button>
+            <div class="dnd-hint">Карточка — двойной клик по строке. Удаление остается только внутри карточки.</div>
+        </aside>
+    </section>
+    </main>
+    <div class="dnd-reason-modal" data-dnd-reason-modal hidden>
+    <div class="dnd-reason-dialog" role="dialog" aria-modal="true" aria-labelledby="dnd-reason-title">
+        <h2 id="dnd-reason-title">Причина блокировки</h2>
+        <p>Укажите, почему доступ сотрудника нужно заблокировать.</p>
+        <textarea data-dnd-reason-input rows="4" placeholder="Например: по заявке ОУП, утеря телефона, временное ограничение доступа"></textarea>
+        <div class="dnd-reason-error" data-dnd-reason-error hidden>Причина обязательна.</div>
+        <div class="dnd-reason-actions">
+            <button type="button" class="secondary" data-dnd-reason-cancel>Отмена</button>
+            <button type="button" class="danger" data-dnd-reason-accept>Заблокировать</button>
+        </div>
+    </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    var shell = document.querySelector("[data-admin-theme]");
+    var themeToggle = document.querySelector("[data-admin-theme-toggle]");
+    var draggedId = "";
+    var dragPreview = null;
+    var transparentDragImage = null;
+    var rows = document.querySelectorAll("[data-employee-row]");
+    var zones = document.querySelectorAll("[data-dnd-action]");
+    var reasonModal = document.querySelector("[data-dnd-reason-modal]");
+    var reasonInput = reasonModal ? reasonModal.querySelector("[data-dnd-reason-input]") : null;
+    var reasonError = reasonModal ? reasonModal.querySelector("[data-dnd-reason-error]") : null;
+    var reasonAccept = reasonModal ? reasonModal.querySelector("[data-dnd-reason-accept]") : null;
+    var reasonCancel = reasonModal ? reasonModal.querySelector("[data-dnd-reason-cancel]") : null;
+    var pendingReasonCallback = null;
+
+    function setAdminTheme(theme) {
+        if (!shell) return;
+        var isNight = theme === "night";
+        shell.classList.toggle("admin-night", isNight);
+        shell.classList.toggle("admin-day", !isNight);
+        if (themeToggle) themeToggle.setAttribute("data-theme-icon", isNight ? "moon" : "sun");
+        try {
+            window.localStorage.setItem("admin-theme", isNight ? "night" : "day");
+        } catch (error) {
+            return;
+        }
+    }
+
+    var savedTheme = "day";
+    try {
+        savedTheme = window.localStorage.getItem("admin-theme") || "day";
+    } catch (error) {
+        savedTheme = "day";
+    }
+    setAdminTheme(savedTheme);
+
+    if (themeToggle) {
+        themeToggle.addEventListener("click", function () {
+            setAdminTheme(shell && shell.classList.contains("admin-night") ? "day" : "night");
+        });
+    }
+
+    function closeReasonModal() {
+        if (!reasonModal) {
+            return;
+        }
+        reasonModal.hidden = true;
+        document.body.classList.remove("modal-open");
+        pendingReasonCallback = null;
+        if (reasonInput) {
+            reasonInput.value = "";
+        }
+        if (reasonError) {
+            reasonError.hidden = true;
+        }
+    }
+
+    function openReasonModal(callback) {
+        if (!reasonModal || !reasonInput || !reasonAccept || !reasonCancel) {
+            return;
+        }
+        pendingReasonCallback = callback;
+        reasonModal.hidden = false;
+        document.body.classList.add("modal-open");
+        reasonInput.value = "";
+        if (reasonError) {
+            reasonError.hidden = true;
+        }
+        reasonInput.focus();
+    }
+
+    if (reasonAccept) {
+        reasonAccept.addEventListener("click", function () {
+            var reason = reasonInput ? reasonInput.value.trim() : "";
+            if (!reason) {
+                if (reasonError) {
+                    reasonError.hidden = false;
+                }
+                if (reasonInput) {
+                    reasonInput.focus();
+                }
+                return;
+            }
+            var callback = pendingReasonCallback;
+            closeReasonModal();
+            if (callback) {
+                callback(reason);
+            }
+        });
+    }
+
+    if (reasonCancel) {
+        reasonCancel.addEventListener("click", closeReasonModal);
+    }
+
+    if (reasonModal) {
+        reasonModal.addEventListener("click", function (event) {
+            if (event.target === reasonModal) {
+                closeReasonModal();
+            }
+        });
+    }
+
+    function moveDragPreview(event) {
+        if (!dragPreview || !event.clientX || !event.clientY) {
+            return;
+        }
+        var viewportPadding = 8;
+        var previewWidth = dragPreview.offsetWidth || 190;
+        var previewHeight = dragPreview.offsetHeight || 52;
+        var left = event.clientX - (previewWidth / 2);
+        var top = event.clientY - (previewHeight / 2);
+
+        left = Math.max(viewportPadding, Math.min(left, window.innerWidth - previewWidth - viewportPadding));
+        top = Math.max(viewportPadding, Math.min(top, window.innerHeight - previewHeight - viewportPadding));
+
+        dragPreview.style.left = left + "px";
+        dragPreview.style.top = top + "px";
+    }
+
+    function removeDragPreview() {
+        if (dragPreview) {
+            dragPreview.remove();
+            dragPreview = null;
+        }
+        if (transparentDragImage) {
+            transparentDragImage.remove();
+            transparentDragImage = null;
+        }
+    }
+
+    var filterForm = document.querySelector("[data-employee-filter-form]");
+    var filterSearch = document.querySelector("[data-auto-filter-search]");
+    function submitFilterForm() {
+        if (!filterForm) {
+            return;
+        }
+        if (filterForm.requestSubmit) {
+            filterForm.requestSubmit();
+        } else {
+            filterForm.submit();
+        }
+    }
+
+    function updateEmployeeCount(visibleCount) {
+        var countBadge = document.querySelector("[data-employee-count]");
+        if (countBadge) {
+            countBadge.textContent = visibleCount + " найдено";
+        }
+    }
+
+    function renderNameHighlight(row, query) {
+        var nameNode = row.querySelector(".employee-mini-main strong");
+        if (!nameNode) {
+            return;
+        }
+        var originalName = nameNode.dataset.originalName || nameNode.textContent;
+        nameNode.dataset.originalName = originalName;
+        nameNode.textContent = "";
+
+        if (!query) {
+            nameNode.textContent = originalName;
+            return;
+        }
+
+        var normalizedName = originalName.toLocaleLowerCase("ru-RU");
+        var normalizedQuery = query.toLocaleLowerCase("ru-RU");
+        var matchIndex = findWordStartMatch(normalizedName, normalizedQuery);
+
+        if (matchIndex < 0) {
+            nameNode.textContent = originalName;
+            return;
+        }
+
+        nameNode.appendChild(document.createTextNode(originalName.slice(0, matchIndex)));
+        var mark = document.createElement("mark");
+        mark.className = "employee-search-highlight";
+        mark.textContent = originalName.slice(matchIndex, matchIndex + query.length);
+        nameNode.appendChild(mark);
+        nameNode.appendChild(document.createTextNode(originalName.slice(matchIndex + query.length)));
+    }
+
+    function findWordStartMatch(text, query) {
+        if (!query) {
+            return 0;
+        }
+        var searchFrom = 0;
+        while (searchFrom <= text.length) {
+            var matchIndex = text.indexOf(query, searchFrom);
+            if (matchIndex < 0) {
+                return -1;
+            }
+            var previousChar = matchIndex > 0 ? text.charAt(matchIndex - 1) : "";
+            if (matchIndex === 0 || previousChar === " " || previousChar === "-") {
+                return matchIndex;
+            }
+            searchFrom = matchIndex + 1;
+        }
+        return -1;
+    }
+
+    function applyLocalEmployeeSearch() {
+        var query = filterSearch ? filterSearch.value.trim() : "";
+        var normalizedQuery = query.toLocaleLowerCase("ru-RU");
+        var visibleCount = 0;
+
+        rows.forEach(function (row) {
+            var employeeName = row.dataset.employeeName || "";
+            var matches = !normalizedQuery || findWordStartMatch(employeeName.toLocaleLowerCase("ru-RU"), normalizedQuery) >= 0;
+            row.hidden = !matches;
+            if (matches) {
+                visibleCount += 1;
+                renderNameHighlight(row, query);
+            } else {
+                renderNameHighlight(row, "");
+            }
+        });
+
+        updateEmployeeCount(visibleCount);
+    }
+
+    if (filterForm) {
+        filterForm.querySelectorAll("select").forEach(function (select) {
+            select.addEventListener("change", submitFilterForm);
+        });
+    }
+
+    if (filterSearch) {
+        applyLocalEmployeeSearch();
+        filterSearch.addEventListener("input", function () {
+            applyLocalEmployeeSearch();
+        });
+        filterSearch.addEventListener("keydown", function (event) {
+            if (event.key === "Enter") {
+                event.preventDefault();
+                applyLocalEmployeeSearch();
+            }
+        });
+    }
+    rows.forEach(function (row) {
+        row.addEventListener("dblclick", function () {
+            if (row.dataset.detailUrl) {
+                window.location.href = row.dataset.detailUrl;
+            }
+        });
+
+        row.addEventListener("keydown", function (event) {
+            if ((event.key === "Enter" || event.key === " ") && row.dataset.detailUrl) {
+                event.preventDefault();
+                window.location.href = row.dataset.detailUrl;
+            }
+        });
+
+        row.addEventListener("dragstart", function (event) {
+            draggedId = row.dataset.employeeId || "";
+            row.classList.add("is-dragging");
+            event.dataTransfer.effectAllowed = "move";
+            event.dataTransfer.setData("text/plain", draggedId);
+            removeDragPreview();
+            var avatar = row.querySelector(".employee-mini-avatar");
+            var badge = document.createElement("div");
+            badge.className = "employee-drag-preview is-visible";
+            if (avatar) {
+                badge.appendChild(avatar.cloneNode(true));
+            }
+            var text = document.createElement("span");
+            text.className = "employee-drag-preview-text";
+            var name = document.createElement("span");
+            name.className = "employee-drag-preview-name";
+            name.textContent = row.dataset.employeeName || "Сотрудник";
+            text.appendChild(name);
+            var state = document.createElement("span");
+            state.className = "employee-drag-preview-status";
+            state.textContent = (row.dataset.employeeStatus || "Статус не указан") + " · " + (row.dataset.accessStatus || "Доступ не указан");
+            text.appendChild(state);
+            badge.appendChild(text);
+            document.body.appendChild(badge);
+            dragPreview = badge;
+            moveDragPreview(event);
+            transparentDragImage = document.createElement("div");
+            transparentDragImage.className = "transparent-drag-image";
+            document.body.appendChild(transparentDragImage);
+            event.dataTransfer.setDragImage(transparentDragImage, 0, 0);
+        });
+
+        row.addEventListener("drag", function (event) {
+            moveDragPreview(event);
+        });
+
+        row.addEventListener("dragend", function () {
+            row.classList.remove("is-dragging");
+            removeDragPreview();
+            zones.forEach(function (zone) {
+                zone.classList.remove("is-drag-over");
+            });
+        });
+    });
+
+    zones.forEach(function (zone) {
+        zone.addEventListener("dragover", function (event) {
+            event.preventDefault();
+            moveDragPreview(event);
+            zone.classList.add("is-drag-over");
+        });
+
+        zone.addEventListener("dragleave", function () {
+            zone.classList.remove("is-drag-over");
+        });
+
+        zone.addEventListener("drop", function (event) {
+            event.preventDefault();
+            removeDragPreview();
+            zone.classList.remove("is-drag-over");
+
+            var employeeId = event.dataTransfer.getData("text/plain") || draggedId;
+            var row = document.querySelector('[data-employee-id="' + employeeId + '"]');
+            if (!row) {
+                return;
+            }
+
+            var action = zone.dataset.dndAction;
+            var form = row.querySelector('[data-dnd-form="' + action + '"]');
+            if (!form) {
+                return;
+            }
+
+            function submitDndForm() {
+                if (typeof form.requestSubmit === "function") {
+                    form.requestSubmit();
+                } else {
+                    form.submit();
+                }
+            }
+
+            if (action === "block_access") {
+                openReasonModal(function (reason) {
+                    var reasonField = form.querySelector("[data-block-reason]");
+                    if (reasonField) {
+                        reasonField.value = reason;
+                    }
+                    submitDndForm();
+                });
+                return;
+            }
+
+            submitDndForm()
+        });
+    });
+});
+</script>
+{% endblock %}

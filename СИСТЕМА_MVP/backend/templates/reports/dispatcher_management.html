@@ -1,0 +1,221 @@
+{% extends "base.html" %}
+
+{% block title %}Витрина диспетчерской{% endblock %}
+{% block body_class %}dispatcher-control-screen{% endblock %}
+
+{% block body %}
+<main class="dispatcher-shell dispatcher-analytics-shell" data-dispatcher-theme>
+    <section class="dispatcher-analytics-board dispatcher-management-board" aria-label="Витрина диспетчерской">
+        <header class="dispatcher-topbar dispatcher-unified-topbar">
+            {% include "includes/dispatcher_header.html" with dispatcher_nav_active="management" dispatcher_header_screen="Витрина" %}
+        </header>
+        <div class="dispatcher-analytics-toolbar">
+            {% include "includes/dispatcher_analytics_tabs.html" with dispatcher_nav_active="management" %}
+            <div class="dispatcher-report-actions">
+                <a href="{% url 'dispatcher_management_export' %}{% if query_string %}?{{ query_string }}{% endif %}">Excel</a>
+                <button type="button" onclick="window.print()">Печать</button>
+            </div>
+        </div>
+
+        <form class="dispatcher-report-filters" method="get" data-auto-filter-form>
+            <label>
+                <span>Дата</span>
+                <input type="date" name="date" value="{{ filters.date_value }}">
+            </label>
+            <label>
+                <span>Смена</span>
+                <select name="shift_type">
+                    <option value="" {% if not filters.shift_type %}selected{% endif %}>Все смены</option>
+                    <option value="day" {% if filters.shift_type == 'day' %}selected{% endif %}>Дневная</option>
+                    <option value="night" {% if filters.shift_type == 'night' %}selected{% endif %}>Ночная</option>
+                </select>
+            </label>
+            <button type="submit">Показать</button>
+        </form>
+
+        <section class="dispatcher-management-layout">
+            <article class="dispatcher-report-card dispatcher-management-summary is-{{ overall_status }}">
+                <div class="dispatcher-report-card-head">
+                    <h2>Итог смены</h2>
+                    <span>{{ shift_label }}</span>
+                </div>
+                <div class="dispatcher-management-score">
+                    <div class="dispatcher-management-ring" style="--ring: {{ kpis.completion }}%;">
+                        <span>{{ kpis.completion }}%</span>
+                    </div>
+                    <div class="dispatcher-management-score-data">
+                        <strong>{{ kpis.volume }} м3</strong>
+                        <span>план {{ kpis.plan }} м3</span>
+                        <em class="{% if kpis.deviation_negative %}is-danger{% else %}is-ok{% endif %}">{% if kpis.deviation_negative %}-{% else %}+{% endif %}{{ kpis.deviation }} м3</em>
+                    </div>
+                </div>
+                <div class="dispatcher-management-mini-kpis">
+                    <div><strong>{{ kpis.tonnage }}</strong><span>тоннаж</span></div>
+                    <div><strong>{{ kpis.trips }}</strong><span>рейсы</span></div>
+                    <div><strong>{{ kpis.trucks }}</strong><span>самосвалы</span></div>
+                    <div><strong>{{ kpis.actions }}</strong><span>действия</span></div>
+                </div>
+            </article>
+
+            <article class="dispatcher-report-card dispatcher-management-attention">
+                <div class="dispatcher-report-card-head">
+                    <h2>Внимание</h2>
+                    <span>красные / желтые</span>
+                </div>
+                <div class="dispatcher-management-alert-list">
+                    {% for row in attention_rows %}
+                        <div class="dispatcher-management-alert is-{{ row.status }}">
+                            <strong>{{ row.title }}</strong>
+                            <span>{{ row.summary }}</span>
+                            <em>{{ row.detail }}</em>
+                        </div>
+                    {% empty %}
+                        <p class="dispatcher-empty-note">Критичных событий по смене нет.</p>
+                    {% endfor %}
+                </div>
+            </article>
+
+            <article class="dispatcher-report-card dispatcher-management-month">
+                <div class="dispatcher-report-card-head">
+                    <h2>Месяц</h2>
+                    <span>накопленно</span>
+                </div>
+                <div class="dispatcher-management-month-grid">
+                    <div><strong>{{ kpis.month_volume }}</strong><span>м3</span></div>
+                    <div><strong>{{ kpis.month_tonnage }}</strong><span>т</span></div>
+                    <div><strong>{{ kpis.month_trips }}</strong><span>рейсов</span></div>
+                    <div><strong>{{ kpis.downtime_hours }}</strong><span>ч простоев</span></div>
+                </div>
+            </article>
+
+            <article class="dispatcher-report-card dispatcher-report-card-wide dispatcher-management-complexes">
+                <div class="dispatcher-report-card-head">
+                    <h2>Комплексы</h2>
+                    <span>текущий срез</span>
+                </div>
+                <div class="dispatcher-complex-report">
+                    {% for row in complex_rows %}
+                        <div class="dispatcher-complex-report-row is-{{ row.status }}">
+                            <strong>{{ row.label }}</strong>
+                            <div>
+                                <span>{{ row.volume_display }} м3</span>
+                                <small>{{ row.completion }}% выполнения</small>
+                            </div>
+                            <div>
+                                <span>{{ row.trips }} рейс.</span>
+                                <small>{{ row.trucks_count }} самосв.</small>
+                            </div>
+                            <div>
+                                <span>{{ row.faces_display }}</span>
+                                <small>{{ row.trucks_display }}</small>
+                            </div>
+                            <div class="dispatcher-complex-dumps">
+                                {% for chip in row.dump_chips %}
+                                    <span>{{ chip.name }} {{ chip.share }}%</span>
+                                {% empty %}
+                                    <span>разгрузка не указана</span>
+                                {% endfor %}
+                            </div>
+                        </div>
+                    {% empty %}
+                        <p class="dispatcher-empty-note">По выбранной смене завершенных рейсов нет.</p>
+                    {% endfor %}
+                </div>
+            </article>
+
+            <article class="dispatcher-report-card">
+                <div class="dispatcher-report-card-head">
+                    <h2>Разгрузки</h2>
+                    <span>куда ушел объем</span>
+                </div>
+                <div class="dispatcher-split-list">
+                    {% for row in dump_rows %}
+                        <div class="dispatcher-split-row">
+                            <span>{{ row.label }}</span>
+                            <strong>{{ row.share }}%</strong>
+                            <i><b style="width: {{ row.bar }}%;"></b></i>
+                        </div>
+                    {% empty %}
+                        <p class="dispatcher-empty-note">Нет данных.</p>
+                    {% endfor %}
+                </div>
+            </article>
+
+            <article class="dispatcher-report-card">
+                <div class="dispatcher-report-card-head">
+                    <h2>Порода</h2>
+                    <span>структура</span>
+                </div>
+                <div class="dispatcher-ring-list">
+                    {% for row in rock_rows %}
+                        <div class="dispatcher-ring-row">
+                            <div class="dispatcher-mini-ring" style="--ring: {{ row.share }}%;"><span>{{ row.share }}%</span></div>
+                            <div>
+                                <strong>{{ row.label }}</strong>
+                                <small>{{ row.volume_display }} м3 / {{ row.trips }} рейс.</small>
+                            </div>
+                        </div>
+                    {% empty %}
+                        <p class="dispatcher-empty-note">Нет данных.</p>
+                    {% endfor %}
+                </div>
+            </article>
+
+            <article class="dispatcher-report-card">
+                <div class="dispatcher-report-card-head">
+                    <h2>Пульс смены</h2>
+                    <span>по часам</span>
+                </div>
+                <div class="dispatcher-shift-pulse dispatcher-management-pulse">
+                    {% for row in hourly_rows %}
+                        <div class="dispatcher-hour-bar">
+                            <span>{{ row.volume_display }}</span>
+                            <i><b style="height: {{ row.bar }}%;"></b></i>
+                            <small>{{ row.label }}</small>
+                        </div>
+                    {% empty %}
+                        <p class="dispatcher-empty-note">Рейсов пока нет.</p>
+                    {% endfor %}
+                </div>
+            </article>
+
+            <article class="dispatcher-report-card">
+                <div class="dispatcher-report-card-head">
+                    <h2>Потери</h2>
+                    <span>по причинам</span>
+                </div>
+                <div class="dispatcher-split-list">
+                    {% for row in downtime_reason_rows %}
+                        <div class="dispatcher-split-row">
+                            <span>{{ row.name }}</span>
+                            <strong>{{ row.duration_display }} ч</strong>
+                            <i><b style="width: {{ row.bar }}%;"></b></i>
+                        </div>
+                    {% empty %}
+                        <p class="dispatcher-empty-note">Простоев по смене нет.</p>
+                    {% endfor %}
+                </div>
+            </article>
+        </section>
+    </section>
+</main>
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    var shell = document.querySelector("[data-dispatcher-theme]");
+    var saved = localStorage.getItem("dispatcher-theme") || "night";
+    function setTheme(theme) {
+        if (!shell) return;
+        shell.classList.toggle("dispatcher-night", theme === "night");
+        shell.classList.toggle("dispatcher-day", theme !== "night");
+        localStorage.setItem("dispatcher-theme", theme);
+    }
+    setTheme(saved);
+    document.querySelectorAll("[data-dispatcher-theme-toggle]").forEach(function (toggle) {
+        toggle.addEventListener("click", function () {
+            setTheme(shell.classList.contains("dispatcher-night") ? "day" : "night");
+        });
+    });
+});
+</script>
+{% endblock %}

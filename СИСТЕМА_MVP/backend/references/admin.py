@@ -7,6 +7,7 @@ from .models import (
     DumpPoint,
     Equipment,
     EquipmentModel,
+    EquipmentState,
     EquipmentType,
     RockType,
     TruckCapacityRule,
@@ -32,6 +33,37 @@ class EquipmentAdmin(admin.ModelAdmin):
     list_display = ('garage_number', 'equipment_type', 'model', 'vin', 'is_own', 'is_active')
     search_fields = ('garage_number', 'vin', 'model__name')
     list_filter = ('equipment_type', 'model', 'is_own', 'is_active')
+
+
+@admin.register(EquipmentState)
+class EquipmentStateAdmin(admin.ModelAdmin):
+    list_display = (
+        'priority',
+        'code',
+        'name',
+        'short_label',
+        'color_group',
+        'semantic_group',
+        'allows_assignment',
+        'allows_drag',
+        'blocks_operation',
+        'requires_attention',
+        'requires_reason',
+        'is_active',
+    )
+    search_fields = ('code', 'name', 'short_label', 'description')
+    list_filter = (
+        'color_group',
+        'semantic_group',
+        'allows_assignment',
+        'allows_drag',
+        'blocks_operation',
+        'requires_attention',
+        'requires_reason',
+        'is_terminal',
+        'is_active',
+    )
+    ordering = ('priority', 'code')
 
 
 @admin.register(RockType)

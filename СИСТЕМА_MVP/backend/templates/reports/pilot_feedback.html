@@ -1,20 +1,14 @@
 {% extends "base.html" %}
 
 {% block title %}Журнал замечаний пилота{% endblock %}
+{% block body_class %}dispatcher-control-screen{% endblock %}
 
 {% block body %}
-<header class="app-header">
-    <div class="header-inner">
-        <div class="topline">
-            <span>{{ access.employee.full_name }}</span>
-            <a href="{% url 'logout' %}">Выйти</a>
-        </div>
-        <h1>Журнал замечаний пилота</h1>
-        <p>Рабочий список замечаний, решений и переносов по пилотной проверке производственного MVP.</p>
-    </div>
-</header>
+<main class="dispatcher-shell dispatcher-analytics-shell management-linked-report" data-dispatcher-theme>
+    <section class="dispatcher-analytics-board management-dashboard-board management-linked-report-board" aria-label="Замечания">
+        {% include "reports/includes/management_report_header.html" with active="feedback" title="Замечания" subtitle="Журнал замечаний, решений и переносов по пилотной проверке." %}
+        <div class="management-linked-report-content">
 
-<main class="page">
     <section class="metric-grid">
         <div class="metric-card">
             <div>Текущий этап</div>
@@ -166,5 +160,8 @@
             </table>
         </div>
     </section>
+</div>
+</section>
 </main>
+{% include "reports/includes/management_report_theme.html" %}
 {% endblock %}

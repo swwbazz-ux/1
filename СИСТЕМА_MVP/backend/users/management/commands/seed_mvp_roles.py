@@ -15,13 +15,13 @@ ROLES = [
 
 
 DEMO_USERS = [
-    ('Администратор MVP', 'admin', '1000'),
-    ('Водитель MVP', 'driver', '2000'),
-    ('Машинист экскаватора MVP', 'excavator_operator', '3000'),
-    ('Горный мастер MVP', 'mining_master', '4000'),
-    ('Диспетчер MVP', 'dispatcher', '5000'),
-    ('Руководство MVP', 'manager', '6000'),
-    ('Механик MVP', 'mechanic', '7000'),
+    ('Администратор MVP', 'admin', '100000', '+79000000001'),
+    ('Водитель MVP', 'driver', '200000', '+79000000002'),
+    ('Машинист экскаватора MVP', 'excavator_operator', '300000', '+79000000003'),
+    ('Горный мастер MVP', 'mining_master', '400000', '+79000000004'),
+    ('Диспетчер MVP', 'dispatcher', '500000', '+79000000005'),
+    ('Руководство MVP', 'manager', '600000', '+79000000006'),
+    ('Механик MVP', 'mechanic', '700000', '+79000000007'),
 ]
 
 
@@ -41,13 +41,21 @@ class Command(BaseCommand):
         self.stdout.write(f'Роли созданы/обновлены: {len(ROLES)}')
 
         if options['with_demo_users']:
-            for full_name, role_code, access_code in DEMO_USERS:
-                employee, _ = Employee.objects.get_or_create(full_name=full_name, defaults={'is_active': True})
+            for full_name, role_code, access_code, phone in DEMO_USERS:
+                employee, _ = Employee.objects.update_or_create(
+                    full_name=full_name,
+                    defaults={'is_active': True, 'phone': phone},
+                )
                 role = Role.objects.get(code=role_code)
                 EmployeeAccess.objects.update_or_create(
-                    access_code=access_code,
-                    defaults={'employee': employee, 'role': role, 'is_active': True},
+                    employee=employee,
+                    role=role,
+                    defaults={
+                        'access_code': access_code,
+                        'is_active': True,
+                        'status': EmployeeAccess.Status.ACTIVATED,
+                    },
                 )
-            self.stdout.write('Демо-доступы созданы: 1000, 2000, 3000, 4000, 5000, 6000, 7000')
+            self.stdout.write('Демо-доступы созданы: 100000, 200000, 300000, 400000, 500000, 600000, 700000')
 
         self.stdout.write(self.style.SUCCESS('Готово.'))

@@ -1,0 +1,43 @@
+<script>
+(function () {
+    "use strict";
+
+    function initManagementReportTheme() {
+        var shell = document.querySelector("[data-dispatcher-theme]");
+        var toggles = document.querySelectorAll("[data-dispatcher-theme-toggle]");
+        if (!shell || !toggles.length) {
+            return;
+        }
+
+        var storedTheme = localStorage.getItem("dispatcher-theme") || localStorage.getItem("dispatcherTheme") || "night";
+
+        function applyTheme(theme) {
+            var isDay = theme === "day";
+            shell.classList.toggle("dispatcher-day", isDay);
+            shell.classList.toggle("dispatcher-night", !isDay);
+            toggles.forEach(function (toggle) {
+                toggle.textContent = "";
+                toggle.dataset.themeIcon = isDay ? "sun" : "moon";
+                toggle.title = isDay ? "Ночной режим" : "Дневной режим";
+                toggle.setAttribute("aria-label", isDay ? "Включить ночную тему" : "Включить дневную тему");
+            });
+            localStorage.setItem("dispatcher-theme", isDay ? "day" : "night");
+            localStorage.setItem("dispatcherTheme", isDay ? "day" : "night");
+        }
+
+        applyTheme(storedTheme);
+        toggles.forEach(function (toggle) {
+            if (toggle.dataset.managementReportThemeBound === "1") {
+                return;
+            }
+            toggle.dataset.managementReportThemeBound = "1";
+            toggle.addEventListener("click", function () {
+                applyTheme(shell.classList.contains("dispatcher-day") ? "night" : "day");
+            });
+        });
+    }
+
+    window.initManagementReportTheme = initManagementReportTheme;
+    document.addEventListener("DOMContentLoaded", initManagementReportTheme);
+})();
+</script>

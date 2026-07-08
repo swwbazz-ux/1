@@ -1,0 +1,212 @@
+{% extends "base.html" %}
+
+{% block title %}Сменная аналитика{% endblock %}
+{% block body_class %}dispatcher-control-screen{% endblock %}
+
+{% block body %}
+<main class="dispatcher-shell dispatcher-analytics-shell management-linked-report" data-dispatcher-theme>
+    <section class="dispatcher-analytics-board management-dashboard-board management-linked-report-board" aria-label="Сменная аналитика" data-shift-analytics-refresh-root>
+        {% include "reports/includes/management_report_header.html" with active="shift_analytics" title="Сменная аналитика" subtitle="Серверный расчет по рейсам, породам, технике, сотрудникам и простоям." export_url=export_url %}
+        <div class="management-linked-report-content">
+            <form class="dispatcher-report-filters management-dashboard-filters" method="get" data-auto-filter-form>
+                <label>
+                    <span>Дата</span>
+                    <input type="date" name="date" value="{{ date_value }}">
+                </label>
+                <label>
+                    <span>Смена</span>
+                    <select name="shift_type">
+                        <option value="" {% if not shift_type %}selected{% endif %}>Все смены</option>
+                        <option value="day" {% if shift_type == 'day' %}selected{% endif %}>Дневная</option>
+                        <option value="night" {% if shift_type == 'night' %}selected{% endif %}>Ночная</option>
+                    </select>
+                </label>
+                <button type="submit">Показать</button>
+            </form>
+
+            <section class="management-dashboard-kpis" aria-label="Ключевые показатели сменной аналитики">
+                <article class="dispatcher-report-tile success">
+                    <div class="dispatcher-report-tile-head"><h2>Отгружено</h2><span>экскаваторы</span></div>
+                    <strong>{{ totals.loaded_trip_count }}</strong>
+                    <p>рейсов по смене загрузки</p>
+                </article>
+                <article class="dispatcher-report-tile success">
+                    <div class="dispatcher-report-tile-head"><h2>Объем</h2><span>{{ shift_label }}</span></div>
+                    <strong>{{ totals.volume_display }} м3</strong>
+                    <p>расчетный объем по отгрузке</p>
+                </article>
+                <article class="dispatcher-report-tile">
+                    <div class="dispatcher-report-tile-head"><h2>Разгружено</h2><span>самосвалы</span></div>
+                    <strong>{{ totals.unloaded_trip_count }}</strong>
+                    <p>рейсов по смене разгрузки</p>
+                </article>
+                <article class="dispatcher-report-tile">
+                    <div class="dispatcher-report-tile-head"><h2>Тоннаж</h2><span>расчет</span></div>
+                    <strong>{{ totals.tonnage_display }} т</strong>
+                    <p>если есть плотность породы</p>
+                </article>
+                <article class="dispatcher-report-tile {% if totals.open_trip_count %}is-danger{% endif %}">
+                    <div class="dispatcher-report-tile-head"><h2>Открытые</h2><span>рейсы</span></div>
+                    <strong>{{ totals.open_trip_count }}</strong>
+                    <p>груженые, но не разгруженные</p>
+                </article>
+                <article class="dispatcher-report-tile {% if totals.downtime_count %}is-danger{% endif %}">
+                    <div class="dispatcher-report-tile-head"><h2>Простои</h2><span>события</span></div>
+                    <strong>{{ totals.downtime_count }}</strong>
+                    <p>{{ totals.downtime_hours_display }} ч за выбранный срез</p>
+                </article>
+            </section>
+
+            <section class="dispatcher-analytics-grid">
+                {% include "reports/includes/shift_analytics_table.html" with title="Экскаваторы" subtitle="кто, что и куда отгрузил" rows=excavator_rows primary_label="Экскаватор" mode="equipment" %}
+                {% include "reports/includes/shift_analytics_table.html" with title="Самосвалы" subtitle="разгруженные рейсы и переходящие машины" rows=truck_rows primary_label="Самосвал" mode="equipment" %}
+                {% include "reports/includes/shift_analytics_employees.html" with rows=employee_rows %}
+                {% include "reports/includes/shift_analytics_table.html" with title="Породы" subtitle="структура отгрузки" rows=rock_rows primary_label="Порода" mode="simple" %}
+                {% include "reports/includes/shift_analytics_table.html" with title="Точки разгрузки" subtitle="куда ушел объем" rows=dump_point_rows primary_label="Точка" mode="simple" %}
+                {% include "reports/includes/shift_analytics_table.html" with title="Горизонты и блоки" subtitle="откуда отгружали" rows=face_rows primary_label="Горизонт / блок" mode="simple" %}
+
+                <article class="dispatcher-report-card dispatcher-report-card-wide">
+                    <div class="dispatcher-report-card-head">
+                        <h2>Простои</h2>
+                        <span>причины и длительность</span>
+                    </div>
+                    <div class="table-wrap">
+                        <table>
+                            <thead>
+                            <tr>
+                                <th>Причина</th>
+                                <th>Событий</th>
+                                <th>Открыто</th>
+                                <th>Часов</th>
+                                <th>Техника</th>
+                                <th>Сотрудники</th>
+                            </tr>
+                            </thead>
+                            <tbody>
+                            {% for row in downtime_reason_rows %}
+                                <tr>
+                                    <td><strong>{{ row.label }}</strong></td>
+                                    <td>{{ row.count }}</td>
+                                    <td>{{ row.open_count }}</td>
+                                    <td>{{ row.duration_display }}</td>
+                                    <td>{{ row.equipment_display }}</td>
+                                    <td>{{ row.employees_display }}</td>
+                                </tr>
+                            {% empty %}
+                                <tr><td colspan="6">Простоев за выбранный срез пока нет.</td></tr>
+                            {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </article>
+            </section>
+        </div>
+    </section>
+</main>
+{% include "reports/includes/management_report_theme.html" %}
+<script>
+(function () {
+    "use strict";
+
+    function initAutoFilterForm(form) {
+        if (!form || form.dataset.shiftAnalyticsAutoFilterBound === "1") {
+            return;
+        }
+        form.dataset.shiftAnalyticsAutoFilterBound = "1";
+        var submitTimer = null;
+
+        function submitAutoFilter(delay) {
+            window.clearTimeout(submitTimer);
+            submitTimer = window.setTimeout(function () {
+                if (form.requestSubmit) {
+                    form.requestSubmit();
+                } else {
+                    form.submit();
+                }
+            }, delay || 0);
+        }
+
+        function openDatePicker(input) {
+            if (!input || !input.showPicker) {
+                return;
+            }
+            try {
+                input.showPicker();
+            } catch (error) {}
+        }
+
+        form.querySelectorAll("select").forEach(function (select) {
+            select.addEventListener("change", function () {
+                submitAutoFilter(0);
+            });
+        });
+
+        form.querySelectorAll("input").forEach(function (input) {
+            var inputType = (input.getAttribute("type") || "text").toLowerCase();
+            if (inputType === "hidden") {
+                return;
+            }
+            if (inputType === "date") {
+                input.addEventListener("change", function () {
+                    submitAutoFilter(0);
+                });
+                input.addEventListener("click", function () {
+                    openDatePicker(input);
+                });
+                input.addEventListener("focus", function () {
+                    openDatePicker(input);
+                });
+                return;
+            }
+            input.addEventListener("input", function () {
+                submitAutoFilter(450);
+            });
+        });
+    }
+
+    function rebindShiftAnalyticsControls(root) {
+        (root || document).querySelectorAll("[data-auto-filter-form]").forEach(initAutoFilterForm);
+        if (typeof window.initManagementReportTheme === "function") {
+            window.initManagementReportTheme();
+        }
+    }
+
+    function refreshShiftAnalyticsFromServer() {
+        var root = document.querySelector("[data-shift-analytics-refresh-root]");
+        if (!root || !window.fetch || !window.DOMParser) {
+            return Promise.resolve({deferred: true, reason: "shift_analytics_refresh_unavailable"});
+        }
+        var url = new URL(window.location.href);
+        url.searchParams.set("_shift_analytics_refresh", String(Date.now()));
+
+        return window.fetch(url.toString(), {
+            method: "GET",
+            credentials: "same-origin",
+            cache: "no-store",
+            headers: {"Accept": "text/html"}
+        }).then(function (response) {
+            if (!response.ok) {
+                throw new Error("shift analytics status " + response.status);
+            }
+            return response.text();
+        }).then(function (html) {
+            var doc = new DOMParser().parseFromString(html, "text/html");
+            var fresh = doc.querySelector("[data-shift-analytics-refresh-root]");
+            if (!fresh) {
+                return {deferred: true, reason: "shift_analytics_fragment_missing"};
+            }
+            root.innerHTML = fresh.innerHTML;
+            rebindShiftAnalyticsControls(root);
+            return {applied: true};
+        }).catch(function () {
+            return {deferred: true, reason: "shift_analytics_refresh_failed"};
+        });
+    }
+
+    window.refreshShiftAnalyticsFromServer = refreshShiftAnalyticsFromServer;
+    window.applyOperationalStateRefresh = function () {
+        return refreshShiftAnalyticsFromServer();
+    };
+})();
+</script>
+{% endblock %}

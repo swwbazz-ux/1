@@ -5,9 +5,27 @@ from .models import DowntimeEvent, DowntimeReason
 
 @admin.register(DowntimeReason)
 class DowntimeReasonAdmin(admin.ModelAdmin):
-    list_display = ('name', 'equipment_type', 'is_critical', 'is_active')
-    search_fields = ('name',)
-    list_filter = ('equipment_type', 'is_critical', 'is_active')
+    list_display = (
+        'name',
+        'short_label',
+        'equipment_type',
+        'equipment_state',
+        'show_for_truck_driver',
+        'show_for_excavator_operator',
+        'show_for_mechanic',
+        'is_critical',
+        'is_active',
+    )
+    search_fields = ('name', 'short_label')
+    list_filter = (
+        'equipment_type',
+        'equipment_state',
+        'show_for_truck_driver',
+        'show_for_excavator_operator',
+        'show_for_mechanic',
+        'is_critical',
+        'is_active',
+    )
 
 
 @admin.register(DowntimeEvent)

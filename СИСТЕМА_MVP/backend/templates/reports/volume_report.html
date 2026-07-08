@@ -1,19 +1,14 @@
 {% extends "base.html" %}
 
 {% block title %}Отчет по объемам{% endblock %}
+{% block body_class %}dispatcher-control-screen{% endblock %}
 
 {% block body %}
-<header class="app-header">
-    <div class="header-inner">
-        <div class="topline">
-            <span>{{ access.employee.full_name }}</span>
-            <a href="{% url 'logout' %}">Выйти</a>
-        </div>
-        <h1>Отчет по объемам</h1>
-        <p>Итоги по выполненным рейсам, фильтры по сменам, переходящие рейсы, группировка по часу и выгрузка в Excel.</p>
-    </div>
-</header>
-<main class="page">
+<main class="dispatcher-shell dispatcher-analytics-shell management-linked-report" data-dispatcher-theme>
+    <section class="dispatcher-analytics-board management-dashboard-board management-linked-report-board" aria-label="Объемы">
+        {% include "reports/includes/management_report_header.html" with active="volume" title="Объемы" subtitle="Выполненные рейсы, группировки, план-факт и выгрузка в Excel." %}
+        <div class="management-linked-report-content">
+
     <section class="metric-grid">
         <div class="metric-card success">
             <div>Общий объем по выполненным рейсам</div>
@@ -160,5 +155,8 @@
             </table>
         </div>
     </section>
+</div>
+</section>
 </main>
+{% include "reports/includes/management_report_theme.html" %}
 {% endblock %}

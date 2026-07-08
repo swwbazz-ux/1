@@ -1,0 +1,251 @@
+{% extends "base.html" %}
+
+{% block title %}Конфликты админки{% endblock %}
+{% block body_class %}system-admin-conflicts-screen{% endblock %}
+
+{% block body %}
+<div class="admin-shell admin-exports-shell admin-conflicts-shell admin-day" data-admin-theme>
+    <header class="admin-console-header" aria-label="Административная шапка">
+        <section class="admin-console-identity">
+            <span class="admin-console-avatar">{{ access.employee.full_name|first }}</span>
+            <span>
+                <strong>{{ access.employee.full_name }}</strong>
+                <em>Системный администратор</em>
+            </span>
+        </section>
+
+        <section class="admin-console-main">
+            <div class="admin-console-title">
+                <span>Админка MVP</span>
+                <h1>Конфликты</h1>
+                <p>Очередь рискованных действий, которые система остановила до решения администратора.</p>
+            </div>
+            <nav class="admin-console-nav" aria-label="Разделы админки">
+                <a href="{% url 'system_admin_dashboard' %}">Сводка</a>
+                <a href="{% url 'system_admin_employees' %}">Сотрудники</a>
+                <a href="{% url 'system_admin_references' %}">Справочники</a>
+                <a class="is-active" href="{% url 'system_admin_conflicts' %}">Конфликты</a>
+                <a href="{% url 'system_admin_logs' %}">Журнал</a>
+                <a href="{% url 'system_admin_exports' %}">Выгрузки</a>
+            </nav>
+        </section>
+
+        <section class="admin-console-actions">
+            <button type="button" class="admin-theme-button" data-admin-theme-toggle title="День / Ночь">Д/Н</button>
+            <a class="admin-utility-link" href="{% url 'system_admin_dashboard' %}">Назад</a>
+            <a class="admin-utility-link" href="{% url 'logout' %}">Выйти</a>
+        </section>
+    </header>
+
+    <main class="admin-console-page conflicts-page">
+        <section class="conflict-metrics">
+            <a class="conflict-metric metric-danger" href="{% url 'system_admin_conflicts' %}?status=open">
+                <span>Открытые</span>
+                <strong>{{ open_total }}</strong>
+                <small>требуют решения</small>
+            </a>
+            <a class="conflict-metric metric-warning" href="{% url 'system_admin_conflicts' %}?status=in_progress">
+                <span>В работе</span>
+                <strong>{{ in_progress_total }}</strong>
+                <small>разбираются</small>
+            </a>
+            <a class="conflict-metric metric-ok" href="{% url 'system_admin_conflicts' %}?status=resolved">
+                <span>Решены</span>
+                <strong>{{ resolved_total }}</strong>
+                <small>закрыты</small>
+            </a>
+            <a class="conflict-metric metric-neutral" href="{% url 'system_admin_conflicts' %}?status=rejected">
+                <span>Отклонены</span>
+                <strong>{{ rejected_total }}</strong>
+                <small>без действия</small>
+            </a>
+        </section>
+
+        <section class="conflicts-control-card">
+            <div class="admin-section-title">
+                <div>
+                    <h2>Поиск и контроль</h2>
+                    <p>Фильтры работают сразу. Статус меняется только через действия в строке конфликта.</p>
+                </div>
+                <span class="admin-chip admin-chip-info">{{ conflict_total }} всего</span>
+            </div>
+            <form class="conflicts-filter-bar" method="get">
+                <div class="field">
+                    <label for="conflict-search">Поиск</label>
+                    <input id="conflict-search" name="q" type="search" value="{{ query }}" placeholder="Сотрудник, процесс, тип или описание" data-conflict-search>
+                </div>
+                <div class="field select-field">
+                    <label for="conflict-status">Статус</label>
+                    <select id="conflict-status" name="status" data-conflict-status>
+                        <option value="">Все статусы</option>
+                        {% for value, label in statuses %}
+                            <option value="{{ value }}" {% if selected_status == value %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <a class="admin-button admin-button-secondary" href="{% url 'system_admin_conflicts' %}">Сбросить</a>
+            </form>
+        </section>
+
+        <section class="conflicts-workspace">
+            <div class="conflicts-list-card">
+                <div class="admin-section-title">
+                    <div>
+                        <h2>Очередь конфликтов</h2>
+                        <p>Сначала разбираются открытые и находящиеся в работе конфликты.</p>
+                    </div>
+                    <span class="admin-chip" data-conflict-visible-count></span>
+                </div>
+
+                <div class="conflicts-list">
+                    {% for conflict in conflicts %}
+                        <article class="admin-conflict-row conflict-state-{{ conflict.status_class }}" data-conflict-row data-status="{{ conflict.status }}" data-text="{{ conflict.conflict_type }} {{ conflict.process }} {{ conflict.description }} {{ conflict.employee.full_name }} {{ conflict.role.name }}">
+                            <span class="conflict-row-accent" aria-hidden="true"></span>
+                            <div class="conflict-main">
+                                <div class="conflict-row-head">
+                                    <strong>{{ conflict.conflict_type }}</strong>
+                                    <span class="admin-chip admin-chip-{{ conflict.status_class }}">{{ conflict.get_status_display }}</span>
+                                </div>
+                                <div class="conflict-row-meta">
+                                    <span>{{ conflict.created_at|date:"d.m.Y H:i" }}</span>
+                                    <span>{{ conflict.employee.full_name|default:"Сотрудник не указан" }}</span>
+                                    <span>{{ conflict.role.name|default:"Роль не указана" }}</span>
+                                    <span>{{ conflict.process|default:"Процесс не указан" }}</span>
+                                </div>
+                                <p>{{ conflict.description }}</p>
+                                {% if conflict.comment %}
+                                    <div class="conflict-comment">{{ conflict.comment }}</div>
+                                {% endif %}
+                            </div>
+                            <div class="admin-conflict-actions">
+                                {% if conflict.status != 'in_progress' %}
+                                    <form method="post" action="{% url 'system_admin_conflict_action' conflict.id 'in-progress' %}" class="inline-form">
+                                        {% csrf_token %}
+                                        <button class="admin-button admin-button-warning" type="submit">В работу</button>
+                                    </form>
+                                {% endif %}
+                                {% if conflict.status != 'resolved' %}
+                                    <form method="post" action="{% url 'system_admin_conflict_action' conflict.id 'resolved' %}" class="inline-form" data-confirm="Отметить конфликт как решенный?">
+                                        {% csrf_token %}
+                                        <button class="admin-button admin-button-primary" type="submit">Решен</button>
+                                    </form>
+                                {% endif %}
+                                {% if conflict.status != 'rejected' %}
+                                    <form method="post" action="{% url 'system_admin_conflict_action' conflict.id 'rejected' %}" class="inline-form" data-confirm="Отклонить конфликт?">
+                                        {% csrf_token %}
+                                        <button class="admin-button admin-button-secondary" type="submit">Отклонен</button>
+                                    </form>
+                                {% endif %}
+                            </div>
+                        </article>
+                    {% empty %}
+                        <div class="reference-empty-state">
+                            <strong>Конфликтов нет</strong>
+                            <span>По выбранному фильтру очередь пустая.</span>
+                        </div>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <aside class="conflicts-side">
+                <section class="conflicts-side-card">
+                    <div class="admin-section-title compact">
+                        <div>
+                            <h2>Разбор</h2>
+                            <p>Рабочие статусы очереди администратора.</p>
+                        </div>
+                    </div>
+                    <div class="admin-status-list">
+                        <div class="admin-status-row row-danger">
+                            <span>Открыт</span>
+                            <strong>требует решения</strong>
+                        </div>
+                        <div class="admin-status-row row-warning">
+                            <span>В работе</span>
+                            <strong>разбирается</strong>
+                        </div>
+                        <div class="admin-status-row row-ok">
+                            <span>Решен</span>
+                            <strong>закрыт</strong>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="conflicts-side-card">
+                    <div class="admin-section-title compact">
+                        <div>
+                            <h2>Действия</h2>
+                            <p>Служебные переходы и выгрузка.</p>
+                        </div>
+                    </div>
+                    <div class="conflicts-side-actions">
+                        <a class="admin-button admin-button-primary" href="{% url 'system_admin_conflict_export' %}">Excel</a>
+                        <a class="admin-button admin-button-secondary" href="{% url 'system_admin_logs' %}">Журнал</a>
+                        <a class="admin-button admin-button-secondary" href="{% url 'system_admin_dashboard' %}">Сводка</a>
+                    </div>
+                </section>
+            </aside>
+        </section>
+    </main>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    var search = document.querySelector('[data-conflict-search]');
+    var status = document.querySelector('[data-conflict-status]');
+    var rows = Array.from(document.querySelectorAll('[data-conflict-row]'));
+    var visibleCount = document.querySelector('[data-conflict-visible-count]');
+    var shell = document.querySelector('[data-admin-theme]');
+    var themeToggle = document.querySelector('[data-admin-theme-toggle]');
+
+    function setAdminTheme(theme) {
+        if (!shell) return;
+        var isNight = theme === 'night';
+        shell.classList.toggle('admin-night', isNight);
+        shell.classList.toggle('admin-day', !isNight);
+        if (themeToggle) themeToggle.setAttribute('data-theme-icon', isNight ? 'moon' : 'sun');
+        try {
+            window.localStorage.setItem('admin-theme', isNight ? 'night' : 'day');
+        } catch (error) {
+            return;
+        }
+    }
+
+    function normalize(value) {
+        return (value || '').toString().trim().toLowerCase();
+    }
+
+    function applyFilters() {
+        var query = normalize(search ? search.value : '');
+        var state = status ? status.value : '';
+        var shown = 0;
+        rows.forEach(function (row) {
+            var matchesQuery = !query || normalize(row.dataset.text).indexOf(query) !== -1;
+            var matchesState = !state || row.dataset.status === state;
+            var isVisible = matchesQuery && matchesState;
+            row.hidden = !isVisible;
+            if (isVisible) shown += 1;
+        });
+        if (visibleCount) visibleCount.textContent = shown + ' видно';
+    }
+
+    if (search) search.addEventListener('input', applyFilters);
+    if (status) status.addEventListener('input', applyFilters);
+    if (shell) {
+        var savedTheme = 'day';
+        try {
+            savedTheme = window.localStorage.getItem('admin-theme') || 'day';
+        } catch (error) {
+            savedTheme = 'day';
+        }
+        setAdminTheme(savedTheme);
+    }
+    if (themeToggle) {
+        themeToggle.addEventListener('click', function () {
+            setAdminTheme(shell && shell.classList.contains('admin-night') ? 'day' : 'night');
+        });
+    }
+    applyFilters();
+});
+</script>
+{% endblock %}

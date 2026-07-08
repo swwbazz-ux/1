@@ -2,7 +2,7 @@ from datetime import timedelta
 from decimal import Decimal
 
 from django.core.management import call_command
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
 
 from assignments.models import AssignmentStatus, HaulAssignment
@@ -13,8 +13,6 @@ from references.models import (
     DormitorySection,
     DumpPoint,
     Equipment,
-    EquipmentModel,
-    EquipmentType,
     RockType,
     TruckCapacityRule,
 )
@@ -31,7 +29,8 @@ class Command(BaseCommand):
         call_command('seed_mvp_roles', with_demo_users=True)
 
         employees = self.get_demo_employees()
-        truck, excavator = self.get_demo_equipment()
+        trucks, excavator = self.get_demo_equipment()
+        truck = trucks[0]
         rock = self.get_demo_rock()
         dump_point = self.get_demo_dump_point()
         dormitory_section = self.get_demo_dormitory_section()
@@ -39,8 +38,6 @@ class Command(BaseCommand):
         DriverPrimaryRegistration.objects.update_or_create(
             employee=employees['driver'],
             defaults={
-                'shift_type': 'day',
-                'truck': truck,
                 'dormitory_section': dormitory_section,
             },
         )
@@ -69,27 +66,22 @@ class Command(BaseCommand):
             assigned_by=employees['mining_master'],
             accepted_at=timezone.now(),
         )
-        pending_truck = self.get_or_create_equipment(
-            equipment_type_name='Самосвал',
-            model_name='БЕЛАЗ демо',
-            garage_number='ДЕМО-11',
-            body_volume_m3=Decimal('38.00'),
-            payload_tons=Decimal('90.00'),
-        )
-        self.get_or_create_haul_assignment(
-            truck=pending_truck,
-            excavator=excavator,
-            status=AssignmentStatus.PENDING,
-            assigned_by=employees['mining_master'],
-            accepted_at=None,
-        )
+        pending_truck = trucks[1] if len(trucks) > 1 else None
+        if pending_truck:
+            self.get_or_create_haul_assignment(
+                truck=pending_truck,
+                excavator=excavator,
+                status=AssignmentStatus.PENDING,
+                assigned_by=employees['mining_master'],
+                accepted_at=None,
+            )
 
         volume = self.get_trip_volume(truck, rock)
         tonnage = self.get_trip_tonnage(volume, rock)
         active_trip = Trip.objects.filter(
             truck=truck,
             excavator=excavator,
-            status=TripStatus.ACTIVE,
+            status__in=(TripStatus.ACTIVE, TripStatus.LOADED_WAITING_UNLOAD),
         ).first()
         if not active_trip:
             active_trip = Trip.objects.create(
@@ -106,8 +98,8 @@ class Command(BaseCommand):
                 loading_block='52',
                 transport_distance_km=Decimal('3.10'),
                 downtime_text='зачистка забоя',
-                note='демо активный рейс',
-                status=TripStatus.ACTIVE,
+                note='демо рейс на разгрузку',
+                status=TripStatus.LOADED_WAITING_UNLOAD,
             )
         else:
             active_trip.planned_volume_m3 = Decimal('7000.00')
@@ -115,7 +107,8 @@ class Command(BaseCommand):
             active_trip.loading_block = '52'
             active_trip.transport_distance_km = Decimal('3.10')
             active_trip.downtime_text = 'зачистка забоя'
-            active_trip.note = 'демо активный рейс'
+            active_trip.note = 'демо рейс на разгрузку'
+            active_trip.status = TripStatus.LOADED_WAITING_UNLOAD
             active_trip.save(update_fields=[
                 'planned_volume_m3',
                 'loading_horizon',
@@ -123,45 +116,41 @@ class Command(BaseCommand):
                 'transport_distance_km',
                 'downtime_text',
                 'note',
+                'status',
             ])
 
-        completed_truck = self.get_or_create_equipment(
-            equipment_type_name='Самосвал',
-            model_name='БЕЛАЗ демо',
-            garage_number='ДЕМО-12',
-            body_volume_m3=Decimal('38.00'),
-            payload_tons=Decimal('90.00'),
-        )
-        if not Trip.objects.filter(truck=completed_truck, status=TripStatus.COMPLETED).exists():
-            Trip.objects.create(
-                excavator=excavator,
-                truck=completed_truck,
-                excavator_operator=employees['excavator_operator'],
-                driver=employees['driver'],
-                loading_shift=excavator_shift,
-                unloading_shift=driver_shift,
-                rock_type=rock,
-                dump_point=dump_point,
-                planned_volume_m3=Decimal('7000.00'),
-                volume_m3=volume,
-                tonnage=tonnage,
-                loading_horizon='75',
-                loading_block='52',
-                transport_distance_km=Decimal('3.10'),
-                downtime_text='ожидание разгрузки',
-                note='демо завершенный рейс для отчета заказчику',
-                status=TripStatus.COMPLETED,
-                completed_at=timezone.now(),
-            )
-        else:
-            Trip.objects.filter(truck=completed_truck, status=TripStatus.COMPLETED).update(
-                planned_volume_m3=Decimal('7000.00'),
-                loading_horizon='75',
-                loading_block='52',
-                transport_distance_km=Decimal('3.10'),
-                downtime_text='ожидание разгрузки',
-                note='демо завершенный рейс для отчета заказчику',
-            )
+        completed_truck = trucks[2] if len(trucks) > 2 else None
+        if completed_truck:
+            if not Trip.objects.filter(truck=completed_truck, status=TripStatus.COMPLETED).exists():
+                Trip.objects.create(
+                    excavator=excavator,
+                    truck=completed_truck,
+                    excavator_operator=employees['excavator_operator'],
+                    driver=employees['driver'],
+                    loading_shift=excavator_shift,
+                    unloading_shift=driver_shift,
+                    rock_type=rock,
+                    dump_point=dump_point,
+                    planned_volume_m3=Decimal('7000.00'),
+                    volume_m3=volume,
+                    tonnage=tonnage,
+                    loading_horizon='75',
+                    loading_block='52',
+                    transport_distance_km=Decimal('3.10'),
+                    downtime_text='ожидание разгрузки',
+                    note='демо завершенный рейс для отчета заказчику',
+                    status=TripStatus.COMPLETED,
+                    completed_at=timezone.now(),
+                )
+            else:
+                Trip.objects.filter(truck=completed_truck, status=TripStatus.COMPLETED).update(
+                    planned_volume_m3=Decimal('7000.00'),
+                    loading_horizon='75',
+                    loading_block='52',
+                    transport_distance_km=Decimal('3.10'),
+                    downtime_text='ожидание разгрузки',
+                    note='демо завершенный рейс для отчета заказчику',
+                )
 
         ReportTemplate.objects.update_or_create(
             name='Демо отчет по объемам',
@@ -197,77 +186,56 @@ class Command(BaseCommand):
 
         self.stdout.write(self.style.SUCCESS('Демо-сценарий MVP подготовлен.'))
         self.stdout.write(
-            'Коды доступа: 1000 админ, 2000 водитель, 3000 машинист, 4000 горный мастер, '
-            '5000 диспетчер, 6000 руководство, 7000 механик.'
+            'Коды доступа: 100000 админ, 200000 водитель, 300000 машинист, 400000 горный мастер, '
+            '500000 диспетчер, 600000 руководство, 700000 механик.'
         )
         self.stdout.write(f'Активный рейс: {active_trip}')
 
     def get_demo_employees(self):
         role_by_code = {role.code: role for role in Role.objects.all()}
         demo = {
-            'admin': ('Администратор MVP', 'admin', '1000'),
-            'driver': ('Водитель MVP', 'driver', '2000'),
-            'excavator_operator': ('Машинист экскаватора MVP', 'excavator_operator', '3000'),
-            'mining_master': ('Горный мастер MVP', 'mining_master', '4000'),
-            'dispatcher': ('Диспетчер MVP', 'dispatcher', '5000'),
-            'manager': ('Руководство MVP', 'manager', '6000'),
-            'mechanic': ('Механик MVP', 'mechanic', '7000'),
+            'admin': ('Администратор MVP', 'admin', '100000', '+79000000001'),
+            'driver': ('Водитель MVP', 'driver', '200000', '+79000000002'),
+            'excavator_operator': ('Машинист экскаватора MVP', 'excavator_operator', '300000', '+79000000003'),
+            'mining_master': ('Горный мастер MVP', 'mining_master', '400000', '+79000000004'),
+            'dispatcher': ('Диспетчер MVP', 'dispatcher', '500000', '+79000000005'),
+            'manager': ('Руководство MVP', 'manager', '600000', '+79000000006'),
+            'mechanic': ('Механик MVP', 'mechanic', '700000', '+79000000007'),
         }
         employees = {}
-        for key, (full_name, role_code, access_code) in demo.items():
-            employee, _ = Employee.objects.update_or_create(full_name=full_name, defaults={'is_active': True})
+        for key, (full_name, role_code, access_code, phone) in demo.items():
+            employee, _ = Employee.objects.update_or_create(full_name=full_name, defaults={'is_active': True, 'phone': phone})
             EmployeeAccess.objects.update_or_create(
-                access_code=access_code,
-                defaults={'employee': employee, 'role': role_by_code[role_code], 'is_active': True},
+                employee=employee,
+                role=role_by_code[role_code],
+                defaults={
+                    'access_code': access_code,
+                    'is_active': True,
+                    'status': EmployeeAccess.Status.ACTIVATED,
+                },
             )
             employees[key] = employee
         return employees
 
     def get_demo_equipment(self):
-        truck = Equipment.objects.filter(equipment_type__name='Самосвал', is_active=True).order_by('garage_number').first()
-        if not truck:
-            truck = self.get_or_create_equipment(
-                equipment_type_name='Самосвал',
-                model_name='БЕЛАЗ демо',
-                garage_number='ДЕМО-10',
-                body_volume_m3=Decimal('38.00'),
-                payload_tons=Decimal('90.00'),
-            )
-        excavator = Equipment.objects.filter(equipment_type__name='Экскаватор', is_active=True).order_by('garage_number').first()
+        trucks = list(
+            Equipment.objects
+            .filter(equipment_type__name='Самосвал', is_active=True)
+            .exclude(garage_number__istartswith='ДЕМО')
+            .order_by('garage_number')
+        )
+        if not trucks:
+            raise CommandError('В справочнике нет активных самосвалов. Сначала загрузите технику в справочники.')
+        excavator = (
+            Equipment.objects
+            .filter(equipment_type__name='Экскаватор', is_active=True)
+            .exclude(garage_number__istartswith='ДЕМО')
+            .order_by('garage_number')
+            .first()
+        )
         if not excavator:
-            excavator = self.get_or_create_equipment(
-                equipment_type_name='Экскаватор',
-                model_name='Экскаватор демо',
-                garage_number='ДЕМО-1',
-                body_volume_m3=Decimal('12.00'),
-                payload_tons=None,
-            )
-        return truck, excavator
-
-    def get_or_create_equipment(self, equipment_type_name, model_name, garage_number, body_volume_m3, payload_tons):
-        equipment_type, _ = EquipmentType.objects.update_or_create(
-            name=equipment_type_name,
-            defaults={'is_active': True},
-        )
-        model, _ = EquipmentModel.objects.update_or_create(
-            equipment_type=equipment_type,
-            name=model_name,
-            defaults={
-                'body_volume_m3': body_volume_m3,
-                'payload_tons': payload_tons,
-                'is_active': True,
-            },
-        )
-        equipment, _ = Equipment.objects.update_or_create(
-            garage_number=garage_number,
-            defaults={
-                'equipment_type': equipment_type,
-                'model': model,
-                'is_own': True,
-                'is_active': True,
-            },
-        )
-        return equipment
+            raise CommandError('В справочнике нет активных экскаваторов. Сначала загрузите технику в справочники.')
+        return trucks, excavator
 
     def get_demo_rock(self):
         rock = RockType.objects.filter(is_active=True, density__isnull=False).order_by('name').first()

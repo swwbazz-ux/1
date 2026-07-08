@@ -1,118 +1,2154 @@
-{% extends "base.html" %}
+﻿{% extends "base.html" %}
+{% load static l10n %}
 
-{% block title %}Работа экскаватора{% endblock %}
+{% block title %}Экскаваторщик{% endblock %}
+{% block body_class %}excavator-operator-screen{% endblock %}
+{% block extra_head %}
+<link rel="manifest" href="{% url 'excavator_manifest' %}">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}">
+<meta name="theme-color" content="#030708">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Погрузка">
+{% endblock %}
 
 {% block body %}
-<header class="app-header">
-    <div class="header-inner">
-        <div class="topline">
-            <span>{{ access.employee.full_name }}</span>
-            <a href="{% url 'logout' %}">Выйти</a>
+<main
+    class="eo-shell"
+    data-eo-shell
+    data-eo-active-tab="trucks"
+    data-eo-current-excavator-id="{% if current_excavator %}{{ current_excavator.id }}{% endif %}"
+    data-eo-settings-url="{% url 'excavator_work_settings' %}"
+    data-eo-shift-url="{% url 'excavator_shift_action' %}"
+    data-eo-truck-loaded-url="{% url 'excavator_truck_loaded' %}"
+    data-eo-truck-loaded-cancel-url="{% url 'excavator_truck_loaded_cancel' %}"
+    data-eo-truck-green-icon="{% static 'img/equipment/truck-green.png' %}"
+>
+    {% if messages %}
+        <div class="eo-messages">
+            {% for message in messages %}
+                <div class="message {% if message.tags %}{{ message.tags }}{% else %}success{% endif %}">{{ message }}</div>
+            {% endfor %}
         </div>
-        <h1>Работа экскаватора</h1>
-        <p>Создание рейса в момент загрузки: выбрать самосвал, породу, точку разгрузки и при необходимости указать параметры для отчета заказчику.</p>
-    </div>
-</header>
-<main class="page">
-    {% for message in messages %}
-        <div class="message success">{{ message }}</div>
-    {% endfor %}
+    {% endif %}
 
-    <section class="card">
-        <h2>Создать рейс</h2>
-        <form method="post">
-            {% csrf_token %}
-            <h3>Основные данные рейса</h3>
-            <div class="filters">
-                <div>
-                    <label for="{{ form.assignment.id_for_label }}">{{ form.assignment.label }}</label>
-                    {{ form.assignment }}
-                    {{ form.assignment.errors }}
+    <form class="eo-form" method="post" data-eo-trip-form>
+        {% csrf_token %}
+        <input type="hidden" name="assignment" value="{% if truck_cards %}{{ truck_cards.0.assignment.id }}{% endif %}" data-eo-assignment-input>
+        <input type="hidden" name="planned_volume_m3" value="{{ planned_volume_value }}">
+        <input type="hidden" name="transport_distance_km" value="{{ transport_distance_value }}">
+        <input type="hidden" name="downtime_text" value="{{ downtime_text_value }}" data-eo-downtime-input>
+        <input type="hidden" name="note" value="{{ note_value }}">
+
+        <header class="eo-topbar" aria-label="Состояние экскаватора">
+            <div class="eo-topbar-cell">
+                <img src="{% static 'img/equipment/excavator-yellow.png' %}" alt="">
+                <strong>{{ excavator_label }}</strong>
+            </div>
+            <div class="eo-topbar-cell eo-shift-kind-cell" aria-label="Дневная смена">
+                <span class="eo-sun-icon" aria-hidden="true"></span>
+            </div>
+            <div class="eo-topbar-cell eo-face-cell eo-face-cell-full">
+                <span class="eo-pin-icon" aria-hidden="true"></span>
+                <strong title="Горизонт {{ face_horizon|default:"125" }} / Блок {{ face_block|default:"4" }}{% if current_rock %} / Порода: {{ current_rock }}{% endif %}">
+                    Гор.{{ face_horizon|default:"125" }} / Бл.{{ face_block|default:"4" }}{% if current_rock %} / {{ current_rock }}{% endif %}
+                </strong>
+            </div>
+        </header>
+
+        <section class="eo-screen mm-mobile-shift-form" data-eo-screen="shift">
+            <div class="eo-shift-titlebar">
+                <h1>Смена</h1>
+                <button class="eo-shift-update-button" type="button" data-eo-pwa-update-check aria-label="Проверить обновление приложения">
+                    <span aria-hidden="true"></span>
+                    <b data-eo-pwa-update-check-label>Обновить</b>
+                    <em data-eo-pwa-update-check-version hidden></em>
+                </button>
+            </div>
+            <div class="eo-shift-section eo-shift-check-panel">
+                <div class="eo-shift-section-head">
+                    <span>Показатели техники</span>
                 </div>
-                <div>
-                    <label for="{{ form.rock_type.id_for_label }}">{{ form.rock_type.label }}</label>
-                    {{ form.rock_type }}
-                    {{ form.rock_type.errors }}
-                </div>
-                <div>
-                    <label for="{{ form.dump_point.id_for_label }}">{{ form.dump_point.label }}</label>
-                    {{ form.dump_point }}
-                    {{ form.dump_point.errors }}
+                <div class="eo-shift-metrics">
+                    <label class="eo-field-card">
+                        <span>Топливо</span>
+                        <span class="eo-shift-metric-value">
+                            <input type="text" inputmode="decimal" name="shift_fuel" value="{{ shift_fuel_display }}" placeholder="0" data-eo-shift-fuel>
+                            <em>л</em>
+                        </span>
+                    </label>
+                    <label class="eo-field-card">
+                        <span>Пробег</span>
+                        <span class="eo-shift-metric-value">
+                            <input type="text" inputmode="decimal" name="shift_mileage" value="{{ shift_mileage_display }}" placeholder="0" data-eo-shift-mileage>
+                            <em>км</em>
+                        </span>
+                    </label>
+                    <label class="eo-field-card">
+                        <span>Моточасы</span>
+                        <span class="eo-shift-metric-value">
+                            <input type="text" inputmode="decimal" name="shift_engine_hours" value="{{ shift_engine_hours_display }}" placeholder="0" data-eo-shift-engine-hours>
+                            <em>м/ч</em>
+                        </span>
+                    </label>
                 </div>
             </div>
 
-            <h3>Параметры для отчета заказчику</h3>
-            <p class="muted">Система подставляет последние введенные параметры этого машиниста. Если экскаватор переехал или изменилась работа, достаточно поправить только изменившиеся поля.</p>
-            <div class="filters">
-                <div>
-                    <label for="{{ form.planned_volume_m3.id_for_label }}">{{ form.planned_volume_m3.label }}</label>
-                    {{ form.planned_volume_m3 }}
-                    {{ form.planned_volume_m3.errors }}
+            <div class="eo-shift-section eo-shift-result-panel">
+                <div class="eo-shift-section-head">
+                    <span>Итог смены</span>
+                    <b>Сейчас</b>
                 </div>
-                <div>
-                    <label for="{{ form.loading_horizon.id_for_label }}">{{ form.loading_horizon.label }}</label>
-                    {{ form.loading_horizon }}
-                    {{ form.loading_horizon.errors }}
-                </div>
-                <div>
-                    <label for="{{ form.loading_block.id_for_label }}">{{ form.loading_block.label }}</label>
-                    {{ form.loading_block }}
-                    {{ form.loading_block.errors }}
-                </div>
-                <div>
-                    <label for="{{ form.transport_distance_km.id_for_label }}">{{ form.transport_distance_km.label }}</label>
-                    {{ form.transport_distance_km }}
-                    {{ form.transport_distance_km.errors }}
-                </div>
-                <div>
-                    <label for="{{ form.downtime_text.id_for_label }}">{{ form.downtime_text.label }}</label>
-                    {{ form.downtime_text }}
-                    {{ form.downtime_text.errors }}
-                </div>
-                <div>
-                    <label for="{{ form.note.id_for_label }}">{{ form.note.label }}</label>
-                    {{ form.note }}
-                    {{ form.note.errors }}
+                <div class="eo-shift-result-grid">
+                    <div><span>План</span><strong>{{ shift_plan_percent|default:0 }}%</strong></div>
+                    <div>
+                        <span>{{ shift_fact_label }}</span>
+                        <strong>{{ shift_fact_value }}</strong>
+                        {% if shift_fact_meta %}<em>{{ shift_fact_meta }}</em>{% endif %}
+                    </div>
+                    <div><span>Назначено</span><strong>{{ truck_cards|length }} шт.</strong></div>
+                    <div><span>В пути</span><strong>{{ active_trips_count }} шт.</strong></div>
                 </div>
             </div>
-            <button type="submit">Отправить самосвал в рейс</button>
-        </form>
-    </section>
 
-    <section class="card">
-        <h2>Активные рейсы</h2>
-        <div class="table-wrap">
-            <table>
-                <thead>
-                <tr>
-                    <th>Самосвал</th>
-                    <th>Экскаватор</th>
-                    <th>Порода</th>
-                    <th>Разгрузка</th>
-                    <th>Горизонт</th>
-                    <th>Блок</th>
-                    <th>Плечо</th>
-                    <th>Объем</th>
-                </tr>
-                </thead>
-                <tbody>
-                {% for trip in active_trips %}
-                    <tr>
-                        <td>{{ trip.truck }}</td>
-                        <td>{{ trip.excavator }}</td>
-                        <td>{{ trip.rock_type }}</td>
-                        <td>{{ trip.dump_point }}</td>
-                        <td>{{ trip.loading_horizon|default:"-" }}</td>
-                        <td>{{ trip.loading_block|default:"-" }}</td>
-                        <td>{{ trip.transport_distance_km|default:"-" }}</td>
-                        <td>{{ trip.volume_m3|default:"-" }}</td>
-                    </tr>
+            <div class="eo-shift-actions">
+                <button class="mm-mobile-shift-button{% if open_shift %} is-danger{% endif %}" type="button" data-eo-shift-button data-eo-shift-action="{% if open_shift %}close{% else %}open{% endif %}" style="--eo-shift-hold: 0%" {% if open_shift %}aria-label="Удерживайте 2 секунды, чтобы завершить смену"{% endif %}>
+                    <span data-eo-shift-label>{% if open_shift %}Завершить смену{% else %}Начать смену{% endif %}</span>
+                </button>
+                <button class="eo-logout-button" type="button" data-eo-logout-button data-eo-logout-url="{% url 'logout' %}" style="--eo-logout-hold: 0%" aria-label="Удерживайте 2 секунды, чтобы выйти">
+                    <span data-eo-logout-label>Выйти</span>
+                </button>
+            </div>
+        </section>
+
+        <section class="eo-screen" data-eo-screen="face">
+            <h1>Забой</h1>
+            <div class="eo-face-form">
+                <label class="eo-large-field">
+                    <span>Горизонт</span>
+                    <input type="number" inputmode="numeric" pattern="[0-9]*" name="loading_horizon" value="{{ face_horizon }}" placeholder="75" data-eo-face-horizon>
+                </label>
+                <label class="eo-large-field">
+                    <span>Блок</span>
+                    <input type="number" inputmode="numeric" pattern="[0-9]*" name="loading_block" value="{{ face_block }}" placeholder="52" data-eo-face-block>
+                </label>
+                <label class="eo-large-field">
+                    <span>Порода</span>
+                    <select name="rock_type" data-eo-rock-select>
+                        {% for rock in rock_choices %}
+                            <option value="{{ rock.id }}" {% if rock.id|stringformat:"s" == default_rock|stringformat:"s" %}selected{% endif %}>{{ rock }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+            </div>
+            <div class="eo-unload-grid eo-unload-grid-settings" aria-label="Выбор точек разгрузки">
+                {% for card in dump_choice_cards %}
+                    <button
+                        class="eo-unload-card status-{{ card.status_key }}{% if card.is_selected %} is-selected{% endif %}"
+                        type="button"
+                        data-eo-dump-select="{{ card.point.id }}"
+                        aria-pressed="{% if card.is_selected %}true{% else %}false{% endif %}"
+                    >
+                        <strong>{{ card.name }}</strong>
+                    </button>
                 {% empty %}
-                    <tr><td colspan="8">Активных рейсов пока нет.</td></tr>
+                    <div class="eo-empty-state eo-empty-state-compact">
+                        <strong>Нет точек</strong>
+                        <span>Заполните справочник разгрузок</span>
+                    </div>
                 {% endfor %}
-                </tbody>
-            </table>
+            </div>
+            <input type="hidden" name="dump_point" value="{{ default_dump_point }}" data-eo-dump-input>
+            <input type="hidden" name="dump_points" value="{% for id in selected_dump_point_ids %}{% if not forloop.first %},{% endif %}{{ id }}{% endfor %}" data-eo-dump-points-input>
+            <button class="eo-primary-action eo-hold-action" type="button" data-eo-apply-settings data-eo-hold-label="Применить настройки" style="--eo-action-hold: 0%" aria-label="Удерживайте 2 секунды, чтобы применить настройки">Применить настройки</button>
+        </section>
+
+        <section class="eo-screen eo-dashboard-screen" data-eo-screen="trucks">
+            <div class="eo-dashboard-main-zone">
+                <div class="eo-dashboard-head">
+                    <div class="eo-dashboard-driver-card">
+                        <span>Машинист экскаватора</span>
+                        <strong>{{ access.employee.full_name|default:"-" }}</strong>
+                    </div>
+                    <div class="eo-dashboard-plan-widget">
+                        <div class="eo-dashboard-plan-ring" style="--eo-dashboard-progress: {{ shift_plan_percent|default:0 }}%;" role="img" aria-label="Выполнение нормы {{ shift_plan_percent|default:0 }}%">
+                            <span>{{ shift_plan_percent|default:0 }}%</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="eo-truck-grid eo-dashboard-truck-grid{% if not truck_cards %} is-empty{% elif truck_cards|length > 9 %} is-many is-rows-4{% else %} is-rows-3{% endif %}" aria-label="Самосвалы">
+                    {% for card in truck_cards %}
+                        <button
+                            class="eo-truck-card eo-dashboard-truck-card status-{{ card.status_key }}{% if card.is_selected %} is-selected{% endif %}{% if card.is_locked %} is-inactive{% endif %}"
+                            type="button"
+                            draggable="{% if card.can_drag %}true{% else %}false{% endif %}"
+                            style="--eo-truck-progress: {{ card.plan_percent|default:0 }}%;"
+                            data-eo-truck-card
+                            data-eo-dashboard-truck
+                            data-assignment-id="{{ card.assignment.id }}"
+                            data-truck-id="{{ card.assignment.truck.id }}"
+                            data-eo-equipment-state="{{ card.equipment_state_code }}"
+                            data-eo-plan-percent="{{ card.plan_percent|default:0 }}"
+                            {% if card.is_locked %}data-eo-truck-inactive="1" aria-disabled="true"{% endif %}
+                        >
+                            <i aria-hidden="true"><img src="{% static card.icon %}" alt=""></i>
+                            <strong>{{ card.number }}</strong>
+                            <span>{{ card.status_label }}</span>
+                            <small>{{ card.plan_percent|default:0 }}%</small>
+                            {% if card.target_label %}<em>{{ card.target_label }}</em>{% endif %}
+                        </button>
+                    {% empty %}
+                        <div class="eo-empty-state eo-dashboard-empty">
+                            <img src="{% static 'img/equipment/truck-gray.png' %}" alt="">
+                            <strong>Нет погрузки</strong>
+                            <span>Назначает горный мастер</span>
+                        </div>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <div class="eo-dashboard-dump-zone">
+                <div class="eo-unload-grid eo-unload-grid-work eo-dashboard-unload-grid{% if dump_cards|length == 1 %} is-single{% endif %}" aria-label="Точки разгрузки">
+                    {% for card in dump_cards %}
+                        <button class="eo-unload-card eo-dashboard-unload-card status-{{ card.status_key }}{% if card.is_default %} is-selected{% endif %}" type="button" data-eo-dump-target="{{ card.point.id }}" data-eo-dump-name="{{ card.name }}">
+                            <span class="eo-dashboard-unload-top">
+                                <strong>{{ card.name }}</strong>
+                                <small>{{ card.completed_count|default:0 }}</small>
+                            </span>
+                            <span class="eo-dashboard-unload-label">Разгружено</span>
+                            <span class="eo-dashboard-unload-badges" aria-label="Назначены, не разгружены">
+                                {% for truck in card.pending_trucks %}
+                                    <b class="status-{{ truck.status_key }}" data-eo-queue-truck data-truck-id="{{ truck.truck_id }}" data-trip-id="{{ truck.trip_id }}" data-eo-truck-number="{{ truck.number }}">{{ truck.number }}</b>
+                                {% empty %}
+                                    <b class="is-muted">нет</b>
+                                {% endfor %}
+                            </span>
+                        </button>
+                    {% empty %}
+                        <div class="eo-empty-state eo-empty-state-compact">
+                            <strong>Нет точек</strong>
+                            <span>Настройте забой</span>
+                        </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </section>
+
+        <div class="eo-dump-queue-modal" data-eo-dump-queue-modal hidden aria-hidden="true">
+            <div class="eo-dump-queue-backdrop" data-eo-dump-queue-close></div>
+            <section class="eo-dump-queue-dialog" role="dialog" aria-modal="true" aria-labelledby="eo-dump-queue-title">
+                <button class="eo-dump-queue-close" type="button" data-eo-dump-queue-close aria-label="Закрыть">×</button>
+                <span class="eo-dump-queue-kicker">Очередь на разгрузку</span>
+                <h2 id="eo-dump-queue-title" data-eo-dump-queue-title>Точка разгрузки</h2>
+                <div class="eo-dump-queue-list" data-eo-dump-queue-list></div>
+                <div class="eo-dump-return-zone" data-eo-dump-return-zone>
+                    <strong>Вернуть в самосвалы</strong>
+                    <span>Перетащите сюда, чтобы отменить отправку</span>
+                </div>
+                <p class="eo-dump-queue-note" data-eo-dump-queue-note hidden></p>
+            </section>
+        </div>
+
+        <section class="eo-screen" data-eo-screen="events">
+            <div class="eo-title-row">
+                <h1>Простои</h1>
+                <button class="eo-refresh-button" type="button" aria-label="Обновить" data-eo-refresh-work>↻</button>
+            </div>
+            <div class="eo-downtime-card status-{{ active_downtime_state.color_group }}{% if active_downtime %} is-active{% endif %}" data-eo-active-downtime-id="{% if active_downtime %}{{ active_downtime.id }}{% endif %}" data-eo-active-started-at="{{ active_downtime_started_at }}" data-eo-active-elapsed-seconds="{{ active_downtime_elapsed_seconds }}" data-eo-downtime-state="{% if active_downtime %}{{ active_downtime_state.code }}{% endif %}">
+                <span class="eo-downtime-state-dot status-{{ active_downtime_state.color_group }}" data-eo-downtime-indicator aria-hidden="true"></span>
+                <div>
+                    <strong data-eo-active-title>{% if active_downtime %}Активный простой{% else %}Простоя нет{% endif %}</strong>
+                    <b data-eo-active-duration>{% if active_downtime %}{{ active_downtime_elapsed_label }}{% else %}00:00:00{% endif %}</b>
+                    <em data-eo-active-reason>{% if active_downtime %}{{ active_downtime.reason }}{% else %}Выберите причину для начала{% endif %}</em>
+                </div>
+            </div>
+            <div class="eo-reason-grid">
+                {% for card in downtime_reason_cards %}
+                    <button class="eo-hold-action status-{{ card.status_key }}{% if card.is_selected %} is-selected{% endif %}" type="button" data-eo-downtime-reason-id="{{ card.reason.id }}" data-eo-reason="{{ card.full_name }}" data-eo-equipment-state="{{ card.equipment_state_code }}" data-eo-hold-label="{{ card.name }}" style="--eo-action-hold: 0%" aria-label="Удерживайте 2 секунды, чтобы начать простой: {{ card.name }}">{{ card.name }}</button>
+                {% empty %}
+                    <div class="eo-empty-state eo-empty-state-compact">
+                        <strong>Причины не настроены</strong>
+                        <span>Добавьте их в справочнике простоев</span>
+                    </div>
+                {% endfor %}
+            </div>
+            <button class="eo-primary-action eo-hold-action{% if not active_downtime %} is-disabled{% endif %}" type="button" data-eo-close-event data-eo-hold-label="Завершить простой" style="--eo-action-hold: 0%" {% if not active_downtime %}disabled aria-disabled="true"{% else %}aria-label="Удерживайте 2 секунды, чтобы завершить простой"{% endif %}>Завершить простой</button>
+        </section>
+    </form>
+
+    <nav class="mm-mobile-bottom-nav" aria-label="Навигация экскаваторщика">
+        <button class="mm-mobile-nav-item" type="button" data-eo-tab="trucks">
+            <img src="{% static 'img/equipment/truck-gray.png' %}" data-eo-icon-idle="{% static 'img/equipment/truck-gray.png' %}" data-eo-icon-active="{% static 'img/equipment/truck-yellow.png' %}" alt="">
+            <span>Погрузка</span>
+        </button>
+        <button class="mm-mobile-nav-item" type="button" data-eo-tab="shift">
+            <span class="eo-nav-clock"></span>
+            <span>Смена</span>
+        </button>
+        <button class="mm-mobile-nav-item" type="button" data-eo-tab="face">
+            <img src="{% static 'img/equipment/excavator-gray.png' %}" data-eo-icon-idle="{% static 'img/equipment/excavator-gray.png' %}" data-eo-icon-active="{% static 'img/equipment/excavator-yellow.png' %}" alt="">
+            <span>Забой</span>
+        </button>
+        <button class="mm-mobile-nav-item" type="button" data-eo-tab="events" data-eo-pwa-update-nav-target>
+            <span class="eo-nav-bell"></span>
+            <span>Простои</span>
+            <span class="mm-mobile-update-badge" data-eo-pwa-update-badge hidden aria-hidden="true"></span>
+        </button>
+    </nav>
+</main>
+
+<div class="eo-mobile-update-modal" data-eo-pwa-update-modal hidden>
+    <section class="eo-mobile-update-dialog" role="alertdialog" aria-modal="true" aria-labelledby="eo-pwa-update-title" aria-describedby="eo-pwa-update-text">
+        <div class="eo-mobile-update-pulse" aria-hidden="true"></div>
+        <div class="eo-mobile-update-copy">
+            <span>Оболочка PWA</span>
+            <h2 id="eo-pwa-update-title">Доступна новая версия</h2>
+            <p id="eo-pwa-update-text" data-eo-pwa-update-text>Можно установить новую оболочку Экскаваторщика.</p>
+            <div class="eo-mobile-update-versions" aria-label="Версии приложения">
+                <div><small>Сейчас</small><strong data-eo-pwa-current-version>v3</strong></div>
+                <div><small>Новая</small><strong data-eo-pwa-new-version>v3</strong></div>
+            </div>
+            <div class="eo-mobile-update-status" data-eo-pwa-update-status>Обновление займет несколько секунд.</div>
+        </div>
+        <div class="eo-mobile-update-actions">
+            <button type="button" class="secondary" data-eo-pwa-update-later>Позже</button>
+            <button type="button" class="primary" data-eo-pwa-update-apply>Обновить</button>
         </div>
     </section>
-</main>
+</div>
+
+<script>
+(function () {
+var excavatorShellVersion = "excavator-mobile-shell-v55";
+var excavatorRelevantEvents = {
+    assignment_changed: true,
+    trip_changed: true,
+    downtime_changed: true,
+    shift_changed: true,
+    equipment_changed: true,
+    access_changed: true
+};
+
+function isExcavatorRefreshUnsafe() {
+    var shell = document.querySelector("[data-eo-shell]");
+    if (!shell) return false;
+    var active = document.activeElement;
+    var activeTag = active && active.tagName ? active.tagName.toLowerCase() : "";
+    if (active && shell.contains(active) && (active.isContentEditable || activeTag === "input" || activeTag === "textarea" || activeTag === "select")) {
+        return true;
+    }
+    return !!document.querySelector(".eo-truck-card.is-pending, .eo-truck-card.is-dragging, .mm-mobile-shift-button.is-holding, .eo-hold-action.is-holding, .eo-logout-button.is-holding, .eo-shift-update-button.is-checking, .eo-mobile-update-modal:not([hidden]), .app-confirm-modal:not([hidden])");
+}
+
+function storeExcavatorRealtimeVersion(version) {
+    if (!version) return;
+    document.body.dataset.operationalStateVersion = String(version);
+    try {
+        window.sessionStorage.setItem("operational-state-version", String(version));
+    } catch (error) {}
+}
+
+function hasExcavatorRelevantEvents(events) {
+    if (!Array.isArray(events) || !events.length) return false;
+    return events.some(function (event) {
+        return !!(event && excavatorRelevantEvents[event.event_type || event.type]);
+    });
+}
+
+function fetchExcavatorRealtimeState(context) {
+    var config = window.AppRealtime && window.AppRealtime.config ? window.AppRealtime.config : window.AppRealtimeConfig;
+    if (!config || !config.stateUrl || !window.fetch) {
+        return Promise.resolve(null);
+    }
+    var url = new URL(config.stateUrl, window.location.origin);
+    var afterVersion = context && context.previousVersion ? Number(context.previousVersion) : Number(document.body.dataset.operationalStateVersion || 0);
+    if (afterVersion > 0) {
+        url.searchParams.set("after", String(afterVersion));
+    }
+    url.searchParams.set("include_events", "1");
+    return fetch(url.toString(), {
+        method: "GET",
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: {"Accept": "application/json"}
+    }).then(function (response) {
+        if (!response.ok) throw new Error("state " + response.status);
+        return response.json();
+    });
+}
+
+function refreshExcavatorWorkFromServer(options) {
+    options = options || {};
+    if (isExcavatorRefreshUnsafe()) {
+        return Promise.resolve(false);
+    }
+    var oldShell = document.querySelector("[data-eo-shell]");
+    if (!oldShell || !window.fetch || !window.DOMParser) {
+        return Promise.resolve(false);
+    }
+    var activeTab = oldShell.dataset.eoActiveTab || "trucks";
+    var url = new URL(window.location.href);
+    url.searchParams.set("_eo_refresh", String(Date.now()));
+    return fetch(url.toString(), {
+        method: "GET",
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: {"X-Requested-With": "XMLHttpRequest"}
+    }).then(function (response) {
+        if (!response.ok) throw new Error("screen " + response.status);
+        return response.text();
+    }).then(function (html) {
+        if (isExcavatorRefreshUnsafe()) return false;
+        var doc = new DOMParser().parseFromString(html, "text/html");
+        var newShell = doc.querySelector("[data-eo-shell]");
+        var currentShell = document.querySelector("[data-eo-shell]");
+        if (!newShell || !currentShell) return false;
+        newShell.dataset.eoActiveTab = options.preserveTab === false ? (newShell.dataset.eoActiveTab || "trucks") : activeTab;
+        currentShell.replaceWith(newShell);
+        if (typeof window.initExcavatorWorkShell === "function") {
+            window.initExcavatorWorkShell();
+        }
+        return true;
+    }).catch(function () {
+        return false;
+    });
+}
+
+window.refreshExcavatorWorkFromServer = refreshExcavatorWorkFromServer;
+window.excavatorHasPendingWork = isExcavatorRefreshUnsafe;
+window.applyOperationalStateRefresh = function (context) {
+    if (isExcavatorRefreshUnsafe()) {
+        return Promise.resolve({ deferred: true, reason: "excavator_busy" });
+    }
+    return fetchExcavatorRealtimeState(context).then(function (state) {
+        if (isExcavatorRefreshUnsafe()) {
+            return { deferred: true, reason: "excavator_busy" };
+        }
+        var targetVersion = state && state.version ? Number(state.version) : Number(context && context.version || 0);
+        var events = state && state.events;
+        if (state && state.events_truncated) {
+            return refreshExcavatorWorkFromServer({ preserveTab: true }).then(function (applied) {
+                if (!applied) return { deferred: true, reason: "excavator_refresh_failed" };
+                storeExcavatorRealtimeVersion(targetVersion);
+                return { applied: true };
+            });
+        }
+        if (!hasExcavatorRelevantEvents(events)) {
+            storeExcavatorRealtimeVersion(targetVersion);
+            return { applied: true };
+        }
+        return refreshExcavatorWorkFromServer({ preserveTab: true }).then(function (applied) {
+            if (!applied) return { deferred: true, reason: "excavator_refresh_failed" };
+            storeExcavatorRealtimeVersion(targetVersion);
+            return { applied: true };
+        });
+    }).catch(function () {
+        return { deferred: true, reason: "excavator_refresh_error" };
+    });
+};
+
+window.initExcavatorWorkShell = function () {
+    var shell = document.querySelector("[data-eo-shell]");
+    if (!shell) return;
+    if (shell.dataset.eoInitialized === "1") return;
+    shell.dataset.eoInitialized = "1";
+
+    var screens = shell.querySelectorAll("[data-eo-screen]");
+    var tabs = shell.querySelectorAll("[data-eo-tab]");
+    var assignmentInput = shell.querySelector("[data-eo-assignment-input]");
+    var dumpInput = shell.querySelector("[data-eo-dump-input]");
+    var dumpPointsInput = shell.querySelector("[data-eo-dump-points-input]");
+    var downtimeInput = shell.querySelector("[data-eo-downtime-input]");
+    var activeReason = shell.querySelector("[data-eo-active-reason]");
+    var activeDuration = shell.querySelector("[data-eo-active-duration]");
+    var downtimeCard = shell.querySelector("[data-eo-active-downtime-id]");
+    var activeTitle = shell.querySelector("[data-eo-active-title]");
+    var downtimeIndicator = shell.querySelector("[data-eo-downtime-indicator]");
+    var selectedTruck = shell.querySelector("[data-eo-truck-card].is-selected");
+    var csrfToken = shell.querySelector("input[name='csrfmiddlewaretoken']") ? shell.querySelector("input[name='csrfmiddlewaretoken']").value : "";
+    var settingsUrl = shell.dataset.eoSettingsUrl || "";
+    var shiftUrl = shell.dataset.eoShiftUrl || "";
+    var truckLoadedUrl = shell.dataset.eoTruckLoadedUrl || "";
+    var truckLoadedCancelUrl = shell.dataset.eoTruckLoadedCancelUrl || "";
+    var truckGreenIcon = shell.dataset.eoTruckGreenIcon || "";
+    var activeTruckDrag = null;
+    var activeQueueDrag = null;
+    var shiftButton = shell.querySelector("[data-eo-shift-button]");
+    var shiftLabel = shell.querySelector("[data-eo-shift-label]");
+    var shiftHoldTimer = null;
+    var shiftHoldFrame = null;
+    var shiftHoldStart = 0;
+    var shiftHoldMs = 2000;
+    var logoutButton = shell.querySelector("[data-eo-logout-button]");
+    var logoutLabel = shell.querySelector("[data-eo-logout-label]");
+    var logoutHoldTimer = null;
+    var logoutHoldFrame = null;
+    var logoutHoldStart = 0;
+    var logoutHoldMs = 2000;
+
+    function fitTopbarLocationText() {
+        var faceText = shell.querySelector(".eo-face-cell-full strong");
+        var excavatorText = shell.querySelector(".eo-topbar-cell:first-child strong");
+        if (!faceText || !excavatorText) return;
+        faceText.style.removeProperty("font-size");
+        var excavatorSize = parseFloat(window.getComputedStyle(excavatorText).fontSize) || 14;
+        var currentSize = parseFloat(window.getComputedStyle(faceText).fontSize) || excavatorSize;
+        var nextSize = Math.min(currentSize, excavatorSize);
+        faceText.style.setProperty("font-size", nextSize + "px", "important");
+        while (nextSize > 10 && faceText.scrollWidth > faceText.clientWidth) {
+            nextSize -= 0.5;
+            faceText.style.setProperty("font-size", nextSize + "px", "important");
+        }
+    }
+
+    window.requestAnimationFrame(fitTopbarLocationText);
+    window.addEventListener("resize", fitTopbarLocationText);
+
+    function isInactiveTruck(card) {
+        return !!(card && card.dataset.eoTruckInactive === "1");
+    }
+
+    function generateClientActionId(prefix) {
+        var randomPart = "";
+        if (window.crypto && window.crypto.getRandomValues) {
+            var values = new Uint32Array(2);
+            window.crypto.getRandomValues(values);
+            randomPart = values[0].toString(36) + values[1].toString(36);
+        } else {
+            randomPart = Math.random().toString(36).slice(2);
+        }
+        return prefix + "-" + Date.now().toString(36) + "-" + randomPart;
+    }
+
+    function isShiftCloseAction() {
+        return !!(shiftButton && (shiftButton.dataset.eoShiftAction || "toggle") === "close");
+    }
+
+    function resetShiftHold() {
+        window.clearTimeout(shiftHoldTimer);
+        if (shiftHoldFrame) {
+            window.cancelAnimationFrame(shiftHoldFrame);
+        }
+        shiftHoldTimer = null;
+        shiftHoldFrame = null;
+        shiftHoldStart = 0;
+        if (shiftButton) {
+            shiftButton.classList.remove("is-holding");
+            shiftButton.style.setProperty("--eo-shift-hold", "0%");
+        }
+        if (shiftLabel && isShiftCloseAction()) {
+            shiftLabel.textContent = "Завершить смену";
+        }
+    }
+
+    function drawShiftHold() {
+        if (!shiftButton || !shiftHoldStart) {
+            return;
+        }
+        var elapsed = Date.now() - shiftHoldStart;
+        var percent = Math.max(0, Math.min(100, Math.round((elapsed / shiftHoldMs) * 100)));
+        shiftButton.style.setProperty("--eo-shift-hold", percent + "%");
+        if (percent < 100) {
+            shiftHoldFrame = window.requestAnimationFrame(drawShiftHold);
+        }
+    }
+
+    function registerHoldAction(button, onComplete, options) {
+        if (!button || typeof onComplete !== "function") {
+            return;
+        }
+        options = options || {};
+        var holdMs = Number(options.holdMs || 2000);
+        var defaultLabel = options.defaultLabel || button.dataset.eoHoldLabel || button.textContent.trim();
+        var holdLabel = options.holdLabel || "Держите";
+        var timer = null;
+        var frame = null;
+        var startedAt = 0;
+
+        function setLabel(text) {
+            button.textContent = text;
+        }
+
+        function resetHold() {
+            window.clearTimeout(timer);
+            if (frame) {
+                window.cancelAnimationFrame(frame);
+            }
+            timer = null;
+            frame = null;
+            startedAt = 0;
+            button.classList.remove("is-holding");
+            button.style.setProperty("--eo-action-hold", "0%");
+            if (!button.classList.contains("is-pending")) {
+                setLabel(defaultLabel);
+            }
+        }
+
+        function drawHold() {
+            if (!startedAt) {
+                return;
+            }
+            var elapsed = Date.now() - startedAt;
+            var percent = Math.max(0, Math.min(100, Math.round((elapsed / holdMs) * 100)));
+            button.style.setProperty("--eo-action-hold", percent + "%");
+            if (percent < 100) {
+                frame = window.requestAnimationFrame(drawHold);
+            }
+        }
+
+        function completeHold() {
+            if (button.disabled || button.getAttribute("aria-disabled") === "true") {
+                resetHold();
+                return;
+            }
+            window.clearTimeout(timer);
+            if (frame) {
+                window.cancelAnimationFrame(frame);
+            }
+            timer = null;
+            frame = null;
+            startedAt = 0;
+            button.classList.remove("is-holding");
+            button.style.setProperty("--eo-action-hold", "0%");
+            onComplete({ resetHold: resetHold, defaultLabel: defaultLabel });
+        }
+
+        function startHold(event) {
+            if (button.disabled || button.getAttribute("aria-disabled") === "true") {
+                return;
+            }
+            event.preventDefault();
+            if (startedAt) {
+                return;
+            }
+            resetHold();
+            startedAt = Date.now();
+            button.classList.add("is-holding");
+            setLabel(holdLabel);
+            drawHold();
+            timer = window.setTimeout(completeHold, holdMs);
+        }
+
+        function cancelHold(event) {
+            if (event) {
+                event.preventDefault();
+            }
+            if (!button.classList.contains("is-pending")) {
+                resetHold();
+            }
+        }
+
+        button.addEventListener("click", function (event) {
+            event.preventDefault();
+        });
+        button.addEventListener("pointerdown", startHold);
+        ["pointerup", "pointercancel", "pointerleave"].forEach(function (eventName) {
+            button.addEventListener(eventName, cancelHold);
+        });
+        button.addEventListener("touchstart", startHold, { passive: false });
+        ["touchend", "touchcancel"].forEach(function (eventName) {
+            button.addEventListener(eventName, cancelHold, { passive: false });
+        });
+        button.addEventListener("keydown", function (event) {
+            if ((event.key === "Enter" || event.key === " ") && !event.repeat) {
+                startHold(event);
+            }
+        });
+        button.addEventListener("keyup", function (event) {
+            if (event.key === "Enter" || event.key === " ") {
+                cancelHold(event);
+            }
+        });
+    }
+
+    function resetLogoutHold() {
+        window.clearTimeout(logoutHoldTimer);
+        if (logoutHoldFrame) {
+            window.cancelAnimationFrame(logoutHoldFrame);
+        }
+        logoutHoldTimer = null;
+        logoutHoldFrame = null;
+        logoutHoldStart = 0;
+        if (logoutButton) {
+            logoutButton.classList.remove("is-holding");
+            logoutButton.style.setProperty("--eo-logout-hold", "0%");
+        }
+        if (logoutLabel) {
+            logoutLabel.textContent = "Выйти";
+        }
+    }
+
+    function drawLogoutHold() {
+        if (!logoutButton || !logoutHoldStart) {
+            return;
+        }
+        var elapsed = Date.now() - logoutHoldStart;
+        var percent = Math.max(0, Math.min(100, Math.round((elapsed / logoutHoldMs) * 100)));
+        logoutButton.style.setProperty("--eo-logout-hold", percent + "%");
+        if (percent < 100) {
+            logoutHoldFrame = window.requestAnimationFrame(drawLogoutHold);
+        }
+    }
+
+    function completeLogoutHold() {
+        if (!logoutButton) {
+            return;
+        }
+        logoutButton.classList.remove("is-holding");
+        logoutButton.classList.add("is-pending");
+        logoutButton.disabled = true;
+        if (logoutLabel) {
+            logoutLabel.textContent = "Выход";
+        }
+        window.location.href = logoutButton.dataset.eoLogoutUrl || "/logout/";
+    }
+
+    function formatDowntimeDuration(totalSeconds) {
+        var seconds = Math.max(0, Math.floor(Number(totalSeconds) || 0));
+        var hours = Math.floor(seconds / 3600);
+        var minutes = Math.floor((seconds % 3600) / 60);
+        var remain = seconds % 60;
+        return String(hours).padStart(2, "0") + ":" + String(minutes).padStart(2, "0") + ":" + String(remain).padStart(2, "0");
+    }
+
+    function clearDowntimeTimer() {
+        if (window.eoDowntimeTimerId) {
+            window.clearInterval(window.eoDowntimeTimerId);
+            window.eoDowntimeTimerId = null;
+        }
+    }
+
+    function startDowntimeTimer(startedAt, fallbackElapsedSeconds) {
+        clearDowntimeTimer();
+        if (!activeDuration) return;
+        var startedAtMs = startedAt ? Date.parse(startedAt) : NaN;
+        var fallbackStartedAtMs = Date.now() - (Math.max(0, Number(fallbackElapsedSeconds) || 0) * 1000);
+        var startMs = Number.isNaN(startedAtMs) ? fallbackStartedAtMs : startedAtMs;
+        function tick() {
+            activeDuration.textContent = formatDowntimeDuration((Date.now() - startMs) / 1000);
+        }
+        tick();
+        window.eoDowntimeTimerId = window.setInterval(tick, 1000);
+    }
+
+    function setDowntimeStatusClass(statusKey) {
+        if (!downtimeCard) return;
+        ["status-gray", "status-yellow", "status-green", "status-blue", "status-orange", "status-red"].forEach(function (className) {
+            downtimeCard.classList.remove(className);
+            if (downtimeIndicator) downtimeIndicator.classList.remove(className);
+        });
+        var nextClass = "status-" + (statusKey || "yellow");
+        downtimeCard.classList.add(nextClass);
+        if (downtimeIndicator) downtimeIndicator.classList.add(nextClass);
+    }
+
+    function applyActiveDowntime(payload) {
+        if (!downtimeCard || !payload || !payload.event_id) return;
+        downtimeCard.dataset.eoActiveDowntimeId = payload.event_id;
+        downtimeCard.dataset.eoActiveStartedAt = payload.started_at || "";
+        downtimeCard.dataset.eoActiveElapsedSeconds = String(payload.elapsed_seconds || 0);
+        downtimeCard.dataset.eoDowntimeState = payload.equipment_state_code || "waiting";
+        downtimeCard.classList.add("is-active");
+        setDowntimeStatusClass(payload.status_key || "yellow");
+        if (activeTitle) activeTitle.textContent = "Активный простой";
+        if (activeReason) activeReason.textContent = payload.reason || "";
+        startDowntimeTimer(payload.started_at, payload.elapsed_seconds);
+        if (closeEvent) {
+            closeEvent.disabled = false;
+            closeEvent.classList.remove("is-disabled");
+            closeEvent.classList.remove("is-pending");
+            closeEvent.removeAttribute("aria-disabled");
+            closeEvent.textContent = closeEvent.dataset.eoHoldLabel || "Завершить простой";
+        }
+    }
+
+    function clearActiveDowntime(payload) {
+        clearDowntimeTimer();
+        if (downtimeInput) downtimeInput.value = "";
+        if (activeTitle) activeTitle.textContent = "Простоя нет";
+        if (activeReason) activeReason.textContent = "Выберите причину для начала";
+        if (activeDuration) activeDuration.textContent = "00:00:00";
+        if (downtimeCard) {
+            downtimeCard.dataset.eoActiveDowntimeId = "";
+            downtimeCard.dataset.eoActiveStartedAt = "";
+            downtimeCard.dataset.eoActiveElapsedSeconds = String((payload && payload.elapsed_seconds) || 0);
+            downtimeCard.dataset.eoDowntimeState = "";
+            downtimeCard.classList.remove("is-active");
+            setDowntimeStatusClass("yellow");
+        }
+        if (closeEvent) {
+            closeEvent.disabled = true;
+            closeEvent.classList.add("is-disabled");
+            closeEvent.classList.remove("is-pending");
+            closeEvent.setAttribute("aria-disabled", "true");
+            closeEvent.textContent = closeEvent.dataset.eoHoldLabel || "Завершить простой";
+        }
+        shell.querySelectorAll("[data-eo-reason]").forEach(function (item) {
+            item.classList.remove("is-selected");
+        });
+    }
+
+    function pickFirstActiveTruck() {
+        var firstCard = shell.querySelector('[data-eo-truck-card]:not([data-eo-truck-inactive="1"])');
+        if (firstCard) {
+            selectTruck(firstCard);
+        }
+    }
+
+    function activateTab(name) {
+        screens.forEach(function (screen) {
+            screen.hidden = screen.dataset.eoScreen !== name;
+        });
+        tabs.forEach(function (tab) {
+            var isActive = tab.dataset.eoTab === name;
+            var icon = tab.querySelector("[data-eo-icon-idle]");
+            tab.classList.toggle("is-active", isActive);
+            if (icon) {
+                icon.src = isActive ? icon.dataset.eoIconActive : icon.dataset.eoIconIdle;
+            }
+        });
+        shell.dataset.eoActiveTab = name;
+    }
+
+    function selectTruck(card) {
+        if (!card) return;
+        if (isInactiveTruck(card)) {
+            return;
+        }
+        shell.querySelectorAll("[data-eo-truck-card]").forEach(function (item) {
+            item.classList.remove("is-selected");
+        });
+        card.classList.add("is-selected");
+        selectedTruck = card;
+        if (assignmentInput) {
+            assignmentInput.value = card.dataset.assignmentId || "";
+        }
+    }
+
+    function selectDump(id) {
+        if (!id) return;
+        shell.querySelectorAll("[data-eo-dump-target]").forEach(function (item) {
+            item.classList.toggle("is-selected", item.dataset.eoDumpTarget === id);
+        });
+        if (dumpInput) {
+            dumpInput.value = id;
+        }
+    }
+
+    function markLastDumpTarget(target) {
+        if (!target) return;
+        shell.querySelectorAll("[data-eo-dump-target].is-last-dump").forEach(function (item) {
+            item.classList.remove("is-last-dump");
+        });
+        target.classList.add("is-last-dump");
+        selectDump(target.dataset.eoDumpTarget);
+    }
+
+    function pendingBadgeList(dumpTarget) {
+        return dumpTarget ? dumpTarget.querySelector(".eo-dashboard-unload-badges") : null;
+    }
+
+    function removeMutedPendingBadge(list) {
+        if (!list) return;
+        list.querySelectorAll(".is-muted").forEach(function (item) {
+            item.remove();
+        });
+    }
+
+    function ensureMutedPendingBadge(list) {
+        if (!list || list.querySelector("[data-eo-queue-truck]")) return;
+        if (!list.querySelector(".is-muted")) {
+            var muted = document.createElement("b");
+            muted.className = "is-muted";
+            muted.textContent = "нет";
+            list.appendChild(muted);
+        }
+    }
+
+    function addPendingTruckBadge(dumpTarget, card, tripId) {
+        var list = pendingBadgeList(dumpTarget);
+        if (!list || !card) return null;
+        var truckId = card.dataset.truckId || "";
+        removeMutedPendingBadge(list);
+        list.querySelectorAll('[data-eo-queue-truck][data-truck-id="' + truckId + '"]').forEach(function (item) {
+            item.remove();
+        });
+        var badge = document.createElement("b");
+        badge.className = "status-green";
+        badge.dataset.eoQueueTruck = "1";
+        badge.dataset.truckId = truckId;
+        badge.dataset.tripId = tripId || "";
+        badge.dataset.eoTruckNumber = card.querySelector("strong") ? card.querySelector("strong").textContent.trim() : "";
+        badge.textContent = badge.dataset.eoTruckNumber || truckId;
+        list.appendChild(badge);
+        return badge;
+    }
+
+    function removePendingTruckBadge(dumpTarget, truckId, tripId) {
+        var list = pendingBadgeList(dumpTarget);
+        if (!list) return;
+        var selector = "[data-eo-queue-truck]";
+        list.querySelectorAll(selector).forEach(function (item) {
+            var sameTruck = truckId && item.dataset.truckId === String(truckId);
+            var sameTrip = tripId && item.dataset.tripId === String(tripId);
+            if (sameTruck || sameTrip) item.remove();
+        });
+        ensureMutedPendingBadge(list);
+    }
+
+    function updatePendingTruckBadgeTrip(dumpTarget, truckId, tripId) {
+        var list = pendingBadgeList(dumpTarget);
+        if (!list) return;
+        var badge = list.querySelector('[data-eo-queue-truck][data-truck-id="' + truckId + '"]');
+        if (badge && tripId) {
+            badge.dataset.tripId = String(tripId);
+        }
+    }
+
+    function restoreTruckAfterLoadedCancel(card, data) {
+        if (!card) return;
+        card.classList.remove("status-green", "status-yellow", "status-gray", "status-red", "status-orange", "is-inactive", "is-pending");
+        card.classList.add("status-" + (data.status_key || "blue"));
+        delete card.dataset.eoTruckInactive;
+        card.dataset.eoEquipmentState = data.equipment_state || "assigned";
+        card.setAttribute("draggable", "true");
+        card.removeAttribute("aria-disabled");
+        var status = card.querySelector("span");
+        if (status) status.textContent = data.status_label || "назначена";
+        var targetText = card.querySelector("em");
+        if (targetText) targetText.remove();
+        selectTruck(card);
+    }
+
+    function cardByTruckId(truckId) {
+        return shell.querySelector('[data-eo-truck-card][data-truck-id="' + truckId + '"]');
+    }
+
+    function queueModalElements() {
+        var modal = shell.querySelector("[data-eo-dump-queue-modal]");
+        return {
+            modal: modal,
+            title: modal ? modal.querySelector("[data-eo-dump-queue-title]") : null,
+            list: modal ? modal.querySelector("[data-eo-dump-queue-list]") : null,
+            note: modal ? modal.querySelector("[data-eo-dump-queue-note]") : null,
+            returnZone: modal ? modal.querySelector("[data-eo-dump-return-zone]") : null
+        };
+    }
+
+    function showQueueNote(text, isError) {
+        var parts = queueModalElements();
+        if (!parts.note) return;
+        parts.note.hidden = false;
+        parts.note.textContent = text || "";
+        parts.note.classList.toggle("is-error", !!isError);
+    }
+
+    function closeDumpQueueModal() {
+        var parts = queueModalElements();
+        if (!parts.modal) return;
+        parts.modal.hidden = true;
+        parts.modal.setAttribute("aria-hidden", "true");
+        activeQueueDrag = null;
+        if (parts.returnZone) parts.returnZone.classList.remove("is-drop-ready");
+    }
+
+    function queueItemFromBadge(badge, dumpTarget) {
+        var item = document.createElement("button");
+        item.className = "eo-dump-queue-item status-green";
+        item.type = "button";
+        item.dataset.truckId = badge.dataset.truckId || "";
+        item.dataset.tripId = badge.dataset.tripId || "";
+        item.dataset.dumpPointId = dumpTarget.dataset.eoDumpTarget || "";
+        item.dataset.truckNumber = badge.dataset.eoTruckNumber || badge.textContent.trim();
+        item.innerHTML = '<img src="' + truckGreenIcon + '" alt=""><strong>' + item.dataset.truckNumber + '</strong>';
+        item.addEventListener("pointerdown", beginQueueDrag);
+        return item;
+    }
+
+    function openDumpQueueModal(dumpTarget) {
+        var parts = queueModalElements();
+        if (!parts.modal || !parts.title || !parts.list) return;
+        var name = dumpTarget.dataset.eoDumpName || (dumpTarget.querySelector("strong") ? dumpTarget.querySelector("strong").textContent.trim() : "Точка разгрузки");
+        parts.title.textContent = name;
+        parts.list.innerHTML = "";
+        if (parts.note) {
+            parts.note.hidden = true;
+            parts.note.textContent = "";
+        }
+        var badges = Array.prototype.slice.call(dumpTarget.querySelectorAll("[data-eo-queue-truck]"));
+        if (!badges.length) {
+            var empty = document.createElement("div");
+            empty.className = "eo-empty-state eo-empty-state-compact";
+            empty.innerHTML = "<strong>Очереди нет</strong><span>На эту точку пока никто не отправлен</span>";
+            parts.list.appendChild(empty);
+        } else {
+            badges.forEach(function (badge) {
+                parts.list.appendChild(queueItemFromBadge(badge, dumpTarget));
+            });
+        }
+        parts.modal.hidden = false;
+        parts.modal.setAttribute("aria-hidden", "false");
+    }
+
+    function beginQueueDrag(event) {
+        if (event.button !== undefined && event.button !== 0) return;
+        var item = event.currentTarget;
+        activeQueueDrag = {
+            item: item,
+            pointerId: event.pointerId,
+            startX: event.clientX,
+            startY: event.clientY,
+            started: false
+        };
+        if (item.setPointerCapture) {
+            try {
+                item.setPointerCapture(event.pointerId);
+            } catch (error) {}
+        }
+        item.addEventListener("pointermove", updateQueueDrag);
+        item.addEventListener("pointerup", finishQueueDrag);
+        item.addEventListener("pointercancel", cancelQueueDrag);
+    }
+
+    function updateQueueDrag(event) {
+        if (!activeQueueDrag || event.pointerId !== activeQueueDrag.pointerId) return;
+        var dx = event.clientX - activeQueueDrag.startX;
+        var dy = event.clientY - activeQueueDrag.startY;
+        if (!activeQueueDrag.started && Math.abs(dx) + Math.abs(dy) < 8) return;
+        event.preventDefault();
+        activeQueueDrag.started = true;
+        activeQueueDrag.item.style.transform = "translate3d(" + dx + "px, " + dy + "px, 0) scale(.98)";
+        var parts = queueModalElements();
+        var element = document.elementFromPoint(event.clientX, event.clientY);
+        var isReturn = !!(parts.returnZone && element && element.closest("[data-eo-dump-return-zone]"));
+        if (parts.returnZone) parts.returnZone.classList.toggle("is-drop-ready", isReturn);
+    }
+
+    function finishQueueDrag(event) {
+        if (!activeQueueDrag || event.pointerId !== activeQueueDrag.pointerId) return;
+        var state = activeQueueDrag;
+        activeQueueDrag = null;
+        state.item.style.transform = "";
+        state.item.removeEventListener("pointermove", updateQueueDrag);
+        state.item.removeEventListener("pointerup", finishQueueDrag);
+        state.item.removeEventListener("pointercancel", cancelQueueDrag);
+        var parts = queueModalElements();
+        if (parts.returnZone) parts.returnZone.classList.remove("is-drop-ready");
+        if (!state.started) return;
+        event.preventDefault();
+        var element = document.elementFromPoint(event.clientX, event.clientY);
+        if (parts.returnZone && element && element.closest("[data-eo-dump-return-zone]")) {
+            cancelLoadedTripFromQueue(state.item);
+        }
+    }
+
+    function cancelQueueDrag(event) {
+        if (!activeQueueDrag || event.pointerId !== activeQueueDrag.pointerId) return;
+        activeQueueDrag.item.style.transform = "";
+        activeQueueDrag = null;
+        var parts = queueModalElements();
+        if (parts.returnZone) parts.returnZone.classList.remove("is-drop-ready");
+    }
+
+    function cancelLoadedTripFromQueue(item) {
+        if (!truckLoadedCancelUrl || !item || !item.dataset.tripId) {
+            showQueueNote("Серверная отмена для этого рейса недоступна.", true);
+            return;
+        }
+        item.disabled = true;
+        showQueueNote("Отменяю назначение на сервере...", false);
+        fetch(truckLoadedCancelUrl, {
+            method: "POST",
+            credentials: "same-origin",
+            headers: {
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "X-CSRFToken": csrfToken,
+                "X-Requested-With": "XMLHttpRequest"
+            },
+            body: JSON.stringify({
+                client_action_id: generateClientActionId("truck-loaded-cancel"),
+                trip_id: item.dataset.tripId || "",
+                truck_id: item.dataset.truckId || "",
+                dump_point_id: item.dataset.dumpPointId || ""
+            })
+        }).then(function (response) {
+            return response.json().catch(function () { return {}; }).then(function (data) {
+                if (!response.ok || !data.ok) {
+                    throw new Error(data.error || "Назначение не отменено");
+                }
+                return data;
+            });
+        }).then(function (data) {
+            var dumpTarget = shell.querySelector('[data-eo-dump-target="' + (data.dump_point_id || item.dataset.dumpPointId) + '"]');
+            removePendingTruckBadge(dumpTarget, data.truck_id || item.dataset.truckId, data.trip_id || item.dataset.tripId);
+            restoreTruckAfterLoadedCancel(cardByTruckId(data.truck_id || item.dataset.truckId), data);
+            item.remove();
+            showQueueNote("Самосвал возвращен в назначенные.", false);
+            if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
+                window.AppRealtime.wake("truck_loaded_cancel");
+            }
+        }).catch(function (error) {
+            item.disabled = false;
+            showQueueNote(error.message || "Назначение не отменено", true);
+            if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
+                window.AppRealtime.wake("truck_loaded_cancel_error");
+            }
+        });
+    }
+
+    function selectedDumpPointIds() {
+        var ids = [];
+        shell.querySelectorAll("[data-eo-dump-select].is-selected").forEach(function (button) {
+            var id = button.dataset.eoDumpSelect || "";
+            if (id && ids.indexOf(id) === -1) {
+                ids.push(id);
+            }
+        });
+        return ids;
+    }
+
+    function syncDumpPointInputs() {
+        var ids = selectedDumpPointIds();
+        if (dumpPointsInput) {
+            dumpPointsInput.value = ids.join(",");
+        }
+        if (dumpInput && ids.length && ids.indexOf(dumpInput.value) === -1) {
+            dumpInput.value = ids[0];
+        }
+        return ids;
+    }
+
+    function toggleDumpChoice(button) {
+        if (!button) return;
+        var selectedButtons = shell.querySelectorAll("[data-eo-dump-select].is-selected");
+        var isSelected = button.classList.contains("is-selected");
+        if (isSelected && selectedButtons.length <= 1) {
+            return;
+        }
+        button.classList.toggle("is-selected", !isSelected);
+        button.setAttribute("aria-pressed", isSelected ? "false" : "true");
+        syncDumpPointInputs();
+    }
+
+    function snapshotTruckCard(card) {
+        return {
+            className: card.className,
+            inactive: card.dataset.eoTruckInactive || "",
+            equipmentState: card.dataset.eoEquipmentState || "",
+            draggable: card.getAttribute("draggable") || "true",
+            statusText: card.querySelector("span") ? card.querySelector("span").textContent : "",
+            targetText: card.querySelector("em") ? card.querySelector("em").textContent : "",
+            icon: card.querySelector("img") ? card.querySelector("img").src : ""
+        };
+    }
+
+    function applyTruckPending(card, dumpTarget) {
+        var label = dumpTarget && dumpTarget.querySelector("strong") ? dumpTarget.querySelector("strong").textContent : "";
+        card.classList.remove("status-yellow", "status-gray", "status-red", "status-blue", "status-orange", "is-selected");
+        card.classList.add("status-green", "is-inactive", "is-pending");
+        card.dataset.eoTruckInactive = "1";
+        card.dataset.eoEquipmentState = "loaded_waiting_unload";
+        card.setAttribute("draggable", "false");
+        var status = card.querySelector("span");
+        if (status) status.textContent = "на разгрузку";
+        var icon = card.querySelector("img");
+        if (icon && truckGreenIcon) icon.src = truckGreenIcon;
+        var targetText = card.querySelector("em");
+        if (!targetText) {
+            targetText = document.createElement("em");
+            card.appendChild(targetText);
+        }
+        targetText.textContent = label;
+        selectedTruck = null;
+        if (assignmentInput) assignmentInput.value = "";
+    }
+
+    function confirmTruckLoaded(card, payload) {
+        card.classList.remove("is-pending");
+        card.classList.add("status-green", "is-inactive");
+        card.dataset.eoTruckInactive = "1";
+        card.dataset.eoEquipmentState = "loaded_waiting_unload";
+        card.setAttribute("draggable", "false");
+        var status = card.querySelector("span");
+        if (status) status.textContent = payload.status_label || "на разгрузку";
+        var targetText = card.querySelector("em");
+        if (!targetText) {
+            targetText = document.createElement("em");
+            card.appendChild(targetText);
+        }
+        targetText.textContent = payload.dump_point || targetText.textContent || "";
+        pickFirstActiveTruck();
+    }
+
+    function restoreTruckCard(card, snapshot) {
+        card.className = snapshot.className;
+        if (snapshot.inactive) {
+            card.dataset.eoTruckInactive = snapshot.inactive;
+        } else {
+            delete card.dataset.eoTruckInactive;
+        }
+        if (snapshot.equipmentState) {
+            card.dataset.eoEquipmentState = snapshot.equipmentState;
+        } else {
+            delete card.dataset.eoEquipmentState;
+        }
+        card.setAttribute("draggable", snapshot.draggable);
+        var status = card.querySelector("span");
+        if (status) status.textContent = snapshot.statusText;
+        var icon = card.querySelector("img");
+        if (icon && snapshot.icon) icon.src = snapshot.icon;
+        var targetText = card.querySelector("em");
+        if (targetText) {
+            if (snapshot.targetText) {
+                targetText.textContent = snapshot.targetText;
+            } else {
+                targetText.remove();
+            }
+        }
+        selectTruck(card);
+    }
+
+    function postTruckLoaded(card, dumpTarget) {
+        if (!card || isInactiveTruck(card) || !dumpTarget || !truckLoadedUrl) return;
+        var snapshot = snapshotTruckCard(card);
+        var optimisticBadge = null;
+        var truckId = card.dataset.truckId || "";
+        var payload = {
+            client_action_id: generateClientActionId("truck-loaded"),
+            truck_id: card.dataset.truckId || "",
+            excavator_id: shell.dataset.eoCurrentExcavatorId || "",
+            dump_point_id: dumpTarget.dataset.eoDumpTarget || "",
+            rock_type: shell.querySelector("select[name='rock_type']") ? shell.querySelector("select[name='rock_type']").value : "",
+            loading_horizon: shell.querySelector("input[name='loading_horizon']") ? shell.querySelector("input[name='loading_horizon']").value : "",
+            loading_block: shell.querySelector("input[name='loading_block']") ? shell.querySelector("input[name='loading_block']").value : "",
+            planned_volume_m3: shell.querySelector("input[name='planned_volume_m3']") ? shell.querySelector("input[name='planned_volume_m3']").value : "",
+            transport_distance_km: shell.querySelector("input[name='transport_distance_km']") ? shell.querySelector("input[name='transport_distance_km']").value : "",
+            downtime_text: downtimeInput ? downtimeInput.value : "",
+            note: shell.querySelector("input[name='note']") ? shell.querySelector("input[name='note']").value : ""
+        };
+        markLastDumpTarget(dumpTarget);
+        applyTruckPending(card, dumpTarget);
+        optimisticBadge = addPendingTruckBadge(dumpTarget, card, "");
+        fetch(truckLoadedUrl, {
+            method: "POST",
+            credentials: "same-origin",
+            headers: {
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "X-CSRFToken": csrfToken,
+                "X-Requested-With": "XMLHttpRequest"
+            },
+            body: JSON.stringify(payload)
+        }).then(function (response) {
+            return response.json().catch(function () { return {}; }).then(function (data) {
+                if (!response.ok || !data.ok) {
+                    throw new Error(data.error || "Действие не сохранено");
+                }
+                return data;
+            });
+        }).then(function (data) {
+            confirmTruckLoaded(card, data);
+            updatePendingTruckBadgeTrip(dumpTarget, truckId, data.trip_id || "");
+            if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
+                window.AppRealtime.wake("truck_loaded");
+            }
+        }).catch(function (error) {
+            restoreTruckCard(card, snapshot);
+            if (optimisticBadge) optimisticBadge.remove();
+            ensureMutedPendingBadge(pendingBadgeList(dumpTarget));
+            window.alert(error.message || "Самосвал не отправлен");
+            if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
+                window.AppRealtime.wake("truck_loaded_error");
+            }
+        });
+    }
+
+    function clearDropReady() {
+        shell.querySelectorAll("[data-eo-dump-target].is-drop-ready").forEach(function (target) {
+            target.classList.remove("is-drop-ready");
+        });
+    }
+
+    function findDumpTargetAtPoint(x, y) {
+        var previousPointerEvents = null;
+        if (activeTruckDrag && activeTruckDrag.card) {
+            previousPointerEvents = activeTruckDrag.card.style.pointerEvents;
+            activeTruckDrag.card.style.pointerEvents = "none";
+        }
+        var element = document.elementFromPoint(x, y);
+        if (activeTruckDrag && activeTruckDrag.card) {
+            activeTruckDrag.card.style.pointerEvents = previousPointerEvents;
+        }
+        return element ? element.closest("[data-eo-dump-target]") : null;
+    }
+
+    function updateTruckDrag(event) {
+        if (!activeTruckDrag || event.pointerId !== activeTruckDrag.pointerId) return;
+        var dx = event.clientX - activeTruckDrag.startX;
+        var dy = event.clientY - activeTruckDrag.startY;
+        var movedEnough = Math.abs(dx) > 7 || Math.abs(dy) > 7;
+        if (!activeTruckDrag.started && !movedEnough) return;
+        event.preventDefault();
+        if (!activeTruckDrag.started) {
+            activeTruckDrag.started = true;
+            activeTruckDrag.card.classList.add("is-dragging");
+        }
+        activeTruckDrag.card.style.transform = "translate3d(" + dx + "px, " + dy + "px, 0) scale(.98)";
+        var target = findDumpTargetAtPoint(event.clientX, event.clientY);
+        clearDropReady();
+        if (target) {
+            target.classList.add("is-drop-ready");
+        }
+        activeTruckDrag.target = target;
+    }
+
+    function finishTruckDrag(event) {
+        if (!activeTruckDrag || event.pointerId !== activeTruckDrag.pointerId) return;
+        var state = activeTruckDrag;
+        activeTruckDrag = null;
+        if (state.card.releasePointerCapture) {
+            try {
+                state.card.releasePointerCapture(state.pointerId);
+            } catch (error) {}
+        }
+        state.card.classList.remove("is-dragging");
+        state.card.style.transform = "";
+        clearDropReady();
+        if (!state.started) {
+            return;
+        }
+        event.preventDefault();
+        state.card.dataset.eoSuppressClick = "1";
+        window.setTimeout(function () {
+            delete state.card.dataset.eoSuppressClick;
+        }, 0);
+        if (state.target && !isInactiveTruck(state.card)) {
+            selectTruck(state.card);
+            selectDump(state.target.dataset.eoDumpTarget);
+            postTruckLoaded(state.card, state.target);
+        }
+    }
+
+    function cancelTruckDrag(event) {
+        if (!activeTruckDrag || event.pointerId !== activeTruckDrag.pointerId) return;
+        var state = activeTruckDrag;
+        activeTruckDrag = null;
+        state.card.classList.remove("is-dragging");
+        state.card.style.transform = "";
+        clearDropReady();
+    }
+
+    tabs.forEach(function (tab) {
+        tab.addEventListener("click", function () {
+            activateTab(tab.dataset.eoTab);
+        });
+    });
+
+    shell.querySelectorAll("[data-eo-truck-card]").forEach(function (card) {
+        card.addEventListener("click", function (event) {
+            if (card.dataset.eoSuppressClick === "1") {
+                event.preventDefault();
+                return;
+            }
+            selectTruck(card);
+        });
+        card.addEventListener("pointerdown", function (event) {
+            if (event.button !== undefined && event.button !== 0) return;
+            if (isInactiveTruck(card)) return;
+            selectTruck(card);
+            activeTruckDrag = {
+                card: card,
+                pointerId: event.pointerId,
+                startX: event.clientX,
+                startY: event.clientY,
+                started: false,
+                target: null
+            };
+            if (card.setPointerCapture) {
+                try {
+                    card.setPointerCapture(event.pointerId);
+                } catch (error) {}
+            }
+        });
+        card.addEventListener("pointermove", updateTruckDrag);
+        card.addEventListener("pointerup", finishTruckDrag);
+        card.addEventListener("pointercancel", cancelTruckDrag);
+        card.addEventListener("dragstart", function (event) {
+            if (isInactiveTruck(card)) {
+                event.preventDefault();
+                return;
+            }
+            selectTruck(card);
+            event.dataTransfer.setData("text/plain", card.dataset.assignmentId || "");
+        });
+    });
+
+    shell.querySelectorAll("[data-eo-dump-select]").forEach(function (button) {
+        button.addEventListener("click", function () {
+            toggleDumpChoice(button);
+        });
+    });
+
+    shell.querySelectorAll("[data-eo-dump-target]").forEach(function (target) {
+        var queueHoldTimer = null;
+        var queueHoldX = 0;
+        var queueHoldY = 0;
+        function clearQueueHold() {
+            if (queueHoldTimer) {
+                window.clearTimeout(queueHoldTimer);
+                queueHoldTimer = null;
+            }
+        }
+        target.addEventListener("pointerdown", function (event) {
+            if (event.button !== undefined && event.button !== 0) return;
+            queueHoldX = event.clientX;
+            queueHoldY = event.clientY;
+            clearQueueHold();
+            queueHoldTimer = window.setTimeout(function () {
+                target.dataset.eoSuppressClick = "1";
+                openDumpQueueModal(target);
+                window.setTimeout(function () {
+                    delete target.dataset.eoSuppressClick;
+                }, 450);
+            }, 560);
+        });
+        target.addEventListener("pointermove", function (event) {
+            if (Math.abs(event.clientX - queueHoldX) > 8 || Math.abs(event.clientY - queueHoldY) > 8) {
+                clearQueueHold();
+            }
+        });
+        ["pointerup", "pointercancel", "pointerleave"].forEach(function (eventName) {
+            target.addEventListener(eventName, clearQueueHold);
+        });
+        target.addEventListener("dragover", function (event) {
+            event.preventDefault();
+            target.classList.add("is-drop-ready");
+        });
+        target.addEventListener("dragleave", function () {
+            target.classList.remove("is-drop-ready");
+        });
+        target.addEventListener("drop", function (event) {
+            event.preventDefault();
+            target.classList.remove("is-drop-ready");
+            if (selectedTruck && isInactiveTruck(selectedTruck)) {
+                return;
+            }
+            selectDump(target.dataset.eoDumpTarget);
+            postTruckLoaded(selectedTruck, target);
+        });
+        target.addEventListener("click", function () {
+            if (target.dataset.eoSuppressClick === "1") {
+                return;
+            }
+            selectDump(target.dataset.eoDumpTarget);
+            if (!selectedTruck || isInactiveTruck(selectedTruck)) {
+                return;
+            }
+            postTruckLoaded(selectedTruck, target);
+        });
+    });
+
+    shell.querySelectorAll("[data-eo-dump-queue-close]").forEach(function (button) {
+        button.addEventListener("click", closeDumpQueueModal);
+    });
+
+    function postDowntimeAction(payload) {
+        return fetch("{% url 'excavator_downtime_action' %}", {
+            method: "POST",
+            credentials: "same-origin",
+            headers: {
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "X-CSRFToken": csrfToken,
+                "X-Requested-With": "XMLHttpRequest"
+            },
+            body: JSON.stringify(payload || {})
+        }).then(function (response) {
+            if (!response.ok) {
+                return response.json().catch(function () { return {}; }).then(function (payload) {
+                    throw new Error(payload.error || "Действие не сохранено");
+                });
+            }
+            return response.json();
+        });
+    }
+
+    shell.querySelectorAll("[data-eo-reason]").forEach(function (button) {
+        registerHoldAction(button, function (hold) {
+            shell.querySelectorAll("[data-eo-reason]").forEach(function (item) {
+                item.classList.remove("is-selected");
+            });
+            button.classList.add("is-selected");
+            if (downtimeInput) {
+                downtimeInput.value = button.dataset.eoReason || "";
+            }
+            if (activeReason) {
+                activeReason.textContent = button.dataset.eoReason || "";
+            }
+            if (button.dataset.eoDowntimeReasonId) {
+                button.disabled = true;
+                button.classList.add("is-pending");
+                button.textContent = "Запускаю";
+                postDowntimeAction({
+                    action: "start",
+                    reason_id: button.dataset.eoDowntimeReasonId,
+                    client_action_id: generateClientActionId("excavator-downtime")
+                }).then(function (payload) {
+                    applyActiveDowntime(payload);
+                    if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
+                        window.AppRealtime.wake("excavator_downtime_saved");
+                    }
+                }).catch(function (error) {
+                    window.alert(error.message || "Простой не сохранен");
+                }).finally(function () {
+                    button.disabled = false;
+                    button.classList.remove("is-pending");
+                    button.textContent = hold.defaultLabel;
+                });
+            }
+        });
+    });
+
+    var applySettings = shell.querySelector("[data-eo-apply-settings]");
+    if (applySettings) {
+        registerHoldAction(applySettings, function (hold) {
+            var ids = syncDumpPointInputs();
+            var rockSelect = shell.querySelector("[data-eo-rock-select]");
+            var horizonInput = shell.querySelector("[data-eo-face-horizon]");
+            var blockInput = shell.querySelector("[data-eo-face-block]");
+            if (!settingsUrl || !rockSelect || !ids.length) {
+                window.alert("Выберите породу и хотя бы одну точку разгрузки");
+                applySettings.textContent = hold.defaultLabel;
+                return;
+            }
+            var payload = {
+                client_action_id: generateClientActionId("excavator-settings"),
+                rock_type_id: rockSelect.value || "",
+                dump_point_ids: ids,
+                loading_horizon: horizonInput ? horizonInput.value : "",
+                loading_block: blockInput ? blockInput.value : ""
+            };
+            applySettings.disabled = true;
+            applySettings.classList.add("is-pending");
+            applySettings.textContent = "Сохраняю";
+            fetch(settingsUrl, {
+                method: "POST",
+                credentials: "same-origin",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                    "X-CSRFToken": csrfToken,
+                    "X-Requested-With": "XMLHttpRequest"
+                },
+                body: JSON.stringify(payload)
+            }).then(function (response) {
+                return response.json().catch(function () { return {}; }).then(function (data) {
+                    if (!response.ok || !data.ok) {
+                        throw new Error(data.error || "Настройки не сохранены");
+                    }
+                    return data;
+                });
+            }).then(function (data) {
+                if (dumpInput && data.dump_point_ids && data.dump_point_ids.length) {
+                    dumpInput.value = String(data.dump_point_ids[0]);
+                }
+                if (dumpPointsInput && data.dump_point_ids) {
+                    dumpPointsInput.value = data.dump_point_ids.join(",");
+                }
+                shell.dataset.eoActiveTab = "trucks";
+                return refreshExcavatorWorkFromServer({ preserveTab: true }).then(function (applied) {
+                    if (!applied) {
+                        activateTab("trucks");
+                    }
+                    if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
+                        window.AppRealtime.wake("excavator_settings_saved");
+                    }
+                });
+            }).catch(function (error) {
+                window.alert(error.message || "Настройки не сохранены");
+            }).finally(function () {
+                applySettings.disabled = false;
+                applySettings.classList.remove("is-pending");
+                applySettings.textContent = hold.defaultLabel;
+            });
+        });
+    }
+
+    var refreshWorkButton = shell.querySelector("[data-eo-refresh-work]");
+    if (refreshWorkButton) {
+        refreshWorkButton.addEventListener("click", function () {
+            refreshWorkButton.disabled = true;
+            refreshExcavatorWorkFromServer({ preserveTab: true }).finally(function () {
+                refreshWorkButton.disabled = false;
+            });
+        });
+    }
+
+    function submitExcavatorShiftAction() {
+        if (!shiftButton) {
+            return;
+        }
+        if (!shiftUrl || shiftButton.disabled) {
+            return;
+        }
+        var action = shiftButton.dataset.eoShiftAction || "toggle";
+        var payload = {
+            action: action,
+            client_action_id: generateClientActionId("excavator-shift"),
+            excavator_id: shell.dataset.eoCurrentExcavatorId || "",
+            fuel: shell.querySelector("[data-eo-shift-fuel]") ? shell.querySelector("[data-eo-shift-fuel]").value : "",
+            mileage: shell.querySelector("[data-eo-shift-mileage]") ? shell.querySelector("[data-eo-shift-mileage]").value : "",
+            engine_hours: shell.querySelector("[data-eo-shift-engine-hours]") ? shell.querySelector("[data-eo-shift-engine-hours]").value : ""
+        };
+        resetShiftHold();
+        shiftButton.disabled = true;
+        shiftButton.classList.add("is-pending");
+        if (shiftLabel) {
+            shiftLabel.textContent = action === "close" ? "Закрываю" : "Открываю";
+        }
+        fetch(shiftUrl, {
+            method: "POST",
+            credentials: "same-origin",
+            headers: {
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "X-CSRFToken": csrfToken,
+                "X-Requested-With": "XMLHttpRequest"
+            },
+            body: JSON.stringify(payload)
+        }).then(function (response) {
+            return response.json().catch(function () { return {}; }).then(function (data) {
+                if (!response.ok || !data.ok) {
+                    throw new Error(data.error || "Смена не сохранена");
+                }
+                return data;
+            });
+        }).then(function () {
+            if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
+                window.AppRealtime.wake("excavator_shift_saved");
+            }
+            return refreshExcavatorWorkFromServer({ preserveTab: true }).then(function (applied) {
+                if (!applied) {
+                    window.location.reload();
+                }
+            });
+        }).catch(function (error) {
+            window.alert(error.message || "Смена не сохранена");
+            shiftButton.disabled = false;
+            shiftButton.classList.remove("is-pending");
+            if (shiftLabel) {
+                shiftLabel.textContent = action === "close" ? "Завершить смену" : "Начать смену";
+            }
+        });
+    }
+
+    if (shiftButton) {
+        function completeShiftHold() {
+            if (!shiftUrl || shiftButton.disabled) {
+                return;
+            }
+            if (!isShiftCloseAction()) {
+                submitExcavatorShiftAction();
+                return;
+            }
+            submitExcavatorShiftAction();
+        }
+        function startShiftHold(event) {
+            if (shiftButton.disabled || !isShiftCloseAction()) {
+                return;
+            }
+            event.preventDefault();
+            if (shiftHoldStart) {
+                return;
+            }
+            resetShiftHold();
+            shiftHoldStart = Date.now();
+            shiftButton.classList.add("is-holding");
+            if (shiftLabel) {
+                shiftLabel.textContent = "Держите";
+            }
+            drawShiftHold();
+            shiftHoldTimer = window.setTimeout(completeShiftHold, shiftHoldMs);
+        }
+        function cancelShiftHold(event) {
+            if (event && isShiftCloseAction()) {
+                event.preventDefault();
+            }
+            if (!shiftButton.classList.contains("is-pending")) {
+                resetShiftHold();
+            }
+        }
+        shiftButton.addEventListener("click", function (event) {
+            if (isShiftCloseAction()) {
+                event.preventDefault();
+                return;
+            }
+            submitExcavatorShiftAction();
+        });
+        shiftButton.addEventListener("pointerdown", startShiftHold);
+        ["pointerup", "pointercancel", "pointerleave"].forEach(function (eventName) {
+            shiftButton.addEventListener(eventName, cancelShiftHold);
+        });
+        shiftButton.addEventListener("touchstart", startShiftHold, { passive: false });
+        ["touchend", "touchcancel"].forEach(function (eventName) {
+            shiftButton.addEventListener(eventName, cancelShiftHold, { passive: false });
+        });
+        shiftButton.addEventListener("keydown", function (event) {
+            if ((event.key === "Enter" || event.key === " ") && !event.repeat && !shiftButton.disabled && isShiftCloseAction()) {
+                startShiftHold(event);
+            }
+        });
+        shiftButton.addEventListener("keyup", function (event) {
+            if ((event.key === "Enter" || event.key === " ") && isShiftCloseAction()) {
+                cancelShiftHold(event);
+            }
+        });
+    }
+
+    var closeEvent = shell.querySelector("[data-eo-close-event]");
+    if (closeEvent) {
+        registerHoldAction(closeEvent, function (hold) {
+            if (closeEvent.disabled || closeEvent.getAttribute("aria-disabled") === "true") {
+                return;
+            }
+            if (!downtimeCard || !downtimeCard.dataset.eoActiveDowntimeId) {
+                closeEvent.disabled = true;
+                closeEvent.classList.add("is-disabled");
+                closeEvent.setAttribute("aria-disabled", "true");
+                return;
+            }
+            closeEvent.disabled = true;
+            closeEvent.classList.add("is-pending");
+            closeEvent.textContent = "Завершаю";
+            postDowntimeAction({
+                action: "close",
+                client_action_id: generateClientActionId("excavator-downtime-close")
+            }).then(function (payload) {
+                clearActiveDowntime(payload);
+                if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
+                    window.AppRealtime.wake("excavator_downtime_closed");
+                }
+            }).catch(function (error) {
+                window.alert(error.message || "Простой не завершен");
+                closeEvent.disabled = false;
+                closeEvent.classList.remove("is-pending");
+                closeEvent.textContent = hold.defaultLabel;
+            });
+        });
+    }
+
+    if (downtimeCard && downtimeCard.dataset.eoActiveDowntimeId && downtimeCard.dataset.eoActiveStartedAt) {
+        startDowntimeTimer(downtimeCard.dataset.eoActiveStartedAt, downtimeCard.dataset.eoActiveElapsedSeconds);
+    } else if (activeDuration) {
+        activeDuration.textContent = "00:00:00";
+        clearDowntimeTimer();
+    }
+    if (logoutButton) {
+        function startLogoutHold(event) {
+            if (logoutButton.disabled) {
+                return;
+            }
+            event.preventDefault();
+            if (logoutHoldStart) {
+                return;
+            }
+            resetLogoutHold();
+            logoutHoldStart = Date.now();
+            logoutButton.classList.add("is-holding");
+            if (logoutLabel) {
+                logoutLabel.textContent = "Держите";
+            }
+            drawLogoutHold();
+            logoutHoldTimer = window.setTimeout(completeLogoutHold, logoutHoldMs);
+        }
+        function cancelLogoutHold(event) {
+            if (event) {
+                event.preventDefault();
+            }
+            if (!logoutButton.classList.contains("is-pending")) {
+                resetLogoutHold();
+            }
+        }
+        logoutButton.addEventListener("pointerdown", startLogoutHold);
+        ["pointerup", "pointercancel", "pointerleave"].forEach(function (eventName) {
+            logoutButton.addEventListener(eventName, cancelLogoutHold);
+        });
+        logoutButton.addEventListener("touchstart", startLogoutHold, { passive: false });
+        ["touchend", "touchcancel"].forEach(function (eventName) {
+            logoutButton.addEventListener(eventName, cancelLogoutHold, { passive: false });
+        });
+        logoutButton.addEventListener("keydown", function (event) {
+            if ((event.key === "Enter" || event.key === " ") && !event.repeat && !logoutButton.disabled) {
+                startLogoutHold(event);
+            }
+        });
+        logoutButton.addEventListener("keyup", function (event) {
+            if (event.key === "Enter" || event.key === " ") {
+                cancelLogoutHold(event);
+            }
+        });
+    }
+    if (selectedTruck && isInactiveTruck(selectedTruck)) {
+        selectedTruck.classList.remove("is-selected");
+        selectedTruck = null;
+        if (assignmentInput) {
+            assignmentInput.value = "";
+        }
+    }
+    pickFirstActiveTruck();
+    activateTab(shell.dataset.eoActiveTab || "trucks");
+};
+
+function formatExcavatorVersion(version) {
+    var normalized = String(version || "").trim();
+    if (!normalized || normalized === "new" || normalized === "unknown") {
+        return "...";
+    }
+    if (/mobile-shell-v\d+$/.test(normalized) && normalized.indexOf("excavator-mobile-shell-") !== 0) {
+        return "...";
+    }
+    return normalized.replace("excavator-mobile-shell-", "");
+}
+
+function normalizeExcavatorVersion(version) {
+    var normalized = String(version || "").trim();
+    return /^excavator-mobile-shell-v\d+$/.test(normalized) ? normalized : "";
+}
+
+function getExcavatorVersionNumber(version) {
+    var match = String(version || "").match(/(?:shell-v|v)(\d+)$/);
+    return match ? parseInt(match[1], 10) : 0;
+}
+
+function isExcavatorVersionNewer(newVersion, currentVersion) {
+    return getExcavatorVersionNumber(newVersion) > getExcavatorVersionNumber(currentVersion || excavatorShellVersion);
+}
+
+function requestExcavatorWorkerVersion(worker) {
+    if (!worker || !window.MessageChannel) return Promise.resolve("");
+    return new Promise(function (resolve) {
+        var channel = new MessageChannel();
+        var timer = window.setTimeout(function () { resolve(""); }, 900);
+        channel.port1.onmessage = function (event) {
+            window.clearTimeout(timer);
+            resolve(normalizeExcavatorVersion((event.data || {}).version));
+        };
+        try {
+            worker.postMessage({ type: "GET_VERSION" }, [channel.port2]);
+        } catch (error) {
+            window.clearTimeout(timer);
+            resolve("");
+        }
+    });
+}
+
+function initExcavatorPwaUpdates() {
+    if (!("serviceWorker" in navigator)) return;
+    var modal = document.querySelector("[data-eo-pwa-update-modal]");
+    var currentNode = document.querySelector("[data-eo-pwa-current-version]");
+    var newNode = document.querySelector("[data-eo-pwa-new-version]");
+    var statusNode = document.querySelector("[data-eo-pwa-update-status]");
+    var textNode = document.querySelector("[data-eo-pwa-update-text]");
+    var laterButton = document.querySelector("[data-eo-pwa-update-later]");
+    var applyButton = document.querySelector("[data-eo-pwa-update-apply]");
+    var checkButton = document.querySelector("[data-eo-pwa-update-check]");
+    var checkLabel = document.querySelector("[data-eo-pwa-update-check-label]");
+    var checkVersion = document.querySelector("[data-eo-pwa-update-check-version]");
+    var registrationRef = null;
+    var waitingWorker = null;
+    var userAcceptedReload = false;
+    var storageKey = "excavator-pwa-update-available";
+
+    function readStoredUpdate() {
+        try {
+            return JSON.parse(localStorage.getItem(storageKey) || "{}") || {};
+        } catch (error) {
+            return {};
+        }
+    }
+
+    function rememberUpdate(newVersion, currentVersion) {
+        try {
+            localStorage.setItem(storageKey, JSON.stringify({
+                newVersion: newVersion || "",
+                currentVersion: currentVersion || excavatorShellVersion,
+                savedAt: Date.now()
+            }));
+        } catch (error) {}
+    }
+
+    function clearUpdate() {
+        try {
+            localStorage.removeItem(storageKey);
+        } catch (error) {}
+    }
+
+    function setIndicator(isAvailable, newVersion, currentVersion) {
+        var visible = !!(isAvailable && isExcavatorVersionNewer(newVersion, currentVersion || excavatorShellVersion));
+        document.querySelectorAll("[data-eo-pwa-update-badge]").forEach(function (badge) {
+            badge.hidden = !visible;
+        });
+        if (checkButton) {
+            checkButton.classList.toggle("has-pwa-update", visible);
+            checkButton.classList.remove("is-checking", "is-current");
+            checkButton.disabled = false;
+        }
+        if (checkLabel) {
+            checkLabel.textContent = "Обновить";
+        }
+        if (checkVersion) {
+            checkVersion.hidden = !visible;
+            checkVersion.textContent = visible ? formatExcavatorVersion(newVersion) : "";
+        }
+        document.querySelectorAll("[data-eo-pwa-update-nav-target]").forEach(function (item) {
+            item.classList.toggle("has-pwa-update", visible);
+            if (visible) {
+                item.title = "Доступна новая версия приложения";
+            } else {
+                item.removeAttribute("title");
+            }
+        });
+        if (visible) {
+            rememberUpdate(newVersion, currentVersion);
+        } else {
+            clearUpdate();
+        }
+    }
+
+    function refreshIndicatorFromStorage(currentVersion) {
+        var stored = readStoredUpdate();
+        if (stored.newVersion && isExcavatorVersionNewer(stored.newVersion, currentVersion || stored.currentVersion || excavatorShellVersion)) {
+            setIndicator(true, stored.newVersion, currentVersion || stored.currentVersion || excavatorShellVersion);
+        } else if (stored.newVersion) {
+            setIndicator(false);
+        }
+    }
+
+    function fetchServerVersion() {
+        return fetch("/excavator-sw.js?version_check=" + Date.now(), {
+            cache: "no-store",
+            credentials: "same-origin"
+        }).then(function (response) {
+            if (!response.ok) return "";
+            return response.text();
+        }).then(function (text) {
+            var match = String(text || "").match(/excavator-mobile-shell-v\d+/);
+            return match ? normalizeExcavatorVersion(match[0]) : "";
+        }).catch(function () {
+            return "";
+        });
+    }
+
+    function getCurrentVersion() {
+        var registrationPromise = registrationRef ? Promise.resolve(registrationRef) : navigator.serviceWorker.getRegistration("/excavator/");
+        return registrationPromise.then(function (registration) {
+            if (registration) registrationRef = registration;
+            return requestExcavatorWorkerVersion(registration && registration.active);
+        }).then(function (version) {
+            return version || excavatorShellVersion;
+        }).catch(function () {
+            return excavatorShellVersion;
+        });
+    }
+
+    function resolveExcavatorUpdateVersion(worker, newVersion, currentVersion) {
+        var baselineVersion = currentVersion || excavatorShellVersion;
+        if (isExcavatorVersionNewer(newVersion, baselineVersion)) {
+            return Promise.resolve(newVersion);
+        }
+        return requestExcavatorWorkerVersion(worker).then(function (workerVersion) {
+            if (isExcavatorVersionNewer(workerVersion, baselineVersion)) {
+                return workerVersion;
+            }
+            return fetchServerVersion();
+        }).then(function (serverVersion) {
+            return isExcavatorVersionNewer(serverVersion, baselineVersion) ? serverVersion : "";
+        }).catch(function () {
+            return "";
+        });
+    }
+
+    function showUpdateModal(worker, newVersion, currentVersion) {
+        if (!modal) return;
+        var knownNewVersion = isExcavatorVersionNewer(newVersion, currentVersion || excavatorShellVersion) ? newVersion : "";
+        waitingWorker = worker || null;
+
+        function renderUpdateModal(version) {
+            setIndicator(true, version, currentVersion || excavatorShellVersion);
+            if (currentNode) currentNode.textContent = formatExcavatorVersion(currentVersion || excavatorShellVersion);
+            if (newNode) newNode.textContent = formatExcavatorVersion(version);
+            if (textNode) textNode.textContent = "Сервер загрузил новую оболочку Экскаваторщика. Установите ее, когда можно обновить экран.";
+            if (statusNode) statusNode.textContent = worker ? "Обновление установится только после нажатия кнопки." : "Браузер еще готовит новую версию. Проверьте позже.";
+            if (applyButton) applyButton.disabled = !worker;
+            modal.hidden = false;
+        }
+
+        if (knownNewVersion) {
+            renderUpdateModal(knownNewVersion);
+            return;
+        }
+
+        resolveExcavatorUpdateVersion(worker, "", currentVersion || excavatorShellVersion).then(function (resolvedVersion) {
+            if (resolvedVersion) {
+                renderUpdateModal(resolvedVersion);
+            } else {
+                modal.hidden = true;
+                setIndicator(false);
+            }
+        });
+    }
+
+    function inspectWaitingWorker(registration, worker) {
+        if (!registration || !worker || worker === navigator.serviceWorker.controller) {
+            return Promise.resolve(false);
+        }
+        return Promise.all([
+            requestExcavatorWorkerVersion(registration.active),
+            requestExcavatorWorkerVersion(worker)
+        ]).then(function (versions) {
+            showUpdateModal(worker, versions[1], versions[0]);
+            return true;
+        });
+    }
+
+    function runManualUpdateCheck() {
+        if (!checkButton) return;
+        checkButton.classList.add("is-checking");
+        checkButton.classList.remove("is-current");
+        checkButton.disabled = true;
+        if (checkLabel) checkLabel.textContent = "Проверка...";
+        var registrationPromise = registrationRef ? Promise.resolve(registrationRef) : navigator.serviceWorker.getRegistration("/excavator/");
+        registrationPromise.then(function (registration) {
+            if (registration) registrationRef = registration;
+            var updatePromise = registration ? registration.update().catch(function () { return registration; }) : Promise.resolve(null);
+            return updatePromise.then(function () {
+                registration = registrationRef || registration;
+                if (registration && registration.waiting) {
+                    return inspectWaitingWorker(registration, registration.waiting).then(function (shown) {
+                        return shown ? "shown" : checkSilently();
+                    });
+                }
+                return checkSilently();
+            });
+        }).then(function (result) {
+            if (result === "shown" || result === true) return;
+            checkButton.classList.add("is-current");
+            if (checkLabel) checkLabel.textContent = "Актуально";
+            window.setTimeout(function () {
+                checkButton.classList.remove("is-current");
+                if (checkLabel) checkLabel.textContent = "Обновить";
+            }, 1800);
+        }).catch(function () {
+            if (checkLabel) checkLabel.textContent = "Ошибка";
+            window.setTimeout(function () {
+                if (checkLabel) checkLabel.textContent = "Обновить";
+            }, 1800);
+        }).finally(function () {
+            checkButton.classList.remove("is-checking");
+            checkButton.disabled = false;
+        });
+    }
+
+    function checkSilently() {
+        refreshIndicatorFromStorage();
+        return Promise.all([getCurrentVersion(), fetchServerVersion()]).then(function (versions) {
+            var currentVersion = versions[0] || excavatorShellVersion;
+            var serverVersion = versions[1] || "";
+            if (serverVersion && isExcavatorVersionNewer(serverVersion, currentVersion)) {
+                setIndicator(true, serverVersion, currentVersion);
+                return true;
+            }
+            if (serverVersion && formatExcavatorVersion(serverVersion) === formatExcavatorVersion(currentVersion)) {
+                setIndicator(false);
+            }
+            return false;
+        }).catch(function () {
+            refreshIndicatorFromStorage();
+            return false;
+        });
+    }
+
+    function applyUpdate() {
+        if (!waitingWorker) {
+            if (modal) modal.hidden = true;
+            return;
+        }
+        userAcceptedReload = true;
+        if (statusNode) statusNode.textContent = "Устанавливаем новую версию...";
+        if (applyButton) applyButton.disabled = true;
+        if (laterButton) laterButton.disabled = true;
+        try {
+            waitingWorker.postMessage({ type: "SKIP_WAITING" });
+        } catch (error) {
+            userAcceptedReload = false;
+            if (statusNode) statusNode.textContent = "Не удалось запустить обновление. Повторите позже.";
+            if (applyButton) applyButton.disabled = false;
+            if (laterButton) laterButton.disabled = false;
+        }
+    }
+
+    if (laterButton) {
+        laterButton.addEventListener("click", function () {
+            if (modal) modal.hidden = true;
+        });
+    }
+    if (applyButton) {
+        applyButton.addEventListener("click", applyUpdate);
+    }
+    if (checkButton) {
+        checkButton.addEventListener("click", runManualUpdateCheck);
+    }
+    if (modal) {
+        modal.addEventListener("click", function (event) {
+            if (event.target === modal) modal.hidden = true;
+        });
+    }
+    navigator.serviceWorker.addEventListener("controllerchange", function () {
+        if (!userAcceptedReload) return;
+        setIndicator(false);
+        window.location.reload();
+    });
+
+    function watchRegistration(registration) {
+        if (!registration) return;
+        if (registration.waiting) {
+            inspectWaitingWorker(registration, registration.waiting);
+        }
+        registration.addEventListener("updatefound", function () {
+            var installing = registration.installing;
+            if (!installing) return;
+            installing.addEventListener("statechange", function () {
+                if (installing.state === "installed" && navigator.serviceWorker.controller) {
+                    inspectWaitingWorker(registration, registration.waiting || installing);
+                }
+            });
+        });
+    }
+
+    navigator.serviceWorker.register("/excavator-sw.js", { scope: "/excavator/" }).then(function (registration) {
+        registrationRef = registration;
+        watchRegistration(registration);
+        registration.update().catch(function () {});
+        checkSilently();
+        window.setInterval(checkSilently, 60000);
+        document.addEventListener("visibilitychange", function () {
+            if (!document.hidden) {
+                registration.update().catch(function () {});
+                checkSilently();
+            }
+        });
+        window.addEventListener("online", checkSilently);
+        window.addEventListener("focus", checkSilently);
+    }).catch(function () {});
+}
+
+document.addEventListener("DOMContentLoaded", function () {
+    window.initExcavatorWorkShell();
+    initExcavatorPwaUpdates();
+});
+})();
+</script>
 {% endblock %}
