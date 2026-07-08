@@ -10,11 +10,21 @@ from assignments.models import AssignmentStatus, ExcavatorPlacement, HaulAssignm
 from core.models import OperationalStateEvent
 from downtimes.models import DowntimeEvent, DowntimeReason
 from references.equipment_states import upsert_default_equipment_states
-from references.models import DumpPoint, Equipment, EquipmentModel, EquipmentState, EquipmentType, RockType
+from references.models import (
+    Dormitory,
+    DormitoryBlock,
+    DormitorySection,
+    DumpPoint,
+    Equipment,
+    EquipmentModel,
+    EquipmentState,
+    EquipmentType,
+    RockType,
+)
 from shifts.models import EmployeeShift
 from trips.models import Trip, TripClientAction, TripStatus
 from trips.views import build_dispatcher_dashboard_context
-from users.models import Employee, EmployeeAccess, Role
+from users.models import DriverPrimaryRegistration, Employee, EmployeeAccess, Role
 
 
 class DispatcherSharedShiftStartTests(TestCase):
@@ -406,6 +416,35 @@ class DispatcherGarageCurrentStateTests(TestCase):
 
 
 class ExcavatorWorkServerIntegrationTests(TestCase):
+    def create_registered_driver_shift(self, truck, *, full_name='Петров П.П.', access_code='200000'):
+        driver_role, _ = Role.objects.get_or_create(
+            code='driver',
+            defaults={'name': 'Водитель'},
+        )
+        driver = Employee.objects.create(full_name=full_name)
+        access = EmployeeAccess.objects.create(
+            employee=driver,
+            role=driver_role,
+            access_code=access_code,
+            is_active=True,
+            status=EmployeeAccess.Status.ACTIVATED,
+        )
+        dormitory, _ = Dormitory.objects.get_or_create(number='5')
+        block, _ = DormitoryBlock.objects.get_or_create(dormitory=dormitory, name='Блок 1')
+        section, _ = DormitorySection.objects.get_or_create(block=block, name='А')
+        DriverPrimaryRegistration.objects.create(
+            employee=driver,
+            dormitory_section=section,
+        )
+        shift = EmployeeShift.objects.create(
+            employee=driver,
+            shift_type='day',
+            equipment=truck,
+            opened_at=timezone.now(),
+            opened_by=driver,
+        )
+        return driver, access, shift
+
     def setUp(self):
         upsert_default_equipment_states()
         self.role = Role.objects.create(code='excavator_operator', name='Машинист экскаватора')
@@ -425,6 +464,11 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.other_excavator = Equipment.objects.create(equipment_type=self.excavator_type, garage_number='13')
         self.rock = RockType.objects.create(name='Руда')
         self.dump_point = DumpPoint.objects.create(name='Дробилка')
+        self.driver, self.driver_access, self.truck_shift = self.create_registered_driver_shift(
+            self.truck,
+            full_name='Петров П.П.',
+            access_code='200021',
+        )
         self.reason = DowntimeReason.objects.get(name='Ожидание самосвалов')
         self.reason.equipment_type = self.excavator_type
         self.reason.show_for_excavator_operator = True
@@ -463,7 +507,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/static/css/excavator-work-v55-shift.css')
         self.assertContains(response, '/excavator-sw.js')
         self.assertContains(response, 'scope: "/excavator/"')
-        self.assertContains(response, 'excavator-mobile-shell-v59')
+        self.assertContains(response, 'excavator-mobile-shell-v60')
         self.assertContains(response, 'Простои')
         self.assertNotContains(response, 'Отпустить сюда')
         self.assertContains(response, 'resolveExcavatorUpdateVersion')
@@ -871,7 +915,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/excavator/')
-        self.assertIn('excavator-mobile-shell-v59', script)
+        self.assertIn('excavator-mobile-shell-v60', script)
         self.assertIn(reverse('excavator_work'), script)
         self.assertIn(reverse('excavator_manifest'), script)
         self.assertIn('/static/js/realtime-client.js', script)
@@ -888,6 +932,11 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
 
     def test_excavator_work_displays_pending_assignment_from_dispatcher(self):
         pending_truck = Equipment.objects.create(equipment_type=self.truck_type, garage_number='77')
+        self.create_registered_driver_shift(
+            pending_truck,
+            full_name='Водитель 77',
+            access_code='200077',
+        )
         HaulAssignment.objects.create(
             truck=pending_truck,
             excavator=self.excavator,
@@ -904,10 +953,27 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(cards_by_number['21']['status_key'], 'blue')
         self.assertEqual(cards_by_number['21']['status_label'], 'Назначена')
         self.assertTrue(cards_by_number['21']['can_drag'])
-        self.assertEqual(cards_by_number['77']['equipment_state_code'], 'waiting')
-        self.assertEqual(cards_by_number['77']['status_key'], 'yellow')
-        self.assertEqual(cards_by_number['77']['status_label'], 'Ожидает')
-        self.assertFalse(cards_by_number['77']['can_drag'])
+        self.assertEqual(cards_by_number['77']['equipment_state_code'], 'assigned')
+        self.assertEqual(cards_by_number['77']['status_key'], 'blue')
+        self.assertEqual(cards_by_number['77']['status_label'], 'Назначена')
+        self.assertTrue(cards_by_number['77']['can_drag'])
+
+    def test_excavator_work_locks_assigned_truck_without_open_driver_shift(self):
+        no_shift_truck = Equipment.objects.create(equipment_type=self.truck_type, garage_number='78')
+        HaulAssignment.objects.create(
+            truck=no_shift_truck,
+            excavator=self.excavator,
+            status=AssignmentStatus.PENDING,
+        )
+
+        response = self.client.get(reverse('excavator_work'))
+
+        self.assertEqual(response.status_code, 200)
+        cards_by_number = {card['number']: card for card in response.context['truck_cards']}
+        self.assertEqual(cards_by_number['78']['equipment_state_code'], 'waiting')
+        self.assertEqual(cards_by_number['78']['status_key'], 'yellow')
+        self.assertFalse(cards_by_number['78']['can_drag'])
+        self.assertIn('смена', cards_by_number['78']['block_reason'])
 
     def test_excavator_work_marks_active_trip_truck_as_waiting_unload_state(self):
         active_trip = Trip.objects.create(
@@ -986,6 +1052,11 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
 
     def test_excavator_work_starts_trip_and_accepts_pending_assignment(self):
         pending_truck = Equipment.objects.create(equipment_type=self.truck_type, garage_number='88')
+        self.create_registered_driver_shift(
+            pending_truck,
+            full_name='Водитель 88',
+            access_code='200088',
+        )
         pending_assignment = HaulAssignment.objects.create(
             truck=pending_truck,
             excavator=self.excavator,
@@ -1067,6 +1138,34 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 409)
         self.assertEqual(Trip.objects.count(), 1)
 
+    def test_truck_loaded_rejects_assigned_truck_without_open_driver_shift(self):
+        self.truck_shift.closed_at = timezone.now()
+        self.truck_shift.save(update_fields=['closed_at'])
+
+        response = self.post_truck_loaded(client_action_id='no-driver-shift')
+
+        self.assertEqual(response.status_code, 409)
+        payload = json.loads(response.content.decode('utf-8'))
+        self.assertFalse(payload['ok'])
+        self.assertIn('смена', payload['error'])
+        self.assertEqual(Trip.objects.count(), 0)
+
+    def test_truck_loaded_rejects_assigned_truck_with_active_downtime(self):
+        DowntimeEvent.objects.create(
+            equipment=self.truck,
+            employee=self.driver,
+            reason=self.reason,
+            started_at=timezone.now() - timedelta(minutes=5),
+        )
+
+        response = self.post_truck_loaded(client_action_id='truck-downtime')
+
+        self.assertEqual(response.status_code, 409)
+        payload = json.loads(response.content.decode('utf-8'))
+        self.assertFalse(payload['ok'])
+        self.assertIn('простое', payload['error'])
+        self.assertEqual(Trip.objects.count(), 0)
+
     def test_truck_loaded_publishes_operational_state_event(self):
         response = self.post_truck_loaded(client_action_id='event-load')
 
@@ -1081,6 +1180,58 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
             payload__status=TripStatus.LOADED_WAITING_UNLOAD,
         ).first()
         self.assertIsNotNone(event)
+
+    def test_dispatcher_assigned_truck_load_unload_cycle_returns_available_to_excavator(self):
+        kkd = DumpPoint.objects.create(name='ККД')
+        assignment = HaulAssignment.objects.get(truck=self.truck, excavator=self.excavator)
+        assignment.status = AssignmentStatus.PENDING
+        assignment.accepted_at = None
+        assignment.save(update_fields=['status', 'accepted_at'])
+
+        start_response = self.client.get(reverse('excavator_work'))
+        cards_by_number = {card['number']: card for card in start_response.context['truck_cards']}
+        self.assertEqual(cards_by_number['21']['equipment_state_code'], 'assigned')
+        self.assertTrue(cards_by_number['21']['can_drag'])
+
+        load_response = self.post_truck_loaded(
+            client_action_id='cycle-load',
+            dump_point=kkd,
+        )
+
+        self.assertEqual(load_response.status_code, 200)
+        load_payload = json.loads(load_response.content.decode('utf-8'))
+        trip = Trip.objects.get(id=load_payload['trip_id'])
+        self.assertEqual(trip.status, TripStatus.LOADED_WAITING_UNLOAD)
+        self.assertEqual(trip.assigned_dump_point, kkd)
+        assignment.refresh_from_db()
+        self.assertEqual(assignment.status, AssignmentStatus.ACCEPTED)
+
+        driver_client = self.client_class()
+        driver_session = driver_client.session
+        driver_session['employee_access_id'] = self.driver_access.id
+        driver_session.save()
+        driver_response = driver_client.get(reverse('driver_work'))
+
+        self.assertEqual(driver_response.status_code, 200)
+        self.assertEqual(driver_response.context['active_trip'], trip)
+        self.assertEqual(driver_response.context['driver_status'], 'ЗАГРУЖЕН')
+        self.assertEqual(str(driver_response.context['driver_dial_label']), 'ККД')
+
+        complete_response = driver_client.post(
+            reverse('driver_complete_trip', args=[trip.id]),
+            data={'client_action_id': 'cycle-unload'},
+        )
+
+        self.assertEqual(complete_response.status_code, 302)
+        trip.refresh_from_db()
+        self.assertEqual(trip.status, TripStatus.COMPLETED)
+        self.assertEqual(trip.driver, self.driver)
+        self.assertEqual(trip.unloading_shift, self.truck_shift)
+
+        finish_response = self.client.get(reverse('excavator_work'))
+        finish_cards_by_number = {card['number']: card for card in finish_response.context['truck_cards']}
+        self.assertEqual(finish_cards_by_number['21']['equipment_state_code'], 'assigned')
+        self.assertTrue(finish_cards_by_number['21']['can_drag'])
 
     def test_truck_loaded_cancel_returns_truck_to_assigned_state(self):
         load_response = self.post_truck_loaded(client_action_id='cancel-load')

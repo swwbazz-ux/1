@@ -393,7 +393,7 @@ EXCAVATOR_MANIFEST = {
 }
 
 EXCAVATOR_SERVICE_WORKER_JS = r"""
-const CACHE_NAME = "excavator-mobile-shell-v59";
+const CACHE_NAME = "excavator-mobile-shell-v60";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const CORE_ASSETS = [
@@ -2135,6 +2135,49 @@ def restrict_excavator_trip_form(form, current_excavator):
     return form
 
 
+def excavator_truck_load_block_reason(
+    assignment,
+    *,
+    current_excavator=None,
+    active_trip=None,
+    active_downtime=None,
+    has_open_truck_shift=None,
+):
+    if not assignment or not assignment.truck_id:
+        return 'Самосвал не назначен.'
+    if current_excavator and assignment.excavator_id != current_excavator.id:
+        return 'Самосвал назначен другому экскаватору.'
+    truck = assignment.truck
+    if not getattr(truck, 'is_active', True):
+        return 'Самосвал неактивен.'
+    if active_trip is None:
+        active_trip = (
+            Trip.objects
+            .filter(truck=truck, status__in=OPEN_TRIP_STATUSES)
+            .order_by('-created_at')
+            .first()
+        )
+    if active_trip:
+        return 'Самосвал уже находится в незакрытом рейсе.'
+    if active_downtime is None:
+        active_downtime = (
+            DowntimeEvent.objects
+            .filter(equipment=truck, ended_at__isnull=True)
+            .order_by('-started_at', '-id')
+            .first()
+        )
+    if active_downtime:
+        return 'Самосвал находится в активном простое.'
+    if has_open_truck_shift is None:
+        has_open_truck_shift = EmployeeShift.objects.filter(
+            equipment=truck,
+            closed_at__isnull=True,
+        ).exists()
+    if not has_open_truck_shift:
+        return 'Для самосвала не открыта смена.'
+    return ''
+
+
 EXCAVATOR_WORK_SETTINGS_SESSION_KEY = 'excavator_work_settings'
 
 
@@ -2392,6 +2435,14 @@ def excavator_truck_loaded_view(request):
         )
         if open_trip:
             return JsonResponse({'ok': False, 'error': 'Самосвал уже находится в незакрытом рейсе.', 'trip_id': open_trip.id}, status=409)
+
+        block_reason = excavator_truck_load_block_reason(
+            assignment,
+            current_excavator=current_excavator,
+            active_trip=open_trip or False,
+        )
+        if block_reason:
+            return JsonResponse({'ok': False, 'error': block_reason}, status=409)
 
         dump_point = get_object_or_404(DumpPoint.objects.filter(is_active=True), id=dump_point_id)
         rock_type = get_object_or_404(RockType.objects.filter(is_active=True), id=rock_type_id)
@@ -2809,6 +2860,16 @@ def excavator_work_view(request):
             current_excavator,
         )
         if form.is_valid():
+            block_reason = excavator_truck_load_block_reason(
+                form.cleaned_data['assignment'],
+                current_excavator=current_excavator,
+            )
+            if block_reason:
+                form.add_error('assignment', block_reason)
+                if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+                    return JsonResponse({'ok': False, 'errors': form.errors}, status=400)
+                messages.error(request, block_reason)
+                return redirect('excavator_work')
             trip = form.create_trip(excavator_operator=access.employee)
             if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
                 return JsonResponse({
@@ -2850,9 +2911,6 @@ def excavator_work_view(request):
         )
     active_truck_ids = {trip.truck_id for trip in blocking_trips}
     active_trip_by_truck_id = {trip.truck_id: trip for trip in blocking_trips}
-    first_ready_assignment_id = next((assignment.id for assignment in available_assignments if assignment.truck_id not in active_truck_ids), None)
-    for assignment in available_assignments:
-        assignment.has_active_trip = assignment.truck_id in active_truck_ids
 
     def equipment_number(equipment):
         return str(getattr(equipment, 'garage_number', '') or equipment or '-')
@@ -2875,6 +2933,34 @@ def excavator_work_view(request):
             .order_by('-started_at', '-id')
         ):
             truck_downtime_by_equipment_id.setdefault(downtime.equipment_id, downtime)
+    open_truck_shift_equipment_ids = set()
+    if assignment_truck_ids:
+        open_truck_shift_equipment_ids = set(
+            EmployeeShift.objects
+            .filter(equipment_id__in=assignment_truck_ids, closed_at__isnull=True)
+            .values_list('equipment_id', flat=True)
+        )
+
+    def assignment_block_reason(assignment, active_trip=None):
+        known_active_trip = active_trip
+        if known_active_trip is None:
+            known_active_trip = active_trip_by_truck_id.get(assignment.truck_id) or False
+        return excavator_truck_load_block_reason(
+            assignment,
+            current_excavator=current_excavator,
+            active_trip=known_active_trip,
+            active_downtime=truck_downtime_by_equipment_id.get(assignment.truck_id),
+            has_open_truck_shift=assignment.truck_id in open_truck_shift_equipment_ids,
+        )
+
+    first_ready_assignment_id = next(
+        (assignment.id for assignment in available_assignments if not assignment_block_reason(assignment)),
+        None,
+    )
+    for assignment in available_assignments:
+        assignment.has_active_trip = assignment.truck_id in active_truck_ids
+        assignment.has_active_downtime = assignment.truck_id in truck_downtime_by_equipment_id
+        assignment.has_open_truck_shift = assignment.truck_id in open_truck_shift_equipment_ids
 
     def excavator_truck_equipment_state_code(assignment, active_trip):
         truck = assignment.truck
@@ -2885,9 +2971,9 @@ def excavator_work_view(request):
             return downtime_equipment_state_code(downtime)
         if active_trip:
             return 'loaded_waiting_unload'
-        if assignment.status == AssignmentStatus.PENDING:
+        if assignment.truck_id not in open_truck_shift_equipment_ids:
             return 'waiting'
-        if assignment.status == AssignmentStatus.ACCEPTED:
+        if assignment.status in {AssignmentStatus.PENDING, AssignmentStatus.ACCEPTED}:
             return 'assigned'
         return 'free'
 
@@ -2897,7 +2983,8 @@ def excavator_work_view(request):
         equipment_state_code = excavator_truck_equipment_state_code(assignment, active_trip)
         target_label = str(active_trip.dump_point) if active_trip else ''
         state_ui = equipment_state_ui(equipment_state_map, equipment_state_code)
-        is_locked = bool(active_trip or state_ui['blocks_operation'] or not state_ui['allows_drag'])
+        block_reason = assignment_block_reason(assignment, active_trip)
+        is_locked = bool(block_reason or state_ui['blocks_operation'] or not state_ui['allows_drag'])
         status_key = state_ui['color_group']
         truck_cards.append({
             'assignment': assignment,
@@ -2909,6 +2996,7 @@ def excavator_work_view(request):
             'is_selected': assignment.id == first_ready_assignment_id,
             'is_locked': is_locked,
             'can_drag': not is_locked,
+            'block_reason': block_reason,
             'icon': f'img/equipment/truck-{status_key}.png',
         })
 

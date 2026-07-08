@@ -1620,6 +1620,13 @@ class AccessLoginTests(TestCase):
         excavator_role = Role.objects.create(code='excavator_operator', name='Машинист экскаватора')
         excavator_operator = Employee.objects.create(full_name='Тестовый машинист')
         EmployeeAccess.objects.create(employee=excavator_operator, role=excavator_role, access_code='3000')
+        driver = Employee.objects.create(full_name='Тестовый водитель')
+        EmployeeShift.objects.create(
+            employee=driver,
+            shift_type='day',
+            equipment=truck,
+            opened_at=timezone.now(),
+        )
         EmployeeShift.objects.create(
             employee=excavator_operator,
             shift_type='day',
@@ -1871,7 +1878,20 @@ class AccessLoginTests(TestCase):
         dump_point = DumpPoint.objects.create(name='ККД')
         excavator_role = Role.objects.create(code='excavator_operator', name='Машинист экскаватора')
         excavator_operator = Employee.objects.create(full_name='Тестовый машинист')
-        EmployeeAccess.objects.create(employee=excavator_operator, role=excavator_role, access_code='3000')
+        excavator_access = EmployeeAccess.objects.create(
+            employee=excavator_operator,
+            role=excavator_role,
+            access_code='3000',
+            is_active=True,
+            status=EmployeeAccess.Status.ACTIVATED,
+        )
+        driver = Employee.objects.create(full_name='Тестовый водитель')
+        EmployeeShift.objects.create(
+            employee=driver,
+            shift_type='day',
+            equipment=truck,
+            opened_at=timezone.now(),
+        )
         EmployeeShift.objects.create(
             employee=excavator_operator,
             shift_type='day',
@@ -1882,7 +1902,9 @@ class AccessLoginTests(TestCase):
         TruckCapacityRule.objects.create(equipment_model=truck_model, rock_type=rock, volume_m3='38.00')
 
         operator_client = self.client_class(HTTP_HOST='localhost')
-        operator_client.post('/', {'access_code': '3000'}, follow=True, HTTP_HOST='localhost')
+        operator_session = operator_client.session
+        operator_session['employee_access_id'] = excavator_access.id
+        operator_session.save()
         operator_client.post(
             '/excavator/work/',
             {'assignment': assignment.id, 'rock_type': rock.id, 'dump_point': dump_point.id},
