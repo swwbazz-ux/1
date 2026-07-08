@@ -55,6 +55,25 @@ class ExcavatorPlacement(models.Model):
         related_name='excavator_placement',
     )
     zone = models.CharField('Зона', max_length=16, choices=Zone.choices, default=Zone.INACTIVE)
+    work_rock_type = models.ForeignKey(
+        'references.RockType',
+        verbose_name='Порода текущего забоя',
+        on_delete=models.SET_NULL,
+        related_name='excavator_work_placements',
+        null=True,
+        blank=True,
+    )
+    work_dump_point = models.ForeignKey(
+        'references.DumpPoint',
+        verbose_name='Основная точка разгрузки',
+        on_delete=models.SET_NULL,
+        related_name='excavator_work_placements',
+        null=True,
+        blank=True,
+    )
+    loading_horizon = models.CharField('Горизонт погрузки', max_length=64, blank=True)
+    loading_block = models.CharField('Блок погрузки', max_length=64, blank=True)
+    work_context_updated_at = models.DateTimeField('Контекст забоя обновлен', null=True, blank=True)
     changed_by = models.ForeignKey(
         'users.Employee',
         verbose_name='Кто изменил',

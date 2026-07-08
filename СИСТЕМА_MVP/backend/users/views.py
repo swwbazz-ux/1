@@ -17,7 +17,7 @@ from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_POST
 from openpyxl import Workbook
 
-from assignments.models import AssignmentStatus, HaulAssignment
+from assignments.models import AssignmentStatus, ExcavatorPlacement, HaulAssignment
 from core.models import OperationalStateEvent, bump_operational_state
 from downtimes.models import DowntimeEvent, DowntimeReason
 from references.models import Dormitory, DormitorySection, DumpPoint, Equipment, EquipmentState, EquipmentType, RockType
@@ -107,7 +107,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v43'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v44'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -1771,6 +1771,23 @@ def driver_shift_view(request):
         driver_status = 'ПРОСТОЙ'
         driver_status_class = 'is-downtime'
 
+    driver_work_excavator = active_trip.excavator if active_trip else (current_assignment.excavator if current_assignment else None)
+    driver_work_context_placement = None
+    if driver_work_excavator:
+        driver_work_context_placement = (
+            ExcavatorPlacement.objects
+            .select_related('work_rock_type', 'work_dump_point')
+            .filter(excavator=driver_work_excavator)
+            .first()
+        )
+    if not driver_trip_context_source and driver_work_context_placement:
+        has_work_context = any([
+            driver_work_context_placement.loading_horizon,
+            driver_work_context_placement.loading_block,
+            driver_work_context_placement.work_rock_type_id,
+        ])
+        if has_work_context:
+            driver_trip_context_source = driver_work_context_placement
     if not driver_trip_context_source and current_assignment:
         driver_trip_context_source = (
             Trip.objects
@@ -1779,7 +1796,6 @@ def driver_shift_view(request):
             .order_by('-created_at')
             .first()
         )
-    driver_work_excavator = active_trip.excavator if active_trip else (current_assignment.excavator if current_assignment else None)
     if current_truck:
         for assignment in open_assignments:
             if assignment.status != AssignmentStatus.PENDING:
@@ -1793,11 +1809,15 @@ def driver_shift_view(request):
         if current_truck
         else f'Самосвал · {driver_employee_short_name(access.employee)}'
     )
+    driver_context_rock = (
+        getattr(driver_trip_context_source, 'rock_type', None)
+        or getattr(driver_trip_context_source, 'work_rock_type', None)
+    )
     driver_context_parts = [
         driver_complex_label_for_excavator(driver_work_excavator),
         driver_compact_context_value('Горизонт', 'Гор.', getattr(driver_trip_context_source, 'loading_horizon', '')),
         driver_compact_context_value('Блок', 'Бл.', getattr(driver_trip_context_source, 'loading_block', '')),
-        str(getattr(driver_trip_context_source, 'rock_type', '') or '—'),
+        str(driver_context_rock or '—'),
     ]
     driver_context_label = ' · '.join(driver_context_parts)
     driver_dial_label = str(driver_target_label) if active_trip else driver_excavator_short_label(driver_work_excavator)

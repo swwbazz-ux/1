@@ -2142,6 +2142,39 @@ def excavator_work_settings_key(current_excavator):
     return str(current_excavator.id) if current_excavator else 'none'
 
 
+def get_excavator_work_placement(current_excavator):
+    if not current_excavator:
+        return None
+    return (
+        ExcavatorPlacement.objects
+        .select_related('work_rock_type', 'work_dump_point')
+        .filter(excavator=current_excavator)
+        .first()
+    )
+
+
+def save_excavator_work_context(*, current_excavator, actor, rock_type, dump_points, loading_horizon, loading_block):
+    if not current_excavator:
+        return None
+    placement, _ = ExcavatorPlacement.objects.get_or_create(excavator=current_excavator)
+    placement.work_rock_type = rock_type
+    placement.work_dump_point = dump_points[0] if dump_points else None
+    placement.loading_horizon = loading_horizon
+    placement.loading_block = loading_block
+    placement.work_context_updated_at = timezone.now()
+    placement.changed_by = actor
+    placement.save(update_fields=[
+        'work_rock_type',
+        'work_dump_point',
+        'loading_horizon',
+        'loading_block',
+        'work_context_updated_at',
+        'changed_by',
+        'changed_at',
+    ])
+    return placement
+
+
 def normalize_excavator_numeric_setting(value, *, max_length=16):
     return re.sub(r'\D+', '', str(value or ''))[:max_length]
 
@@ -2149,6 +2182,7 @@ def normalize_excavator_numeric_setting(value, *, max_length=16):
 def excavator_work_settings_from_session(request, current_excavator, form):
     session_settings = request.session.get(EXCAVATOR_WORK_SETTINGS_SESSION_KEY, {})
     raw_settings = session_settings.get(excavator_work_settings_key(current_excavator), {})
+    placement = get_excavator_work_placement(current_excavator)
     rock_choices = list(form.fields['rock_type'].queryset)
     dump_point_choices = list(form.fields['dump_point'].queryset)
 
@@ -2156,12 +2190,15 @@ def excavator_work_settings_from_session(request, current_excavator, form):
     dump_by_id = {str(point.id): point for point in dump_point_choices}
 
     default_rock_id = str(form['rock_type'].value() or '')
-    rock_id = str(raw_settings.get('rock_type_id') or default_rock_id or (rock_choices[0].id if rock_choices else ''))
+    placement_rock_id = str(getattr(placement, 'work_rock_type_id', '') or '')
+    rock_id = str(raw_settings.get('rock_type_id') or placement_rock_id or default_rock_id or (rock_choices[0].id if rock_choices else ''))
     current_rock = rock_by_id.get(rock_id) or (rock_choices[0] if rock_choices else None)
 
     raw_dump_ids = raw_settings.get('dump_point_ids')
     if not isinstance(raw_dump_ids, list):
         raw_dump_ids = []
+    if not raw_dump_ids and getattr(placement, 'work_dump_point_id', None):
+        raw_dump_ids = [placement.work_dump_point_id]
     selected_dump_points = []
     seen_dump_ids = set()
     for raw_id in raw_dump_ids:
@@ -2177,10 +2214,14 @@ def excavator_work_settings_from_session(request, current_excavator, form):
         selected_dump_points.append(dump_point_choices[0])
 
     face_horizon = normalize_excavator_numeric_setting(
-        raw_settings.get('loading_horizon') if 'loading_horizon' in raw_settings else form['loading_horizon'].value()
+        raw_settings.get('loading_horizon')
+        if 'loading_horizon' in raw_settings
+        else (getattr(placement, 'loading_horizon', '') or form['loading_horizon'].value())
     )
     face_block = normalize_excavator_numeric_setting(
-        raw_settings.get('loading_block') if 'loading_block' in raw_settings else form['loading_block'].value()
+        raw_settings.get('loading_block')
+        if 'loading_block' in raw_settings
+        else (getattr(placement, 'loading_block', '') or form['loading_block'].value())
     )
 
     selected_dump_ids = [point.id for point in selected_dump_points]
@@ -2358,6 +2399,16 @@ def excavator_truck_loaded_view(request):
             assignment.status = AssignmentStatus.ACCEPTED
             assignment.accepted_at = timezone.now()
             assignment.save(update_fields=['status', 'accepted_at'])
+        loading_horizon = normalize_excavator_numeric_setting(payload.get('loading_horizon'))
+        loading_block = normalize_excavator_numeric_setting(payload.get('loading_block'))
+        save_excavator_work_context(
+            current_excavator=current_excavator,
+            actor=access.employee,
+            rock_type=rock_type,
+            dump_points=[dump_point],
+            loading_horizon=loading_horizon,
+            loading_block=loading_block,
+        )
 
         trip = Trip.objects.create(
             excavator=current_excavator,
@@ -2371,8 +2422,8 @@ def excavator_truck_loaded_view(request):
             planned_volume_m3=payload.get('planned_volume_m3') or None,
             volume_m3=None,
             tonnage=None,
-            loading_horizon=str(payload.get('loading_horizon') or '')[:64],
-            loading_block=str(payload.get('loading_block') or '')[:64],
+            loading_horizon=loading_horizon[:64],
+            loading_block=loading_block[:64],
             transport_distance_km=payload.get('transport_distance_km') or None,
             downtime_text=str(payload.get('downtime_text') or '')[:255],
             note=str(payload.get('note') or '')[:1000],
@@ -2554,6 +2605,14 @@ def excavator_work_settings_view(request):
     }
     request.session[EXCAVATOR_WORK_SETTINGS_SESSION_KEY] = session_settings
     request.session.modified = True
+    save_excavator_work_context(
+        current_excavator=current_excavator,
+        actor=access.employee,
+        rock_type=rock_type,
+        dump_points=dump_points,
+        loading_horizon=loading_horizon,
+        loading_block=loading_block,
+    )
 
     state = bump_operational_state(
         'ExcavatorWorkSettings:update',

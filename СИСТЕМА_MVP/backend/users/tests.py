@@ -105,7 +105,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, reverse('driver_manifest'))
         self.assertContains(response, 'rel="manifest"')
         self.assertContains(response, '/driver-sw.js')
-        self.assertContains(response, 'driver-mobile-shell-v43')
+        self.assertContains(response, 'driver-mobile-shell-v44')
         self.assertContains(response, 'data-driver-pwa-update-modal')
         self.assertContains(response, 'data-driver-pwa-update-badge')
         self.assertContains(response, 'mode: "custom", path: "^/driver/(?:shift/?)?$"')
@@ -175,7 +175,7 @@ class AccessLoginTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Service-Worker-Allowed'], '/driver/')
-        self.assertIn('driver-mobile-shell-v43', script)
+        self.assertIn('driver-mobile-shell-v44', script)
         self.assertIn('/driver/', script)
         self.assertIn('/driver/shift/', script)
         self.assertIn('/driver.webmanifest', script)
@@ -1288,6 +1288,156 @@ class AccessLoginTests(TestCase):
         self.assertEqual(assignment.status, AssignmentStatus.PENDING)
         self.assertIsNone(assignment.accepted_at)
 
+    def test_driver_receives_dispatcher_assignment_excavator_context_and_loaded_trip_chain(self):
+        self.employee.full_name = 'Петров Петр Петрович'
+        self.employee.save(update_fields=['full_name'])
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        truck = Equipment.objects.create(equipment_type=truck_type, garage_number='54')
+        excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='1')
+        rock = RockType.objects.create(name='Руда')
+        dump_point = DumpPoint.objects.create(name='ККД')
+        truck = self.create_registered_driver_shift(truck=truck)
+
+        dispatcher_role = Role.objects.create(code='dispatcher', name='Диспетчер')
+        dispatcher = Employee.objects.create(full_name='Тестовый диспетчер')
+        dispatcher_access = EmployeeAccess.objects.create(
+            employee=dispatcher,
+            role=dispatcher_role,
+            access_code='5000',
+        )
+        EmployeeShift.objects.create(
+            employee=dispatcher,
+            shift_type='day',
+            opened_at=timezone.now(),
+            opened_by=dispatcher,
+        )
+        dispatcher_client = self.client_class(HTTP_HOST='localhost')
+        dispatcher_session = dispatcher_client.session
+        dispatcher_session['employee_access_id'] = dispatcher_access.id
+        dispatcher_session.save()
+
+        assign_response = dispatcher_client.post(
+            '/dispatcher/control/truck/assign/',
+            data=json.dumps({
+                'action': 'assign',
+                'truck_id': truck.id,
+                'excavator_id': excavator.id,
+            }),
+            content_type='application/json',
+            HTTP_HOST='localhost',
+        )
+        assignment = HaulAssignment.objects.get(truck=truck, excavator=excavator)
+        initial_driver_response = self.client.get('/driver/', HTTP_HOST='localhost')
+
+        self.assertEqual(assign_response.status_code, 200)
+        self.assertTrue(assign_response.json()['ok'])
+        self.assertEqual(assignment.status, AssignmentStatus.PENDING)
+        self.assertEqual(assignment.truck, truck)
+        self.assertContains(initial_driver_response, 'Самосвал 54 · Петров П.П.')
+        self.assertContains(initial_driver_response, 'К-1')
+        self.assertContains(initial_driver_response, 'ЭКС-1')
+        self.assertContains(initial_driver_response, 'НА ЗАГРУЗКУ')
+        self.assertNotContains(initial_driver_response, 'ПРИНЯТЬ')
+
+        excavator_role = Role.objects.create(code='excavator_operator', name='Машинист экскаватора')
+        excavator_operator = Employee.objects.create(full_name='Тестовый машинист')
+        excavator_access = EmployeeAccess.objects.create(
+            employee=excavator_operator,
+            role=excavator_role,
+            access_code='3000',
+        )
+        EmployeeShift.objects.create(
+            employee=excavator_operator,
+            shift_type='day',
+            equipment=excavator,
+            opened_at=timezone.now(),
+            opened_by=excavator_operator,
+        )
+        operator_client = self.client_class(HTTP_HOST='localhost')
+        operator_session = operator_client.session
+        operator_session['employee_access_id'] = excavator_access.id
+        operator_session.save()
+
+        settings_response = operator_client.post(
+            reverse('excavator_work_settings'),
+            data=json.dumps({
+                'client_action_id': 'driver-chain-settings-1',
+                'rock_type_id': rock.id,
+                'dump_point_ids': [dump_point.id],
+                'loading_horizon': '75',
+                'loading_block': '52',
+            }),
+            content_type='application/json',
+            HTTP_HOST='localhost',
+        )
+        context_driver_response = self.client.get('/driver/', HTTP_HOST='localhost')
+
+        self.assertEqual(settings_response.status_code, 200)
+        self.assertContains(context_driver_response, 'К-1 · Гор.75 · Бл.52 · Руда')
+        self.assertContains(context_driver_response, 'ЭКС-1')
+        self.assertContains(context_driver_response, 'driver-work-dial-button is-empty')
+
+        load_response = operator_client.post(
+            reverse('excavator_truck_loaded'),
+            data=json.dumps({
+                'client_action_id': 'driver-chain-truck-loaded-1',
+                'truck_id': truck.id,
+                'excavator_id': excavator.id,
+                'dump_point_id': dump_point.id,
+                'rock_type_id': rock.id,
+                'loading_horizon': '75',
+                'loading_block': '52',
+            }),
+            content_type='application/json',
+            HTTP_HOST='localhost',
+        )
+        assignment.refresh_from_db()
+        trip = Trip.objects.get(truck=truck, excavator=excavator)
+        loaded_driver_response = self.client.get('/driver/', HTTP_HOST='localhost')
+
+        self.assertEqual(load_response.status_code, 200)
+        self.assertEqual(load_response.json()['action'], 'truck_loaded')
+        self.assertEqual(assignment.status, AssignmentStatus.ACCEPTED)
+        self.assertEqual(trip.status, TripStatus.LOADED_WAITING_UNLOAD)
+        self.assertEqual(trip.truck, truck)
+        self.assertContains(loaded_driver_response, 'ККД')
+        self.assertContains(loaded_driver_response, 'ТОЧКА РАЗГРУЗКИ')
+        self.assertContains(loaded_driver_response, 'driver-work-dial-button is-loaded')
+        self.assertContains(loaded_driver_response, 'К-1 · Гор.75 · Бл.52 · Руда')
+
+        complete_response = self.client.post(
+            f'/driver/trip/{trip.id}/complete/',
+            {'client_action_id': 'driver-chain-trip-unloaded-1'},
+            follow=True,
+            HTTP_HOST='localhost',
+        )
+        trip.refresh_from_db()
+        empty_driver_response = self.client.get('/driver/', HTTP_HOST='localhost')
+
+        self.assertEqual(complete_response.status_code, 200)
+        self.assertEqual(trip.status, TripStatus.COMPLETED)
+        self.assertEqual(trip.driver, self.employee)
+        self.assertContains(empty_driver_response, 'ЭКС-1')
+        self.assertContains(empty_driver_response, 'НА ЗАГРУЗКУ')
+        self.assertContains(empty_driver_response, 'driver-work-dial-button is-empty')
+        self.assertContains(empty_driver_response, 'К-1 · Гор.75 · Бл.52 · Руда')
+        self.assertTrue(
+            OperationalStateEvent.objects.filter(
+                event_type='assignment_changed',
+                object_type='HaulAssignment',
+                object_id=str(assignment.id),
+            ).exists()
+        )
+        self.assertTrue(
+            OperationalStateEvent.objects.filter(
+                event_type='trip_changed',
+                object_type='Trip',
+                object_id=str(trip.id),
+                payload__action='truck_loaded',
+            ).exists()
+        )
+
     def test_driver_shows_reassignment_button_only_for_other_pending_complex(self):
         truck_type = EquipmentType.objects.create(name='Самосвал')
         excavator_type = EquipmentType.objects.create(name='Экскаватор')
@@ -1528,7 +1678,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(driver_shift_response, 'ККД')
         self.assertContains(driver_shift_response, 'window.applyOperationalStateRefresh')
         self.assertContains(driver_shift_response, 'data-realtime-mode="custom"')
-        self.assertContains(driver_shift_response, 'driver-mobile-shell-v43')
+        self.assertContains(driver_shift_response, 'driver-mobile-shell-v44')
 
     def test_driver_downtime_buttons_are_rendered_from_server_reference(self):
         truck = self.create_registered_driver_shift()

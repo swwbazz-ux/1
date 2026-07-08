@@ -617,6 +617,11 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(payload['dump_point_ids'], [second_dump.id, self.dump_point.id])
         self.assertEqual(payload['loading_horizon'], '75')
         self.assertEqual(payload['loading_block'], '521')
+        placement = ExcavatorPlacement.objects.get(excavator=self.excavator)
+        self.assertEqual(placement.work_rock_type, second_rock)
+        self.assertEqual(placement.work_dump_point, second_dump)
+        self.assertEqual(placement.loading_horizon, '75')
+        self.assertEqual(placement.loading_block, '521')
         self.assertTrue(
             OperationalStateEvent.objects.filter(
                 event_type='equipment_changed',
