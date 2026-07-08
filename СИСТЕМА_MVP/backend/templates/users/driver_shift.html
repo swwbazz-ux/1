@@ -74,7 +74,7 @@ body.driver-mobile-screen .driver-shell {
     --driver-safe-bottom: env(safe-area-inset-bottom, 0px);
     --driver-nav-content-h: 78px;
     --driver-nav-total-h: calc(var(--driver-nav-content-h) + var(--driver-safe-bottom));
-    --driver-dial-size: clamp(280px, 68vw, 420px);
+    --driver-dial-size: clamp(260px, 64vw, 390px);
     width: 100%;
     max-width: none;
     min-width: 320px;
@@ -154,10 +154,10 @@ body.driver-mobile-screen .driver-toast {
 
 body.driver-mobile-screen .driver-header {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-columns: minmax(0, 1fr) minmax(104px, max-content) auto;
     align-content: center;
     align-items: center;
-    gap: clamp(8px, 2.5vw, 14px);
+    gap: clamp(7px, 2vw, 12px);
     height: var(--driver-header-h);
     min-height: var(--driver-header-h);
     padding: 0;
@@ -187,7 +187,7 @@ body.driver-mobile-screen .driver-header h1 {
     margin: 0;
     color: var(--driver-ink);
     text-transform: uppercase;
-    font-size: clamp(18px, 5vw, 24px);
+    font-size: clamp(17px, 4.7vw, 23px);
     line-height: 1;
     font-weight: 900;
     white-space: nowrap;
@@ -199,20 +199,22 @@ body.driver-mobile-screen .driver-header h1 {
 
 body.driver-mobile-screen .driver-header p {
     position: relative;
+    justify-self: center;
     width: fit-content;
-    max-width: min(42vw, 160px);
+    min-width: clamp(104px, 29vw, 128px);
+    max-width: clamp(104px, 32vw, 148px);
     margin: 0;
-    padding: 5px 8px 5px 12px;
+    padding: 4px 7px 4px 11px;
     border: 1px solid rgba(140, 255, 46, 0.26);
     border-radius: 8px;
     color: var(--driver-green);
     background: linear-gradient(100deg, rgba(140,255,46,0.12), rgba(32,217,230,0.05));
     box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 0 18px rgba(140,255,46,0.08);
     text-transform: uppercase;
-    font-size: clamp(10px, 2.8vw, 12px);
-    line-height: 1.05;
+    font-size: clamp(9px, 2.35vw, 11px);
+    line-height: 1;
     font-weight: 800;
-    white-space: normal;
+    white-space: nowrap;
     overflow: visible;
     text-overflow: clip;
     text-align: center;
@@ -221,10 +223,10 @@ body.driver-mobile-screen .driver-header p {
 body.driver-mobile-screen .driver-header p::before {
     content: "";
     position: absolute;
-    left: 5px;
+    left: 4px;
     top: 50%;
-    width: 3px;
-    height: 0.9em;
+    width: 2px;
+    height: 0.82em;
     border-radius: 4px;
     transform: translateY(-50%);
     background: var(--driver-green);
@@ -291,7 +293,7 @@ body.driver-mobile-screen .driver-panel.is-active {
     height: 100%;
     overflow: hidden;
     overscroll-behavior: contain;
-    padding: clamp(12px, 2dvh, 18px) 0 10px;
+    padding: clamp(12px, 2dvh, 18px) 0 max(18px, var(--driver-safe-bottom, 0px));
 }
 
 body.driver-mobile-screen .driver-panel[data-driver-tab-panel="shift"].is-active,
@@ -312,8 +314,8 @@ body.driver-mobile-screen .driver-work-screen.is-active {
         "dial"
         "caption";
     grid-template-rows: auto minmax(0, 1fr) auto;
-    gap: clamp(16px, 2.4dvh, 28px);
-    padding: clamp(8px, 1.5dvh, 14px) 0 clamp(8px, 1.4dvh, 14px);
+    gap: clamp(18px, 2.6dvh, 30px);
+    padding: clamp(8px, 1.5dvh, 14px) 0 16px;
     overflow: hidden;
 }
 
@@ -416,7 +418,8 @@ body.driver-mobile-screen .driver-work-dial-zone {
     width: 100%;
     display: grid;
     place-items: center;
-    padding: 0;
+    padding: clamp(10px, 2.2vw, 16px) 0;
+    overflow: hidden;
 }
 
 body.driver-mobile-screen .driver-work-dial {
@@ -440,7 +443,7 @@ body.driver-mobile-screen .driver-work-dial::after {
 }
 
 body.driver-mobile-screen .driver-work-dial::before {
-    inset: -6%;
+    inset: -3.5%;
     z-index: -2;
     background:
         repeating-conic-gradient(from -2deg, rgba(186, 204, 210, 0.28) 0 1.1deg, transparent 1.1deg 6deg),
@@ -448,9 +451,9 @@ body.driver-mobile-screen .driver-work-dial::before {
         radial-gradient(circle at 50% 50%, rgba(7, 19, 24, 0) 53%, rgba(158, 176, 181, 0.16) 55% 56%, rgba(3, 10, 13, 0.97) 62% 100%);
     box-shadow:
         inset 0 0 28px rgba(255,255,255,0.05),
-        inset 0 -28px 58px rgba(0,0,0,0.74),
-        0 26px 62px rgba(0,0,0,0.48),
-        0 0 38px rgba(180,198,204,0.06);
+        inset 0 -22px 46px rgba(0,0,0,0.72),
+        0 20px 48px rgba(0,0,0,0.42),
+        0 0 28px rgba(180,198,204,0.05);
 }
 
 body.driver-mobile-screen .driver-work-dial::after {
@@ -471,9 +474,9 @@ body.driver-mobile-screen .driver-work-dial:has(.driver-work-dial-button.is-load
         radial-gradient(circle at 50% 50%, rgba(7, 19, 24, 0) 53%, rgba(140,255,46,0.22) 55% 56%, rgba(3, 10, 13, 0.97) 62% 100%);
     box-shadow:
         inset 0 0 30px rgba(255,255,255,0.08),
-        inset 0 -28px 58px rgba(0,0,0,0.74),
-        0 28px 66px rgba(0,0,0,0.50),
-        0 0 72px rgba(140,255,46,0.18);
+        inset 0 -22px 46px rgba(0,0,0,0.72),
+        0 22px 52px rgba(0,0,0,0.46),
+        0 0 58px rgba(140,255,46,0.17);
 }
 
 body.driver-mobile-screen .driver-work-dial:has(.driver-work-dial-button.is-empty)::before {
@@ -483,9 +486,9 @@ body.driver-mobile-screen .driver-work-dial:has(.driver-work-dial-button.is-empt
         radial-gradient(circle at 50% 50%, rgba(7, 19, 24, 0) 53%, rgba(158, 176, 181, 0.16) 55% 56%, rgba(3, 10, 13, 0.97) 62% 100%);
     box-shadow:
         inset 0 0 28px rgba(255,255,255,0.05),
-        inset 0 -28px 58px rgba(0,0,0,0.72),
-        0 24px 58px rgba(0,0,0,0.44),
-        0 0 38px rgba(180,198,204,0.06);
+        inset 0 -22px 46px rgba(0,0,0,0.70),
+        0 18px 44px rgba(0,0,0,0.38),
+        0 0 28px rgba(180,198,204,0.05);
 }
 
 body.driver-mobile-screen .driver-work-dial:has(.driver-work-dial-button.is-empty)::after {
@@ -1318,7 +1321,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
 
 @media (max-height: 780px) {
     body.driver-mobile-screen .driver-header h1 {
-        font-size: clamp(18px, 5vw, 24px);
+        font-size: clamp(17px, 4.7vw, 23px);
     }
 
     body.driver-mobile-screen .driver-header p {
@@ -1366,7 +1369,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
     }
 
     body.driver-mobile-screen .driver-work-dial {
-        width: min(var(--driver-dial-size), 58dvh, 100%);
+        width: min(var(--driver-dial-size), 57dvh, 100%);
     }
 
     body.driver-mobile-screen .driver-work-caption {
@@ -1377,7 +1380,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
 {% endblock %}
 
 {% block body %}
-<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v39' }}">
+<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v40' }}">
     {% if messages %}
         <div class="driver-messages">
             {% for message in messages %}
@@ -2061,7 +2064,7 @@ window.bindDriverMobileShell = function () {
         if (!("serviceWorker" in navigator)) {
             return;
         }
-        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v39' }}";
+        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v40' }}";
         var updateModal = document.querySelector("[data-driver-pwa-update-modal]");
         var updateBadge = document.querySelector("[data-driver-pwa-update-badge]");
         var updateTarget = document.querySelector("[data-driver-pwa-update-nav-target]");
