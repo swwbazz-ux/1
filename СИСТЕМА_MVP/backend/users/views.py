@@ -107,7 +107,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v41'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v42'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -1648,11 +1648,12 @@ def driver_prefixed_context_value(prefix, value):
     return f'{prefix} {value}'
 
 
-def driver_assignment_elapsed_label(assignment):
+def driver_assignment_countdown_label(assignment):
     if not assignment or not assignment.assigned_at:
-        return '00:00'
+        return '05:00'
     elapsed_seconds = max(0, int((timezone.now() - assignment.assigned_at).total_seconds()))
-    minutes, seconds = divmod(elapsed_seconds, 60)
+    remaining_seconds = max(0, (5 * 60) - elapsed_seconds)
+    minutes, seconds = divmod(remaining_seconds, 60)
     return f'{minutes:02d}:{seconds:02d}'
 
 
@@ -1670,11 +1671,12 @@ def driver_shift_view(request):
     open_shift = EmployeeShift.objects.filter(employee=access.employee, closed_at__isnull=True).order_by('-opened_at').first()
     current_truck = open_shift.equipment if open_shift else None
     current_assignment = None
+    pending_reassignment = None
     active_trip = None
     active_downtime = None
     shift_trips = []
     if current_truck:
-        current_assignment = (
+        open_assignments = list(
             HaulAssignment.objects
             .filter(
                 truck=current_truck,
@@ -1683,8 +1685,16 @@ def driver_shift_view(request):
             .exclude(status=AssignmentStatus.CANCELLED)
             .select_related('truck', 'excavator')
             .order_by('-assigned_at')
-            .first()
         )
+        accepted_assignment = next(
+            (assignment for assignment in open_assignments if assignment.status == AssignmentStatus.ACCEPTED),
+            None,
+        )
+        pending_assignment = next(
+            (assignment for assignment in open_assignments if assignment.status == AssignmentStatus.PENDING),
+            None,
+        )
+        current_assignment = accepted_assignment or pending_assignment
         active_trip = Trip.objects.filter(
             truck=current_truck,
             status__in=OPEN_TRIP_STATUSES,
@@ -1759,6 +1769,14 @@ def driver_shift_view(request):
             .first()
         )
     driver_work_excavator = active_trip.excavator if active_trip else (current_assignment.excavator if current_assignment else None)
+    if current_truck:
+        for assignment in open_assignments:
+            if assignment.status != AssignmentStatus.PENDING:
+                continue
+            if not driver_work_excavator or assignment.excavator_id == getattr(driver_work_excavator, 'id', None):
+                continue
+            pending_reassignment = assignment
+            break
     driver_header_label = (
         f'Самосвал {driver_equipment_number(current_truck)} · {driver_employee_short_name(access.employee)}'
         if current_truck
@@ -1770,13 +1788,14 @@ def driver_shift_view(request):
         driver_prefixed_context_value('Блок', getattr(driver_trip_context_source, 'loading_block', '')),
         str(getattr(driver_trip_context_source, 'rock_type', '') or '—'),
     ]
+    driver_context_label = ' · '.join(driver_context_parts)
     driver_dial_label = str(driver_target_label) if active_trip else driver_excavator_short_label(driver_work_excavator)
-    driver_dial_note = 'удерживать 2 сек' if active_trip else 'точка погрузки'
+    driver_dial_note = 'ТОЧКА РАЗГРУЗКИ' if active_trip else 'НА ЗАГРУЗКУ'
     driver_new_assignment_label = ''
-    if current_assignment and current_assignment.status == AssignmentStatus.PENDING:
+    if pending_reassignment:
         driver_new_assignment_label = (
-            f'{driver_complex_label_for_excavator(current_assignment.excavator)} · '
-            f'ПРИНЯТЬ · {driver_assignment_elapsed_label(current_assignment)}'
+            f'{driver_complex_label_for_excavator(pending_reassignment.excavator)} · '
+            f'ПРИНЯТЬ · {driver_assignment_countdown_label(pending_reassignment)}'
         )
 
     downtime_equipment_type = current_truck.equipment_type if current_truck else None
@@ -1857,6 +1876,7 @@ def driver_shift_view(request):
             'driver_target_label': driver_target_label,
             'driver_header_label': driver_header_label,
             'driver_context_parts': driver_context_parts,
+            'driver_context_label': driver_context_label,
             'driver_dial_label': driver_dial_label,
             'driver_dial_note': driver_dial_note,
             'driver_new_assignment_label': driver_new_assignment_label,
