@@ -382,11 +382,11 @@ body.driver-mobile-screen .driver-work-context-line {
     overflow: hidden;
     color: var(--driver-ink);
     text-transform: uppercase;
-    font-size: clamp(19px, 5.1vw, 32px);
+    font-size: clamp(17px, 4.4vw, 27px);
     line-height: 1;
     font-weight: 900;
     white-space: nowrap;
-    text-overflow: ellipsis;
+    text-overflow: clip;
 }
 
 body.driver-mobile-screen .driver-work-context-line b {
@@ -1544,7 +1544,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
 {% endblock %}
 
 {% block body %}
-<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v42' }}">
+<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v43' }}">
     {% if messages %}
         <div class="driver-messages">
             {% for message in messages %}
@@ -2229,7 +2229,7 @@ window.bindDriverMobileShell = function () {
         if (!("serviceWorker" in navigator)) {
             return;
         }
-        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v42' }}";
+        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v43' }}";
         var updateModal = document.querySelector("[data-driver-pwa-update-modal]");
         var updateBadge = document.querySelector("[data-driver-pwa-update-badge]");
         var updateTarget = document.querySelector("[data-driver-pwa-update-nav-target]");

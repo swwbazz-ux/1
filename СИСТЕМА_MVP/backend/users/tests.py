@@ -105,7 +105,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, reverse('driver_manifest'))
         self.assertContains(response, 'rel="manifest"')
         self.assertContains(response, '/driver-sw.js')
-        self.assertContains(response, 'driver-mobile-shell-v42')
+        self.assertContains(response, 'driver-mobile-shell-v43')
         self.assertContains(response, 'data-driver-pwa-update-modal')
         self.assertContains(response, 'data-driver-pwa-update-badge')
         self.assertContains(response, 'mode: "custom", path: "^/driver/(?:shift/?)?$"')
@@ -132,6 +132,8 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, 'gap: clamp(12px, 2dvh, 20px)')
         self.assertContains(response, 'class="driver-work-context-card"')
         self.assertContains(response, 'class="driver-work-context-line"')
+        self.assertContains(response, 'font-size: clamp(17px, 4.4vw, 27px)')
+        self.assertContains(response, 'text-overflow: clip')
         self.assertContains(response, 'class="driver-work-ticks"')
         self.assertContains(response, 'body.driver-mobile-screen .driver-work-assignment')
         self.assertContains(response, 'width: min(var(--driver-dial-size), 100%)')
@@ -173,7 +175,7 @@ class AccessLoginTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Service-Worker-Allowed'], '/driver/')
-        self.assertIn('driver-mobile-shell-v42', script)
+        self.assertIn('driver-mobile-shell-v43', script)
         self.assertIn('/driver/', script)
         self.assertIn('/driver/shift/', script)
         self.assertIn('/driver.webmanifest', script)
@@ -1403,8 +1405,10 @@ class AccessLoginTests(TestCase):
 
         driver_shift_response = driver_client.get('/driver/shift/', HTTP_HOST='localhost')
         self.assertContains(driver_shift_response, 'ККД')
-        self.assertContains(driver_shift_response, 'Горизонт 75')
-        self.assertContains(driver_shift_response, 'Блок 52')
+        self.assertContains(driver_shift_response, 'Гор.75')
+        self.assertContains(driver_shift_response, 'Бл.52')
+        self.assertNotContains(driver_shift_response, 'Горизонт 75')
+        self.assertNotContains(driver_shift_response, 'Блок 52')
         self.assertContains(driver_shift_response, 'ТОЧКА РАЗГРУЗКИ')
         self.assertContains(driver_shift_response, 'Выбор точки')
         self.assertNotContains(driver_shift_response, 'Активный рейс')
@@ -1524,7 +1528,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(driver_shift_response, 'ККД')
         self.assertContains(driver_shift_response, 'window.applyOperationalStateRefresh')
         self.assertContains(driver_shift_response, 'data-realtime-mode="custom"')
-        self.assertContains(driver_shift_response, 'driver-mobile-shell-v42')
+        self.assertContains(driver_shift_response, 'driver-mobile-shell-v43')
 
     def test_driver_downtime_buttons_are_rendered_from_server_reference(self):
         truck = self.create_registered_driver_shift()

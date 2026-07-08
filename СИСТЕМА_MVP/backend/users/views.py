@@ -107,7 +107,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v42'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v43'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -1648,6 +1648,17 @@ def driver_prefixed_context_value(prefix, value):
     return f'{prefix} {value}'
 
 
+def driver_compact_context_value(prefix, compact_prefix, value):
+    value = str(value or '').strip()
+    if not value:
+        return f'{compact_prefix}—'
+    for candidate in (prefix, compact_prefix):
+        if value.lower().startswith(candidate.lower()):
+            value = value[len(candidate):].strip()
+            break
+    return f'{compact_prefix}{value}'
+
+
 def driver_assignment_countdown_label(assignment):
     if not assignment or not assignment.assigned_at:
         return '05:00'
@@ -1784,8 +1795,8 @@ def driver_shift_view(request):
     )
     driver_context_parts = [
         driver_complex_label_for_excavator(driver_work_excavator),
-        driver_prefixed_context_value('Горизонт', getattr(driver_trip_context_source, 'loading_horizon', '')),
-        driver_prefixed_context_value('Блок', getattr(driver_trip_context_source, 'loading_block', '')),
+        driver_compact_context_value('Горизонт', 'Гор.', getattr(driver_trip_context_source, 'loading_horizon', '')),
+        driver_compact_context_value('Блок', 'Бл.', getattr(driver_trip_context_source, 'loading_block', '')),
         str(getattr(driver_trip_context_source, 'rock_type', '') or '—'),
     ]
     driver_context_label = ' · '.join(driver_context_parts)
