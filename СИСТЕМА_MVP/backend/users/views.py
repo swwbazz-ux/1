@@ -107,7 +107,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v40'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v41'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -1605,6 +1605,57 @@ def driver_wants_json(request):
     )
 
 
+def driver_employee_short_name(employee):
+    parts = [part for part in (getattr(employee, 'full_name', '') or '').split() if part]
+    if not parts:
+        return 'Водитель'
+    if len(parts) == 1:
+        return parts[0]
+    initials = ''.join(f'{part[0]}.' for part in parts[1:3] if part)
+    return f'{parts[0]} {initials}'.strip()
+
+
+def driver_equipment_number(equipment):
+    return str(getattr(equipment, 'garage_number', '') or equipment or '').strip()
+
+
+def driver_excavator_short_label(equipment):
+    number = driver_equipment_number(equipment)
+    if not number:
+        return '—'
+    upper_number = number.upper()
+    if upper_number.startswith(('ЭКС', 'ЭКГ', 'EX')):
+        return number
+    return f'ЭКС-{number}'
+
+
+def driver_complex_label_for_excavator(equipment):
+    number = driver_equipment_number(equipment)
+    if not number:
+        return 'К-—'
+    upper_number = number.upper()
+    if upper_number.startswith('К-'):
+        return number
+    return f'К-{number}'
+
+
+def driver_prefixed_context_value(prefix, value):
+    value = str(value or '').strip()
+    if not value:
+        return f'{prefix} —'
+    if value.lower().startswith(prefix.lower()):
+        return value
+    return f'{prefix} {value}'
+
+
+def driver_assignment_elapsed_label(assignment):
+    if not assignment or not assignment.assigned_at:
+        return '00:00'
+    elapsed_seconds = max(0, int((timezone.now() - assignment.assigned_at).total_seconds()))
+    minutes, seconds = divmod(elapsed_seconds, 60)
+    return f'{minutes:02d}:{seconds:02d}'
+
+
 def driver_shift_view(request):
     access_id = request.session.get('employee_access_id')
     if not access_id:
@@ -1690,6 +1741,7 @@ def driver_shift_view(request):
     driver_status = 'ПУСТОЙ'
     driver_status_class = 'is-empty'
     driver_target_label = '—'
+    driver_trip_context_source = active_trip
     if active_trip:
         driver_status = 'ЗАГРУЖЕН'
         driver_status_class = 'is-loaded'
@@ -1697,6 +1749,35 @@ def driver_shift_view(request):
     elif active_downtime:
         driver_status = 'ПРОСТОЙ'
         driver_status_class = 'is-downtime'
+
+    if not driver_trip_context_source and current_assignment:
+        driver_trip_context_source = (
+            Trip.objects
+            .filter(excavator=current_assignment.excavator)
+            .select_related('rock_type', 'dump_point', 'actual_dump_point', 'assigned_dump_point')
+            .order_by('-created_at')
+            .first()
+        )
+    driver_work_excavator = active_trip.excavator if active_trip else (current_assignment.excavator if current_assignment else None)
+    driver_header_label = (
+        f'Самосвал {driver_equipment_number(current_truck)} · {driver_employee_short_name(access.employee)}'
+        if current_truck
+        else f'Самосвал · {driver_employee_short_name(access.employee)}'
+    )
+    driver_context_parts = [
+        driver_complex_label_for_excavator(driver_work_excavator),
+        driver_prefixed_context_value('Горизонт', getattr(driver_trip_context_source, 'loading_horizon', '')),
+        driver_prefixed_context_value('Блок', getattr(driver_trip_context_source, 'loading_block', '')),
+        str(getattr(driver_trip_context_source, 'rock_type', '') or '—'),
+    ]
+    driver_dial_label = str(driver_target_label) if active_trip else driver_excavator_short_label(driver_work_excavator)
+    driver_dial_note = 'удерживать 2 сек' if active_trip else 'точка погрузки'
+    driver_new_assignment_label = ''
+    if current_assignment and current_assignment.status == AssignmentStatus.PENDING:
+        driver_new_assignment_label = (
+            f'{driver_complex_label_for_excavator(current_assignment.excavator)} · '
+            f'ПРИНЯТЬ · {driver_assignment_elapsed_label(current_assignment)}'
+        )
 
     downtime_equipment_type = current_truck.equipment_type if current_truck else None
     downtime_reasons = DowntimeReason.for_workplace('truck_driver', downtime_equipment_type)
@@ -1774,6 +1855,11 @@ def driver_shift_view(request):
             'driver_status': driver_status,
             'driver_status_class': driver_status_class,
             'driver_target_label': driver_target_label,
+            'driver_header_label': driver_header_label,
+            'driver_context_parts': driver_context_parts,
+            'driver_dial_label': driver_dial_label,
+            'driver_dial_note': driver_dial_note,
+            'driver_new_assignment_label': driver_new_assignment_label,
             'unload_points': unload_points,
             'active_trip_assigned_dump_point': active_trip_assigned_dump_point,
             'active_trip_actual_dump_point_id': active_trip_actual_dump_point_id,
