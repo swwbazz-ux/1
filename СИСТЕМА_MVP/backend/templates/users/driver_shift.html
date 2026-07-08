@@ -154,7 +154,7 @@ body.driver-mobile-screen .driver-toast {
 
 body.driver-mobile-screen .driver-header {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr) auto auto;
     align-content: center;
     align-items: center;
     gap: clamp(8px, 2.5vw, 14px);
@@ -164,13 +164,11 @@ body.driver-mobile-screen .driver-header {
     border-bottom: 1px solid var(--driver-line);
 }
 
-body.driver-mobile-screen .driver-header > div:first-child {
+body.driver-mobile-screen .driver-header-identity {
     min-width: 0;
-    max-width: none;
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr) auto;
-    align-items: center;
-    gap: clamp(7px, 2.2vw, 11px);
+    align-content: center;
+    gap: 3px;
 }
 
 body.driver-mobile-screen .driver-header span,
@@ -202,7 +200,7 @@ body.driver-mobile-screen .driver-header h1 {
 body.driver-mobile-screen .driver-header p {
     position: relative;
     width: fit-content;
-    max-width: 100%;
+    max-width: min(42vw, 160px);
     margin: 0;
     padding: 5px 8px 5px 12px;
     border: 1px solid rgba(140, 255, 46, 0.26);
@@ -212,11 +210,12 @@ body.driver-mobile-screen .driver-header p {
     box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 0 18px rgba(140,255,46,0.08);
     text-transform: uppercase;
     font-size: clamp(10px, 2.8vw, 12px);
-    line-height: 1;
+    line-height: 1.05;
     font-weight: 800;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    text-align: center;
 }
 
 body.driver-mobile-screen .driver-header p::before {
@@ -287,22 +286,23 @@ body.driver-mobile-screen .driver-panel {
 }
 
 body.driver-mobile-screen .driver-panel.is-active {
-    display: block;
+    display: grid;
     min-height: 0;
     height: 100%;
-    overflow-y: auto;
+    overflow: hidden;
     overscroll-behavior: contain;
-    padding-bottom: 18px;
+    padding: clamp(12px, 2dvh, 18px) 0 10px;
 }
 
 body.driver-mobile-screen .driver-panel[data-driver-tab-panel="shift"].is-active,
-body.driver-mobile-screen .driver-panel[data-driver-tab-panel="downtimes"].is-active,
 body.driver-mobile-screen .driver-panel[data-driver-tab-panel="manifest"].is-active {
-    min-height: 0;
-    height: 100%;
-    overflow-y: auto;
-    overscroll-behavior: contain;
-    padding-bottom: 18px;
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: clamp(12px, 2dvh, 18px);
+}
+
+body.driver-mobile-screen .driver-panel[data-driver-tab-panel="downtimes"].is-active {
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    gap: clamp(12px, 2dvh, 18px);
 }
 
 body.driver-mobile-screen .driver-work-screen.is-active {
@@ -769,6 +769,11 @@ body.driver-mobile-screen .driver-section-title {
     padding-left: 14px;
 }
 
+body.driver-mobile-screen [data-driver-tab-panel="shift"].is-active .driver-section-title,
+body.driver-mobile-screen [data-driver-tab-panel="manifest"].is-active .driver-section-title {
+    margin: 0;
+}
+
 body.driver-mobile-screen .driver-section-title span {
     position: relative;
     color: var(--driver-green);
@@ -789,6 +794,14 @@ body.driver-mobile-screen .driver-form-card {
     display: grid;
     gap: 18px;
     padding: 16px;
+}
+
+body.driver-mobile-screen [data-driver-tab-panel="shift"].is-active .driver-form-card,
+body.driver-mobile-screen [data-driver-tab-panel="manifest"].is-active .driver-trip-list {
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding-bottom: 18px;
 }
 
 body.driver-mobile-screen .driver-form-card label {
@@ -837,7 +850,7 @@ body.driver-mobile-screen .driver-downtime-card {
     grid-template-columns: 58px minmax(0, 1fr);
     align-items: center;
     gap: 14px;
-    margin: 18px 0 20px;
+    margin: 0;
     padding: 12px 16px;
     border-color: rgba(255, 207, 29, 0.95);
     background: linear-gradient(90deg, rgba(74, 63, 8, 0.82), rgba(26, 31, 19, 0.82));
@@ -882,12 +895,15 @@ body.driver-mobile-screen .driver-downtime-card em {
 }
 
 body.driver-mobile-screen .driver-downtime-list {
+    min-height: 0;
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
+    align-content: start;
     gap: 10px;
-    max-height: min(43dvh, 390px);
+    max-height: none;
     overflow-y: auto;
     padding-bottom: 8px;
+    overscroll-behavior: contain;
     scrollbar-width: thin;
 }
 
@@ -941,7 +957,8 @@ body.driver-mobile-screen .driver-downtime-list button.status-success {
 }
 
 body.driver-mobile-screen .driver-downtime-close {
-    margin-top: 10px;
+    margin-top: 0;
+    align-self: end;
 }
 
 body.driver-mobile-screen .driver-trip-list,
@@ -1314,7 +1331,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
     }
 
     body.driver-mobile-screen .driver-downtime-list {
-        max-height: min(39dvh, 330px);
+        max-height: none;
     }
 }
 
@@ -1360,7 +1377,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
 {% endblock %}
 
 {% block body %}
-<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v38' }}">
+<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v39' }}">
     {% if messages %}
         <div class="driver-messages">
             {% for message in messages %}
@@ -1371,11 +1388,11 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
     <div class="driver-toast" data-driver-toast hidden role="status" aria-live="polite"></div>
 
     <header class="driver-header">
-        <div>
+        <div class="driver-header-identity">
             <span>Водитель</span>
             <h1>{% if current_truck %}Самосвал {{ current_truck.garage_number|default:current_truck }}{% else %}Самосвал{% endif %}</h1>
-            <p>{% if open_shift %}Активная смена{% else %}Смена не открыта{% endif %}</p>
         </div>
+        <p>{% if open_shift %}Активная смена{% else %}Смена не открыта{% endif %}</p>
         <div class="driver-online" role="status" aria-label="Онлайн">
             <span>онлайн</span>
             <strong></strong>
@@ -2044,7 +2061,7 @@ window.bindDriverMobileShell = function () {
         if (!("serviceWorker" in navigator)) {
             return;
         }
-        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v38' }}";
+        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v39' }}";
         var updateModal = document.querySelector("[data-driver-pwa-update-modal]");
         var updateBadge = document.querySelector("[data-driver-pwa-update-badge]");
         var updateTarget = document.querySelector("[data-driver-pwa-update-nav-target]");
