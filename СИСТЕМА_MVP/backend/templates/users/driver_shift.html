@@ -14,8 +14,8 @@
 <link rel="apple-touch-icon" href="{% static 'img/pwa/mining-master-180.png' %}">
 <style>
 body.driver-mobile-screen {
-    --driver-safe-bottom: max(env(safe-area-inset-bottom, 0px), 16px);
-    --driver-nav-content-h: clamp(78px, 10dvh, 96px);
+    --driver-safe-bottom: env(safe-area-inset-bottom, 0px);
+    --driver-nav-content-h: 78px;
     --driver-nav-total-h: calc(var(--driver-nav-content-h) + var(--driver-safe-bottom));
     margin: 0;
     width: 100vw;
@@ -70,9 +70,9 @@ body.driver-mobile-screen .driver-shell {
     --driver-muted: #8ca0a8;
     --driver-line: rgba(144, 173, 184, 0.24);
     --driver-edge: clamp(16px, 5vw, 34px);
-    --driver-header-h: clamp(150px, 22dvh, 220px);
-    --driver-safe-bottom: max(env(safe-area-inset-bottom, 0px), 16px);
-    --driver-nav-content-h: clamp(78px, 10dvh, 96px);
+    --driver-header-h: 54px;
+    --driver-safe-bottom: env(safe-area-inset-bottom, 0px);
+    --driver-nav-content-h: 78px;
     --driver-nav-total-h: calc(var(--driver-nav-content-h) + var(--driver-safe-bottom));
     --driver-dial-size: clamp(260px, 76vw, 520px);
     width: 100%;
@@ -82,7 +82,7 @@ body.driver-mobile-screen .driver-shell {
     min-height: 100dvh;
     display: grid;
     grid-template-rows: var(--driver-header-h) minmax(0, 1fr);
-    padding: 0 var(--driver-edge) calc(var(--driver-nav-total-h) + 16px);
+    padding: 0 var(--driver-edge) var(--driver-nav-total-h);
     overflow: hidden;
     position: relative;
     background:
@@ -154,17 +154,23 @@ body.driver-mobile-screen .driver-toast {
 
 body.driver-mobile-screen .driver-header {
     display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    align-content: end;
-    align-items: start;
-    gap: 10px;
-    padding: clamp(18px, 3.4dvh, 32px) 0 clamp(12px, 2dvh, 16px);
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-content: center;
+    align-items: center;
+    gap: clamp(8px, 2.5vw, 14px);
+    height: var(--driver-header-h);
+    min-height: var(--driver-header-h);
+    padding: 0;
     border-bottom: 1px solid var(--driver-line);
 }
 
 body.driver-mobile-screen .driver-header > div:first-child {
     min-width: 0;
-    max-width: calc(100% - 86px);
+    max-width: none;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: clamp(7px, 2.2vw, 11px);
 }
 
 body.driver-mobile-screen .driver-header span,
@@ -173,19 +179,22 @@ body.driver-mobile-screen label > span,
 body.driver-mobile-screen .driver-online span {
     color: var(--driver-muted);
     text-transform: uppercase;
-    font-size: clamp(13px, 3.3vw, 16px);
+    font-size: clamp(10px, 2.5vw, 12px);
     font-weight: 500;
     line-height: 1;
 }
 
 body.driver-mobile-screen .driver-header h1 {
-    margin: 8px 0 0;
+    min-width: 0;
+    margin: 0;
     color: var(--driver-ink);
     text-transform: uppercase;
-    font-size: clamp(31px, 8.4vw, 39px);
-    line-height: 0.92;
+    font-size: clamp(18px, 5vw, 24px);
+    line-height: 1;
     font-weight: 900;
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
     letter-spacing: 0;
     text-shadow: 0 0 16px rgba(236, 255, 221, 0.12);
 }
@@ -193,26 +202,30 @@ body.driver-mobile-screen .driver-header h1 {
 body.driver-mobile-screen .driver-header p {
     position: relative;
     width: fit-content;
-    margin: 12px 0 0;
-    padding: 9px 14px 9px 18px;
+    max-width: 100%;
+    margin: 0;
+    padding: 5px 8px 5px 12px;
     border: 1px solid rgba(140, 255, 46, 0.26);
     border-radius: 8px;
     color: var(--driver-green);
     background: linear-gradient(100deg, rgba(140,255,46,0.12), rgba(32,217,230,0.05));
     box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 0 18px rgba(140,255,46,0.08);
     text-transform: uppercase;
-    font-size: clamp(15px, 4.2vw, 21px);
+    font-size: clamp(10px, 2.8vw, 12px);
     line-height: 1;
     font-weight: 800;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 body.driver-mobile-screen .driver-header p::before {
     content: "";
     position: absolute;
-    left: 8px;
+    left: 5px;
     top: 50%;
-    width: 4px;
-    height: 1.05em;
+    width: 3px;
+    height: 0.9em;
     border-radius: 4px;
     transform: translateY(-50%);
     background: var(--driver-green);
@@ -232,14 +245,15 @@ body.driver-mobile-screen .driver-section-title span::before {
 }
 
 body.driver-mobile-screen .driver-online {
-    position: absolute;
-    top: clamp(34px, 5.6dvh, 48px);
-    right: 2px;
-    width: 72px;
-    display: grid;
+    position: relative;
+    top: auto;
+    right: auto;
+    width: auto;
+    display: flex;
+    align-items: center;
     justify-items: center;
-    gap: 7px;
-    min-width: 68px;
+    gap: 6px;
+    min-width: 0;
     color: var(--driver-cyan);
     text-transform: uppercase;
 }
@@ -247,23 +261,23 @@ body.driver-mobile-screen .driver-online {
 body.driver-mobile-screen .driver-online::after {
     content: "";
     position: absolute;
-    top: 4px;
-    right: -10px;
-    width: 11px;
-    height: 11px;
+    top: -4px;
+    right: -5px;
+    width: 7px;
+    height: 7px;
     border-radius: 50%;
     background: var(--driver-cyan);
     box-shadow: 0 0 14px rgba(32, 217, 230, 0.85);
 }
 
 body.driver-mobile-screen .driver-online strong {
-    width: 46px;
-    height: 46px;
+    width: 18px;
+    height: 18px;
     border-radius: 50%;
     background:
         radial-gradient(circle, #8cff2e 0 22%, rgba(140,255,46,0.33) 24% 42%, rgba(36,104,38,0.54) 44% 62%, rgba(7,39,45,0.78) 64% 100%);
     border: 1px solid rgba(32, 217, 230, 0.22);
-    box-shadow: 0 0 0 10px rgba(32, 217, 230, 0.04), 0 0 26px rgba(140,255,46,0.24);
+    box-shadow: 0 0 0 5px rgba(32, 217, 230, 0.04), 0 0 18px rgba(140,255,46,0.24);
 }
 
 body.driver-mobile-screen .driver-panel {
@@ -1085,8 +1099,8 @@ body.driver-mobile-screen .driver-bottom-nav {
     bottom: 0;
     z-index: 100;
     width: 100%;
-    height: var(--driver-nav-total-h, 94px);
-    padding-bottom: max(env(safe-area-inset-bottom, 0px), 16px);
+    height: var(--driver-nav-total-h, 78px);
+    padding-bottom: var(--driver-safe-bottom, 0px);
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
     border-top: 1px solid rgba(127, 163, 177, 0.24);
@@ -1279,11 +1293,11 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
 
 @media (max-height: 780px) {
     body.driver-mobile-screen .driver-header h1 {
-        font-size: clamp(32px, 9vw, 38px);
+        font-size: clamp(18px, 5vw, 24px);
     }
 
     body.driver-mobile-screen .driver-header p {
-        margin-top: 12px;
+        margin: 0;
     }
 
     body.driver-mobile-screen .driver-work-card {
@@ -1327,7 +1341,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
 {% endblock %}
 
 {% block body %}
-<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v36' }}">
+<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v37' }}">
     {% if messages %}
         <div class="driver-messages">
             {% for message in messages %}
@@ -2011,7 +2025,7 @@ window.bindDriverMobileShell = function () {
         if (!("serviceWorker" in navigator)) {
             return;
         }
-        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v36' }}";
+        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v37' }}";
         var updateModal = document.querySelector("[data-driver-pwa-update-modal]");
         var updateBadge = document.querySelector("[data-driver-pwa-update-badge]");
         var updateTarget = document.querySelector("[data-driver-pwa-update-nav-target]");
