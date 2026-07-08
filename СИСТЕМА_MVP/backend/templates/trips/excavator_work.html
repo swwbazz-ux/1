@@ -5,9 +5,9 @@
 {% block body_class %}excavator-operator-screen{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v63">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v63">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v63">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v64">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v64">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v64">
 <meta name="theme-color" content="#030708">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Погрузка">
@@ -185,13 +185,14 @@
                                 class="eo-truck-card eo-dashboard-truck-card status-{{ card.status_key }}{% if card.is_selected %} is-selected{% endif %}{% if card.is_locked %} is-inactive{% endif %}"
                                 type="button"
                                 draggable="{% if card.can_drag %}true{% else %}false{% endif %}"
-                                style="--eo-truck-progress: {{ card.plan_percent|default:0 }}%;"
+                                style="--eo-truck-progress: {{ card.plan_percent|default:0 }}%; --plan-progress: {{ card.plan_percent|default:0 }}%;"
                                 data-eo-truck-card
                                 data-eo-dashboard-truck
                                 data-assignment-id="{{ card.assignment.id }}"
                                 data-truck-id="{{ card.assignment.truck.id }}"
                                 data-eo-equipment-state="{{ card.equipment_state_code }}"
                                 data-eo-plan-percent="{{ card.plan_percent|default:0 }}"
+                                data-plan-percent="{{ card.plan_percent|default:0 }}"
                                 {% if card.is_locked %}data-eo-truck-inactive="1" aria-disabled="true"{% endif %}
                             >
                                 <i aria-hidden="true"><img src="{% static card.icon %}" alt=""></i>
@@ -326,7 +327,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v63";
+var excavatorShellVersion = "excavator-mobile-shell-v64";
 var excavatorRelevantEvents = {
     assignment_changed: true,
     trip_changed: true,
@@ -1318,7 +1319,7 @@ window.initExcavatorWorkShell = function () {
         if (!state || !state.card || state.preview) return;
         var rect = state.card.getBoundingClientRect();
         var preview = state.card.cloneNode(true);
-        preview.classList.add("is-drag-preview");
+        preview.classList.add("is-drag-preview", "truck-drag-preview");
         preview.classList.remove("is-selected");
         preview.removeAttribute("id");
         preview.style.position = "fixed";
