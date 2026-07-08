@@ -5,9 +5,9 @@
 {% block body_class %}excavator-operator-screen{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v61">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v61">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v61">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v63">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v63">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v63">
 <meta name="theme-color" content="#030708">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Погрузка">
@@ -326,7 +326,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v61";
+var excavatorShellVersion = "excavator-mobile-shell-v63";
 var excavatorRelevantEvents = {
     assignment_changed: true,
     trip_changed: true,
@@ -1324,12 +1324,18 @@ window.initExcavatorWorkShell = function () {
         preview.style.position = "fixed";
         preview.style.left = rect.left + "px";
         preview.style.top = rect.top + "px";
-        preview.style.width = rect.width + "px";
-        preview.style.height = rect.height + "px";
+        preview.style.setProperty("width", rect.width + "px", "important");
+        preview.style.setProperty("height", rect.height + "px", "important");
+        preview.style.setProperty("min-width", "0", "important");
+        preview.style.setProperty("min-height", "0", "important");
+        preview.style.setProperty("max-width", "none", "important");
+        preview.style.setProperty("max-height", "none", "important");
+        preview.style.setProperty("aspect-ratio", "auto", "important");
         preview.style.margin = "0";
         preview.style.pointerEvents = "none";
         preview.style.zIndex = "20000";
-        preview.style.transform = "translate3d(0, 0, 0) scale(.98)";
+        preview.style.boxSizing = "border-box";
+        preview.style.transform = "translate3d(0, 0, 0)";
         preview.style.transformOrigin = "center center";
         document.body.appendChild(preview);
         state.preview = preview;
@@ -1337,7 +1343,7 @@ window.initExcavatorWorkShell = function () {
 
     function moveTruckDragPreview(state, dx, dy) {
         if (!state || !state.preview) return;
-        state.preview.style.transform = "translate3d(" + dx + "px, " + dy + "px, 0) scale(.98)";
+        state.preview.style.transform = "translate3d(" + dx + "px, " + dy + "px, 0)";
     }
 
     function removeTruckDragPreview(state) {
@@ -1510,21 +1516,17 @@ window.initExcavatorWorkShell = function () {
         target.addEventListener("drop", function (event) {
             event.preventDefault();
             target.classList.remove("is-drop-ready");
-            if (selectedTruck && isInactiveTruck(selectedTruck)) {
+            if (!selectedTruck || isInactiveTruck(selectedTruck)) {
                 return;
             }
             selectDump(target.dataset.eoDumpTarget);
             postTruckLoaded(selectedTruck, target);
         });
-        target.addEventListener("click", function () {
+        target.addEventListener("click", function (event) {
             if (target.dataset.eoSuppressClick === "1") {
+                event.preventDefault();
                 return;
             }
-            selectDump(target.dataset.eoDumpTarget);
-            if (!selectedTruck || isInactiveTruck(selectedTruck)) {
-                return;
-            }
-            postTruckLoaded(selectedTruck, target);
         });
     });
 
