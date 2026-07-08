@@ -5,9 +5,9 @@
 {% block body_class %}excavator-operator-screen{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v59">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v59">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v59">
 <meta name="theme-color" content="#030708">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Погрузка">
@@ -326,7 +326,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v58";
+var excavatorShellVersion = "excavator-mobile-shell-v59";
 var excavatorRelevantEvents = {
     assignment_changed: true,
     trip_changed: true,
@@ -335,6 +335,42 @@ var excavatorRelevantEvents = {
     equipment_changed: true,
     access_changed: true
 };
+var viewportSyncFrame = null;
+
+function syncExcavatorViewportHeight() {
+    var height = window.visualViewport && window.visualViewport.height ? window.visualViewport.height : window.innerHeight;
+    if (!height || height < 320) return;
+    var value = height + "px";
+    document.documentElement.style.setProperty("--app-height", value);
+    document.documentElement.style.setProperty("--eo-app-height", value);
+}
+
+function scheduleExcavatorViewportHeightSync() {
+    syncExcavatorViewportHeight();
+    if (viewportSyncFrame) {
+        window.cancelAnimationFrame(viewportSyncFrame);
+    }
+    viewportSyncFrame = window.requestAnimationFrame(function () {
+        viewportSyncFrame = null;
+        syncExcavatorViewportHeight();
+    });
+    window.setTimeout(syncExcavatorViewportHeight, 180);
+}
+
+syncExcavatorViewportHeight();
+window.syncExcavatorViewportHeight = syncExcavatorViewportHeight;
+window.addEventListener("resize", scheduleExcavatorViewportHeightSync, { passive: true });
+window.addEventListener("pageshow", scheduleExcavatorViewportHeightSync);
+window.addEventListener("load", scheduleExcavatorViewportHeightSync);
+if (window.visualViewport) {
+    window.visualViewport.addEventListener("resize", scheduleExcavatorViewportHeightSync, { passive: true });
+    window.visualViewport.addEventListener("scroll", scheduleExcavatorViewportHeightSync, { passive: true });
+}
+document.addEventListener("visibilitychange", function () {
+    if (!document.hidden) {
+        scheduleExcavatorViewportHeightSync();
+    }
+});
 
 function isExcavatorRefreshUnsafe() {
     var shell = document.querySelector("[data-eo-shell]");
@@ -415,6 +451,7 @@ function refreshExcavatorWorkFromServer(options) {
         if (typeof window.initExcavatorWorkShell === "function") {
             window.initExcavatorWorkShell();
         }
+        scheduleExcavatorViewportHeightSync();
         return true;
     }).catch(function () {
         return false;
@@ -1277,6 +1314,38 @@ window.initExcavatorWorkShell = function () {
         });
     }
 
+    function createTruckDragPreview(state) {
+        if (!state || !state.card || state.preview) return;
+        var rect = state.card.getBoundingClientRect();
+        var preview = state.card.cloneNode(true);
+        preview.classList.add("is-drag-preview");
+        preview.classList.remove("is-selected");
+        preview.removeAttribute("id");
+        preview.style.position = "fixed";
+        preview.style.left = rect.left + "px";
+        preview.style.top = rect.top + "px";
+        preview.style.width = rect.width + "px";
+        preview.style.height = rect.height + "px";
+        preview.style.margin = "0";
+        preview.style.pointerEvents = "none";
+        preview.style.zIndex = "20000";
+        preview.style.transform = "translate3d(0, 0, 0) scale(.98)";
+        preview.style.transformOrigin = "center center";
+        document.body.appendChild(preview);
+        state.preview = preview;
+    }
+
+    function moveTruckDragPreview(state, dx, dy) {
+        if (!state || !state.preview) return;
+        state.preview.style.transform = "translate3d(" + dx + "px, " + dy + "px, 0) scale(.98)";
+    }
+
+    function removeTruckDragPreview(state) {
+        if (!state || !state.preview) return;
+        state.preview.remove();
+        state.preview = null;
+    }
+
     function findDumpTargetAtPoint(x, y) {
         var previousPointerEvents = null;
         if (activeTruckDrag && activeTruckDrag.card) {
@@ -1300,8 +1369,9 @@ window.initExcavatorWorkShell = function () {
         if (!activeTruckDrag.started) {
             activeTruckDrag.started = true;
             activeTruckDrag.card.classList.add("is-dragging");
+            createTruckDragPreview(activeTruckDrag);
         }
-        activeTruckDrag.card.style.transform = "translate3d(" + dx + "px, " + dy + "px, 0) scale(.98)";
+        moveTruckDragPreview(activeTruckDrag, dx, dy);
         var target = findDumpTargetAtPoint(event.clientX, event.clientY);
         clearDropReady();
         if (target) {
@@ -1321,6 +1391,7 @@ window.initExcavatorWorkShell = function () {
         }
         state.card.classList.remove("is-dragging");
         state.card.style.transform = "";
+        removeTruckDragPreview(state);
         clearDropReady();
         if (!state.started) {
             return;
@@ -1343,6 +1414,7 @@ window.initExcavatorWorkShell = function () {
         activeTruckDrag = null;
         state.card.classList.remove("is-dragging");
         state.card.style.transform = "";
+        removeTruckDragPreview(state);
         clearDropReady();
     }
 
@@ -2112,6 +2184,7 @@ function initExcavatorPwaUpdates() {
         });
     }
     navigator.serviceWorker.addEventListener("controllerchange", function () {
+        scheduleExcavatorViewportHeightSync();
         if (!userAcceptedReload) return;
         setIndicator(false);
         window.location.reload();
@@ -2151,8 +2224,10 @@ function initExcavatorPwaUpdates() {
 }
 
 document.addEventListener("DOMContentLoaded", function () {
+    scheduleExcavatorViewportHeightSync();
     window.initExcavatorWorkShell();
     initExcavatorPwaUpdates();
+    scheduleExcavatorViewportHeightSync();
 });
 })();
 </script>
