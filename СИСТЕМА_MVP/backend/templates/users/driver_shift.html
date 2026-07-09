@@ -299,7 +299,15 @@ body.driver-mobile-screen .driver-online {
     white-space: nowrap;
 }
 
+body.driver-mobile-screen .driver-online::before,
+body.driver-mobile-screen .driver-online::after {
+    content: "" !important;
+    display: none !important;
+}
+
 body.driver-mobile-screen .driver-online-dot {
+    display: block;
+    flex: 0 0 14px;
     width: 14px;
     height: 14px;
     border-radius: 50%;
@@ -308,13 +316,7 @@ body.driver-mobile-screen .driver-online-dot {
 }
 
 body.driver-mobile-screen .driver-online strong {
-    width: 42px;
-    height: 42px;
-    border-radius: 50%;
-    background:
-        radial-gradient(circle, #8cff2e 0 18%, rgba(140,255,46,0.35) 20% 36%, transparent 38%),
-        radial-gradient(circle, transparent 0 47%, rgba(140,255,46,0.28) 49% 53%, transparent 55%);
-    box-shadow: 0 0 22px rgba(140, 255, 46, 0.20);
+    display: none;
 }
 
 body.driver-mobile-screen .driver-panel {
@@ -757,6 +759,7 @@ body.driver-mobile-screen .driver-work-dial.is-plan-missing .driver-work-percent
 }
 
 body.driver-mobile-screen .driver-work-label {
+    display: block;
     max-width: 92%;
     color: currentColor;
     text-transform: uppercase;
@@ -764,6 +767,7 @@ body.driver-mobile-screen .driver-work-label {
     line-height: 0.88;
     font-weight: 900;
     white-space: nowrap;
+    overflow: visible;
     text-shadow: 0 0 24px rgba(140,255,46,0.26);
 }
 
@@ -845,6 +849,18 @@ body.driver-mobile-screen .driver-work-dial-button.is-empty .driver-work-dial-co
 body.driver-mobile-screen .driver-work-dial-button.is-pending {
     color: var(--driver-cyan);
     pointer-events: none;
+}
+
+body.driver-mobile-screen .driver-work-dial-button.is-pending .driver-work-dial-core {
+    gap: clamp(7px, 1.2vw, 10px);
+}
+
+body.driver-mobile-screen .driver-work-dial-button.is-pending .driver-work-label {
+    max-width: 88%;
+    font-size: clamp(28px, 6.2vw, 54px);
+    line-height: 0.94;
+    overflow: hidden;
+    text-overflow: clip;
 }
 
 body.driver-mobile-screen .driver-work-dial-button.is-pending .driver-work-progress {
@@ -1529,14 +1545,15 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
         gap: 0;
     }
 
-    body.driver-mobile-screen .driver-online span,
-    body.driver-mobile-screen .driver-online-dot {
+    body.driver-mobile-screen .driver-online span {
         display: none;
     }
 
-    body.driver-mobile-screen .driver-online strong {
-        width: 34px;
-        height: 34px;
+    body.driver-mobile-screen .driver-online-dot {
+        display: block;
+        flex-basis: 12px;
+        width: 12px;
+        height: 12px;
     }
 }
 
@@ -1553,7 +1570,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
 {% endblock %}
 
 {% block body %}
-<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v47' }}">
+<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v48' }}">
     {% if messages %}
         <div class="driver-messages">
             {% for message in messages %}
@@ -2238,7 +2255,7 @@ window.bindDriverMobileShell = function () {
         if (!("serviceWorker" in navigator)) {
             return;
         }
-        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v47' }}";
+        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v48' }}";
         var updateModal = document.querySelector("[data-driver-pwa-update-modal]");
         var updateBadge = document.querySelector("[data-driver-pwa-update-badge]");
         var updateTarget = document.querySelector("[data-driver-pwa-update-nav-target]");
