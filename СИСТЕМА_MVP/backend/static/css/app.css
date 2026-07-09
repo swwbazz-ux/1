@@ -16859,6 +16859,11 @@ body.system-admin-reference-detail-screen .admin-page {
     background: var(--gd-yellow-soft);
 }
 
+.dispatcher-equipment-tile.status-gray {
+    border-color: rgba(142, 158, 166, .42);
+    background: rgba(142, 158, 166, .08);
+}
+
 .dispatcher-equipment-tile.status-blue {
     border-color: var(--gd-blue);
     background: var(--gd-blue-soft);
@@ -16880,6 +16885,10 @@ body.system-admin-reference-detail-screen .admin-page {
 
 .dispatcher-night .dispatcher-equipment-tile.status-yellow {
     background: rgba(255, 178, 29, .11);
+}
+
+.dispatcher-night .dispatcher-equipment-tile.status-gray {
+    background: rgba(142, 158, 166, .07);
 }
 
 .dispatcher-night .dispatcher-equipment-tile.status-blue {
@@ -22658,6 +22667,13 @@ body.management-dynamics-chart-modal-open {
     box-shadow: inset 0 0 16px rgba(255, 178, 29, .12), 0 0 0 1px rgba(255, 178, 29, .16);
 }
 
+.dispatcher-excavator-garage-tile.status-gray {
+    border-color: rgba(142, 158, 166, .42);
+    background: rgba(142, 158, 166, .08);
+    color: var(--gd-muted);
+    box-shadow: inset 0 0 14px rgba(142, 158, 166, .08), 0 0 0 1px rgba(142, 158, 166, .1);
+}
+
 .dispatcher-excavator-garage-tile.status-blue {
     border-color: color-mix(in srgb, var(--gd-blue) 44%, transparent);
     background: var(--gd-blue-soft);
@@ -22987,6 +23003,12 @@ body.management-dynamics-chart-modal-open {
     color: var(--gd-yellow);
 }
 
+.dispatcher-truck-tile.status-gray {
+    border-color: rgba(142, 158, 166, .48);
+    background: rgba(142, 158, 166, .08);
+    color: var(--gd-muted);
+}
+
 .dispatcher-truck-tile.status-blue {
     border-color: var(--gd-blue);
     background: var(--gd-blue-soft);
@@ -23250,7 +23272,7 @@ body.management-dynamics-chart-modal-open {
 }
 
 .dispatcher-excavator-garage-tile .dispatcher-tile-plan-label.is-plan-missing {
-    color: var(--gd-yellow);
+    color: var(--gd-muted);
 }
 
 .dispatcher-plan-strip span,
@@ -23278,12 +23300,12 @@ body.management-dynamics-chart-modal-open {
 }
 
 .dispatcher-plan-strip.is-plan-missing {
-    border-color: rgba(255, 178, 29, .45);
-    background: color-mix(in srgb, var(--gd-yellow) 10%, rgba(4, 13, 18, .82));
+    border-color: rgba(142, 158, 166, .4);
+    background: rgba(142, 158, 166, .08);
 }
 
 .dispatcher-plan-strip.is-plan-missing strong {
-    color: var(--gd-yellow);
+    color: var(--gd-muted);
 }
 
 .dispatcher-complex-card .complex-assigned-trucks {

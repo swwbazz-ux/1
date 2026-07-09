@@ -16,13 +16,61 @@ class EquipmentStateTests(TestCase):
         self.assertTrue(
             EquipmentState.objects.filter(
                 code='free',
-                color_group=EquipmentState.ColorGroup.YELLOW,
+                color_group=EquipmentState.ColorGroup.GRAY,
                 allows_assignment=True,
                 allows_drag=True,
+                requires_attention=False,
                 short_label='Свободен',
             ).exists()
         )
+        self.assertEqual(EquipmentState.objects.get(code='free').css_class, 'status-gray')
+        self.assertTrue(
+            EquipmentState.objects.filter(
+                code='garage',
+                color_group=EquipmentState.ColorGroup.GRAY,
+            ).exists()
+        )
+        self.assertTrue(
+            EquipmentState.objects.filter(
+                code='off_shift',
+                color_group=EquipmentState.ColorGroup.GRAY,
+                short_label='Вне смены',
+            ).exists()
+        )
+        self.assertTrue(
+            EquipmentState.objects.filter(
+                code='waiting_for_shift',
+                color_group=EquipmentState.ColorGroup.BLUE,
+                short_label='Ожидает смену',
+            ).exists()
+        )
+        self.assertTrue(
+            EquipmentState.objects.filter(
+                code='no_driver',
+                color_group=EquipmentState.ColorGroup.YELLOW,
+                requires_attention=True,
+            ).exists()
+        )
+        self.assertTrue(
+            EquipmentState.objects.filter(
+                code='no_operator',
+                color_group=EquipmentState.ColorGroup.YELLOW,
+                requires_attention=True,
+            ).exists()
+        )
         self.assertFalse(EquipmentState.objects.filter(code='in_transit').exists())
+        self.assertTrue(
+            EquipmentState.objects.filter(
+                code='assigned',
+                color_group=EquipmentState.ColorGroup.BLUE,
+            ).exists()
+        )
+        self.assertTrue(
+            EquipmentState.objects.filter(
+                code='working',
+                color_group=EquipmentState.ColorGroup.GREEN,
+            ).exists()
+        )
         self.assertTrue(
             EquipmentState.objects.filter(
                 code='loaded_waiting_unload',

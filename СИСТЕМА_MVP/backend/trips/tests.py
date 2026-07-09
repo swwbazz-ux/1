@@ -183,7 +183,7 @@ class DispatcherSharedShiftStartTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/dispatcher/')
-        self.assertIn('dispatcher-desktop-shell-v25', script)
+        self.assertIn('dispatcher-desktop-shell-v26', script)
         self.assertIn(reverse('dispatcher_control'), script)
         self.assertIn(reverse('dispatcher_manifest'), script)
         self.assertIn('/static/js/realtime-client.js', script)
@@ -352,7 +352,7 @@ class DispatcherGarageCurrentStateTests(TestCase):
             if not tile.get('is_placeholder')
         }
 
-        self.assertEqual(trucks_by_name['10']['status'], 'yellow')
+        self.assertEqual(trucks_by_name['10']['status'], 'gray')
         self.assertEqual(trucks_by_name['10']['equipment_state_code'], 'free')
         self.assertEqual(trucks_by_name['10']['label'], 'Свободен')
         self.assertEqual(trucks_by_name['10']['percent'], 0)
@@ -369,6 +369,8 @@ class DispatcherGarageCurrentStateTests(TestCase):
         self.assertEqual(excavators_by_number['2']['status'], 'gray')
         self.assertEqual(excavators_by_number['2']['equipment_state_code'], 'garage')
         self.assertEqual(excavators_by_number['2']['label'], 'Гараж')
+        self.assertEqual(dashboard['equipment_state_ui']['free']['color_group'], 'gray')
+        self.assertEqual(dashboard['equipment_state_ui']['garage']['color_group'], 'gray')
 
     def test_complex_cards_use_standard_equipment_state_colors(self):
         blue_excavator = Equipment.objects.create(equipment_type=self.excavator_type, garage_number='3')
