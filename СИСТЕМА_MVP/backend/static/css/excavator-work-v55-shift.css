@@ -425,6 +425,41 @@ body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashbo
     cursor: help !important;
 }
 
+body.excavator-operator-screen .eo-dump-queue-item.is-queue-dragging {
+    opacity: .32 !important;
+    transform: none !important;
+}
+
+body.excavator-operator-screen .eo-dump-queue-drag-preview {
+    position: fixed !important;
+    z-index: 22000 !important;
+    pointer-events: none !important;
+    opacity: .98 !important;
+    transform-origin: center center !important;
+    transition: none !important;
+    will-change: transform !important;
+    border-color: rgba(77, 255, 89, .9) !important;
+    background:
+        radial-gradient(circle at 50% 42%, rgba(77, 255, 89, .18), transparent 62%),
+        rgba(8, 24, 17, .92) !important;
+    box-shadow: 0 0 0 1px rgba(77, 255, 89, .48), 0 16px 34px rgba(0, 0, 0, .52), 0 0 22px rgba(77, 255, 89, .18) !important;
+    filter: brightness(1.12) saturate(1.12) !important;
+}
+
+body.excavator-operator-screen .eo-dump-queue-drag-preview img {
+    width: clamp(48px, 14vw, 68px) !important;
+    height: auto !important;
+    max-width: 72% !important;
+    max-height: 58% !important;
+    object-fit: contain !important;
+    opacity: .96 !important;
+}
+
+body.excavator-operator-screen .eo-dump-return-zone {
+    position: relative !important;
+    z-index: 2 !important;
+}
+
 body.excavator-operator-screen .eo-dashboard-truck-card.is-drag-preview,
 body.excavator-operator-screen .eo-truck-card.is-drag-preview {
     --eo-plan-color: rgba(163, 230, 53, 1);

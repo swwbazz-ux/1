@@ -5,9 +5,9 @@
 {% block body_class %}excavator-operator-screen{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v70">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v70">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v70">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v71">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v71">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v71">
 <meta name="theme-color" content="#030708">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Погрузка">
@@ -368,7 +368,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v70";
+var excavatorShellVersion = "excavator-mobile-shell-v71";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var excavatorRelevantEvents = {
     assignment_changed: true,
@@ -1212,9 +1212,12 @@ window.initExcavatorWorkShell = function () {
     function closeDumpQueueModal() {
         var parts = queueModalElements();
         if (!parts.modal) return;
+        if (activeQueueDrag) {
+            cleanupQueueDragState(activeQueueDrag);
+            activeQueueDrag = null;
+        }
         parts.modal.hidden = true;
         parts.modal.setAttribute("aria-hidden", "true");
-        activeQueueDrag = null;
         if (parts.returnZone) parts.returnZone.classList.remove("is-drop-ready");
     }
 
@@ -1264,7 +1267,8 @@ window.initExcavatorWorkShell = function () {
             pointerId: event.pointerId,
             startX: event.clientX,
             startY: event.clientY,
-            started: false
+            started: false,
+            preview: null
         };
         if (item.setPointerCapture) {
             try {
@@ -1276,14 +1280,63 @@ window.initExcavatorWorkShell = function () {
         item.addEventListener("pointercancel", cancelQueueDrag);
     }
 
+    function createQueueDragPreview(state) {
+        if (!state || !state.item || state.preview) return;
+        var rect = state.item.getBoundingClientRect();
+        var preview = state.item.cloneNode(true);
+        preview.classList.add("eo-dump-queue-drag-preview");
+        preview.disabled = true;
+        preview.setAttribute("aria-hidden", "true");
+        preview.removeAttribute("id");
+        preview.style.position = "fixed";
+        preview.style.left = rect.left + "px";
+        preview.style.top = rect.top + "px";
+        preview.style.setProperty("width", rect.width + "px", "important");
+        preview.style.setProperty("height", rect.height + "px", "important");
+        preview.style.setProperty("min-width", "0", "important");
+        preview.style.setProperty("min-height", "0", "important");
+        preview.style.setProperty("max-width", "none", "important");
+        preview.style.setProperty("max-height", "none", "important");
+        preview.style.pointerEvents = "none";
+        preview.style.zIndex = "22000";
+        preview.style.margin = "0";
+        preview.style.transform = "translate3d(0, 0, 0)";
+        preview.style.transformOrigin = "center center";
+        preview.style.boxSizing = "border-box";
+        document.body.appendChild(preview);
+        state.preview = preview;
+        state.item.classList.add("is-queue-dragging");
+    }
+
+    function moveQueueDragPreview(state, dx, dy) {
+        if (!state || !state.preview) return;
+        state.preview.style.transform = "translate3d(" + dx + "px, " + dy + "px, 0) scale(.98)";
+    }
+
+    function cleanupQueueDragState(state) {
+        if (!state || !state.item) return;
+        state.item.classList.remove("is-queue-dragging");
+        state.item.style.transform = "";
+        state.item.removeEventListener("pointermove", updateQueueDrag);
+        state.item.removeEventListener("pointerup", finishQueueDrag);
+        state.item.removeEventListener("pointercancel", cancelQueueDrag);
+        if (state.preview) {
+            state.preview.remove();
+            state.preview = null;
+        }
+    }
+
     function updateQueueDrag(event) {
         if (!activeQueueDrag || event.pointerId !== activeQueueDrag.pointerId) return;
         var dx = event.clientX - activeQueueDrag.startX;
         var dy = event.clientY - activeQueueDrag.startY;
         if (!activeQueueDrag.started && Math.abs(dx) + Math.abs(dy) < 8) return;
         event.preventDefault();
-        activeQueueDrag.started = true;
-        activeQueueDrag.item.style.transform = "translate3d(" + dx + "px, " + dy + "px, 0) scale(.98)";
+        if (!activeQueueDrag.started) {
+            activeQueueDrag.started = true;
+            createQueueDragPreview(activeQueueDrag);
+        }
+        moveQueueDragPreview(activeQueueDrag, dx, dy);
         var parts = queueModalElements();
         var element = document.elementFromPoint(event.clientX, event.clientY);
         var isReturn = !!(parts.returnZone && element && element.closest("[data-eo-dump-return-zone]"));
@@ -1294,15 +1347,12 @@ window.initExcavatorWorkShell = function () {
         if (!activeQueueDrag || event.pointerId !== activeQueueDrag.pointerId) return;
         var state = activeQueueDrag;
         activeQueueDrag = null;
-        state.item.style.transform = "";
-        state.item.removeEventListener("pointermove", updateQueueDrag);
-        state.item.removeEventListener("pointerup", finishQueueDrag);
-        state.item.removeEventListener("pointercancel", cancelQueueDrag);
         var parts = queueModalElements();
+        var element = state.started ? document.elementFromPoint(event.clientX, event.clientY) : null;
+        cleanupQueueDragState(state);
         if (parts.returnZone) parts.returnZone.classList.remove("is-drop-ready");
         if (!state.started) return;
         event.preventDefault();
-        var element = document.elementFromPoint(event.clientX, event.clientY);
         if (parts.returnZone && element && element.closest("[data-eo-dump-return-zone]")) {
             cancelLoadedTripFromQueue(state.item);
         }
@@ -1310,7 +1360,7 @@ window.initExcavatorWorkShell = function () {
 
     function cancelQueueDrag(event) {
         if (!activeQueueDrag || event.pointerId !== activeQueueDrag.pointerId) return;
-        activeQueueDrag.item.style.transform = "";
+        cleanupQueueDragState(activeQueueDrag);
         activeQueueDrag = null;
         var parts = queueModalElements();
         if (parts.returnZone) parts.returnZone.classList.remove("is-drop-ready");
