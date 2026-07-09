@@ -5,9 +5,9 @@
 {% block body_class %}excavator-operator-screen{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v77">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v77">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v77">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v78">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v78">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v78">
 <meta name="theme-color" content="#030708">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Погрузка">
@@ -173,7 +173,7 @@
                     </div>
                     <div class="eo-dashboard-plan-widget">
                         <div class="eo-dashboard-plan-ring{% if not shift_plan_has_plan %} is-plan-missing{% endif %}" style="--eo-dashboard-progress: {% if shift_plan_has_plan %}{{ shift_plan_percent }}{% else %}0{% endif %}%;" role="img" aria-label="{% if shift_plan_has_plan %}Выполнение нормы {{ shift_plan_percent }}%{% else %}{{ shift_plan_status_label }}{% endif %}" data-plan-status="{{ shift_plan_status|default:'no_plan_group' }}">
-                            <span>{% if shift_plan_has_plan %}{{ shift_plan_percent }}%{% else %}{{ shift_plan_short_label }}{% endif %}</span>
+                            <span>{% if shift_plan_has_plan %}{{ shift_plan_percent }}{% else %}0{% endif %}%</span>
                         </div>
                     </div>
                 </div>
@@ -369,7 +369,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v77";
+var excavatorShellVersion = "excavator-mobile-shell-v78";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var excavatorRelevantEvents = {
     assignment_changed: true,

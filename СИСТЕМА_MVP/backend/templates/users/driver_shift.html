@@ -746,16 +746,13 @@ body.driver-mobile-screen .driver-work-percent::after {
 }
 
 body.driver-mobile-screen .driver-work-dial.is-plan-missing .driver-work-percent {
-    grid-template-columns: 1fr;
-    min-width: 0;
-    max-width: 82%;
-    font-size: clamp(16px, 4.3vw, 22px);
-    line-height: 1.08;
+    color: #ff5a50 !important;
+    text-shadow: 0 0 24px rgba(255, 90, 80, 0.42) !important;
 }
 
 body.driver-mobile-screen .driver-work-dial.is-plan-missing .driver-work-percent::before,
 body.driver-mobile-screen .driver-work-dial.is-plan-missing .driver-work-percent::after {
-    display: none;
+    background: rgba(255, 90, 80, 0.34);
 }
 
 body.driver-mobile-screen .driver-work-label {
@@ -885,6 +882,25 @@ body.driver-mobile-screen .driver-work-dial-button.is-error {
 
 body.driver-mobile-screen .driver-work-dial-button.is-error .driver-work-progress {
     stroke: #ff5a50;
+}
+
+body.driver-mobile-screen .driver-work-dial.is-plan-missing .driver-work-track {
+    stroke: rgba(255, 90, 80, 0.45);
+}
+
+body.driver-mobile-screen .driver-work-dial.is-plan-missing .driver-work-progress {
+    stroke: #ff5a50 !important;
+    stroke-dashoffset: 0;
+    filter: drop-shadow(0 0 16px rgba(255, 90, 80, 0.72));
+}
+
+body.driver-mobile-screen .driver-work-dial.is-plan-missing .driver-work-dial-core {
+    background:
+        radial-gradient(circle at 50% 42%, rgba(92, 22, 26, 0.42), rgba(45, 14, 18, 0.78) 65%, rgba(12, 8, 11, 0.95));
+    border-color: rgba(255, 90, 80, 0.72);
+    box-shadow:
+        0 0 44px rgba(255, 90, 80, 0.26),
+        inset 0 0 44px rgba(255, 90, 80, 0.13);
 }
 
 body.driver-mobile-screen .driver-work-dial-button.is-holding .driver-work-hold-progress,
@@ -1582,7 +1598,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
 {% endblock %}
 
 {% block body %}
-<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v53' }}">
+<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v54' }}">
     {% if messages %}
         <div class="driver-messages">
             {% for message in messages %}
@@ -1624,7 +1640,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
                             </svg>
                             <span class="driver-work-ticks" aria-hidden="true"></span>
                             <span class="driver-work-dial-core">
-                                <span class="driver-work-percent">{% if shift_plan_has_plan %}{{ shift_plan_percent }}%{% else %}{{ shift_plan_short_label }}{% endif %}</span>
+                                <span class="driver-work-percent">{% if shift_plan_has_plan %}{{ shift_plan_percent }}{% else %}0{% endif %}%</span>
                                 <strong class="driver-work-label" data-driver-dial-label>{{ driver_dial_label }}</strong>
                                 <em class="driver-work-note">{{ driver_dial_note }}</em>
                             </span>
@@ -1639,7 +1655,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
                         </svg>
                         <span class="driver-work-ticks" aria-hidden="true"></span>
                         <span class="driver-work-dial-core">
-                            <span class="driver-work-percent">{% if shift_plan_has_plan %}{{ shift_plan_percent }}%{% else %}{{ shift_plan_short_label }}{% endif %}</span>
+                            <span class="driver-work-percent">{% if shift_plan_has_plan %}{{ shift_plan_percent }}{% else %}0{% endif %}%</span>
                             <strong class="driver-work-label">{{ driver_dial_label }}</strong>
                             <em class="driver-work-note">{{ driver_dial_note }}</em>
                         </span>
@@ -2276,7 +2292,7 @@ window.bindDriverMobileShell = function () {
         if (!("serviceWorker" in navigator)) {
             return;
         }
-        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v53' }}";
+        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v54' }}";
         var updateModal = document.querySelector("[data-driver-pwa-update-modal]");
         var updateBadge = document.querySelector("[data-driver-pwa-update-badge]");
         var updateTarget = document.querySelector("[data-driver-pwa-update-nav-target]");
