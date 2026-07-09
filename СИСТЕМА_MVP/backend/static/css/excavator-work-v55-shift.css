@@ -970,6 +970,7 @@ body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashbo
     body.excavator-operator-screen .eo-dashboard-truck-card.truck-drag-preview,
     body.excavator-operator-screen .eo-truck-card.truck-drag-preview {
         opacity: 1 !important;
+        padding-top: clamp(28px, 3.8dvh, 36px) !important;
         background:
             radial-gradient(circle at 50% 34%, rgba(96, 213, 255, .22), rgba(96, 213, 255, 0) 46%),
             linear-gradient(180deg, rgba(15, 23, 42, .98), rgba(6, 18, 24, .99)) !important;
