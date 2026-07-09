@@ -5,9 +5,9 @@
 {% block body_class %}excavator-operator-screen{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v78">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v78">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v78">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v79">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v79">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v79">
 <meta name="theme-color" content="#030708">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Погрузка">
@@ -35,7 +35,7 @@
 
     <form class="eo-form" method="post" data-eo-trip-form>
         {% csrf_token %}
-        <input type="hidden" name="assignment" value="{% if truck_cards %}{{ truck_cards.0.assignment.id }}{% endif %}" data-eo-assignment-input>
+        <input type="hidden" name="assignment" value="{{ first_ready_assignment_id|default:'' }}" data-eo-assignment-input>
         <input type="hidden" name="planned_volume_m3" value="{{ planned_volume_value }}">
         <input type="hidden" name="transport_distance_km" value="{{ transport_distance_value }}">
         <input type="hidden" name="downtime_text" value="{{ downtime_text_value }}" data-eo-downtime-input>
@@ -182,7 +182,7 @@
                     {% for card in truck_cards %}
                         {% if forloop.counter <= 9 %}
                             <button
-                                class="eo-truck-card eo-dashboard-truck-card status-{{ card.status_key }}{% if card.is_selected %} is-selected{% endif %}{% if card.is_locked %} is-inactive{% endif %}"
+                                class="eo-truck-card eo-dashboard-truck-card status-{{ card.status_key }}{% if card.is_selected %} is-selected{% endif %}{% if card.is_inactive %} is-inactive{% endif %}{% if card.is_load_blocked %} is-load-blocked{% endif %}{% if card.load_block_reason_code == 'driver_shift_not_started' %} is-shift-pending{% endif %}{% if card.load_block_reason_code == 'no_driver' %} is-no-driver{% endif %}"
                                 type="button"
                                 draggable="{% if card.can_drag %}true{% else %}false{% endif %}"
                                 style="--eo-truck-progress: {% if card.plan_has_plan %}{{ card.plan_percent }}{% else %}0{% endif %}%; --plan-progress: {% if card.plan_has_plan %}{{ card.plan_percent }}{% else %}0{% endif %}%; --truck-plan-percent: {% if card.plan_has_plan %}{{ card.plan_percent }}{% else %}0{% endif %};"
@@ -192,11 +192,15 @@
                                 data-truck-id="{{ card.assignment.truck.id }}"
                                 data-eo-truck-detail-id="{{ card.detail_card_id }}"
                                 data-eo-equipment-state="{{ card.equipment_state_code }}"
+                                data-eo-can-load="{% if card.can_load %}1{% else %}0{% endif %}"
+                                {% if card.load_block_reason_code %}data-eo-load-block-reason-code="{{ card.load_block_reason_code }}"{% endif %}
+                                {% if card.load_block_reason_label %}data-eo-load-block-reason-label="{{ card.load_block_reason_label }}"{% endif %}
                                 data-eo-plan-percent="{% if card.plan_has_plan %}{{ card.plan_percent }}{% endif %}"
                                 data-plan-percent="{% if card.plan_has_plan %}{{ card.plan_percent }}{% endif %}"
                                 data-plan-status="{{ card.plan_status|default:'no_plan_group' }}"
                                 data-plan-progress-status="{{ card.plan_status_key|default:'empty' }}"
-                                {% if card.is_locked %}data-eo-truck-inactive="1" aria-disabled="true"{% endif %}
+                                {% if card.is_inactive %}data-eo-truck-inactive="1"{% endif %}
+                                {% if card.is_locked %}aria-disabled="true"{% endif %}
                             >
                                 <i aria-hidden="true"><img src="{% static card.icon %}" alt=""></i>
                                 <strong>{{ card.number }}</strong>
@@ -369,7 +373,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v78";
+var excavatorShellVersion = "excavator-mobile-shell-v79";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var excavatorRelevantEvents = {
     assignment_changed: true,
@@ -782,6 +786,18 @@ window.initExcavatorWorkShell = function () {
         return !!(card && card.dataset.eoTruckInactive === "1");
     }
 
+    function isTruckLoadBlocked(card) {
+        return !!(card && card.dataset.eoCanLoad === "0");
+    }
+
+    function truckLoadBlockReason(card) {
+        return (card && card.dataset.eoLoadBlockReasonLabel) || "Самосвал недоступен для погрузки";
+    }
+
+    function canTruckLoad(card) {
+        return !!(card && !isInactiveTruck(card) && !isTruckLoadBlocked(card));
+    }
+
     function generateClientActionId(prefix) {
         var randomPart = "";
         if (window.crypto && window.crypto.getRandomValues) {
@@ -1063,9 +1079,11 @@ window.initExcavatorWorkShell = function () {
     }
 
     function pickFirstActiveTruck() {
-        var firstCard = shell.querySelector('[data-eo-truck-card]:not([data-eo-truck-inactive="1"])');
+        var firstCard = shell.querySelector('[data-eo-truck-card][data-eo-can-load="1"]:not([data-eo-truck-inactive="1"])');
         if (firstCard) {
             selectTruck(firstCard);
+        } else if (assignmentInput) {
+            assignmentInput.value = "";
         }
     }
 
@@ -1086,7 +1104,7 @@ window.initExcavatorWorkShell = function () {
 
     function selectTruck(card) {
         if (!card) return;
-        if (isInactiveTruck(card)) {
+        if (!canTruckLoad(card)) {
             return;
         }
         shell.querySelectorAll("[data-eo-truck-card]").forEach(function (item) {
@@ -1181,9 +1199,12 @@ window.initExcavatorWorkShell = function () {
 
     function restoreTruckAfterLoadedCancel(card, data) {
         if (!card) return;
-        card.classList.remove("status-green", "status-yellow", "status-gray", "status-red", "status-orange", "is-inactive", "is-pending");
+        card.classList.remove("status-green", "status-yellow", "status-gray", "status-red", "status-orange", "is-inactive", "is-pending", "is-load-blocked", "is-shift-pending", "is-no-driver");
         card.classList.add("status-" + (data.status_key || "blue"));
         delete card.dataset.eoTruckInactive;
+        card.dataset.eoCanLoad = "1";
+        delete card.dataset.eoLoadBlockReasonCode;
+        delete card.dataset.eoLoadBlockReasonLabel;
         card.dataset.eoEquipmentState = data.equipment_state || "assigned";
         card.setAttribute("draggable", "true");
         card.removeAttribute("aria-disabled");
@@ -1459,6 +1480,9 @@ window.initExcavatorWorkShell = function () {
         return {
             className: card.className,
             inactive: card.dataset.eoTruckInactive || "",
+            canLoad: card.dataset.eoCanLoad || "",
+            loadBlockReasonCode: card.dataset.eoLoadBlockReasonCode || "",
+            loadBlockReasonLabel: card.dataset.eoLoadBlockReasonLabel || "",
             equipmentState: card.dataset.eoEquipmentState || "",
             draggable: card.getAttribute("draggable") || "true",
             statusText: card.querySelector("span") ? card.querySelector("span").textContent : "",
@@ -1470,8 +1494,12 @@ window.initExcavatorWorkShell = function () {
     function applyTruckPending(card, dumpTarget) {
         var label = dumpTarget && dumpTarget.querySelector("strong") ? dumpTarget.querySelector("strong").textContent : "";
         card.classList.remove("status-yellow", "status-gray", "status-red", "status-blue", "status-orange", "is-selected");
+        card.classList.remove("is-load-blocked", "is-shift-pending", "is-no-driver");
         card.classList.add("status-green", "is-inactive", "is-pending");
         card.dataset.eoTruckInactive = "1";
+        card.dataset.eoCanLoad = "0";
+        delete card.dataset.eoLoadBlockReasonCode;
+        delete card.dataset.eoLoadBlockReasonLabel;
         card.dataset.eoEquipmentState = "loaded_waiting_unload";
         card.setAttribute("draggable", "false");
         var status = card.querySelector("span");
@@ -1490,8 +1518,12 @@ window.initExcavatorWorkShell = function () {
 
     function confirmTruckLoaded(card, payload) {
         card.classList.remove("is-pending");
+        card.classList.remove("is-load-blocked", "is-shift-pending", "is-no-driver");
         card.classList.add("status-green", "is-inactive");
         card.dataset.eoTruckInactive = "1";
+        card.dataset.eoCanLoad = "0";
+        delete card.dataset.eoLoadBlockReasonCode;
+        delete card.dataset.eoLoadBlockReasonLabel;
         card.dataset.eoEquipmentState = "loaded_waiting_unload";
         card.setAttribute("draggable", "false");
         var status = card.querySelector("span");
@@ -1511,6 +1543,21 @@ window.initExcavatorWorkShell = function () {
             card.dataset.eoTruckInactive = snapshot.inactive;
         } else {
             delete card.dataset.eoTruckInactive;
+        }
+        if (snapshot.canLoad) {
+            card.dataset.eoCanLoad = snapshot.canLoad;
+        } else {
+            delete card.dataset.eoCanLoad;
+        }
+        if (snapshot.loadBlockReasonCode) {
+            card.dataset.eoLoadBlockReasonCode = snapshot.loadBlockReasonCode;
+        } else {
+            delete card.dataset.eoLoadBlockReasonCode;
+        }
+        if (snapshot.loadBlockReasonLabel) {
+            card.dataset.eoLoadBlockReasonLabel = snapshot.loadBlockReasonLabel;
+        } else {
+            delete card.dataset.eoLoadBlockReasonLabel;
         }
         if (snapshot.equipmentState) {
             card.dataset.eoEquipmentState = snapshot.equipmentState;
@@ -1534,7 +1581,11 @@ window.initExcavatorWorkShell = function () {
     }
 
     function postTruckLoaded(card, dumpTarget) {
-        if (!card || isInactiveTruck(card) || !dumpTarget || !truckLoadedUrl) return;
+        if (!card || !dumpTarget || !truckLoadedUrl) return;
+        if (!canTruckLoad(card)) {
+            window.alert(truckLoadBlockReason(card));
+            return;
+        }
         var snapshot = snapshotTruckCard(card);
         var optimisticBadge = null;
         var truckId = card.dataset.truckId || "";
@@ -1692,7 +1743,7 @@ window.initExcavatorWorkShell = function () {
         window.setTimeout(function () {
             delete state.card.dataset.eoSuppressClick;
         }, 0);
-        if (state.target && !isInactiveTruck(state.card)) {
+        if (state.target && canTruckLoad(state.card)) {
             selectTruck(state.card);
             selectDump(state.target.dataset.eoDumpTarget);
             postTruckLoaded(state.card, state.target);
@@ -1748,6 +1799,11 @@ window.initExcavatorWorkShell = function () {
                 event.preventDefault();
                 return;
             }
+            if (isTruckLoadBlocked(card)) {
+                event.preventDefault();
+                openTruckDetailCard(card.dataset.eoTruckDetailId || card.dataset.truckId);
+                return;
+            }
             selectTruck(card);
         });
         card.addEventListener("pointerdown", function (event) {
@@ -1767,7 +1823,7 @@ window.initExcavatorWorkShell = function () {
                     }
                 }
             }, 580);
-            if (isInactiveTruck(card)) return;
+            if (!canTruckLoad(card)) return;
             selectTruck(card);
             activeTruckDrag = {
                 card: card,
@@ -1875,7 +1931,7 @@ window.initExcavatorWorkShell = function () {
         target.addEventListener("drop", function (event) {
             event.preventDefault();
             target.classList.remove("is-drop-ready");
-            if (!selectedTruck || isInactiveTruck(selectedTruck)) {
+            if (!selectedTruck || !canTruckLoad(selectedTruck)) {
                 return;
             }
             selectDump(target.dataset.eoDumpTarget);
@@ -2229,7 +2285,7 @@ window.initExcavatorWorkShell = function () {
             }
         });
     }
-    if (selectedTruck && isInactiveTruck(selectedTruck)) {
+    if (selectedTruck && !canTruckLoad(selectedTruck)) {
         selectedTruck.classList.remove("is-selected");
         selectedTruck = null;
         if (assignmentInput) {

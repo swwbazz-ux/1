@@ -1,4 +1,45 @@
 /* v65 shift tab balance layer. Loaded after historical excavator CSS files. */
+body.excavator-operator-screen .eo-dashboard-truck-card.is-load-blocked:not(.is-inactive),
+body.excavator-operator-screen .eo-truck-card.is-load-blocked:not(.is-inactive) {
+    cursor: help !important;
+    border-style: dashed !important;
+    opacity: .78 !important;
+    box-shadow: inset 0 0 18px rgba(148, 163, 184, .08), 0 7px 13px rgba(0, 0, 0, .2) !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-card.is-load-blocked:not(.is-inactive)::after,
+body.excavator-operator-screen .eo-truck-card.is-load-blocked:not(.is-inactive)::after {
+    content: "";
+    position: absolute !important;
+    right: clamp(6px, 1.5vw, 10px) !important;
+    top: clamp(6px, 1.4vw, 9px) !important;
+    width: clamp(6px, 1.35vw, 9px) !important;
+    height: clamp(6px, 1.35vw, 9px) !important;
+    border-radius: 50% !important;
+    background: currentColor !important;
+    opacity: .78 !important;
+    pointer-events: none !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-card.is-load-blocked:not(.is-inactive):hover,
+body.excavator-operator-screen .eo-truck-card.is-load-blocked:not(.is-inactive):hover {
+    opacity: .86 !important;
+    filter: saturate(.86) contrast(.98) !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-card.is-load-blocked:not(.is-inactive).is-selected,
+body.excavator-operator-screen .eo-truck-card.is-load-blocked:not(.is-inactive).is-selected {
+    outline: none !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-card.is-shift-pending:not(.is-inactive) {
+    background: linear-gradient(180deg, rgba(8, 24, 38, .94), rgba(8, 18, 28, .92)) !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-card.is-no-driver:not(.is-inactive) {
+    background: linear-gradient(180deg, rgba(34, 27, 9, .94), rgba(23, 18, 8, .92)) !important;
+}
+
 body.excavator-operator-screen .eo-screen.mm-mobile-shift-form {
     gap: clamp(13px, 1.8dvh, 18px) !important;
     justify-content: flex-start !important;

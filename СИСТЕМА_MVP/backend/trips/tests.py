@@ -6,7 +6,7 @@ from django.test import Client, TestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from assignments.models import AssignmentStatus, ExcavatorPlacement, HaulAssignment
+from assignments.models import AssignmentStatus, EquipmentAssignment, ExcavatorPlacement, HaulAssignment
 from core.models import OperationalStateEvent
 from downtimes.models import DowntimeEvent, DowntimeReason
 from references.equipment_states import upsert_default_equipment_states
@@ -566,6 +566,15 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         )
         return driver, access, shift
 
+    def create_driver_assignment(self, truck, *, driver=None, shift=None, status=AssignmentStatus.ACCEPTED):
+        return EquipmentAssignment.objects.create(
+            employee=driver or self.driver,
+            equipment=truck,
+            shift=shift,
+            assigned_by=self.operator,
+            status=status,
+        )
+
     def setUp(self):
         upsert_default_equipment_states()
         self.role = Role.objects.create(code='excavator_operator', name='Машинист экскаватора')
@@ -628,7 +637,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/static/css/excavator-work-v55-shift.css')
         self.assertContains(response, '/excavator-sw.js')
         self.assertContains(response, 'scope: "/excavator/"')
-        self.assertContains(response, 'excavator-mobile-shell-v78')
+        self.assertContains(response, 'excavator-mobile-shell-v79')
         self.assertContains(response, 'Простои')
         self.assertNotContains(response, 'Отпустить сюда')
         self.assertContains(response, 'resolveExcavatorUpdateVersion')
@@ -745,9 +754,11 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.context['truck_cards'][0]['plan_status_key'], 'no_plan_group')
         self.assertContains(response, 'data-plan-status="no_plan_group"')
         self.assertTrue(response.context['truck_cards'][0]['can_drag'])
+        self.assertTrue(response.context['truck_cards'][0]['can_load'])
         self.assertFalse(response.context['truck_cards'][0]['is_locked'])
         self.assertContains(response, 'Назначена')
         self.assertContains(response, 'data-eo-equipment-state="assigned"')
+        self.assertContains(response, 'data-eo-can-load="1"')
         self.assertContains(response, 'card.dataset.eoEquipmentState = "loaded_waiting_unload";')
         self.assertNotContains(response, 'ожидает сервер')
         self.assertNotContains(response, 'Под погрузкой')
@@ -763,6 +774,13 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(detail['label'], '21')
         self.assertEqual(detail['status_label'], 'Назначена')
         self.assertEqual(detail['category'], 'truck')
+        self.assertTrue(detail['can_load'])
+        self.assertTrue(detail['can_drag'])
+        self.assertEqual(detail['equipment_state_code'], 'assigned')
+        self.assertEqual(detail['color_group'], 'blue')
+        self.assertEqual(detail['css_class'], 'status-blue')
+        self.assertEqual(detail['load_block_reason_code'], '')
+        self.assertEqual(detail['load_block_reason_label'], '')
         detail_labels = {row['label']: row['value'] for row in detail['details']}
         self.assertEqual(detail_labels['Гаражный N'], '21')
         self.assertEqual(detail_labels['Состояние'], 'Назначена')
@@ -1191,7 +1209,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/excavator/')
-        self.assertIn('excavator-mobile-shell-v78', script)
+        self.assertIn('excavator-mobile-shell-v79', script)
         self.assertIn(reverse('excavator_work'), script)
         self.assertIn(reverse('excavator_manifest'), script)
         self.assertIn('/static/js/realtime-client.js', script)
@@ -1229,12 +1247,14 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(cards_by_number['21']['status_key'], 'blue')
         self.assertEqual(cards_by_number['21']['status_label'], 'Назначена')
         self.assertTrue(cards_by_number['21']['can_drag'])
+        self.assertTrue(cards_by_number['21']['can_load'])
         self.assertEqual(cards_by_number['77']['equipment_state_code'], 'assigned')
         self.assertEqual(cards_by_number['77']['status_key'], 'blue')
         self.assertEqual(cards_by_number['77']['status_label'], 'Назначена')
         self.assertTrue(cards_by_number['77']['can_drag'])
+        self.assertTrue(cards_by_number['77']['can_load'])
 
-    def test_excavator_work_locks_assigned_truck_without_open_driver_shift(self):
+    def test_excavator_work_marks_complex_truck_without_driver_assignment(self):
         no_shift_truck = Equipment.objects.create(equipment_type=self.truck_type, garage_number='78')
         HaulAssignment.objects.create(
             truck=no_shift_truck,
@@ -1246,10 +1266,52 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         cards_by_number = {card['number']: card for card in response.context['truck_cards']}
-        self.assertEqual(cards_by_number['78']['equipment_state_code'], 'waiting')
+        self.assertEqual(cards_by_number['78']['equipment_state_code'], 'no_driver')
         self.assertEqual(cards_by_number['78']['status_key'], 'yellow')
+        self.assertEqual(cards_by_number['78']['status_label'], 'Нет водителя')
+        self.assertFalse(cards_by_number['78']['can_load'])
         self.assertFalse(cards_by_number['78']['can_drag'])
-        self.assertIn('смена', cards_by_number['78']['block_reason'])
+        self.assertFalse(cards_by_number['78']['is_inactive'])
+        self.assertTrue(cards_by_number['78']['is_load_blocked'])
+        self.assertEqual(cards_by_number['78']['load_block_reason_code'], 'no_driver')
+        self.assertEqual(cards_by_number['78']['load_block_reason_label'], 'Водитель не назначен')
+        self.assertContains(response, 'data-eo-equipment-state="no_driver"')
+        self.assertContains(response, 'data-eo-can-load="0"')
+        self.assertContains(response, 'data-eo-load-block-reason-code="no_driver"')
+
+    def test_excavator_work_marks_driver_assignment_without_open_shift_as_waiting_for_shift(self):
+        waiting_truck = Equipment.objects.create(equipment_type=self.truck_type, garage_number='79')
+        driver, _, shift = self.create_registered_driver_shift(
+            waiting_truck,
+            full_name='Водитель 79',
+            access_code='200079',
+        )
+        shift.closed_at = timezone.now()
+        shift.save(update_fields=['closed_at'])
+        self.create_driver_assignment(waiting_truck, driver=driver, shift=shift)
+        HaulAssignment.objects.create(
+            truck=waiting_truck,
+            excavator=self.excavator,
+            status=AssignmentStatus.PENDING,
+        )
+
+        response = self.client.get(reverse('excavator_work'))
+
+        self.assertEqual(response.status_code, 200)
+        cards_by_number = {card['number']: card for card in response.context['truck_cards']}
+        self.assertEqual(cards_by_number['79']['equipment_state_code'], 'waiting_for_shift')
+        self.assertEqual(cards_by_number['79']['status_key'], 'blue')
+        self.assertEqual(cards_by_number['79']['status_label'], 'Ожидает смену')
+        self.assertFalse(cards_by_number['79']['can_load'])
+        self.assertFalse(cards_by_number['79']['can_drag'])
+        self.assertFalse(cards_by_number['79']['is_inactive'])
+        self.assertTrue(cards_by_number['79']['is_load_blocked'])
+        self.assertFalse(cards_by_number['79']['driver_shift_started'])
+        self.assertEqual(cards_by_number['79']['load_block_reason_code'], 'driver_shift_not_started')
+        self.assertEqual(cards_by_number['79']['load_block_reason_label'], 'Смена водителя не начата')
+        self.assertContains(response, 'data-eo-equipment-state="waiting_for_shift"')
+        self.assertContains(response, 'data-eo-can-load="0"')
+        self.assertContains(response, 'data-eo-load-block-reason-code="driver_shift_not_started"')
 
     def test_excavator_work_marks_active_trip_truck_as_waiting_unload_state(self):
         active_trip = Trip.objects.create(
@@ -1423,7 +1485,24 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 409)
         payload = json.loads(response.content.decode('utf-8'))
         self.assertFalse(payload['ok'])
-        self.assertIn('смена', payload['error'])
+        self.assertEqual(payload['load_block_reason_code'], 'no_driver')
+        self.assertEqual(payload['load_block_reason_label'], 'Водитель не назначен')
+        self.assertEqual(payload['error'], 'Водитель не назначен')
+        self.assertEqual(Trip.objects.count(), 0)
+
+    def test_truck_loaded_rejects_assigned_driver_without_open_shift(self):
+        self.create_driver_assignment(self.truck, driver=self.driver, shift=self.truck_shift)
+        self.truck_shift.closed_at = timezone.now()
+        self.truck_shift.save(update_fields=['closed_at'])
+
+        response = self.post_truck_loaded(client_action_id='driver-shift-not-started')
+
+        self.assertEqual(response.status_code, 409)
+        payload = json.loads(response.content.decode('utf-8'))
+        self.assertFalse(payload['ok'])
+        self.assertEqual(payload['load_block_reason_code'], 'driver_shift_not_started')
+        self.assertEqual(payload['load_block_reason_label'], 'Смена водителя не начата')
+        self.assertEqual(payload['error'], 'Смена водителя не начата')
         self.assertEqual(Trip.objects.count(), 0)
 
     def test_truck_loaded_rejects_assigned_truck_with_active_downtime(self):
