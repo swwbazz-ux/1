@@ -852,14 +852,23 @@ body.driver-mobile-screen .driver-work-dial-button.is-pending {
 }
 
 body.driver-mobile-screen .driver-work-dial-button.is-pending .driver-work-dial-core {
-    gap: clamp(7px, 1.2vw, 10px);
+    gap: clamp(8px, 1.1vw, 12px);
+}
+
+body.driver-mobile-screen .driver-work-dial-button.is-pending .driver-work-percent {
+    min-width: 0;
+    font-size: clamp(20px, 3.4vw, 32px);
+    opacity: 0.62;
 }
 
 body.driver-mobile-screen .driver-work-dial-button.is-pending .driver-work-label {
-    max-width: 88%;
-    font-size: clamp(28px, 6.2vw, 54px);
-    line-height: 0.94;
-    overflow: hidden;
+    width: 100%;
+    max-width: 78%;
+    justify-self: center;
+    font-size: clamp(24px, 4.5vw, 42px);
+    line-height: 1;
+    text-align: center;
+    overflow: visible;
     text-overflow: clip;
 }
 
@@ -1570,7 +1579,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
 {% endblock %}
 
 {% block body %}
-<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v48' }}">
+<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v49' }}">
     {% if messages %}
         <div class="driver-messages">
             {% for message in messages %}
@@ -2255,7 +2264,7 @@ window.bindDriverMobileShell = function () {
         if (!("serviceWorker" in navigator)) {
             return;
         }
-        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v48' }}";
+        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v49' }}";
         var updateModal = document.querySelector("[data-driver-pwa-update-modal]");
         var updateBadge = document.querySelector("[data-driver-pwa-update-badge]");
         var updateTarget = document.querySelector("[data-driver-pwa-update-nav-target]");
