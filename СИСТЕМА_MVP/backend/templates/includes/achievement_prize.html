@@ -70,29 +70,11 @@
         });
     }
 
-    function achievementStorageKey(unlockId) {
-        return "achievement-prize-shown:" + unlockId;
-    }
-
-    function rememberUnlock(unlockId) {
-        try {
-            window.sessionStorage.setItem(achievementStorageKey(unlockId), "1");
-        } catch (error) {}
-    }
-
-    function hasRememberedUnlock(unlockId) {
-        try {
-            return window.sessionStorage.getItem(achievementStorageKey(unlockId)) === "1";
-        } catch (error) {
-            return false;
-        }
-    }
-
     function markAchievementShown(unlockId) {
         if (!unlockId || !window.fetch) {
-            return;
+            return Promise.resolve(null);
         }
-        fetch("/api/achievements/" + unlockId + "/shown/", {
+        return fetch("/api/achievements/" + unlockId + "/shown/", {
             method: "POST",
             credentials: "same-origin",
             cache: "no-store",
@@ -101,15 +83,20 @@
                 "X-Requested-With": "XMLHttpRequest",
                 "X-CSRFToken": csrfToken()
             }
-        }).catch(function () {});
+        }).catch(function () {
+            return null;
+        });
     }
 
     function showAchievementPrize(data) {
-        if (!data || !data.unlocked || !data.unlock_id || data.shown || hasRememberedUnlock(data.unlock_id)) {
+        if (!data || !data.unlocked || !data.unlock_id || data.shown) {
             return false;
         }
-        rememberUnlock(data.unlock_id);
         var modal = createAchievementModal();
+        if (!modal.hidden && modal.dataset.achievementUnlockId === String(data.unlock_id)) {
+            return true;
+        }
+        modal.dataset.achievementUnlockId = String(data.unlock_id);
         var stage = modal.querySelector("[data-achievement-stage]");
         var title = modal.querySelector("[data-achievement-title]");
         var percent = modal.querySelector("[data-achievement-percent]");
@@ -129,13 +116,13 @@
         window.setTimeout(function () {
             stage.classList.remove("is-celebrating");
             stage.classList.add("is-prize");
-            markAchievementShown(data.unlock_id);
         }, 2400);
 
         if (saveButton) {
             saveButton.onclick = function () {
                 var targetUrl = data.download_url || data.image_url;
                 if (!targetUrl) return;
+                markAchievementShown(data.unlock_id);
                 var opened = window.open(targetUrl, "_blank", "noopener");
                 if (!opened) {
                     window.location.href = targetUrl;
@@ -144,6 +131,7 @@
         }
         if (closeButton) {
             closeButton.onclick = function () {
+                markAchievementShown(data.unlock_id);
                 modal.hidden = true;
                 stage.classList.remove("is-celebrating", "is-prize");
             };
