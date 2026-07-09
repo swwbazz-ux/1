@@ -14,9 +14,14 @@
 <link rel="apple-touch-icon" href="{% static 'img/pwa/mining-master-180.png' %}">
 <style>
 body.driver-mobile-screen {
+    --driver-safe-top: env(safe-area-inset-top, 0px);
     --driver-safe-bottom: env(safe-area-inset-bottom, 0px);
+    --driver-header-h: 54px;
+    --driver-header-content-h: var(--driver-header-h);
+    --driver-header-total-h: calc(var(--driver-safe-top) + var(--driver-header-content-h));
     --driver-nav-content-h: 78px;
     --driver-nav-total-h: calc(var(--driver-nav-content-h) + var(--driver-safe-bottom));
+    --driver-work-gap: clamp(12px, 1.8dvh, 20px);
     margin: 0;
     width: 100vw;
     min-width: 0;
@@ -72,18 +77,22 @@ body.driver-mobile-screen .driver-shell {
     --driver-line: rgba(144, 173, 184, 0.24);
     --driver-edge: clamp(16px, 5vw, 34px);
     --driver-header-h: 54px;
+    --driver-safe-top: env(safe-area-inset-top, 0px);
     --driver-safe-bottom: env(safe-area-inset-bottom, 0px);
+    --driver-header-total-h: calc(var(--driver-safe-top) + var(--driver-header-h));
     --driver-nav-content-h: 78px;
     --driver-nav-total-h: calc(var(--driver-nav-content-h) + var(--driver-safe-bottom));
-    --driver-dial-size: clamp(285px, 78vw, 520px);
+    --driver-work-gap: clamp(12px, 1.8dvh, 20px);
+    --driver-work-column: min(100%, clamp(320px, 72vw, 720px));
+    --driver-dial-size: clamp(280px, min(68vw, 54dvh), 520px);
     width: 100%;
     max-width: none;
     min-width: 320px;
     height: 100dvh;
     min-height: 100dvh;
     display: grid;
-    grid-template-rows: var(--driver-header-h) minmax(0, 1fr);
-    padding: 0 var(--driver-edge) var(--driver-nav-total-h);
+    grid-template-rows: minmax(0, 1fr);
+    padding: calc(var(--driver-header-total-h) + var(--driver-work-gap)) var(--driver-edge) calc(var(--driver-nav-total-h) + var(--driver-work-gap));
     overflow: hidden;
     position: relative;
     background:
@@ -154,15 +163,24 @@ body.driver-mobile-screen .driver-toast {
 }
 
 body.driver-mobile-screen .driver-header {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 116;
+    width: 100%;
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     align-content: center;
     align-items: center;
     gap: 12px;
-    height: var(--driver-header-h);
-    min-height: var(--driver-header-h);
-    padding: 0;
+    height: var(--driver-header-total-h);
+    min-height: var(--driver-header-total-h);
+    padding: var(--driver-safe-top) var(--driver-edge) 0;
     border-bottom: 1px solid var(--driver-line);
+    background: rgba(3, 16, 21, 0.96);
+    box-shadow: inset 0 -1px 0 rgba(127, 163, 177, 0.20), 0 12px 28px rgba(0, 0, 0, 0.32);
+    overflow: hidden;
 }
 
 body.driver-mobile-screen .driver-header-id {
@@ -309,9 +327,10 @@ body.driver-mobile-screen .driver-panel.is-active {
     display: grid;
     min-height: 0;
     height: 100%;
+    max-height: 100%;
     overflow: hidden;
     overscroll-behavior: contain;
-    padding: clamp(12px, 2dvh, 18px) 0 max(18px, var(--driver-safe-bottom, 0px));
+    padding: 0 0 max(10px, var(--driver-safe-bottom, 0px));
 }
 
 body.driver-mobile-screen .driver-panel[data-driver-tab-panel="shift"].is-active,
@@ -332,13 +351,17 @@ body.driver-mobile-screen .driver-work-screen.is-active {
         "dial"
         "assign";
     grid-template-rows: auto minmax(0, 1fr) auto;
-    gap: clamp(12px, 2dvh, 20px);
-    padding: clamp(14px, 2.4dvh, 24px) 0 12px;
+    gap: var(--driver-work-gap);
+    justify-items: center;
+    align-content: stretch;
+    padding: 0;
     overflow: hidden;
 }
 
 body.driver-mobile-screen .driver-work-context-card {
     grid-area: context;
+    justify-self: center;
+    width: var(--driver-work-column);
     min-height: clamp(64px, 9dvh, 82px);
     border: 1px solid var(--driver-line);
     border-radius: 10px;
@@ -851,7 +874,8 @@ body.driver-mobile-screen .driver-work-dial-button.is-holding .driver-work-dial-
 
 body.driver-mobile-screen .driver-work-assignment {
     grid-area: assign;
-    width: 100%;
+    justify-self: center;
+    width: var(--driver-work-column);
     height: clamp(58px, 8.4dvh, 76px);
     border: 1px solid rgba(255,209,42,0.72);
     border-radius: 12px;
@@ -1518,46 +1542,18 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
 
 @media (min-width: 900px) {
     body.driver-mobile-screen .driver-work-screen.is-active {
-        --driver-dial-size: clamp(320px, 36vw, 520px);
+        --driver-dial-size: clamp(320px, min(42vw, 58dvh), 520px);
     }
 
     body.driver-mobile-screen .driver-work-dial {
         max-width: 520px;
     }
 }
-
-@media (min-width: 900px) and (max-height: 820px) {
-    body.driver-mobile-screen .driver-work-screen.is-active {
-        grid-template-areas:
-            "context dial"
-            "assign dial";
-        grid-template-columns: minmax(280px, 0.42fr) minmax(320px, 0.58fr);
-        grid-template-rows: auto auto;
-        gap: clamp(16px, 2vw, 28px);
-        align-items: center;
-    }
-
-    body.driver-mobile-screen .driver-work-context-card {
-        align-self: end;
-    }
-
-    body.driver-mobile-screen .driver-work-dial-zone {
-        grid-area: dial;
-    }
-
-    body.driver-mobile-screen .driver-work-dial {
-        width: min(var(--driver-dial-size), 57dvh, 100%);
-    }
-
-    body.driver-mobile-screen .driver-work-assignment {
-        align-self: start;
-    }
-}
 </style>
 {% endblock %}
 
 {% block body %}
-<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v45' }}">
+<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v47' }}">
     {% if messages %}
         <div class="driver-messages">
             {% for message in messages %}
@@ -2242,7 +2238,7 @@ window.bindDriverMobileShell = function () {
         if (!("serviceWorker" in navigator)) {
             return;
         }
-        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v45' }}";
+        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v47' }}";
         var updateModal = document.querySelector("[data-driver-pwa-update-modal]");
         var updateBadge = document.querySelector("[data-driver-pwa-update-badge]");
         var updateTarget = document.querySelector("[data-driver-pwa-update-nav-target]");
