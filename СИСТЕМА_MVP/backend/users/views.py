@@ -26,7 +26,7 @@ from references.models import Dormitory, DormitorySection, DumpPoint, Equipment,
 from reports.models import ReportTemplate
 from shifts.forms import EquipmentPlanGroupForm
 from shifts.models import EmployeeShift, EquipmentPlanGroup, EquipmentShiftPlan, PlanAssignmentStatus, PlanCalculationMode, ShiftPlan, ShiftPlanScope
-from shifts.services import assign_shift_plan_snapshot, calculate_open_shift_progress, plan_status_label, plan_unit_label
+from shifts.services import assign_shift_plan_snapshot, calculate_truck_shift_progress, plan_status_label, plan_unit_label
 from trips.models import DispatcherActionLog, OPEN_TRIP_STATUSES, Trip, TripClientAction, TripStatus
 
 from .access_auth import find_employee_access_by_credentials
@@ -110,7 +110,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v49'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v50'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -1823,7 +1823,7 @@ def driver_shift_view(request):
 
     completed_shift_trips = [trip for trip in shift_trips if trip.status == TripStatus.COMPLETED]
     shift_trip_count = len(completed_shift_trips)
-    shift_progress = calculate_open_shift_progress(open_shift)
+    shift_progress = calculate_truck_shift_progress(current_truck, reference_shift=open_shift)
     shift_plan = shift_plan_display_context(shift_progress)
     shift_plan_percent = shift_plan['percent']
     active_tab = request.GET.get('tab', 'work')

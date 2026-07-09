@@ -214,6 +214,10 @@ def equipment_is_excavator(equipment):
     return bool(equipment and equipment.equipment_type and 'экскаватор' in equipment.equipment_type.name.lower())
 
 
+def equipment_is_truck(equipment):
+    return bool(equipment and equipment.equipment_type and 'самосвал' in equipment.equipment_type.name.lower())
+
+
 def equipment_shift_trip_queryset(equipment, date, shift_type):
     if not equipment or not date or not shift_type:
         return Trip.objects.none()
@@ -340,9 +344,16 @@ def calculate_equipment_shift_progress(equipment, date, shift_type):
     return calculate_progress_from_trip_queryset(equipment, date, shift_type, trips)
 
 
-def calculate_truck_progress_for_excavator_shift(truck, excavator_shift):
-    if not truck or not excavator_shift:
+def calculate_truck_shift_progress(truck, reference_shift=None):
+    if not truck:
         return None
+    if reference_shift and getattr(reference_shift, 'equipment_id', None) == getattr(truck, 'id', None):
+        trips = Trip.objects.filter(
+            status=TripStatus.COMPLETED,
+            truck=truck,
+            unloading_shift=reference_shift,
+        )
+        return calculate_progress_from_snapshot(reference_shift, trips)
     truck_shift = (
         EmployeeShift.objects
         .filter(equipment=truck, closed_at__isnull=True)
@@ -358,14 +369,14 @@ def calculate_truck_progress_for_excavator_shift(truck, excavator_shift):
         )
         return calculate_progress_from_snapshot(truck_shift, trips)
 
-    date = timezone.localtime(excavator_shift.opened_at).date()
-    shift_type = excavator_shift.shift_type
-    trips = Trip.objects.filter(
-        status=TripStatus.COMPLETED,
-        truck=truck,
-        loading_shift=excavator_shift,
-    )
-    return calculate_progress_from_trip_queryset(truck, date, shift_type, trips)
+    if reference_shift and reference_shift.opened_at and reference_shift.shift_type:
+        date = timezone.localtime(reference_shift.opened_at).date()
+        return calculate_equipment_shift_progress(truck, date, reference_shift.shift_type)
+    return empty_progress(truck, status=PlanAssignmentStatus.NO_PLAN_GROUP)
+
+
+def calculate_truck_progress_for_excavator_shift(truck, excavator_shift):
+    return calculate_truck_shift_progress(truck, reference_shift=excavator_shift)
 
 
 def calculate_open_shift_progress(open_shift):

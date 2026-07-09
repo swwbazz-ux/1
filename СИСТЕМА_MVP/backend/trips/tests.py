@@ -2,7 +2,7 @@
 from datetime import timedelta
 from pathlib import Path
 
-from django.test import TestCase
+from django.test import Client, TestCase
 from django.urls import reverse
 from django.utils import timezone
 
@@ -183,7 +183,7 @@ class DispatcherSharedShiftStartTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/dispatcher/')
-        self.assertIn('dispatcher-desktop-shell-v24', script)
+        self.assertIn('dispatcher-desktop-shell-v25', script)
         self.assertIn(reverse('dispatcher_control'), script)
         self.assertIn(reverse('dispatcher_manifest'), script)
         self.assertIn('/static/js/realtime-client.js', script)
@@ -626,7 +626,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/static/css/excavator-work-v55-shift.css')
         self.assertContains(response, '/excavator-sw.js')
         self.assertContains(response, 'scope: "/excavator/"')
-        self.assertContains(response, 'excavator-mobile-shell-v68')
+        self.assertContains(response, 'excavator-mobile-shell-v69')
         self.assertContains(response, 'Простои')
         self.assertNotContains(response, 'Отпустить сюда')
         self.assertContains(response, 'resolveExcavatorUpdateVersion')
@@ -785,6 +785,71 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, 'data-plan-status="assigned"')
         self.assertContains(response, 'data-plan-progress-status="low"')
         self.assertContains(response, '--eo-truck-progress: 49%;')
+
+    def test_truck_plan_percent_matches_dispatcher_driver_and_excavator(self):
+        loading_shift = EmployeeShift.objects.get(employee=self.operator, equipment=self.excavator)
+        group = EquipmentPlanGroup.objects.create(
+            name='Самосвалы БелАЗ единый процент',
+            code='belaz-unified-truck-percent-test',
+            calculation_mode=PlanCalculationMode.TRIPS,
+            plan_value='20.00',
+            is_active=True,
+        )
+        group.equipment.add(self.truck)
+        assign_shift_plan_snapshot(self.truck_shift)
+        self.truck_shift.refresh_from_db()
+        for index in range(12):
+            Trip.objects.create(
+                excavator=self.excavator,
+                truck=self.truck,
+                excavator_operator=self.operator,
+                driver=self.driver,
+                loading_shift=loading_shift,
+                unloading_shift=self.truck_shift,
+                rock_type=self.rock,
+                dump_point=self.dump_point,
+                actual_dump_point=self.dump_point,
+                volume_m3='49.40',
+                status=TripStatus.COMPLETED,
+                completed_at=loading_shift.opened_at + timedelta(minutes=index),
+            )
+
+        dispatcher_role = Role.objects.create(code='dispatcher', name='Диспетчер')
+        dispatcher = Employee.objects.create(full_name='Диспетчер')
+        dispatcher_access = EmployeeAccess.objects.create(
+            employee=dispatcher,
+            role=dispatcher_role,
+            access_code='500000',
+            is_active=True,
+            status=EmployeeAccess.Status.ACTIVATED,
+        )
+        dispatcher_client = Client()
+        dispatcher_session = dispatcher_client.session
+        dispatcher_session['employee_access_id'] = dispatcher_access.id
+        dispatcher_session.save()
+        dispatcher_response = dispatcher_client.get(reverse('dispatcher_control'))
+
+        driver_client = Client()
+        driver_session = driver_client.session
+        driver_session['employee_access_id'] = self.driver_access.id
+        driver_session.save()
+        driver_response = driver_client.get(reverse('driver_shift'))
+        excavator_response = self.client.get(reverse('excavator_work'))
+
+        self.assertEqual(dispatcher_response.status_code, 200)
+        self.assertContains(dispatcher_response, f'data-equipment-id="{self.truck.id}"')
+        self.assertContains(dispatcher_response, f'data-equipment-name="{self.truck.garage_number}"')
+        self.assertContains(dispatcher_response, 'data-plan-percent="60"')
+        self.assertContains(dispatcher_response, '--tile-progress: 60%;')
+        self.assertEqual(driver_response.status_code, 200)
+        self.assertContains(driver_response, '--driver-progress: 60;')
+        self.assertContains(driver_response, '<span class="driver-work-percent">60%</span>', html=False)
+        self.assertEqual(excavator_response.status_code, 200)
+        first_card = excavator_response.context['truck_cards'][0]
+        self.assertEqual(first_card['number'], '21')
+        self.assertEqual(first_card['plan_percent'], 60)
+        self.assertContains(excavator_response, 'data-plan-percent="60"')
+        self.assertContains(excavator_response, '--eo-truck-progress: 60%;')
 
     def test_excavator_work_renders_face_settings_from_server_references(self):
         second_dump = DumpPoint.objects.create(name='Отвал')
@@ -1097,7 +1162,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/excavator/')
-        self.assertIn('excavator-mobile-shell-v68', script)
+        self.assertIn('excavator-mobile-shell-v69', script)
         self.assertIn(reverse('excavator_work'), script)
         self.assertIn(reverse('excavator_manifest'), script)
         self.assertIn('/static/js/realtime-client.js', script)

@@ -23,7 +23,8 @@ from shifts.models import PlanAssignmentStatus, PlanCalculationMode
 from shifts.services import (
     assign_shift_plan_snapshot,
     calculate_open_shift_progress,
-    calculate_truck_progress_for_excavator_shift,
+    calculate_truck_shift_progress,
+    equipment_is_truck,
     plan_status_label,
     plan_unit_label,
 )
@@ -367,7 +368,7 @@ DISPATCHER_MANIFEST = {
 }
 
 DISPATCHER_SERVICE_WORKER_JS = r"""
-const CACHE_NAME = "dispatcher-desktop-shell-v24";
+const CACHE_NAME = "dispatcher-desktop-shell-v25";
 const APP_SHELL_URL = "/dispatcher/control/";
 const MANIFEST_URL = "/dispatcher.webmanifest";
 const CORE_ASSETS = [
@@ -532,7 +533,7 @@ EXCAVATOR_MANIFEST = {
 }
 
 EXCAVATOR_SERVICE_WORKER_JS = r"""
-const CACHE_NAME = "excavator-mobile-shell-v68";
+const CACHE_NAME = "excavator-mobile-shell-v69";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const CORE_ASSETS = [
@@ -1217,7 +1218,10 @@ def build_dispatcher_dashboard_context(*, dispatcher_shift, active_trips, pendin
             return plan_progress_display_context(None)
         if equipment_id not in plan_by_equipment_id:
             shift = open_shift_by_equipment_id.get(equipment_id)
-            progress = calculate_dispatcher_snapshot_progress(shift, equipment=equipment)
+            if shift and equipment_is_truck(shift.equipment):
+                progress = calculate_truck_shift_progress(equipment, reference_shift=shift)
+            else:
+                progress = calculate_dispatcher_snapshot_progress(shift, equipment=equipment)
             plan_by_equipment_id[equipment_id] = plan_progress_display_context(progress)
         return plan_by_equipment_id[equipment_id]
 
@@ -3308,7 +3312,7 @@ def excavator_work_view(request):
     for card in truck_cards:
         truck_progress = None
         if open_shift:
-            truck_progress = calculate_truck_progress_for_excavator_shift(card['assignment'].truck, open_shift)
+            truck_progress = calculate_truck_shift_progress(card['assignment'].truck, reference_shift=open_shift)
         truck_plan = plan_progress_display_context(truck_progress)
         plan_percent = truck_plan['percent']
         card['plan_percent'] = plan_percent
