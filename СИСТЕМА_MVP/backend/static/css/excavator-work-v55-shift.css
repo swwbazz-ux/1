@@ -1064,3 +1064,279 @@ body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashbo
         text-shadow: 0 0 8px currentColor !important;
     }
 }
+
+/* v80: shared sizing for the Face and Downtime tabs, aligned with the Shift tab density. */
+body.excavator-operator-screen .eo-shell {
+    --eo-ui-page-x: var(--eo-page-x, clamp(10px, 3.35vw, 16px));
+    --eo-ui-gap: clamp(8px, 1.15dvh, 12px);
+    --eo-ui-row-h: clamp(52px, 6.75dvh, 62px);
+    --eo-ui-choice-h: clamp(46px, 6.05dvh, 56px);
+    --eo-ui-action-h: clamp(52px, 6.8dvh, 62px);
+    --eo-ui-title-row-h: clamp(32px, 4.25dvh, 40px);
+    --eo-ui-radius: var(--eo-radius-md, 8px);
+    --eo-ui-border: 1px;
+    --eo-ui-label-size: clamp(12px, 3vw, 14px);
+    --eo-ui-value-size: clamp(20px, 4.9vw, 25px);
+    --eo-ui-button-size: clamp(15px, 3.8vw, 18px);
+}
+
+body.excavator-operator-screen .eo-screen[data-eo-screen="face"],
+body.excavator-operator-screen .eo-screen[data-eo-screen="events"] {
+    min-height: 0 !important;
+    height: 100% !important;
+    padding-top: var(--eo-ui-gap) !important;
+    padding-bottom: max(var(--eo-ui-gap), env(safe-area-inset-bottom, 0px)) !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+    gap: var(--eo-ui-gap) !important;
+}
+
+body.excavator-operator-screen .eo-screen[data-eo-screen="face"] {
+    display: grid !important;
+    grid-template-rows: auto auto minmax(0, 1fr) auto !important;
+}
+
+body.excavator-operator-screen .eo-screen[data-eo-screen="events"] {
+    display: grid !important;
+    grid-template-rows: auto auto minmax(0, 1fr) auto !important;
+}
+
+body.excavator-operator-screen .eo-screen[data-eo-screen="face"][hidden],
+body.excavator-operator-screen .eo-screen[data-eo-screen="events"][hidden] {
+    display: none !important;
+}
+
+body.excavator-operator-screen .eo-screen[data-eo-screen="face"] > h1,
+body.excavator-operator-screen .eo-screen[data-eo-screen="events"] .eo-title-row h1 {
+    display: flex !important;
+    min-height: var(--eo-ui-title-row-h) !important;
+    align-items: center !important;
+    margin: 0 !important;
+    font-size: var(--eo-title-size) !important;
+    font-weight: 780 !important;
+    line-height: 1 !important;
+    letter-spacing: 0 !important;
+}
+
+body.excavator-operator-screen .eo-screen[data-eo-screen="events"] .eo-title-row {
+    min-height: var(--eo-ui-title-row-h) !important;
+    align-items: center !important;
+    gap: var(--eo-ui-gap) !important;
+    margin: 0 !important;
+}
+
+body.excavator-operator-screen .eo-screen[data-eo-screen="events"] .eo-refresh-button {
+    width: clamp(36px, 9.4vw, 42px) !important;
+    height: clamp(36px, 5.1dvh, 42px) !important;
+    border-radius: var(--eo-ui-radius) !important;
+    font-size: clamp(21px, 5.5vw, 25px) !important;
+}
+
+body.excavator-operator-screen .eo-face-form {
+    display: grid !important;
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    gap: var(--eo-ui-gap) !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+}
+
+body.excavator-operator-screen .eo-large-field {
+    box-sizing: border-box !important;
+    display: grid !important;
+    align-content: center !important;
+    gap: clamp(3px, .45dvh, 5px) !important;
+    min-width: 0 !important;
+    min-height: var(--eo-ui-row-h) !important;
+    height: var(--eo-ui-row-h) !important;
+    padding: clamp(8px, 1.1dvh, 10px) clamp(10px, 2.7vw, 14px) !important;
+    border-width: var(--eo-ui-border) !important;
+    border-radius: var(--eo-ui-radius) !important;
+    overflow: hidden !important;
+}
+
+body.excavator-operator-screen .eo-large-field span {
+    min-width: 0 !important;
+    color: rgba(203, 214, 220, .78) !important;
+    font-size: var(--eo-ui-label-size) !important;
+    font-weight: 600 !important;
+    line-height: 1.05 !important;
+    letter-spacing: 0 !important;
+}
+
+body.excavator-operator-screen .eo-large-field input,
+body.excavator-operator-screen .eo-large-field select {
+    min-width: 0 !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+    font-size: var(--eo-ui-value-size) !important;
+    font-weight: 700 !important;
+    line-height: 1.05 !important;
+    text-overflow: ellipsis !important;
+}
+
+body.excavator-operator-screen .eo-unload-grid-settings {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    grid-auto-rows: var(--eo-ui-choice-h) !important;
+    align-content: start !important;
+    align-items: stretch !important;
+    gap: var(--eo-ui-gap) !important;
+    min-height: 0 !important;
+    height: 100% !important;
+    margin: 0 !important;
+    overflow: visible !important;
+}
+
+body.excavator-operator-screen .eo-unload-grid-settings .eo-unload-card {
+    box-sizing: border-box !important;
+    display: grid !important;
+    place-items: center !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
+    height: var(--eo-ui-choice-h) !important;
+    padding: clamp(7px, 1dvh, 10px) clamp(8px, 2.2vw, 12px) !important;
+    border-width: var(--eo-ui-border) !important;
+    border-radius: var(--eo-ui-radius) !important;
+}
+
+body.excavator-operator-screen .eo-unload-grid-settings .eo-unload-card strong {
+    display: -webkit-box !important;
+    max-width: 100% !important;
+    overflow: hidden !important;
+    color: #eff7dd !important;
+    font-size: clamp(14px, 3.45vw, 17px) !important;
+    font-weight: 700 !important;
+    line-height: 1.08 !important;
+    text-align: center !important;
+    overflow-wrap: anywhere !important;
+    -webkit-box-orient: vertical !important;
+    -webkit-line-clamp: 2 !important;
+}
+
+body.excavator-operator-screen .eo-screen[data-eo-screen="face"] .eo-primary-action,
+body.excavator-operator-screen .eo-screen[data-eo-screen="events"] > .eo-primary-action {
+    align-self: end !important;
+    min-height: var(--eo-ui-action-h) !important;
+    height: var(--eo-ui-action-h) !important;
+    margin: 0 !important;
+    border-radius: var(--eo-ui-radius) !important;
+    font-size: var(--eo-ui-button-size) !important;
+    font-weight: 700 !important;
+}
+
+body.excavator-operator-screen .eo-downtime-card {
+    box-sizing: border-box !important;
+    display: grid !important;
+    grid-template-columns: clamp(42px, 11vw, 52px) minmax(0, 1fr) !important;
+    align-items: center !important;
+    min-height: clamp(72px, 9.35dvh, 86px) !important;
+    margin: 0 !important;
+    padding: clamp(8px, 1.1dvh, 11px) clamp(10px, 2.7vw, 14px) !important;
+    border-width: var(--eo-ui-border) !important;
+    border-radius: var(--eo-ui-radius) !important;
+    gap: var(--eo-ui-gap) !important;
+}
+
+body.excavator-operator-screen .eo-downtime-state-dot {
+    width: clamp(38px, 10vw, 48px) !important;
+    height: clamp(38px, 10vw, 48px) !important;
+}
+
+body.excavator-operator-screen .eo-downtime-card div {
+    min-width: 0 !important;
+}
+
+body.excavator-operator-screen .eo-downtime-card strong {
+    font-size: clamp(16px, 4vw, 20px) !important;
+    font-weight: 760 !important;
+    line-height: 1.05 !important;
+}
+
+body.excavator-operator-screen .eo-downtime-card b {
+    font-size: clamp(23px, 5.8vw, 30px) !important;
+    font-weight: 760 !important;
+    line-height: 1 !important;
+}
+
+body.excavator-operator-screen .eo-downtime-card em {
+    font-size: clamp(12px, 3.1vw, 15px) !important;
+    font-weight: 500 !important;
+    line-height: 1.12 !important;
+}
+
+body.excavator-operator-screen .eo-reason-grid {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    grid-auto-rows: var(--eo-ui-choice-h) !important;
+    align-content: start !important;
+    align-items: stretch !important;
+    gap: var(--eo-ui-gap) !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    overflow: visible !important;
+}
+
+body.excavator-operator-screen .eo-reason-grid .eo-hold-action {
+    box-sizing: border-box !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
+    height: var(--eo-ui-choice-h) !important;
+    padding: clamp(7px, 1dvh, 10px) clamp(8px, 2.1vw, 12px) !important;
+    border-width: var(--eo-ui-border) !important;
+    border-radius: var(--eo-ui-radius) !important;
+    font-size: clamp(13px, 3.25vw, 16px) !important;
+    font-weight: 700 !important;
+    line-height: 1.08 !important;
+    text-align: center !important;
+    overflow-wrap: anywhere !important;
+}
+
+body.excavator-operator-screen .eo-screen[data-eo-screen="events"] > .eo-primary-action.is-disabled,
+body.excavator-operator-screen .eo-screen[data-eo-screen="events"] > .eo-primary-action:disabled {
+    cursor: not-allowed !important;
+    opacity: .55 !important;
+    filter: saturate(.72) brightness(.82) !important;
+}
+
+@media (max-width: 370px) {
+    body.excavator-operator-screen .eo-shell {
+        --eo-ui-gap: 8px;
+        --eo-ui-row-h: 50px;
+        --eo-ui-choice-h: 44px;
+        --eo-ui-action-h: 50px;
+    }
+
+    body.excavator-operator-screen .eo-reason-grid .eo-hold-action {
+        font-size: 12px !important;
+        line-height: 1.05 !important;
+    }
+}
+
+@media (min-width: 768px) {
+    body.excavator-operator-screen .eo-shell {
+        --eo-ui-gap: clamp(10px, 1.25dvh, 14px);
+        --eo-ui-row-h: clamp(56px, 7dvh, 66px);
+        --eo-ui-choice-h: clamp(50px, 6.25dvh, 60px);
+        --eo-ui-action-h: clamp(54px, 6.8dvh, 64px);
+        --eo-ui-label-size: clamp(12px, .82vw, 14px);
+        --eo-ui-value-size: clamp(20px, 1.55vw, 26px);
+        --eo-ui-button-size: clamp(15px, 1.1vw, 18px);
+    }
+
+    body.excavator-operator-screen .eo-unload-grid-settings {
+        grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    }
+
+    body.excavator-operator-screen .eo-reason-grid {
+        grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+    }
+
+    body.excavator-operator-screen .eo-reason-grid .eo-hold-action,
+    body.excavator-operator-screen .eo-unload-grid-settings .eo-unload-card strong {
+        font-size: clamp(14px, .95vw, 17px) !important;
+    }
+}
