@@ -26,6 +26,7 @@ def plan_status_label(status):
         PlanAssignmentStatus.ASSIGNED: 'План назначен',
         PlanAssignmentStatus.NO_PLAN_GROUP: 'Нет группы плана',
         PlanAssignmentStatus.NO_ACTIVE_PLAN: 'Нет активного плана',
+        'plan_not_assigned': 'План не назначен',
         'legacy_plan': 'План из старой схемы',
     }
     return labels.get(status or '', 'Нет плана')

@@ -183,7 +183,7 @@ class DispatcherSharedShiftStartTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/dispatcher/')
-        self.assertIn('dispatcher-desktop-shell-v22', script)
+        self.assertIn('dispatcher-desktop-shell-v23', script)
         self.assertIn(reverse('dispatcher_control'), script)
         self.assertIn(reverse('dispatcher_manifest'), script)
         self.assertIn('/static/js/realtime-client.js', script)
@@ -275,11 +275,48 @@ class DispatcherGarageCurrentStateTests(TestCase):
             pending_assignments=HaulAssignment.objects.filter(status=AssignmentStatus.PENDING),
             accepted_assignments=HaulAssignment.objects.filter(status=AssignmentStatus.ACCEPTED),
             recent_completed_trips=Trip.objects.none(),
-            open_shifts=[],
+            open_shifts=EmployeeShift.objects.filter(closed_at__isnull=True).exclude(id=self.shift.id),
             open_mechanic_downtimes=DowntimeEvent.objects.filter(ended_at__isnull=True),
             trucks=Equipment.objects.filter(equipment_type=self.truck_type).order_by('garage_number'),
             excavators=Equipment.objects.filter(equipment_type=self.excavator_type).order_by('garage_number'),
             recent_dispatcher_actions=[],
+        )
+
+    def create_plan_group(self, *, equipment, mode, value, name='Группа плана', is_active=True):
+        group = EquipmentPlanGroup.objects.create(
+            name=name,
+            code=f'group-{equipment.id}-{EquipmentPlanGroup.objects.count() + 1}',
+            calculation_mode=mode,
+            plan_value=value,
+            is_active=is_active,
+        )
+        group.equipment.add(equipment)
+        return group
+
+    def open_equipment_shift(self, equipment, *, employee_name='Сотрудник'):
+        employee = Employee.objects.create(full_name=employee_name)
+        shift = EmployeeShift.objects.create(
+            employee=employee,
+            shift_type='day',
+            equipment=equipment,
+            opened_at=self.shift.opened_at,
+            opened_by=employee,
+        )
+        assign_shift_plan_snapshot(shift)
+        return shift
+
+    def create_completed_trip(self, *, truck, excavator, unloading_shift=None, loading_shift=None, volume='850.00'):
+        return Trip.objects.create(
+            excavator=excavator,
+            truck=truck,
+            rock_type=self.rock,
+            dump_point=self.dump_point,
+            loading_shift=loading_shift,
+            unloading_shift=unloading_shift,
+            volume_m3=volume,
+            status=TripStatus.COMPLETED,
+            created_at=self.shift.opened_at + timedelta(minutes=5),
+            completed_at=self.shift.opened_at + timedelta(minutes=10),
         )
 
     def test_garages_show_current_equipment_state(self):
@@ -414,6 +451,87 @@ class DispatcherGarageCurrentStateTests(TestCase):
         self.assertEqual(dashboard['event_rows'][0]['status'], 'warning')
         self.assertEqual(loss_by_label['Тестовое ожидание сводки']['status'], 'warning')
         self.assertEqual(loss_by_label['Аварийный простой']['status'], 'danger')
+
+    def test_dispatcher_dashboard_returns_truck_snapshot_plan_progress(self):
+        group = self.create_plan_group(
+            equipment=self.free_truck,
+            mode=PlanCalculationMode.TRIPS,
+            value='3.00',
+            name='Самосвалы БелАЗ dispatcher',
+        )
+        truck_shift = self.open_equipment_shift(self.free_truck, employee_name='Водитель БелАЗ')
+        self.create_completed_trip(truck=self.free_truck, excavator=self.excavator, unloading_shift=truck_shift)
+
+        group.plan_value = '10.00'
+        group.save(update_fields=['plan_value'])
+        dashboard = self.build_dashboard()
+        trucks_by_name = {tile['name']: tile for tile in dashboard['truck_garage_tiles']}
+        tile = trucks_by_name['10']
+
+        self.assertEqual(tile['plan_status'], PlanAssignmentStatus.ASSIGNED)
+        self.assertEqual(tile['plan_group_name'], 'Самосвалы БелАЗ dispatcher')
+        self.assertEqual(tile['plan_calculation_mode'], PlanCalculationMode.TRIPS)
+        self.assertEqual(tile['plan_value'], '3')
+        self.assertEqual(tile['plan_fact_value'], '1')
+        self.assertEqual(tile['plan_unit'], 'рейса')
+        self.assertEqual(tile['percent'], 33)
+        self.assertEqual(tile['plan']['percent'], 33)
+        self.assertEqual(tile['plan']['fact_plan_label'], '1 / 3 рейса')
+        self.assertEqual(tile['plan']['value'], truck_shift.plan_value)
+
+    def test_dispatcher_dashboard_returns_excavator_snapshot_plan_progress(self):
+        self.create_plan_group(
+            equipment=self.excavator,
+            mode=PlanCalculationMode.VOLUME,
+            value='3000.00',
+            name='Экскаваторы 4000 dispatcher',
+        )
+        excavator_shift = self.open_equipment_shift(self.excavator, employee_name='Машинист 4000')
+        self.create_completed_trip(truck=self.free_truck, excavator=self.excavator, loading_shift=excavator_shift, volume='850.00')
+        ExcavatorPlacement.objects.create(
+            excavator=self.excavator,
+            zone=ExcavatorPlacement.Zone.ACTIVE,
+        )
+
+        dashboard = self.build_dashboard()
+        complex_by_id = {card['id']: card for card in dashboard['complex_cards']}
+        card = complex_by_id['K-1']
+
+        self.assertEqual(card['plan_status'], PlanAssignmentStatus.ASSIGNED)
+        self.assertEqual(card['plan_group_name'], 'Экскаваторы 4000 dispatcher')
+        self.assertEqual(card['plan_calculation_mode'], PlanCalculationMode.VOLUME)
+        self.assertEqual(card['plan_value'], '3 000')
+        self.assertEqual(card['plan_fact_value'], '850')
+        self.assertEqual(card['plan_unit'], 'м³')
+        self.assertEqual(card['percent'], 28)
+        self.assertEqual(card['plan']['fact_plan_label'], '850 / 3 000 м³')
+
+    def test_dispatcher_dashboard_does_not_turn_missing_plans_into_zero_percent(self):
+        no_group_shift = self.open_equipment_shift(self.downtime_truck, employee_name='Водитель без группы')
+        inactive_truck = Equipment.objects.create(equipment_type=self.truck_type, garage_number='16')
+        self.create_plan_group(
+            equipment=inactive_truck,
+            mode=PlanCalculationMode.TRIPS,
+            value='4.00',
+            name='Самосвалы NHL inactive',
+            is_active=False,
+        )
+        no_active_shift = self.open_equipment_shift(inactive_truck, employee_name='Водитель без активного плана')
+
+        dashboard = self.build_dashboard()
+        trucks_by_name = {tile['name']: tile for tile in dashboard['truck_garage_tiles']}
+
+        self.assertEqual(no_group_shift.plan_status, PlanAssignmentStatus.NO_PLAN_GROUP)
+        self.assertEqual(trucks_by_name['12']['plan_status'], PlanAssignmentStatus.NO_PLAN_GROUP)
+        self.assertIsNone(trucks_by_name['12']['plan']['percent'])
+        self.assertEqual(trucks_by_name['12']['plan_fact_label'], 'Нет группы плана')
+        self.assertEqual(no_active_shift.plan_status, PlanAssignmentStatus.NO_ACTIVE_PLAN)
+        self.assertEqual(trucks_by_name['16']['plan_status'], PlanAssignmentStatus.NO_ACTIVE_PLAN)
+        self.assertIsNone(trucks_by_name['16']['plan']['percent'])
+        self.assertEqual(trucks_by_name['16']['plan_fact_label'], 'Нет активного плана')
+        self.assertEqual(trucks_by_name['10']['plan_status'], 'plan_not_assigned')
+        self.assertIsNone(trucks_by_name['10']['plan']['percent'])
+        self.assertEqual(trucks_by_name['10']['plan_fact_label'], 'План не назначен')
 
 
 class ExcavatorWorkServerIntegrationTests(TestCase):

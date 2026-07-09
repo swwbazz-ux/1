@@ -19,7 +19,7 @@ from downtimes.models import DowntimeEvent, DowntimeReason
 from references.equipment_states import DEFAULT_EQUIPMENT_STATES
 from references.models import DumpPoint, Equipment, EquipmentState, RockType, TruckCapacityRule
 from shifts.models import EmployeeShift
-from shifts.models import PlanAssignmentStatus
+from shifts.models import PlanAssignmentStatus, PlanCalculationMode
 from shifts.services import (
     assign_shift_plan_snapshot,
     calculate_open_shift_progress,
@@ -46,6 +46,7 @@ DISPATCHER_FILTER_KEYS = (
 
 DISPATCHER_PLAN_TOTAL_TONS = Decimal('420000')
 EQUIPMENT_STATUS_COLOR_GROUPS = {'gray', 'yellow', 'green', 'blue', 'orange', 'red'}
+DISPATCHER_PLAN_NOT_ASSIGNED = 'plan_not_assigned'
 
 def get_equipment_state_ui_map():
     states = {}
@@ -155,7 +156,7 @@ def format_progress_percent(value):
 
 
 def plan_progress_status_key(percent, plan_status=''):
-    if plan_status in {PlanAssignmentStatus.NO_PLAN_GROUP, PlanAssignmentStatus.NO_ACTIVE_PLAN}:
+    if plan_status in {PlanAssignmentStatus.NO_PLAN_GROUP, PlanAssignmentStatus.NO_ACTIVE_PLAN, DISPATCHER_PLAN_NOT_ASSIGNED}:
         return plan_status
     try:
         value = int(percent)
@@ -170,19 +171,118 @@ def plan_progress_status_key(percent, plan_status=''):
     return 'good'
 
 
+def dispatcher_empty_snapshot_progress(shift=None, equipment=None):
+    equipment = equipment or getattr(shift, 'equipment', None)
+    return {
+        'equipment': equipment,
+        'date': timezone.localtime(shift.opened_at).date() if shift and shift.opened_at else None,
+        'shift_type': shift.shift_type if shift else None,
+        'shift': shift,
+        'plan': None,
+        'plan_group': getattr(shift, 'plan_group', None) if shift else None,
+        'plan_group_name': getattr(shift, 'plan_group_name', '') if shift else '',
+        'plan_status': DISPATCHER_PLAN_NOT_ASSIGNED,
+        'calculation_mode': getattr(shift, 'plan_calculation_mode', '') if shift else '',
+        'plan_value': getattr(shift, 'plan_value', None) if shift else None,
+        'trip_count': 0,
+        'volume_m3': Decimal('0'),
+        'tonnage': Decimal('0'),
+        'progress_percent': None,
+    }
+
+
+def calculate_dispatcher_snapshot_progress(shift, equipment=None):
+    if not shift:
+        return dispatcher_empty_snapshot_progress(equipment=equipment)
+    if not shift.plan_status:
+        return dispatcher_empty_snapshot_progress(shift=shift, equipment=equipment)
+    return calculate_open_shift_progress(shift)
+
+
+def format_dispatcher_plan_number(value):
+    if value in {None, ''}:
+        return ''
+    try:
+        value = Decimal(value)
+    except (InvalidOperation, TypeError, ValueError):
+        return str(value)
+    if value == value.to_integral_value():
+        return format_dispatcher_number(value)
+    return format_dispatcher_decimal(value.normalize())
+
+
+def dispatcher_plan_fact_value(progress, calculation_mode):
+    if not progress:
+        return None
+    if calculation_mode == PlanCalculationMode.TRIPS:
+        return progress.get('trip_count') or 0
+    if calculation_mode == PlanCalculationMode.TONNAGE:
+        return progress.get('tonnage') or Decimal('0')
+    if calculation_mode == PlanCalculationMode.VOLUME:
+        return progress.get('volume_m3') or Decimal('0')
+    return progress.get('volume_m3') or Decimal('0')
+
+
+def dispatcher_plan_unit_label(calculation_mode):
+    if calculation_mode == PlanCalculationMode.TRIPS:
+        return 'рейса'
+    return plan_unit_label(calculation_mode)
+
+
 def plan_progress_display_context(progress):
-    status = progress.get('plan_status') if progress else PlanAssignmentStatus.NO_PLAN_GROUP
+    status = progress.get('plan_status') if progress else DISPATCHER_PLAN_NOT_ASSIGNED
     percent_value = format_progress_percent(progress.get('progress_percent') if progress else None)
     calculation_mode = progress.get('calculation_mode') if progress else ''
+    fact_value = dispatcher_plan_fact_value(progress, calculation_mode)
+    plan_value = progress.get('plan_value') if progress else None
+    unit = dispatcher_plan_unit_label(calculation_mode)
+    fact_display = format_dispatcher_plan_number(fact_value) if fact_value is not None else ''
+    plan_display = format_dispatcher_plan_number(plan_value) if plan_value is not None else ''
+    status_label = plan_status_label(status)
+    short_label = (
+        'Нет группы'
+        if status == PlanAssignmentStatus.NO_PLAN_GROUP
+        else 'Нет плана'
+        if status == PlanAssignmentStatus.NO_ACTIVE_PLAN
+        else 'Не назначен'
+        if status == DISPATCHER_PLAN_NOT_ASSIGNED
+        else status_label
+    )
+    has_plan = percent_value is not None
+    fact_plan_label = f'{fact_display} / {plan_display} {unit}'.strip() if has_plan else status_label
+    percent_label = f'{percent_value}%' if has_plan else short_label
     return {
         'percent': percent_value,
+        'css_percent': percent_value if percent_value is not None else 0,
         'status': status,
-        'status_label': plan_status_label(status),
-        'short_label': 'Нет группы' if status == PlanAssignmentStatus.NO_PLAN_GROUP else 'Нет плана' if status == PlanAssignmentStatus.NO_ACTIVE_PLAN else plan_status_label(status),
-        'has_plan': percent_value is not None,
-        'value': progress.get('plan_value') if progress else None,
-        'unit': plan_unit_label(calculation_mode),
+        'status_key': plan_progress_status_key(percent_value, status),
+        'status_label': status_label,
+        'short_label': short_label,
+        'has_plan': has_plan,
+        'value': plan_value,
+        'value_display': plan_display,
+        'fact_value': fact_value,
+        'fact_display': fact_display,
+        'fact_plan_label': fact_plan_label,
+        'percent_label': percent_label,
+        'unit': unit,
+        'calculation_mode': calculation_mode,
         'group_name': progress.get('plan_group_name') if progress else '',
+    }
+
+
+def dispatcher_plan_api_payload(plan):
+    plan = plan or plan_progress_display_context(None)
+    return {
+        'plan_status': plan['status'],
+        'plan_status_label': plan['status_label'],
+        'plan_group_name': plan['group_name'],
+        'plan_calculation_mode': plan['calculation_mode'],
+        'plan_value': plan['value_display'],
+        'completed_value': plan['fact_display'],
+        'progress_percent': plan['percent'] if plan['has_plan'] else None,
+        'unit': plan['unit'],
+        'fact_plan_label': plan['fact_plan_label'],
     }
 
 
@@ -267,7 +367,7 @@ DISPATCHER_MANIFEST = {
 }
 
 DISPATCHER_SERVICE_WORKER_JS = r"""
-const CACHE_NAME = "dispatcher-desktop-shell-v22";
+const CACHE_NAME = "dispatcher-desktop-shell-v23";
 const APP_SHELL_URL = "/dispatcher/control/";
 const MANIFEST_URL = "/dispatcher.webmanifest";
 const CORE_ASSETS = [
@@ -922,8 +1022,10 @@ def dispatcher_complex_shift_report(card):
     truck_rows = dispatcher_complex_truck_rows(card)
     current_truck_rows = [row for row in truck_rows if row['state_key'] == 'current']
     removed_truck_rows = [row for row in truck_rows if row['state_key'] == 'removed']
-    plan_value = f'{card.get("plan_tons", "0")} т'
-    fact_value = f'{card.get("fact_tons", "0")} т'
+    plan_context = card.get('plan') or {}
+    plan_unit = plan_context.get('unit') or 'т'
+    plan_value = f'{plan_context.get("value_display")} {plan_unit}'.strip() if plan_context.get('value_display') else f'{card.get("plan_tons", "0")} т'
+    fact_value = plan_context.get('fact_plan_label') or f'{card.get("fact_tons", "0")} т'
     forecast_value = f'{card.get("forecast_tons", "0")} т'
     if status_key == 'red':
         problem = 'работа заблокирована'
@@ -978,7 +1080,7 @@ def dispatcher_complex_shift_report(card):
                 'type': 'bar',
                 'title': 'План / факт',
                 'rows': [
-                    {'label': 'Факт смены', 'meta': 'выполнение комплекса', 'value': fact_value, 'percent': max(4, percent), 'accent': status_key if status_key in {'green', 'yellow', 'blue', 'orange', 'red', 'gray'} else 'green'},
+                    {'label': 'Факт / план', 'meta': plan_context.get('group_name') or 'snapshot смены', 'value': fact_value, 'percent': max(4, percent), 'accent': status_key if status_key in {'green', 'yellow', 'blue', 'orange', 'red', 'gray'} else 'green'},
                     {'label': 'Прогноз', 'meta': 'ожидаемый итог', 'value': forecast_value, 'percent': min(100, max(4, percent + 8)), 'accent': 'blue'},
                     {'label': 'План', 'meta': 'сменное задание', 'value': plan_value, 'percent': 100, 'accent': 'green'},
                 ],
@@ -1031,6 +1133,7 @@ def build_dispatcher_equipment_card(
     details=None,
     shift_report=None,
     category='equipment',
+    plan=None,
 ):
     card_details = []
     seen_labels = set()
@@ -1062,6 +1165,7 @@ def build_dispatcher_equipment_card(
         'details': card_details,
         'shift_report': shift_report or {},
         'category': category,
+        'plan': dispatcher_plan_api_payload(plan),
     }
 
 
@@ -1105,6 +1209,31 @@ def build_dispatcher_dashboard_context(*, dispatcher_shift, active_trips, pendin
     for shift in open_shifts:
         if shift.equipment_id and shift.equipment_id not in open_shift_by_equipment_id:
             open_shift_by_equipment_id[shift.equipment_id] = shift
+    plan_by_equipment_id = {}
+
+    def dispatcher_plan_for_equipment(equipment):
+        equipment_id = getattr(equipment, 'id', None)
+        if not equipment_id:
+            return plan_progress_display_context(None)
+        if equipment_id not in plan_by_equipment_id:
+            shift = open_shift_by_equipment_id.get(equipment_id)
+            progress = calculate_dispatcher_snapshot_progress(shift, equipment=equipment)
+            plan_by_equipment_id[equipment_id] = plan_progress_display_context(progress)
+        return plan_by_equipment_id[equipment_id]
+
+    def dispatcher_plan_details(plan):
+        if not plan:
+            return []
+        rows = [
+            {'label': 'Статус плана', 'value': plan.get('status_label')},
+            {'label': 'Факт / план', 'value': plan.get('fact_plan_label')},
+        ]
+        if plan.get('has_plan'):
+            rows.insert(1, {'label': 'Выполнение плана', 'value': plan.get('percent_label')})
+        if plan.get('group_name'):
+            rows.append({'label': 'Группа плана', 'value': plan.get('group_name')})
+        return rows
+
     downtime_by_equipment_id = {}
     for downtime in open_downtime_list:
         downtime_by_equipment_id.setdefault(downtime.equipment_id, downtime)
@@ -1277,10 +1406,8 @@ def build_dispatcher_dashboard_context(*, dispatcher_shift, active_trips, pendin
         assigned = row['accepted'] + row['active_trips']
         plan = Decimal('0')
         fact = row['volume']
-        percent = 0
-        if plan > 0:
-            percent = int((fact / plan) * 100)
-            percent = max(0, min(100, percent))
+        excavator_plan = dispatcher_plan_for_equipment(excavator)
+        percent = excavator_plan['css_percent']
         status_key, status_label, equipment_state_code = complex_equipment_state(excavator, row)
         status_label = downtime_reason_label_for(excavator.id) or status_label
 
@@ -1324,6 +1451,7 @@ def build_dispatcher_dashboard_context(*, dispatcher_shift, active_trips, pendin
                 continue
             truck_status, truck_state_label, truck_state_code = truck_current_state(truck)
             truck_volume = volume_by_truck.get(truck_id, Decimal('0'))
+            truck_plan = dispatcher_plan_for_equipment(truck)
             truck_rows.append({
                 'truck': dispatcher_truck_garage_number(truck, 0) or equipment_short_name(truck),
                 'truck_id': truck_id,
@@ -1333,10 +1461,21 @@ def build_dispatcher_dashboard_context(*, dispatcher_shift, active_trips, pendin
                 'target': target_by_truck.get(truck_id, ''),
                 'rock': rock_by_truck.get(truck_id, ''),
                 'value': f'{format_dispatcher_number(truck_volume)} т',
-                'percent': dispatcher_chart_percent(truck_volume, max_truck_volume) if max_truck_volume else 0,
+                'percent': truck_plan['css_percent'],
                 'accent': truck_status,
                 'label': dispatcher_truck_garage_number(truck, 0) or equipment_short_name(truck),
                 'meta': '',
+                'plan': truck_plan,
+                'plan_status': truck_plan['status'],
+                'plan_status_label': truck_plan['status_label'],
+                'plan_group_name': truck_plan['group_name'],
+                'plan_calculation_mode': truck_plan['calculation_mode'],
+                'plan_value': truck_plan['value_display'],
+                'plan_fact_value': truck_plan['fact_display'],
+                'plan_fact_label': truck_plan['fact_plan_label'],
+                'plan_percent_label': truck_plan['percent_label'],
+                'plan_unit': truck_plan['unit'],
+                'plan_has_plan': truck_plan['has_plan'],
             })
         forecast = fact
         current_rock = rock_values[0] if rock_values else ''
@@ -1348,6 +1487,17 @@ def build_dispatcher_dashboard_context(*, dispatcher_shift, active_trips, pendin
             'status_label': status_label,
             'equipment_state_code': equipment_state_code,
             'percent': percent,
+            'plan': excavator_plan,
+            'plan_status': excavator_plan['status'],
+            'plan_status_label': excavator_plan['status_label'],
+            'plan_group_name': excavator_plan['group_name'],
+            'plan_calculation_mode': excavator_plan['calculation_mode'],
+            'plan_value': excavator_plan['value_display'],
+            'plan_fact_value': excavator_plan['fact_display'],
+            'plan_fact_label': excavator_plan['fact_plan_label'],
+            'plan_percent_label': excavator_plan['percent_label'],
+            'plan_unit': excavator_plan['unit'],
+            'plan_has_plan': excavator_plan['has_plan'],
             'excavator': excavator,
             'excavator_name': equipment_short_name(excavator),
             'excavator_icon': equipment_icon_key(excavator, equipment_state_icon_color(status_key)),
@@ -1369,7 +1519,8 @@ def build_dispatcher_dashboard_context(*, dispatcher_shift, active_trips, pendin
     for index, excavator in enumerate(excavators_list[:12], start=1):
         board_number = garage_number_int(excavator)
         status, label, equipment_state_code = excavator_current_state(excavator)
-        percent = 0
+        excavator_plan = dispatcher_plan_for_equipment(excavator)
+        percent = excavator_plan['css_percent']
         excavator_tiles.append({
             'equipment': excavator,
             'name': equipment_short_name(excavator),
@@ -1378,6 +1529,17 @@ def build_dispatcher_dashboard_context(*, dispatcher_shift, active_trips, pendin
             'label': label,
             'equipment_state_code': equipment_state_code,
             'percent': percent,
+            'plan': excavator_plan,
+            'plan_status': excavator_plan['status'],
+            'plan_status_label': excavator_plan['status_label'],
+            'plan_group_name': excavator_plan['group_name'],
+            'plan_calculation_mode': excavator_plan['calculation_mode'],
+            'plan_value': excavator_plan['value_display'],
+            'plan_fact_value': excavator_plan['fact_display'],
+            'plan_fact_label': excavator_plan['fact_plan_label'],
+            'plan_percent_label': excavator_plan['percent_label'],
+            'plan_unit': excavator_plan['unit'],
+            'plan_has_plan': excavator_plan['has_plan'],
             'icon': equipment_icon_key(excavator, status),
             'card_id': str(excavator.id) if excavator else '',
             'board_number': board_number,
@@ -1456,6 +1618,17 @@ def build_dispatcher_dashboard_context(*, dispatcher_shift, active_trips, pendin
                 'icon': equipment_icon_key(truck, status),
                 'percent': row.get('percent') or 0,
                 'card_id': str(row.get('truck_id') or ''),
+                'plan': row.get('plan') or plan_progress_display_context(None),
+                'plan_status': row.get('plan_status') or DISPATCHER_PLAN_NOT_ASSIGNED,
+                'plan_status_label': row.get('plan_status_label') or plan_status_label(DISPATCHER_PLAN_NOT_ASSIGNED),
+                'plan_group_name': row.get('plan_group_name') or '',
+                'plan_calculation_mode': row.get('plan_calculation_mode') or '',
+                'plan_value': row.get('plan_value') or '',
+                'plan_fact_value': row.get('plan_fact_value') or '',
+                'plan_fact_label': row.get('plan_fact_label') or plan_status_label(DISPATCHER_PLAN_NOT_ASSIGNED),
+                'plan_percent_label': row.get('plan_percent_label') or 'Не назначен',
+                'plan_unit': row.get('plan_unit') or '',
+                'plan_has_plan': bool(row.get('plan_has_plan')),
             })
         unload_totals = {}
         for row in current_truck_rows:
@@ -1628,6 +1801,7 @@ def build_dispatcher_dashboard_context(*, dispatcher_shift, active_trips, pendin
         if str(truck_number) in active_complex_truck_names:
             continue
         status, label, equipment_state_code = truck_current_state(truck)
+        truck_plan = dispatcher_plan_for_equipment(truck)
         truck_garage_tiles.append({
             'equipment': truck,
             'name': truck_number,
@@ -1635,7 +1809,18 @@ def build_dispatcher_dashboard_context(*, dispatcher_shift, active_trips, pendin
             'label': label,
             'equipment_state_code': equipment_state_code,
             'icon': equipment_icon_key(truck, status),
-            'percent': 0,
+            'percent': truck_plan['css_percent'],
+            'plan': truck_plan,
+            'plan_status': truck_plan['status'],
+            'plan_status_label': truck_plan['status_label'],
+            'plan_group_name': truck_plan['group_name'],
+            'plan_calculation_mode': truck_plan['calculation_mode'],
+            'plan_value': truck_plan['value_display'],
+            'plan_fact_value': truck_plan['fact_display'],
+            'plan_fact_label': truck_plan['fact_plan_label'],
+            'plan_percent_label': truck_plan['percent_label'],
+            'plan_unit': truck_plan['unit'],
+            'plan_has_plan': truck_plan['has_plan'],
             'card_id': str(truck.id),
         })
     mobile_truck_garage_tiles = []
@@ -1649,6 +1834,7 @@ def build_dispatcher_dashboard_context(*, dispatcher_shift, active_trips, pendin
         if truck_number is None:
             continue
         status, label, equipment_state_code = truck_current_state(truck)
+        truck_plan = dispatcher_plan_for_equipment(truck)
         mobile_truck_garage_tiles.append({
             'equipment': truck,
             'name': truck_number,
@@ -1656,7 +1842,18 @@ def build_dispatcher_dashboard_context(*, dispatcher_shift, active_trips, pendin
             'label': label,
             'equipment_state_code': equipment_state_code,
             'icon': equipment_icon_key(truck, status),
-            'percent': 0,
+            'percent': truck_plan['css_percent'],
+            'plan': truck_plan,
+            'plan_status': truck_plan['status'],
+            'plan_status_label': truck_plan['status_label'],
+            'plan_group_name': truck_plan['group_name'],
+            'plan_calculation_mode': truck_plan['calculation_mode'],
+            'plan_value': truck_plan['value_display'],
+            'plan_fact_value': truck_plan['fact_display'],
+            'plan_fact_label': truck_plan['fact_plan_label'],
+            'plan_percent_label': truck_plan['percent_label'],
+            'plan_unit': truck_plan['unit'],
+            'plan_has_plan': truck_plan['has_plan'],
             'card_id': str(truck.id),
         })
 
@@ -1670,8 +1867,8 @@ def build_dispatcher_dashboard_context(*, dispatcher_shift, active_trips, pendin
         details = shift_details(equipment)
         details.extend([
             {'label': 'Комплекс', 'value': tile.get('complex')},
-            {'label': 'Выработка', 'value': f'{tile.get("percent", 0)}%'},
         ])
+        details.extend(dispatcher_plan_details(tile.get('plan')))
         if active_trip:
             details.extend([
                 {'label': 'Рейс', 'value': 'активный'},
@@ -1702,6 +1899,7 @@ def build_dispatcher_dashboard_context(*, dispatcher_shift, active_trips, pendin
                 equipment_kind='Экскаватор',
                 shift_trips=shift_trips,
             ),
+            plan=tile.get('plan'),
         )
 
     for card in complex_cards:
@@ -1713,10 +1911,9 @@ def build_dispatcher_dashboard_context(*, dispatcher_shift, active_trips, pendin
             {'label': 'Порода', 'value': card.get('material')},
             {'label': 'Самосвалы', 'value': f'{card.get("assigned", 0)} / {card.get("need", 0)}'},
             {'label': 'Баланс транспорта', 'value': f'+{card["assigned"] - card["need"]}' if card['assigned'] > card['need'] else str(card['assigned'] - card['need'])},
-            {'label': 'План смены', 'value': f'{card.get("plan_tons")} т'},
-            {'label': 'Факт смены', 'value': f'{card.get("fact_tons")} т'},
             {'label': 'Прогноз', 'value': f'{card.get("forecast_tons")} т'},
         ]
+        details.extend(dispatcher_plan_details(card.get('plan')))
         if card.get('status_key') == 'yellow':
             details.append({'label': 'Причина', 'value': 'дефицит транспорта / риск выполнения'})
             details.append({'label': 'Действие', 'value': 'добавить самосвалы'})
@@ -1741,6 +1938,7 @@ def build_dispatcher_dashboard_context(*, dispatcher_shift, active_trips, pendin
             details=details,
             shift_report=complex_report,
             category='complex',
+            plan=card.get('plan'),
         )
 
     for complex_card in complex_cards:
@@ -1750,6 +1948,15 @@ def build_dispatcher_dashboard_context(*, dispatcher_shift, active_trips, pendin
                 continue
             equipment = truck_by_id.get(int(card_id)) if card_id.isdigit() else None
             status_label = status_label_for(tile.get('status'), tile.get('label'))
+            details = [
+                {'label': 'Гаражный N', 'value': tile.get('name')},
+                {'label': 'Комплекс', 'value': complex_card.get('id')},
+                {'label': 'Состояние', 'value': tile.get('label')},
+                {'label': 'Забой', 'value': complex_card.get('current_face')},
+                {'label': 'Порода', 'value': complex_card.get('current_rock')},
+                {'label': 'Разгрузки', 'value': ', '.join(point.get('name') for point in complex_card.get('unload_points', []) if point.get('name'))},
+            ]
+            details.extend(dispatcher_plan_details(tile.get('plan')))
             equipment_cards[card_id] = build_dispatcher_equipment_card(
                 card_id=card_id,
                 type_name='Самосвал',
@@ -1760,20 +1967,13 @@ def build_dispatcher_dashboard_context(*, dispatcher_shift, active_trips, pendin
                 status_label=status_label,
                 zone=f'{complex_card.get("id")} / в составе',
                 percent=tile.get('percent', 0),
-                details=[
-                    {'label': 'Гаражный N', 'value': tile.get('name')},
-                    {'label': 'Комплекс', 'value': complex_card.get('id')},
-                    {'label': 'Состояние', 'value': tile.get('label')},
-                    {'label': 'Выработка', 'value': f'{tile.get("percent", 0)}%'},
-                    {'label': 'Забой', 'value': complex_card.get('current_face')},
-                    {'label': 'Порода', 'value': complex_card.get('current_rock')},
-                    {'label': 'Разгрузки', 'value': ', '.join(point.get('name') for point in complex_card.get('unload_points', []) if point.get('name'))},
-                ],
+                details=details,
                 shift_report=dispatcher_shift_report_for_equipment(
                     equipment,
                     equipment_kind='Самосвал',
                     shift_trips=shift_trips,
                 ),
+                plan=tile.get('plan'),
             )
 
     for tile in truck_garage_tiles + [
@@ -1783,7 +1983,7 @@ def build_dispatcher_dashboard_context(*, dispatcher_shift, active_trips, pendin
     ]:
         equipment = tile.get('equipment')
         status_label = status_label_for(tile.get('status'), tile.get('label'))
-        details = [{'label': 'Выработка', 'value': f'{tile.get("percent", 0)}%'}]
+        details = dispatcher_plan_details(tile.get('plan'))
         if equipment:
             downtime = downtime_by_equipment_id.get(equipment.id)
             active_trip = active_trip_by_truck_id.get(equipment.id)
@@ -1826,6 +2026,7 @@ def build_dispatcher_dashboard_context(*, dispatcher_shift, active_trips, pendin
                     equipment_kind='Самосвал',
                     shift_trips=shift_trips,
                 ),
+                plan=tile.get('plan'),
             )
         equipment_cards[str(tile['card_id'])] = card
 
@@ -3366,7 +3567,7 @@ def dispatcher_control_view(request, *, access_override=None, enforce_dispatcher
     open_shifts = (
         EmployeeShift.objects
         .filter(closed_at__isnull=True)
-        .select_related('employee', 'equipment', 'opened_by')
+        .select_related('employee', 'equipment', 'equipment__equipment_type', 'plan_group', 'opened_by')
         .order_by('opened_at')
     )
     if dispatcher_shift:
@@ -3375,7 +3576,7 @@ def dispatcher_control_view(request, *, access_override=None, enforce_dispatcher
         open_shifts = open_shifts.filter(equipment_id=truck_id)
     if excavator_id:
         open_shifts = open_shifts.filter(equipment_id=excavator_id)
-    open_shifts = list(open_shifts[:40])
+    open_shifts = list(open_shifts[:120])
 
     employee_ids = [shift.employee_id for shift in open_shifts]
     role_by_employee_id = {

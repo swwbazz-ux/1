@@ -22657,7 +22657,7 @@ body.management-dynamics-chart-modal-open {
 .dispatcher-excavator-garage-tile span {
     position: absolute;
     right: 3px;
-    bottom: 3px;
+    bottom: 16px;
     left: 3px;
     z-index: 2;
     display: block;
@@ -23076,7 +23076,7 @@ body.management-dynamics-chart-modal-open {
     justify-items: end;
     width: max-content;
     min-width: 0;
-    max-width: min(210px, 100%);
+    max-width: min(250px, 100%);
     gap: 2px;
     text-align: right;
 }
@@ -23124,6 +23124,110 @@ body.management-dynamics-chart-modal-open {
     min-height: 17px;
     padding: 2px 7px;
     font-size: clamp(9px, .62vw, 11px);
+}
+
+.dispatcher-plan-strip {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: 3px 7px;
+    max-width: 100%;
+    margin-top: 2px;
+    padding: 4px 7px;
+    border: 1px solid color-mix(in srgb, var(--complex-accent) 44%, transparent);
+    border-radius: 5px;
+    background: color-mix(in srgb, var(--complex-accent) 11%, rgba(4, 13, 18, .82));
+    color: var(--gd-ink);
+}
+
+.dispatcher-plan-strip strong {
+    color: var(--complex-accent);
+    font-size: clamp(12px, .9vw, 16px);
+    font-weight: 900;
+    line-height: 1;
+    white-space: nowrap;
+}
+
+.dispatcher-excavator-garage-tile .dispatcher-tile-plan-percent,
+.dispatcher-truck-tile .dispatcher-tile-plan-percent {
+    position: absolute;
+    top: 3px;
+    right: 3px;
+    z-index: 3;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    max-width: 52%;
+    min-height: 12px;
+    padding: 1px 4px;
+    border-radius: 4px;
+    background: color-mix(in srgb, currentColor 18%, rgba(4, 13, 18, .88));
+    color: currentColor;
+    font-size: 8px;
+    font-style: normal;
+    font-weight: 900;
+    line-height: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.dispatcher-excavator-garage-tile .dispatcher-tile-plan-label,
+.dispatcher-truck-tile .dispatcher-tile-plan-label {
+    position: absolute;
+    right: 3px;
+    bottom: 3px;
+    left: 3px;
+    z-index: 3;
+    display: block;
+    min-height: 10px;
+    color: var(--gd-ink);
+    font-size: 7px;
+    font-style: normal;
+    font-weight: 900;
+    line-height: 1;
+    overflow: hidden;
+    text-align: center;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.dispatcher-excavator-garage-tile .dispatcher-tile-plan-label.is-plan-missing,
+.dispatcher-truck-tile .dispatcher-tile-plan-label.is-plan-missing {
+    color: var(--gd-yellow);
+}
+
+.dispatcher-plan-strip span,
+.dispatcher-plan-strip em {
+    overflow: hidden;
+    min-width: 0;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.dispatcher-plan-strip span {
+    color: var(--gd-ink);
+    font-size: clamp(10px, .72vw, 12px);
+    font-weight: 900;
+    line-height: 1;
+}
+
+.dispatcher-plan-strip em {
+    grid-column: 1 / -1;
+    color: var(--gd-muted);
+    font-size: clamp(8px, .58vw, 10px);
+    font-style: normal;
+    font-weight: 800;
+    line-height: 1;
+}
+
+.dispatcher-plan-strip.is-plan-missing {
+    border-color: rgba(255, 178, 29, .45);
+    background: color-mix(in srgb, var(--gd-yellow) 10%, rgba(4, 13, 18, .82));
+}
+
+.dispatcher-plan-strip.is-plan-missing strong {
+    color: var(--gd-yellow);
 }
 
 .dispatcher-complex-card .complex-assigned-trucks {
@@ -23433,12 +23537,23 @@ body.mining-master-screen .dispatcher-complex-card .complex-truck-tile {
 .dispatcher-truck-tile span {
     position: absolute;
     right: 3px;
-    bottom: 3px;
+    bottom: 16px;
     left: 3px;
     color: currentColor;
     font-size: 7px;
     font-weight: 900;
     text-align: center;
+}
+
+.complex-truck-tile .dispatcher-tile-plan-percent {
+    max-width: 58%;
+    min-height: 10px;
+    padding: 1px 3px;
+    font-size: 7px;
+}
+
+.complex-truck-tile .dispatcher-tile-plan-label {
+    font-size: 6px;
 }
 
 .dispatcher-truck-tile:not(.is-placeholder):not(.is-assigned):hover {
