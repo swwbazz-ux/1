@@ -533,7 +533,7 @@ EXCAVATOR_MANIFEST = {
 }
 
 EXCAVATOR_SERVICE_WORKER_JS = r"""
-const CACHE_NAME = "excavator-mobile-shell-v69";
+const CACHE_NAME = "excavator-mobile-shell-v70";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const CORE_ASSETS = [
@@ -3185,13 +3185,19 @@ def excavator_work_view(request):
             .order_by('-started_at', '-id')
         ):
             truck_downtime_by_equipment_id.setdefault(downtime.equipment_id, downtime)
+    open_truck_shift_by_equipment_id = {}
     open_truck_shift_equipment_ids = set()
     if assignment_truck_ids:
-        open_truck_shift_equipment_ids = set(
+        open_truck_shifts = list(
             EmployeeShift.objects
             .filter(equipment_id__in=assignment_truck_ids, closed_at__isnull=True)
-            .values_list('equipment_id', flat=True)
+            .select_related('employee', 'equipment', 'equipment__equipment_type', 'plan_group')
+            .order_by('-opened_at')
         )
+        for truck_shift in open_truck_shifts:
+            if truck_shift.equipment_id and truck_shift.equipment_id not in open_truck_shift_by_equipment_id:
+                open_truck_shift_by_equipment_id[truck_shift.equipment_id] = truck_shift
+        open_truck_shift_equipment_ids = set(open_truck_shift_by_equipment_id.keys())
 
     def assignment_block_reason(assignment, active_trip=None):
         known_active_trip = active_trip
@@ -3213,6 +3219,36 @@ def excavator_work_view(request):
         assignment.has_active_trip = assignment.truck_id in active_truck_ids
         assignment.has_active_downtime = assignment.truck_id in truck_downtime_by_equipment_id
         assignment.has_open_truck_shift = assignment.truck_id in open_truck_shift_equipment_ids
+
+    truck_detail_shift_trips = []
+    if assignment_truck_ids:
+        truck_shift_ids = [
+            truck_shift.id
+            for truck_shift in open_truck_shift_by_equipment_id.values()
+            if truck_shift.id
+        ]
+        truck_detail_queryset = (
+            Trip.objects
+            .filter(truck_id__in=assignment_truck_ids)
+            .select_related('truck', 'excavator', 'rock_type', 'dump_point', 'actual_dump_point')
+            .order_by('-created_at', '-id')
+        )
+        if truck_shift_ids:
+            truck_detail_queryset = truck_detail_queryset.filter(
+                Q(unloading_shift_id__in=truck_shift_ids) |
+                Q(status__in=OPEN_TRIP_STATUSES)
+            )
+        elif open_shift:
+            truck_detail_queryset = truck_detail_queryset.filter(
+                Q(loading_shift=open_shift) |
+                Q(status__in=OPEN_TRIP_STATUSES)
+            )
+        else:
+            truck_detail_queryset = truck_detail_queryset.none()
+        truck_detail_shift_trips = list(truck_detail_queryset[:200])
+    latest_trip_by_truck_id = {}
+    for detail_trip in truck_detail_shift_trips:
+        latest_trip_by_truck_id.setdefault(detail_trip.truck_id, detail_trip)
 
     def excavator_truck_equipment_state_code(assignment, active_trip):
         truck = assignment.truck
@@ -3324,6 +3360,86 @@ def excavator_work_view(request):
         card['plan_value'] = truck_plan['value']
         card['plan_unit'] = truck_plan['unit']
         card['plan_group_name'] = truck_plan['group_name']
+        card['plan'] = truck_plan
+
+    truck_detail_cards = {}
+
+    def excavator_detail_plan_rows(plan):
+        if not plan:
+            return []
+        if not plan.get('has_plan'):
+            return [{'label': 'План смены', 'value': plan.get('status_label')}]
+        rows = [
+            {'label': 'Выполнение плана', 'value': plan.get('percent_label')},
+            {'label': 'Факт / план', 'value': plan.get('fact_plan_label')},
+        ]
+        if plan.get('group_name'):
+            rows.append({'label': 'Группа плана', 'value': plan.get('group_name')})
+        return rows
+
+    for card in truck_cards:
+        assignment = card['assignment']
+        truck = assignment.truck
+        active_trip = active_trip_by_truck_id.get(assignment.truck_id)
+        downtime = truck_downtime_by_equipment_id.get(assignment.truck_id)
+        latest_trip = latest_trip_by_truck_id.get(assignment.truck_id)
+        truck_shift = open_truck_shift_by_equipment_id.get(assignment.truck_id)
+        truck_trips = [trip for trip in truck_detail_shift_trips if trip.truck_id == assignment.truck_id]
+        completed_trips = [trip for trip in truck_trips if trip.status == TripStatus.COMPLETED]
+        truck_volume = sum((trip.volume_m3 or Decimal('0')) for trip in truck_trips)
+        availability_label = card['block_reason'] or (
+            'Доступен для погрузки' if card['can_drag'] else f'Недоступен: {card["status_label"]}'
+        )
+        assignment_label = 'принято' if assignment.status == AssignmentStatus.ACCEPTED else 'ожидает'
+        detail_rows = [
+            {'label': 'Состояние', 'value': card['status_label']},
+            {'label': 'Доступность', 'value': availability_label},
+            {'label': 'Назначение', 'value': assignment_label},
+            {'label': 'Экскаватор', 'value': equipment_short_name(assignment.excavator)},
+            {'label': 'Назначен', 'value': format_dispatcher_datetime(assignment.assigned_at)},
+            {'label': 'Рейсы смены', 'value': f'{len(completed_trips)} / {len(truck_trips)}'},
+            {'label': 'Объем смены', 'value': format_whole_value_with_unit(truck_volume, 'м³')},
+        ]
+        detail_rows.extend(excavator_detail_plan_rows(card.get('plan')))
+        if active_trip:
+            detail_rows.extend([
+                {'label': 'Текущий рейс', 'value': 'на разгрузке'},
+                {'label': 'Точка разгрузки', 'value': str(active_trip.dump_point or '')},
+                {'label': 'Порода', 'value': str(active_trip.rock_type or '')},
+            ])
+        elif card.get('target_label'):
+            detail_rows.append({'label': 'Точка разгрузки', 'value': card.get('target_label')})
+        if latest_trip:
+            detail_rows.append({
+                'label': 'Последнее событие',
+                'value': format_dispatcher_datetime(latest_trip.completed_at or latest_trip.created_at),
+            })
+        if downtime:
+            detail_rows.extend([
+                {'label': 'Простой', 'value': str(downtime.reason or '')},
+                {'label': 'С начала', 'value': format_dispatcher_datetime(downtime.started_at)},
+            ])
+        card['detail_card_id'] = str(truck.id)
+        truck_detail_cards[str(truck.id)] = build_dispatcher_equipment_card(
+            card_id=truck.id,
+            type_name='Самосвал',
+            equipment=truck,
+            number=card['number'],
+            icon=card['icon'],
+            status=card['status_key'],
+            status_label=card['status_label'],
+            zone=card.get('target_label') or equipment_short_name(assignment.excavator),
+            percent=card['plan'].get('css_percent', 0),
+            employee=getattr(truck_shift, 'employee', None),
+            details=detail_rows,
+            shift_report=dispatcher_shift_report_for_equipment(
+                truck,
+                equipment_kind='Самосвал',
+                shift_trips=truck_detail_shift_trips,
+            ),
+            category='truck',
+            plan=card['plan'],
+        )
 
     active_trips_by_dump_id = defaultdict(list)
     for trip in active_trips:
@@ -3387,6 +3503,7 @@ def excavator_work_view(request):
             'active_trips_count': len(active_trips),
             'completed_today_count': completed_shift_count,
             'truck_cards': truck_cards,
+            'truck_detail_cards': truck_detail_cards,
             'dump_cards': dump_cards,
             'dump_choice_cards': dump_choice_cards,
             'rock_choices': rock_choices,

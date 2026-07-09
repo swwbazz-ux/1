@@ -5,9 +5,9 @@
 {% block body_class %}excavator-operator-screen{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v69">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v69">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v69">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v70">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v70">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v70">
 <meta name="theme-color" content="#030708">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Погрузка">
@@ -190,6 +190,7 @@
                                 data-eo-dashboard-truck
                                 data-assignment-id="{{ card.assignment.id }}"
                                 data-truck-id="{{ card.assignment.truck.id }}"
+                                data-eo-truck-detail-id="{{ card.detail_card_id }}"
                                 data-eo-equipment-state="{{ card.equipment_state_code }}"
                                 data-eo-plan-percent="{% if card.plan_has_plan %}{{ card.plan_percent }}{% endif %}"
                                 data-plan-percent="{% if card.plan_has_plan %}{{ card.plan_percent }}{% endif %}"
@@ -256,6 +257,41 @@
                     <span>Перетащите сюда, чтобы отменить отправку</span>
                 </div>
                 <p class="eo-dump-queue-note" data-eo-dump-queue-note hidden></p>
+            </section>
+        </div>
+
+        <div class="eo-truck-detail-modal gd-equipment-detail mm-equipment-detail" data-eo-truck-detail hidden aria-hidden="true">
+            <div class="mm-equipment-detail-backdrop" data-eo-truck-detail-close></div>
+            <section class="mm-equipment-detail-panel" role="dialog" aria-modal="true" aria-labelledby="eo-truck-detail-title">
+                <button type="button" class="mm-detail-close" data-eo-truck-detail-close aria-label="Закрыть карточку">×</button>
+                <div class="mm-detail-head">
+                    <div class="gd-detail-garage-slot" data-eo-truck-detail-icon-slot></div>
+                    <div>
+                        <span data-eo-truck-detail-type>Самосвал</span>
+                        <h2 id="eo-truck-detail-title" data-eo-truck-detail-title>Самосвал</h2>
+                        <div class="mm-detail-tags">
+                            <mark data-eo-truck-detail-status></mark>
+                            <small data-eo-truck-detail-zone></small>
+                        </div>
+                    </div>
+                </div>
+                <div class="mm-detail-employee" data-eo-truck-detail-employee hidden>
+                    <div class="mm-detail-employee-photo">
+                        <img data-eo-truck-detail-employee-img src="" alt="">
+                        <span data-eo-truck-detail-employee-initials></span>
+                    </div>
+                    <div class="mm-detail-employee-info">
+                        <span>В смене</span>
+                        <strong data-eo-truck-detail-employee-name></strong>
+                        <a data-eo-truck-detail-employee-phone href=""></a>
+                    </div>
+                </div>
+                <dl class="mm-detail-list" data-eo-truck-detail-list></dl>
+                <div class="gd-detail-shift-report" data-eo-truck-detail-shift-report hidden>
+                    <div class="gd-detail-section-title">Смена самосвала</div>
+                    <div class="gd-detail-metrics" data-eo-truck-detail-metrics></div>
+                    <div class="gd-detail-dashboard" data-eo-truck-detail-dashboard></div>
+                </div>
             </section>
         </div>
 
@@ -327,9 +363,13 @@
     </section>
 </div>
 
+{{ truck_detail_cards|json_script:"eo-truck-detail-cards-data" }}
+{% get_static_prefix as static_prefix %}
+
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v69";
+var excavatorShellVersion = "excavator-mobile-shell-v70";
+var staticPrefix = "{{ static_prefix|escapejs }}";
 var excavatorRelevantEvents = {
     assignment_changed: true,
     trip_changed: true,
@@ -383,7 +423,7 @@ function isExcavatorRefreshUnsafe() {
     if (active && shell.contains(active) && (active.isContentEditable || activeTag === "input" || activeTag === "textarea" || activeTag === "select")) {
         return true;
     }
-    return !!document.querySelector(".eo-truck-card.is-pending, .eo-truck-card.is-dragging, .mm-mobile-shift-button.is-holding, .eo-hold-action.is-holding, .eo-logout-button.is-holding, .eo-shift-update-button.is-checking, .eo-mobile-update-modal:not([hidden]), .app-confirm-modal:not([hidden])");
+    return !!document.querySelector(".eo-truck-card.is-pending, .eo-truck-card.is-dragging, .mm-mobile-shift-button.is-holding, .eo-hold-action.is-holding, .eo-logout-button.is-holding, .eo-shift-update-button.is-checking, .eo-truck-detail-modal:not([hidden]), .eo-mobile-update-modal:not([hidden]), .app-confirm-modal:not([hidden])");
 }
 
 function storeExcavatorRealtimeVersion(version) {
@@ -449,6 +489,11 @@ function refreshExcavatorWorkFromServer(options) {
         var newShell = doc.querySelector("[data-eo-shell]");
         var currentShell = document.querySelector("[data-eo-shell]");
         if (!newShell || !currentShell) return false;
+        var newTruckDetailCards = doc.getElementById("eo-truck-detail-cards-data");
+        var currentTruckDetailCards = document.getElementById("eo-truck-detail-cards-data");
+        if (newTruckDetailCards && currentTruckDetailCards) {
+            currentTruckDetailCards.textContent = newTruckDetailCards.textContent;
+        }
         newShell.dataset.eoActiveTab = options.preserveTab === false ? (newShell.dataset.eoActiveTab || "trucks") : activeTab;
         currentShell.replaceWith(newShell);
         if (typeof window.initExcavatorWorkShell === "function") {
@@ -532,6 +577,180 @@ window.initExcavatorWorkShell = function () {
     var logoutHoldFrame = null;
     var logoutHoldStart = 0;
     var logoutHoldMs = 2000;
+    var truckDetailLayer = document.querySelector("[data-eo-truck-detail]");
+    var truckDetailIconSlot = document.querySelector("[data-eo-truck-detail-icon-slot]");
+    var truckDetailType = document.querySelector("[data-eo-truck-detail-type]");
+    var truckDetailTitle = document.querySelector("[data-eo-truck-detail-title]");
+    var truckDetailStatus = document.querySelector("[data-eo-truck-detail-status]");
+    var truckDetailZone = document.querySelector("[data-eo-truck-detail-zone]");
+    var truckDetailEmployee = document.querySelector("[data-eo-truck-detail-employee]");
+    var truckDetailEmployeeImg = document.querySelector("[data-eo-truck-detail-employee-img]");
+    var truckDetailEmployeeInitials = document.querySelector("[data-eo-truck-detail-employee-initials]");
+    var truckDetailEmployeeName = document.querySelector("[data-eo-truck-detail-employee-name]");
+    var truckDetailEmployeePhone = document.querySelector("[data-eo-truck-detail-employee-phone]");
+    var truckDetailList = document.querySelector("[data-eo-truck-detail-list]");
+    var truckDetailShiftReport = document.querySelector("[data-eo-truck-detail-shift-report]");
+    var truckDetailMetrics = document.querySelector("[data-eo-truck-detail-metrics]");
+    var truckDetailDashboard = document.querySelector("[data-eo-truck-detail-dashboard]");
+
+    function escapeHtml(value) {
+        return String(value == null ? "" : value).replace(/[&<>"']/g, function (char) {
+            return {
+                "&": "&amp;",
+                "<": "&lt;",
+                ">": "&gt;",
+                '"': "&quot;",
+                "'": "&#39;"
+            }[char];
+        });
+    }
+
+    function readTruckDetailCards() {
+        var node = document.getElementById("eo-truck-detail-cards-data");
+        if (!node) return {};
+        try {
+            return JSON.parse(node.textContent || "{}") || {};
+        } catch (error) {
+            return {};
+        }
+    }
+
+    function closeTruckDetailCard() {
+        if (!truckDetailLayer) return;
+        truckDetailLayer.hidden = true;
+        truckDetailLayer.setAttribute("aria-hidden", "true");
+        delete truckDetailLayer.dataset.eoTruckDetailActiveId;
+    }
+
+    function normalizeTruckDetailStatus(status) {
+        var known = ["green", "yellow", "blue", "orange", "red", "gray"];
+        return known.indexOf(status) >= 0 ? status : "gray";
+    }
+
+    function renderTruckDetailIcon(data) {
+        if (!truckDetailIconSlot) return;
+        var status = normalizeTruckDetailStatus(data.status_key);
+        truckDetailIconSlot.innerHTML = "";
+        var icon = document.createElement("div");
+        icon.className = "mm-detail-icon status-" + status;
+        icon.style.setProperty("--tile-progress", String(data.percent || 0) + "%");
+        icon.innerHTML =
+            "<strong>" + escapeHtml(data.number || data.label || "") + "</strong>" +
+            '<img src="' + escapeHtml(staticPrefix + (data.icon || "img/equipment/truck-gray.png")) + '" alt="">' +
+            "<span>" + escapeHtml(data.status_label || "") + "</span>";
+        truckDetailIconSlot.appendChild(icon);
+    }
+
+    function renderTruckDetailEmployee(employee) {
+        if (!truckDetailEmployee) return;
+        employee = employee || {};
+        truckDetailEmployee.hidden = false;
+        if (truckDetailEmployeeName) truckDetailEmployeeName.textContent = employee.name || "Водитель не назначен";
+        if (truckDetailEmployeePhone) {
+            truckDetailEmployeePhone.textContent = employee.phone || "телефон не указан";
+            if (employee.phone) {
+                truckDetailEmployeePhone.href = "tel:" + employee.phone.replace(/[^\d+]/g, "");
+                truckDetailEmployeePhone.removeAttribute("aria-disabled");
+            } else {
+                truckDetailEmployeePhone.removeAttribute("href");
+                truckDetailEmployeePhone.setAttribute("aria-disabled", "true");
+            }
+        }
+        if (truckDetailEmployeeImg && truckDetailEmployeeInitials) {
+            if (employee.photo) {
+                truckDetailEmployeeImg.src = employee.photo;
+                truckDetailEmployeeImg.hidden = false;
+                truckDetailEmployeeInitials.hidden = true;
+            } else {
+                truckDetailEmployeeImg.removeAttribute("src");
+                truckDetailEmployeeImg.hidden = true;
+                truckDetailEmployeeInitials.textContent = employee.initials || "--";
+                truckDetailEmployeeInitials.hidden = false;
+            }
+        }
+    }
+
+    function renderTruckDetailRows(rows) {
+        if (!truckDetailList) return;
+        truckDetailList.innerHTML = "";
+        (rows || []).forEach(function (row) {
+            if (!row || !row.value) return;
+            var term = document.createElement("dt");
+            var value = document.createElement("dd");
+            term.textContent = row.label || "";
+            value.textContent = row.value || "";
+            truckDetailList.appendChild(term);
+            truckDetailList.appendChild(value);
+        });
+    }
+
+    function renderTruckDetailReport(report) {
+        if (!truckDetailShiftReport || !truckDetailMetrics || !truckDetailDashboard) return;
+        var metrics = (report && report.metrics) || [];
+        var charts = ((report && report.charts) || []).filter(function (chart) {
+            return chart && chart.rows && chart.rows.length;
+        });
+        truckDetailMetrics.innerHTML = "";
+        truckDetailDashboard.innerHTML = "";
+        metrics.forEach(function (metric) {
+            if (!metric || !metric.value) return;
+            var item = document.createElement("div");
+            var label = document.createElement("span");
+            var value = document.createElement("strong");
+            label.textContent = metric.label || "";
+            value.textContent = metric.value || "";
+            item.appendChild(label);
+            item.appendChild(value);
+            truckDetailMetrics.appendChild(item);
+        });
+        charts.slice(0, 2).forEach(function (chart) {
+            var card = document.createElement("div");
+            card.className = "gd-detail-chart-card gd-detail-chart-bar";
+            var title = document.createElement("div");
+            title.className = "gd-detail-report-title";
+            title.textContent = chart.title || "";
+            card.appendChild(title);
+            chart.rows.slice(0, 4).forEach(function (row) {
+                var line = document.createElement("div");
+                line.className = "gd-detail-chart-row accent-" + (row.accent || "green");
+                line.style.setProperty("--bar-pct", Math.max(0, Math.min(100, Number(row.percent || 0))) + "%");
+                line.innerHTML =
+                    "<div class=\"gd-detail-chart-head\"><strong>" + escapeHtml(row.label || row.source || row.target || "") + "</strong><span>" + escapeHtml(row.value || "") + "</span></div>" +
+                    "<div class=\"gd-detail-chart-meta\">" + escapeHtml(row.meta || row.target || "") + "</div>" +
+                    "<div class=\"gd-detail-chart-bar\"><i></i></div>";
+                card.appendChild(line);
+            });
+            truckDetailDashboard.appendChild(card);
+        });
+        truckDetailShiftReport.hidden = metrics.length === 0 && charts.length === 0;
+    }
+
+    function openTruckDetailCard(cardId) {
+        var data = readTruckDetailCards()[String(cardId || "")];
+        if (!data || !truckDetailLayer) return false;
+        truckDetailLayer.dataset.eoTruckDetailActiveId = String(cardId || "");
+        renderTruckDetailIcon(data);
+        if (truckDetailType) truckDetailType.textContent = data.type || "Самосвал";
+        if (truckDetailTitle) truckDetailTitle.textContent = data.label || data.number || "Самосвал";
+        if (truckDetailStatus) truckDetailStatus.textContent = data.status_label || "";
+        if (truckDetailZone) truckDetailZone.textContent = data.zone || "";
+        renderTruckDetailEmployee(data.employee || {});
+        renderTruckDetailRows(data.details || []);
+        renderTruckDetailReport(data.shift_report || {});
+        truckDetailLayer.hidden = false;
+        truckDetailLayer.setAttribute("aria-hidden", "false");
+        return true;
+    }
+
+    if (truckDetailLayer && truckDetailLayer.dataset.eoTruckDetailBound !== "1") {
+        truckDetailLayer.dataset.eoTruckDetailBound = "1";
+        truckDetailLayer.querySelectorAll("[data-eo-truck-detail-close]").forEach(function (node) {
+            node.addEventListener("click", closeTruckDetailCard);
+        });
+        document.addEventListener("keydown", function (event) {
+            if (event.key === "Escape") closeTruckDetailCard();
+        });
+    }
 
     function fitTopbarLocationText() {
         var faceText = shell.querySelector(".eo-face-cell-full strong");
@@ -1370,6 +1589,7 @@ window.initExcavatorWorkShell = function () {
 
     function updateTruckDrag(event) {
         if (!activeTruckDrag || event.pointerId !== activeTruckDrag.pointerId) return;
+        if (activeTruckDrag.longPressOpened) return;
         var dx = event.clientX - activeTruckDrag.startX;
         var dy = event.clientY - activeTruckDrag.startY;
         var movedEnough = Math.abs(dx) > 7 || Math.abs(dy) > 7;
@@ -1402,6 +1622,10 @@ window.initExcavatorWorkShell = function () {
         state.card.style.transform = "";
         removeTruckDragPreview(state);
         clearDropReady();
+        if (state.longPressOpened) {
+            event.preventDefault();
+            return;
+        }
         if (!state.started) {
             return;
         }
@@ -1434,8 +1658,29 @@ window.initExcavatorWorkShell = function () {
     });
 
     shell.querySelectorAll("[data-eo-truck-card]").forEach(function (card) {
+        var truckLongPressTimer = null;
+        var truckLongPressPointerId = null;
+        var truckLongPressStartX = 0;
+        var truckLongPressStartY = 0;
+        var truckLongPressOpened = false;
+        function clearTruckLongPress() {
+            if (truckLongPressTimer) {
+                window.clearTimeout(truckLongPressTimer);
+                truckLongPressTimer = null;
+            }
+        }
+        function suppressTruckClick() {
+            card.dataset.eoSuppressClick = "1";
+            window.setTimeout(function () {
+                delete card.dataset.eoSuppressClick;
+            }, 480);
+        }
         card.addEventListener("click", function (event) {
             if (card.dataset.eoSuppressClick === "1") {
+                event.preventDefault();
+                return;
+            }
+            if (isInactiveTruck(card)) {
                 event.preventDefault();
                 return;
             }
@@ -1443,6 +1688,21 @@ window.initExcavatorWorkShell = function () {
         });
         card.addEventListener("pointerdown", function (event) {
             if (event.button !== undefined && event.button !== 0) return;
+            truckLongPressPointerId = event.pointerId;
+            truckLongPressStartX = event.clientX;
+            truckLongPressStartY = event.clientY;
+            truckLongPressOpened = false;
+            clearTruckLongPress();
+            truckLongPressTimer = window.setTimeout(function () {
+                if (truckLongPressPointerId !== event.pointerId) return;
+                truckLongPressOpened = openTruckDetailCard(card.dataset.eoTruckDetailId || card.dataset.truckId);
+                if (truckLongPressOpened) {
+                    suppressTruckClick();
+                    if (activeTruckDrag && activeTruckDrag.card === card && activeTruckDrag.pointerId === event.pointerId) {
+                        activeTruckDrag.longPressOpened = true;
+                    }
+                }
+            }, 580);
             if (isInactiveTruck(card)) return;
             selectTruck(card);
             activeTruckDrag = {
@@ -1451,7 +1711,8 @@ window.initExcavatorWorkShell = function () {
                 startX: event.clientX,
                 startY: event.clientY,
                 started: false,
-                target: null
+                target: null,
+                longPressOpened: false
             };
             if (card.setPointerCapture) {
                 try {
@@ -1459,14 +1720,49 @@ window.initExcavatorWorkShell = function () {
                 } catch (error) {}
             }
         });
-        card.addEventListener("pointermove", updateTruckDrag);
-        card.addEventListener("pointerup", finishTruckDrag);
-        card.addEventListener("pointercancel", cancelTruckDrag);
+        card.addEventListener("pointermove", function (event) {
+            if (truckLongPressPointerId === event.pointerId) {
+                var dx = event.clientX - truckLongPressStartX;
+                var dy = event.clientY - truckLongPressStartY;
+                if (Math.hypot(dx, dy) > 9) {
+                    clearTruckLongPress();
+                }
+            }
+            updateTruckDrag(event);
+        });
+        card.addEventListener("pointerup", function (event) {
+            if (truckLongPressPointerId === event.pointerId) {
+                clearTruckLongPress();
+                truckLongPressPointerId = null;
+                if (truckLongPressOpened) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                }
+            }
+            finishTruckDrag(event);
+            truckLongPressOpened = false;
+        });
+        card.addEventListener("pointercancel", function (event) {
+            if (truckLongPressPointerId === event.pointerId) {
+                clearTruckLongPress();
+                truckLongPressPointerId = null;
+            }
+            cancelTruckDrag(event);
+            truckLongPressOpened = false;
+        });
+        card.addEventListener("pointerleave", function (event) {
+            if (truckLongPressPointerId === event.pointerId && !activeTruckDrag) {
+                clearTruckLongPress();
+                truckLongPressPointerId = null;
+                truckLongPressOpened = false;
+            }
+        });
         card.addEventListener("dragstart", function (event) {
             if (isInactiveTruck(card)) {
                 event.preventDefault();
                 return;
             }
+            clearTruckLongPress();
             selectTruck(card);
             event.dataTransfer.setData("text/plain", card.dataset.assignmentId || "");
         });

@@ -417,6 +417,14 @@ body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashbo
     z-index: 10040 !important;
 }
 
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-card[data-eo-truck-card] {
+    pointer-events: auto !important;
+}
+
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-card[data-eo-truck-inactive="1"] {
+    cursor: help !important;
+}
+
 body.excavator-operator-screen .eo-dashboard-truck-card.is-drag-preview,
 body.excavator-operator-screen .eo-truck-card.is-drag-preview {
     --eo-plan-color: rgba(163, 230, 53, 1);
@@ -523,6 +531,148 @@ body.excavator-operator-screen .eo-dashboard-truck-card.is-drag-preview > *,
 body.excavator-operator-screen .eo-truck-card.is-drag-preview > * {
     position: relative !important;
     z-index: 6 !important;
+}
+
+body.excavator-operator-screen .truck-drag-preview i,
+body.excavator-operator-screen .truck-drag-preview .truck-icon,
+body.excavator-operator-screen .truck-drag-preview .truck-image {
+    position: absolute !important;
+    inset: 0 !important;
+    display: grid !important;
+    place-items: center !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    overflow: visible !important;
+    transform: none !important;
+    z-index: 5 !important;
+    pointer-events: none !important;
+}
+
+body.excavator-operator-screen .truck-drag-preview i img,
+body.excavator-operator-screen .truck-drag-preview .truck-icon img,
+body.excavator-operator-screen .truck-drag-preview .truck-image img,
+body.excavator-operator-screen .truck-drag-preview svg,
+body.excavator-operator-screen .truck-drag-preview img {
+    width: clamp(78px, 6.4vw, 118px) !important;
+    height: auto !important;
+    max-width: none !important;
+    max-height: 58% !important;
+    object-fit: contain !important;
+    transform: none !important;
+    position: static !important;
+    z-index: 5 !important;
+}
+
+body.excavator-operator-screen .truck-drag-preview strong,
+body.excavator-operator-screen .truck-drag-preview span,
+body.excavator-operator-screen .truck-drag-preview small,
+body.excavator-operator-screen .truck-drag-preview b,
+body.excavator-operator-screen .truck-drag-preview em,
+body.excavator-operator-screen .truck-drag-preview mark {
+    position: relative !important;
+    z-index: 7 !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-card.truck-drag-preview i,
+body.excavator-operator-screen .eo-dashboard-truck-card.truck-drag-preview .truck-icon,
+body.excavator-operator-screen .eo-dashboard-truck-card.truck-drag-preview .truck-image {
+    position: absolute !important;
+    inset: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    max-width: none !important;
+    max-height: none !important;
+    align-self: stretch !important;
+    justify-self: stretch !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-card.truck-drag-preview i img,
+body.excavator-operator-screen .eo-dashboard-truck-card.truck-drag-preview .truck-icon img,
+body.excavator-operator-screen .eo-dashboard-truck-card.truck-drag-preview .truck-image img,
+body.excavator-operator-screen .eo-dashboard-truck-card.truck-drag-preview svg,
+body.excavator-operator-screen .eo-dashboard-truck-card.truck-drag-preview img {
+    width: clamp(78px, 6.4vw, 118px) !important;
+    height: auto !important;
+    max-width: none !important;
+    max-height: 58% !important;
+}
+
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-card.truck-drag-preview i,
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-card.truck-drag-preview .truck-icon,
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-card.truck-drag-preview .truck-image {
+    position: absolute !important;
+    inset: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    max-width: none !important;
+    max-height: none !important;
+}
+
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-card.truck-drag-preview i img,
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-card.truck-drag-preview .truck-icon img,
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-card.truck-drag-preview .truck-image img,
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-card.truck-drag-preview svg,
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-card.truck-drag-preview img {
+    width: clamp(78px, 6.4vw, 118px) !important;
+    height: auto !important;
+    max-width: none !important;
+    max-height: 58% !important;
+}
+
+body.excavator-operator-screen .eo-truck-detail-modal {
+    z-index: 18000 !important;
+}
+
+body.excavator-operator-screen .eo-truck-detail-modal .mm-equipment-detail-panel {
+    width: min(520px, calc(100vw - 24px)) !important;
+    max-height: min(760px, calc(100dvh - var(--bottom-nav-height, 96px) - 24px)) !important;
+    border-radius: 8px !important;
+}
+
+body.excavator-operator-screen .eo-truck-detail-modal .gd-detail-garage-slot .mm-detail-icon {
+    width: 104px !important;
+    height: 76px !important;
+}
+
+body.excavator-operator-screen .eo-truck-detail-modal .gd-detail-shift-report[hidden] {
+    display: none !important;
+}
+
+@media (max-width: 767px) {
+    body.excavator-operator-screen .truck-drag-preview i img,
+    body.excavator-operator-screen .truck-drag-preview .truck-icon img,
+    body.excavator-operator-screen .truck-drag-preview .truck-image img,
+    body.excavator-operator-screen .truck-drag-preview svg,
+    body.excavator-operator-screen .truck-drag-preview img {
+        width: clamp(50px, 14vw, 68px) !important;
+        height: auto !important;
+        max-width: none !important;
+        max-height: 58% !important;
+    }
+
+    body.excavator-operator-screen .eo-dashboard-truck-card.truck-drag-preview i img,
+    body.excavator-operator-screen .eo-dashboard-truck-card.truck-drag-preview .truck-icon img,
+    body.excavator-operator-screen .eo-dashboard-truck-card.truck-drag-preview .truck-image img,
+    body.excavator-operator-screen .eo-dashboard-truck-card.truck-drag-preview svg,
+    body.excavator-operator-screen .eo-dashboard-truck-card.truck-drag-preview img {
+        width: clamp(50px, 14vw, 68px) !important;
+        height: auto !important;
+        max-width: none !important;
+        max-height: 58% !important;
+    }
+
+    body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-card.truck-drag-preview i img,
+    body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-card.truck-drag-preview .truck-icon img,
+    body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-card.truck-drag-preview .truck-image img,
+    body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-card.truck-drag-preview svg,
+    body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-card.truck-drag-preview img {
+        width: clamp(50px, 14vw, 68px) !important;
+        height: auto !important;
+        max-width: none !important;
+        max-height: 58% !important;
+    }
 }
 
 body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-overflow {

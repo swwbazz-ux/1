@@ -626,7 +626,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/static/css/excavator-work-v55-shift.css')
         self.assertContains(response, '/excavator-sw.js')
         self.assertContains(response, 'scope: "/excavator/"')
-        self.assertContains(response, 'excavator-mobile-shell-v69')
+        self.assertContains(response, 'excavator-mobile-shell-v70')
         self.assertContains(response, 'Простои')
         self.assertNotContains(response, 'Отпустить сюда')
         self.assertContains(response, 'resolveExcavatorUpdateVersion')
@@ -647,6 +647,12 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, reverse('excavator_work_settings'))
         self.assertContains(response, reverse('excavator_shift_action'))
         self.assertContains(response, reverse('excavator_truck_loaded_cancel'))
+        self.assertContains(response, 'eo-truck-detail-cards-data')
+        self.assertContains(response, 'data-eo-truck-detail')
+        self.assertContains(response, 'data-eo-truck-detail-id')
+        self.assertContains(response, 'openTruckDetailCard')
+        self.assertContains(response, 'truckLongPressTimer')
+        self.assertContains(response, 'truck-drag-preview')
         self.assertContains(response, 'data-eo-shift-url')
         self.assertContains(response, 'data-eo-truck-loaded-cancel-url')
         self.assertContains(response, 'data-eo-shift-button')
@@ -744,6 +750,27 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertNotContains(response, 'ожидает сервер')
         self.assertNotContains(response, 'Под погрузкой')
         self.assertContains(response, 'class="mm-mobile-shift-button is-danger"')
+
+    def test_excavator_work_renders_readonly_truck_detail_card_data(self):
+        response = self.client.get(reverse('excavator_work'))
+
+        self.assertEqual(response.status_code, 200)
+        detail_cards = response.context['truck_detail_cards']
+        detail = detail_cards[str(self.truck.id)]
+        self.assertEqual(detail['type'], 'Самосвал')
+        self.assertEqual(detail['label'], '21')
+        self.assertEqual(detail['status_label'], 'Назначена')
+        self.assertEqual(detail['category'], 'truck')
+        detail_labels = {row['label']: row['value'] for row in detail['details']}
+        self.assertEqual(detail_labels['Гаражный N'], '21')
+        self.assertEqual(detail_labels['Состояние'], 'Назначена')
+        self.assertEqual(detail_labels['Доступность'], 'Доступен для погрузки')
+        self.assertEqual(detail_labels['Назначение'], 'принято')
+        self.assertIn('Рейсы смены', detail_labels)
+        self.assertIn('План смены', detail_labels)
+        self.assertIn('metrics', detail['shift_report'])
+        self.assertContains(response, f'"{self.truck.id}"')
+        self.assertContains(response, 'Смена самосвала')
 
     def test_excavator_work_renders_individual_truck_plan_percent(self):
         loading_shift = EmployeeShift.objects.get(employee=self.operator, equipment=self.excavator)
@@ -1162,7 +1189,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/excavator/')
-        self.assertIn('excavator-mobile-shell-v69', script)
+        self.assertIn('excavator-mobile-shell-v70', script)
         self.assertIn(reverse('excavator_work'), script)
         self.assertIn(reverse('excavator_manifest'), script)
         self.assertIn('/static/js/realtime-client.js', script)
