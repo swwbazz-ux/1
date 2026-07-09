@@ -105,7 +105,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, reverse('driver_manifest'))
         self.assertContains(response, 'rel="manifest"')
         self.assertContains(response, '/driver-sw.js')
-        self.assertContains(response, 'driver-mobile-shell-v45')
+        self.assertContains(response, 'driver-mobile-shell-v47')
         self.assertContains(response, 'data-driver-pwa-update-modal')
         self.assertContains(response, 'data-driver-pwa-update-badge')
         self.assertContains(response, 'mode: "custom", path: "^/driver/(?:shift/?)?$"')
@@ -115,8 +115,9 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, '--driver-nav-total-h')
         self.assertContains(response, '--driver-edge: clamp(16px, 5vw, 34px)')
         self.assertContains(response, '--driver-header-h: 54px')
+        self.assertContains(response, '--driver-header-total-h')
         self.assertContains(response, '--driver-nav-content-h: 78px')
-        self.assertContains(response, 'height: var(--driver-header-h)')
+        self.assertContains(response, 'height: var(--driver-header-total-h)')
         self.assertContains(response, 'height: var(--driver-nav-total-h, 78px)')
         self.assertContains(response, 'grid-template-columns: minmax(0, 1fr) auto')
         self.assertContains(response, 'class="driver-header-id')
@@ -124,12 +125,12 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, 'white-space: nowrap')
         self.assertContains(response, 'text-overflow: clip')
         self.assertNotContains(response, '>Активная смена<')
-        self.assertContains(response, '--driver-dial-size: clamp(285px, 78vw, 520px)')
+        self.assertContains(response, '--driver-dial-size: clamp(280px, min(68vw, 54dvh), 520px)')
         self.assertContains(response, 'grid-template-areas:')
         self.assertContains(response, '"context"')
         self.assertContains(response, '"dial"')
         self.assertContains(response, '"assign"')
-        self.assertContains(response, 'gap: clamp(12px, 2dvh, 20px)')
+        self.assertContains(response, 'gap: var(--driver-work-gap)')
         self.assertContains(response, 'class="driver-work-context-card"')
         self.assertContains(response, 'class="driver-work-context-line"')
         self.assertContains(response, 'font-size: clamp(17px, 4.4vw, 27px)')
@@ -138,14 +139,15 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, 'body.driver-mobile-screen .driver-work-assignment')
         self.assertContains(response, 'width: min(var(--driver-dial-size), 100%)')
         self.assertContains(response, 'max-width: 520px')
-        self.assertContains(response, '--driver-dial-size: clamp(320px, 36vw, 520px)')
+        self.assertContains(response, '--driver-dial-size: clamp(320px, min(42vw, 58dvh), 520px)')
         self.assertContains(response, 'max-width: 520px')
-        self.assertContains(response, 'width: min(var(--driver-dial-size), 57dvh, 100%)')
+        self.assertNotContains(response, 'width: min(var(--driver-dial-size), 57dvh, 100%)')
+        self.assertNotContains(response, '"context dial"')
+        self.assertNotContains(response, '"assign dial"')
         self.assertContains(response, 'grid-template-rows: auto minmax(0, 1fr) auto')
         self.assertContains(response, '[data-driver-tab-panel="downtimes"].is-active')
-        self.assertContains(response, 'max-height: none')
-        self.assertContains(response, 'align-self: end')
-        self.assertContains(response, 'padding: clamp(12px, 2dvh, 18px) 0 max(18px, var(--driver-safe-bottom, 0px))')
+        self.assertContains(response, 'max-height: 100%')
+        self.assertContains(response, 'padding: 0 0 max(10px, var(--driver-safe-bottom, 0px))')
         self.assertContains(response, 'width: 100%')
         self.assertContains(response, 'max-width: none')
         self.assertContains(response, 'min-width: 320px')
@@ -175,7 +177,7 @@ class AccessLoginTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Service-Worker-Allowed'], '/driver/')
-        self.assertIn('driver-mobile-shell-v45', script)
+        self.assertIn('driver-mobile-shell-v47', script)
         self.assertIn('/driver/', script)
         self.assertIn('/driver/shift/', script)
         self.assertIn('/driver.webmanifest', script)
@@ -727,6 +729,80 @@ class AccessLoginTests(TestCase):
         self.assertEqual(equipment_plan.plan_trips, 20)
         self.assertIsNone(equipment_plan.plan_tonnage)
         self.assertEqual(equipment_plan.calculation_mode, 'trips')
+
+    def test_admin_plan_group_editor_uses_checkboxes_and_validates_equipment(self):
+        admin_role = Role.objects.create(code='admin', name='Администратор')
+        admin_employee = Employee.objects.create(full_name='Администратор MVP', status=Employee.Status.ACTIVE)
+        EmployeeAccess.objects.create(
+            employee=admin_employee,
+            role=admin_role,
+            access_code='1000',
+            status=EmployeeAccess.Status.ACTIVATED,
+        )
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        belaz_model = EquipmentModel.objects.create(equipment_type=truck_type, name='БелАЗ 7513D')
+        truck = Equipment.objects.create(equipment_type=truck_type, model=belaz_model, garage_number='25', is_active=True)
+        excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='2', is_active=True)
+        group = EquipmentPlanGroup.objects.get(code='excavators_3000')
+        group.plan_value = '3000.00'
+        group.is_active = True
+        group.save(update_fields=['plan_value', 'is_active'])
+
+        self.client.post('/', {'access_code': '1000'}, follow=True, HTTP_HOST='localhost')
+        page = self.client.get(
+            f'/system-admin/references/equipment-plan-groups/?edit={group.id}',
+            HTTP_HOST='localhost',
+        )
+        self.assertContains(page, 'reference-checkbox-panel')
+        self.assertContains(page, 'type="checkbox"')
+        self.assertContains(page, 'Самосвал 25')
+        self.assertContains(page, 'Экскаватор 2')
+
+        bad_response = self.client.post(
+            f'/system-admin/references/equipment-plan-groups/?edit={group.id}',
+            {
+                'record_id': str(group.id),
+                'name': 'Экскаваторы 3000',
+                'code': 'excavators_3000',
+                'calculation_mode': PlanCalculationMode.VOLUME,
+                'plan_value': '3000.00',
+                'equipment': [str(truck.id)],
+                'is_active': 'on',
+                'active_from': timezone.localdate().isoformat(),
+                'comment': '',
+            },
+            HTTP_HOST='localhost',
+        )
+        group.refresh_from_db()
+        self.assertEqual(bad_response.status_code, 200)
+        self.assertContains(bad_response, 'нельзя сохранить')
+        self.assertEqual(group.equipment.count(), 0)
+
+        good_response = self.client.post(
+            f'/system-admin/references/equipment-plan-groups/?edit={group.id}',
+            {
+                'record_id': str(group.id),
+                'name': 'Экскаваторы 3000',
+                'code': 'excavators_3000',
+                'calculation_mode': PlanCalculationMode.VOLUME,
+                'plan_value': '3000.00',
+                'equipment': [str(excavator.id)],
+                'is_active': 'on',
+                'active_from': timezone.localdate().isoformat(),
+                'comment': '',
+            },
+            HTTP_HOST='localhost',
+        )
+        group.refresh_from_db()
+        reload_response = self.client.get(
+            f'/system-admin/references/equipment-plan-groups/?edit={group.id}',
+            HTTP_HOST='localhost',
+        )
+
+        self.assertEqual(good_response.status_code, 302)
+        self.assertEqual(list(group.equipment.all()), [excavator])
+        self.assertContains(reload_response, 'Экскаватор 2')
 
     def test_reference_detail_save_keeps_selected_record_and_filters(self):
         admin_role = Role.objects.create(code='admin', name='Администратор')
@@ -1731,7 +1807,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(driver_shift_response, 'ККД')
         self.assertContains(driver_shift_response, 'window.applyOperationalStateRefresh')
         self.assertContains(driver_shift_response, 'data-realtime-mode="custom"')
-        self.assertContains(driver_shift_response, 'driver-mobile-shell-v45')
+        self.assertContains(driver_shift_response, 'driver-mobile-shell-v47')
 
     def test_driver_downtime_buttons_are_rendered_from_server_reference(self):
         truck = self.create_registered_driver_shift()

@@ -1,4 +1,5 @@
 from datetime import timedelta
+from django.core.exceptions import ValidationError
 from django.test import TestCase
 from django.utils import timezone
 
@@ -7,6 +8,10 @@ from trips.models import Trip, TripStatus
 from users.models import Employee
 
 from .models import EmployeeShift, EquipmentPlanGroup, EquipmentShiftPlan, PlanAssignmentStatus, PlanCalculationMode, ShiftPlan
+from .equipment_plan_groups import (
+    reconcile_default_equipment_plan_groups,
+    validate_equipment_plan_group_membership,
+)
 from .services import assign_shift_plan_snapshot, calculate_equipment_shift_progress, calculate_open_shift_progress, shift_plan_totals
 
 
@@ -34,6 +39,143 @@ class ShiftPlanServiceTests(TestCase):
         )
         group.equipment.add(equipment)
         return group
+
+    def test_reconcile_default_groups_keeps_each_equipment_in_expected_group_only(self):
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        belaz_model = EquipmentModel.objects.create(equipment_type=truck_type, name='БелАЗ 7513D')
+        nhl_model = EquipmentModel.objects.create(equipment_type=truck_type, name='NHL NTE 200')
+        belaz = Equipment.objects.create(equipment_type=truck_type, model=belaz_model, garage_number='25')
+        nhl = Equipment.objects.create(equipment_type=truck_type, model=nhl_model, garage_number='54')
+        excavator_1 = Equipment.objects.create(equipment_type=excavator_type, garage_number='1')
+        excavator_8 = Equipment.objects.create(equipment_type=excavator_type, garage_number='8')
+        excavator_2 = Equipment.objects.create(equipment_type=excavator_type, garage_number='2')
+        excavator_3 = Equipment.objects.create(equipment_type=excavator_type, garage_number='3')
+        excavators_3000 = EquipmentPlanGroup.objects.get(code='excavators_3000')
+        excavators_3000.equipment.add(belaz, nhl, excavator_1, excavator_2)
+        belaz_group = EquipmentPlanGroup.objects.get(code='belaz_trucks')
+        belaz_group.equipment.add(excavator_8)
+
+        report = reconcile_default_equipment_plan_groups()
+
+        self.assertGreaterEqual(report['removed_total'], 4)
+        self.assertEqual(
+            set(EquipmentPlanGroup.objects.get(code='belaz_trucks').equipment.values_list('id', flat=True)),
+            {belaz.id},
+        )
+        self.assertEqual(
+            set(EquipmentPlanGroup.objects.get(code='nhl_trucks').equipment.values_list('id', flat=True)),
+            {nhl.id},
+        )
+        self.assertEqual(
+            set(EquipmentPlanGroup.objects.get(code='excavators_4000').equipment.values_list('id', flat=True)),
+            {excavator_1.id, excavator_8.id},
+        )
+        self.assertEqual(
+            set(EquipmentPlanGroup.objects.get(code='excavators_3000').equipment.values_list('id', flat=True)),
+            {excavator_2.id, excavator_3.id},
+        )
+        default_ids = []
+        for code in ['belaz_trucks', 'nhl_trucks', 'excavators_4000', 'excavators_3000']:
+            default_ids.extend(EquipmentPlanGroup.objects.get(code=code).equipment.values_list('id', flat=True))
+        self.assertEqual(len(default_ids), len(set(default_ids)))
+
+    def test_default_group_validation_rejects_incompatible_equipment(self):
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        belaz_model = EquipmentModel.objects.create(equipment_type=truck_type, name='БелАЗ 7513D')
+        truck = Equipment.objects.create(equipment_type=truck_type, model=belaz_model, garage_number='25')
+        group = EquipmentPlanGroup(
+            name='Экскаваторы 3000',
+            code='excavators_3000',
+            calculation_mode=PlanCalculationMode.VOLUME,
+            is_active=True,
+        )
+
+        with self.assertRaises(ValidationError):
+            validate_equipment_plan_group_membership(
+                group,
+                [truck],
+                group_code='excavators_3000',
+                is_active=True,
+            )
+
+    def test_equipment_cannot_be_in_two_active_plan_groups(self):
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        truck = Equipment.objects.create(equipment_type=truck_type, garage_number='25')
+        first_group = EquipmentPlanGroup.objects.create(
+            name='Активная группа 1',
+            code='active-group-1',
+            calculation_mode=PlanCalculationMode.TRIPS,
+            plan_value='10.00',
+            is_active=True,
+        )
+        first_group.equipment.add(truck)
+        second_group = EquipmentPlanGroup(
+            name='Активная группа 2',
+            code='active-group-2',
+            calculation_mode=PlanCalculationMode.TRIPS,
+            plan_value='11.00',
+            is_active=True,
+        )
+
+        with self.assertRaises(ValidationError):
+            validate_equipment_plan_group_membership(
+                second_group,
+                [truck],
+                group_code='active-group-2',
+                is_active=True,
+            )
+
+    def test_reconcile_does_not_recalculate_closed_shift_snapshot(self):
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        belaz_model = EquipmentModel.objects.create(equipment_type=truck_type, name='БелАЗ 7513D')
+        truck = Equipment.objects.create(equipment_type=truck_type, model=belaz_model, garage_number='25')
+        group = EquipmentPlanGroup.objects.get(code='belaz_trucks')
+        group.plan_value = '12.00'
+        group.calculation_mode = PlanCalculationMode.TRIPS
+        group.is_active = True
+        group.save(update_fields=['plan_value', 'calculation_mode', 'is_active'])
+        group.equipment.set([truck])
+        shift = self.create_shift_with_snapshot(truck)
+        shift.closed_at = timezone.now()
+        shift.save(update_fields=['closed_at'])
+
+        reconcile_default_equipment_plan_groups()
+        shift.refresh_from_db()
+
+        self.assertEqual(shift.plan_status, PlanAssignmentStatus.ASSIGNED)
+        self.assertEqual(shift.plan_group_name, 'Самосвалы БелАЗ')
+        self.assertEqual(shift.plan_calculation_mode, PlanCalculationMode.TRIPS)
+        self.assertEqual(shift.plan_value, 12)
+
+    def test_group_composition_change_applies_only_to_new_shifts(self):
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        truck = Equipment.objects.create(equipment_type=truck_type, garage_number='25')
+        old_group = self.create_plan_group(
+            name='Старая активная группа',
+            code='old-active-group',
+            mode=PlanCalculationMode.TRIPS,
+            value='10.00',
+            equipment=truck,
+        )
+        old_shift = self.create_shift_with_snapshot(truck, employee_name='Водитель старая смена')
+        new_group = EquipmentPlanGroup.objects.create(
+            name='Новая активная группа',
+            code='new-active-group',
+            calculation_mode=PlanCalculationMode.TRIPS,
+            plan_value='15.00',
+            is_active=True,
+        )
+        old_group.equipment.remove(truck)
+        new_group.equipment.add(truck)
+
+        new_shift = self.create_shift_with_snapshot(truck, employee_name='Водитель новая смена')
+        old_shift.refresh_from_db()
+
+        self.assertEqual(old_shift.plan_group_name, 'Старая активная группа')
+        self.assertEqual(old_shift.plan_value, 10)
+        self.assertEqual(new_shift.plan_group_name, 'Новая активная группа')
+        self.assertEqual(new_shift.plan_value, 15)
 
     def test_belaz_gets_trip_plan_for_day_and_night_without_daily_shift_plan(self):
         truck_type = EquipmentType.objects.create(name='Самосвал')

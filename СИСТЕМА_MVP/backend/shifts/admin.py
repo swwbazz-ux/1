@@ -1,5 +1,6 @@
 from django.contrib import admin
 
+from .forms import EquipmentPlanGroupForm
 from .models import EmployeeShift, EquipmentPlanGroup, EquipmentShiftPlan, ShiftPlan, WatchPeriod
 
 
@@ -19,6 +20,7 @@ class EmployeeShiftAdmin(admin.ModelAdmin):
 
 @admin.register(EquipmentPlanGroup)
 class EquipmentPlanGroupAdmin(admin.ModelAdmin):
+    form = EquipmentPlanGroupForm
     list_display = ('name', 'calculation_mode', 'plan_value', 'is_active', 'active_from', 'updated_by', 'updated_at')
     search_fields = ('name', 'code', 'comment', 'equipment__garage_number', 'equipment__model__name')
     list_filter = ('calculation_mode', 'is_active', 'active_from')

@@ -24,6 +24,7 @@ from core.models import OperationalStateEvent, bump_operational_state
 from downtimes.models import DowntimeEvent, DowntimeReason
 from references.models import Dormitory, DormitorySection, DumpPoint, Equipment, EquipmentState, EquipmentType, RockType
 from reports.models import ReportTemplate
+from shifts.forms import EquipmentPlanGroupForm
 from shifts.models import EmployeeShift, EquipmentPlanGroup, EquipmentShiftPlan, PlanAssignmentStatus, PlanCalculationMode, ShiftPlan, ShiftPlanScope
 from shifts.services import assign_shift_plan_snapshot, calculate_open_shift_progress, plan_status_label, plan_unit_label
 from trips.models import DispatcherActionLog, OPEN_TRIP_STATUSES, Trip, TripClientAction, TripStatus
@@ -109,7 +110,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v45'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v47'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -742,6 +743,7 @@ def get_system_admin_reference_configs():
             'title': 'Ежесменные планы техники',
             'section': 'Производство',
             'model': EquipmentPlanGroup,
+            'form_class': EquipmentPlanGroupForm,
             'description': 'Один активный план задается на группу техники и автоматически фиксируется snapshot при открытии смены.',
             'fields': ['name', 'code', 'calculation_mode', 'plan_value', 'equipment', 'is_active', 'active_from', 'comment'],
             'search_fields': ['name', 'code', 'comment', 'equipment__garage_number', 'equipment__equipment_type__name', 'equipment__model__name'],
@@ -810,6 +812,21 @@ def get_system_admin_reference_configs():
 
 def build_reference_form(model, config=None):
     config = config or {}
+    if config.get('form_class'):
+        form_class = config['form_class']
+        field_choices = config.get('field_choices') or {}
+        if not field_choices:
+            return form_class
+
+        class ReferenceForm(form_class):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                for field_name, choices in field_choices.items():
+                    if field_name in self.fields:
+                        self.fields[field_name].choices = choices
+
+        return ReferenceForm
+
     editable_fields = config.get('fields') or [
         field.name
         for field in model._meta.fields
