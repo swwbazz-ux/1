@@ -23207,8 +23207,7 @@ body.management-dynamics-chart-modal-open {
     white-space: nowrap;
 }
 
-.dispatcher-excavator-garage-tile .dispatcher-tile-plan-percent,
-.dispatcher-truck-tile .dispatcher-tile-plan-percent {
+.dispatcher-excavator-garage-tile .dispatcher-tile-plan-percent {
     position: absolute;
     top: 3px;
     right: 3px;
@@ -23231,8 +23230,7 @@ body.management-dynamics-chart-modal-open {
     white-space: nowrap;
 }
 
-.dispatcher-excavator-garage-tile .dispatcher-tile-plan-label,
-.dispatcher-truck-tile .dispatcher-tile-plan-label {
+.dispatcher-excavator-garage-tile .dispatcher-tile-plan-label {
     position: absolute;
     right: 3px;
     bottom: 3px;
@@ -23251,8 +23249,7 @@ body.management-dynamics-chart-modal-open {
     white-space: nowrap;
 }
 
-.dispatcher-excavator-garage-tile .dispatcher-tile-plan-label.is-plan-missing,
-.dispatcher-truck-tile .dispatcher-tile-plan-label.is-plan-missing {
+.dispatcher-excavator-garage-tile .dispatcher-tile-plan-label.is-plan-missing {
     color: var(--gd-yellow);
 }
 
@@ -23574,10 +23571,21 @@ body.mining-master-screen .dispatcher-complex-card .complex-truck-tile {
 }
 
 .dispatcher-truck-tile strong {
+    position: absolute;
+    top: 51%;
+    left: 50%;
+    z-index: 3;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    max-width: calc(100% - 8px);
     color: var(--gd-ink);
-    font-size: 10px;
+    font-size: clamp(11px, .8vw, 14px);
     font-weight: 900;
     line-height: 1;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, .92), 0 0 7px rgba(4, 13, 18, .95);
+    transform: translate(-50%, -56%);
+    pointer-events: none;
 }
 
 .dispatcher-truck-tile img {
@@ -23596,23 +23604,13 @@ body.mining-master-screen .dispatcher-complex-card .complex-truck-tile {
 .dispatcher-truck-tile span {
     position: absolute;
     right: 3px;
-    bottom: 16px;
+    bottom: 3px;
     left: 3px;
+    z-index: 3;
     color: currentColor;
     font-size: 7px;
     font-weight: 900;
     text-align: center;
-}
-
-.complex-truck-tile .dispatcher-tile-plan-percent {
-    max-width: 58%;
-    min-height: 10px;
-    padding: 1px 3px;
-    font-size: 7px;
-}
-
-.complex-truck-tile .dispatcher-tile-plan-label {
-    font-size: 6px;
 }
 
 .dispatcher-truck-tile:not(.is-placeholder):not(.is-assigned):hover {

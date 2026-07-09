@@ -104,8 +104,6 @@
                                     <strong>{{ truck.name }}</strong>
                                     <img src="{% static truck.icon %}" alt="">
                                     <span>{{ truck.label }}</span>
-                                    <em class="dispatcher-tile-plan-percent">{{ truck.plan_percent_label|default:"Не назначен" }}</em>
-                                    <small class="dispatcher-tile-plan-label{% if not truck.plan_has_plan %} is-plan-missing{% endif %}">{% if truck.plan_has_plan %}{{ truck.plan_fact_label }}{% else %}{{ truck.plan_status_label|default:"План не назначен" }}{% endif %}</small>
                                 </article>
                             {% empty %}
                                 <em class="complex-truck-empty">самосвалы не назначены</em>
@@ -129,8 +127,6 @@
                         <strong>{{ tile.name }}</strong>
                         <img src="{% static tile.icon %}" alt="">
                         <span>{{ tile.label }}</span>
-                        <em class="dispatcher-tile-plan-percent">{{ tile.plan_percent_label|default:"Не назначен" }}</em>
-                        <small class="dispatcher-tile-plan-label{% if not tile.plan_has_plan %} is-plan-missing{% endif %}">{% if tile.plan_has_plan %}{{ tile.plan_fact_label }}{% else %}{{ tile.plan_status_label|default:"План не назначен" }}{% endif %}</small>
                     </article>
                 {% endfor %}
                 </div>
