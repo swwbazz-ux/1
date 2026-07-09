@@ -25,7 +25,7 @@ from downtimes.models import DowntimeEvent, DowntimeReason
 from references.models import Dormitory, DormitorySection, DumpPoint, Equipment, EquipmentState, EquipmentType, RockType
 from reports.models import ReportTemplate
 from shifts.forms import EquipmentPlanGroupForm
-from shifts.models import EmployeeShift, EquipmentPlanGroup, EquipmentShiftPlan, PlanAssignmentStatus, PlanCalculationMode, ShiftPlan, ShiftPlanScope
+from shifts.models import AchievementPrize, EmployeeShift, EquipmentPlanGroup, EquipmentShiftPlan, PlanAssignmentStatus, PlanCalculationMode, ShiftPlan, ShiftPlanScope
 from shifts.services import assign_shift_plan_snapshot, calculate_truck_shift_progress, plan_status_label, plan_unit_label
 from trips.models import DispatcherActionLog, OPEN_TRIP_STATUSES, Trip, TripClientAction, TripStatus
 
@@ -110,7 +110,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v50'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v51'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -580,6 +580,7 @@ def system_admin_references_view(request):
                 {'name': 'Точки разгрузки', 'count': DumpPoint.objects.count(), 'url': '', 'external_url': '/admin/references/dumppoint/', 'detail_code': 'dump-points'},
                 {'name': 'Шаблоны отчетов', 'count': ReportTemplate.objects.count(), 'url': '', 'external_url': '/reports/templates/'},
                 {'name': 'Ежесменные планы техники', 'count': EquipmentPlanGroup.objects.count(), 'url': '', 'external_url': '/admin/shifts/equipmentplangroup/', 'detail_code': 'equipment-plan-groups'},
+                {'name': 'Приз за 100% плана', 'count': AchievementPrize.objects.count(), 'url': '', 'external_url': '/admin/shifts/achievementprize/', 'detail_code': 'achievement-prizes'},
                 {'name': 'Сменные планы (история)', 'count': ShiftPlan.objects.count(), 'url': '', 'external_url': '/admin/shifts/shiftplan/', 'detail_code': 'shift-plans'},
                 {'name': 'Планы техники (история)', 'count': EquipmentShiftPlan.objects.count(), 'url': '', 'external_url': '/admin/shifts/equipmentshiftplan/', 'detail_code': 'equipment-shift-plans'},
             ],
@@ -758,6 +759,17 @@ def get_system_admin_reference_configs():
                 ],
             },
             'admin_url': '/admin/shifts/equipmentplangroup/',
+        },
+        'achievement-prizes': {
+            'title': 'Приз за 100% плана',
+            'section': 'Производство',
+            'model': AchievementPrize,
+            'description': 'Одна активная призовая картинка для водителей самосвалов и машинистов экскаваторов. Активная картинка выдается только после выполнения 100% сменного плана.',
+            'fields': ['title', 'image', 'is_active'],
+            'search_fields': ['title'],
+            'preview_fields': ['title', 'image', 'is_active', 'updated_at'],
+            'initial': {'title': 'План выполнен', 'is_active': True},
+            'admin_url': '/admin/shifts/achievementprize/',
         },
         'shift-plans': {
             'title': 'Сменные планы (история)',
@@ -963,7 +975,7 @@ def system_admin_reference_detail_view(request, reference_code):
             messages.success(request, 'Состояние записи обновлено.')
             return redirect(reference_detail_redirect_url(record.id))
 
-        form = form_class(request.POST, instance=record)
+        form = form_class(request.POST, request.FILES, instance=record)
         if form.is_valid():
             saved_record = form.save(commit=False)
             saved_record = prepare_reference_record_for_save(reference_code, saved_record, access)

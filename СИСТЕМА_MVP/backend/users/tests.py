@@ -28,7 +28,7 @@ from references.models import (
     TruckCapacityRule,
 )
 from reports.models import PilotFeedback, ReportTemplate, ReportType
-from shifts.models import EmployeeShift, EquipmentPlanGroup, EquipmentShiftPlan, PlanAssignmentStatus, PlanCalculationMode, ShiftPlan
+from shifts.models import AchievementPrize, EmployeeShift, EquipmentPlanGroup, EquipmentShiftPlan, PlanAssignmentStatus, PlanCalculationMode, ShiftPlan
 from trips.models import DispatcherActionLog, DispatcherActionType, Trip, TripClientAction, TripStatus
 
 from .forms import AdminEmployeeEditForm
@@ -105,7 +105,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, reverse('driver_manifest'))
         self.assertContains(response, 'rel="manifest"')
         self.assertContains(response, '/driver-sw.js')
-        self.assertContains(response, 'driver-mobile-shell-v50')
+        self.assertContains(response, 'driver-mobile-shell-v51')
         self.assertContains(response, 'data-driver-pwa-update-modal')
         self.assertContains(response, 'data-driver-pwa-update-badge')
         self.assertContains(response, 'mode: "custom", path: "^/driver/(?:shift/?)?$"')
@@ -182,7 +182,7 @@ class AccessLoginTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Service-Worker-Allowed'], '/driver/')
-        self.assertIn('driver-mobile-shell-v50', script)
+        self.assertIn('driver-mobile-shell-v51', script)
         self.assertIn('/driver/', script)
         self.assertIn('/driver/shift/', script)
         self.assertIn('/driver.webmanifest', script)
@@ -630,11 +630,13 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, 'Породы')
         self.assertContains(response, 'Точки разгрузки')
         self.assertContains(response, 'Ежесменные планы техники')
+        self.assertContains(response, 'Приз за 100% плана')
         self.assertContains(response, 'Сменные планы (история)')
         self.assertContains(response, 'Планы техники (история)')
         self.assertContains(response, '/admin/references/equipmenttype/')
         self.assertContains(response, '/system-admin/references/equipment/')
         self.assertContains(response, '/system-admin/references/equipment-plan-groups/')
+        self.assertContains(response, '/system-admin/references/achievement-prizes/')
         self.assertContains(response, '/system-admin/references/shift-plans/')
         self.assertContains(response, '/system-admin/references/equipment-shift-plans/')
 
@@ -643,6 +645,40 @@ class AccessLoginTests(TestCase):
         self.assertEqual(detail_response.status_code, 200)
         self.assertContains(detail_response, 'reference-detail-page')
         self.assertContains(detail_response, '/admin/references/equipment/')
+
+    def test_admin_saves_active_achievement_prize_image_from_reference_screen(self):
+        admin_role = Role.objects.create(code='admin', name='Администратор')
+        admin_employee = Employee.objects.create(full_name='Администратор MVP', status=Employee.Status.ACTIVE)
+        EmployeeAccess.objects.create(
+            employee=admin_employee,
+            role=admin_role,
+            access_code='1000',
+            status=EmployeeAccess.Status.ACTIVATED,
+        )
+        self.client.post('/', {'access_code': '1000'}, follow=True, HTTP_HOST='localhost')
+
+        with TemporaryDirectory() as media_root, override_settings(MEDIA_ROOT=media_root):
+            page = self.client.get('/system-admin/references/achievement-prizes/', HTTP_HOST='localhost')
+            self.assertContains(page, 'Приз за 100% плана')
+            self.assertContains(page, 'Призовая картинка')
+            image_bytes = BytesIO()
+            Image.new('RGB', (8, 8), color='green').save(image_bytes, format='PNG')
+            image_bytes.seek(0)
+
+            response = self.client.post(
+                '/system-admin/references/achievement-prizes/',
+                {
+                    'title': 'План выполнен',
+                    'image': SimpleUploadedFile('prize.png', image_bytes.read(), content_type='image/png'),
+                    'is_active': 'on',
+                },
+                HTTP_HOST='localhost',
+            )
+
+            self.assertEqual(response.status_code, 302)
+            prize = AchievementPrize.objects.get(title='План выполнен')
+            self.assertTrue(prize.is_active)
+            self.assertTrue(prize.image.name.startswith('achievement_prizes/'))
 
     def test_admin_saves_shift_plans_from_reference_screen(self):
         admin_role = Role.objects.create(code='admin', name='Администратор')
@@ -1812,7 +1848,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(driver_shift_response, 'ККД')
         self.assertContains(driver_shift_response, 'window.applyOperationalStateRefresh')
         self.assertContains(driver_shift_response, 'data-realtime-mode="custom"')
-        self.assertContains(driver_shift_response, 'driver-mobile-shell-v50')
+        self.assertContains(driver_shift_response, 'driver-mobile-shell-v51')
 
     def test_driver_downtime_buttons_are_rendered_from_server_reference(self):
         truck = self.create_registered_driver_shift()

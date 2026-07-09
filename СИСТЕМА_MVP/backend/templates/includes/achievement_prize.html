@@ -1,0 +1,198 @@
+<script>
+(function () {
+    if (window.bindAchievementPrizeUnlock) {
+        return;
+    }
+
+    function csrfToken() {
+        var input = document.querySelector("input[name='csrfmiddlewaretoken']");
+        return input ? input.value : "";
+    }
+
+    function createAchievementModal() {
+        var existing = document.querySelector("[data-achievement-prize-modal]");
+        if (existing) {
+            return existing;
+        }
+        var modal = document.createElement("div");
+        modal.className = "achievement-prize-modal";
+        modal.hidden = true;
+        modal.setAttribute("data-achievement-prize-modal", "");
+        modal.setAttribute("role", "dialog");
+        modal.setAttribute("aria-modal", "true");
+        modal.innerHTML = [
+            '<section class="achievement-prize-stage" data-achievement-stage>',
+                '<div class="achievement-prize-burst" aria-hidden="true"></div>',
+                '<div class="achievement-prize-confetti" data-achievement-confetti aria-hidden="true"></div>',
+                '<article class="achievement-prize-card">',
+                    '<div class="achievement-prize-copy">',
+                        '<span>Сменный план выполнен</span>',
+                        '<strong data-achievement-title>План выполнен</strong>',
+                        '<em data-achievement-percent>100%</em>',
+                    '</div>',
+                    '<div class="achievement-prize-image-wrap">',
+                        '<img data-achievement-image alt="Приз за выполнение сменного плана">',
+                    '</div>',
+                    '<div class="achievement-prize-actions">',
+                        '<button type="button" data-achievement-save>Сохранить</button>',
+                        '<button type="button" data-achievement-close>Закрыть</button>',
+                    '</div>',
+                '</article>',
+            '</section>'
+        ].join("");
+        document.body.appendChild(modal);
+        return modal;
+    }
+
+    function fillConfetti(stage) {
+        var holder = stage.querySelector("[data-achievement-confetti]");
+        if (!holder || holder.dataset.ready === "true") {
+            return;
+        }
+        holder.dataset.ready = "true";
+        var colors = ["#7cff58", "#ffd335", "#5bd6ff", "#ffffff", "#98ff35"];
+        var pieces = [];
+        for (var index = 0; index < 44; index += 1) {
+            var angle = (Math.PI * 2 * index) / 44;
+            var distance = 130 + ((index % 9) * 22);
+            var span = document.createElement("span");
+            span.style.setProperty("--x", (34 + ((index * 17) % 34)) + "%");
+            span.style.setProperty("--tx", Math.round(Math.cos(angle) * distance) + "px");
+            span.style.setProperty("--ty", Math.round(Math.sin(angle) * distance - 80) + "px");
+            span.style.setProperty("--r", ((index * 37) % 180) + "deg");
+            span.style.setProperty("--s", (7 + (index % 5)) + "px");
+            span.style.setProperty("--d", ((index % 8) * 45) + "ms");
+            span.style.setProperty("--c", colors[index % colors.length]);
+            pieces.push(span);
+        }
+        pieces.forEach(function (piece) {
+            holder.appendChild(piece);
+        });
+    }
+
+    function achievementStorageKey(unlockId) {
+        return "achievement-prize-shown:" + unlockId;
+    }
+
+    function rememberUnlock(unlockId) {
+        try {
+            window.sessionStorage.setItem(achievementStorageKey(unlockId), "1");
+        } catch (error) {}
+    }
+
+    function hasRememberedUnlock(unlockId) {
+        try {
+            return window.sessionStorage.getItem(achievementStorageKey(unlockId)) === "1";
+        } catch (error) {
+            return false;
+        }
+    }
+
+    function markAchievementShown(unlockId) {
+        if (!unlockId || !window.fetch) {
+            return;
+        }
+        fetch("/api/achievements/" + unlockId + "/shown/", {
+            method: "POST",
+            credentials: "same-origin",
+            cache: "no-store",
+            headers: {
+                "Accept": "application/json",
+                "X-Requested-With": "XMLHttpRequest",
+                "X-CSRFToken": csrfToken()
+            }
+        }).catch(function () {});
+    }
+
+    function showAchievementPrize(data) {
+        if (!data || !data.unlocked || !data.unlock_id || data.shown || hasRememberedUnlock(data.unlock_id)) {
+            return false;
+        }
+        rememberUnlock(data.unlock_id);
+        var modal = createAchievementModal();
+        var stage = modal.querySelector("[data-achievement-stage]");
+        var title = modal.querySelector("[data-achievement-title]");
+        var percent = modal.querySelector("[data-achievement-percent]");
+        var image = modal.querySelector("[data-achievement-image]");
+        var saveButton = modal.querySelector("[data-achievement-save]");
+        var closeButton = modal.querySelector("[data-achievement-close]");
+        fillConfetti(stage);
+        if (title) title.textContent = data.title || "План выполнен";
+        if (percent) percent.textContent = (data.percent || 100) + "% сменного плана";
+        if (image) {
+            image.removeAttribute("src");
+            image.src = data.image_url;
+        }
+        modal.hidden = false;
+        stage.classList.remove("is-prize");
+        stage.classList.add("is-celebrating");
+        window.setTimeout(function () {
+            stage.classList.remove("is-celebrating");
+            stage.classList.add("is-prize");
+            markAchievementShown(data.unlock_id);
+        }, 2400);
+
+        if (saveButton) {
+            saveButton.onclick = function () {
+                var targetUrl = data.download_url || data.image_url;
+                if (!targetUrl) return;
+                var opened = window.open(targetUrl, "_blank", "noopener");
+                if (!opened) {
+                    window.location.href = targetUrl;
+                }
+            };
+        }
+        if (closeButton) {
+            closeButton.onclick = function () {
+                modal.hidden = true;
+                stage.classList.remove("is-celebrating", "is-prize");
+            };
+        }
+        return true;
+    }
+
+    function requestAchievementPrize() {
+        if (!window.fetch) {
+            return Promise.resolve(null);
+        }
+        return fetch("/api/achievements/current/", {
+            method: "GET",
+            credentials: "same-origin",
+            cache: "no-store",
+            headers: {
+                "Accept": "application/json",
+                "X-Requested-With": "XMLHttpRequest"
+            }
+        }).then(function (response) {
+            if (!response.ok) {
+                return null;
+            }
+            return response.json();
+        }).then(function (data) {
+            showAchievementPrize(data);
+            return data;
+        }).catch(function () {
+            return null;
+        });
+    }
+
+    window.bindAchievementPrizeUnlock = function () {
+        if (window.__achievementPrizeBound) {
+            return;
+        }
+        window.__achievementPrizeBound = true;
+        window.checkAchievementPrize = requestAchievementPrize;
+        window.setTimeout(requestAchievementPrize, 1200);
+        window.setInterval(function () {
+            if (!document.hidden) {
+                requestAchievementPrize();
+            }
+        }, 20000);
+        document.addEventListener("visibilitychange", function () {
+            if (!document.hidden) {
+                requestAchievementPrize();
+            }
+        });
+    };
+})();
+</script>

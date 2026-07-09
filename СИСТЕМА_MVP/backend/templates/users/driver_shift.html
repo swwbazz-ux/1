@@ -1582,7 +1582,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
 {% endblock %}
 
 {% block body %}
-<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v50' }}">
+<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v51' }}">
     {% if messages %}
         <div class="driver-messages">
             {% for message in messages %}
@@ -1811,7 +1811,13 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
     </div>
 </div>
 
+{% include "includes/achievement_prize.html" %}
+
 <script>
+if (typeof window.bindAchievementPrizeUnlock === "function") {
+    window.bindAchievementPrizeUnlock();
+}
+
 window.applyOperationalStateRefresh = function (context) {
     var currentShell = document.querySelector("[data-driver-shell]");
     if (!currentShell || !window.fetch || !window.DOMParser) {
@@ -1868,6 +1874,9 @@ window.applyOperationalStateRefresh = function (context) {
         }
         if (typeof window.bindDriverMobileShell === "function") {
             window.bindDriverMobileShell();
+        }
+        if (typeof window.checkAchievementPrize === "function") {
+            window.checkAchievementPrize();
         }
         return true;
     }).catch(function () {
@@ -2267,7 +2276,7 @@ window.bindDriverMobileShell = function () {
         if (!("serviceWorker" in navigator)) {
             return;
         }
-        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v50' }}";
+        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v51' }}";
         var updateModal = document.querySelector("[data-driver-pwa-update-modal]");
         var updateBadge = document.querySelector("[data-driver-pwa-update-badge]");
         var updateTarget = document.querySelector("[data-driver-pwa-update-nav-target]");

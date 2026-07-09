@@ -138,6 +138,70 @@ class EmployeeShift(models.Model):
         return f'{self.employee} / {self.get_shift_type_display()} / {self.opened_at:%d.%m.%Y}'
 
 
+class AchievementPrize(models.Model):
+    title = models.CharField('Название', max_length=128, default='План выполнен')
+    image = models.ImageField('Призовая картинка', upload_to='achievement_prizes/')
+    is_active = models.BooleanField('Активна', default=True)
+    updated_at = models.DateTimeField('Обновлена', auto_now=True)
+
+    class Meta:
+        verbose_name = 'Приз за выполнение плана'
+        verbose_name_plural = 'Призы за выполнение плана'
+        ordering = ['-is_active', '-updated_at']
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        if self.is_active:
+            AchievementPrize.objects.filter(is_active=True).exclude(pk=self.pk).update(is_active=False)
+
+    def __str__(self):
+        return self.title
+
+
+class AchievementUnlock(models.Model):
+    user = models.ForeignKey(
+        'users.Employee',
+        verbose_name='Пользователь',
+        on_delete=models.PROTECT,
+        related_name='achievement_unlocks',
+    )
+    equipment = models.ForeignKey(
+        'references.Equipment',
+        verbose_name='Техника',
+        on_delete=models.PROTECT,
+        related_name='achievement_unlocks',
+    )
+    employee_shift = models.ForeignKey(
+        EmployeeShift,
+        verbose_name='Смена сотрудника',
+        on_delete=models.PROTECT,
+        related_name='achievement_unlocks',
+    )
+    prize = models.ForeignKey(
+        AchievementPrize,
+        verbose_name='Приз',
+        on_delete=models.PROTECT,
+        related_name='unlocks',
+    )
+    percent_at_unlock = models.DecimalField('Процент при разблокировке', max_digits=7, decimal_places=1)
+    unlocked_at = models.DateTimeField('Разблокирована', auto_now_add=True)
+    shown_at = models.DateTimeField('Показана', null=True, blank=True)
+
+    class Meta:
+        verbose_name = 'Разблокировка приза'
+        verbose_name_plural = 'Разблокировки призов'
+        ordering = ['-unlocked_at']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['user', 'equipment', 'employee_shift', 'prize'],
+                name='unique_achievement_unlock_per_shift_prize',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.user} / {self.equipment} / {self.prize}'
+
+
 class ShiftPlanScope(models.TextChoices):
     MONTH = 'month', 'Месячный план'
     DAY = 'day_total', 'Суточный план'

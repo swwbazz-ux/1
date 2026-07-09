@@ -1,5 +1,11 @@
 from django.urls import path
 
+from .achievement_views import (
+    achievement_current_view,
+    achievement_prize_download_view,
+    achievement_prize_image_view,
+    achievement_shown_view,
+)
 from .views import (
     dispatcher_cancel_assignment_view,
     dispatcher_cancel_trip_view,
@@ -44,4 +50,8 @@ urlpatterns = [
     path('excavator/downtime/', excavator_downtime_action_view, name='excavator_downtime_action'),
     path('driver/trip/<int:trip_id>/change-unload-point/', driver_change_unload_point_view, name='driver_change_unload_point'),
     path('driver/trip/<int:trip_id>/complete/', driver_complete_trip_view, name='driver_complete_trip'),
+    path('api/achievements/current/', achievement_current_view, name='achievement_current'),
+    path('api/achievements/<int:unlock_id>/image/', achievement_prize_image_view, name='achievement_prize_image'),
+    path('api/achievements/<int:unlock_id>/download/', achievement_prize_download_view, name='achievement_prize_download'),
+    path('api/achievements/<int:unlock_id>/shown/', achievement_shown_view, name='achievement_shown'),
 ]

@@ -5,9 +5,9 @@
 {% block body_class %}excavator-operator-screen{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v74">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v74">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v74">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v75">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v75">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v75">
 <meta name="theme-color" content="#030708">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Погрузка">
@@ -365,10 +365,11 @@
 
 {{ truck_detail_cards|json_script:"eo-truck-detail-cards-data" }}
 {% get_static_prefix as static_prefix %}
+{% include "includes/achievement_prize.html" %}
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v74";
+var excavatorShellVersion = "excavator-mobile-shell-v75";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var excavatorRelevantEvents = {
     assignment_changed: true,
@@ -379,6 +380,10 @@ var excavatorRelevantEvents = {
     access_changed: true
 };
 var viewportSyncFrame = null;
+
+if (typeof window.bindAchievementPrizeUnlock === "function") {
+    window.bindAchievementPrizeUnlock();
+}
 
 function syncExcavatorViewportHeight() {
     var height = window.visualViewport && window.visualViewport.height ? window.visualViewport.height : window.innerHeight;
@@ -498,6 +503,9 @@ function refreshExcavatorWorkFromServer(options) {
         currentShell.replaceWith(newShell);
         if (typeof window.initExcavatorWorkShell === "function") {
             window.initExcavatorWorkShell();
+        }
+        if (typeof window.checkAchievementPrize === "function") {
+            window.checkAchievementPrize();
         }
         scheduleExcavatorViewportHeightSync();
         return true;
