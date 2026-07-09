@@ -5,9 +5,9 @@
 {% block body_class %}excavator-operator-screen{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v73">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v73">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v73">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v74">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v74">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v74">
 <meta name="theme-color" content="#030708">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Погрузка">
@@ -368,7 +368,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v73";
+var excavatorShellVersion = "excavator-mobile-shell-v74";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var excavatorRelevantEvents = {
     assignment_changed: true,
@@ -1701,6 +1701,12 @@ window.initExcavatorWorkShell = function () {
         clearDropReady();
     }
 
+    shell.addEventListener("dragstart", function (event) {
+        if (event.target && event.target.closest("[data-eo-truck-card]")) {
+            event.preventDefault();
+        }
+    }, true);
+
     tabs.forEach(function (tab) {
         tab.addEventListener("click", function () {
             activateTab(tab.dataset.eoTab);
@@ -1808,13 +1814,9 @@ window.initExcavatorWorkShell = function () {
             }
         });
         card.addEventListener("dragstart", function (event) {
-            if (isInactiveTruck(card)) {
-                event.preventDefault();
-                return;
-            }
             clearTruckLongPress();
-            selectTruck(card);
-            event.dataTransfer.setData("text/plain", card.dataset.assignmentId || "");
+            event.preventDefault();
+            event.stopPropagation();
         });
     });
 
