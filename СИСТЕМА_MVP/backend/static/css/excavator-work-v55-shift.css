@@ -234,9 +234,15 @@ body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashbo
 }
 
 body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-card {
-    --eo-plan-color: rgba(74, 222, 128, .98);
-    --eo-plan-track: rgba(226, 232, 240, .36);
-    --eo-plan-track-strong: rgba(148, 163, 184, .58);
+    --eo-plan-color: rgba(163, 230, 53, 1);
+    --eo-plan-color-glow: rgba(163, 230, 53, .72);
+    --eo-plan-track: rgba(71, 85, 105, .92);
+    --eo-plan-track-strong: rgba(148, 163, 184, .38);
+    --eo-plan-ring-width: clamp(4px, .72dvh, 6px);
+    --eo-plan-marker-size: clamp(4px, .88dvh, 6px);
+    --eo-plan-marker-x: clamp(13px, 4.8vw, 18px);
+    --eo-plan-marker-offset: clamp(3px, .55dvh, 5px);
+    --eo-plan-active-opacity: 0;
     position: relative !important;
     isolation: isolate !important;
     display: grid !important;
@@ -257,40 +263,70 @@ body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashbo
     max-height: 100% !important;
     overflow: hidden !important;
     padding: clamp(22px, 3.15dvh, 34px) clamp(7px, 1.5vw, 12px) clamp(7px, 1.1dvh, 12px) !important;
-    border: 1px solid var(--eo-plan-track-strong) !important;
-    box-shadow: inset 0 0 0 1px rgba(15, 23, 42, .34) !important;
+    border: 1px solid rgba(15, 23, 42, .45) !important;
+    box-shadow: inset 0 0 0 1px rgba(148, 163, 184, .16), inset 0 0 24px rgba(15, 23, 42, .26) !important;
     z-index: 3 !important;
     will-change: transform !important;
 }
 
 body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-card[data-plan-status="empty"] {
-    --eo-plan-color: rgba(148, 163, 184, .84);
-    --eo-plan-track: rgba(226, 232, 240, .42);
+    --eo-plan-color: rgba(148, 163, 184, .82);
+    --eo-plan-color-glow: rgba(148, 163, 184, .42);
+    --eo-plan-track: rgba(71, 85, 105, .94);
+    --eo-plan-active-opacity: 0;
+}
+
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-card[data-plan-percent]:not([data-plan-percent=""]):not([data-plan-percent="0"]) {
+    --eo-plan-active-opacity: 1;
 }
 
 body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-card[data-plan-status="low"] {
-    --eo-plan-color: rgba(248, 113, 113, .98);
+    --eo-plan-color: rgba(255, 96, 86, 1);
+    --eo-plan-color-glow: rgba(255, 96, 86, .72);
 }
 
 body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-card[data-plan-status="warning"] {
-    --eo-plan-color: rgba(250, 204, 21, .98);
+    --eo-plan-color: rgba(255, 211, 61, 1);
+    --eo-plan-color-glow: rgba(255, 211, 61, .72);
 }
 
 body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-card[data-plan-status="good"] {
-    --eo-plan-color: rgba(74, 222, 128, .98);
+    --eo-plan-color: rgba(163, 230, 53, 1);
+    --eo-plan-color-glow: rgba(163, 230, 53, .72);
 }
 
 body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-card::before {
     content: "" !important;
     position: absolute !important;
     inset: 0 !important;
-    z-index: 5 !important;
+    z-index: 2 !important;
     box-sizing: border-box !important;
-    padding: clamp(3px, .42dvh, 5px) !important;
+    padding: var(--eo-plan-ring-width) !important;
     border-radius: inherit !important;
     background: conic-gradient(from -90deg, var(--eo-plan-color) 0 var(--eo-truck-progress, 0%), var(--eo-plan-track) var(--eo-truck-progress, 0%) 100%) !important;
-    filter: drop-shadow(0 0 5px rgba(255, 255, 255, .18)) !important;
+    box-shadow: inset 0 0 0 1px rgba(226, 232, 240, .12) !important;
+    filter: none !important;
     opacity: 1 !important;
+    pointer-events: none !important;
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0) !important;
+    -webkit-mask-composite: xor !important;
+    mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0) !important;
+    mask-composite: exclude !important;
+}
+
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-card::after {
+    content: "" !important;
+    position: absolute !important;
+    inset: 0 !important;
+    z-index: 3 !important;
+    box-sizing: border-box !important;
+    padding: var(--eo-plan-ring-width) !important;
+    border-radius: inherit !important;
+    background:
+        radial-gradient(circle at var(--eo-plan-marker-x) var(--eo-plan-marker-offset), var(--eo-plan-color) 0 var(--eo-plan-marker-size), rgba(0, 0, 0, 0) calc(var(--eo-plan-marker-size) + 1px)),
+        conic-gradient(from -90deg, var(--eo-plan-color) 0 var(--eo-truck-progress, 0%), rgba(0, 0, 0, 0) var(--eo-truck-progress, 0%) 100%) !important;
+    filter: drop-shadow(0 0 4px var(--eo-plan-color-glow)) drop-shadow(0 0 9px var(--eo-plan-color-glow)) !important;
+    opacity: var(--eo-plan-active-opacity, 0) !important;
     pointer-events: none !important;
     -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0) !important;
     -webkit-mask-composite: xor !important;
@@ -383,9 +419,15 @@ body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashbo
 
 body.excavator-operator-screen .eo-dashboard-truck-card.is-drag-preview,
 body.excavator-operator-screen .eo-truck-card.is-drag-preview {
-    --eo-plan-color: rgba(74, 222, 128, .98);
-    --eo-plan-track: rgba(226, 232, 240, .36);
-    --eo-plan-track-strong: rgba(148, 163, 184, .58);
+    --eo-plan-color: rgba(163, 230, 53, 1);
+    --eo-plan-color-glow: rgba(163, 230, 53, .78);
+    --eo-plan-track: rgba(71, 85, 105, .94);
+    --eo-plan-track-strong: rgba(148, 163, 184, .42);
+    --eo-plan-ring-width: clamp(5px, .82dvh, 7px);
+    --eo-plan-marker-size: clamp(5px, .95dvh, 8px);
+    --eo-plan-marker-x: clamp(15px, 5.2vw, 22px);
+    --eo-plan-marker-offset: clamp(4px, .62dvh, 6px);
+    --eo-plan-active-opacity: 0;
     position: fixed !important;
     isolation: isolate !important;
     z-index: 20000 !important;
@@ -407,23 +449,33 @@ body.excavator-operator-screen .eo-truck-card.is-drag-preview {
 
 body.excavator-operator-screen .eo-dashboard-truck-card.is-drag-preview[data-plan-status="empty"],
 body.excavator-operator-screen .eo-truck-card.is-drag-preview[data-plan-status="empty"] {
-    --eo-plan-color: rgba(148, 163, 184, .84);
-    --eo-plan-track: rgba(226, 232, 240, .42);
+    --eo-plan-color: rgba(148, 163, 184, .82);
+    --eo-plan-color-glow: rgba(148, 163, 184, .42);
+    --eo-plan-track: rgba(71, 85, 105, .94);
+    --eo-plan-active-opacity: 0;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-card.is-drag-preview[data-plan-percent]:not([data-plan-percent=""]):not([data-plan-percent="0"]),
+body.excavator-operator-screen .eo-truck-card.is-drag-preview[data-plan-percent]:not([data-plan-percent=""]):not([data-plan-percent="0"]) {
+    --eo-plan-active-opacity: 1;
 }
 
 body.excavator-operator-screen .eo-dashboard-truck-card.is-drag-preview[data-plan-status="low"],
 body.excavator-operator-screen .eo-truck-card.is-drag-preview[data-plan-status="low"] {
-    --eo-plan-color: rgba(248, 113, 113, .98);
+    --eo-plan-color: rgba(255, 96, 86, 1);
+    --eo-plan-color-glow: rgba(255, 96, 86, .78);
 }
 
 body.excavator-operator-screen .eo-dashboard-truck-card.is-drag-preview[data-plan-status="warning"],
 body.excavator-operator-screen .eo-truck-card.is-drag-preview[data-plan-status="warning"] {
-    --eo-plan-color: rgba(250, 204, 21, .98);
+    --eo-plan-color: rgba(255, 211, 61, 1);
+    --eo-plan-color-glow: rgba(255, 211, 61, .78);
 }
 
 body.excavator-operator-screen .eo-dashboard-truck-card.is-drag-preview[data-plan-status="good"],
 body.excavator-operator-screen .eo-truck-card.is-drag-preview[data-plan-status="good"] {
-    --eo-plan-color: rgba(74, 222, 128, .98);
+    --eo-plan-color: rgba(163, 230, 53, 1);
+    --eo-plan-color-glow: rgba(163, 230, 53, .78);
 }
 
 body.excavator-operator-screen .eo-dashboard-truck-card.is-drag-preview::before,
@@ -431,13 +483,35 @@ body.excavator-operator-screen .eo-truck-card.is-drag-preview::before {
     content: "" !important;
     position: absolute !important;
     inset: 0 !important;
-    z-index: 5 !important;
+    z-index: 2 !important;
     box-sizing: border-box !important;
-    padding: clamp(3px, .42dvh, 5px) !important;
+    padding: var(--eo-plan-ring-width) !important;
     border-radius: inherit !important;
     background: conic-gradient(from -90deg, var(--eo-plan-color) 0 var(--eo-truck-progress, 0%), var(--eo-plan-track) var(--eo-truck-progress, 0%) 100%) !important;
-    filter: drop-shadow(0 0 5px rgba(255, 255, 255, .18)) !important;
+    box-shadow: inset 0 0 0 1px rgba(226, 232, 240, .12) !important;
+    filter: none !important;
     opacity: 1 !important;
+    pointer-events: none !important;
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0) !important;
+    -webkit-mask-composite: xor !important;
+    mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0) !important;
+    mask-composite: exclude !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-card.is-drag-preview::after,
+body.excavator-operator-screen .eo-truck-card.is-drag-preview::after {
+    content: "" !important;
+    position: absolute !important;
+    inset: 0 !important;
+    z-index: 3 !important;
+    box-sizing: border-box !important;
+    padding: var(--eo-plan-ring-width) !important;
+    border-radius: inherit !important;
+    background:
+        radial-gradient(circle at var(--eo-plan-marker-x) var(--eo-plan-marker-offset), var(--eo-plan-color) 0 var(--eo-plan-marker-size), rgba(0, 0, 0, 0) calc(var(--eo-plan-marker-size) + 1px)),
+        conic-gradient(from -90deg, var(--eo-plan-color) 0 var(--eo-truck-progress, 0%), rgba(0, 0, 0, 0) var(--eo-truck-progress, 0%) 100%) !important;
+    filter: drop-shadow(0 0 5px var(--eo-plan-color-glow)) drop-shadow(0 0 12px var(--eo-plan-color-glow)) !important;
+    opacity: var(--eo-plan-active-opacity, 0) !important;
     pointer-events: none !important;
     -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0) !important;
     -webkit-mask-composite: xor !important;
@@ -549,6 +623,10 @@ body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashbo
 
     body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-card {
         justify-self: stretch !important;
+        --eo-plan-ring-width: clamp(5px, .38vw, 7px);
+        --eo-plan-marker-size: clamp(5px, .46vw, 8px);
+        --eo-plan-marker-x: clamp(16px, 1.5vw, 26px);
+        --eo-plan-marker-offset: clamp(4px, .31vw, 6px);
     }
 
     body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-driver-card strong {
@@ -595,6 +673,10 @@ body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashbo
 
     body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-card {
         justify-self: stretch !important;
+        --eo-plan-ring-width: clamp(5px, .38vw, 7px);
+        --eo-plan-marker-size: clamp(5px, .46vw, 8px);
+        --eo-plan-marker-x: clamp(16px, 1.5vw, 26px);
+        --eo-plan-marker-offset: clamp(4px, .31vw, 6px);
     }
 
     body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-driver-card strong {
