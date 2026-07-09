@@ -31221,6 +31221,7 @@ body.excavator-operator-screen .mm-mobile-nav-item span {
 .achievement-prize-confetti {
     position: absolute;
     inset: 0;
+    z-index: 4;
     overflow: hidden;
     pointer-events: none;
 }
@@ -31244,6 +31245,7 @@ body.excavator-operator-screen .mm-mobile-nav-item span {
 
 .achievement-prize-burst {
     position: absolute;
+    z-index: 3;
     width: 150px;
     height: 150px;
     border-radius: 50%;
@@ -31389,8 +31391,11 @@ body.excavator-operator-screen .mm-mobile-nav-item span {
 }
 
 @media (prefers-reduced-motion: reduce) {
-    .achievement-prize-stage.is-celebrating .achievement-prize-confetti span,
+    .achievement-prize-stage.is-celebrating .achievement-prize-confetti span {
+        animation-duration: 1.65s;
+    }
+
     .achievement-prize-stage.is-celebrating .achievement-prize-burst {
-        animation-duration: 1ms;
+        animation-duration: 1.45s;
     }
 }
