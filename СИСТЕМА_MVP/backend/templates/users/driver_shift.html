@@ -710,6 +710,8 @@ body.driver-mobile-screen .driver-work-dial-button::after {
 body.driver-mobile-screen .driver-work-dial-core {
     position: absolute;
     z-index: 2;
+    isolation: isolate;
+    overflow: hidden;
     width: 68%;
     aspect-ratio: 1 / 1;
     border-radius: 50%;
@@ -718,12 +720,38 @@ body.driver-mobile-screen .driver-work-dial-core {
     align-content: center;
     gap: 12px;
     background:
-        radial-gradient(circle at 50% 42%, rgba(110,132,140,0.33), rgba(36,60,66,0.72) 65%, rgba(10,23,28,0.94));
+        radial-gradient(circle at 50% 24%, rgba(188,215,211,0.20), transparent 38%),
+        radial-gradient(circle at 50% 46%, rgba(91,124,124,0.38), rgba(31,56,61,0.80) 62%, rgba(7,19,23,0.98));
     border: 1px solid rgba(210,229,232,0.36);
     box-shadow:
-        inset 0 0 46px rgba(255,255,255,0.06),
+        inset 0 12px 22px rgba(255,255,255,0.08),
+        inset 0 -26px 36px rgba(0,0,0,0.52),
+        inset 0 0 46px rgba(255,255,255,0.05),
+        0 10px 26px rgba(0,0,0,0.42),
         0 0 38px rgba(190,210,220,0.10);
     text-align: center;
+    transition: transform 120ms ease, box-shadow 120ms ease;
+}
+
+body.driver-mobile-screen .driver-work-dial-core::before {
+    content: "";
+    position: absolute;
+    inset: 1px;
+    z-index: 0;
+    border-radius: 50%;
+    pointer-events: none;
+    background:
+        radial-gradient(ellipse at 50% 5%, rgba(238,255,250,0.16), transparent 48%),
+        linear-gradient(180deg, rgba(255,255,255,0.05), transparent 38%, rgba(0,0,0,0.08) 68%, rgba(0,0,0,0.26));
+    box-shadow:
+        inset 0 2px 0 rgba(245,255,250,0.12),
+        inset 0 -3px 6px rgba(0,0,0,0.24);
+    transition: opacity 120ms ease, transform 120ms ease;
+}
+
+body.driver-mobile-screen .driver-work-dial-core > * {
+    position: relative;
+    z-index: 1;
 }
 
 body.driver-mobile-screen .driver-work-dial-core.has-multiline-label {
@@ -776,9 +804,16 @@ body.driver-mobile-screen .driver-work-label {
     overflow: hidden;
     text-align: center;
     border-top: 1px solid rgba(140,255,46,0.16);
-    border-bottom: 1px solid rgba(140,255,46,0.16);
-    background: linear-gradient(90deg, transparent, rgba(20,54,35,0.30) 18%, rgba(20,54,35,0.30) 82%, transparent);
+    border-bottom: 1px solid rgba(0,0,0,0.34);
+    background:
+        linear-gradient(180deg, rgba(153,255,104,0.08), rgba(16,48,32,0.20) 48%, rgba(3,20,15,0.34)),
+        linear-gradient(90deg, transparent, rgba(20,54,35,0.34) 18%, rgba(20,54,35,0.34) 82%, transparent);
+    box-shadow:
+        inset 0 1px 0 rgba(218,255,197,0.12),
+        inset 0 -2px 3px rgba(0,0,0,0.32),
+        0 5px 12px rgba(0,0,0,0.20);
     text-shadow: 0 0 18px rgba(140,255,46,0.30);
+    transition: transform 120ms ease, box-shadow 120ms ease;
 }
 
 body.driver-mobile-screen .driver-work-label-line {
@@ -844,8 +879,11 @@ body.driver-mobile-screen .driver-work-dial-button.is-loaded .driver-work-progre
 body.driver-mobile-screen .driver-work-dial-button.is-loaded .driver-work-dial-core {
     border-color: rgba(140,255,46,0.78);
     box-shadow:
-        0 0 48px rgba(140,255,46,0.34),
-        inset 0 0 44px rgba(140,255,46,0.18);
+        inset 0 12px 22px rgba(238,255,230,0.10),
+        inset 0 -26px 36px rgba(0,0,0,0.50),
+        inset 0 0 44px rgba(140,255,46,0.16),
+        0 10px 28px rgba(0,0,0,0.42),
+        0 0 48px rgba(140,255,46,0.34);
 }
 
 body.driver-mobile-screen .driver-work-dial-button.is-loaded .driver-work-label {
@@ -853,9 +891,25 @@ body.driver-mobile-screen .driver-work-dial-button.is-loaded .driver-work-label 
     text-shadow: 0 0 18px rgba(140,255,46,0.36);
 }
 
+body.driver-mobile-screen .driver-work-dial-button.is-loaded .driver-work-label-line {
+    color: transparent;
+    background: linear-gradient(180deg, #e0ffc5 0%, #a8ff5c 34%, #7dea20 66%, #54bd05 100%);
+    background-clip: text;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    text-shadow:
+        0 -1px 0 rgba(247,255,239,0.48),
+        0 2px 0 rgba(39,102,7,0.78);
+    filter:
+        drop-shadow(0 3px 2px rgba(0,0,0,0.46))
+        drop-shadow(0 0 10px rgba(140,255,46,0.22));
+}
+
 body.driver-mobile-screen .driver-work-dial-button.is-loaded .driver-work-percent {
     color: rgba(205, 230, 216, 0.58);
-    text-shadow: none;
+    text-shadow:
+        0 -1px 0 rgba(240,255,247,0.12),
+        0 1px 0 rgba(0,0,0,0.78);
 }
 
 body.driver-mobile-screen .driver-work-dial-button.is-empty {
@@ -880,10 +934,14 @@ body.driver-mobile-screen .driver-work-dial-button.is-empty .driver-work-progres
 
 body.driver-mobile-screen .driver-work-dial-button.is-empty .driver-work-dial-core {
     background:
-        radial-gradient(circle at 50% 42%, rgba(110,132,140,0.33), rgba(36,60,66,0.72) 65%, rgba(10,23,28,0.94));
+        radial-gradient(circle at 50% 24%, rgba(188,215,211,0.16), transparent 38%),
+        radial-gradient(circle at 50% 46%, rgba(91,124,124,0.32), rgba(31,56,61,0.78) 62%, rgba(7,19,23,0.98));
     border-color: rgba(210,229,232,0.36);
     box-shadow:
-        inset 0 0 46px rgba(255,255,255,0.06),
+        inset 0 10px 20px rgba(255,255,255,0.07),
+        inset 0 -24px 34px rgba(0,0,0,0.48),
+        inset 0 0 46px rgba(255,255,255,0.05),
+        0 9px 24px rgba(0,0,0,0.38),
         0 0 38px rgba(190,210,220,0.10);
 }
 
@@ -949,9 +1007,23 @@ body.driver-mobile-screen .driver-work-dial-button.is-pending .driver-work-hold-
 body.driver-mobile-screen .driver-work-dial-button.is-holding .driver-work-dial-core {
     transform: scale(0.985);
     box-shadow:
-        inset 0 0 58px rgba(255,255,255,0.08),
-        inset 0 -28px 40px rgba(0,0,0,0.54),
-        0 0 88px rgba(140,255,46,0.46);
+        inset 0 14px 26px rgba(0,0,0,0.58),
+        inset 0 -8px 18px rgba(255,255,255,0.05),
+        inset 0 0 58px rgba(140,255,46,0.12),
+        0 3px 12px rgba(0,0,0,0.34),
+        0 0 72px rgba(140,255,46,0.40);
+}
+
+body.driver-mobile-screen .driver-work-dial-button.is-holding .driver-work-dial-core::before {
+    opacity: 0.46;
+    transform: translateY(2px);
+}
+
+body.driver-mobile-screen .driver-work-dial-button.is-holding .driver-work-label {
+    transform: translateY(2px);
+    box-shadow:
+        inset 0 2px 4px rgba(0,0,0,0.42),
+        inset 0 -1px 0 rgba(255,255,255,0.05);
 }
 
 body.driver-mobile-screen .driver-work-assignment {
@@ -1636,7 +1708,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
 {% endblock %}
 
 {% block body %}
-<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v58' }}">
+<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v59' }}">
     {% if messages %}
         <div class="driver-messages">
             {% for message in messages %}
@@ -2471,7 +2543,7 @@ window.bindDriverMobileShell = function () {
         if (!("serviceWorker" in navigator)) {
             return;
         }
-        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v58' }}";
+        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v59' }}";
         var updateModal = document.querySelector("[data-driver-pwa-update-modal]");
         var updateBadge = document.querySelector("[data-driver-pwa-update-badge]");
         var updateTarget = document.querySelector("[data-driver-pwa-update-nav-target]");
