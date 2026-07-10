@@ -83,7 +83,7 @@ body.driver-mobile-screen .driver-shell {
     --driver-nav-content-h: 78px;
     --driver-nav-total-h: calc(var(--driver-nav-content-h) + var(--driver-safe-bottom));
     --driver-work-gap: clamp(12px, 1.8dvh, 20px);
-    --driver-work-column: min(100%, clamp(320px, 72vw, 720px));
+    --driver-work-column: min(100%, clamp(320px, 92vw, 720px));
     --driver-dial-size: clamp(320px, min(92vw, 62dvh), 520px);
     width: 100%;
     max-width: none;
@@ -364,25 +364,35 @@ body.driver-mobile-screen .driver-work-context-card {
     grid-area: context;
     justify-self: center;
     width: var(--driver-work-column);
-    min-height: clamp(64px, 9dvh, 82px);
+    min-height: clamp(82px, 10dvh, 104px);
     border: 1px solid var(--driver-line);
     border-radius: 10px;
-    padding: 11px clamp(13px, 3.8vw, 22px);
+    padding: 12px clamp(14px, 3.8vw, 22px);
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
     align-items: center;
-    gap: 13px;
-    background: linear-gradient(145deg, rgba(12,31,40,0.88), rgba(4,13,18,0.78));
-    box-shadow: inset 0 1px 0 rgba(255,255,255,0.04), 0 18px 42px rgba(0,0,0,0.18);
+    gap: clamp(12px, 3vw, 18px);
+    background:
+        linear-gradient(90deg, rgba(140,255,46,0.035), transparent 34%),
+        linear-gradient(145deg, rgba(12,31,40,0.94), rgba(4,13,18,0.88));
+    box-shadow:
+        inset 0 1px 0 rgba(255,255,255,0.05),
+        inset 4px 0 0 rgba(140,255,46,0.18),
+        0 16px 34px rgba(0,0,0,0.22);
 }
 
 body.driver-mobile-screen .driver-work-context-card[role="button"] {
     cursor: pointer;
 }
 
+body.driver-mobile-screen .driver-work-context-card[role="button"]:focus-visible {
+    outline: 2px solid var(--driver-green);
+    outline-offset: 3px;
+}
+
 body.driver-mobile-screen .driver-work-context-icon {
-    width: 40px;
-    height: 40px;
+    width: 42px;
+    height: 42px;
     border: 1px solid rgba(140,255,46,0.40);
     border-radius: 50%;
     display: grid;
@@ -393,8 +403,12 @@ body.driver-mobile-screen .driver-work-context-icon {
     box-shadow: 0 0 18px rgba(140,255,46,0.12);
 }
 
+body.driver-mobile-screen .driver-work-context-copy {
+    min-width: 0;
+}
+
 body.driver-mobile-screen .driver-work-context-title {
-    margin-bottom: 5px;
+    margin-bottom: 8px;
     color: var(--driver-muted);
     text-transform: uppercase;
     font-size: clamp(9px, 2.4vw, 12px);
@@ -404,14 +418,47 @@ body.driver-mobile-screen .driver-work-context-title {
 
 body.driver-mobile-screen .driver-work-context-line {
     min-width: 0;
-    overflow: hidden;
+    width: 100%;
+    overflow: visible;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(76px, 1fr));
+    align-items: stretch;
     color: var(--driver-ink);
     text-transform: uppercase;
-    font-size: clamp(17px, 4.4vw, 27px);
-    line-height: 1;
+    font-size: clamp(16px, 4vw, 23px);
+    line-height: 1.08;
     font-weight: 900;
+    white-space: normal;
+    text-align: center;
+}
+
+body.driver-mobile-screen .driver-work-context-part {
+    min-width: 0;
+    padding: 2px clamp(7px, 1.8vw, 12px);
+    border-left: 1px solid rgba(132,165,176,0.20);
+    display: grid;
+    place-items: center;
     white-space: nowrap;
-    text-overflow: clip;
+    text-shadow: 0 0 12px rgba(225,255,215,0.08);
+}
+
+body.driver-mobile-screen .driver-work-context-part:first-child {
+    border-left: 0;
+    color: var(--driver-green);
+    text-shadow: 0 0 14px rgba(140,255,46,0.28);
+}
+
+body.driver-mobile-screen .driver-work-context-line.is-single {
+    display: block;
+    text-align: left;
+}
+
+body.driver-mobile-screen .driver-work-context-line.is-single .driver-work-context-part {
+    padding-left: 0;
+    border-left: 0;
+    display: block;
+    white-space: normal;
+    text-align: left;
 }
 
 body.driver-mobile-screen .driver-work-context-line b {
@@ -1544,9 +1591,12 @@ body.driver-mobile-screen .driver-bottom-nav {
     padding-bottom: var(--driver-safe-bottom, 0px);
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
-    border-top: 1px solid rgba(127, 163, 177, 0.24);
-    background: rgba(3, 16, 21, 0.96);
-    box-shadow: 0 -16px 32px rgba(0,0,0,0.28);
+    border-top: 1px solid rgba(138,174,184,0.26);
+    background:
+        linear-gradient(180deg, rgba(8,28,34,0.98), rgba(2,12,16,0.99));
+    box-shadow:
+        inset 0 1px 0 rgba(255,255,255,0.025),
+        0 -14px 30px rgba(0,0,0,0.34);
 }
 
 body.driver-mobile-screen .driver-bottom-nav .mm-mobile-nav-item {
@@ -1554,32 +1604,54 @@ body.driver-mobile-screen .driver-bottom-nav .mm-mobile-nav-item {
     min-width: 0;
     height: var(--driver-nav-content-h, 78px);
     border: 0;
-    border-right: 1px solid rgba(127, 163, 177, 0.14);
+    padding: 7px 4px 6px;
+    border-right: 1px solid rgba(127,163,177,0.10);
     display: grid;
     align-content: center;
     justify-items: center;
-    gap: 7px;
-    color: rgba(142, 162, 171, 0.82);
+    gap: 6px;
+    color: rgba(141,164,173,0.76);
     background: transparent;
     text-transform: uppercase;
-    font-size: clamp(12px, 3.1vw, 14px);
+    font-size: clamp(11px, 2.8vw, 13px);
     line-height: 1;
-    font-weight: 400;
+    font-weight: 600;
+    transition: color 140ms ease, background-color 140ms ease;
+}
+
+body.driver-mobile-screen .driver-bottom-nav .mm-mobile-nav-item:last-child {
+    border-right: 0;
+}
+
+body.driver-mobile-screen .driver-bottom-nav .mm-mobile-nav-item > * {
+    position: relative;
+    z-index: 1;
 }
 
 body.driver-mobile-screen .driver-bottom-nav .mm-mobile-nav-item::before {
     content: "";
     position: absolute;
     top: 0;
-    left: 20%;
-    right: 20%;
-    height: 4px;
-    border-radius: 0 0 6px 6px;
+    left: 14%;
+    right: 14%;
+    height: 3px;
+    border-radius: 0 0 4px 4px;
     background: transparent;
+}
+
+body.driver-mobile-screen .driver-bottom-nav .mm-mobile-nav-item::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    opacity: 0;
+    background: linear-gradient(180deg, rgba(140,255,46,0.11), rgba(140,255,46,0.025) 58%, transparent);
+    transition: opacity 140ms ease;
 }
 
 body.driver-mobile-screen .driver-bottom-nav .mm-mobile-nav-item.is-active {
     color: var(--driver-green);
+    font-weight: 800;
 }
 
 body.driver-mobile-screen .driver-bottom-nav .mm-mobile-nav-item.is-active::before {
@@ -1587,22 +1659,43 @@ body.driver-mobile-screen .driver-bottom-nav .mm-mobile-nav-item.is-active::befo
     box-shadow: 0 0 12px rgba(140,255,46,0.65);
 }
 
+body.driver-mobile-screen .driver-bottom-nav .mm-mobile-nav-item.is-active::after {
+    opacity: 1;
+}
+
+body.driver-mobile-screen .driver-bottom-nav .mm-mobile-nav-item:focus-visible {
+    outline: 2px solid var(--driver-cyan);
+    outline-offset: -3px;
+}
+
 body.driver-mobile-screen .driver-nav-icon {
-    width: 30px;
-    height: 30px;
+    width: 28px;
+    height: 28px;
     display: block;
-    opacity: 0.72;
+    opacity: 0.64;
+    transition: opacity 140ms ease, filter 140ms ease, transform 140ms ease;
 }
 
 body.driver-mobile-screen .mm-mobile-nav-item.is-active .driver-nav-icon {
     opacity: 1;
+    transform: translateY(-1px);
+    filter: drop-shadow(0 0 8px rgba(140,255,46,0.36));
+}
+
+body.driver-mobile-screen .driver-nav-truck {
+    object-fit: contain;
+    filter: grayscale(1) brightness(1.35);
+}
+
+body.driver-mobile-screen .mm-mobile-nav-item.is-active .driver-nav-truck {
+    filter: saturate(1.15) drop-shadow(0 0 8px rgba(140,255,46,0.42));
 }
 
 body.driver-mobile-screen .driver-nav-clock,
 body.driver-mobile-screen .driver-nav-alert,
 body.driver-mobile-screen .driver-nav-doc {
     position: relative;
-    border: 3px solid currentColor;
+    border: 2px solid currentColor;
     border-radius: 50%;
 }
 
@@ -1640,13 +1733,13 @@ body.driver-mobile-screen .driver-nav-alert::before {
     place-items: center;
     width: 100%;
     height: 100%;
-    font-size: 30px;
+    font-size: 27px;
     line-height: 1;
     font-weight: 900;
 }
 
 body.driver-mobile-screen .driver-nav-doc {
-    border-radius: 6px;
+    border-radius: 5px;
 }
 
 body.driver-mobile-screen .driver-nav-doc::before,
@@ -1659,8 +1752,8 @@ body.driver-mobile-screen .driver-nav-doc::after {
     background: currentColor;
 }
 
-body.driver-mobile-screen .driver-nav-doc::before { top: 9px; }
-body.driver-mobile-screen .driver-nav-doc::after { top: 17px; }
+body.driver-mobile-screen .driver-nav-doc::before { top: 8px; }
+body.driver-mobile-screen .driver-nav-doc::after { top: 16px; }
 
 body.driver-mobile-screen .driver-mobile-update-badge {
     position: absolute;
@@ -1752,6 +1845,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
 }
 
 @media (max-width: 370px) {
+    body.driver-mobile-screen .driver-online span,
     body.driver-mobile-screen .driver-online strong,
     body.driver-mobile-screen .driver-work-context-icon {
         display: none;
@@ -1759,29 +1853,26 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
 
     body.driver-mobile-screen .driver-work-context-card {
         grid-template-columns: minmax(0, 1fr);
-        min-height: 58px;
-    }
-
-    body.driver-mobile-screen .driver-work-context-title {
-        display: none;
+        min-height: 82px;
     }
 
 }
 
 @media (max-width: 520px) {
-    body.driver-mobile-screen .driver-online {
-        gap: 0;
-    }
-
-    body.driver-mobile-screen .driver-online span {
-        display: none;
-    }
-
     body.driver-mobile-screen .driver-online-dot {
         display: block;
         flex-basis: 12px;
         width: 12px;
         height: 12px;
+    }
+
+    body.driver-mobile-screen .driver-work-context-line {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        row-gap: 8px;
+    }
+
+    body.driver-mobile-screen .driver-work-context-part:nth-child(odd) {
+        border-left: 0;
     }
 }
 
@@ -1798,7 +1889,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
 {% endblock %}
 
 {% block body %}
-<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v65' }}">
+<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v66' }}">
     {% if messages %}
         <div class="driver-messages">
             {% for message in messages %}
@@ -1820,9 +1911,9 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
     <section class="driver-panel driver-tab driver-work-screen {% if active_tab == 'work' %}is-active{% endif %}" data-driver-tab-panel="work">
         <section class="driver-work-context-card"{% if active_trip %} role="button" tabindex="0" data-driver-point-open{% endif %}>
             <div class="driver-work-context-icon" aria-hidden="true">⌖</div>
-            <div>
+            <div class="driver-work-context-copy">
                 <div class="driver-work-context-title">Назначенный комплекс и точка погрузки</div>
-                <div class="driver-work-context-line">{{ driver_context_label }}</div>
+                <div class="driver-work-context-line" data-driver-context-line>{{ driver_context_label }}</div>
             </div>
         </section>
 
@@ -2115,6 +2206,27 @@ window.bindDriverMobileShell = function () {
         return;
     }
     shell.dataset.driverShellBound = "true";
+    function enhanceDriverContextLine() {
+        shell.querySelectorAll("[data-driver-context-line]").forEach(function (line) {
+            if (line.dataset.driverContextReady === "true") {
+                return;
+            }
+            var parts = line.textContent.trim().split(/\s*·\s*/).filter(Boolean);
+            if (!parts.length) {
+                parts = ["—"];
+            }
+            line.replaceChildren();
+            parts.forEach(function (part) {
+                var node = document.createElement("span");
+                node.className = "driver-work-context-part";
+                node.textContent = part;
+                line.appendChild(node);
+            });
+            line.classList.toggle("is-single", parts.length === 1);
+            line.dataset.driverContextReady = "true";
+        });
+    }
+    enhanceDriverContextLine();
     function syncDriverDialProgress() {
         shell.querySelectorAll(".driver-work-dial").forEach(function (dial) {
             var loopProgress = Number(dial.dataset.driverLoopProgress || 0);
@@ -2665,7 +2777,7 @@ window.bindDriverMobileShell = function () {
         if (!("serviceWorker" in navigator)) {
             return;
         }
-        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v65' }}";
+        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v66' }}";
         var updateModal = document.querySelector("[data-driver-pwa-update-modal]");
         var updateBadge = document.querySelector("[data-driver-pwa-update-badge]");
         var updateTarget = document.querySelector("[data-driver-pwa-update-nav-target]");

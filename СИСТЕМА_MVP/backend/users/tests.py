@@ -105,7 +105,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, reverse('driver_manifest'))
         self.assertContains(response, 'rel="manifest"')
         self.assertContains(response, '/driver-sw.js')
-        self.assertContains(response, 'driver-mobile-shell-v65')
+        self.assertContains(response, 'driver-mobile-shell-v66')
         self.assertContains(response, 'data-driver-pwa-update-modal')
         self.assertContains(response, 'data-driver-pwa-update-badge')
         self.assertContains(response, 'mode: "custom", path: "^/driver/(?:shift/?)?$"')
@@ -135,8 +135,14 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, 'gap: var(--driver-work-gap)')
         self.assertContains(response, 'class="driver-work-context-card"')
         self.assertContains(response, 'class="driver-work-context-line"')
-        self.assertContains(response, 'font-size: clamp(17px, 4.4vw, 27px)')
-        self.assertContains(response, 'text-overflow: clip')
+        self.assertContains(response, '--driver-work-column: min(100%, clamp(320px, 92vw, 720px))')
+        self.assertContains(response, 'font-size: clamp(16px, 4vw, 23px)')
+        self.assertContains(response, 'data-driver-context-line')
+        self.assertContains(response, 'class="driver-work-context-copy"')
+        self.assertContains(response, 'body.driver-mobile-screen .driver-work-context-part')
+        self.assertContains(response, 'function enhanceDriverContextLine()')
+        self.assertContains(response, 'node.className = "driver-work-context-part"')
+        self.assertContains(response, 'grid-template-columns: repeat(2, minmax(0, 1fr))')
         self.assertContains(response, 'class="driver-work-ticks"')
         self.assertContains(response, 'data-driver-dial-label')
         self.assertContains(response, 'className = "driver-work-label-line"')
@@ -215,6 +221,9 @@ class AccessLoginTests(TestCase):
         self.assertNotContains(response, 'margin: 0 auto')
         self.assertContains(response, 'position: fixed')
         self.assertContains(response, 'right: 0')
+        self.assertContains(response, 'body.driver-mobile-screen .driver-bottom-nav .mm-mobile-nav-item.is-active::after')
+        self.assertContains(response, 'body.driver-mobile-screen .driver-bottom-nav .mm-mobile-nav-item:focus-visible')
+        self.assertContains(response, 'body.driver-mobile-screen .driver-nav-truck')
         self.assertNotContains(response, 'driver-work-' + 'bottom-nav')
 
     def test_driver_manifest_is_installable_pwa_manifest(self):
@@ -236,7 +245,7 @@ class AccessLoginTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Service-Worker-Allowed'], '/driver/')
-        self.assertIn('driver-mobile-shell-v65', script)
+        self.assertIn('driver-mobile-shell-v66', script)
         self.assertIn('/driver/', script)
         self.assertIn('/driver/shift/', script)
         self.assertIn('/driver.webmanifest', script)
@@ -1902,7 +1911,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(driver_shift_response, 'ККД')
         self.assertContains(driver_shift_response, 'window.applyOperationalStateRefresh')
         self.assertContains(driver_shift_response, 'data-realtime-mode="custom"')
-        self.assertContains(driver_shift_response, 'driver-mobile-shell-v65')
+        self.assertContains(driver_shift_response, 'driver-mobile-shell-v66')
 
     def test_driver_downtime_buttons_are_rendered_from_server_reference(self):
         truck = self.create_registered_driver_shift()
