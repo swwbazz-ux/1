@@ -525,6 +525,8 @@ body.driver-mobile-screen .driver-work-dial-zone {
 
 body.driver-mobile-screen .driver-work-dial {
     --driver-progress: 0;
+    --driver-progress-capped: 0;
+    --driver-over-progress: 0;
     --driver-hold: 0;
     position: relative;
     width: min(var(--driver-dial-size), 100%);
@@ -544,63 +546,55 @@ body.driver-mobile-screen .driver-work-dial::after {
 }
 
 body.driver-mobile-screen .driver-work-dial::before {
-    display: none;
-    inset: -3.5%;
-    z-index: -2;
+    display: block;
+    inset: 1.5%;
+    z-index: 0;
     background:
-        repeating-conic-gradient(from -2deg, rgba(186, 204, 210, 0.28) 0 1.1deg, transparent 1.1deg 6deg),
-        repeating-conic-gradient(from 0deg, rgba(150, 166, 172, 0.22) 0 2deg, transparent 2deg 30deg),
-        radial-gradient(circle at 50% 50%, rgba(7, 19, 24, 0) 53%, rgba(158, 176, 181, 0.16) 55% 56%, rgba(3, 10, 13, 0.97) 62% 100%);
+        conic-gradient(from 215deg, transparent 0 10%, rgba(235,249,247,0.10) 19%, transparent 31% 68%, rgba(0,0,0,0.24) 84%, transparent 96%),
+        radial-gradient(circle, transparent 0 72%, rgba(28,43,48,0.94) 72.5% 78%, rgba(111,135,143,0.58) 78.5% 80%, rgba(15,26,30,0.98) 80.5% 88%, rgba(2,8,11,0.98) 89% 100%);
     box-shadow:
-        inset 0 0 28px rgba(255,255,255,0.05),
-        inset 0 -22px 46px rgba(0,0,0,0.72),
-        0 20px 48px rgba(0,0,0,0.42),
-        0 0 28px rgba(180,198,204,0.05);
+        inset 0 2px 2px rgba(240,251,251,0.09),
+        inset 0 -10px 22px rgba(0,0,0,0.48),
+        0 16px 34px rgba(0,0,0,0.38),
+        0 0 22px rgba(153,180,187,0.08);
 }
 
 body.driver-mobile-screen .driver-work-dial::after {
-    display: none;
-    inset: 7%;
-    z-index: -1;
-    background:
-        radial-gradient(circle at 50% 39%, rgba(226, 247, 241, 0.16), rgba(16, 42, 49, 0.40) 43%, rgba(3, 11, 15, 0.90) 72%);
+    display: block;
+    inset: 13.5%;
+    z-index: 0;
+    border: 1px solid rgba(155,181,187,0.26);
+    background: transparent;
     box-shadow:
-        inset 0 0 44px rgba(255,255,255,0.06),
-        inset 0 -22px 42px rgba(0,0,0,0.58),
-        0 0 54px rgba(32, 217, 230, 0.10);
+        inset 0 2px 4px rgba(235,250,247,0.06),
+        inset 0 -4px 9px rgba(0,0,0,0.42),
+        0 0 0 1px rgba(0,0,0,0.42),
+        0 0 20px rgba(104,138,145,0.08);
 }
 
 body.driver-mobile-screen .driver-work-dial:has(.driver-work-dial-button.is-loaded)::before {
-    background:
-        repeating-conic-gradient(from -2deg, rgba(224, 250, 238, 0.42) 0 1.1deg, transparent 1.1deg 6deg),
-        repeating-conic-gradient(from 0deg, rgba(140,255,46,0.48) 0 2deg, transparent 2deg 30deg),
-        radial-gradient(circle at 50% 50%, rgba(7, 19, 24, 0) 53%, rgba(140,255,46,0.22) 55% 56%, rgba(3, 10, 13, 0.97) 62% 100%);
     box-shadow:
-        inset 0 0 30px rgba(255,255,255,0.08),
-        inset 0 -22px 46px rgba(0,0,0,0.72),
-        0 22px 52px rgba(0,0,0,0.46),
-        0 0 58px rgba(140,255,46,0.17);
+        inset 0 2px 2px rgba(240,255,231,0.11),
+        inset 0 -10px 22px rgba(0,0,0,0.48),
+        0 16px 36px rgba(0,0,0,0.40),
+        0 0 34px rgba(140,255,46,0.12);
 }
 
-body.driver-mobile-screen .driver-work-dial:has(.driver-work-dial-button.is-empty)::before {
-    background:
-        repeating-conic-gradient(from -2deg, rgba(186, 204, 210, 0.28) 0 1.1deg, transparent 1.1deg 6deg),
-        repeating-conic-gradient(from 0deg, rgba(150, 166, 172, 0.22) 0 2deg, transparent 2deg 30deg),
-        radial-gradient(circle at 50% 50%, rgba(7, 19, 24, 0) 53%, rgba(158, 176, 181, 0.16) 55% 56%, rgba(3, 10, 13, 0.97) 62% 100%);
+body.driver-mobile-screen .driver-work-dial:has(.driver-work-dial-button.is-loaded)::after {
+    border-color: rgba(140,255,46,0.30);
     box-shadow:
-        inset 0 0 28px rgba(255,255,255,0.05),
-        inset 0 -22px 46px rgba(0,0,0,0.70),
-        0 18px 44px rgba(0,0,0,0.38),
-        0 0 28px rgba(180,198,204,0.05);
+        inset 0 2px 4px rgba(220,255,202,0.07),
+        inset 0 -4px 9px rgba(0,0,0,0.42),
+        0 0 0 1px rgba(0,0,0,0.42),
+        0 0 22px rgba(140,255,46,0.10);
 }
 
-body.driver-mobile-screen .driver-work-dial:has(.driver-work-dial-button.is-empty)::after {
-    background:
-        radial-gradient(circle at 50% 39%, rgba(218, 231, 232, 0.10), rgba(44, 59, 64, 0.34) 43%, rgba(4, 11, 15, 0.92) 72%);
+body.driver-mobile-screen .driver-work-dial:has(.driver-work-dial-button.is-holding)::before {
     box-shadow:
-        inset 0 0 38px rgba(255,255,255,0.04),
-        inset 0 -22px 42px rgba(0,0,0,0.58),
-        0 0 34px rgba(180, 198, 204, 0.06);
+        inset 0 8px 18px rgba(0,0,0,0.46),
+        inset 0 -2px 4px rgba(235,255,225,0.05),
+        0 6px 18px rgba(0,0,0,0.34),
+        0 0 42px rgba(140,255,46,0.18);
 }
 
 body.driver-mobile-screen .driver-work-dial-form {
@@ -609,15 +603,32 @@ body.driver-mobile-screen .driver-work-dial-form {
 
 body.driver-mobile-screen .driver-work-ticks {
     position: absolute;
-    inset: 4%;
+    inset: 3%;
+    z-index: 1;
     border-radius: 50%;
-    background:
-        repeating-conic-gradient(from 0deg, rgba(168,185,193,0.34) 0deg 0.8deg, transparent 0.9deg 6deg),
-        repeating-conic-gradient(from 0deg, transparent 0 29deg, rgba(190,210,215,0.55) 29deg 30.4deg, transparent 30.5deg 45deg);
-    -webkit-mask: radial-gradient(circle, transparent 0 62%, #000 63% 88%, transparent 89%);
-    mask: radial-gradient(circle, transparent 0 62%, #000 63% 88%, transparent 89%);
-    opacity: 0.55;
     pointer-events: none;
+}
+
+body.driver-mobile-screen .driver-work-ticks::before,
+body.driver-mobile-screen .driver-work-ticks::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    pointer-events: none;
+}
+
+body.driver-mobile-screen .driver-work-ticks::before {
+    background: repeating-conic-gradient(from -0.35deg, rgba(163,184,191,0.38) 0 0.7deg, transparent 0.7deg 6deg);
+    -webkit-mask: radial-gradient(circle, transparent 0 76%, #000 76.5% 87.5%, transparent 88%);
+    mask: radial-gradient(circle, transparent 0 76%, #000 76.5% 87.5%, transparent 88%);
+}
+
+body.driver-mobile-screen .driver-work-ticks::after {
+    background: repeating-conic-gradient(from -0.9deg, rgba(205,225,227,0.70) 0 1.8deg, transparent 1.8deg 30deg);
+    -webkit-mask: radial-gradient(circle, transparent 0 66%, #000 66.5% 90%, transparent 90.5%);
+    mask: radial-gradient(circle, transparent 0 66%, #000 66.5% 90%, transparent 90.5%);
+    filter: drop-shadow(0 1px 1px rgba(0,0,0,0.70));
 }
 
 body.driver-mobile-screen .driver-work-dial-svg {
@@ -633,29 +644,46 @@ body.driver-mobile-screen .driver-work-dial-svg {
 
 body.driver-mobile-screen .driver-work-track,
 body.driver-mobile-screen .driver-work-progress,
+body.driver-mobile-screen .driver-work-over-progress,
 body.driver-mobile-screen .driver-work-hold-progress {
     fill: none;
     vector-effect: non-scaling-stroke;
-    stroke-linecap: butt;
+    stroke-linecap: round;
 }
 
 body.driver-mobile-screen .driver-work-track {
-    stroke: rgba(115, 136, 145, 0.58);
-    stroke-width: 5;
+    stroke: rgba(101, 125, 133, 0.48);
+    stroke-width: 3;
+    filter: drop-shadow(0 1px 1px rgba(0,0,0,0.72));
 }
 
 body.driver-mobile-screen .driver-work-progress {
     stroke: rgba(206, 226, 231, 0.62);
-    stroke-width: 6;
+    stroke-width: 4.5;
     stroke-dasharray: 100;
-    stroke-dashoffset: calc(100 - var(--driver-progress));
-    filter: drop-shadow(0 0 8px rgba(210,230,230,0.16));
+    stroke-dashoffset: calc(100 - var(--driver-progress-capped));
+    transition: stroke-dashoffset 240ms ease;
+    filter: drop-shadow(0 0 6px rgba(210,230,230,0.14));
+}
+
+body.driver-mobile-screen .driver-work-over-progress {
+    opacity: 0;
+    stroke: var(--driver-cyan);
+    stroke-width: 2.5;
+    stroke-dasharray: 100;
+    stroke-dashoffset: calc(100 - var(--driver-over-progress));
+    transition: opacity 180ms ease, stroke-dashoffset 240ms ease;
+    filter: drop-shadow(0 0 7px rgba(32,217,230,0.52));
+}
+
+body.driver-mobile-screen .driver-work-dial.is-over-plan .driver-work-over-progress {
+    opacity: 0.88;
 }
 
 body.driver-mobile-screen .driver-work-hold-progress {
     opacity: 0;
     stroke: var(--driver-green);
-    stroke-width: 4;
+    stroke-width: 3.5;
     stroke-dasharray: 100;
     stroke-dashoffset: calc(100 - var(--driver-hold));
     transition: opacity 0.12s ease;
@@ -1708,7 +1736,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
 {% endblock %}
 
 {% block body %}
-<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v59' }}">
+<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v60' }}">
     {% if messages %}
         <div class="driver-messages">
             {% for message in messages %}
@@ -1737,7 +1765,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
         </section>
 
         <div class="driver-work-dial-zone">
-            <div class="driver-work-dial {% if active_trip %}is-loaded{% else %}is-empty{% endif %}{% if not shift_plan_has_plan %} is-plan-missing{% endif %}" style="--driver-progress: {% if shift_plan_has_plan %}{{ shift_plan_percent }}{% else %}0{% endif %}; --driver-hold: 0;" data-plan-status="{{ shift_plan_status|default:'no_plan_group' }}">
+            <div class="driver-work-dial {% if active_trip %}is-loaded{% else %}is-empty{% endif %}{% if not shift_plan_has_plan %} is-plan-missing{% endif %}" style="--driver-progress: {% if shift_plan_has_plan %}{{ shift_plan_percent }}{% else %}0{% endif %}; --driver-hold: 0;" data-driver-progress="{% if shift_plan_has_plan %}{{ shift_plan_percent }}{% else %}0{% endif %}" data-plan-status="{{ shift_plan_status|default:'no_plan_group' }}">
                 {% if active_trip %}
                     <form method="post" action="{% url 'driver_complete_trip' active_trip.id %}" class="driver-work-dial-form" data-driver-hold-form>
                         {% csrf_token %}
@@ -1746,6 +1774,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
                             <svg class="driver-work-dial-svg" viewBox="0 0 100 100" aria-hidden="true">
                                 <circle class="driver-work-track" cx="50" cy="50" r="45" pathLength="100"></circle>
                                 <circle class="driver-work-progress" cx="50" cy="50" r="45" pathLength="100"></circle>
+                                <circle class="driver-work-over-progress" cx="50" cy="50" r="41" pathLength="100"></circle>
                                 <circle class="driver-work-hold-progress" cx="50" cy="50" r="36" pathLength="100"></circle>
                             </svg>
                             <span class="driver-work-ticks" aria-hidden="true"></span>
@@ -1761,6 +1790,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
                         <svg class="driver-work-dial-svg" viewBox="0 0 100 100" aria-hidden="true">
                             <circle class="driver-work-track" cx="50" cy="50" r="45" pathLength="100"></circle>
                             <circle class="driver-work-progress" cx="50" cy="50" r="45" pathLength="100"></circle>
+                            <circle class="driver-work-over-progress" cx="50" cy="50" r="41" pathLength="100"></circle>
                             <circle class="driver-work-hold-progress" cx="50" cy="50" r="36" pathLength="100"></circle>
                         </svg>
                         <span class="driver-work-ticks" aria-hidden="true"></span>
@@ -2019,6 +2049,20 @@ window.bindDriverMobileShell = function () {
         return;
     }
     shell.dataset.driverShellBound = "true";
+    function syncDriverDialProgress() {
+        shell.querySelectorAll(".driver-work-dial").forEach(function (dial) {
+            var progress = Number(dial.dataset.driverProgress || 0);
+            if (!Number.isFinite(progress)) {
+                progress = 0;
+            }
+            var cappedProgress = Math.max(0, Math.min(progress, 100));
+            var overProgress = Math.max(0, Math.min(progress - 100, 100));
+            dial.style.setProperty("--driver-progress-capped", String(cappedProgress));
+            dial.style.setProperty("--driver-over-progress", String(overProgress));
+            dial.classList.toggle("is-over-plan", overProgress > 0);
+        });
+    }
+    syncDriverDialProgress();
     function isTextEditable(target) {
         return Boolean(target && target.closest && target.closest("input, textarea, select, option, [contenteditable='true'], [contenteditable='']"));
     }
@@ -2543,7 +2587,7 @@ window.bindDriverMobileShell = function () {
         if (!("serviceWorker" in navigator)) {
             return;
         }
-        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v59' }}";
+        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v60' }}";
         var updateModal = document.querySelector("[data-driver-pwa-update-modal]");
         var updateBadge = document.querySelector("[data-driver-pwa-update-badge]");
         var updateTarget = document.querySelector("[data-driver-pwa-update-nav-target]");
