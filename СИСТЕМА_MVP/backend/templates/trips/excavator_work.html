@@ -5,9 +5,9 @@
 {% block body_class %}excavator-operator-screen{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v96">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v96">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v96">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v97">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v97">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v97">
 <meta name="theme-color" content="#030708">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Погрузка">
@@ -162,7 +162,7 @@
             </div>
             <input type="hidden" name="dump_point" value="{{ default_dump_point }}" data-eo-dump-input>
             <input type="hidden" name="dump_points" value="{% for id in selected_dump_point_ids %}{% if not forloop.first %},{% endif %}{{ id }}{% endfor %}" data-eo-dump-points-input>
-            <button class="eo-primary-action eo-hold-action" type="button" data-eo-apply-settings data-eo-hold-label="Применить настройки" style="--eo-action-hold: 0%" aria-label="Удерживайте 2 секунды, чтобы применить настройки">Применить настройки</button>
+            <button class="eo-primary-action eo-hold-action{% if has_applied_settings %} is-disabled{% endif %}" type="button" data-eo-apply-settings data-eo-hold-label="Применить настройки" data-eo-settings-applied="{% if has_applied_settings %}true{% else %}false{% endif %}" style="--eo-action-hold: 0%"{% if has_applied_settings %} disabled aria-disabled="true" aria-label="Настройки уже применены"{% else %} aria-disabled="false" aria-label="Удерживайте 2 секунды, чтобы применить настройки"{% endif %}>Применить настройки</button>
         </section>
 
         <section class="eo-screen eo-dashboard-screen" data-eo-screen="trucks">
@@ -400,7 +400,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v96";
+var excavatorShellVersion = "excavator-mobile-shell-v97";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var excavatorRelevantEvents = {
     assignment_changed: true,
@@ -1503,6 +1503,45 @@ window.initExcavatorWorkShell = function () {
         button.classList.toggle("is-selected", !isSelected);
         button.setAttribute("aria-pressed", isSelected ? "false" : "true");
         syncDumpPointInputs();
+        updateApplySettingsState();
+    }
+
+    function normalizeFaceSetting(value) {
+        var normalized = String(value == null ? "" : value).trim();
+        return normalized.replace(/^0+(?=\d)/, "");
+    }
+
+    function currentExcavatorSettingsSnapshot() {
+        var rockSelect = shell.querySelector("[data-eo-rock-select]");
+        var horizonInput = shell.querySelector("[data-eo-face-horizon]");
+        var blockInput = shell.querySelector("[data-eo-face-block]");
+        return JSON.stringify({
+            rockTypeId: rockSelect ? String(rockSelect.value || "") : "",
+            loadingHorizon: normalizeFaceSetting(horizonInput ? horizonInput.value : ""),
+            loadingBlock: normalizeFaceSetting(blockInput ? blockInput.value : ""),
+            dumpPointIds: selectedDumpPointIds().map(String).sort()
+        });
+    }
+
+    var settingsApplyButton = shell.querySelector("[data-eo-apply-settings]");
+    var appliedExcavatorSettingsSnapshot = settingsApplyButton && settingsApplyButton.dataset.eoSettingsApplied === "true"
+        ? currentExcavatorSettingsSnapshot()
+        : null;
+
+    function updateApplySettingsState() {
+        var button = shell.querySelector("[data-eo-apply-settings]");
+        if (!button || button.classList.contains("is-pending")) {
+            return;
+        }
+        var isDirty = appliedExcavatorSettingsSnapshot === null
+            || currentExcavatorSettingsSnapshot() !== appliedExcavatorSettingsSnapshot;
+        button.disabled = !isDirty;
+        button.classList.toggle("is-disabled", !isDirty);
+        button.setAttribute("aria-disabled", isDirty ? "false" : "true");
+        button.setAttribute(
+            "aria-label",
+            isDirty ? "Удерживайте 2 секунды, чтобы применить настройки" : "Настройки уже применены"
+        );
     }
 
     function snapshotTruckCard(card) {
@@ -2037,6 +2076,15 @@ window.initExcavatorWorkShell = function () {
 
     var applySettings = shell.querySelector("[data-eo-apply-settings]");
     if (applySettings) {
+        shell.querySelectorAll("[data-eo-face-horizon], [data-eo-face-block]").forEach(function (input) {
+            input.addEventListener("input", updateApplySettingsState);
+            input.addEventListener("change", updateApplySettingsState);
+        });
+        var settingsRockSelect = shell.querySelector("[data-eo-rock-select]");
+        if (settingsRockSelect) {
+            settingsRockSelect.addEventListener("change", updateApplySettingsState);
+        }
+        updateApplySettingsState();
         registerHoldAction(applySettings, function (hold) {
             var ids = syncDumpPointInputs();
             var rockSelect = shell.querySelector("[data-eo-rock-select]");
@@ -2081,6 +2129,9 @@ window.initExcavatorWorkShell = function () {
                 if (dumpPointsInput && data.dump_point_ids) {
                     dumpPointsInput.value = data.dump_point_ids.join(",");
                 }
+                appliedExcavatorSettingsSnapshot = currentExcavatorSettingsSnapshot();
+                applySettings.classList.remove("is-pending");
+                updateApplySettingsState();
                 shell.dataset.eoActiveTab = data.work_context_changed && data.active_downtime_reason
                     ? "downtime"
                     : "trucks";
@@ -2095,9 +2146,9 @@ window.initExcavatorWorkShell = function () {
             }).catch(function (error) {
                 window.alert(error.message || "Настройки не сохранены");
             }).finally(function () {
-                applySettings.disabled = false;
                 applySettings.classList.remove("is-pending");
                 applySettings.textContent = hold.defaultLabel;
+                updateApplySettingsState();
             });
         });
     }

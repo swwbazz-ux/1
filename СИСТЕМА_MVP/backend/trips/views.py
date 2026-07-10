@@ -537,7 +537,7 @@ EXCAVATOR_MANIFEST = {
 }
 
 EXCAVATOR_SERVICE_WORKER_JS = r"""
-const CACHE_NAME = "excavator-mobile-shell-v96";
+const CACHE_NAME = "excavator-mobile-shell-v97";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const CORE_ASSETS = [
@@ -2734,6 +2734,7 @@ def excavator_work_settings_from_session(request, current_excavator, form):
 
     selected_dump_ids = [point.id for point in selected_dump_points]
     return {
+        'has_applied_settings': bool(raw_settings or placement),
         'rock_choices': rock_choices,
         'dump_point_choices': dump_point_choices,
         'current_rock': current_rock,
@@ -3851,6 +3852,7 @@ def excavator_work_view(request):
             'dump_cards': dump_cards,
             'dump_choice_cards': dump_choice_cards,
             'rock_choices': rock_choices,
+            'has_applied_settings': work_settings['has_applied_settings'],
             'default_rock': default_rock,
             'default_dump_point': default_dump_point,
             'selected_dump_point_ids': work_settings['selected_dump_point_ids'],

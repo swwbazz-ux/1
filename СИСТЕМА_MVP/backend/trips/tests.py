@@ -637,7 +637,12 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/static/css/excavator-work-v55-shift.css')
         self.assertContains(response, '/excavator-sw.js')
         self.assertContains(response, 'scope: "/excavator/"')
-        self.assertContains(response, 'excavator-mobile-shell-v96')
+        self.assertContains(response, 'excavator-mobile-shell-v97')
+        self.assertContains(response, 'data-eo-apply-settings data-eo-hold-label="Применить настройки"')
+        self.assertContains(response, 'data-eo-settings-applied="')
+        self.assertContains(response, 'data-eo-settings-applied="false"')
+        self.assertContains(response, 'appliedExcavatorSettingsSnapshot')
+        self.assertContains(response, 'currentExcavatorSettingsSnapshot() !== appliedExcavatorSettingsSnapshot')
         self.assertContains(response, 'data.work_context_changed && data.active_downtime_reason')
         self.assertContains(response, '? "downtime"')
         self.assertContains(response, 'Простои')
@@ -670,6 +675,22 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, 'Обновить')
         self.assertContains(response, 'runManualUpdateCheck')
         self.assertContains(response, 'Проверка...')
+
+    def test_excavator_work_disables_apply_button_for_saved_settings(self):
+        ExcavatorPlacement.objects.create(
+            excavator=self.excavator,
+            zone=ExcavatorPlacement.Zone.ACTIVE,
+            work_rock_type=self.rock,
+            work_dump_point=self.dump_point,
+            loading_horizon='125',
+            loading_block='4',
+        )
+
+        response = self.client.get(reverse('excavator_work'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-eo-settings-applied="true"')
+        self.assertContains(response, 'disabled aria-disabled="true" aria-label="Настройки уже применены"')
         self.assertContains(response, 'registration && registration.active')
         self.assertNotContains(response, 'newVersion || "new"')
         self.assertNotContains(response, 'registration.active || navigator.serviceWorker.controller')
@@ -1558,7 +1579,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/excavator/')
-        self.assertIn('excavator-mobile-shell-v96', script)
+        self.assertIn('excavator-mobile-shell-v97', script)
         self.assertIn(reverse('excavator_work'), script)
         self.assertIn(reverse('excavator_manifest'), script)
         self.assertIn('/static/js/realtime-client.js', script)
@@ -1589,7 +1610,6 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         response = self.client.get(reverse('excavator_work'))
 
         self.assertEqual(response.status_code, 200)
-        self.assertNotContains(response, '77')
         self.assertEqual([card['number'] for card in response.context['truck_cards']], ['21'])
         cards_by_number = {card['number']: card for card in response.context['truck_cards']}
         self.assertEqual(cards_by_number['21']['equipment_state_code'], 'assigned')

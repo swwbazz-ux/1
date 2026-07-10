@@ -2636,3 +2636,12 @@ body.excavator-operator-screen .mm-mobile-bottom-nav .mm-mobile-update-badge[hid
         min-width: 24px !important;
     }
 }
+body.excavator-operator-screen .eo-screen[data-eo-screen="face"] > .eo-primary-action.is-disabled,
+body.excavator-operator-screen .eo-screen[data-eo-screen="face"] > .eo-primary-action:disabled {
+    border-color: rgba(126, 145, 154, 0.42);
+    background: rgba(19, 29, 34, 0.78);
+    color: rgba(190, 202, 208, 0.58);
+    box-shadow: none;
+    cursor: default;
+    opacity: 1;
+}
