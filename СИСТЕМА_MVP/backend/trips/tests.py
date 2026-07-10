@@ -24,7 +24,7 @@ from references.models import (
 from shifts.models import EmployeeShift, EquipmentPlanGroup, PlanAssignmentStatus, PlanCalculationMode
 from shifts.services import assign_shift_plan_snapshot
 from trips.models import Trip, TripClientAction, TripStatus
-from trips.views import build_dispatcher_dashboard_context
+from trips.views import build_dispatcher_dashboard_context, progress_cycle_visual_context
 from users.models import DriverPrimaryRegistration, Employee, EmployeeAccess, Role
 
 
@@ -637,7 +637,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/static/css/excavator-work-v55-shift.css')
         self.assertContains(response, '/excavator-sw.js')
         self.assertContains(response, 'scope: "/excavator/"')
-        self.assertContains(response, 'excavator-mobile-shell-v86')
+        self.assertContains(response, 'excavator-mobile-shell-v87')
         self.assertContains(response, 'Простои')
         self.assertNotContains(response, 'Отпустить сюда')
         self.assertContains(response, 'resolveExcavatorUpdateVersion')
@@ -729,6 +729,8 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertNotContains(response, 'Назначенные самосвалы')
         self.assertContains(response, 'data-eo-dashboard-truck')
         self.assertContains(response, 'data-plan-percent=""')
+        self.assertContains(response, 'data-plan-loop-percent=""')
+        self.assertContains(response, 'data-plan-completed-loops="0"')
         self.assertContains(response, 'data-plan-status="no_active_plan"')
         self.assertContains(response, 'data-plan-status="no_plan_group"')
         self.assertContains(response, 'class="mm-mobile-bottom-nav"')
@@ -765,6 +767,26 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertNotContains(response, 'ожидает сервер')
         self.assertNotContains(response, 'Под погрузкой')
         self.assertContains(response, 'class="mm-mobile-shift-button is-danger"')
+
+    def test_excavator_progress_cycle_visual_context_preserves_completed_boundaries(self):
+        cases = {
+            0: (0, 0, 'green'),
+            45: (45, 0, 'green'),
+            99: (99, 0, 'green'),
+            100: (100, 0, 'green'),
+            125: (25, 1, 'amber'),
+            235: (35, 2, 'cyan'),
+            346: (46, 3, 'orange'),
+            999: (99, 9, 'orange'),
+        }
+
+        for percent, (loop_percent, completed_loops, phase) in cases.items():
+            with self.subTest(percent=percent):
+                visual = progress_cycle_visual_context(percent)
+                self.assertEqual(visual['loop_progress'], loop_percent)
+                self.assertEqual(visual['completed_loops'], completed_loops)
+                self.assertEqual(visual['phase'], phase)
+                self.assertEqual(visual['has_completed_loops'], completed_loops > 0)
 
     def test_excavator_work_renders_readonly_truck_detail_card_data(self):
         response = self.client.get(reverse('excavator_work'))
@@ -834,6 +856,8 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, 'data-plan-status="assigned"')
         self.assertContains(response, 'data-plan-progress-status="low"')
         self.assertContains(response, '--eo-truck-progress: 49%;')
+        self.assertContains(response, 'data-plan-loop-percent="49"')
+        self.assertContains(response, 'data-plan-completed-loops="0"')
 
     def test_truck_plan_percent_matches_dispatcher_driver_and_excavator(self):
         loading_shift = EmployeeShift.objects.get(employee=self.operator, equipment=self.excavator)
@@ -1211,7 +1235,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/excavator/')
-        self.assertIn('excavator-mobile-shell-v86', script)
+        self.assertIn('excavator-mobile-shell-v87', script)
         self.assertIn(reverse('excavator_work'), script)
         self.assertIn(reverse('excavator_manifest'), script)
         self.assertIn('/static/js/realtime-client.js', script)

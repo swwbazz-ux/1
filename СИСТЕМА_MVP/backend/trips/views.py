@@ -172,17 +172,23 @@ def plan_progress_status_key(percent, plan_status=''):
     return 'good'
 
 
-def dashboard_progress_visual_context(percent):
+def progress_cycle_visual_context(percent):
     value = format_progress_percent(percent)
     if value is None:
         value = 0
-    completed_loops = value // 100 if value >= 100 else 0
-    loop_progress = value if value < 100 else value % 100
-    if value < 100:
+
+    completed_loops, loop_progress = divmod(value, 100)
+    # Keep an exact completed boundary visible as a finished active cycle.
+    # This prevents the indicator from jumping from 99% to an empty ring.
+    if value and loop_progress == 0:
+        loop_progress = 100
+        completed_loops = max(0, completed_loops - 1)
+
+    if completed_loops == 0:
         phase = 'green'
-    elif value < 200:
+    elif completed_loops == 1:
         phase = 'amber'
-    elif value < 300:
+    elif completed_loops == 2:
         phase = 'cyan'
     else:
         phase = 'orange'
@@ -191,8 +197,9 @@ def dashboard_progress_visual_context(percent):
         'loop_progress': loop_progress,
         'completed_loops': completed_loops,
         'phase': phase,
-        'is_overrun': value >= 100,
-        'text_class': 'is-progress-extra-wide' if value >= 1000 else 'is-progress-wide' if value >= 100 else '',
+        'has_completed_loops': completed_loops > 0,
+        'is_overrun': completed_loops > 0,
+        'text_class': '',
     }
 
 
@@ -557,7 +564,7 @@ EXCAVATOR_MANIFEST = {
 }
 
 EXCAVATOR_SERVICE_WORKER_JS = r"""
-const CACHE_NAME = "excavator-mobile-shell-v86";
+const CACHE_NAME = "excavator-mobile-shell-v87";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const CORE_ASSETS = [
@@ -3466,7 +3473,7 @@ def excavator_work_view(request):
     shift_progress = calculate_open_shift_progress(open_shift)
     shift_plan = plan_progress_display_context(shift_progress)
     shift_plan_percent = shift_plan['percent']
-    shift_plan_visual = dashboard_progress_visual_context(shift_plan_percent if shift_plan['has_plan'] else 0)
+    shift_plan_visual = progress_cycle_visual_context(shift_plan_percent if shift_plan['has_plan'] else 0)
 
     for card in truck_cards:
         truck_progress = None
@@ -3484,6 +3491,7 @@ def excavator_work_view(request):
         card['plan_unit'] = truck_plan['unit']
         card['plan_group_name'] = truck_plan['group_name']
         card['plan'] = truck_plan
+        card['plan_visual'] = progress_cycle_visual_context(plan_percent if truck_plan['has_plan'] else 0)
 
     truck_detail_cards = {}
 

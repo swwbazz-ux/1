@@ -2215,3 +2215,89 @@ body.excavator-operator-screen .eo-dashboard-progress-loop {
         font-size: clamp(8px, .58vw, 10px) !important;
     }
 }
+
+/* v87: the ring shows only the active plan cycle; completed cycles stay compact. */
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-card[data-plan-percent]:not([data-plan-percent=""])[data-plan-progress-phase="green"] {
+    --eo-plan-color: rgba(74, 222, 128, 1);
+    --eo-plan-color-glow: rgba(74, 222, 128, .6);
+    --eo-plan-complete-color: rgba(74, 222, 128, .68);
+}
+
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-card[data-plan-percent]:not([data-plan-percent=""])[data-plan-progress-phase="amber"] {
+    --eo-plan-color: rgba(250, 204, 21, 1);
+    --eo-plan-color-glow: rgba(250, 204, 21, .58);
+    --eo-plan-complete-color: rgba(74, 222, 128, .7);
+}
+
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-card[data-plan-percent]:not([data-plan-percent=""])[data-plan-progress-phase="cyan"] {
+    --eo-plan-color: rgba(56, 189, 248, 1);
+    --eo-plan-color-glow: rgba(56, 189, 248, .54);
+    --eo-plan-complete-color: rgba(250, 204, 21, .62);
+}
+
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-card[data-plan-percent]:not([data-plan-percent=""])[data-plan-progress-phase="orange"] {
+    --eo-plan-color: rgba(251, 146, 60, 1);
+    --eo-plan-color-glow: rgba(251, 146, 60, .6);
+    --eo-plan-complete-color: rgba(56, 189, 248, .56);
+}
+
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-card.is-plan-overrun::before {
+    background:
+        conic-gradient(from -90deg, var(--eo-plan-color) 0 var(--eo-truck-progress, 0%), rgba(0, 0, 0, 0) var(--eo-truck-progress, 0%) 100%),
+        conic-gradient(from -90deg, var(--eo-plan-complete-color) 0 100%, rgba(0, 0, 0, 0) 0 100%),
+        conic-gradient(from -90deg, var(--eo-plan-track) 0 100%) !important;
+}
+
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-card > .eo-truck-progress-loop {
+    top: auto !important;
+    left: auto !important;
+    position: absolute !important;
+    right: clamp(5px, 1.2vw, 8px) !important;
+    bottom: clamp(6px, 1dvh, 9px) !important;
+    z-index: 7 !important;
+    min-width: clamp(20px, 5vw, 26px) !important;
+    padding: 2px 5px !important;
+    border: 1px solid var(--eo-plan-color) !important;
+    border-radius: 999px !important;
+    background: rgba(4, 13, 17, .94) !important;
+    box-shadow: 0 0 9px var(--eo-plan-color-glow), 0 3px 8px rgba(0, 0, 0, .4) !important;
+    color: var(--eo-plan-color) !important;
+    font-size: clamp(8px, 2vw, 10px) !important;
+    font-style: normal !important;
+    font-weight: 900 !important;
+    line-height: 1 !important;
+    letter-spacing: 0 !important;
+    text-align: center !important;
+    white-space: nowrap !important;
+}
+
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-card.truck-drag-preview > .eo-truck-progress-loop {
+    top: auto !important;
+    left: auto !important;
+    right: 7px !important;
+    bottom: 7px !important;
+    z-index: 8 !important;
+    font-size: clamp(9px, 1.05vw, 12px) !important;
+}
+
+/* Match the other shift summary cells: labels, values and metadata share one left edge. */
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-grid .eo-shift-result-fact span,
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-grid .eo-shift-result-fact strong,
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-grid .eo-shift-result-fact em {
+    justify-self: start !important;
+    text-align: left !important;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-grid .eo-shift-result-fact {
+    justify-self: stretch !important;
+    justify-content: start !important;
+    width: auto !important;
+}
+
+@media (min-width: 768px) {
+    body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-card > .eo-truck-progress-loop {
+        right: clamp(6px, .65vw, 11px) !important;
+        bottom: clamp(7px, .7vw, 11px) !important;
+        font-size: clamp(9px, .7vw, 12px) !important;
+    }
+}
