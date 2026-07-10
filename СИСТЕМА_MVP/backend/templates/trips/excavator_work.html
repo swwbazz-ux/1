@@ -5,9 +5,9 @@
 {% block body_class %}excavator-operator-screen{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v83">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v83">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v83">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v85">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v85">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v85">
 <meta name="theme-color" content="#030708">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Погрузка">
@@ -46,8 +46,8 @@
                 <img src="{% static 'img/equipment/excavator-yellow.png' %}" alt="">
                 <strong>{{ excavator_label }}</strong>
             </div>
-            <div class="eo-topbar-cell eo-shift-kind-cell" aria-label="Дневная смена">
-                <span class="eo-sun-icon" aria-hidden="true"></span>
+            <div class="eo-topbar-cell eo-shift-kind-cell" aria-label="Смена -1">
+                <span class="eo-shift-status-text">Смена -1</span>
             </div>
             <div class="eo-topbar-cell eo-face-cell eo-face-cell-full">
                 <span class="eo-pin-icon" aria-hidden="true"></span>
@@ -373,7 +373,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v83";
+var excavatorShellVersion = "excavator-mobile-shell-v85";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var excavatorRelevantEvents = {
     assignment_changed: true,

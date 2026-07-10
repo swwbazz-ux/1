@@ -1920,3 +1920,132 @@ body.excavator-operator-screen .eo-shell {
         padding-bottom: var(--excavator-work-action-nav-gap) !important;
     }
 }
+
+/* v84: quieter top chrome and slightly stronger labels without changing the rails. */
+@media (max-width: 767px) {
+    body.excavator-operator-screen .eo-topbar,
+    body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-topbar {
+        grid-template-columns: minmax(94px, .72fr) clamp(68px, 18vw, 78px) minmax(0, 2.5fr) !important;
+    }
+
+    body.excavator-operator-screen .eo-topbar .eo-shift-kind-cell {
+        min-width: clamp(66px, 18vw, 76px) !important;
+        padding-inline: clamp(5px, 1.25vw, 8px) !important;
+        justify-content: center !important;
+    }
+
+    body.excavator-operator-screen .eo-topbar .eo-shift-status-text {
+        display: inline-flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        white-space: nowrap !important;
+        color: rgba(250, 204, 21, .92) !important;
+        font-size: clamp(10.5px, 2.78vw, 13px) !important;
+        font-weight: 900 !important;
+        line-height: 1 !important;
+        letter-spacing: .01em !important;
+        text-transform: none !important;
+    }
+
+    body.excavator-operator-screen .eo-screen[data-eo-screen="events"] .eo-refresh-button {
+        display: none !important;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-update-button b {
+        font-size: clamp(11px, 2.55vw, 13px) !important;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-metrics .eo-field-card > span:first-child {
+        font-size: clamp(13px, 3.15vw, 15px) !important;
+        line-height: 1.05 !important;
+    }
+
+    body.excavator-operator-screen .eo-unload-grid-settings .eo-unload-card {
+        padding-inline: clamp(6px, 1.65vw, 9px) !important;
+    }
+
+    body.excavator-operator-screen .eo-unload-grid-settings .eo-unload-card strong {
+        font-size: clamp(14px, 3.65vw, 17px) !important;
+        line-height: 1.12 !important;
+    }
+
+    body.excavator-operator-screen .eo-reason-grid .eo-hold-action {
+        padding-inline: clamp(5px, 1.55vw, 8px) !important;
+        font-size: clamp(13px, 3.28vw, 15px) !important;
+        line-height: 1.05 !important;
+        font-weight: 800 !important;
+    }
+}
+
+@media (max-width: 370px) {
+    body.excavator-operator-screen .eo-topbar,
+    body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-topbar {
+        grid-template-columns: minmax(92px, .72fr) 64px minmax(0, 2.4fr) !important;
+    }
+
+    body.excavator-operator-screen .eo-topbar .eo-shift-kind-cell {
+        min-width: 62px !important;
+        padding-inline: 3px !important;
+    }
+
+    body.excavator-operator-screen .eo-topbar .eo-shift-status-text {
+        font-size: 10px !important;
+    }
+
+    body.excavator-operator-screen .eo-unload-grid-settings .eo-unload-card strong,
+    body.excavator-operator-screen .eo-reason-grid .eo-hold-action {
+        font-size: 12.5px !important;
+    }
+}
+
+/* v85: make face parameter cards match the downtime status rail height. */
+@media (max-width: 767px) {
+    body.excavator-operator-screen .eo-screen[data-eo-screen="face"] {
+        grid-template-rows: var(--eo-mobile-title-row-h) var(--eo-mobile-downtime-h) minmax(0, 1fr) var(--eo-mobile-action-h) !important;
+    }
+
+    body.excavator-operator-screen .eo-face-form {
+        min-height: var(--eo-mobile-downtime-h) !important;
+        height: var(--eo-mobile-downtime-h) !important;
+        gap: clamp(6px, .8dvh, 8px) !important;
+        align-items: stretch !important;
+    }
+
+    body.excavator-operator-screen .eo-large-field {
+        min-height: var(--eo-mobile-downtime-h) !important;
+        height: var(--eo-mobile-downtime-h) !important;
+        padding: clamp(8px, 1.05dvh, 11px) clamp(8px, 2vw, 11px) !important;
+        align-content: center !important;
+        justify-content: center !important;
+    }
+
+    body.excavator-operator-screen .eo-large-field span {
+        font-size: clamp(9.5px, 2.45vw, 11px) !important;
+        line-height: 1.02 !important;
+    }
+
+    body.excavator-operator-screen .eo-large-field input,
+    body.excavator-operator-screen .eo-large-field select {
+        font-size: clamp(18px, 4.7vw, 22px) !important;
+        line-height: 1.05 !important;
+    }
+
+    body.excavator-operator-screen .eo-unload-grid-settings {
+        gap: clamp(6px, .78dvh, 8px) !important;
+    }
+}
+
+@media (max-width: 370px) {
+    body.excavator-operator-screen .eo-face-form {
+        gap: 6px !important;
+    }
+
+    body.excavator-operator-screen .eo-large-field {
+        padding: 7px 7px !important;
+    }
+
+    body.excavator-operator-screen .eo-large-field input,
+    body.excavator-operator-screen .eo-large-field select {
+        font-size: 17px !important;
+    }
+}
