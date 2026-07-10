@@ -23410,6 +23410,30 @@ body.mining-master-mobile-screen .dispatcher-complex-card[data-plan-progress-pha
     filter: saturate(1.45) brightness(1.28) drop-shadow(0 0 5px var(--dispatcher-plan-glow));
 }
 
+body.mining-master-mobile-screen :is(.dispatcher-excavator-garage-tile, .dispatcher-truck-tile, .dispatcher-complex-card)[data-plan-progress-phase="green"] {
+    --dispatcher-plan-color: rgba(74, 222, 128, 1);
+    --dispatcher-plan-glow: rgba(74, 222, 128, .6);
+    --dispatcher-plan-complete-color: rgba(74, 222, 128, .68);
+}
+
+body.mining-master-mobile-screen :is(.dispatcher-excavator-garage-tile, .dispatcher-truck-tile, .dispatcher-complex-card)[data-plan-progress-phase="amber"] {
+    --dispatcher-plan-color: rgba(250, 204, 21, 1);
+    --dispatcher-plan-glow: rgba(250, 204, 21, .58);
+    --dispatcher-plan-complete-color: rgba(74, 222, 128, .7);
+}
+
+body.mining-master-mobile-screen :is(.dispatcher-excavator-garage-tile, .dispatcher-truck-tile, .dispatcher-complex-card)[data-plan-progress-phase="cyan"] {
+    --dispatcher-plan-color: rgba(56, 189, 248, 1);
+    --dispatcher-plan-glow: rgba(56, 189, 248, .54);
+    --dispatcher-plan-complete-color: rgba(250, 204, 21, .62);
+}
+
+body.mining-master-mobile-screen :is(.dispatcher-excavator-garage-tile, .dispatcher-truck-tile, .dispatcher-complex-card)[data-plan-progress-phase="orange"] {
+    --dispatcher-plan-color: rgba(251, 146, 60, 1);
+    --dispatcher-plan-glow: rgba(251, 146, 60, .6);
+    --dispatcher-plan-complete-color: rgba(56, 189, 248, .56);
+}
+
 body.mining-master-mobile-screen .dispatcher-excavator-garage-tile[data-plan-progress-phase]:not([data-plan-progress-phase=""])::before,
 body.mining-master-mobile-screen .dispatcher-truck-tile[data-plan-progress-phase]:not([data-plan-progress-phase=""])::before {
     padding: 4px;
@@ -27715,8 +27739,8 @@ body.mining-master-screen .dispatcher-complex-card .complex-truck-tile {
     .mm-mobile-truck-mini.has-plan-progress,
     .mm-mobile-truck-card.has-plan-progress {
         --mm-mobile-plan-color: rgba(74, 222, 128, 1);
-        --mm-mobile-plan-glow: rgba(74, 222, 128, .52);
-        --mm-mobile-plan-complete-color: rgba(74, 222, 128, .62);
+        --mm-mobile-plan-glow: rgba(74, 222, 128, .6);
+        --mm-mobile-plan-complete-color: rgba(74, 222, 128, .68);
         --mm-mobile-plan-track: rgba(142, 158, 166, .26);
     }
 
@@ -27724,24 +27748,24 @@ body.mining-master-screen .dispatcher-complex-card .complex-truck-tile {
     .mm-mobile-truck-mini[data-plan-progress-phase="amber"],
     .mm-mobile-truck-card[data-plan-progress-phase="amber"] {
         --mm-mobile-plan-color: rgba(250, 204, 21, 1);
-        --mm-mobile-plan-glow: rgba(250, 204, 21, .5);
-        --mm-mobile-plan-complete-color: rgba(74, 222, 128, .68);
+        --mm-mobile-plan-glow: rgba(250, 204, 21, .58);
+        --mm-mobile-plan-complete-color: rgba(74, 222, 128, .7);
     }
 
     .mm-mobile-complex-card[data-plan-progress-phase="cyan"],
     .mm-mobile-truck-mini[data-plan-progress-phase="cyan"],
     .mm-mobile-truck-card[data-plan-progress-phase="cyan"] {
         --mm-mobile-plan-color: rgba(56, 189, 248, 1);
-        --mm-mobile-plan-glow: rgba(56, 189, 248, .48);
-        --mm-mobile-plan-complete-color: rgba(250, 204, 21, .6);
+        --mm-mobile-plan-glow: rgba(56, 189, 248, .54);
+        --mm-mobile-plan-complete-color: rgba(250, 204, 21, .62);
     }
 
     .mm-mobile-complex-card[data-plan-progress-phase="orange"],
     .mm-mobile-truck-mini[data-plan-progress-phase="orange"],
     .mm-mobile-truck-card[data-plan-progress-phase="orange"] {
         --mm-mobile-plan-color: rgba(251, 146, 60, 1);
-        --mm-mobile-plan-glow: rgba(251, 146, 60, .5);
-        --mm-mobile-plan-complete-color: rgba(56, 189, 248, .54);
+        --mm-mobile-plan-glow: rgba(251, 146, 60, .6);
+        --mm-mobile-plan-complete-color: rgba(56, 189, 248, .56);
     }
 
     .mm-mobile-complex-plan-ring {

@@ -64,7 +64,7 @@ MINING_MASTER_MANIFEST = {
 
 
 MINING_MASTER_SERVICE_WORKER_JS = r"""
-const CACHE_NAME = "mining-master-mobile-shell-v100";
+const CACHE_NAME = "mining-master-mobile-shell-v101";
 const APP_SHELL_URL = "/mining-master/assignments/";
 const LOGIN_URL = "/";
 const MANIFEST_URL = "/mining-master-manifest.webmanifest";
