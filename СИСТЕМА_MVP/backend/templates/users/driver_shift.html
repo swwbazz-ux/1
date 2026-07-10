@@ -84,7 +84,7 @@ body.driver-mobile-screen .driver-shell {
     --driver-nav-total-h: calc(var(--driver-nav-content-h) + var(--driver-safe-bottom));
     --driver-work-gap: clamp(12px, 1.8dvh, 20px);
     --driver-work-column: min(100%, clamp(320px, 72vw, 720px));
-    --driver-dial-size: clamp(280px, min(68vw, 54dvh), 520px);
+    --driver-dial-size: clamp(320px, min(92vw, 62dvh), 520px);
     width: 100%;
     max-width: none;
     min-width: 320px;
@@ -642,6 +642,18 @@ body.driver-mobile-screen .driver-work-dial-svg {
     transform: rotate(-90deg);
     overflow: visible;
     pointer-events: none;
+    transition: opacity 120ms ease;
+}
+
+body.driver-mobile-screen .driver-work-hold-svg {
+    position: absolute;
+    inset: 0;
+    z-index: 4;
+    width: 100%;
+    height: 100%;
+    transform: rotate(-90deg);
+    overflow: visible;
+    pointer-events: none;
 }
 
 body.driver-mobile-screen .driver-work-track,
@@ -701,24 +713,29 @@ body.driver-mobile-screen .driver-work-dial[data-plan-progress-phase="orange"] {
 body.driver-mobile-screen .driver-work-hold-progress {
     opacity: 0;
     stroke: var(--driver-green);
-    stroke-width: 3.5;
+    stroke-width: 3;
     stroke-dasharray: 100;
-    stroke-dashoffset: calc(100 - var(--driver-hold));
+    stroke-dashoffset: 100;
     transition: opacity 0.12s ease;
-    filter: drop-shadow(0 0 8px rgba(140,255,46,0.65));
+    filter: drop-shadow(0 0 9px rgba(140,255,46,0.82));
 }
 
 body.driver-mobile-screen .driver-work-hold-progress-reverse {
     opacity: 0;
     stroke: var(--driver-cyan);
-    stroke-width: 3;
+    stroke-width: 3.4;
     stroke-dasharray: 100;
-    stroke-dashoffset: calc(100 - var(--driver-hold));
+    stroke-dashoffset: 100;
     transform: scaleY(-1);
     transform-box: view-box;
     transform-origin: 50% 50%;
     transition: opacity 0.12s ease;
-    filter: drop-shadow(0 0 9px rgba(32,217,230,0.72));
+    filter: drop-shadow(0 0 10px rgba(32,217,230,0.88));
+}
+
+@keyframes driver-work-hold-fill {
+    from { stroke-dashoffset: 100; }
+    to { stroke-dashoffset: 0; }
 }
 
 body.driver-mobile-screen .driver-work-dial-button {
@@ -771,7 +788,7 @@ body.driver-mobile-screen .driver-work-dial-core {
     z-index: 2;
     isolation: isolate;
     overflow: hidden;
-    width: 68%;
+    width: 74%;
     aspect-ratio: 1 / 1;
     border-radius: 50%;
     display: grid;
@@ -896,9 +913,10 @@ body.driver-mobile-screen .driver-work-label {
 }
 
 body.driver-mobile-screen .driver-work-label-line {
-    display: block;
+    display: inline-block;
+    width: max-content;
     min-width: 0;
-    max-width: 100%;
+    max-width: none;
     white-space: nowrap;
 }
 
@@ -1083,6 +1101,21 @@ body.driver-mobile-screen .driver-work-dial-button.is-holding .driver-work-hold-
 body.driver-mobile-screen .driver-work-dial-button.is-pending .driver-work-hold-progress,
 body.driver-mobile-screen .driver-work-dial-button.is-pending .driver-work-hold-progress-reverse {
     opacity: 1;
+}
+
+body.driver-mobile-screen .driver-work-dial-button.is-holding .driver-work-hold-progress,
+body.driver-mobile-screen .driver-work-dial-button.is-holding .driver-work-hold-progress-reverse {
+    animation: driver-work-hold-fill 2s linear forwards;
+}
+
+body.driver-mobile-screen .driver-work-dial-button.is-holding .driver-work-dial-svg {
+    opacity: 0.16;
+}
+
+body.driver-mobile-screen .driver-work-dial-button.is-pending .driver-work-hold-progress,
+body.driver-mobile-screen .driver-work-dial-button.is-pending .driver-work-hold-progress-reverse {
+    animation: none;
+    stroke-dashoffset: 0;
 }
 
 body.driver-mobile-screen .driver-work-dial-button.is-holding .driver-work-dial-core {
@@ -1754,9 +1787,6 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
         display: none;
     }
 
-    body.driver-mobile-screen .driver-work-screen.is-active {
-        --driver-dial-size: clamp(260px, 76vw, 380px);
-    }
 }
 
 @media (max-width: 520px) {
@@ -1789,7 +1819,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
 {% endblock %}
 
 {% block body %}
-<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v63' }}">
+<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v64' }}">
     {% if messages %}
         <div class="driver-messages">
             {% for message in messages %}
@@ -1825,13 +1855,15 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
                         <input type="hidden" name="client_action_id" value="" data-driver-client-action>
                         <button class="driver-work-dial-button is-loaded" type="submit" data-driver-hold-button data-driver-pending-label="ОТПРАВКА">
                             <svg class="driver-work-dial-svg" viewBox="0 0 100 100" aria-hidden="true">
-                                <circle class="driver-work-hold-progress-reverse" cx="50" cy="50" r="48" pathLength="100"></circle>
                                 <circle class="driver-work-track" cx="50" cy="50" r="45" pathLength="100"></circle>
                                 <circle class="driver-work-progress" cx="50" cy="50" r="45" pathLength="100"></circle>
                                 <circle class="driver-work-over-progress" cx="50" cy="50" r="41" pathLength="100"></circle>
-                                <circle class="driver-work-hold-progress" cx="50" cy="50" r="36" pathLength="100"></circle>
                             </svg>
                             <span class="driver-work-ticks" aria-hidden="true"></span>
+                            <svg class="driver-work-hold-svg" viewBox="0 0 100 100" aria-hidden="true">
+                                <circle class="driver-work-hold-progress-reverse" cx="50" cy="50" r="48" pathLength="100"></circle>
+                                <circle class="driver-work-hold-progress" cx="50" cy="50" r="37.5" pathLength="100"></circle>
+                            </svg>
                             <span class="driver-work-dial-core">
                                 <span class="driver-work-percent">{% if shift_plan_has_plan %}{{ shift_plan_visual.loop_progress }}{% else %}0{% endif %}%</span>
                                 {% if shift_plan_visual.has_completed_loops %}<b class="driver-work-progress-loop" aria-label="Завершено циклов: {{ shift_plan_visual.completed_loops }}">×{{ shift_plan_visual.completed_loops }}</b>{% endif %}
@@ -1843,13 +1875,15 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
                 {% else %}
                     <div class="driver-work-dial-button is-empty" aria-disabled="true">
                         <svg class="driver-work-dial-svg" viewBox="0 0 100 100" aria-hidden="true">
-                            <circle class="driver-work-hold-progress-reverse" cx="50" cy="50" r="48" pathLength="100"></circle>
                             <circle class="driver-work-track" cx="50" cy="50" r="45" pathLength="100"></circle>
                             <circle class="driver-work-progress" cx="50" cy="50" r="45" pathLength="100"></circle>
                             <circle class="driver-work-over-progress" cx="50" cy="50" r="41" pathLength="100"></circle>
-                            <circle class="driver-work-hold-progress" cx="50" cy="50" r="36" pathLength="100"></circle>
                         </svg>
                         <span class="driver-work-ticks" aria-hidden="true"></span>
+                        <svg class="driver-work-hold-svg" viewBox="0 0 100 100" aria-hidden="true">
+                            <circle class="driver-work-hold-progress-reverse" cx="50" cy="50" r="48" pathLength="100"></circle>
+                            <circle class="driver-work-hold-progress" cx="50" cy="50" r="37.5" pathLength="100"></circle>
+                        </svg>
                         <span class="driver-work-dial-core">
                             <span class="driver-work-percent">{% if shift_plan_has_plan %}{{ shift_plan_visual.loop_progress }}{% else %}0{% endif %}%</span>
                             {% if shift_plan_visual.has_completed_loops %}<b class="driver-work-progress-loop" aria-label="Завершено циклов: {{ shift_plan_visual.completed_loops }}">×{{ shift_plan_visual.completed_loops }}</b>{% endif %}
@@ -2587,7 +2621,9 @@ window.bindDriverMobileShell = function () {
                 scheduleDriverDialLabelFit();
             }
             holdButton.disabled = true;
-            holdForm.submit();
+            window.requestAnimationFrame(function () {
+                holdForm.submit();
+            });
         }
         holdButton.addEventListener("pointerdown", function (event) {
             if (holdButton.disabled) {
@@ -2651,7 +2687,7 @@ window.bindDriverMobileShell = function () {
         if (!("serviceWorker" in navigator)) {
             return;
         }
-        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v63' }}";
+        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v64' }}";
         var updateModal = document.querySelector("[data-driver-pwa-update-modal]");
         var updateBadge = document.querySelector("[data-driver-pwa-update-badge]");
         var updateTarget = document.querySelector("[data-driver-pwa-update-nav-target]");
