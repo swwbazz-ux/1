@@ -1077,6 +1077,8 @@ class AccessLoginTests(TestCase):
         self.assertEqual(len(access.access_code), 6)
         self.assertTrue(access.access_code.isdigit())
         self.assertTrue(AdminActionLog.objects.filter(action='Создан сотрудник и выдан первичный пинкод').exists())
+        self.assertNotContains(create_response, 'Сотрудник создан.')
+        self.assertContains(create_response, 'Первичный пинкод:')
 
         block_response = self.client.post(
             f'/system-admin/accesses/{access.id}/block/',

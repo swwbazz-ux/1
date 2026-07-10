@@ -39,7 +39,9 @@
 
 <main class="admin-console-page admin-page employee-detail-page">
     {% for message in messages %}
-        <div class="message success">{{ message }}</div>
+        {% if "Сотрудник создан" not in message.message %}
+            <div class="message success">{{ message }}</div>
+        {% endif %}
     {% endfor %}
 
     <section class="employee-detail-grid">
