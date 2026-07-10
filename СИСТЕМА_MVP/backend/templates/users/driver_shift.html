@@ -449,26 +449,39 @@ body.driver-mobile-screen .driver-work-context-machine small {
 
 body.driver-mobile-screen .driver-work-context-geology-values {
     min-width: 0;
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 5px 0;
+    display: grid;
+    gap: 5px;
     color: var(--driver-ink);
     text-transform: uppercase;
-    font-size: clamp(16px, 4vw, 22px);
+    font-size: clamp(14px, 3.5vw, 20px);
     line-height: 1.08;
     font-weight: 900;
     text-align: left;
 }
 
-body.driver-mobile-screen .driver-work-context-geology-values span {
+body.driver-mobile-screen .driver-work-context-location {
+    min-width: 0;
+    display: flex;
+    align-items: center;
     white-space: nowrap;
 }
 
-body.driver-mobile-screen .driver-work-context-geology-values span + span::before {
+body.driver-mobile-screen .driver-work-context-location span {
+    white-space: nowrap;
+}
+
+body.driver-mobile-screen .driver-work-context-location span + span::before {
     content: "·";
     margin: 0 0.42em;
     color: rgba(140,255,46,0.62);
+}
+
+body.driver-mobile-screen .driver-work-context-rock {
+    min-width: 0;
+    color: #f4ffe9;
+    font-size: clamp(11px, 2.9vw, 18px);
+    line-height: 1.08;
+    white-space: nowrap;
 }
 
 body.driver-mobile-screen .driver-work-cards {
@@ -2174,7 +2187,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
 {% endblock %}
 
 {% block body %}
-<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v72' }}">
+<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v73' }}">
     {% if messages %}
         <div class="driver-messages">
             {% for message in messages %}
@@ -2203,9 +2216,12 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
                     <small>Комплекс {{ driver_complex_label }}</small>
                 </div>
                 <div class="driver-work-context-geology">
-                    <span>Горизонт · блок · порода</span>
+                    <span>Место погрузки · порода</span>
                     <div class="driver-work-context-geology-values">
-                        {% for part in driver_geology_parts %}<span>{{ part }}</span>{% endfor %}
+                        <div class="driver-work-context-location">
+                            {% for part in driver_geology_parts|slice:":2" %}<span>{{ part }}</span>{% endfor %}
+                        </div>
+                        <div class="driver-work-context-rock" title="{{ driver_geology_parts.2 }}">{{ driver_geology_parts.2 }}</div>
                     </div>
                 </div>
             </div>
@@ -3228,7 +3244,7 @@ window.bindDriverMobileShell = function () {
         if (!("serviceWorker" in navigator)) {
             return;
         }
-        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v72' }}";
+        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v73' }}";
         var updateModal = document.querySelector("[data-driver-pwa-update-modal]");
         var updateBadge = document.querySelector("[data-driver-pwa-update-badge]");
         var updateTarget = document.querySelector("[data-driver-pwa-update-nav-target]");
