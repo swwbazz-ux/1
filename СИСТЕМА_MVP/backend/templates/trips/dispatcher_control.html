@@ -47,13 +47,14 @@
             </div>
             <div class="dispatcher-excavators" aria-label="Экскаваторы">
                 {% for tile in dispatcher_dashboard.excavator_garage_tiles %}
-                    <article class="dispatcher-equipment-tile dispatcher-excavator-garage-tile status-{{ tile.status }}{% if tile.is_placeholder %} is-placeholder{% endif %}" style="--tile-progress: {{ tile.percent|default:0 }}%;" {% if not tile.is_placeholder %}role="button" tabindex="0" draggable="true" data-dispatcher-drag="excavator" data-equipment-card-id="{{ tile.card_id }}" data-equipment-id="{{ tile.card_id }}" data-equipment-name="{{ tile.name }}" data-equipment-state="{{ tile.equipment_state_code }}" data-excavator-slot="{{ tile.display_name }}" data-garage-item="excavator" data-plan-status="{{ tile.plan_status|default:'plan_not_assigned' }}" data-plan-percent="{{ tile.percent|default:0 }}" data-plan-mode="{{ tile.plan_calculation_mode|default:'' }}" data-plan-value="{{ tile.plan_value|default:'' }}" data-plan-fact="{{ tile.plan_fact_value|default:'' }}" data-plan-unit="{{ tile.plan_unit|default:'' }}" data-plan-group="{{ tile.plan_group_name|default:'' }}"{% endif %}>
+                    <article class="dispatcher-equipment-tile dispatcher-excavator-garage-tile status-{{ tile.status }}{% if tile.is_placeholder %} is-placeholder{% endif %}{% if tile.plan_visual.is_overrun %} is-plan-overrun{% endif %}" style="--tile-progress: {% if tile.plan_has_plan %}{{ tile.plan_visual.loop_progress }}{% else %}0{% endif %}%; --tile-total-progress: {{ tile.percent|default:0 }}%;" {% if not tile.is_placeholder %}role="button" tabindex="0" draggable="true" data-dispatcher-drag="excavator" data-equipment-card-id="{{ tile.card_id }}" data-equipment-id="{{ tile.card_id }}" data-equipment-name="{{ tile.name }}" data-equipment-state="{{ tile.equipment_state_code }}" data-excavator-slot="{{ tile.display_name }}" data-garage-item="excavator" data-plan-status="{{ tile.plan_status|default:'plan_not_assigned' }}" data-plan-percent="{{ tile.percent|default:0 }}" data-plan-loop-percent="{% if tile.plan_has_plan %}{{ tile.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ tile.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if tile.plan_has_plan %}{{ tile.plan_visual.phase }}{% endif %}" data-plan-mode="{{ tile.plan_calculation_mode|default:'' }}" data-plan-value="{{ tile.plan_value|default:'' }}" data-plan-fact="{{ tile.plan_fact_value|default:'' }}" data-plan-unit="{{ tile.plan_unit|default:'' }}" data-plan-group="{{ tile.plan_group_name|default:'' }}"{% endif %}>
                         {% if tile.display_name %}<strong>{{ tile.display_name }}</strong>{% endif %}
                         <img src="{% static tile.icon %}" alt="">
                         {% if not tile.is_placeholder %}<span>{{ tile.label }}</span>{% endif %}
                         {% if not tile.is_placeholder %}
                             <em class="dispatcher-tile-plan-percent">{{ tile.plan_percent_label|default:"Не назначен" }}</em>
                             <small class="dispatcher-tile-plan-label{% if not tile.plan_has_plan %} is-plan-missing{% endif %}">{% if tile.plan_has_plan %}{{ tile.plan_fact_label }}{% else %}{{ tile.plan_status_label|default:"План не назначен" }}{% endif %}</small>
+                            {% if tile.plan_visual.has_completed_loops %}<b class="dispatcher-plan-loop-badge" aria-label="Завершено циклов: {{ tile.plan_visual.completed_loops }}">×{{ tile.plan_visual.completed_loops }}</b>{% endif %}
                         {% endif %}
                     </article>
                 {% endfor %}
@@ -71,7 +72,7 @@
             </div>
             <div class="dispatcher-zone-grid">
             {% for complex in dispatcher_dashboard.complex_zones %}
-                <article class="dispatcher-complex-card {% if complex.is_empty %}status-empty{% else %}status-{{ complex.status_key }}{% endif %}" style="--complex-progress: {{ complex.percent }}%;" data-dispatcher-drop="complex" data-zone-id="{{ complex.id }}"{% if not complex.is_empty %} role="button" tabindex="0" draggable="true" data-dispatcher-drag="complex" data-equipment-card-id="{{ complex.card_id }}" data-source-equipment-card-id="{{ complex.equipment_card_id }}" data-equipment-id="{{ complex.equipment_card_id }}" data-equipment-name="{{ complex.excavator_name }}" data-equipment-state="{{ complex.equipment_state_code }}" data-excavator-slot="{{ complex.excavator_slot }}" data-plan-status="{{ complex.plan_status|default:'plan_not_assigned' }}" data-plan-percent="{{ complex.percent|default:0 }}" data-plan-mode="{{ complex.plan_calculation_mode|default:'' }}" data-plan-value="{{ complex.plan_value|default:'' }}" data-plan-fact="{{ complex.plan_fact_value|default:'' }}" data-plan-unit="{{ complex.plan_unit|default:'' }}" data-plan-group="{{ complex.plan_group_name|default:'' }}"{% endif %}>
+                <article class="dispatcher-complex-card {% if complex.is_empty %}status-empty{% else %}status-{{ complex.status_key }}{% endif %}{% if complex.plan_visual.is_overrun %} is-plan-overrun{% endif %}" style="--complex-progress: {% if complex.plan_has_plan %}{{ complex.plan_visual.loop_progress }}{% else %}0{% endif %}%; --complex-total-progress: {{ complex.percent|default:0 }}%;" data-dispatcher-drop="complex" data-zone-id="{{ complex.id }}"{% if not complex.is_empty %} role="button" tabindex="0" draggable="true" data-dispatcher-drag="complex" data-equipment-card-id="{{ complex.card_id }}" data-source-equipment-card-id="{{ complex.equipment_card_id }}" data-equipment-id="{{ complex.equipment_card_id }}" data-equipment-name="{{ complex.excavator_name }}" data-equipment-state="{{ complex.equipment_state_code }}" data-excavator-slot="{{ complex.excavator_slot }}" data-plan-status="{{ complex.plan_status|default:'plan_not_assigned' }}" data-plan-percent="{{ complex.percent|default:0 }}" data-plan-loop-percent="{% if complex.plan_has_plan %}{{ complex.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ complex.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if complex.plan_has_plan %}{{ complex.plan_visual.phase }}{% endif %}" data-plan-mode="{{ complex.plan_calculation_mode|default:'' }}" data-plan-value="{{ complex.plan_value|default:'' }}" data-plan-fact="{{ complex.plan_fact_value|default:'' }}" data-plan-unit="{{ complex.plan_unit|default:'' }}" data-plan-group="{{ complex.plan_group_name|default:'' }}"{% endif %}>
                     {% if complex.is_empty %}
                         <div class="complex-empty" aria-hidden="true"></div>
                     {% else %}
@@ -95,15 +96,17 @@
                                     <strong>{{ complex.plan_percent_label|default:"Не назначен" }}</strong>
                                     <span>{{ complex.plan_fact_label|default:"План не назначен" }}</span>
                                     {% if complex.plan_group_name %}<em>{{ complex.plan_group_name }}</em>{% endif %}
+                                    {% if complex.plan_visual.has_completed_loops %}<b class="dispatcher-plan-loop-badge" aria-label="Завершено циклов: {{ complex.plan_visual.completed_loops }}">×{{ complex.plan_visual.completed_loops }}</b>{% endif %}
                                 </div>
                             </div>
                         </div>
                         <div class="complex-assigned-trucks {{ complex.truck_scale_class }}" style="--complex-truck-cols: {{ complex.truck_column_count|default:1 }};" aria-label="Активные самосвалы комплекса">
                             {% for truck in complex.active_truck_tiles %}
-                                <article class="dispatcher-truck-tile complex-truck-tile status-{{ truck.status }}" style="--tile-progress: {{ truck.percent|default:0 }}%;" role="button" tabindex="0" draggable="true" data-dispatcher-drag="truck" data-equipment-card-id="{{ truck.card_id }}" data-equipment-id="{{ truck.card_id }}" data-equipment-name="{{ truck.name }}" data-equipment-state="{{ truck.equipment_state_code }}" data-complex-truck="true" data-assigned-zone="{{ complex.id }}" data-plan-status="{{ truck.plan_status|default:'plan_not_assigned' }}" data-plan-percent="{{ truck.percent|default:0 }}" data-plan-mode="{{ truck.plan_calculation_mode|default:'' }}" data-plan-value="{{ truck.plan_value|default:'' }}" data-plan-fact="{{ truck.plan_fact_value|default:'' }}" data-plan-unit="{{ truck.plan_unit|default:'' }}" data-plan-group="{{ truck.plan_group_name|default:'' }}">
+                                <article class="dispatcher-truck-tile complex-truck-tile status-{{ truck.status }}{% if truck.plan_visual.is_overrun %} is-plan-overrun{% endif %}" style="--tile-progress: {% if truck.plan_has_plan %}{{ truck.plan_visual.loop_progress }}{% else %}0{% endif %}%; --tile-total-progress: {{ truck.percent|default:0 }}%;" role="button" tabindex="0" draggable="true" data-dispatcher-drag="truck" data-equipment-card-id="{{ truck.card_id }}" data-equipment-id="{{ truck.card_id }}" data-equipment-name="{{ truck.name }}" data-equipment-state="{{ truck.equipment_state_code }}" data-complex-truck="true" data-assigned-zone="{{ complex.id }}" data-plan-status="{{ truck.plan_status|default:'plan_not_assigned' }}" data-plan-percent="{{ truck.percent|default:0 }}" data-plan-loop-percent="{% if truck.plan_has_plan %}{{ truck.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ truck.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if truck.plan_has_plan %}{{ truck.plan_visual.phase }}{% endif %}" data-plan-mode="{{ truck.plan_calculation_mode|default:'' }}" data-plan-value="{{ truck.plan_value|default:'' }}" data-plan-fact="{{ truck.plan_fact_value|default:'' }}" data-plan-unit="{{ truck.plan_unit|default:'' }}" data-plan-group="{{ truck.plan_group_name|default:'' }}">
                                     <strong>{{ truck.name }}</strong>
                                     <img src="{% static truck.icon %}" alt="">
                                     <span>{{ truck.label }}</span>
+                                    {% if truck.plan_visual.has_completed_loops %}<b class="dispatcher-plan-loop-badge" aria-label="Завершено циклов: {{ truck.plan_visual.completed_loops }}">×{{ truck.plan_visual.completed_loops }}</b>{% endif %}
                                 </article>
                             {% empty %}
                                 <em class="complex-truck-empty">самосвалы не назначены</em>
@@ -123,10 +126,11 @@
                 </div>
                 <div class="dispatcher-trucks" aria-label="Самосвалы">
                 {% for tile in dispatcher_dashboard.truck_garage_tiles %}
-                    <article class="dispatcher-truck-tile status-{{ tile.status }}" style="--tile-progress: {{ tile.percent|default:0 }}%;" role="button" tabindex="0" draggable="true" data-dispatcher-drag="truck" data-equipment-card-id="{{ tile.card_id }}" data-equipment-id="{{ tile.card_id }}" data-equipment-name="{{ tile.name }}" data-equipment-state="{{ tile.equipment_state_code }}" data-garage-item="truck" data-plan-status="{{ tile.plan_status|default:'plan_not_assigned' }}" data-plan-percent="{{ tile.percent|default:0 }}" data-plan-mode="{{ tile.plan_calculation_mode|default:'' }}" data-plan-value="{{ tile.plan_value|default:'' }}" data-plan-fact="{{ tile.plan_fact_value|default:'' }}" data-plan-unit="{{ tile.plan_unit|default:'' }}" data-plan-group="{{ tile.plan_group_name|default:'' }}">
+                    <article class="dispatcher-truck-tile status-{{ tile.status }}{% if tile.plan_visual.is_overrun %} is-plan-overrun{% endif %}" style="--tile-progress: {% if tile.plan_has_plan %}{{ tile.plan_visual.loop_progress }}{% else %}0{% endif %}%; --tile-total-progress: {{ tile.percent|default:0 }}%;" role="button" tabindex="0" draggable="true" data-dispatcher-drag="truck" data-equipment-card-id="{{ tile.card_id }}" data-equipment-id="{{ tile.card_id }}" data-equipment-name="{{ tile.name }}" data-equipment-state="{{ tile.equipment_state_code }}" data-garage-item="truck" data-plan-status="{{ tile.plan_status|default:'plan_not_assigned' }}" data-plan-percent="{{ tile.percent|default:0 }}" data-plan-loop-percent="{% if tile.plan_has_plan %}{{ tile.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ tile.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if tile.plan_has_plan %}{{ tile.plan_visual.phase }}{% endif %}" data-plan-mode="{{ tile.plan_calculation_mode|default:'' }}" data-plan-value="{{ tile.plan_value|default:'' }}" data-plan-fact="{{ tile.plan_fact_value|default:'' }}" data-plan-unit="{{ tile.plan_unit|default:'' }}" data-plan-group="{{ tile.plan_group_name|default:'' }}">
                         <strong>{{ tile.name }}</strong>
                         <img src="{% static tile.icon %}" alt="">
                         <span>{{ tile.label }}</span>
+                        {% if tile.plan_visual.has_completed_loops %}<b class="dispatcher-plan-loop-badge" aria-label="Завершено циклов: {{ tile.plan_visual.completed_loops }}">×{{ tile.plan_visual.completed_loops }}</b>{% endif %}
                     </article>
                 {% endfor %}
                 </div>
@@ -146,7 +150,7 @@
                 <div class="mm-mobile-plan-ring" style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" role="img" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%">
                     {{ dispatcher_dashboard.completion_percent|default:0 }}%
                 </div>
-                <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v97</span>
+                <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v98</span>
             </div>
         </header>
 
@@ -221,7 +225,7 @@
                     <div class="mm-mobile-plan-ring" style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" role="img" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%">
                         {{ dispatcher_dashboard.completion_percent|default:0 }}%
                     </div>
-                    <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v97</span>
+                    <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v98</span>
                 </div>
             </header>
 
@@ -275,7 +279,7 @@
                     <div class="mm-mobile-plan-ring" style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" role="img" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%">
                         {{ dispatcher_dashboard.completion_percent|default:0 }}%
                     </div>
-                    <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v97</span>
+                    <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v98</span>
                 </div>
             </header>
 
@@ -326,7 +330,7 @@
                     <div class="mm-mobile-plan-ring" style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" role="img" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%">
                         {{ dispatcher_dashboard.completion_percent|default:0 }}%
                     </div>
-                    <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v97</span>
+                    <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v98</span>
                 </div>
             </header>
 
@@ -389,7 +393,7 @@
 
             <div class="mm-mobile-version-strip" aria-label="Версия приложения">
                 <span>Версия приложения</span>
-                <strong data-mm-pwa-current-shell-version>v97</strong>
+                <strong data-mm-pwa-current-shell-version>v98</strong>
                 <button type="button" data-mm-pwa-check-update>Проверить обновления</button>
             </div>
 
@@ -426,7 +430,7 @@
                             <div class="mm-mobile-plan-ring" style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" role="img" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%">
                                 {{ dispatcher_dashboard.completion_percent|default:0 }}%
                             </div>
-                            <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v97</span>
+                            <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v98</span>
                         </div>
                     </header>
 
@@ -863,7 +867,7 @@ document.addEventListener("DOMContentLoaded", function () {
     var dispatcherRealtimeConnected = true;
     var dispatcherRealtimeLastSuccessAt = 0;
     var dispatcherRealtimeLastReason = "";
-    var miningMasterShellVersion = "mining-master-mobile-shell-v97";
+    var miningMasterShellVersion = "mining-master-mobile-shell-v98";
     function readDispatcherSyncQueue() {
         try {
             return JSON.parse(window.localStorage.getItem(dispatcherSyncQueueKey) || "[]");
@@ -2129,15 +2133,24 @@ document.addEventListener("DOMContentLoaded", function () {
     function buildDetailGarageTile(data) {
         var status = normalizeTileStatus(data.status_key);
         var isTruck = String(data.type || "").toLowerCase().indexOf("самосвал") !== -1;
+        var plan = data.plan || {};
+        var loopProgress = plan.progress_loop_percent;
+        var completedLoops = Number(plan.progress_completed_loops || 0);
         var tile = document.createElement("article");
         tile.className = isTruck
             ? "dispatcher-truck-tile status-" + status
             : "dispatcher-equipment-tile dispatcher-excavator-garage-tile status-" + status;
-        tile.style.setProperty("--tile-progress", String(data.percent || 0) + "%");
+        if (completedLoops > 0) tile.classList.add("is-plan-overrun");
+        tile.style.setProperty("--tile-progress", String(loopProgress === null || loopProgress === undefined || loopProgress === "" ? data.percent || 0 : loopProgress) + "%");
+        tile.style.setProperty("--tile-total-progress", String(data.percent || 0) + "%");
+        if (loopProgress !== null && loopProgress !== undefined && loopProgress !== "") tile.dataset.planLoopPercent = String(loopProgress);
+        tile.dataset.planCompletedLoops = String(completedLoops);
+        if (plan.progress_phase) tile.dataset.planProgressPhase = plan.progress_phase;
         tile.innerHTML =
             "<strong>" + escapeHtml(data.number || "") + "</strong>" +
             '<img src="' + escapeHtml(staticPrefix + (data.icon || "")) + '" alt="">' +
-            "<span>" + escapeHtml(data.status_label || "") + "</span>";
+            "<span>" + escapeHtml(data.status_label || "") + "</span>" +
+            (completedLoops > 0 ? '<b class="dispatcher-plan-loop-badge" aria-label="Завершено циклов: ' + completedLoops + '">×' + completedLoops + '</b>' : "");
         return tile;
     }
 

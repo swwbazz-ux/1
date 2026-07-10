@@ -22,9 +22,9 @@ from references.models import (
     RockType,
 )
 from shifts.models import EmployeeShift, EquipmentPlanGroup, PlanAssignmentStatus, PlanCalculationMode
-from shifts.services import assign_shift_plan_snapshot
+from shifts.services import assign_shift_plan_snapshot, progress_cycle_visual_context
 from trips.models import Trip, TripClientAction, TripStatus
-from trips.views import build_dispatcher_dashboard_context, progress_cycle_visual_context
+from trips.views import build_dispatcher_dashboard_context
 from users.models import DriverPrimaryRegistration, Employee, EmployeeAccess, Role
 
 
@@ -183,7 +183,7 @@ class DispatcherSharedShiftStartTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/dispatcher/')
-        self.assertIn('dispatcher-desktop-shell-v26', script)
+        self.assertIn('dispatcher-desktop-shell-v27', script)
         self.assertIn(reverse('dispatcher_control'), script)
         self.assertIn(reverse('dispatcher_manifest'), script)
         self.assertIn('/static/js/realtime-client.js', script)
@@ -913,16 +913,100 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(dispatcher_response, f'data-equipment-id="{self.truck.id}"')
         self.assertContains(dispatcher_response, f'data-equipment-name="{self.truck.garage_number}"')
         self.assertContains(dispatcher_response, 'data-plan-percent="60"')
+        self.assertContains(dispatcher_response, 'data-plan-loop-percent="60"')
+        self.assertContains(dispatcher_response, 'data-plan-completed-loops="0"')
         self.assertContains(dispatcher_response, '--tile-progress: 60%;')
         self.assertEqual(driver_response.status_code, 200)
         self.assertContains(driver_response, '--driver-progress: 60;')
+        self.assertContains(driver_response, 'data-driver-loop-progress="60"')
+        self.assertContains(driver_response, 'data-driver-completed-loops="0"')
         self.assertContains(driver_response, '<span class="driver-work-percent">60%</span>', html=False)
         self.assertEqual(excavator_response.status_code, 200)
         first_card = excavator_response.context['truck_cards'][0]
         self.assertEqual(first_card['number'], '21')
         self.assertEqual(first_card['plan_percent'], 60)
         self.assertContains(excavator_response, 'data-plan-percent="60"')
+        self.assertContains(excavator_response, 'data-plan-loop-percent="60"')
+        self.assertContains(excavator_response, 'data-plan-completed-loops="0"')
         self.assertContains(excavator_response, '--eo-truck-progress: 60%;')
+
+    def test_truck_plan_overrun_cycle_matches_dispatcher_driver_and_excavator(self):
+        loading_shift = EmployeeShift.objects.get(employee=self.operator, equipment=self.excavator)
+        group = EquipmentPlanGroup.objects.create(
+            name='Самосвалы БелАЗ единый цикл перевыполнения',
+            code='belaz-unified-overrun-cycle-test',
+            calculation_mode=PlanCalculationMode.TRIPS,
+            plan_value='8.00',
+            is_active=True,
+        )
+        group.equipment.add(self.truck)
+        assign_shift_plan_snapshot(self.truck_shift)
+        self.truck_shift.refresh_from_db()
+        for index in range(10):
+            Trip.objects.create(
+                excavator=self.excavator,
+                truck=self.truck,
+                excavator_operator=self.operator,
+                driver=self.driver,
+                loading_shift=loading_shift,
+                unloading_shift=self.truck_shift,
+                rock_type=self.rock,
+                dump_point=self.dump_point,
+                actual_dump_point=self.dump_point,
+                volume_m3='49.40',
+                status=TripStatus.COMPLETED,
+                completed_at=loading_shift.opened_at + timedelta(minutes=index),
+            )
+
+        dispatcher_role = Role.objects.create(code='dispatcher', name='Диспетчер')
+        dispatcher = Employee.objects.create(full_name='Диспетчер')
+        dispatcher_access = EmployeeAccess.objects.create(
+            employee=dispatcher,
+            role=dispatcher_role,
+            access_code='500001',
+            is_active=True,
+            status=EmployeeAccess.Status.ACTIVATED,
+        )
+        dispatcher_client = Client()
+        dispatcher_session = dispatcher_client.session
+        dispatcher_session['employee_access_id'] = dispatcher_access.id
+        dispatcher_session.save()
+        dispatcher_response = dispatcher_client.get(reverse('dispatcher_control'))
+
+        driver_client = Client()
+        driver_session = driver_client.session
+        driver_session['employee_access_id'] = self.driver_access.id
+        driver_session.save()
+        driver_response = driver_client.get(reverse('driver_shift'))
+        excavator_response = self.client.get(reverse('excavator_work'))
+
+        self.assertEqual(dispatcher_response.status_code, 200)
+        self.assertContains(dispatcher_response, 'data-plan-percent="125"')
+        self.assertContains(dispatcher_response, 'data-plan-loop-percent="25"')
+        self.assertContains(dispatcher_response, 'data-plan-completed-loops="1"')
+        self.assertContains(dispatcher_response, 'data-plan-progress-phase="amber"')
+        self.assertContains(dispatcher_response, '--tile-progress: 25%;')
+        self.assertContains(dispatcher_response, '×1', html=False)
+        self.assertEqual(driver_response.status_code, 200)
+        self.assertContains(driver_response, '--driver-progress: 125;')
+        self.assertContains(driver_response, '--driver-progress-capped: 100;')
+        self.assertContains(driver_response, '--driver-over-progress: 25;')
+        self.assertContains(driver_response, 'data-driver-loop-progress="25"')
+        self.assertContains(driver_response, 'data-driver-completed-loops="1"')
+        self.assertContains(driver_response, 'data-plan-progress-phase="amber"')
+        self.assertContains(driver_response, '<span class="driver-work-percent">25%</span>', html=False)
+        self.assertContains(driver_response, '×1', html=False)
+        self.assertEqual(excavator_response.status_code, 200)
+        first_card = excavator_response.context['truck_cards'][0]
+        self.assertEqual(first_card['plan_percent'], 125)
+        self.assertEqual(first_card['plan_visual']['loop_progress'], 25)
+        self.assertEqual(first_card['plan_visual']['completed_loops'], 1)
+        self.assertContains(excavator_response, 'data-plan-percent="125"')
+        self.assertContains(excavator_response, 'data-plan-loop-percent="25"')
+        self.assertContains(excavator_response, 'data-plan-completed-loops="1"')
+        self.assertContains(excavator_response, 'data-plan-progress-phase="amber"')
+        self.assertContains(excavator_response, '--eo-truck-progress: 25%;')
+        self.assertContains(excavator_response, '×1', html=False)
 
     def test_excavator_work_renders_face_settings_from_server_references(self):
         second_dump = DumpPoint.objects.create(name='Отвал')

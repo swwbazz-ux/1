@@ -25,7 +25,9 @@ from shifts.services import (
     calculate_open_shift_progress,
     calculate_truck_shift_progress,
     equipment_is_truck,
+    format_progress_percent,
     plan_status_label,
+    progress_cycle_visual_context,
     plan_unit_label,
 )
 from users.access_auth import find_employee_access_by_credentials
@@ -146,16 +148,6 @@ def format_duration_label(seconds):
     return f'{hours:02d}:{minutes:02d}:{seconds % 60:02d}'
 
 
-def format_progress_percent(value):
-    if value is None:
-        return None
-    try:
-        value = Decimal(value)
-    except Exception:
-        return None
-    return int(max(Decimal('0'), value).quantize(Decimal('1')))
-
-
 def plan_progress_status_key(percent, plan_status=''):
     if plan_status in {PlanAssignmentStatus.NO_PLAN_GROUP, PlanAssignmentStatus.NO_ACTIVE_PLAN, DISPATCHER_PLAN_NOT_ASSIGNED}:
         return plan_status
@@ -170,37 +162,6 @@ def plan_progress_status_key(percent, plan_status=''):
     if value < 80:
         return 'warning'
     return 'good'
-
-
-def progress_cycle_visual_context(percent):
-    value = format_progress_percent(percent)
-    if value is None:
-        value = 0
-
-    completed_loops, loop_progress = divmod(value, 100)
-    # Keep an exact completed boundary visible as a finished active cycle.
-    # This prevents the indicator from jumping from 99% to an empty ring.
-    if value and loop_progress == 0:
-        loop_progress = 100
-        completed_loops = max(0, completed_loops - 1)
-
-    if completed_loops == 0:
-        phase = 'green'
-    elif completed_loops == 1:
-        phase = 'amber'
-    elif completed_loops == 2:
-        phase = 'cyan'
-    else:
-        phase = 'orange'
-    return {
-        'percent': value,
-        'loop_progress': loop_progress,
-        'completed_loops': completed_loops,
-        'phase': phase,
-        'has_completed_loops': completed_loops > 0,
-        'is_overrun': completed_loops > 0,
-        'text_class': '',
-    }
 
 
 def dispatcher_empty_snapshot_progress(shift=None, equipment=None):
@@ -283,6 +244,7 @@ def plan_progress_display_context(progress):
     has_plan = percent_value is not None
     fact_plan_label = f'{fact_display} / {plan_display} {unit}'.strip() if has_plan else status_label
     percent_label = f'{percent_value}%' if has_plan else short_label
+    visual = progress_cycle_visual_context(percent_value if has_plan else 0)
     return {
         'percent': percent_value,
         'css_percent': percent_value if percent_value is not None else 0,
@@ -300,11 +262,17 @@ def plan_progress_display_context(progress):
         'unit': unit,
         'calculation_mode': calculation_mode,
         'group_name': progress.get('plan_group_name') if progress else '',
+        'visual': visual,
+        'loop_progress': visual['loop_progress'],
+        'completed_loops': visual['completed_loops'],
+        'progress_phase': visual['phase'],
+        'has_completed_loops': visual['has_completed_loops'],
     }
 
 
 def dispatcher_plan_api_payload(plan):
     plan = plan or plan_progress_display_context(None)
+    visual = plan.get('visual') or progress_cycle_visual_context(plan['percent'] if plan['has_plan'] else 0)
     return {
         'plan_status': plan['status'],
         'plan_status_label': plan['status_label'],
@@ -313,6 +281,9 @@ def dispatcher_plan_api_payload(plan):
         'plan_value': plan['value_display'],
         'completed_value': plan['fact_display'],
         'progress_percent': plan['percent'] if plan['has_plan'] else None,
+        'progress_loop_percent': visual['loop_progress'] if plan['has_plan'] else None,
+        'progress_completed_loops': visual['completed_loops'],
+        'progress_phase': visual['phase'] if plan['has_plan'] else '',
         'unit': plan['unit'],
         'fact_plan_label': plan['fact_plan_label'],
     }
@@ -399,7 +370,7 @@ DISPATCHER_MANIFEST = {
 }
 
 DISPATCHER_SERVICE_WORKER_JS = r"""
-const CACHE_NAME = "dispatcher-desktop-shell-v26";
+const CACHE_NAME = "dispatcher-desktop-shell-v27";
 const APP_SHELL_URL = "/dispatcher/control/";
 const MANIFEST_URL = "/dispatcher.webmanifest";
 const CORE_ASSETS = [
@@ -1497,6 +1468,7 @@ def build_dispatcher_dashboard_context(*, dispatcher_shift, active_trips, pendin
                 'rock': rock_by_truck.get(truck_id, ''),
                 'value': f'{format_dispatcher_number(truck_volume)} т',
                 'percent': truck_plan['css_percent'],
+                'plan_visual': truck_plan['visual'],
                 'accent': truck_status,
                 'label': dispatcher_truck_garage_number(truck, 0) or equipment_short_name(truck),
                 'meta': '',
@@ -1522,6 +1494,7 @@ def build_dispatcher_dashboard_context(*, dispatcher_shift, active_trips, pendin
             'status_label': status_label,
             'equipment_state_code': equipment_state_code,
             'percent': percent,
+            'plan_visual': excavator_plan['visual'],
             'plan': excavator_plan,
             'plan_status': excavator_plan['status'],
             'plan_status_label': excavator_plan['status_label'],
@@ -1564,6 +1537,7 @@ def build_dispatcher_dashboard_context(*, dispatcher_shift, active_trips, pendin
             'label': label,
             'equipment_state_code': equipment_state_code,
             'percent': percent,
+            'plan_visual': excavator_plan['visual'],
             'plan': excavator_plan,
             'plan_status': excavator_plan['status'],
             'plan_status_label': excavator_plan['status_label'],
@@ -1645,6 +1619,7 @@ def build_dispatcher_dashboard_context(*, dispatcher_shift, active_trips, pendin
             truck = truck_by_id.get(row.get('truck_id'))
             row_state_code = row.get('equipment_state_code') or ''
             row_state = equipment_state_ui(equipment_state_map, row_state_code) if row_state_code else None
+            row_plan = row.get('plan') or plan_progress_display_context(None)
             truck_tiles.append({
                 'name': row.get('truck'),
                 'status': status,
@@ -1653,7 +1628,8 @@ def build_dispatcher_dashboard_context(*, dispatcher_shift, active_trips, pendin
                 'icon': equipment_icon_key(truck, status),
                 'percent': row.get('percent') or 0,
                 'card_id': str(row.get('truck_id') or ''),
-                'plan': row.get('plan') or plan_progress_display_context(None),
+                'plan': row_plan,
+                'plan_visual': row_plan['visual'],
                 'plan_status': row.get('plan_status') or DISPATCHER_PLAN_NOT_ASSIGNED,
                 'plan_status_label': row.get('plan_status_label') or plan_status_label(DISPATCHER_PLAN_NOT_ASSIGNED),
                 'plan_group_name': row.get('plan_group_name') or '',
@@ -1845,6 +1821,7 @@ def build_dispatcher_dashboard_context(*, dispatcher_shift, active_trips, pendin
             'equipment_state_code': equipment_state_code,
             'icon': equipment_icon_key(truck, status),
             'percent': truck_plan['css_percent'],
+            'plan_visual': truck_plan['visual'],
             'plan': truck_plan,
             'plan_status': truck_plan['status'],
             'plan_status_label': truck_plan['status_label'],
@@ -1878,6 +1855,7 @@ def build_dispatcher_dashboard_context(*, dispatcher_shift, active_trips, pendin
             'equipment_state_code': equipment_state_code,
             'icon': equipment_icon_key(truck, status),
             'percent': truck_plan['css_percent'],
+            'plan_visual': truck_plan['visual'],
             'plan': truck_plan,
             'plan_status': truck_plan['status'],
             'plan_status_label': truck_plan['status_label'],

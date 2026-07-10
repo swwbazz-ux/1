@@ -1,12 +1,15 @@
-from django.test import TestCase
 import json
+from datetime import timedelta
+
+from django.test import TestCase
 
 from django.urls import reverse
 from django.utils import timezone
 
 from downtimes.models import DowntimeEvent, DowntimeReason
 from references.models import DumpPoint, Equipment, EquipmentModel, EquipmentState, EquipmentType, RockType
-from shifts.models import EmployeeShift
+from shifts.models import EmployeeShift, EquipmentPlanGroup, PlanCalculationMode
+from shifts.services import assign_shift_plan_snapshot
 from trips.models import Trip, TripStatus
 from users.models import Employee, EmployeeAccess, Role
 
@@ -112,6 +115,63 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertNotContains(response, 'data-mm-tab')
         self.assertNotContains(response, 'data-mm-panel')
         self.assertEqual(len(response.context['dispatcher_dashboard']['complex_zones']), 9)
+
+    def test_mining_master_truck_plan_overrun_uses_progress_cycle_contract(self):
+        group = EquipmentPlanGroup.objects.create(
+            name='Самосвалы Горный мастер цикл',
+            code='mm-truck-cycle-test',
+            calculation_mode=PlanCalculationMode.TRIPS,
+            plan_value='4.00',
+            is_active=True,
+        )
+        group.equipment.add(self.assigned_truck)
+        driver = Employee.objects.create(full_name='Водитель цикла')
+        truck_shift = EmployeeShift.objects.create(
+            employee=driver,
+            shift_type='day',
+            equipment=self.assigned_truck,
+            opened_at=self.shift.opened_at,
+            opened_by=driver,
+        )
+        assign_shift_plan_snapshot(truck_shift)
+        rock_type = RockType.objects.create(name='Руда цикла')
+        dump_point = DumpPoint.objects.create(name='Отвал цикла')
+        for index in range(5):
+            Trip.objects.create(
+                excavator=self.excavator,
+                truck=self.assigned_truck,
+                unloading_shift=truck_shift,
+                rock_type=rock_type,
+                dump_point=dump_point,
+                volume_m3='10.00',
+                status=TripStatus.COMPLETED,
+                created_at=self.shift.opened_at + timedelta(minutes=index),
+                completed_at=self.shift.opened_at + timedelta(minutes=index + 1),
+            )
+
+        response = self.client.get(reverse('mining_master_assignments'))
+        complex_card = next(
+            card
+            for card in response.context['dispatcher_dashboard']['complex_zones']
+            if card['id'] == 'K-1'
+        )
+        truck_tile = next(
+            tile
+            for tile in complex_card['active_truck_tiles']
+            if tile['card_id'] == str(self.assigned_truck.id)
+        )
+
+        self.assertEqual(truck_tile['percent'], 125)
+        self.assertEqual(truck_tile['plan_visual']['loop_progress'], 25)
+        self.assertEqual(truck_tile['plan_visual']['completed_loops'], 1)
+        self.assertEqual(truck_tile['plan_visual']['phase'], 'amber')
+        self.assertContains(response, 'data-plan-percent="125"')
+        self.assertContains(response, 'data-plan-loop-percent="25"')
+        self.assertContains(response, 'data-plan-completed-loops="1"')
+        self.assertContains(response, 'data-plan-progress-phase="amber"')
+        self.assertContains(response, 'is-plan-overrun')
+        self.assertContains(response, 'dispatcher-plan-loop-badge')
+        self.assertContains(response, '×1', html=False)
 
     def test_mining_master_desktop_realtime_refresh_uses_rendered_board(self):
         response = self.client.get(reverse('mining_master_assignments'))
@@ -243,7 +303,7 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertContains(response, 'miningMasterUpdateCheckIntervalMs')
         self.assertContains(response, 'checkMiningMasterPwaUpdateSilently')
         self.assertContains(response, 'Установлена последняя версия приложения')
-        self.assertContains(response, 'mining-master-mobile-shell-v97')
+        self.assertContains(response, 'mining-master-mobile-shell-v98')
         self.assertContains(response, '"trip_changed"')
         self.assertContains(
             response,
@@ -282,7 +342,7 @@ class MiningMasterAssignmentsViewTests(TestCase):
         script = response.content.decode('utf-8')
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'mining-master-mobile-shell-v97')
+        self.assertContains(response, 'mining-master-mobile-shell-v98')
         self.assertIn(reverse('mining_master_manifest'), script)
         self.assertIn('/static/js/realtime-client.js', script)
         self.assertIn('ignoreSearch: true', script)
@@ -463,7 +523,7 @@ class MiningMasterAssignmentsViewTests(TestCase):
         }
 
         self.assertNotIn('101', mobile_tiles)
-        self.assertEqual(mobile_tiles['102']['status'], 'yellow')
+        self.assertEqual(mobile_tiles['102']['status'], 'gray')
         self.assertEqual(mobile_tiles['102']['equipment_state_code'], 'free')
         self.assertEqual(mobile_tiles['102']['label'], 'Свободен')
         self.assertEqual(mobile_tiles['103']['status'], 'red')

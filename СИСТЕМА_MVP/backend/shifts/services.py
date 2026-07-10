@@ -48,6 +48,47 @@ def percent(fact, plan):
     return ((Decimal(fact or 0) / Decimal(plan)) * Decimal('100')).quantize(Decimal('0.1'))
 
 
+def format_progress_percent(value):
+    if value is None:
+        return None
+    try:
+        value = Decimal(value)
+    except Exception:
+        return None
+    return int(max(Decimal('0'), value).quantize(Decimal('1')))
+
+
+def progress_cycle_visual_context(percent):
+    value = format_progress_percent(percent)
+    if value is None:
+        value = 0
+
+    completed_loops, loop_progress = divmod(value, 100)
+    # Keep an exact completed boundary visible as a finished active cycle.
+    # This prevents the indicator from jumping from 99% to an empty ring.
+    if value and loop_progress == 0:
+        loop_progress = 100
+        completed_loops = max(0, completed_loops - 1)
+
+    if completed_loops == 0:
+        phase = 'green'
+    elif completed_loops == 1:
+        phase = 'amber'
+    elif completed_loops == 2:
+        phase = 'cyan'
+    else:
+        phase = 'orange'
+    return {
+        'percent': value,
+        'loop_progress': loop_progress,
+        'completed_loops': completed_loops,
+        'phase': phase,
+        'has_completed_loops': completed_loops > 0,
+        'is_overrun': completed_loops > 0,
+        'text_class': '',
+    }
+
+
 def empty_progress(equipment, date=None, shift_type=None, *, status=PlanAssignmentStatus.NO_PLAN_GROUP, shift=None):
     return {
         'equipment': equipment,

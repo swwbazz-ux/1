@@ -17137,6 +17137,9 @@ body.system-admin-reference-detail-screen .admin-page {
 
 .dispatcher-complex-card {
     --complex-accent: var(--gd-green);
+    --dispatcher-plan-color: var(--gd-green);
+    --dispatcher-plan-track: rgba(142, 158, 166, .2);
+    --dispatcher-plan-complete-color: rgba(123, 211, 25, .42);
     position: relative;
     display: grid;
     grid-template-columns: minmax(72px, .72fr) minmax(112px, .92fr) minmax(94px, .78fr);
@@ -17160,8 +17163,8 @@ body.system-admin-reference-detail-screen .admin-page {
     border-radius: 7px;
     background: conic-gradient(
         from -90deg,
-        var(--complex-accent) 0 var(--complex-progress),
-        color-mix(in srgb, var(--complex-accent) 18%, transparent) var(--complex-progress) 100%
+        var(--dispatcher-plan-color) 0 var(--complex-progress),
+        var(--dispatcher-plan-track) var(--complex-progress) 100%
     );
     pointer-events: none;
     -webkit-mask:
@@ -22636,6 +22639,9 @@ body.management-dynamics-chart-modal-open {
 }
 
 .dispatcher-excavator-garage-tile {
+    --dispatcher-plan-color: var(--gd-green);
+    --dispatcher-plan-track: rgba(142, 158, 166, .2);
+    --dispatcher-plan-complete-color: rgba(123, 211, 25, .42);
     position: relative;
     z-index: 1;
     display: grid;
@@ -22704,8 +22710,8 @@ body.management-dynamics-chart-modal-open {
     padding: 3px;
     background: conic-gradient(
         from -90deg,
-        currentColor 0 var(--tile-progress),
-        rgba(142, 158, 166, .2) var(--tile-progress) 100%
+        var(--dispatcher-plan-color) 0 var(--tile-progress),
+        var(--dispatcher-plan-track) var(--tile-progress) 100%
     );
     -webkit-mask:
         linear-gradient(#000 0 0) content-box,
@@ -22953,6 +22959,9 @@ body.management-dynamics-chart-modal-open {
 }
 
 .dispatcher-truck-tile {
+    --dispatcher-plan-color: var(--gd-green);
+    --dispatcher-plan-track: rgba(142, 158, 166, .2);
+    --dispatcher-plan-complete-color: rgba(123, 211, 25, .42);
     position: relative;
     z-index: 1;
     order: 0;
@@ -22983,8 +22992,8 @@ body.management-dynamics-chart-modal-open {
     padding: 3px;
     background: conic-gradient(
         from -90deg,
-        currentColor 0 var(--tile-progress),
-        rgba(142, 158, 166, .2) var(--tile-progress) 100%
+        var(--dispatcher-plan-color) 0 var(--tile-progress),
+        var(--dispatcher-plan-track) var(--tile-progress) 100%
     );
     -webkit-mask:
         linear-gradient(#000 0 0) content-box,
@@ -23306,6 +23315,157 @@ body.management-dynamics-chart-modal-open {
 
 .dispatcher-plan-strip.is-plan-missing strong {
     color: var(--gd-muted);
+}
+
+.dispatcher-complex-card.is-plan-overrun::before {
+    background:
+        conic-gradient(from -90deg, var(--dispatcher-plan-color) 0 var(--complex-progress), transparent var(--complex-progress) 100%),
+        conic-gradient(from -90deg, var(--dispatcher-plan-complete-color) 0 100%, transparent 0 100%),
+        conic-gradient(from -90deg, var(--dispatcher-plan-track) 0 100%);
+}
+
+.dispatcher-excavator-garage-tile[data-plan-progress-phase]:not([data-plan-progress-phase=""]),
+.dispatcher-truck-tile[data-plan-progress-phase]:not([data-plan-progress-phase=""]),
+.dispatcher-complex-card[data-plan-progress-phase]:not([data-plan-progress-phase=""]) {
+    --dispatcher-plan-color: rgba(74, 222, 128, 1);
+    --dispatcher-plan-glow: rgba(74, 222, 128, .52);
+    --dispatcher-plan-complete-color: rgba(74, 222, 128, .62);
+    --dispatcher-plan-track: rgba(142, 158, 166, .2);
+}
+
+.dispatcher-excavator-garage-tile[data-plan-progress-phase="amber"],
+.dispatcher-truck-tile[data-plan-progress-phase="amber"],
+.dispatcher-complex-card[data-plan-progress-phase="amber"] {
+    --dispatcher-plan-color: rgba(250, 204, 21, 1);
+    --dispatcher-plan-glow: rgba(250, 204, 21, .5);
+    --dispatcher-plan-complete-color: rgba(74, 222, 128, .68);
+}
+
+.dispatcher-excavator-garage-tile[data-plan-progress-phase="cyan"],
+.dispatcher-truck-tile[data-plan-progress-phase="cyan"],
+.dispatcher-complex-card[data-plan-progress-phase="cyan"] {
+    --dispatcher-plan-color: rgba(56, 189, 248, 1);
+    --dispatcher-plan-glow: rgba(56, 189, 248, .48);
+    --dispatcher-plan-complete-color: rgba(250, 204, 21, .6);
+}
+
+.dispatcher-excavator-garage-tile[data-plan-progress-phase="orange"],
+.dispatcher-truck-tile[data-plan-progress-phase="orange"],
+.dispatcher-complex-card[data-plan-progress-phase="orange"] {
+    --dispatcher-plan-color: rgba(251, 146, 60, 1);
+    --dispatcher-plan-glow: rgba(251, 146, 60, .5);
+    --dispatcher-plan-complete-color: rgba(56, 189, 248, .54);
+}
+
+.dispatcher-excavator-garage-tile[data-plan-progress-phase]:not([data-plan-progress-phase=""])::before,
+.dispatcher-truck-tile[data-plan-progress-phase]:not([data-plan-progress-phase=""])::before {
+    background: conic-gradient(
+        from -90deg,
+        var(--dispatcher-plan-color) 0 var(--tile-progress),
+        var(--dispatcher-plan-track) var(--tile-progress) 100%
+    );
+}
+
+.dispatcher-excavator-garage-tile.is-plan-overrun[data-plan-progress-phase]:not([data-plan-progress-phase=""])::before,
+.dispatcher-truck-tile.is-plan-overrun[data-plan-progress-phase]:not([data-plan-progress-phase=""])::before {
+    background:
+        conic-gradient(
+            from -90deg,
+            var(--dispatcher-plan-color) 0 var(--tile-progress),
+            rgba(0, 0, 0, 0) var(--tile-progress) 100%
+        ),
+        conic-gradient(
+            from -90deg,
+            var(--dispatcher-plan-complete-color) 0 100%,
+            rgba(0, 0, 0, 0) 0 100%
+        ),
+        conic-gradient(from -90deg, var(--dispatcher-plan-track) 0 100%);
+}
+
+.dispatcher-complex-card[data-plan-progress-phase]:not([data-plan-progress-phase=""])::before {
+    background: conic-gradient(
+        from -90deg,
+        var(--dispatcher-plan-color) 0 var(--complex-progress),
+        var(--dispatcher-plan-track) var(--complex-progress) 100%
+    );
+}
+
+.dispatcher-complex-card.is-plan-overrun[data-plan-progress-phase]:not([data-plan-progress-phase=""])::before {
+    background:
+        conic-gradient(
+            from -90deg,
+            var(--dispatcher-plan-color) 0 var(--complex-progress),
+            rgba(0, 0, 0, 0) var(--complex-progress) 100%
+        ),
+        conic-gradient(
+            from -90deg,
+            var(--dispatcher-plan-complete-color) 0 100%,
+            rgba(0, 0, 0, 0) 0 100%
+        ),
+        conic-gradient(from -90deg, var(--dispatcher-plan-track) 0 100%);
+}
+
+.dispatcher-plan-loop-badge {
+    position: absolute;
+    top: 3px;
+    right: 3px;
+    z-index: 6;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 22px;
+    min-height: 14px;
+    padding: 2px 5px;
+    border: 1px solid var(--dispatcher-plan-color, rgba(250, 204, 21, .9));
+    border-radius: 999px;
+    background: rgba(4, 13, 18, .94);
+    box-shadow: 0 0 10px var(--dispatcher-plan-glow, rgba(250, 204, 21, .38)), 0 3px 8px rgba(0, 0, 0, .36);
+    color: var(--dispatcher-plan-color, #facc15);
+    font-size: 9px;
+    font-style: normal;
+    font-weight: 900;
+    letter-spacing: 0;
+    line-height: 1;
+    pointer-events: none;
+    white-space: nowrap;
+}
+
+.dispatcher-excavator-garage-tile .dispatcher-plan-loop-badge {
+    top: 17px;
+    right: 3px;
+    min-width: 18px;
+    min-height: 12px;
+    padding: 1px 4px;
+    font-size: 7px;
+}
+
+.dispatcher-truck-tile .dispatcher-plan-loop-badge {
+    min-width: 18px;
+    min-height: 12px;
+    padding: 1px 4px;
+    font-size: 7px;
+}
+
+.complex-truck-tile .dispatcher-plan-loop-badge {
+    top: 3px;
+    right: 3px;
+}
+
+.dispatcher-plan-strip {
+    position: relative;
+}
+
+.dispatcher-plan-strip:has(.dispatcher-plan-loop-badge) {
+    padding-right: 40px;
+}
+
+.dispatcher-plan-strip .dispatcher-plan-loop-badge {
+    top: 50%;
+    right: 6px;
+    min-width: 24px;
+    min-height: 15px;
+    font-size: 9px;
+    transform: translateY(-50%);
 }
 
 .dispatcher-complex-card .complex-assigned-trucks {

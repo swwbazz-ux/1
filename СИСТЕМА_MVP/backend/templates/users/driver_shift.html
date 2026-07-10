@@ -527,6 +527,8 @@ body.driver-mobile-screen .driver-work-dial {
     --driver-progress: 0;
     --driver-progress-capped: 0;
     --driver-over-progress: 0;
+    --driver-plan-over-color: var(--driver-cyan);
+    --driver-plan-over-glow: rgba(32,217,230,0.52);
     --driver-hold: 0;
     position: relative;
     width: min(var(--driver-dial-size), 100%);
@@ -669,16 +671,31 @@ body.driver-mobile-screen .driver-work-progress {
 
 body.driver-mobile-screen .driver-work-over-progress {
     opacity: 0;
-    stroke: var(--driver-cyan);
+    stroke: var(--driver-plan-over-color);
     stroke-width: 2.5;
     stroke-dasharray: 100;
     stroke-dashoffset: calc(100 - var(--driver-over-progress));
     transition: opacity 180ms ease, stroke-dashoffset 240ms ease;
-    filter: drop-shadow(0 0 7px rgba(32,217,230,0.52));
+    filter: drop-shadow(0 0 7px var(--driver-plan-over-glow));
 }
 
 body.driver-mobile-screen .driver-work-dial.is-over-plan .driver-work-over-progress {
     opacity: 0.88;
+}
+
+body.driver-mobile-screen .driver-work-dial[data-plan-progress-phase="amber"] {
+    --driver-plan-over-color: #facc15;
+    --driver-plan-over-glow: rgba(250,204,21,0.58);
+}
+
+body.driver-mobile-screen .driver-work-dial[data-plan-progress-phase="cyan"] {
+    --driver-plan-over-color: var(--driver-cyan);
+    --driver-plan-over-glow: rgba(32,217,230,0.52);
+}
+
+body.driver-mobile-screen .driver-work-dial[data-plan-progress-phase="orange"] {
+    --driver-plan-over-color: #fb923c;
+    --driver-plan-over-glow: rgba(251,146,60,0.56);
 }
 
 body.driver-mobile-screen .driver-work-hold-progress {
@@ -827,6 +844,26 @@ body.driver-mobile-screen .driver-work-dial.is-plan-missing .driver-work-percent
 body.driver-mobile-screen .driver-work-dial.is-plan-missing .driver-work-percent::before,
 body.driver-mobile-screen .driver-work-dial.is-plan-missing .driver-work-percent::after {
     background: rgba(255, 90, 80, 0.34);
+}
+
+body.driver-mobile-screen .driver-work-progress-loop {
+    position: absolute;
+    top: 18%;
+    right: 17%;
+    z-index: 3;
+    min-width: 34px;
+    padding: 4px 8px;
+    border: 1px solid var(--driver-plan-over-color);
+    border-radius: 999px;
+    background: rgba(4, 13, 18, .9);
+    box-shadow: 0 0 14px var(--driver-plan-over-glow), 0 4px 10px rgba(0,0,0,.38);
+    color: var(--driver-plan-over-color);
+    font-size: clamp(14px, 3vw, 20px);
+    font-style: normal;
+    font-weight: 900;
+    letter-spacing: 0;
+    line-height: 1;
+    pointer-events: none;
 }
 
 body.driver-mobile-screen .driver-work-label {
@@ -1752,7 +1789,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
 {% endblock %}
 
 {% block body %}
-<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v62' }}">
+<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v63' }}">
     {% if messages %}
         <div class="driver-messages">
             {% for message in messages %}
@@ -1781,7 +1818,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
         </section>
 
         <div class="driver-work-dial-zone">
-            <div class="driver-work-dial {% if active_trip %}is-loaded{% else %}is-empty{% endif %}{% if not shift_plan_has_plan %} is-plan-missing{% endif %}" style="--driver-progress: {% if shift_plan_has_plan %}{{ shift_plan_percent }}{% else %}0{% endif %}; --driver-hold: 0;" data-driver-progress="{% if shift_plan_has_plan %}{{ shift_plan_percent }}{% else %}0{% endif %}" data-plan-status="{{ shift_plan_status|default:'no_plan_group' }}">
+            <div class="driver-work-dial {% if active_trip %}is-loaded{% else %}is-empty{% endif %}{% if not shift_plan_has_plan %} is-plan-missing{% endif %}{% if shift_plan_visual.is_overrun %} is-over-plan{% endif %}" style="--driver-progress: {% if shift_plan_has_plan %}{{ shift_plan_percent }}{% else %}0{% endif %}; --driver-progress-capped: {% if shift_plan_visual.is_overrun %}100{% else %}{{ shift_plan_visual.loop_progress }}{% endif %}; --driver-over-progress: {% if shift_plan_visual.is_overrun %}{{ shift_plan_visual.loop_progress }}{% else %}0{% endif %}; --driver-hold: 0;" data-driver-progress="{% if shift_plan_has_plan %}{{ shift_plan_percent }}{% else %}0{% endif %}" data-driver-loop-progress="{% if shift_plan_has_plan %}{{ shift_plan_visual.loop_progress }}{% else %}0{% endif %}" data-driver-completed-loops="{{ shift_plan_visual.completed_loops|default:0 }}" data-driver-has-plan="{% if shift_plan_has_plan %}1{% else %}0{% endif %}" data-plan-progress-phase="{% if shift_plan_has_plan %}{{ shift_plan_visual.phase }}{% endif %}" data-plan-status="{{ shift_plan_status|default:'no_plan_group' }}">
                 {% if active_trip %}
                     <form method="post" action="{% url 'driver_complete_trip' active_trip.id %}" class="driver-work-dial-form" data-driver-hold-form>
                         {% csrf_token %}
@@ -1796,7 +1833,8 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
                             </svg>
                             <span class="driver-work-ticks" aria-hidden="true"></span>
                             <span class="driver-work-dial-core">
-                                <span class="driver-work-percent">{% if shift_plan_has_plan %}{{ shift_plan_percent }}{% else %}0{% endif %}%</span>
+                                <span class="driver-work-percent">{% if shift_plan_has_plan %}{{ shift_plan_visual.loop_progress }}{% else %}0{% endif %}%</span>
+                                {% if shift_plan_visual.has_completed_loops %}<b class="driver-work-progress-loop" aria-label="Завершено циклов: {{ shift_plan_visual.completed_loops }}">×{{ shift_plan_visual.completed_loops }}</b>{% endif %}
                                 <strong class="driver-work-label" data-driver-dial-label>{{ driver_dial_label }}</strong>
                                 <em class="driver-work-note">{{ driver_dial_note }}</em>
                             </span>
@@ -1813,7 +1851,8 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
                         </svg>
                         <span class="driver-work-ticks" aria-hidden="true"></span>
                         <span class="driver-work-dial-core">
-                            <span class="driver-work-percent">{% if shift_plan_has_plan %}{{ shift_plan_percent }}{% else %}0{% endif %}%</span>
+                            <span class="driver-work-percent">{% if shift_plan_has_plan %}{{ shift_plan_visual.loop_progress }}{% else %}0{% endif %}%</span>
+                            {% if shift_plan_visual.has_completed_loops %}<b class="driver-work-progress-loop" aria-label="Завершено циклов: {{ shift_plan_visual.completed_loops }}">×{{ shift_plan_visual.completed_loops }}</b>{% endif %}
                             <strong class="driver-work-label" data-driver-dial-label>{{ driver_dial_label }}</strong>
                             <em class="driver-work-note">{{ driver_dial_note }}</em>
                         </span>
@@ -2069,12 +2108,18 @@ window.bindDriverMobileShell = function () {
     shell.dataset.driverShellBound = "true";
     function syncDriverDialProgress() {
         shell.querySelectorAll(".driver-work-dial").forEach(function (dial) {
-            var progress = Number(dial.dataset.driverProgress || 0);
-            if (!Number.isFinite(progress)) {
-                progress = 0;
+            var loopProgress = Number(dial.dataset.driverLoopProgress || 0);
+            if (!Number.isFinite(loopProgress)) {
+                loopProgress = 0;
             }
-            var cappedProgress = Math.max(0, Math.min(progress, 100));
-            var overProgress = Math.max(0, Math.min(progress - 100, 100));
+            loopProgress = Math.max(0, Math.min(loopProgress, 100));
+            var completedLoops = Number(dial.dataset.driverCompletedLoops || 0);
+            if (!Number.isFinite(completedLoops)) {
+                completedLoops = 0;
+            }
+            var hasPlan = dial.dataset.driverHasPlan === "1";
+            var cappedProgress = hasPlan ? (completedLoops > 0 ? 100 : loopProgress) : 0;
+            var overProgress = hasPlan && completedLoops > 0 ? loopProgress : 0;
             dial.style.setProperty("--driver-progress-capped", String(cappedProgress));
             dial.style.setProperty("--driver-over-progress", String(overProgress));
             dial.classList.toggle("is-over-plan", overProgress > 0);
@@ -2606,7 +2651,7 @@ window.bindDriverMobileShell = function () {
         if (!("serviceWorker" in navigator)) {
             return;
         }
-        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v62' }}";
+        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v63' }}";
         var updateModal = document.querySelector("[data-driver-pwa-update-modal]");
         var updateBadge = document.querySelector("[data-driver-pwa-update-badge]");
         var updateTarget = document.querySelector("[data-driver-pwa-update-nav-target]");

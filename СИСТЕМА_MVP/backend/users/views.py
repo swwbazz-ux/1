@@ -26,7 +26,7 @@ from references.models import Dormitory, DormitorySection, DumpPoint, Equipment,
 from reports.models import ReportTemplate
 from shifts.forms import EquipmentPlanGroupForm
 from shifts.models import AchievementPrize, EmployeeShift, EquipmentPlanGroup, EquipmentShiftPlan, PlanAssignmentStatus, PlanCalculationMode, ShiftPlan, ShiftPlanScope
-from shifts.services import assign_shift_plan_snapshot, calculate_truck_shift_progress, plan_status_label, plan_unit_label
+from shifts.services import assign_shift_plan_snapshot, calculate_truck_shift_progress, plan_status_label, plan_unit_label, progress_cycle_visual_context
 from trips.models import DispatcherActionLog, OPEN_TRIP_STATUSES, Trip, TripClientAction, TripStatus
 
 from .access_auth import find_employee_access_by_credentials
@@ -110,7 +110,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v62'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v63'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -1739,10 +1739,11 @@ def shift_plan_display_context(progress):
     status = progress.get('plan_status') if progress else ''
     percent_value = progress.get('progress_percent') if progress else None
     has_plan = percent_value is not None
+    visual = progress_cycle_visual_context(percent_value if has_plan else 0)
     plan_value = progress.get('plan_value') if progress else None
     calculation_mode = progress.get('calculation_mode') if progress else ''
     return {
-        'percent': int(percent_value.quantize(Decimal('1'))) if hasattr(percent_value, 'quantize') else percent_value,
+        'percent': visual['percent'] if has_plan else 0,
         'status': status or PlanAssignmentStatus.NO_PLAN_GROUP,
         'status_label': plan_status_label(status),
         'short_label': 'Нет группы' if status == PlanAssignmentStatus.NO_PLAN_GROUP else 'Нет плана' if status == PlanAssignmentStatus.NO_ACTIVE_PLAN else plan_status_label(status),
@@ -1750,6 +1751,7 @@ def shift_plan_display_context(progress):
         'value': plan_value,
         'unit': plan_unit_label(calculation_mode),
         'group_name': progress.get('plan_group_name') if progress else '',
+        'visual': visual,
     }
 
 
@@ -1992,6 +1994,7 @@ def driver_shift_view(request):
             'shift_plan_value': shift_plan['value'],
             'shift_plan_unit': shift_plan['unit'],
             'shift_plan_group_name': shift_plan['group_name'],
+            'shift_plan_visual': shift_plan['visual'],
             'driver_status': driver_status,
             'driver_status_class': driver_status_class,
             'driver_target_label': driver_target_label,

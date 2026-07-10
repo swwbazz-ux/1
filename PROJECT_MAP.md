@@ -37,7 +37,7 @@ Backend является основным рабочим приложением.
 - Маршруты: `/driver/`, `/driver/shift/`.
 - Manifest: `/driver.webmanifest`.
 - Service worker: `/driver-sw.js`.
-- Shell: `driver-mobile-shell-v62`.
+- Shell: `driver-mobile-shell-v63`.
 
 ### Машинист экскаватора
 
@@ -53,7 +53,7 @@ Backend является основным рабочим приложением.
 - View: `СИСТЕМА_MVP/backend/assignments/views.py`.
 - Маршрут: `/mining-master/assignments/`.
 - Service worker: `/mining-master-sw.js`.
-- Shell: `mining-master-mobile-shell-v97`.
+- Shell: `mining-master-mobile-shell-v98`.
 - Шаблон: фактически экран Горного мастера проходит через `assignments/views.py`, который использует диспетчерский контур рендера из `trips.views`. Общий рабочий template/shell сейчас связан с `СИСТЕМА_MVP/backend/templates/trips/dispatcher_control.html`; перед UI-правкой нужно подтвердить конкретный блок шаблона по коду.
 
 ### Диспетчер
@@ -62,7 +62,7 @@ Backend является основным рабочим приложением.
 - View: `СИСТЕМА_MVP/backend/trips/views.py`.
 - Маршрут: `/dispatcher/control/`.
 - Service worker: `/dispatcher-sw.js`.
-- Shell: `dispatcher-desktop-shell-v22`.
+- Shell: `dispatcher-desktop-shell-v27`.
 
 ## Правило локализации задачи
 
