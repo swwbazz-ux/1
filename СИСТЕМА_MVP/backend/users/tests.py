@@ -105,7 +105,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, reverse('driver_manifest'))
         self.assertContains(response, 'rel="manifest"')
         self.assertContains(response, '/driver-sw.js')
-        self.assertContains(response, 'driver-mobile-shell-v54')
+        self.assertContains(response, 'driver-mobile-shell-v55')
         self.assertContains(response, 'data-driver-pwa-update-modal')
         self.assertContains(response, 'data-driver-pwa-update-badge')
         self.assertContains(response, 'mode: "custom", path: "^/driver/(?:shift/?)?$"')
@@ -138,6 +138,10 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, 'font-size: clamp(17px, 4.4vw, 27px)')
         self.assertContains(response, 'text-overflow: clip')
         self.assertContains(response, 'class="driver-work-ticks"')
+        self.assertContains(response, 'data-driver-dial-label')
+        self.assertContains(response, 'function fitDriverDialLabel(label)')
+        self.assertContains(response, 'text-wrap: balance')
+        self.assertContains(response, 'overflow-wrap: anywhere')
         self.assertContains(response, 'body.driver-mobile-screen .driver-work-dial-button.is-pending .driver-work-label')
         self.assertContains(response, 'font-size: clamp(24px, 4.5vw, 42px)')
         self.assertContains(response, 'body.driver-mobile-screen .driver-work-dial-button.is-pending .driver-work-percent')
@@ -182,7 +186,7 @@ class AccessLoginTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Service-Worker-Allowed'], '/driver/')
-        self.assertIn('driver-mobile-shell-v54', script)
+        self.assertIn('driver-mobile-shell-v55', script)
         self.assertIn('/driver/', script)
         self.assertIn('/driver/shift/', script)
         self.assertIn('/driver.webmanifest', script)
@@ -1848,7 +1852,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(driver_shift_response, 'ККД')
         self.assertContains(driver_shift_response, 'window.applyOperationalStateRefresh')
         self.assertContains(driver_shift_response, 'data-realtime-mode="custom"')
-        self.assertContains(driver_shift_response, 'driver-mobile-shell-v54')
+        self.assertContains(driver_shift_response, 'driver-mobile-shell-v55')
 
     def test_driver_downtime_buttons_are_rendered_from_server_reference(self):
         truck = self.create_registered_driver_shift()

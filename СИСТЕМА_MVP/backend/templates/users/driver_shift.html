@@ -758,15 +758,19 @@ body.driver-mobile-screen .driver-work-dial.is-plan-missing .driver-work-percent
 body.driver-mobile-screen .driver-work-label {
     display: block;
     justify-self: center;
-    width: 100%;
-    max-width: 80%;
+    min-width: 0;
+    width: 78%;
+    max-width: 78%;
+    max-height: 1.84em;
     color: currentColor;
     text-transform: uppercase;
     font-size: clamp(42px, 11vw, 78px);
-    line-height: 0.94;
+    line-height: 0.92;
     font-weight: 900;
-    white-space: nowrap;
-    overflow: visible;
+    white-space: normal;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+    text-wrap: balance;
     text-align: center;
     text-shadow: 0 0 24px rgba(140,255,46,0.26);
 }
@@ -1598,7 +1602,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
 {% endblock %}
 
 {% block body %}
-<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v54' }}">
+<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v55' }}">
     {% if messages %}
         <div class="driver-messages">
             {% for message in messages %}
@@ -1656,7 +1660,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
                         <span class="driver-work-ticks" aria-hidden="true"></span>
                         <span class="driver-work-dial-core">
                             <span class="driver-work-percent">{% if shift_plan_has_plan %}{{ shift_plan_percent }}{% else %}0{% endif %}%</span>
-                            <strong class="driver-work-label">{{ driver_dial_label }}</strong>
+                            <strong class="driver-work-label" data-driver-dial-label>{{ driver_dial_label }}</strong>
                             <em class="driver-work-note">{{ driver_dial_note }}</em>
                         </span>
                     </div>
@@ -1942,6 +1946,63 @@ window.bindDriverMobileShell = function () {
             label.classList.add("is-long");
         }
     });
+    function fitDriverDialLabel(label) {
+        var core = label.closest(".driver-work-dial-core");
+        if (!core || !label.textContent.trim()) {
+            return;
+        }
+        label.style.removeProperty("font-size");
+        var maxSize = parseFloat(window.getComputedStyle(label).fontSize) || 78;
+        var minSize = Math.min(maxSize, Math.max(10, core.clientWidth * 0.035));
+        var low = minSize;
+        var high = maxSize;
+        var best = minSize;
+        function fits(size) {
+            label.style.fontSize = size.toFixed(2) + "px";
+            var lineHeight = parseFloat(window.getComputedStyle(label).lineHeight) || (size * 0.92);
+            return label.scrollWidth <= label.clientWidth + 1
+                && label.scrollHeight <= (lineHeight * 2) + 2;
+        }
+        if (fits(high)) {
+            best = high;
+        } else {
+            for (var step = 0; step < 9; step += 1) {
+                var middle = (low + high) / 2;
+                if (fits(middle)) {
+                    best = middle;
+                    low = middle;
+                } else {
+                    high = middle;
+                }
+            }
+        }
+        label.style.fontSize = best.toFixed(2) + "px";
+    }
+    function fitDriverDialLabels() {
+        shell.querySelectorAll("[data-driver-dial-label]").forEach(fitDriverDialLabel);
+    }
+    function scheduleDriverDialLabelFit() {
+        if (window.driverDialLabelFitFrame) {
+            window.cancelAnimationFrame(window.driverDialLabelFitFrame);
+        }
+        window.driverDialLabelFitFrame = window.requestAnimationFrame(function () {
+            window.driverDialLabelFitFrame = null;
+            fitDriverDialLabels();
+        });
+    }
+    if (window.driverDialLabelResizeObserver) {
+        window.driverDialLabelResizeObserver.disconnect();
+    }
+    if ("ResizeObserver" in window) {
+        window.driverDialLabelResizeObserver = new ResizeObserver(scheduleDriverDialLabelFit);
+        shell.querySelectorAll(".driver-work-dial-core").forEach(function (core) {
+            window.driverDialLabelResizeObserver.observe(core);
+        });
+    }
+    scheduleDriverDialLabelFit();
+    if (document.fonts && document.fonts.ready) {
+        document.fonts.ready.then(scheduleDriverDialLabelFit);
+    }
     function generateClientActionId(prefix) {
         if (window.crypto && window.crypto.randomUUID) {
             return prefix + "-" + window.crypto.randomUUID();
@@ -2226,6 +2287,7 @@ window.bindDriverMobileShell = function () {
             var dialLabel = holdButton.querySelector("[data-driver-dial-label]");
             if (dialLabel) {
                 dialLabel.textContent = holdButton.dataset.driverPendingLabel || "ОТПРАВКА";
+                scheduleDriverDialLabelFit();
             }
             holdButton.disabled = true;
             holdForm.submit();
@@ -2292,7 +2354,7 @@ window.bindDriverMobileShell = function () {
         if (!("serviceWorker" in navigator)) {
             return;
         }
-        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v54' }}";
+        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v55' }}";
         var updateModal = document.querySelector("[data-driver-pwa-update-modal]");
         var updateBadge = document.querySelector("[data-driver-pwa-update-badge]");
         var updateTarget = document.querySelector("[data-driver-pwa-update-nav-target]");
