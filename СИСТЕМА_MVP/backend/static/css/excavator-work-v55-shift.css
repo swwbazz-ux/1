@@ -2399,6 +2399,52 @@ body.excavator-operator-screen .eo-reason-grid .eo-hold-action.is-selected:disab
     }
 }
 
+/* Face tab: use the full desktop work area and keep the shift label readable. */
+@media (min-width: 768px) {
+    body.excavator-operator-screen .eo-topbar,
+    body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-topbar {
+        grid-template-columns: minmax(220px, .82fr) minmax(104px, .18fr) minmax(0, 1.86fr) !important;
+    }
+
+    body.excavator-operator-screen .eo-topbar .eo-shift-kind-cell {
+        min-width: 104px !important;
+        padding-inline: 12px !important;
+        justify-content: center !important;
+    }
+
+    body.excavator-operator-screen .eo-topbar .eo-shift-status-text {
+        display: inline-flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        white-space: nowrap !important;
+        font-size: clamp(15px, 1vw, 18px) !important;
+        font-weight: 800 !important;
+        line-height: 1 !important;
+        letter-spacing: 0 !important;
+    }
+
+    body.excavator-operator-screen .eo-screen[data-eo-screen="face"] {
+        overflow-y: hidden !important;
+    }
+
+    body.excavator-operator-screen .eo-unload-grid-settings {
+        grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+        grid-template-rows: repeat(2, minmax(0, 1fr)) !important;
+        grid-auto-rows: minmax(0, 1fr) !important;
+        align-content: stretch !important;
+        align-items: stretch !important;
+        height: 100% !important;
+        overflow: hidden !important;
+    }
+
+    body.excavator-operator-screen .eo-unload-grid-settings .eo-unload-card {
+        width: 100% !important;
+        height: 100% !important;
+        min-height: 0 !important;
+        font-size: clamp(16px, 1.12vw, 21px) !important;
+    }
+}
+
 @media (prefers-reduced-motion: reduce) {
     body.excavator-operator-screen .eo-reason-grid .eo-hold-action.is-selected {
         animation: none !important;
