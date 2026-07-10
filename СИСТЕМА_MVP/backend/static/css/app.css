@@ -28436,6 +28436,56 @@ body.mining-master-screen .dispatcher-complex-card .complex-truck-tile {
     gap: 8px;
 }
 
+.admin-employee-detail-shell .employee-login-share {
+    display: grid;
+    gap: 8px;
+    padding: 10px;
+    border: 1px solid color-mix(in srgb, var(--admin-line) 72%, var(--admin-green) 28%);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--admin-panel) 82%, var(--admin-green) 18%);
+}
+
+.admin-employee-detail-shell .employee-login-share-title {
+    color: var(--admin-muted);
+    font-size: 11px;
+    font-weight: 900;
+    line-height: 1.1;
+}
+
+.admin-employee-detail-shell .employee-login-share-text {
+    display: grid;
+    gap: 2px;
+    color: var(--admin-ink);
+    font-size: 13px;
+    font-weight: 800;
+    line-height: 1.35;
+    min-width: 0;
+    word-break: break-word;
+}
+
+.admin-employee-detail-shell .employee-login-share-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.admin-employee-detail-shell .employee-login-share-actions button {
+    min-height: 36px;
+    border: 1px solid color-mix(in srgb, var(--admin-line) 70%, var(--admin-green) 30%);
+    border-radius: 8px;
+    background: var(--admin-green);
+    color: #061311;
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 900;
+    line-height: 1.1;
+    cursor: pointer;
+}
+
+.admin-employee-detail-shell .employee-login-share-actions button[data-login-share-button] {
+    background: color-mix(in srgb, var(--admin-panel) 34%, var(--admin-green) 66%);
+}
+
 .admin-employee-detail-shell .employee-access-meta {
     grid-template-columns: 1fr;
     gap: 4px;

@@ -506,7 +506,11 @@ class AccessLoginTests(TestCase):
         admin_role = Role.objects.create(code='admin', name='Администратор')
         driver_role = Role.objects.create(code='driver_primary_pin', name='Водитель самосвала')
         admin_employee = Employee.objects.create(full_name='Администратор MVP', status=Employee.Status.ACTIVE)
-        employee = Employee.objects.create(full_name='Водитель с доступом', status=Employee.Status.ACTIVE)
+        employee = Employee.objects.create(
+            full_name='Водитель с доступом',
+            phone='+79990000000',
+            status=Employee.Status.ACTIVE,
+        )
         employee_access = EmployeeAccess.objects.create(
             employee=employee,
             role=driver_role,
@@ -530,6 +534,12 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, f'<option value="{driver_role.id}" selected>', html=False)
         self.assertContains(response, '2468')
         self.assertContains(response, 'ожидает первого входа')
+        self.assertContains(response, 'employee-login-share')
+        self.assertContains(response, 'https://driverform.ru')
+        self.assertContains(response, 'Телефон: +79990000000')
+        self.assertContains(response, 'Пин код: 246824')
+        self.assertContains(response, 'Скопировать')
+        self.assertContains(response, 'Отправить')
 
         employee_access.access_code = '8642'
         employee_access.status = EmployeeAccess.Status.ACTIVATED
@@ -541,6 +551,7 @@ class AccessLoginTests(TestCase):
 
         self.assertContains(activated_response, f'<option value="{driver_role.id}" selected>', html=False)
         self.assertContains(activated_response, 'Пинкод активирован')
+        self.assertNotContains(activated_response, 'employee-login-share')
         self.assertNotContains(activated_response, '8642')
 
         reset_response = self.client.post(
@@ -556,6 +567,8 @@ class AccessLoginTests(TestCase):
         self.assertIsNone(employee_access.activated_at)
         self.assertNotEqual(employee_access.access_code, '8642')
         self.assertContains(reset_response, employee_access.access_code)
+        self.assertContains(reset_response, 'Телефон: +79990000000')
+        self.assertContains(reset_response, f'Пин код: {employee_access.access_code}')
         self.assertContains(reset_response, 'ожидает первого входа')
         self.assertNotContains(reset_response, '8642')
 
@@ -1079,6 +1092,30 @@ class AccessLoginTests(TestCase):
         self.assertTrue(AdminActionLog.objects.filter(action='Создан сотрудник и выдан первичный пинкод').exists())
         self.assertNotContains(create_response, 'Сотрудник создан.')
         self.assertContains(create_response, 'Первичный пинкод:')
+
+        save_response = self.client.post(
+            f'/system-admin/employees/{employee.id}/',
+            {
+                'full_name': employee.full_name,
+                'position': 'Водитель',
+                'personnel_number': employee.personnel_number,
+                'phone': employee.phone,
+                'status': employee.status,
+                'comment': 'Данные дополнены',
+                'hired_at': '',
+                'dismissed_at': '',
+                'rotation': '',
+                'residence_text': '',
+                'hr_data': '',
+            },
+            follow=True,
+            HTTP_HOST='localhost',
+        )
+        employee.refresh_from_db()
+
+        self.assertEqual(save_response.status_code, 200)
+        self.assertEqual(employee.comment, 'Данные дополнены')
+        self.assertNotContains(save_response, 'Карточка сотрудника сохранена.')
 
         block_response = self.client.post(
             f'/system-admin/accesses/{access.id}/block/',
