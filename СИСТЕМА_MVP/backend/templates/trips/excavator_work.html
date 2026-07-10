@@ -5,9 +5,9 @@
 {% block body_class %}excavator-operator-screen{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v93">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v93">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v93">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v94">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v94">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v94">
 <meta name="theme-color" content="#030708">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Погрузка">
@@ -262,10 +262,7 @@
                 <span class="eo-dump-queue-kicker">Очередь на разгрузку</span>
                 <h2 id="eo-dump-queue-title" data-eo-dump-queue-title>Точка разгрузки</h2>
                 <div class="eo-dump-queue-list" data-eo-dump-queue-list></div>
-                <div class="eo-dump-return-zone" data-eo-dump-return-zone>
-                    <strong>Вернуть в самосвалы</strong>
-                    <span>Перетащите сюда, чтобы отменить отправку</span>
-                </div>
+                <p class="eo-dump-queue-gesture-hint" data-eo-dump-queue-gesture-hint>Смахните самосвал вверх, чтобы вернуть</p>
                 <p class="eo-dump-queue-note" data-eo-dump-queue-note hidden></p>
             </section>
         </div>
@@ -403,7 +400,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v93";
+var excavatorShellVersion = "excavator-mobile-shell-v94";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var excavatorRelevantEvents = {
     assignment_changed: true,
@@ -1254,10 +1251,10 @@ window.initExcavatorWorkShell = function () {
         var modal = shell.querySelector("[data-eo-dump-queue-modal]");
         return {
             modal: modal,
+            dialog: modal ? modal.querySelector(".eo-dump-queue-dialog") : null,
             title: modal ? modal.querySelector("[data-eo-dump-queue-title]") : null,
             list: modal ? modal.querySelector("[data-eo-dump-queue-list]") : null,
-            note: modal ? modal.querySelector("[data-eo-dump-queue-note]") : null,
-            returnZone: modal ? modal.querySelector("[data-eo-dump-return-zone]") : null
+            note: modal ? modal.querySelector("[data-eo-dump-queue-note]") : null
         };
     }
 
@@ -1278,7 +1275,7 @@ window.initExcavatorWorkShell = function () {
         }
         parts.modal.hidden = true;
         parts.modal.setAttribute("aria-hidden", "true");
-        if (parts.returnZone) parts.returnZone.classList.remove("is-drop-ready");
+        if (parts.dialog) parts.dialog.classList.remove("is-return-armed");
     }
 
     function queueItemFromBadge(badge, dumpTarget) {
@@ -1328,6 +1325,7 @@ window.initExcavatorWorkShell = function () {
             startX: event.clientX,
             startY: event.clientY,
             started: false,
+            isReturnReady: false,
             preview: null
         };
         if (item.setPointerCapture) {
@@ -1398,9 +1396,10 @@ window.initExcavatorWorkShell = function () {
         }
         moveQueueDragPreview(activeQueueDrag, dx, dy);
         var parts = queueModalElements();
-        var element = document.elementFromPoint(event.clientX, event.clientY);
-        var isReturn = !!(parts.returnZone && element && element.closest("[data-eo-dump-return-zone]"));
-        if (parts.returnZone) parts.returnZone.classList.toggle("is-drop-ready", isReturn);
+        var dialogRect = parts.dialog ? parts.dialog.getBoundingClientRect() : null;
+        activeQueueDrag.isReturnReady = !!(dialogRect && dy <= -56 && event.clientY <= dialogRect.top + 12);
+        if (parts.dialog) parts.dialog.classList.toggle("is-return-armed", activeQueueDrag.isReturnReady);
+        if (activeQueueDrag.preview) activeQueueDrag.preview.classList.toggle("is-return-ready", activeQueueDrag.isReturnReady);
     }
 
     function finishQueueDrag(event) {
@@ -1408,12 +1407,11 @@ window.initExcavatorWorkShell = function () {
         var state = activeQueueDrag;
         activeQueueDrag = null;
         var parts = queueModalElements();
-        var element = state.started ? document.elementFromPoint(event.clientX, event.clientY) : null;
         cleanupQueueDragState(state);
-        if (parts.returnZone) parts.returnZone.classList.remove("is-drop-ready");
+        if (parts.dialog) parts.dialog.classList.remove("is-return-armed");
         if (!state.started) return;
         event.preventDefault();
-        if (parts.returnZone && element && element.closest("[data-eo-dump-return-zone]")) {
+        if (state.isReturnReady) {
             cancelLoadedTripFromQueue(state.item);
         }
     }
@@ -1423,7 +1421,7 @@ window.initExcavatorWorkShell = function () {
         cleanupQueueDragState(activeQueueDrag);
         activeQueueDrag = null;
         var parts = queueModalElements();
-        if (parts.returnZone) parts.returnZone.classList.remove("is-drop-ready");
+        if (parts.dialog) parts.dialog.classList.remove("is-return-armed");
     }
 
     function cancelLoadedTripFromQueue(item) {
