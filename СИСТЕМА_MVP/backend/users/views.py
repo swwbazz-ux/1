@@ -110,7 +110,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v66'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v67'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -1897,12 +1897,14 @@ def driver_shift_view(request):
         getattr(driver_trip_context_source, 'rock_type', None)
         or getattr(driver_trip_context_source, 'work_rock_type', None)
     )
-    driver_context_parts = [
-        driver_complex_label_for_excavator(driver_work_excavator),
+    driver_excavator_label = driver_excavator_short_label(driver_work_excavator)
+    driver_complex_label = driver_complex_label_for_excavator(driver_work_excavator)
+    driver_geology_parts = [
         driver_compact_context_value('Горизонт', 'Гор.', getattr(driver_trip_context_source, 'loading_horizon', '')),
         driver_compact_context_value('Блок', 'Бл.', getattr(driver_trip_context_source, 'loading_block', '')),
         str(driver_context_rock or '—'),
     ]
+    driver_context_parts = [driver_complex_label, *driver_geology_parts]
     driver_context_label = ' · '.join(driver_context_parts)
     driver_dial_label = str(driver_target_label) if active_trip else driver_excavator_short_label(driver_work_excavator)
     driver_dial_note = 'ТОЧКА РАЗГРУЗКИ' if active_trip else 'НА ЗАГРУЗКУ'
@@ -1999,6 +2001,9 @@ def driver_shift_view(request):
             'driver_status_class': driver_status_class,
             'driver_target_label': driver_target_label,
             'driver_header_label': driver_header_label,
+            'driver_excavator_label': driver_excavator_label,
+            'driver_complex_label': driver_complex_label,
+            'driver_geology_parts': driver_geology_parts,
             'driver_context_parts': driver_context_parts,
             'driver_context_label': driver_context_label,
             'driver_dial_label': driver_dial_label,

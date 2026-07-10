@@ -364,14 +364,12 @@ body.driver-mobile-screen .driver-work-context-card {
     grid-area: context;
     justify-self: center;
     width: var(--driver-work-column);
-    min-height: clamp(82px, 10dvh, 104px);
+    min-height: clamp(96px, 11dvh, 118px);
+    overflow: hidden;
     border: 1px solid var(--driver-line);
     border-radius: 10px;
-    padding: 12px clamp(14px, 3.8vw, 22px);
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr);
-    align-items: center;
-    gap: clamp(12px, 3vw, 18px);
+    grid-template-rows: auto minmax(0, 1fr);
     background:
         linear-gradient(90deg, rgba(140,255,46,0.035), transparent 34%),
         linear-gradient(145deg, rgba(12,31,40,0.94), rgba(4,13,18,0.88));
@@ -390,81 +388,94 @@ body.driver-mobile-screen .driver-work-context-card[role="button"]:focus-visible
     outline-offset: 3px;
 }
 
-body.driver-mobile-screen .driver-work-context-icon {
-    width: 42px;
-    height: 42px;
-    border: 1px solid rgba(140,255,46,0.40);
-    border-radius: 50%;
-    display: grid;
-    place-items: center;
-    color: var(--driver-green);
-    font-size: 24px;
-    line-height: 1;
-    box-shadow: 0 0 18px rgba(140,255,46,0.12);
-}
-
-body.driver-mobile-screen .driver-work-context-copy {
-    min-width: 0;
-}
-
-body.driver-mobile-screen .driver-work-context-title {
-    margin-bottom: 8px;
+body.driver-mobile-screen .driver-work-context-heading {
+    min-height: 28px;
+    padding: 8px clamp(13px, 3.5vw, 20px) 7px;
+    border-bottom: 1px solid rgba(135,169,180,0.16);
     color: var(--driver-muted);
     text-transform: uppercase;
-    font-size: clamp(9px, 2.4vw, 12px);
+    font-size: clamp(9px, 2.3vw, 11px);
     line-height: 1;
+    font-weight: 600;
     letter-spacing: 0;
 }
 
-body.driver-mobile-screen .driver-work-context-line {
+body.driver-mobile-screen .driver-work-context-body {
     min-width: 0;
-    width: 100%;
-    overflow: visible;
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(76px, 1fr));
-    align-items: stretch;
+    grid-template-columns: minmax(98px, 0.36fr) minmax(0, 1fr);
+    align-items: center;
+    padding: 10px clamp(13px, 3.5vw, 20px) 12px;
+}
+
+body.driver-mobile-screen .driver-work-context-machine,
+body.driver-mobile-screen .driver-work-context-geology {
+    min-width: 0;
+    display: grid;
+    align-content: center;
+}
+
+body.driver-mobile-screen .driver-work-context-machine {
+    padding-right: clamp(12px, 3vw, 20px);
+    border-right: 1px solid rgba(132,165,176,0.24);
+    gap: 3px;
+}
+
+body.driver-mobile-screen .driver-work-context-geology {
+    padding-left: clamp(12px, 3vw, 20px);
+    gap: 7px;
+}
+
+body.driver-mobile-screen .driver-work-context-machine > span,
+body.driver-mobile-screen .driver-work-context-geology > span {
+    color: var(--driver-muted);
+    text-transform: uppercase;
+    font-size: clamp(9px, 2.3vw, 11px);
+    line-height: 1;
+    font-weight: 600;
+}
+
+body.driver-mobile-screen .driver-work-context-machine strong {
+    color: var(--driver-green);
+    text-transform: uppercase;
+    font-size: clamp(22px, 5.8vw, 31px);
+    line-height: 1;
+    font-weight: 900;
+    white-space: nowrap;
+    text-shadow: 0 0 16px rgba(140,255,46,0.34);
+}
+
+body.driver-mobile-screen .driver-work-context-machine small {
+    color: rgba(204,220,217,0.70);
+    text-transform: uppercase;
+    font-size: clamp(10px, 2.6vw, 13px);
+    line-height: 1;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+body.driver-mobile-screen .driver-work-context-geology-values {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 5px 0;
     color: var(--driver-ink);
     text-transform: uppercase;
-    font-size: clamp(16px, 4vw, 23px);
+    font-size: clamp(16px, 4vw, 22px);
     line-height: 1.08;
     font-weight: 900;
-    white-space: normal;
-    text-align: center;
+    text-align: left;
 }
 
-body.driver-mobile-screen .driver-work-context-part {
-    min-width: 0;
-    padding: 2px clamp(7px, 1.8vw, 12px);
-    border-left: 1px solid rgba(132,165,176,0.20);
-    display: grid;
-    place-items: center;
+body.driver-mobile-screen .driver-work-context-geology-values span {
     white-space: nowrap;
-    text-shadow: 0 0 12px rgba(225,255,215,0.08);
 }
 
-body.driver-mobile-screen .driver-work-context-part:first-child {
-    border-left: 0;
-    color: var(--driver-green);
-    text-shadow: 0 0 14px rgba(140,255,46,0.28);
-}
-
-body.driver-mobile-screen .driver-work-context-line.is-single {
-    display: block;
-    text-align: left;
-}
-
-body.driver-mobile-screen .driver-work-context-line.is-single .driver-work-context-part {
-    padding-left: 0;
-    border-left: 0;
-    display: block;
-    white-space: normal;
-    text-align: left;
-}
-
-body.driver-mobile-screen .driver-work-context-line b {
-    margin: 0 0.35em;
-    color: var(--driver-green);
-    font-weight: 900;
+body.driver-mobile-screen .driver-work-context-geology-values span + span::before {
+    content: "·";
+    margin: 0 0.42em;
+    color: rgba(140,255,46,0.62);
 }
 
 body.driver-mobile-screen .driver-work-cards {
@@ -1846,14 +1857,13 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
 
 @media (max-width: 370px) {
     body.driver-mobile-screen .driver-online span,
-    body.driver-mobile-screen .driver-online strong,
-    body.driver-mobile-screen .driver-work-context-icon {
+    body.driver-mobile-screen .driver-online strong {
         display: none;
     }
 
-    body.driver-mobile-screen .driver-work-context-card {
-        grid-template-columns: minmax(0, 1fr);
-        min-height: 82px;
+    body.driver-mobile-screen .driver-work-context-body {
+        grid-template-columns: minmax(90px, 0.36fr) minmax(0, 1fr);
+        padding-inline: 11px;
     }
 
 }
@@ -1866,13 +1876,12 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
         height: 12px;
     }
 
-    body.driver-mobile-screen .driver-work-context-line {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        row-gap: 8px;
+    body.driver-mobile-screen .driver-work-context-machine {
+        padding-right: 11px;
     }
 
-    body.driver-mobile-screen .driver-work-context-part:nth-child(odd) {
-        border-left: 0;
+    body.driver-mobile-screen .driver-work-context-geology {
+        padding-left: 11px;
     }
 }
 
@@ -1889,7 +1898,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
 {% endblock %}
 
 {% block body %}
-<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v66' }}">
+<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v67' }}">
     {% if messages %}
         <div class="driver-messages">
             {% for message in messages %}
@@ -1910,10 +1919,19 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
 
     <section class="driver-panel driver-tab driver-work-screen {% if active_tab == 'work' %}is-active{% endif %}" data-driver-tab-panel="work">
         <section class="driver-work-context-card"{% if active_trip %} role="button" tabindex="0" data-driver-point-open{% endif %}>
-            <div class="driver-work-context-icon" aria-hidden="true">⌖</div>
-            <div class="driver-work-context-copy">
-                <div class="driver-work-context-title">Назначенный комплекс и точка погрузки</div>
-                <div class="driver-work-context-line" data-driver-context-line>{{ driver_context_label }}</div>
+            <div class="driver-work-context-heading">Назначение на погрузку</div>
+            <div class="driver-work-context-body">
+                <div class="driver-work-context-machine">
+                    <span>Экскаватор</span>
+                    <strong>{{ driver_excavator_label }}</strong>
+                    <small>Комплекс {{ driver_complex_label }}</small>
+                </div>
+                <div class="driver-work-context-geology">
+                    <span>Горизонт · блок · порода</span>
+                    <div class="driver-work-context-geology-values">
+                        {% for part in driver_geology_parts %}<span>{{ part }}</span>{% endfor %}
+                    </div>
+                </div>
             </div>
         </section>
 
@@ -2206,27 +2224,6 @@ window.bindDriverMobileShell = function () {
         return;
     }
     shell.dataset.driverShellBound = "true";
-    function enhanceDriverContextLine() {
-        shell.querySelectorAll("[data-driver-context-line]").forEach(function (line) {
-            if (line.dataset.driverContextReady === "true") {
-                return;
-            }
-            var parts = line.textContent.trim().split(/\s*·\s*/).filter(Boolean);
-            if (!parts.length) {
-                parts = ["—"];
-            }
-            line.replaceChildren();
-            parts.forEach(function (part) {
-                var node = document.createElement("span");
-                node.className = "driver-work-context-part";
-                node.textContent = part;
-                line.appendChild(node);
-            });
-            line.classList.toggle("is-single", parts.length === 1);
-            line.dataset.driverContextReady = "true";
-        });
-    }
-    enhanceDriverContextLine();
     function syncDriverDialProgress() {
         shell.querySelectorAll(".driver-work-dial").forEach(function (dial) {
             var loopProgress = Number(dial.dataset.driverLoopProgress || 0);
@@ -2777,7 +2774,7 @@ window.bindDriverMobileShell = function () {
         if (!("serviceWorker" in navigator)) {
             return;
         }
-        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v66' }}";
+        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v67' }}";
         var updateModal = document.querySelector("[data-driver-pwa-update-modal]");
         var updateBadge = document.querySelector("[data-driver-pwa-update-badge]");
         var updateTarget = document.querySelector("[data-driver-pwa-update-nav-target]");
