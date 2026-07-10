@@ -1343,7 +1343,7 @@ body.driver-mobile-screen .driver-shift-workspace {
     min-height: 0;
     height: 100%;
     display: grid;
-    grid-template-rows: auto minmax(0, 1fr) minmax(0, 1fr) auto;
+    grid-template-rows: auto minmax(0, 1.3fr) minmax(0, .9fr) auto;
     gap: clamp(8px, 1.15dvh, 12px);
     overflow: hidden;
 }
@@ -1589,7 +1589,7 @@ body.driver-mobile-screen .driver-shift-logout::before {
 
 @media (max-width: 640px) {
     body.driver-mobile-screen .driver-shift-workspace {
-        grid-template-rows: auto minmax(0, 1fr) minmax(0, 1fr) auto;
+        grid-template-rows: auto minmax(0, 1.3fr) minmax(0, .9fr) auto;
     }
 
     body.driver-mobile-screen .driver-shift-section {
@@ -2181,7 +2181,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
 {% endblock %}
 
 {% block body %}
-<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v70' }}">
+<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v71' }}">
     {% if messages %}
         <div class="driver-messages">
             {% for message in messages %}
@@ -2535,6 +2535,9 @@ window.bindDriverMobileShell = function () {
         return;
     }
     shell.dataset.driverShellBound = "true";
+    shell.querySelectorAll(".driver-shift-metric-value input").forEach(function (input) {
+        if (!input.getAttribute("placeholder")) input.setAttribute("placeholder", "0");
+    });
     function syncDriverDialProgress() {
         shell.querySelectorAll(".driver-work-dial").forEach(function (dial) {
             var loopProgress = Number(dial.dataset.driverLoopProgress || 0);
@@ -3232,7 +3235,7 @@ window.bindDriverMobileShell = function () {
         if (!("serviceWorker" in navigator)) {
             return;
         }
-        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v70' }}";
+        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v71' }}";
         var updateModal = document.querySelector("[data-driver-pwa-update-modal]");
         var updateBadge = document.querySelector("[data-driver-pwa-update-badge]");
         var updateTarget = document.querySelector("[data-driver-pwa-update-nav-target]");
