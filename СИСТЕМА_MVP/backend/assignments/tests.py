@@ -303,7 +303,7 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertContains(response, 'miningMasterUpdateCheckIntervalMs')
         self.assertContains(response, 'checkMiningMasterPwaUpdateSilently')
         self.assertContains(response, 'Установлена последняя версия приложения')
-        self.assertContains(response, 'mining-master-mobile-shell-v98')
+        self.assertContains(response, 'mining-master-mobile-shell-v99')
         self.assertContains(response, '"trip_changed"')
         self.assertContains(
             response,
@@ -342,7 +342,7 @@ class MiningMasterAssignmentsViewTests(TestCase):
         script = response.content.decode('utf-8')
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'mining-master-mobile-shell-v98')
+        self.assertContains(response, 'mining-master-mobile-shell-v99')
         self.assertIn(reverse('mining_master_manifest'), script)
         self.assertIn('/static/js/realtime-client.js', script)
         self.assertIn('ignoreSearch: true', script)
