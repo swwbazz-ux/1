@@ -1335,6 +1335,227 @@ body.driver-mobile-screen .driver-primary-action:disabled {
     box-shadow: none;
 }
 
+body.driver-mobile-screen [data-driver-tab-panel="shift"].is-active {
+    grid-template-rows: minmax(0, 1fr);
+}
+
+body.driver-mobile-screen .driver-shift-workspace {
+    min-height: 0;
+    height: 100%;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1.05fr) minmax(0, .72fr) clamp(58px, 8dvh, 72px);
+    gap: clamp(9px, 1.35dvh, 14px);
+    overflow: hidden;
+}
+
+body.driver-mobile-screen .driver-shift-titlebar,
+body.driver-mobile-screen .driver-shift-section-head,
+body.driver-mobile-screen .driver-shift-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+body.driver-mobile-screen .driver-shift-titlebar h2 {
+    margin: 0;
+    color: #f6fbfd;
+    font-size: clamp(24px, 6vw, 34px);
+    line-height: 1;
+    text-transform: uppercase;
+}
+
+body.driver-mobile-screen .driver-shift-update {
+    min-height: 36px;
+    border: 1px solid rgba(127, 163, 177, .32);
+    border-radius: 7px;
+    padding: 0 12px;
+    color: #b9c8cd;
+    background: rgba(8, 20, 25, .84);
+    font-size: clamp(11px, 2.8vw, 13px);
+    text-transform: uppercase;
+}
+
+body.driver-mobile-screen .driver-shift-section {
+    min-height: 0;
+    overflow: hidden;
+    border: 1px solid rgba(74, 222, 128, .34);
+    border-radius: 8px;
+    padding: clamp(10px, 1.7dvh, 15px);
+    background: linear-gradient(180deg, rgba(13, 22, 24, .94), rgba(8, 14, 17, .98));
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.04);
+}
+
+body.driver-mobile-screen .driver-shift-section-head {
+    min-height: 24px;
+    margin-bottom: clamp(7px, 1dvh, 10px);
+}
+
+body.driver-mobile-screen .driver-shift-section-head span {
+    color: #dbe7e9;
+    font-size: clamp(14px, 3.5vw, 17px);
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+body.driver-mobile-screen .driver-shift-section-head b {
+    color: rgba(185, 200, 205, .62);
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+body.driver-mobile-screen .driver-shift-metrics {
+    min-height: 0;
+    height: calc(100% - 34px);
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: clamp(6px, 1.5vw, 10px);
+}
+
+body.driver-mobile-screen .driver-shift-field {
+    min-width: 0;
+    min-height: 0;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: 6px;
+    padding: clamp(8px, 2vw, 12px);
+    border: 1px solid rgba(127, 163, 177, .24);
+    border-radius: 7px;
+    background: rgba(2, 12, 17, .76);
+}
+
+body.driver-mobile-screen .driver-shift-field > span:first-child {
+    color: #91a4aa;
+    font-size: clamp(12px, 3vw, 15px);
+    line-height: 1;
+    text-transform: uppercase;
+}
+
+body.driver-mobile-screen .driver-shift-metric-value {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+body.driver-mobile-screen .driver-shift-metric-value input {
+    width: 100%;
+    min-width: 0;
+    height: 100%;
+    min-height: 44px;
+    border: 0;
+    padding: 0;
+    color: #f6fbfd;
+    background: transparent;
+    outline: none;
+    font-size: clamp(22px, 5.6vw, 32px);
+    font-weight: 600;
+    text-align: center;
+}
+
+body.driver-mobile-screen .driver-shift-metric-value em {
+    color: #82969d;
+    font-size: clamp(11px, 2.8vw, 14px);
+    font-style: normal;
+}
+
+body.driver-mobile-screen .driver-shift-result-grid {
+    height: calc(100% - 34px);
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: repeat(2, minmax(0, 1fr));
+    gap: clamp(6px, 1.5vw, 9px);
+}
+
+body.driver-mobile-screen .driver-shift-result-cell {
+    min-width: 0;
+    display: grid;
+    align-content: center;
+    gap: 3px;
+    padding: 7px 10px;
+    border: 1px solid rgba(127, 163, 177, .18);
+    border-radius: 6px;
+    background: rgba(4, 15, 19, .72);
+}
+
+body.driver-mobile-screen .driver-shift-result-cell span {
+    color: #84989e;
+    font-size: clamp(10px, 2.5vw, 12px);
+    text-transform: uppercase;
+}
+
+body.driver-mobile-screen .driver-shift-result-cell strong {
+    min-width: 0;
+    overflow: hidden;
+    color: #f6fbfd;
+    font-size: clamp(19px, 4.9vw, 25px);
+    line-height: 1;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+body.driver-mobile-screen .driver-shift-actions {
+    min-height: 0;
+}
+
+body.driver-mobile-screen .driver-shift-submit,
+body.driver-mobile-screen .driver-shift-logout {
+    position: relative;
+    isolation: isolate;
+    width: 50%;
+    height: 100%;
+    overflow: hidden;
+    border: 1px solid rgba(248, 113, 113, .82);
+    border-radius: 8px;
+    display: grid;
+    place-items: center;
+    color: #ff7d7d;
+    background: rgba(45, 12, 15, .76);
+    font-size: clamp(15px, 3.8vw, 19px);
+    font-weight: 800;
+    text-decoration: none;
+    text-transform: uppercase;
+}
+
+body.driver-mobile-screen .driver-shift-logout {
+    border-color: rgba(127, 163, 177, .34);
+    color: #b9c8cd;
+    background: rgba(7, 18, 23, .88);
+}
+
+body.driver-mobile-screen .driver-shift-submit::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    width: var(--driver-shift-hold, 0%);
+    background: rgba(248, 113, 113, .28);
+}
+
+body.driver-mobile-screen .driver-shift-logout::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    width: var(--driver-logout-hold, 0%);
+    background: rgba(127, 163, 177, .2);
+}
+
+@media (max-width: 640px) {
+    body.driver-mobile-screen .driver-shift-workspace {
+        grid-template-rows: auto minmax(0, 1fr) minmax(0, .72fr) 62px;
+    }
+
+    body.driver-mobile-screen .driver-shift-section {
+        padding: 9px;
+    }
+
+    body.driver-mobile-screen .driver-shift-field {
+        padding: 7px 5px;
+    }
+}
+
 body.driver-mobile-screen .driver-downtime-card {
     min-height: 104px;
     display: grid;
@@ -1915,7 +2136,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
 {% endblock %}
 
 {% block body %}
-<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v68' }}">
+<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v69' }}">
     {% if messages %}
         <div class="driver-messages">
             {% for message in messages %}
@@ -2036,20 +2257,42 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
 
     <section class="driver-panel driver-tab {% if active_tab == 'shift' %}is-active{% endif %}" data-driver-tab-panel="shift">
         {% if open_shift %}
-            <div class="driver-section-title">
-                <span>Закрытие смены</span>
-                <strong>{{ shift_trip_count }} рейсов · {% if shift_plan_has_plan %}{{ shift_plan_percent }}% плана{% else %}{{ shift_plan_status_label }}{% endif %}</strong>
-            </div>
-            <form method="post" action="{% url 'driver_close_shift' %}" class="driver-form-card">
+            <form method="post" action="{% url 'driver_close_shift' %}" class="driver-shift-workspace" data-driver-shift-close-form>
                 {% csrf_token %}
-                {% for field in close_form %}
-                    <label>
-                        <span>{{ field.label }}</span>
-                        {{ field }}
-                        {{ field.errors }}
-                    </label>
-                {% endfor %}
-                <button class="driver-primary-action" type="submit">Закрыть смену</button>
+                <div class="driver-shift-titlebar">
+                    <h2>Смена</h2>
+                    <button class="driver-shift-update" type="button" data-driver-shift-update>Обновить</button>
+                </div>
+                <div class="driver-shift-section">
+                    <div class="driver-shift-section-head"><span>Показатели техники</span></div>
+                    <div class="driver-shift-metrics">
+                        <label class="driver-shift-field">
+                            <span>Топливо</span>
+                            <span class="driver-shift-metric-value">{{ close_form.end_fuel }}<em>л</em></span>
+                        </label>
+                        <label class="driver-shift-field">
+                            <span>Пробег</span>
+                            <span class="driver-shift-metric-value">{{ close_form.end_mileage }}<em>км</em></span>
+                        </label>
+                        <label class="driver-shift-field">
+                            <span>Моточасы</span>
+                            <span class="driver-shift-metric-value">{{ close_form.end_engine_hours }}<em>м/ч</em></span>
+                        </label>
+                    </div>
+                </div>
+                <div class="driver-shift-section">
+                    <div class="driver-shift-section-head"><span>Итог смены</span><b>Сейчас</b></div>
+                    <div class="driver-shift-result-grid">
+                        <div class="driver-shift-result-cell"><span>План</span><strong>{% if shift_plan_has_plan %}{{ shift_plan_percent }}%{% else %}{{ shift_plan_short_label }}{% endif %}</strong></div>
+                        <div class="driver-shift-result-cell"><span>Рейсы</span><strong>{{ shift_trip_count }} шт.</strong></div>
+                        <div class="driver-shift-result-cell"><span>Самосвал</span><strong>{{ current_truck.garage_number|default:"—" }}</strong></div>
+                        <div class="driver-shift-result-cell"><span>Состояние</span><strong>{% if active_trip %}В пути{% else %}Свободен{% endif %}</strong></div>
+                    </div>
+                </div>
+                <div class="driver-shift-actions">
+                    <button class="driver-shift-submit" type="submit" data-driver-shift-close-button style="--driver-shift-hold: 0%;">Завершить смену</button>
+                    <button class="driver-shift-logout" type="button" data-driver-shift-logout data-driver-logout-url="{% url 'logout' %}" style="--driver-logout-hold: 0%;">Выйти</button>
+                </div>
             </form>
         {% else %}
             <div class="driver-section-title">
@@ -2306,6 +2549,114 @@ window.bindDriverMobileShell = function () {
         renderCountdown();
     }
     bindAssignmentCountdown();
+    function bindDriverShiftControls() {
+        var form = shell.querySelector("[data-driver-shift-close-form]");
+        var closeButton = shell.querySelector("[data-driver-shift-close-button]");
+        var updateButton = shell.querySelector("[data-driver-shift-update]");
+        var logoutButton = shell.querySelector("[data-driver-shift-logout]");
+        var holdStartedAt = 0;
+        var holdFrame = null;
+        var holdMs = 2000;
+
+        function resetHold() {
+            holdStartedAt = 0;
+            if (holdFrame) {
+                window.cancelAnimationFrame(holdFrame);
+                holdFrame = null;
+            }
+            if (closeButton) {
+                closeButton.style.setProperty("--driver-shift-hold", "0%");
+            }
+        }
+
+        function drawHold() {
+            if (!holdStartedAt || !closeButton || !form) {
+                return;
+            }
+            var progress = Math.min(100, ((Date.now() - holdStartedAt) / holdMs) * 100);
+            closeButton.style.setProperty("--driver-shift-hold", progress + "%");
+            if (progress >= 100) {
+                form.dataset.driverShiftConfirmed = "true";
+                form.requestSubmit(closeButton);
+                return;
+            }
+            holdFrame = window.requestAnimationFrame(drawHold);
+        }
+
+        if (form && closeButton && closeButton.dataset.driverShiftBound !== "true") {
+            closeButton.dataset.driverShiftBound = "true";
+            closeButton.addEventListener("pointerdown", function (event) {
+                event.preventDefault();
+                holdStartedAt = Date.now();
+                holdFrame = window.requestAnimationFrame(drawHold);
+            });
+            ["pointerup", "pointercancel", "pointerleave"].forEach(function (eventName) {
+                closeButton.addEventListener(eventName, resetHold);
+            });
+            closeButton.addEventListener("click", function (event) {
+                if (form.dataset.driverShiftConfirmed !== "true") {
+                    event.preventDefault();
+                }
+            });
+            form.addEventListener("submit", function (event) {
+                if (form.dataset.driverShiftConfirmed !== "true") {
+                    event.preventDefault();
+                }
+            });
+        }
+
+        if (updateButton && updateButton.dataset.driverShiftUpdateBound !== "true") {
+            updateButton.dataset.driverShiftUpdateBound = "true";
+            updateButton.addEventListener("click", function () {
+                updateButton.disabled = true;
+                updateButton.textContent = "Проверка";
+                var updateRequest = navigator.serviceWorker
+                    ? navigator.serviceWorker.getRegistration("/driver/").then(function (registration) {
+                        return registration ? registration.update() : null;
+                    })
+                    : Promise.resolve();
+                updateRequest.finally(function () {
+                    updateButton.textContent = "Обновить";
+                    updateButton.disabled = false;
+                });
+            });
+        }
+
+        if (logoutButton && logoutButton.dataset.driverLogoutBound !== "true") {
+            logoutButton.dataset.driverLogoutBound = "true";
+            var logoutStartedAt = 0;
+            var logoutFrame = null;
+            function resetLogoutHold() {
+                logoutStartedAt = 0;
+                if (logoutFrame) {
+                    window.cancelAnimationFrame(logoutFrame);
+                    logoutFrame = null;
+                }
+                logoutButton.style.setProperty("--driver-logout-hold", "0%");
+            }
+            function drawLogoutHold() {
+                if (!logoutStartedAt) {
+                    return;
+                }
+                var progress = Math.min(100, ((Date.now() - logoutStartedAt) / holdMs) * 100);
+                logoutButton.style.setProperty("--driver-logout-hold", progress + "%");
+                if (progress >= 100) {
+                    window.location.href = logoutButton.dataset.driverLogoutUrl;
+                    return;
+                }
+                logoutFrame = window.requestAnimationFrame(drawLogoutHold);
+            }
+            logoutButton.addEventListener("pointerdown", function (event) {
+                event.preventDefault();
+                logoutStartedAt = Date.now();
+                logoutFrame = window.requestAnimationFrame(drawLogoutHold);
+            });
+            ["pointerup", "pointercancel", "pointerleave"].forEach(function (eventName) {
+                logoutButton.addEventListener(eventName, resetLogoutHold);
+            });
+        }
+    }
+    bindDriverShiftControls();
     function isTextEditable(target) {
         return Boolean(target && target.closest && target.closest("input, textarea, select, option, [contenteditable='true'], [contenteditable='']"));
     }
@@ -2836,7 +3187,7 @@ window.bindDriverMobileShell = function () {
         if (!("serviceWorker" in navigator)) {
             return;
         }
-        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v68' }}";
+        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v69' }}";
         var updateModal = document.querySelector("[data-driver-pwa-update-modal]");
         var updateBadge = document.querySelector("[data-driver-pwa-update-badge]");
         var updateTarget = document.querySelector("[data-driver-pwa-update-nav-target]");
