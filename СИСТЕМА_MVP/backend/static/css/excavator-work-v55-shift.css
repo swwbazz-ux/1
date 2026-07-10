@@ -2049,3 +2049,169 @@ body.excavator-operator-screen .eo-shell {
         font-size: 17px !important;
     }
 }
+
+/* v86: keep large shift fact values and over-100 dashboard progress readable. */
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-grid .eo-shift-result-fact {
+    display: grid !important;
+    grid-template-rows: auto minmax(0, 1fr) auto !important;
+    align-content: center !important;
+    align-items: center !important;
+    justify-items: start !important;
+    gap: clamp(1px, .28dvh, 3px) !important;
+    overflow: hidden !important;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-grid .eo-shift-result-fact span,
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-grid .eo-shift-result-fact strong,
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-grid .eo-shift-result-fact em {
+    max-width: 100% !important;
+    min-width: 0 !important;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-grid .eo-shift-result-fact span {
+    margin: 0 !important;
+    align-self: end !important;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-grid .eo-shift-result-fact strong {
+    align-self: center !important;
+    margin: 0 !important;
+    overflow: visible !important;
+    color: #f6fbfd !important;
+    font-size: clamp(20px, 5.25vw, 24px) !important;
+    font-variant-numeric: tabular-nums !important;
+    letter-spacing: 0 !important;
+    line-height: .95 !important;
+    text-overflow: clip !important;
+    white-space: nowrap !important;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-grid .eo-shift-result-fact em {
+    align-self: start !important;
+    margin: 0 !important;
+    color: rgba(203, 214, 220, .76) !important;
+    font-size: clamp(10.5px, 2.6vw, 12px) !important;
+    line-height: 1.05 !important;
+    white-space: nowrap !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-plan-ring:not(.is-plan-missing) {
+    --eo-dashboard-loop-progress: var(--eo-dashboard-progress, 0%);
+    --eo-dashboard-loop-color: rgba(74, 222, 128, 1);
+    --eo-dashboard-loop-glow: rgba(74, 222, 128, .48);
+    --eo-dashboard-complete-color: rgba(74, 222, 128, .68);
+    --eo-dashboard-track-color: rgba(54, 82, 91, .72);
+    position: relative !important;
+    isolation: isolate !important;
+    overflow: visible !important;
+    background:
+        radial-gradient(circle at center, #061014 0 51%, transparent 52%),
+        conic-gradient(from -90deg, var(--eo-dashboard-loop-color) 0 var(--eo-dashboard-loop-progress, 0%), var(--eo-dashboard-track-color) var(--eo-dashboard-loop-progress, 0%) 100%) !important;
+    box-shadow:
+        inset 0 0 20px rgba(88, 223, 82, .1),
+        0 0 18px var(--eo-dashboard-loop-glow),
+        0 10px 26px rgba(0, 0, 0, .34) !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-plan-ring.is-progress-overrun:not(.is-plan-missing) {
+    background:
+        radial-gradient(circle at center, #061014 0 51%, transparent 52%),
+        conic-gradient(from -90deg, var(--eo-dashboard-loop-color) 0 var(--eo-dashboard-loop-progress, 0%), rgba(0, 0, 0, 0) var(--eo-dashboard-loop-progress, 0%) 100%),
+        conic-gradient(from -90deg, var(--eo-dashboard-complete-color) 0 100%, rgba(0, 0, 0, 0) 0 100%),
+        conic-gradient(from -90deg, var(--eo-dashboard-track-color) 0 100%) !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-plan-ring[data-progress-phase="amber"] {
+    --eo-dashboard-loop-color: rgba(250, 204, 21, 1);
+    --eo-dashboard-loop-glow: rgba(250, 204, 21, .44);
+    --eo-dashboard-complete-color: rgba(74, 222, 128, .7);
+}
+
+body.excavator-operator-screen .eo-dashboard-plan-ring[data-progress-phase="cyan"] {
+    --eo-dashboard-loop-color: rgba(56, 189, 248, 1);
+    --eo-dashboard-loop-glow: rgba(56, 189, 248, .4);
+    --eo-dashboard-complete-color: rgba(250, 204, 21, .58);
+}
+
+body.excavator-operator-screen .eo-dashboard-plan-ring[data-progress-phase="orange"] {
+    --eo-dashboard-loop-color: rgba(251, 146, 60, 1);
+    --eo-dashboard-loop-glow: rgba(251, 146, 60, .44);
+    --eo-dashboard-complete-color: rgba(56, 189, 248, .46);
+}
+
+body.excavator-operator-screen .eo-dashboard-plan-ring::after {
+    z-index: 1 !important;
+    inset: clamp(7px, 1.85vw, 10px) !important;
+    border-color: rgba(180, 200, 210, .24) !important;
+    pointer-events: none !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-plan-ring > span:first-child {
+    position: relative !important;
+    z-index: 3 !important;
+    display: block !important;
+    max-width: calc(100% - clamp(15px, 3.8vw, 20px)) !important;
+    overflow: visible !important;
+    color: #f6fbfd !important;
+    font-size: clamp(17px, 4.25vw, 22px) !important;
+    font-variant-numeric: tabular-nums !important;
+    letter-spacing: 0 !important;
+    line-height: .92 !important;
+    text-align: center !important;
+    text-shadow: 0 0 12px rgba(255, 255, 255, .16) !important;
+    white-space: nowrap !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-plan-ring.is-progress-wide > span:first-child {
+    font-size: clamp(14.5px, 3.65vw, 18px) !important;
+    line-height: .9 !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-plan-ring.is-progress-extra-wide > span:first-child {
+    font-size: clamp(13px, 3.25vw, 16px) !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-progress-loop {
+    position: absolute !important;
+    right: clamp(-5px, -1vw, -2px) !important;
+    bottom: clamp(-3px, -.7vw, -1px) !important;
+    z-index: 4 !important;
+    min-width: clamp(20px, 5vw, 25px) !important;
+    padding: 2px 5px !important;
+    border: 1px solid rgba(250, 204, 21, .48) !important;
+    border-radius: 999px !important;
+    background: rgba(7, 15, 18, .96) !important;
+    box-shadow: 0 0 11px var(--eo-dashboard-loop-glow), 0 5px 11px rgba(0, 0, 0, .38) !important;
+    color: var(--eo-dashboard-loop-color) !important;
+    font-size: clamp(8px, 2vw, 10px) !important;
+    font-style: normal !important;
+    font-weight: 900 !important;
+    line-height: 1 !important;
+    letter-spacing: 0 !important;
+    text-align: center !important;
+    white-space: nowrap !important;
+}
+
+@media (max-width: 370px) {
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-grid .eo-shift-result-fact strong {
+        font-size: 19px !important;
+    }
+
+    body.excavator-operator-screen .eo-dashboard-plan-ring.is-progress-wide > span:first-child {
+        font-size: 13.5px !important;
+    }
+}
+
+@media (min-width: 768px) {
+    body.excavator-operator-screen .eo-dashboard-plan-ring > span:first-child {
+        font-size: clamp(18px, 1.15vw, 23px) !important;
+    }
+
+    body.excavator-operator-screen .eo-dashboard-plan-ring.is-progress-wide > span:first-child {
+        font-size: clamp(15px, .92vw, 18px) !important;
+    }
+
+    body.excavator-operator-screen .eo-dashboard-progress-loop {
+        font-size: clamp(8px, .58vw, 10px) !important;
+    }
+}

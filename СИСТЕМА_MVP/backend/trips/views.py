@@ -172,6 +172,30 @@ def plan_progress_status_key(percent, plan_status=''):
     return 'good'
 
 
+def dashboard_progress_visual_context(percent):
+    value = format_progress_percent(percent)
+    if value is None:
+        value = 0
+    completed_loops = value // 100 if value >= 100 else 0
+    loop_progress = value if value < 100 else value % 100
+    if value < 100:
+        phase = 'green'
+    elif value < 200:
+        phase = 'amber'
+    elif value < 300:
+        phase = 'cyan'
+    else:
+        phase = 'orange'
+    return {
+        'percent': value,
+        'loop_progress': loop_progress,
+        'completed_loops': completed_loops,
+        'phase': phase,
+        'is_overrun': value >= 100,
+        'text_class': 'is-progress-extra-wide' if value >= 1000 else 'is-progress-wide' if value >= 100 else '',
+    }
+
+
 def dispatcher_empty_snapshot_progress(shift=None, equipment=None):
     equipment = equipment or getattr(shift, 'equipment', None)
     return {
@@ -533,7 +557,7 @@ EXCAVATOR_MANIFEST = {
 }
 
 EXCAVATOR_SERVICE_WORKER_JS = r"""
-const CACHE_NAME = "excavator-mobile-shell-v85";
+const CACHE_NAME = "excavator-mobile-shell-v86";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const CORE_ASSETS = [
@@ -3442,6 +3466,7 @@ def excavator_work_view(request):
     shift_progress = calculate_open_shift_progress(open_shift)
     shift_plan = plan_progress_display_context(shift_progress)
     shift_plan_percent = shift_plan['percent']
+    shift_plan_visual = dashboard_progress_visual_context(shift_plan_percent if shift_plan['has_plan'] else 0)
 
     for card in truck_cards:
         truck_progress = None
@@ -3627,6 +3652,7 @@ def excavator_work_view(request):
             'shift_time_label': '07:00-19:00' if not open_shift or open_shift.shift_type == 'day' else '19:00-07:00',
             'excavator_label': excavator_operator_label(current_excavator),
             'shift_plan_percent': shift_plan_percent,
+            'shift_plan_visual': shift_plan_visual,
             'shift_plan_status': shift_plan['status'],
             'shift_plan_status_label': shift_plan['status_label'],
             'shift_plan_short_label': shift_plan['short_label'],

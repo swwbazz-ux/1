@@ -5,9 +5,9 @@
 {% block body_class %}excavator-operator-screen{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v85">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v85">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v85">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v86">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v86">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v86">
 <meta name="theme-color" content="#030708">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Погрузка">
@@ -101,14 +101,14 @@
                     <b>Сейчас</b>
                 </div>
                 <div class="eo-shift-result-grid">
-                    <div data-plan-status="{{ shift_plan_status|default:'no_plan_group' }}"><span>План</span><strong>{% if shift_plan_has_plan %}{{ shift_plan_percent }}%{% else %}{{ shift_plan_short_label }}{% endif %}</strong></div>
-                    <div>
+                    <div class="eo-shift-result-cell eo-shift-result-plan" data-plan-status="{{ shift_plan_status|default:'no_plan_group' }}"><span>План</span><strong>{% if shift_plan_has_plan %}{{ shift_plan_percent }}%{% else %}{{ shift_plan_short_label }}{% endif %}</strong></div>
+                    <div class="eo-shift-result-cell eo-shift-result-fact">
                         <span>{{ shift_fact_label }}</span>
                         <strong>{{ shift_fact_value }}</strong>
                         {% if shift_fact_meta %}<em>{{ shift_fact_meta }}</em>{% endif %}
                     </div>
-                    <div><span>Назначено</span><strong>{{ truck_cards|length }} шт.</strong></div>
-                    <div><span>В пути</span><strong>{{ active_trips_count }} шт.</strong></div>
+                    <div class="eo-shift-result-cell"><span>Назначено</span><strong>{{ truck_cards|length }} шт.</strong></div>
+                    <div class="eo-shift-result-cell"><span>В пути</span><strong>{{ active_trips_count }} шт.</strong></div>
                 </div>
             </div>
 
@@ -172,8 +172,9 @@
                         <strong>{{ access.employee.full_name|default:"-" }}</strong>
                     </div>
                     <div class="eo-dashboard-plan-widget">
-                        <div class="eo-dashboard-plan-ring{% if not shift_plan_has_plan %} is-plan-missing{% endif %}" style="--eo-dashboard-progress: {% if shift_plan_has_plan %}{{ shift_plan_percent }}{% else %}0{% endif %}%;" role="img" aria-label="{% if shift_plan_has_plan %}Выполнение нормы {{ shift_plan_percent }}%{% else %}{{ shift_plan_status_label }}{% endif %}" data-plan-status="{{ shift_plan_status|default:'no_plan_group' }}">
+                        <div class="eo-dashboard-plan-ring {{ shift_plan_visual.text_class }}{% if shift_plan_visual.is_overrun %} is-progress-overrun{% endif %}{% if not shift_plan_has_plan %} is-plan-missing{% endif %}" style="--eo-dashboard-progress: {% if shift_plan_has_plan %}{{ shift_plan_percent }}{% else %}0{% endif %}%; --eo-dashboard-loop-progress: {{ shift_plan_visual.loop_progress }}%;" role="img" aria-label="{% if shift_plan_has_plan %}Выполнение нормы {{ shift_plan_percent }}%{% else %}{{ shift_plan_status_label }}{% endif %}" data-plan-status="{{ shift_plan_status|default:'no_plan_group' }}" data-progress-percent="{% if shift_plan_has_plan %}{{ shift_plan_percent }}{% else %}0{% endif %}" data-progress-loops="{{ shift_plan_visual.completed_loops }}" data-progress-phase="{{ shift_plan_visual.phase }}">
                             <span>{% if shift_plan_has_plan %}{{ shift_plan_percent }}{% else %}0{% endif %}%</span>
+                            {% if shift_plan_visual.is_overrun %}<b class="eo-dashboard-progress-loop">×{{ shift_plan_visual.completed_loops }}</b>{% endif %}
                         </div>
                     </div>
                 </div>
@@ -373,7 +374,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v85";
+var excavatorShellVersion = "excavator-mobile-shell-v86";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var excavatorRelevantEvents = {
     assignment_changed: true,
