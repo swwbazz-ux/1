@@ -637,7 +637,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/static/css/excavator-work-v55-shift.css')
         self.assertContains(response, '/excavator-sw.js')
         self.assertContains(response, 'scope: "/excavator/"')
-        self.assertContains(response, 'excavator-mobile-shell-v87')
+        self.assertContains(response, 'excavator-mobile-shell-v88')
         self.assertContains(response, 'Простои')
         self.assertNotContains(response, 'Отпустить сюда')
         self.assertContains(response, 'resolveExcavatorUpdateVersion')
@@ -1202,6 +1202,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.context['active_downtime_state']['color_group'], 'yellow')
         self.assertContains(response, 'class="eo-downtime-card status-yellow is-active"')
         self.assertContains(response, 'data-eo-downtime-state="waiting"')
+        self.assertContains(response, 'class="eo-hold-action status-yellow is-selected"')
 
     def test_excavator_work_shift_button_shows_start_style_without_open_shift(self):
         EmployeeShift.objects.filter(employee=self.operator, closed_at__isnull=True).update(closed_at=timezone.now())
@@ -1235,7 +1236,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/excavator/')
-        self.assertIn('excavator-mobile-shell-v87', script)
+        self.assertIn('excavator-mobile-shell-v88', script)
         self.assertIn(reverse('excavator_work'), script)
         self.assertIn(reverse('excavator_manifest'), script)
         self.assertIn('/static/js/realtime-client.js', script)
