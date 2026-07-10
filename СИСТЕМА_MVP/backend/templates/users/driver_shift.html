@@ -726,6 +726,10 @@ body.driver-mobile-screen .driver-work-dial-core {
     text-align: center;
 }
 
+body.driver-mobile-screen .driver-work-dial-core.has-multiline-label {
+    gap: 8px;
+}
+
 body.driver-mobile-screen .driver-work-percent {
     display: grid;
     grid-template-columns: 1fr auto 1fr;
@@ -756,23 +760,40 @@ body.driver-mobile-screen .driver-work-dial.is-plan-missing .driver-work-percent
 }
 
 body.driver-mobile-screen .driver-work-label {
-    display: block;
+    display: grid;
+    justify-items: center;
     justify-self: center;
     min-width: 0;
-    width: 78%;
-    max-width: 78%;
-    max-height: 1.84em;
+    width: 88%;
+    max-width: 88%;
     color: currentColor;
     text-transform: uppercase;
-    font-size: clamp(42px, 11vw, 78px);
-    line-height: 0.92;
+    font-size: 52px;
+    line-height: 0.9;
     font-weight: 900;
     white-space: normal;
     overflow: hidden;
-    overflow-wrap: anywhere;
-    text-wrap: balance;
     text-align: center;
     text-shadow: 0 0 24px rgba(140,255,46,0.26);
+}
+
+body.driver-mobile-screen .driver-work-label-line {
+    display: block;
+    min-width: 0;
+    max-width: 100%;
+    white-space: nowrap;
+}
+
+body.driver-mobile-screen .driver-work-label.is-single-medium {
+    font-size: 42px;
+}
+
+body.driver-mobile-screen .driver-work-label.is-two-line {
+    font-size: 36px;
+}
+
+body.driver-mobile-screen .driver-work-label.is-three-line {
+    font-size: 30px;
 }
 
 body.driver-mobile-screen .driver-work-note {
@@ -866,14 +887,11 @@ body.driver-mobile-screen .driver-work-dial-button.is-pending .driver-work-perce
 }
 
 body.driver-mobile-screen .driver-work-dial-button.is-pending .driver-work-label {
-    width: 100%;
-    max-width: 78%;
+    width: 88%;
+    max-width: 88%;
     justify-self: center;
-    font-size: clamp(24px, 4.5vw, 42px);
     line-height: 1;
     text-align: center;
-    overflow: visible;
-    text-overflow: clip;
 }
 
 body.driver-mobile-screen .driver-work-dial-button.is-pending .driver-work-progress {
@@ -1602,7 +1620,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
 {% endblock %}
 
 {% block body %}
-<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v55' }}">
+<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v56' }}">
     {% if messages %}
         <div class="driver-messages">
             {% for message in messages %}
@@ -1946,22 +1964,104 @@ window.bindDriverMobileShell = function () {
             label.classList.add("is-long");
         }
     });
+    function splitDriverDialLabel(text) {
+        var words = String(text || "").trim().replace(/\s+/g, " ").split(" ").filter(Boolean);
+        if (words.length <= 3) {
+            return words;
+        }
+        var bestLines = [words.slice(0, 1).join(" "), words.slice(1, -1).join(" "), words.slice(-1).join(" ")];
+        var bestScore = Infinity;
+        for (var firstBreak = 1; firstBreak <= words.length - 2; firstBreak += 1) {
+            for (var secondBreak = firstBreak + 1; secondBreak <= words.length - 1; secondBreak += 1) {
+                var lines = [
+                    words.slice(0, firstBreak).join(" "),
+                    words.slice(firstBreak, secondBreak).join(" "),
+                    words.slice(secondBreak).join(" ")
+                ];
+                var lengths = lines.map(function (line) { return line.length; });
+                var longest = Math.max.apply(Math, lengths);
+                var shortest = Math.min.apply(Math, lengths);
+                var score = (longest * 3) + (longest - shortest);
+                if (score < bestScore) {
+                    bestScore = score;
+                    bestLines = lines;
+                }
+            }
+        }
+        return bestLines;
+    }
+    function preferredDriverDialFontSize(coreWidth, lineCount, textLength) {
+        if (lineCount >= 3) {
+            return Math.min(34, Math.max(26, coreWidth * 0.13));
+        }
+        if (lineCount === 2) {
+            return Math.min(42, Math.max(30, coreWidth * 0.15));
+        }
+        if (textLength > 5) {
+            return Math.min(48, Math.max(36, coreWidth * 0.17));
+        }
+        return Math.min(54, Math.max(44, coreWidth * 0.2));
+    }
+    function minimumDriverDialFontSize(lineCount, textLength) {
+        if (lineCount >= 3) {
+            return 23;
+        }
+        if (lineCount === 2) {
+            return 26;
+        }
+        return textLength > 5 ? 32 : 40;
+    }
+    function renderDriverDialLabel(label, text) {
+        var lines = splitDriverDialLabel(text);
+        label.replaceChildren();
+        lines.forEach(function (line) {
+            var lineNode = document.createElement("span");
+            lineNode.className = "driver-work-label-line";
+            lineNode.textContent = line;
+            label.appendChild(lineNode);
+        });
+        label.dataset.driverDialRaw = text;
+        label.setAttribute("aria-label", text);
+        label.classList.remove("is-single-medium", "is-two-line", "is-three-line");
+        if (lines.length >= 3) {
+            label.classList.add("is-three-line");
+        } else if (lines.length === 2) {
+            label.classList.add("is-two-line");
+        } else if (text.replace(/\s+/g, "").length > 5) {
+            label.classList.add("is-single-medium");
+        }
+        return lines;
+    }
     function fitDriverDialLabel(label) {
         var core = label.closest(".driver-work-dial-core");
-        if (!core || !label.textContent.trim()) {
+        var rawText = label.dataset.driverDialRaw || label.textContent.trim().replace(/\s+/g, " ");
+        if (!core || !rawText) {
             return;
         }
         label.style.removeProperty("font-size");
-        var maxSize = parseFloat(window.getComputedStyle(label).fontSize) || 78;
-        var minSize = Math.min(maxSize, Math.max(10, core.clientWidth * 0.035));
+        var lines = renderDriverDialLabel(label, rawText);
+        var textLength = rawText.replace(/\s+/g, "").length;
+        core.classList.toggle("has-multiline-label", lines.length > 1);
+        var maxSize = preferredDriverDialFontSize(core.clientWidth, lines.length, textLength);
+        var minSize = Math.min(maxSize, minimumDriverDialFontSize(lines.length, textLength));
         var low = minSize;
         var high = maxSize;
         var best = minSize;
         function fits(size) {
             label.style.fontSize = size.toFixed(2) + "px";
-            var lineHeight = parseFloat(window.getComputedStyle(label).lineHeight) || (size * 0.92);
-            return label.scrollWidth <= label.clientWidth + 1
-                && label.scrollHeight <= (lineHeight * 2) + 2;
+            var percent = core.querySelector(".driver-work-percent");
+            var note = core.querySelector(".driver-work-note");
+            var coreStyle = window.getComputedStyle(core);
+            var gap = parseFloat(coreStyle.rowGap || coreStyle.gap) || 0;
+            var availableHeight = core.clientHeight
+                - (percent ? percent.offsetHeight : 0)
+                - (note ? note.offsetHeight : 0)
+                - (gap * 2)
+                - 4;
+            var linesFit = Array.prototype.every.call(label.children, function (lineNode) {
+                return lineNode.scrollWidth <= label.clientWidth + 1;
+            });
+            return linesFit && label.scrollHeight <= availableHeight;
         }
         if (fits(high)) {
             best = high;
@@ -2287,6 +2387,7 @@ window.bindDriverMobileShell = function () {
             var dialLabel = holdButton.querySelector("[data-driver-dial-label]");
             if (dialLabel) {
                 dialLabel.textContent = holdButton.dataset.driverPendingLabel || "ОТПРАВКА";
+                delete dialLabel.dataset.driverDialRaw;
                 scheduleDriverDialLabelFit();
             }
             holdButton.disabled = true;
@@ -2354,7 +2455,7 @@ window.bindDriverMobileShell = function () {
         if (!("serviceWorker" in navigator)) {
             return;
         }
-        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v55' }}";
+        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v56' }}";
         var updateModal = document.querySelector("[data-driver-pwa-update-modal]");
         var updateBadge = document.querySelector("[data-driver-pwa-update-badge]");
         var updateTarget = document.querySelector("[data-driver-pwa-update-nav-target]");
