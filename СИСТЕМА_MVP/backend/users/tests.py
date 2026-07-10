@@ -1080,6 +1080,30 @@ class AccessLoginTests(TestCase):
         self.assertNotContains(create_response, 'Сотрудник создан.')
         self.assertContains(create_response, 'Первичный пинкод:')
 
+        save_response = self.client.post(
+            f'/system-admin/employees/{employee.id}/',
+            {
+                'full_name': employee.full_name,
+                'position': 'Водитель',
+                'personnel_number': employee.personnel_number,
+                'phone': employee.phone,
+                'status': employee.status,
+                'comment': 'Данные дополнены',
+                'hired_at': '',
+                'dismissed_at': '',
+                'rotation': '',
+                'residence_text': '',
+                'hr_data': '',
+            },
+            follow=True,
+            HTTP_HOST='localhost',
+        )
+        employee.refresh_from_db()
+
+        self.assertEqual(save_response.status_code, 200)
+        self.assertEqual(employee.comment, 'Данные дополнены')
+        self.assertNotContains(save_response, 'Карточка сотрудника сохранена.')
+
         block_response = self.client.post(
             f'/system-admin/accesses/{access.id}/block/',
             {'reason': 'Проверка блокировки'},
