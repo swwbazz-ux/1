@@ -637,7 +637,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/static/css/excavator-work-v55-shift.css')
         self.assertContains(response, '/excavator-sw.js')
         self.assertContains(response, 'scope: "/excavator/"')
-        self.assertContains(response, 'excavator-mobile-shell-v95')
+        self.assertContains(response, 'excavator-mobile-shell-v96')
         self.assertContains(response, 'data.work_context_changed && data.active_downtime_reason')
         self.assertContains(response, '? "downtime"')
         self.assertContains(response, 'Простои')
@@ -1558,7 +1558,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/excavator/')
-        self.assertIn('excavator-mobile-shell-v95', script)
+        self.assertIn('excavator-mobile-shell-v96', script)
         self.assertIn(reverse('excavator_work'), script)
         self.assertIn(reverse('excavator_manifest'), script)
         self.assertIn('/static/js/realtime-client.js', script)
@@ -1840,6 +1840,25 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
 
     def test_truck_loaded_starts_waiting_when_last_available_truck_is_sent(self):
         response = self.post_truck_loaded(client_action_id='last-loadable-truck')
+
+        self.assertEqual(response.status_code, 200)
+        waiting = DowntimeEvent.objects.get(
+            equipment=self.excavator,
+            reason__name='Ожидание самосвалов',
+            ended_at__isnull=True,
+        )
+        self.assertEqual(waiting.employee, self.operator)
+        self.assertEqual(waiting.comment, 'Автоматически по производственному событию')
+
+    def test_excavator_work_restores_waiting_when_no_truck_is_loadable(self):
+        self.post_truck_loaded(client_action_id='waiting-before-refresh')
+        DowntimeEvent.objects.filter(
+            equipment=self.excavator,
+            reason__name='Ожидание самосвалов',
+            ended_at__isnull=True,
+        ).delete()
+
+        response = self.client.get(reverse('excavator_work'))
 
         self.assertEqual(response.status_code, 200)
         waiting = DowntimeEvent.objects.get(

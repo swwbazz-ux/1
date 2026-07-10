@@ -537,7 +537,7 @@ EXCAVATOR_MANIFEST = {
 }
 
 EXCAVATOR_SERVICE_WORKER_JS = r"""
-const CACHE_NAME = "excavator-mobile-shell-v95";
+const CACHE_NAME = "excavator-mobile-shell-v96";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const CORE_ASSETS = [
@@ -3383,7 +3383,11 @@ def excavator_work_view(request):
 
     open_shift = get_excavator_open_shift(access.employee)
     current_excavator = open_shift.equipment if open_shift else None
-    reconcile_excavator_waiting_for_trucks(current_excavator)
+    reconcile_excavator_waiting_for_trucks(
+        current_excavator,
+        access.employee,
+        start_when_empty=bool(open_shift),
+    )
     shift_start_excavator = current_excavator or get_excavator_for_shift_start(access.employee, {})
     previous_equipment_shift = None if open_shift else get_previous_closed_equipment_shift(shift_start_excavator)
 
