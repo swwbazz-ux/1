@@ -19,7 +19,8 @@ from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_POST
 from openpyxl import Workbook
 
-from assignments.models import AssignmentStatus, ExcavatorPlacement, HaulAssignment
+from assignments.models import AssignmentStatus, ExcavatorPlacement, HaulAssignment, HaulAssignmentAction
+from assignments.services import apply_pending_haul_assignment, reconcile_due_haul_assignments
 from core.models import OperationalStateEvent, bump_operational_state
 from downtimes.models import DowntimeEvent, DowntimeReason
 from references.models import Dormitory, DormitorySection, DumpPoint, Equipment, EquipmentState, EquipmentType, RockType
@@ -110,7 +111,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v67'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v68'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -1727,10 +1728,15 @@ def driver_compact_context_value(prefix, compact_prefix, value):
 
 
 def driver_assignment_countdown_label(assignment):
-    if not assignment or not assignment.assigned_at:
+    if not assignment:
         return '05:00'
-    elapsed_seconds = max(0, int((timezone.now() - assignment.assigned_at).total_seconds()))
-    remaining_seconds = max(0, (5 * 60) - elapsed_seconds)
+    if assignment.effective_at:
+        remaining_seconds = max(0, int((assignment.effective_at - timezone.now()).total_seconds()))
+    elif assignment.assigned_at:
+        elapsed_seconds = max(0, int((timezone.now() - assignment.assigned_at).total_seconds()))
+        remaining_seconds = max(0, (5 * 60) - elapsed_seconds)
+    else:
+        remaining_seconds = 5 * 60
     minutes, seconds = divmod(remaining_seconds, 60)
     return f'{minutes:02d}:{seconds:02d}'
 
@@ -1768,8 +1774,10 @@ def driver_shift_view(request):
 
     open_shift = EmployeeShift.objects.filter(employee=access.employee, closed_at__isnull=True).order_by('-opened_at').first()
     current_truck = open_shift.equipment if open_shift else None
+    if current_truck:
+        reconcile_due_haul_assignments(truck_id=current_truck.id)
     current_assignment = None
-    pending_reassignment = None
+    pending_assignment_action = None
     active_trip = None
     active_downtime = None
     shift_trips = []
@@ -1792,7 +1800,8 @@ def driver_shift_view(request):
             (assignment for assignment in open_assignments if assignment.status == AssignmentStatus.PENDING),
             None,
         )
-        current_assignment = accepted_assignment or pending_assignment
+        current_assignment = accepted_assignment
+        pending_assignment_action = pending_assignment
         active_trip = Trip.objects.filter(
             truck=current_truck,
             status__in=OPEN_TRIP_STATUSES,
@@ -1880,14 +1889,6 @@ def driver_shift_view(request):
             .order_by('-created_at')
             .first()
         )
-    if current_truck:
-        for assignment in open_assignments:
-            if assignment.status != AssignmentStatus.PENDING:
-                continue
-            if not driver_work_excavator or assignment.excavator_id == getattr(driver_work_excavator, 'id', None):
-                continue
-            pending_reassignment = assignment
-            break
     driver_header_label = (
         f'Самосвал {driver_equipment_number(current_truck)} · {driver_employee_short_name(access.employee)}'
         if current_truck
@@ -1909,11 +1910,21 @@ def driver_shift_view(request):
     driver_dial_label = str(driver_target_label) if active_trip else driver_excavator_short_label(driver_work_excavator)
     driver_dial_note = 'ТОЧКА РАЗГРУЗКИ' if active_trip else 'НА ЗАГРУЗКУ'
     driver_new_assignment_label = ''
-    if pending_reassignment:
+    driver_assignment_action_label = ''
+    driver_assignment_effective_at = ''
+    driver_assignment_countdown = '05:00'
+    if pending_assignment_action:
+        if pending_assignment_action.action == HaulAssignmentAction.RELEASE:
+            action_label = 'НАЗНАЧЕНИЕ СНЯТО'
+        else:
+            action_label = f'ВЫ НАЗНАЧЕНЫ НА {driver_excavator_short_label(pending_assignment_action.excavator)}'
+        driver_assignment_action_label = action_label
+        driver_assignment_countdown = driver_assignment_countdown_label(pending_assignment_action)
         driver_new_assignment_label = (
-            f'{driver_complex_label_for_excavator(pending_reassignment.excavator)} · '
-            f'ПРИНЯТЬ · {driver_assignment_countdown_label(pending_reassignment)}'
+            f'{action_label} · ПРИНЯТЬ · {driver_assignment_countdown}'
         )
+        if pending_assignment_action.effective_at:
+            driver_assignment_effective_at = pending_assignment_action.effective_at.isoformat()
 
     downtime_equipment_type = current_truck.equipment_type if current_truck else None
     downtime_reasons = DowntimeReason.for_workplace('truck_driver', downtime_equipment_type)
@@ -2009,6 +2020,10 @@ def driver_shift_view(request):
             'driver_dial_label': driver_dial_label,
             'driver_dial_note': driver_dial_note,
             'driver_new_assignment_label': driver_new_assignment_label,
+            'driver_assignment_action_label': driver_assignment_action_label,
+            'driver_assignment_effective_at': driver_assignment_effective_at,
+            'driver_assignment_countdown': driver_assignment_countdown,
+            'pending_assignment_action': pending_assignment_action,
             'unload_points': unload_points,
             'active_trip_assigned_dump_point': active_trip_assigned_dump_point,
             'active_trip_actual_dump_point_id': active_trip_actual_dump_point_id,
@@ -2018,6 +2033,38 @@ def driver_shift_view(request):
     )
     response['Cache-Control'] = 'no-cache'
     return response
+
+
+@require_POST
+def driver_accept_assignment_view(request, assignment_id):
+    access_id = request.session.get('employee_access_id')
+    access = (
+        EmployeeAccess.objects.select_related('employee', 'role')
+        .filter(id=access_id, is_active=True, role__code='driver')
+        .first()
+    )
+    if not access:
+        return JsonResponse({'ok': False, 'error': 'Нет доступа к приложению водителя.'}, status=403)
+    open_shift = (
+        EmployeeShift.objects
+        .filter(employee=access.employee, closed_at__isnull=True)
+        .select_related('equipment')
+        .order_by('-opened_at')
+        .first()
+    )
+    if not open_shift or not open_shift.equipment_id:
+        return JsonResponse({'ok': False, 'error': 'Открытая смена водителя не найдена.'}, status=409)
+    assignment = get_object_or_404(
+        HaulAssignment,
+        id=assignment_id,
+        truck_id=open_shift.equipment_id,
+        status=AssignmentStatus.PENDING,
+        ended_at__isnull=True,
+    )
+    applied = apply_pending_haul_assignment(assignment.id)
+    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        return JsonResponse({'ok': bool(applied), 'action': assignment.action})
+    return redirect('driver_work')
 
 
 def driver_close_shift_view(request):

@@ -7,6 +7,11 @@ class AssignmentStatus(models.TextChoices):
     CANCELLED = 'cancelled', 'Отменено'
 
 
+class HaulAssignmentAction(models.TextChoices):
+    ASSIGN = 'assign', 'Назначить'
+    RELEASE = 'release', 'Снять назначение'
+
+
 class EquipmentAssignment(models.Model):
     employee = models.ForeignKey('users.Employee', verbose_name='Сотрудник', on_delete=models.PROTECT)
     equipment = models.ForeignKey('references.Equipment', verbose_name='Техника', on_delete=models.PROTECT)
@@ -30,8 +35,10 @@ class HaulAssignment(models.Model):
     excavator = models.ForeignKey('references.Equipment', verbose_name='Экскаватор', on_delete=models.PROTECT, related_name='excavator_haul_assignments')
     truck = models.ForeignKey('references.Equipment', verbose_name='Самосвал', on_delete=models.PROTECT, related_name='truck_haul_assignments')
     assigned_by = models.ForeignKey('users.Employee', verbose_name='Кто назначил', on_delete=models.PROTECT, null=True, blank=True)
+    action = models.CharField('Действие', max_length=16, choices=HaulAssignmentAction.choices, default=HaulAssignmentAction.ASSIGN)
     status = models.CharField('Статус', max_length=16, choices=AssignmentStatus.choices, default=AssignmentStatus.PENDING)
     assigned_at = models.DateTimeField('Назначено', auto_now_add=True)
+    effective_at = models.DateTimeField('Вступает в силу', null=True, blank=True)
     accepted_at = models.DateTimeField('Принято водителем', null=True, blank=True)
     ended_at = models.DateTimeField('Завершено', null=True, blank=True)
 

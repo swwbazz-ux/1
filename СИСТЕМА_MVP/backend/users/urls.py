@@ -2,6 +2,7 @@ from django.urls import path
 
 from .views import (
     activate_access_view,
+    driver_accept_assignment_view,
     driver_downtime_action_view,
     driver_close_shift_view,
     driver_manifest_view,
@@ -44,6 +45,7 @@ urlpatterns = [
     path('driver/shift/', driver_shift_view, name='driver_shift'),
     path('driver/shift/close/', driver_close_shift_view, name='driver_close_shift'),
     path('driver/downtime/', driver_downtime_action_view, name='driver_downtime_action'),
+    path('driver/assignment/<int:assignment_id>/accept/', driver_accept_assignment_view, name='driver_accept_assignment'),
     path('system-admin/', system_admin_dashboard_view, name='system_admin_dashboard'),
     path('system-admin/reset-shift-test-data/', system_admin_reset_shift_test_data_view, name='system_admin_reset_shift_test_data'),
     path('system-admin/employees/', system_admin_employees_view, name='system_admin_employees'),

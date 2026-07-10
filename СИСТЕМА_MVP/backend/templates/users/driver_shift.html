@@ -1200,15 +1200,32 @@ body.driver-mobile-screen .driver-work-assignment {
 
 body.driver-mobile-screen .driver-work-assignment small {
     min-width: 0;
-    overflow: hidden;
+    overflow: visible;
     color: var(--driver-yellow);
     font: inherit;
-    white-space: nowrap;
+    white-space: normal;
     text-align: center;
-    text-overflow: ellipsis;
+    text-overflow: clip;
 }
 
-body.driver-mobile-screen .driver-work-assignment span {
+body.driver-mobile-screen .driver-work-assignment-copy {
+    display: grid;
+    justify-items: center;
+    gap: 5px;
+}
+
+body.driver-mobile-screen .driver-work-assignment-main {
+    font-size: clamp(14px, 3.8vw, 22px);
+    line-height: 1.05;
+}
+
+body.driver-mobile-screen .driver-work-assignment-meta {
+    color: rgba(255, 238, 164, 0.92);
+    font-size: clamp(12px, 3.2vw, 18px);
+    line-height: 1;
+}
+
+body.driver-mobile-screen .driver-work-assignment > span {
     font-size: 28px;
     line-height: 1;
 }
@@ -1898,7 +1915,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
 {% endblock %}
 
 {% block body %}
-<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v67' }}">
+<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v68' }}">
     {% if messages %}
         <div class="driver-messages">
             {% for message in messages %}
@@ -1980,9 +1997,15 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
         </div>
 
         {% if driver_new_assignment_label %}
-            <button class="driver-work-assignment" type="button">
+            <form id="driver-assignment-action" method="post" action="{% url 'driver_accept_assignment' pending_assignment_action.id %}" hidden>
+                {% csrf_token %}
+            </form>
+            <button class="driver-work-assignment" type="submit" form="driver-assignment-action" data-driver-assignment-deadline="{{ driver_assignment_effective_at }}">
                 <span aria-hidden="true">↻</span>
-                <small>{{ driver_new_assignment_label }}</small>
+                <small class="driver-work-assignment-copy">
+                    <strong class="driver-work-assignment-main">{{ driver_assignment_action_label }}</strong>
+                    <span class="driver-work-assignment-meta">ПРИНЯТЬ · <b data-driver-assignment-countdown>{{ driver_assignment_countdown }}</b></span>
+                </small>
                 <span aria-hidden="true">›</span>
             </button>
         {% endif %}
@@ -2244,6 +2267,45 @@ window.bindDriverMobileShell = function () {
         });
     }
     syncDriverDialProgress();
+    function bindAssignmentCountdown() {
+        var button = shell.querySelector("[data-driver-assignment-deadline]");
+        var output = button ? button.querySelector("[data-driver-assignment-countdown]") : null;
+        if (!button || !output) {
+            return;
+        }
+        var deadline = Date.parse(button.dataset.driverAssignmentDeadline || "");
+        if (!Number.isFinite(deadline)) {
+            return;
+        }
+        function renderCountdown() {
+            if (!button.isConnected) {
+                window.clearInterval(timerId);
+                return;
+            }
+            var remaining = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+            var minutes = Math.floor(remaining / 60);
+            var seconds = remaining % 60;
+            output.textContent = String(minutes).padStart(2, "0") + ":" + String(seconds).padStart(2, "0");
+            if (remaining > 0 || button.dataset.driverDeadlineReached === "true") {
+                return;
+            }
+            button.dataset.driverDeadlineReached = "true";
+            button.disabled = true;
+            window.clearInterval(timerId);
+            if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
+                window.AppRealtime.wake("assignment-deadline");
+            } else {
+                window.setTimeout(function () {
+                    if (button.isConnected) {
+                        window.location.reload();
+                    }
+                }, 1200);
+            }
+        }
+        var timerId = window.setInterval(renderCountdown, 1000);
+        renderCountdown();
+    }
+    bindAssignmentCountdown();
     function isTextEditable(target) {
         return Boolean(target && target.closest && target.closest("input, textarea, select, option, [contenteditable='true'], [contenteditable='']"));
     }
@@ -2774,7 +2836,7 @@ window.bindDriverMobileShell = function () {
         if (!("serviceWorker" in navigator)) {
             return;
         }
-        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v67' }}";
+        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v68' }}";
         var updateModal = document.querySelector("[data-driver-pwa-update-modal]");
         var updateBadge = document.querySelector("[data-driver-pwa-update-badge]");
         var updateTarget = document.querySelector("[data-driver-pwa-update-nav-target]");

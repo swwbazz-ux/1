@@ -13,7 +13,8 @@ from shifts.services import assign_shift_plan_snapshot
 from trips.models import Trip, TripStatus
 from users.models import Employee, EmployeeAccess, Role
 
-from .models import AssignmentStatus, ExcavatorPlacement, HaulAssignment
+from .models import AssignmentStatus, ExcavatorPlacement, HaulAssignment, HaulAssignmentAction
+from .services import apply_pending_haul_assignment, reconcile_due_haul_assignments, schedule_haul_assignment, schedule_haul_release
 from .views import build_excavator_tile, build_truck_tile
 
 
@@ -720,14 +721,86 @@ class MiningMasterAssignmentsViewTests(TestCase):
 
         self.assertRedirects(response, reverse('mining_master_assignments'))
         assignments = HaulAssignment.objects.filter(truck=self.assigned_truck)
-        self.assertEqual(assignments.count(), 2)
-        self.assertFalse(
-            assignments
-            .filter(ended_at__isnull=True)
-            .exclude(status=AssignmentStatus.CANCELLED)
-            .exists()
+        self.assertTrue(assignments.filter(status=AssignmentStatus.ACCEPTED, ended_at__isnull=True).exists())
+        pending_release = assignments.get(
+            action=HaulAssignmentAction.RELEASE,
+            status=AssignmentStatus.PENDING,
+            ended_at__isnull=True,
         )
-        self.assertTrue(all(assignment.ended_at for assignment in assignments))
+        self.assertGreater(pending_release.effective_at, timezone.now())
+
+    def test_reassignment_keeps_old_excavator_until_driver_accepts(self):
+        HaulAssignment.objects.filter(truck=self.assigned_truck).delete()
+        accepted = HaulAssignment.objects.create(
+            truck=self.assigned_truck,
+            excavator=self.excavator,
+            assigned_by=self.master,
+            status=AssignmentStatus.ACCEPTED,
+            accepted_at=timezone.now(),
+        )
+
+        pending, created = schedule_haul_assignment(
+            truck=self.assigned_truck,
+            excavator=self.other_excavator,
+            assigned_by=self.master,
+        )
+
+        self.assertTrue(created)
+        accepted.refresh_from_db()
+        self.assertEqual(accepted.status, AssignmentStatus.ACCEPTED)
+        self.assertIsNone(accepted.ended_at)
+        self.assertEqual(pending.status, AssignmentStatus.PENDING)
+
+        apply_pending_haul_assignment(pending.id)
+
+        accepted.refresh_from_db()
+        pending.refresh_from_db()
+        self.assertEqual(accepted.status, AssignmentStatus.CANCELLED)
+        self.assertIsNotNone(accepted.ended_at)
+        self.assertEqual(pending.status, AssignmentStatus.ACCEPTED)
+
+    def test_pending_assignment_applies_automatically_after_five_minutes(self):
+        HaulAssignment.objects.filter(truck=self.free_truck).delete()
+        start = timezone.now()
+        pending, _ = schedule_haul_assignment(
+            truck=self.free_truck,
+            excavator=self.excavator,
+            assigned_by=self.master,
+            now=start,
+        )
+
+        applied = reconcile_due_haul_assignments(now=start + timedelta(minutes=5, seconds=1))
+
+        pending.refresh_from_db()
+        self.assertEqual(applied, 1)
+        self.assertEqual(pending.status, AssignmentStatus.ACCEPTED)
+
+    def test_pending_release_keeps_assignment_until_timeout_then_removes_it(self):
+        HaulAssignment.objects.filter(truck=self.free_truck).delete()
+        accepted = HaulAssignment.objects.create(
+            truck=self.free_truck,
+            excavator=self.excavator,
+            assigned_by=self.master,
+            status=AssignmentStatus.ACCEPTED,
+            accepted_at=timezone.now(),
+        )
+        start = timezone.now()
+        pending, _ = schedule_haul_release(
+            truck=self.free_truck,
+            assigned_by=self.master,
+            now=start,
+        )
+
+        accepted.refresh_from_db()
+        self.assertIsNone(accepted.ended_at)
+        self.assertEqual(pending.action, HaulAssignmentAction.RELEASE)
+
+        reconcile_due_haul_assignments(now=start + timedelta(minutes=5, seconds=1))
+
+        accepted.refresh_from_db()
+        pending.refresh_from_db()
+        self.assertEqual(accepted.status, AssignmentStatus.CANCELLED)
+        self.assertEqual(pending.status, AssignmentStatus.CANCELLED)
 
     def test_mining_master_can_release_excavator_complex_to_garage(self):
         other_assignment = HaulAssignment.objects.create(
@@ -746,14 +819,13 @@ class MiningMasterAssignmentsViewTests(TestCase):
         )
 
         self.assertRedirects(response, reverse('mining_master_assignments'))
-        self.assertFalse(
+        self.assertTrue(
             HaulAssignment.objects
-            .filter(excavator=self.excavator, ended_at__isnull=True)
-            .exclude(status=AssignmentStatus.CANCELLED)
+            .filter(excavator=self.excavator, action=HaulAssignmentAction.RELEASE, status=AssignmentStatus.PENDING, ended_at__isnull=True)
             .exists()
         )
         other_assignment.refresh_from_db()
-        self.assertIsNotNone(other_assignment.ended_at)
+        self.assertIsNone(other_assignment.ended_at)
 
     def test_mining_master_can_release_all_complexes_to_garage(self):
         HaulAssignment.objects.create(
@@ -769,10 +841,9 @@ class MiningMasterAssignmentsViewTests(TestCase):
         )
 
         self.assertRedirects(response, reverse('mining_master_assignments'))
-        self.assertFalse(
+        self.assertTrue(
             HaulAssignment.objects
-            .filter(ended_at__isnull=True)
-            .exclude(status=AssignmentStatus.CANCELLED)
+            .filter(action=HaulAssignmentAction.RELEASE, status=AssignmentStatus.PENDING, ended_at__isnull=True)
             .exists()
         )
         self.assertFalse(
@@ -793,10 +864,9 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertRedirects(response, reverse('mining_master_assignments'))
         placement = ExcavatorPlacement.objects.get(excavator=self.excavator)
         self.assertEqual(placement.zone, ExcavatorPlacement.Zone.INACTIVE)
-        self.assertFalse(
+        self.assertTrue(
             HaulAssignment.objects
-            .filter(excavator=self.excavator, ended_at__isnull=True)
-            .exclude(status=AssignmentStatus.CANCELLED)
+            .filter(excavator=self.excavator, action=HaulAssignmentAction.RELEASE, status=AssignmentStatus.PENDING, ended_at__isnull=True)
             .exists()
         )
 
@@ -902,11 +972,15 @@ class MiningMasterAssignmentsViewTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json()['ok'])
-        self.assertEqual(response.json()['closed'], 1)
-        self.assertFalse(
+        self.assertTrue(response.json()['created'])
+        self.assertTrue(
             HaulAssignment.objects
-            .filter(truck=self.assigned_truck, ended_at__isnull=True)
-            .exclude(status=AssignmentStatus.CANCELLED)
+            .filter(
+                truck=self.assigned_truck,
+                action=HaulAssignmentAction.RELEASE,
+                status=AssignmentStatus.PENDING,
+                ended_at__isnull=True,
+            )
             .exists()
         )
 
@@ -952,10 +1026,14 @@ class MiningMasterAssignmentsViewTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json()['ok'])
-        self.assertFalse(
+        self.assertTrue(
             HaulAssignment.objects
-            .filter(excavator=self.excavator, ended_at__isnull=True)
-            .exclude(status=AssignmentStatus.CANCELLED)
+            .filter(
+                excavator=self.excavator,
+                action=HaulAssignmentAction.RELEASE,
+                status=AssignmentStatus.PENDING,
+                ended_at__isnull=True,
+            )
             .exists()
         )
         self.assertTrue(

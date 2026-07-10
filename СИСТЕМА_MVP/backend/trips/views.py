@@ -15,6 +15,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from assignments.models import AssignmentStatus, EquipmentAssignment, ExcavatorPlacement, HaulAssignment
+from assignments.services import reconcile_due_haul_assignments, schedule_haul_assignment, schedule_haul_release
 from core.models import OperationalStateVersion, bump_operational_state
 from downtimes.models import DowntimeEvent, DowntimeReason
 from references.equipment_states import DEFAULT_EQUIPMENT_STATES
@@ -2268,14 +2269,18 @@ def dispatcher_move_excavator_view(request):
 
     if zone == ExcavatorPlacement.Zone.INACTIVE:
         now = timezone.now()
-        closed = close_haul_assignments(
+        current_assignments = list(
             HaulAssignment.objects
             .filter(excavator=excavator, ended_at__isnull=True)
-            .exclude(status=AssignmentStatus.CANCELLED),
-            now,
-            action='move_excavator_inactive',
+            .exclude(status=AssignmentStatus.CANCELLED)
+            .select_related('truck')
         )
-        summary = f'{equipment_short_name(excavator)} возвращен в гараж, комплекс расформирован ({len(closed)} самосв.)'
+        trucks = {assignment.truck_id: assignment.truck for assignment in current_assignments}
+        scheduled = sum(
+            bool(schedule_haul_release(truck=truck, assigned_by=access.employee, now=now)[0])
+            for truck in trucks.values()
+        )
+        summary = f'{equipment_short_name(excavator)} возвращен в гараж, снятие назначений ожидает ({scheduled} самосв.)'
     else:
         summary = f'{equipment_short_name(excavator)} переведен в активную смену'
 
@@ -2306,19 +2311,23 @@ def dispatcher_assign_truck_view(request):
             equipment_type__name__icontains='Экскаватор',
             is_active=True,
         )
-        closed = close_haul_assignments(
+        current_assignments = list(
             HaulAssignment.objects
             .filter(excavator=excavator, ended_at__isnull=True)
-            .exclude(status=AssignmentStatus.CANCELLED),
-            now,
-            action='release_complex',
+            .exclude(status=AssignmentStatus.CANCELLED)
+            .select_related('truck')
+        )
+        trucks = {assignment.truck_id: assignment.truck for assignment in current_assignments}
+        scheduled = sum(
+            bool(schedule_haul_release(truck=truck, assigned_by=access.employee, now=now)[0])
+            for truck in trucks.values()
         )
         log_dispatcher_action(
             actor=access.employee,
             action_type=DispatcherActionType.CANCEL_ASSIGNMENT,
-            target_summary=f'{equipment_short_name(excavator)}: самосвалы сброшены в гараж ({len(closed)})',
+            target_summary=f'{equipment_short_name(excavator)}: снятие назначений ожидает ({scheduled})',
         )
-        return JsonResponse({'ok': True, 'closed': len(closed)})
+        return JsonResponse({'ok': True, 'scheduled': scheduled})
 
     truck = get_object_or_404(
         Equipment.objects.select_related('equipment_type'),
@@ -2332,13 +2341,13 @@ def dispatcher_assign_truck_view(request):
         .exclude(status=AssignmentStatus.CANCELLED)
     )
     if action == 'release':
-        closed = close_haul_assignments(active_assignments, now, action='release_truck')
+        assignment, created = schedule_haul_release(truck=truck, assigned_by=access.employee, now=now)
         log_dispatcher_action(
             actor=access.employee,
             action_type=DispatcherActionType.CANCEL_ASSIGNMENT,
             target_summary=f'{equipment_short_name(truck)} снят с комплекса и возвращен в гараж',
         )
-        return JsonResponse({'ok': True, 'closed': len(closed)})
+        return JsonResponse({'ok': True, 'assignment_id': assignment.id if assignment else None, 'created': created})
 
     if action != 'assign':
         return JsonResponse({'ok': False, 'error': 'Некорректное действие с самосвалом.'}, status=400)
@@ -2355,12 +2364,11 @@ def dispatcher_assign_truck_view(request):
         placement.changed_by = access.employee
         placement.save(update_fields=['zone', 'changed_by', 'changed_at'])
 
-    close_haul_assignments(active_assignments, now, action='assign_truck_reassign')
-    assignment = HaulAssignment.objects.create(
+    assignment, created = schedule_haul_assignment(
         truck=truck,
         excavator=excavator,
         assigned_by=access.employee,
-        status=AssignmentStatus.PENDING,
+        now=now,
     )
     log_dispatcher_action(
         actor=access.employee,
@@ -2368,7 +2376,7 @@ def dispatcher_assign_truck_view(request):
         target_summary=f'{equipment_short_name(truck)} назначен под {equipment_short_name(excavator)}',
         haul_assignment=assignment,
     )
-    return JsonResponse({'ok': True, 'assignment_id': assignment.id})
+    return JsonResponse({'ok': True, 'assignment_id': assignment.id, 'created': created})
 
 
 def excavator_access_from_request(request):
@@ -2746,7 +2754,7 @@ def excavator_truck_loaded_view(request):
                 truck_id=truck_id,
                 excavator=current_excavator,
                 ended_at__isnull=True,
-                status__in={AssignmentStatus.PENDING, AssignmentStatus.ACCEPTED},
+                status=AssignmentStatus.ACCEPTED,
             )
             .first()
         )
@@ -2777,10 +2785,6 @@ def excavator_truck_loaded_view(request):
 
         dump_point = get_object_or_404(DumpPoint.objects.filter(is_active=True), id=dump_point_id)
         rock_type = get_object_or_404(RockType.objects.filter(is_active=True), id=rock_type_id)
-        if assignment.status != AssignmentStatus.ACCEPTED:
-            assignment.status = AssignmentStatus.ACCEPTED
-            assignment.accepted_at = timezone.now()
-            assignment.save(update_fields=['status', 'accepted_at'])
         loading_horizon = normalize_excavator_numeric_setting(payload.get('loading_horizon'))
         loading_block = normalize_excavator_numeric_setting(payload.get('loading_block'))
         save_excavator_work_context(
@@ -3213,6 +3217,8 @@ def excavator_work_view(request):
     access = excavator_access_from_request(request)
     if not access:
         return redirect('role_home')
+
+    reconcile_due_haul_assignments()
 
     open_shift = get_excavator_open_shift(access.employee)
     current_excavator = open_shift.equipment if open_shift else None
@@ -3780,6 +3786,7 @@ def excavator_downtime_action_view(request):
     return JsonResponse(downtime_event_payload(event, action=action_label))
 
 def dispatcher_control_view(request, *, access_override=None, enforce_dispatcher_access=True, dispatcher_header_override=None, context_overrides=None):
+    reconcile_due_haul_assignments()
     if access_override is None:
         access_id = request.session.get('employee_access_id')
         if not access_id:
@@ -4067,13 +4074,22 @@ def dispatcher_cancel_assignment_view(request, assignment_id):
         messages.error(request, 'Активное назначение для отмены не найдено.')
         return redirect(redirect_url)
 
-    assignment.status = AssignmentStatus.CANCELLED
-    assignment.ended_at = timezone.now()
-    assignment.save(update_fields=['status', 'ended_at'])
+    if assignment.status == AssignmentStatus.ACCEPTED:
+        pending_release, _ = schedule_haul_release(
+            truck=assignment.truck,
+            assigned_by=access.employee,
+            now=timezone.now(),
+        )
+        logged_assignment = pending_release or assignment
+    else:
+        assignment.status = AssignmentStatus.CANCELLED
+        assignment.ended_at = timezone.now()
+        assignment.save(update_fields=['status', 'ended_at'])
+        logged_assignment = assignment
     log_dispatcher_action(
         actor=access.employee,
         action_type=DispatcherActionType.CANCEL_ASSIGNMENT,
-        haul_assignment=assignment,
+        haul_assignment=logged_assignment,
         target_summary=f'{assignment.truck} под {assignment.excavator}',
         reason=reason,
     )

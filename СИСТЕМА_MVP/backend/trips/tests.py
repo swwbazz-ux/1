@@ -6,7 +6,7 @@ from django.test import Client, TestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from assignments.models import AssignmentStatus, EquipmentAssignment, ExcavatorPlacement, HaulAssignment
+from assignments.models import AssignmentStatus, EquipmentAssignment, ExcavatorPlacement, HaulAssignment, HaulAssignmentAction
 from core.models import OperationalStateEvent
 from downtimes.models import DowntimeEvent, DowntimeReason
 from references.equipment_states import upsert_default_equipment_states
@@ -1536,7 +1536,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertIn('GET_VERSION', script)
         self.assertIn('event.ports && event.ports[0]', script)
 
-    def test_excavator_work_displays_pending_assignment_from_dispatcher(self):
+    def test_excavator_work_hides_pending_assignment_until_driver_accepts(self):
         pending_truck = Equipment.objects.create(equipment_type=self.truck_type, garage_number='77')
         self.create_registered_driver_shift(
             pending_truck,
@@ -1552,26 +1552,21 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         response = self.client.get(reverse('excavator_work'))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, '77')
-        self.assertEqual([card['number'] for card in response.context['truck_cards']], ['21', '77'])
+        self.assertNotContains(response, '77')
+        self.assertEqual([card['number'] for card in response.context['truck_cards']], ['21'])
         cards_by_number = {card['number']: card for card in response.context['truck_cards']}
         self.assertEqual(cards_by_number['21']['equipment_state_code'], 'assigned')
         self.assertEqual(cards_by_number['21']['status_key'], 'blue')
         self.assertEqual(cards_by_number['21']['status_label'], 'Назначена')
         self.assertTrue(cards_by_number['21']['can_drag'])
         self.assertTrue(cards_by_number['21']['can_load'])
-        self.assertEqual(cards_by_number['77']['equipment_state_code'], 'assigned')
-        self.assertEqual(cards_by_number['77']['status_key'], 'blue')
-        self.assertEqual(cards_by_number['77']['status_label'], 'Назначена')
-        self.assertTrue(cards_by_number['77']['can_drag'])
-        self.assertTrue(cards_by_number['77']['can_load'])
 
     def test_excavator_work_marks_complex_truck_without_driver_assignment(self):
         no_shift_truck = Equipment.objects.create(equipment_type=self.truck_type, garage_number='78')
         HaulAssignment.objects.create(
             truck=no_shift_truck,
             excavator=self.excavator,
-            status=AssignmentStatus.PENDING,
+            status=AssignmentStatus.ACCEPTED,
         )
 
         response = self.client.get(reverse('excavator_work'))
@@ -1604,7 +1599,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         HaulAssignment.objects.create(
             truck=waiting_truck,
             excavator=self.excavator,
-            status=AssignmentStatus.PENDING,
+            status=AssignmentStatus.ACCEPTED,
         )
 
         response = self.client.get(reverse('excavator_work'))
@@ -1700,7 +1695,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertFalse(first_card['can_drag'])
         self.assertContains(response, 'data-eo-equipment-state="loaded_waiting_unload"')
 
-    def test_excavator_work_starts_trip_and_accepts_pending_assignment(self):
+    def test_excavator_work_rejects_trip_for_pending_assignment(self):
         pending_truck = Equipment.objects.create(equipment_type=self.truck_type, garage_number='88')
         self.create_registered_driver_shift(
             pending_truck,
@@ -1724,10 +1719,11 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
             },
         )
 
-        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.status_code, 200)
         pending_assignment.refresh_from_db()
-        self.assertEqual(pending_assignment.status, AssignmentStatus.ACCEPTED)
-        self.assertIsNotNone(pending_assignment.accepted_at)
+        self.assertEqual(pending_assignment.status, AssignmentStatus.PENDING)
+        self.assertIsNone(pending_assignment.accepted_at)
+        self.assertFalse(Trip.objects.filter(truck=pending_truck).exists())
 
     def post_truck_loaded(self, *, client_action_id='load-1', truck=None, dump_point=None, rock=None):
         return self.client.post(
@@ -1851,10 +1847,6 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
     def test_dispatcher_assigned_truck_load_unload_cycle_returns_available_to_excavator(self):
         kkd = DumpPoint.objects.create(name='ККД')
         assignment = HaulAssignment.objects.get(truck=self.truck, excavator=self.excavator)
-        assignment.status = AssignmentStatus.PENDING
-        assignment.accepted_at = None
-        assignment.save(update_fields=['status', 'accepted_at'])
-
         start_response = self.client.get(reverse('excavator_work'))
         cards_by_number = {card['number']: card for card in start_response.context['truck_cards']}
         self.assertEqual(cards_by_number['21']['equipment_state_code'], 'assigned')
@@ -2153,11 +2145,15 @@ class DispatcherAssignmentRealtimeTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json()['ok'])
-        self.assertEqual(response.json()['closed'], 1)
-        self.assertFalse(
+        self.assertEqual(response.json()['scheduled'], 1)
+        self.assertTrue(
             HaulAssignment.objects
-            .filter(excavator=self.excavator, ended_at__isnull=True)
-            .exclude(status=AssignmentStatus.CANCELLED)
+            .filter(
+                excavator=self.excavator,
+                action=HaulAssignmentAction.RELEASE,
+                status=AssignmentStatus.PENDING,
+                ended_at__isnull=True,
+            )
             .exists()
         )
         self.assertTrue(
@@ -2167,10 +2163,9 @@ class DispatcherAssignmentRealtimeTests(TestCase):
         )
         event = OperationalStateEvent.objects.filter(
             event_type='assignment_changed',
-            reason='HaulAssignment:bulk_close',
-            payload__action='release_complex',
+            reason='HaulAssignment:release_pending',
+            payload__action='release_pending',
         ).latest('version')
-        self.assertEqual(event.payload['closed_count'], 1)
         self.assertEqual(event.payload['excavator_ids'], [self.excavator.id])
         self.assertEqual(event.payload['truck_ids'], [self.truck.id])
 
@@ -2192,8 +2187,8 @@ class DispatcherAssignmentRealtimeTests(TestCase):
 
         self.assertEqual(content.count(truck_marker), 1)
 
-    def test_dispatcher_assign_truck_closes_all_previous_active_assignments(self):
-        HaulAssignment.objects.create(
+    def test_dispatcher_assign_truck_reuses_same_pending_action(self):
+        pending = HaulAssignment.objects.create(
             truck=self.truck,
             excavator=self.excavator,
             assigned_by=self.dispatcher,
@@ -2217,12 +2212,8 @@ class DispatcherAssignmentRealtimeTests(TestCase):
             .filter(truck=self.truck, ended_at__isnull=True)
             .exclude(status=AssignmentStatus.CANCELLED)
         )
-        self.assertEqual(active_assignments.count(), 1)
-        self.assertEqual(active_assignments.get().id, response.json()['assignment_id'])
-        self.assertFalse(
-            HaulAssignment.objects
-            .filter(truck=self.truck)
-            .exclude(id=response.json()['assignment_id'])
-            .exclude(status=AssignmentStatus.CANCELLED)
-            .exists()
-        )
+        self.assertFalse(response.json()['created'])
+        self.assertEqual(active_assignments.count(), 2)
+        self.assertEqual(response.json()['assignment_id'], pending.id)
+        self.assertTrue(active_assignments.filter(status=AssignmentStatus.ACCEPTED).exists())
+        self.assertTrue(active_assignments.filter(id=pending.id, status=AssignmentStatus.PENDING).exists())

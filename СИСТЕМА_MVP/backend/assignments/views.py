@@ -17,6 +17,7 @@ from users.models import EmployeeAccess
 from users.session_device import get_session_device_kind, set_session_device_kind
 
 from .models import AssignmentStatus, ExcavatorPlacement, HaulAssignment
+from .services import schedule_haul_assignment, schedule_haul_release
 
 
 MINING_MASTER_MANIFEST = {
@@ -550,14 +551,17 @@ def handle_assignment_action(request, action, access, current_shift):
         .select_related('excavator')
         .order_by('-assigned_at')
     )
-    active_assignment = active_assignments[0] if active_assignments else None
+    active_assignment = next(
+        (assignment for assignment in active_assignments if assignment.status == AssignmentStatus.ACCEPTED),
+        active_assignments[0] if active_assignments else None,
+    )
 
     if action == 'release':
         if not active_assignment:
             messages.info(request, f'{get_truck_label(truck)} уже находится в гараже.')
             return
-        close_active_assignments(active_assignments, now)
-        messages.success(request, f'{get_truck_label(truck)} снят из комплекса и отправлен в гараж.')
+        schedule_haul_release(truck=truck, assigned_by=access.employee, now=now)
+        messages.success(request, f'{get_truck_label(truck)} получит снятие назначения через 5 минут.')
         return
 
     excavator_id = request.POST.get('excavator')
@@ -571,17 +575,11 @@ def handle_assignment_action(request, action, access, current_shift):
         is_active=True,
     )
 
-    if active_assignment and active_assignment.excavator_id == excavator.id:
-        close_active_assignments(active_assignments[1:], now)
-        messages.info(request, f'{get_truck_label(truck)} уже назначен на {get_excavator_label(excavator)}.')
-        return
-    close_active_assignments(active_assignments, now)
-
-    HaulAssignment.objects.create(
+    schedule_haul_assignment(
         truck=truck,
         excavator=excavator,
         assigned_by=access.employee,
-        status=AssignmentStatus.PENDING,
+        now=now,
     )
     messages.success(request, f'{get_truck_label(truck)} назначен на {get_excavator_label(excavator)}.')
 
@@ -791,8 +789,12 @@ def mining_master_assign_truck_view(request):
             is_active=True,
         )
         assignments = list(get_active_assignments_queryset().filter(excavator=excavator))
-        close_active_assignments(assignments, now)
-        return mining_master_json_ok(payload, closed=len(assignments))
+        trucks = {assignment.truck_id: assignment.truck for assignment in assignments}
+        scheduled = sum(
+            bool(schedule_haul_release(truck=truck, assigned_by=access.employee, now=now)[0])
+            for truck in trucks.values()
+        )
+        return mining_master_json_ok(payload, scheduled=scheduled)
 
     truck = get_object_or_404(
         Equipment.objects.select_related('equipment_type', 'model'),
@@ -807,7 +809,10 @@ def mining_master_assign_truck_view(request):
         .select_related('excavator')
         .order_by('-assigned_at')
     )
-    active_assignment = active_assignments[0] if active_assignments else None
+    active_assignment = next(
+        (assignment for assignment in active_assignments if assignment.status == AssignmentStatus.ACCEPTED),
+        active_assignments[0] if active_assignments else None,
+    )
     expected_source_excavator_id = str(payload.get('expected_source_excavator_id') or '').strip()
     if expected_source_excavator_id and active_assignment and str(active_assignment.excavator_id) != expected_source_excavator_id:
         return JsonResponse({
@@ -818,8 +823,8 @@ def mining_master_assign_truck_view(request):
         }, status=409)
 
     if action == 'release':
-        close_active_assignments(active_assignments, now)
-        return mining_master_json_ok(payload, closed=len(active_assignments))
+        assignment, created = schedule_haul_release(truck=truck, assigned_by=access.employee, now=now)
+        return mining_master_json_ok(payload, assignment_id=assignment.id if assignment else None, created=created)
 
     if action != 'assign':
         return JsonResponse({'ok': False, 'error': 'Неизвестное действие.'}, status=400)
@@ -833,18 +838,13 @@ def mining_master_assign_truck_view(request):
     if not ExcavatorPlacement.objects.filter(excavator=excavator, zone=ExcavatorPlacement.Zone.ACTIVE).exists():
         return JsonResponse({'ok': False, 'error': 'Самосвал можно назначить только в активный комплекс.'}, status=400)
 
-    if active_assignment and active_assignment.excavator_id == excavator.id:
-        close_active_assignments(active_assignments[1:], now)
-        return mining_master_json_ok(payload, already_assigned=True)
-
-    close_active_assignments(active_assignments, now)
-    HaulAssignment.objects.create(
+    assignment, created = schedule_haul_assignment(
         truck=truck,
         excavator=excavator,
         assigned_by=access.employee,
-        status=AssignmentStatus.PENDING,
+        now=now,
     )
-    return mining_master_json_ok(payload)
+    return mining_master_json_ok(payload, assignment_id=assignment.id, created=created)
 
 
 def handle_bulk_release_action(request, action, current_shift, access):
@@ -870,8 +870,10 @@ def handle_bulk_release_action(request, action, current_shift, access):
         if not assignments:
             messages.info(request, f'{get_excavator_label(excavator)} уже пустой.')
             return
-        close_active_assignments(assignments, now)
-        messages.success(request, f'{get_excavator_label(excavator)} расформирован. Самосвалы возвращены в гараж.')
+        trucks = {assignment.truck_id: assignment.truck for assignment in assignments}
+        for truck in trucks.values():
+            schedule_haul_release(truck=truck, assigned_by=access.employee, now=now)
+        messages.success(request, f'{get_excavator_label(excavator)} расформировывается. Водителям дано 5 минут.')
         return
 
     if action == 'release_all':
@@ -884,7 +886,9 @@ def handle_bulk_release_action(request, action, current_shift, access):
         if not assignments and not active_excavator_placements:
             messages.info(request, 'Вся техника уже находится в неактивной смене.')
             return
-        close_active_assignments(assignments, now)
+        trucks = {assignment.truck_id: assignment.truck for assignment in assignments}
+        for truck in trucks.values():
+            schedule_haul_release(truck=truck, assigned_by=access.employee, now=now)
         for placement in active_excavator_placements:
             placement.zone = ExcavatorPlacement.Zone.INACTIVE
             placement.changed_by = access.employee
@@ -920,7 +924,9 @@ def handle_excavator_placement_action(request, action, access, current_shift):
 
     if action == 'deactivate_excavator':
         active_assignments = list(get_active_assignments_queryset().filter(excavator=excavator))
-        close_active_assignments(active_assignments, now)
+        trucks = {assignment.truck_id: assignment.truck for assignment in active_assignments}
+        for truck in trucks.values():
+            schedule_haul_release(truck=truck, assigned_by=access.employee, now=now)
         placement.zone = ExcavatorPlacement.Zone.INACTIVE
         placement.changed_by = access.employee
         placement.save(update_fields=['zone', 'changed_by', 'changed_at'])

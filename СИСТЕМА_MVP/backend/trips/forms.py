@@ -1,8 +1,6 @@
 from decimal import Decimal
 
 from django import forms
-from django.utils import timezone
-
 from assignments.models import AssignmentStatus, HaulAssignment
 from references.models import DumpPoint, RockType, TruckCapacityRule
 from shifts.models import EmployeeShift
@@ -25,7 +23,7 @@ class TripCreateForm(forms.Form):
         self.excavator_operator = kwargs.pop('excavator_operator', None)
         super().__init__(*args, **kwargs)
         self.fields['assignment'].queryset = HaulAssignment.objects.filter(
-            status__in={AssignmentStatus.ACCEPTED, AssignmentStatus.PENDING},
+            status=AssignmentStatus.ACCEPTED,
             ended_at__isnull=True,
         ).select_related('truck', 'excavator').order_by('excavator__garage_number', 'truck__garage_number')
         if not self.is_bound:
@@ -50,10 +48,6 @@ class TripCreateForm(forms.Form):
 
     def create_trip(self, excavator_operator):
         assignment = self.cleaned_data['assignment']
-        if assignment.status != AssignmentStatus.ACCEPTED:
-            assignment.status = AssignmentStatus.ACCEPTED
-            assignment.accepted_at = timezone.now()
-            assignment.save(update_fields=['status', 'accepted_at'])
         rock_type = self.cleaned_data['rock_type']
         dump_point = self.cleaned_data['dump_point']
         loading_shift = EmployeeShift.objects.filter(

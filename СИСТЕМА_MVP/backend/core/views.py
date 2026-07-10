@@ -44,6 +44,10 @@ def operational_state_version_view(request):
     if not access_exists:
         return JsonResponse({'authenticated': False}, status=401)
 
+    from assignments.services import reconcile_due_haul_assignments
+
+    reconcile_due_haul_assignments()
+
     state = OperationalStateVersion.objects.filter(key='production').first()
     after = parse_positive_int(request.GET.get('after'), 0)
     limit = parse_positive_int(request.GET.get('limit'), 50, maximum=200)
