@@ -645,7 +645,8 @@ body.driver-mobile-screen .driver-work-dial-svg {
 body.driver-mobile-screen .driver-work-track,
 body.driver-mobile-screen .driver-work-progress,
 body.driver-mobile-screen .driver-work-over-progress,
-body.driver-mobile-screen .driver-work-hold-progress {
+body.driver-mobile-screen .driver-work-hold-progress,
+body.driver-mobile-screen .driver-work-hold-progress-reverse {
     fill: none;
     vector-effect: non-scaling-stroke;
     stroke-linecap: round;
@@ -688,6 +689,19 @@ body.driver-mobile-screen .driver-work-hold-progress {
     stroke-dashoffset: calc(100 - var(--driver-hold));
     transition: opacity 0.12s ease;
     filter: drop-shadow(0 0 8px rgba(140,255,46,0.65));
+}
+
+body.driver-mobile-screen .driver-work-hold-progress-reverse {
+    opacity: 0;
+    stroke: var(--driver-cyan);
+    stroke-width: 3;
+    stroke-dasharray: 100;
+    stroke-dashoffset: calc(100 - var(--driver-hold));
+    transform: scaleY(-1);
+    transform-box: view-box;
+    transform-origin: 50% 50%;
+    transition: opacity 0.12s ease;
+    filter: drop-shadow(0 0 9px rgba(32,217,230,0.72));
 }
 
 body.driver-mobile-screen .driver-work-dial-button {
@@ -1028,7 +1042,9 @@ body.driver-mobile-screen .driver-work-dial.is-plan-missing .driver-work-dial-co
 }
 
 body.driver-mobile-screen .driver-work-dial-button.is-holding .driver-work-hold-progress,
-body.driver-mobile-screen .driver-work-dial-button.is-pending .driver-work-hold-progress {
+body.driver-mobile-screen .driver-work-dial-button.is-holding .driver-work-hold-progress-reverse,
+body.driver-mobile-screen .driver-work-dial-button.is-pending .driver-work-hold-progress,
+body.driver-mobile-screen .driver-work-dial-button.is-pending .driver-work-hold-progress-reverse {
     opacity: 1;
 }
 
@@ -1736,7 +1752,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
 {% endblock %}
 
 {% block body %}
-<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v60' }}">
+<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v62' }}">
     {% if messages %}
         <div class="driver-messages">
             {% for message in messages %}
@@ -1772,6 +1788,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
                         <input type="hidden" name="client_action_id" value="" data-driver-client-action>
                         <button class="driver-work-dial-button is-loaded" type="submit" data-driver-hold-button data-driver-pending-label="ОТПРАВКА">
                             <svg class="driver-work-dial-svg" viewBox="0 0 100 100" aria-hidden="true">
+                                <circle class="driver-work-hold-progress-reverse" cx="50" cy="50" r="48" pathLength="100"></circle>
                                 <circle class="driver-work-track" cx="50" cy="50" r="45" pathLength="100"></circle>
                                 <circle class="driver-work-progress" cx="50" cy="50" r="45" pathLength="100"></circle>
                                 <circle class="driver-work-over-progress" cx="50" cy="50" r="41" pathLength="100"></circle>
@@ -1788,6 +1805,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
                 {% else %}
                     <div class="driver-work-dial-button is-empty" aria-disabled="true">
                         <svg class="driver-work-dial-svg" viewBox="0 0 100 100" aria-hidden="true">
+                            <circle class="driver-work-hold-progress-reverse" cx="50" cy="50" r="48" pathLength="100"></circle>
                             <circle class="driver-work-track" cx="50" cy="50" r="45" pathLength="100"></circle>
                             <circle class="driver-work-progress" cx="50" cy="50" r="45" pathLength="100"></circle>
                             <circle class="driver-work-over-progress" cx="50" cy="50" r="41" pathLength="100"></circle>
@@ -2512,6 +2530,7 @@ window.bindDriverMobileShell = function () {
             }
         }
         function completeHold() {
+            holdButton.style.setProperty("--driver-hold", "100");
             fillClientAction(holdForm, "trip-unloaded");
             holdForm.dataset.holdComplete = "true";
             holdButton.classList.remove("is-loaded");
@@ -2587,7 +2606,7 @@ window.bindDriverMobileShell = function () {
         if (!("serviceWorker" in navigator)) {
             return;
         }
-        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v60' }}";
+        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v62' }}";
         var updateModal = document.querySelector("[data-driver-pwa-update-modal]");
         var updateBadge = document.querySelector("[data-driver-pwa-update-badge]");
         var updateTarget = document.querySelector("[data-driver-pwa-update-nav-target]");
