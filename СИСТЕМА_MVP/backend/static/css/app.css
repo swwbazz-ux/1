@@ -27696,6 +27696,173 @@ body.mining-master-screen .dispatcher-complex-card .complex-truck-tile {
         box-shadow: 0 0 10px var(--mm-mobile-complex-accent);
     }
 
+    .mm-mobile-complex-head-meta {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 5px;
+        min-width: 0;
+        margin-left: auto;
+    }
+
+    .mm-mobile-complex-head-meta .mm-mobile-status-chip {
+        max-width: 74px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .mm-mobile-complex-card.has-plan-progress,
+    .mm-mobile-truck-mini.has-plan-progress,
+    .mm-mobile-truck-card.has-plan-progress {
+        --mm-mobile-plan-color: rgba(74, 222, 128, 1);
+        --mm-mobile-plan-glow: rgba(74, 222, 128, .52);
+        --mm-mobile-plan-complete-color: rgba(74, 222, 128, .62);
+        --mm-mobile-plan-track: rgba(142, 158, 166, .26);
+    }
+
+    .mm-mobile-complex-card[data-plan-progress-phase="amber"],
+    .mm-mobile-truck-mini[data-plan-progress-phase="amber"],
+    .mm-mobile-truck-card[data-plan-progress-phase="amber"] {
+        --mm-mobile-plan-color: rgba(250, 204, 21, 1);
+        --mm-mobile-plan-glow: rgba(250, 204, 21, .5);
+        --mm-mobile-plan-complete-color: rgba(74, 222, 128, .68);
+    }
+
+    .mm-mobile-complex-card[data-plan-progress-phase="cyan"],
+    .mm-mobile-truck-mini[data-plan-progress-phase="cyan"],
+    .mm-mobile-truck-card[data-plan-progress-phase="cyan"] {
+        --mm-mobile-plan-color: rgba(56, 189, 248, 1);
+        --mm-mobile-plan-glow: rgba(56, 189, 248, .48);
+        --mm-mobile-plan-complete-color: rgba(250, 204, 21, .6);
+    }
+
+    .mm-mobile-complex-card[data-plan-progress-phase="orange"],
+    .mm-mobile-truck-mini[data-plan-progress-phase="orange"],
+    .mm-mobile-truck-card[data-plan-progress-phase="orange"] {
+        --mm-mobile-plan-color: rgba(251, 146, 60, 1);
+        --mm-mobile-plan-glow: rgba(251, 146, 60, .5);
+        --mm-mobile-plan-complete-color: rgba(56, 189, 248, .54);
+    }
+
+    .mm-mobile-complex-plan-ring {
+        position: relative;
+        z-index: 2;
+        display: grid;
+        flex: 0 0 34px;
+        place-items: center;
+        width: 34px;
+        height: 34px;
+        border-radius: 50%;
+        background: conic-gradient(
+            from -90deg,
+            var(--mm-mobile-plan-color) 0 var(--mm-mobile-plan-progress, 0%),
+            var(--mm-mobile-plan-track) var(--mm-mobile-plan-progress, 0%) 100%
+        );
+        filter: drop-shadow(0 0 5px var(--mm-mobile-plan-glow));
+        pointer-events: none;
+    }
+
+    .mm-mobile-complex-card.is-plan-overrun .mm-mobile-complex-plan-ring {
+        background:
+            conic-gradient(from -90deg, var(--mm-mobile-plan-color) 0 var(--mm-mobile-plan-progress, 0%), transparent var(--mm-mobile-plan-progress, 0%) 100%),
+            conic-gradient(from -90deg, var(--mm-mobile-plan-complete-color) 0 100%, transparent 0 100%),
+            conic-gradient(from -90deg, var(--mm-mobile-plan-track) 0 100%);
+    }
+
+    .mm-mobile-complex-plan-ring::before {
+        content: "";
+        position: absolute;
+        inset: 3px;
+        border-radius: 50%;
+        background: rgba(4, 14, 20, .96);
+        box-shadow: inset 0 0 7px rgba(255, 255, 255, .05);
+    }
+
+    .mm-mobile-complex-plan-ring > span {
+        position: relative;
+        z-index: 2;
+        color: #eef7fa;
+        font-size: 8px;
+        font-weight: 900;
+        letter-spacing: 0;
+        line-height: 1;
+    }
+
+    .mm-mobile-truck-mini .mm-mobile-plan-ring-layer,
+    .mm-mobile-truck-card .mm-mobile-plan-ring-layer {
+        position: absolute;
+        inset: 3px;
+        z-index: 1;
+        display: block;
+        padding: 2px;
+        border-radius: 4px;
+        background: conic-gradient(
+            from -90deg,
+            var(--mm-mobile-plan-color) 0 var(--mm-mobile-plan-progress, 0%),
+            var(--mm-mobile-plan-track) var(--mm-mobile-plan-progress, 0%) 100%
+        );
+        filter: drop-shadow(0 0 4px var(--mm-mobile-plan-glow));
+        pointer-events: none;
+        -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+        -webkit-mask-composite: xor;
+        mask-composite: exclude;
+    }
+
+    .mm-mobile-truck-mini.is-plan-overrun .mm-mobile-plan-ring-layer,
+    .mm-mobile-truck-card.is-plan-overrun .mm-mobile-plan-ring-layer {
+        background:
+            conic-gradient(from -90deg, var(--mm-mobile-plan-color) 0 var(--mm-mobile-plan-progress, 0%), transparent var(--mm-mobile-plan-progress, 0%) 100%),
+            conic-gradient(from -90deg, var(--mm-mobile-plan-complete-color) 0 100%, transparent 0 100%),
+            conic-gradient(from -90deg, var(--mm-mobile-plan-track) 0 100%);
+    }
+
+    .mm-mobile-truck-card.has-plan-progress > *:not(.mm-mobile-plan-loop-badge):not(.mm-mobile-plan-ring-layer) {
+        position: relative;
+        z-index: 2;
+    }
+
+    .mm-mobile-plan-loop-badge {
+        position: absolute;
+        top: 2px;
+        right: 2px;
+        z-index: 4;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 17px;
+        min-height: 12px;
+        padding: 1px 3px;
+        border: 1px solid var(--mm-mobile-plan-color);
+        border-radius: 999px;
+        background: rgba(4, 13, 18, .95);
+        box-shadow: 0 0 8px var(--mm-mobile-plan-glow), 0 2px 5px rgba(0, 0, 0, .42);
+        color: var(--mm-mobile-plan-color);
+        font-size: 8px;
+        font-style: normal;
+        font-weight: 900;
+        letter-spacing: 0;
+        line-height: 1;
+        pointer-events: none;
+        white-space: nowrap;
+    }
+
+    .mm-mobile-complex-plan-ring .mm-mobile-plan-loop-badge {
+        top: auto;
+        right: -5px;
+        bottom: -3px;
+        min-width: 15px;
+        min-height: 10px;
+        padding: 1px 2px;
+        font-size: 7px;
+    }
+
+    .mm-mobile-truck-mini .mm-mobile-plan-loop-badge {
+        min-width: 14px;
+        min-height: 10px;
+        padding: 1px 2px;
+        font-size: clamp(7px, calc(var(--mm-mobile-preview-tile) * .12), 9px);
+    }
+
     .mm-mobile-complex-visual {
         position: absolute;
         inset: 36px 6px 6px;

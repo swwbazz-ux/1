@@ -117,6 +117,23 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertEqual(len(response.context['dispatcher_dashboard']['complex_zones']), 9)
 
     def test_mining_master_truck_plan_overrun_uses_progress_cycle_contract(self):
+        excavator_group = EquipmentPlanGroup.objects.create(
+            name='Экскаваторы Горный мастер цикл',
+            code='mm-excavator-cycle-test',
+            calculation_mode=PlanCalculationMode.VOLUME,
+            plan_value='40.00',
+            is_active=True,
+        )
+        excavator_group.equipment.add(self.excavator)
+        operator = Employee.objects.create(full_name='Машинист цикла')
+        excavator_shift = EmployeeShift.objects.create(
+            employee=operator,
+            shift_type='day',
+            equipment=self.excavator,
+            opened_at=self.shift.opened_at,
+            opened_by=operator,
+        )
+        assign_shift_plan_snapshot(excavator_shift)
         group = EquipmentPlanGroup.objects.create(
             name='Самосвалы Горный мастер цикл',
             code='mm-truck-cycle-test',
@@ -140,6 +157,7 @@ class MiningMasterAssignmentsViewTests(TestCase):
             Trip.objects.create(
                 excavator=self.excavator,
                 truck=self.assigned_truck,
+                loading_shift=excavator_shift,
                 unloading_shift=truck_shift,
                 rock_type=rock_type,
                 dump_point=dump_point,
@@ -161,6 +179,10 @@ class MiningMasterAssignmentsViewTests(TestCase):
             if tile['card_id'] == str(self.assigned_truck.id)
         )
 
+        self.assertEqual(complex_card['percent'], 125)
+        self.assertEqual(complex_card['plan_visual']['loop_progress'], 25)
+        self.assertEqual(complex_card['plan_visual']['completed_loops'], 1)
+        self.assertEqual(complex_card['plan_visual']['phase'], 'amber')
         self.assertEqual(truck_tile['percent'], 125)
         self.assertEqual(truck_tile['plan_visual']['loop_progress'], 25)
         self.assertEqual(truck_tile['plan_visual']['completed_loops'], 1)
@@ -171,6 +193,26 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertContains(response, 'data-plan-progress-phase="amber"')
         self.assertContains(response, 'is-plan-overrun')
         self.assertContains(response, 'dispatcher-plan-loop-badge')
+        self.assertContains(response, 'mm-mobile-complex-plan-ring')
+        self.assertContains(response, 'mm-mobile-plan-ring-layer')
+        self.assertContains(response, 'function syncMobilePlanVisual(source, target)')
+        self.assertContains(response, 'syncMobilePlanVisual(source, mini);')
+        html = response.content.decode('utf-8')
+        mobile_complex_marker = f'data-mm-mobile-open-complex="{complex_card["card_id"]}"'
+        mobile_complex_index = html.index(mobile_complex_marker)
+        mobile_complex_tag = html[html.rfind('<article', 0, mobile_complex_index):html.index('>', mobile_complex_index) + 1]
+        self.assertIn('has-plan-progress', mobile_complex_tag)
+        self.assertIn('is-plan-overrun', mobile_complex_tag)
+        self.assertIn('data-plan-percent="125"', mobile_complex_tag)
+        self.assertIn('data-plan-loop-percent="25"', mobile_complex_tag)
+        mobile_truck_marker = f'data-mm-mobile-home-truck-id="{self.assigned_truck.id}"'
+        mobile_truck_index = html.index(mobile_truck_marker)
+        mobile_truck_tag = html[html.rfind('<span', 0, mobile_truck_index):html.index('>', mobile_truck_index) + 1]
+        self.assertIn('has-plan-progress', mobile_truck_tag)
+        self.assertIn('is-plan-overrun', mobile_truck_tag)
+        self.assertIn('data-plan-percent="125"', mobile_truck_tag)
+        self.assertIn('data-plan-loop-percent="25"', mobile_truck_tag)
+        self.assertIn('data-plan-completed-loops="1"', mobile_truck_tag)
         self.assertContains(response, '×1', html=False)
 
     def test_mining_master_desktop_realtime_refresh_uses_rendered_board(self):
@@ -303,7 +345,7 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertContains(response, 'miningMasterUpdateCheckIntervalMs')
         self.assertContains(response, 'checkMiningMasterPwaUpdateSilently')
         self.assertContains(response, 'Установлена последняя версия приложения')
-        self.assertContains(response, 'mining-master-mobile-shell-v99')
+        self.assertContains(response, 'mining-master-mobile-shell-v100')
         self.assertContains(response, '"trip_changed"')
         self.assertContains(
             response,
@@ -342,7 +384,7 @@ class MiningMasterAssignmentsViewTests(TestCase):
         script = response.content.decode('utf-8')
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'mining-master-mobile-shell-v99')
+        self.assertContains(response, 'mining-master-mobile-shell-v100')
         self.assertIn(reverse('mining_master_manifest'), script)
         self.assertIn('/static/js/realtime-client.js', script)
         self.assertIn('ignoreSearch: true', script)

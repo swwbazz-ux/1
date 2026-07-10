@@ -150,7 +150,7 @@
                 <div class="mm-mobile-plan-ring" style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" role="img" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%">
                     {{ dispatcher_dashboard.completion_percent|default:0 }}%
                 </div>
-                <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v99</span>
+                <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v100</span>
             </div>
         </header>
 
@@ -166,19 +166,27 @@
         <div class="mm-mobile-complex-grid">
             {% for complex in dispatcher_dashboard.mobile_complex_zones %}
                 {% if not complex.is_empty %}
-                    <article class="mm-mobile-complex-card status-{{ complex.status_key }}" role="button" tabindex="0" data-mm-mobile-open-complex="{{ complex.card_id }}" data-mm-mobile-excavator-id="{{ complex.equipment_card_id }}">
+                    <article class="mm-mobile-complex-card status-{{ complex.status_key }}{% if complex.plan_has_plan %} has-plan-progress{% endif %}{% if complex.plan_visual.is_overrun %} is-plan-overrun{% endif %}"{% if complex.plan_has_plan %} style="--mm-mobile-plan-progress: {{ complex.plan_visual.loop_progress }}%;"{% endif %} role="button" tabindex="0" data-mm-mobile-open-complex="{{ complex.card_id }}" data-mm-mobile-excavator-id="{{ complex.equipment_card_id }}" data-plan-percent="{% if complex.plan_has_plan %}{{ complex.percent }}{% endif %}" data-plan-loop-percent="{% if complex.plan_has_plan %}{{ complex.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ complex.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if complex.plan_has_plan %}{{ complex.plan_visual.phase }}{% endif %}">
                         <div class="mm-mobile-complex-card-head">
                             <h2>{{ complex.id }}</h2>
-                            <span class="mm-mobile-status-chip">
-                                {{ complex.status_label|default:"состояние" }}
-                            </span>
+                            <div class="mm-mobile-complex-head-meta">
+                                <span class="mm-mobile-status-chip">
+                                    {{ complex.status_label|default:"состояние" }}
+                                </span>
+                                {% if complex.plan_has_plan %}
+                                    <span class="mm-mobile-complex-plan-ring" role="img" aria-label="Выполнение плана {{ complex.percent }}%, завершено циклов: {{ complex.plan_visual.completed_loops }}">
+                                        <span>{{ complex.plan_visual.loop_progress }}%</span>
+                                        {% if complex.plan_visual.has_completed_loops %}<b class="mm-mobile-plan-loop-badge">×{{ complex.plan_visual.completed_loops }}</b>{% endif %}
+                                    </span>
+                                {% endif %}
+                            </div>
                         </div>
                         <div class="mm-mobile-complex-visual" aria-hidden="true" data-mm-mobile-release-trucks>
                             <img src="{% static complex.excavator_icon %}" alt="">
                         </div>
                         <div class="mm-mobile-truck-preview" aria-label="Самосвалы комплекса" data-mm-mobile-truck-count="{% if complex.mobile_truck_overflow %}17{% else %}{{ complex.active_truck_tiles|length }}{% endif %}">
                             {% for truck in complex.active_truck_tiles|slice:":16" %}
-                                <span class="mm-mobile-truck-mini status-{{ truck.status }}" data-mm-mobile-home-truck-id="{{ truck.card_id }}" data-mm-mobile-home-truck-number="{{ truck.name }}" data-mm-mobile-home-source-excavator-id="{{ complex.equipment_card_id }}" data-mm-mobile-equipment-state="{{ truck.equipment_state_code }}">{{ truck.name }}</span>
+                                <span class="mm-mobile-truck-mini status-{{ truck.status }}{% if truck.plan_has_plan %} has-plan-progress{% endif %}{% if truck.plan_visual.is_overrun %} is-plan-overrun{% endif %}"{% if truck.plan_has_plan %} style="--mm-mobile-plan-progress: {{ truck.plan_visual.loop_progress }}%;"{% endif %} data-mm-mobile-home-truck-id="{{ truck.card_id }}" data-mm-mobile-home-truck-number="{{ truck.name }}" data-mm-mobile-home-source-excavator-id="{{ complex.equipment_card_id }}" data-mm-mobile-equipment-state="{{ truck.equipment_state_code }}" data-plan-percent="{% if truck.plan_has_plan %}{{ truck.percent }}{% endif %}" data-plan-loop-percent="{% if truck.plan_has_plan %}{{ truck.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ truck.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if truck.plan_has_plan %}{{ truck.plan_visual.phase }}{% endif %}">{{ truck.name }}{% if truck.plan_has_plan %}<i class="mm-mobile-plan-ring-layer" aria-hidden="true"></i>{% endif %}{% if truck.plan_visual.has_completed_loops %}<b class="mm-mobile-plan-loop-badge">×{{ truck.plan_visual.completed_loops }}</b>{% endif %}</span>
                             {% endfor %}
                             {% if complex.mobile_truck_overflow %}
                                 <span class="mm-mobile-truck-mini is-more">+{{ complex.mobile_truck_overflow }}</span>
@@ -225,7 +233,7 @@
                     <div class="mm-mobile-plan-ring" style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" role="img" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%">
                         {{ dispatcher_dashboard.completion_percent|default:0 }}%
                     </div>
-                    <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v99</span>
+                    <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v100</span>
                 </div>
             </header>
 
@@ -279,7 +287,7 @@
                     <div class="mm-mobile-plan-ring" style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" role="img" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%">
                         {{ dispatcher_dashboard.completion_percent|default:0 }}%
                     </div>
-                    <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v99</span>
+                    <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v100</span>
                 </div>
             </header>
 
@@ -289,10 +297,12 @@
 
             <div class="mm-mobile-detail-trucks" aria-label="Гараж самосвалов">
                 {% for truck in dispatcher_dashboard.mobile_truck_garage_tiles %}
-                    <article class="mm-mobile-truck-card status-{{ truck.status }}" role="button" tabindex="0" data-equipment-card-id="{{ truck.card_id }}" data-mm-mobile-truck-sort="{{ truck.name }}" data-mm-mobile-truck-state="{{ truck.status }}" data-mm-mobile-equipment-state="{{ truck.equipment_state_code }}" title="{{ truck.label }}" aria-label="Самосвал {{ truck.name }}: {{ truck.label }}">
+                    <article class="mm-mobile-truck-card status-{{ truck.status }}{% if truck.plan_has_plan %} has-plan-progress{% endif %}{% if truck.plan_visual.is_overrun %} is-plan-overrun{% endif %}"{% if truck.plan_has_plan %} style="--mm-mobile-plan-progress: {{ truck.plan_visual.loop_progress }}%;"{% endif %} role="button" tabindex="0" data-equipment-card-id="{{ truck.card_id }}" data-mm-mobile-truck-sort="{{ truck.name }}" data-mm-mobile-truck-state="{{ truck.status }}" data-mm-mobile-equipment-state="{{ truck.equipment_state_code }}" data-plan-percent="{% if truck.plan_has_plan %}{{ truck.percent }}{% endif %}" data-plan-loop-percent="{% if truck.plan_has_plan %}{{ truck.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ truck.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if truck.plan_has_plan %}{{ truck.plan_visual.phase }}{% endif %}" title="{{ truck.label }}" aria-label="Самосвал {{ truck.name }}: {{ truck.label }}">
                         <img src="{% static truck.icon %}" alt="">
                         <strong>{{ truck.name }}</strong>
                         <span></span>
+                        {% if truck.plan_has_plan %}<i class="mm-mobile-plan-ring-layer" aria-hidden="true"></i>{% endif %}
+                        {% if truck.plan_visual.has_completed_loops %}<b class="mm-mobile-plan-loop-badge">×{{ truck.plan_visual.completed_loops }}</b>{% endif %}
                     </article>
                 {% empty %}
                     <div class="mm-mobile-detail-empty">самосвалов в гараже нет</div>
@@ -330,7 +340,7 @@
                     <div class="mm-mobile-plan-ring" style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" role="img" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%">
                         {{ dispatcher_dashboard.completion_percent|default:0 }}%
                     </div>
-                    <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v99</span>
+                    <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v100</span>
                 </div>
             </header>
 
@@ -393,7 +403,7 @@
 
             <div class="mm-mobile-version-strip" aria-label="Версия приложения">
                 <span>Версия приложения</span>
-                <strong data-mm-pwa-current-shell-version>v99</strong>
+                <strong data-mm-pwa-current-shell-version>v100</strong>
                 <button type="button" data-mm-pwa-check-update>Проверить обновления</button>
             </div>
 
@@ -430,7 +440,7 @@
                             <div class="mm-mobile-plan-ring" style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" role="img" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%">
                                 {{ dispatcher_dashboard.completion_percent|default:0 }}%
                             </div>
-                            <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v99</span>
+                            <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v100</span>
                         </div>
                     </header>
 
@@ -443,7 +453,7 @@
                         </div>
                         <div class="mm-mobile-fill-assigned" data-mm-mobile-fill-assigned aria-label="Самосвалы комплекса">
                             {% for truck in complex.active_truck_tiles|slice:":16" %}
-                                <span class="mm-mobile-truck-mini status-{{ truck.status }}" data-mm-mobile-assigned-truck-id="{{ truck.card_id }}" data-mm-mobile-assigned-truck-number="{{ truck.name }}" data-mm-mobile-equipment-state="{{ truck.equipment_state_code }}">{{ truck.name }}</span>
+                                <span class="mm-mobile-truck-mini status-{{ truck.status }}{% if truck.plan_has_plan %} has-plan-progress{% endif %}{% if truck.plan_visual.is_overrun %} is-plan-overrun{% endif %}"{% if truck.plan_has_plan %} style="--mm-mobile-plan-progress: {{ truck.plan_visual.loop_progress }}%;"{% endif %} data-mm-mobile-assigned-truck-id="{{ truck.card_id }}" data-mm-mobile-assigned-truck-number="{{ truck.name }}" data-mm-mobile-equipment-state="{{ truck.equipment_state_code }}" data-plan-percent="{% if truck.plan_has_plan %}{{ truck.percent }}{% endif %}" data-plan-loop-percent="{% if truck.plan_has_plan %}{{ truck.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ truck.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if truck.plan_has_plan %}{{ truck.plan_visual.phase }}{% endif %}">{{ truck.name }}{% if truck.plan_has_plan %}<i class="mm-mobile-plan-ring-layer" aria-hidden="true"></i>{% endif %}{% if truck.plan_visual.has_completed_loops %}<b class="mm-mobile-plan-loop-badge">×{{ truck.plan_visual.completed_loops }}</b>{% endif %}</span>
                             {% endfor %}
                         </div>
                     </div>
@@ -454,10 +464,12 @@
                         </div>
                         <div class="mm-mobile-fill-truck-garage" aria-label="Гараж самосвалов">
                             {% for truck in dispatcher_dashboard.mobile_truck_garage_tiles %}
-                                <button type="button" class="mm-mobile-truck-card mm-mobile-fill-truck status-{{ truck.status }}" data-equipment-card-id="{{ truck.card_id }}" data-mm-mobile-fill-truck-id="{{ truck.card_id }}" data-mm-mobile-fill-truck-number="{{ truck.name }}" data-mm-mobile-truck-sort="{{ truck.name }}" data-mm-mobile-truck-state="{{ truck.status }}" data-mm-mobile-equipment-state="{{ truck.equipment_state_code }}" title="{{ truck.label }}" aria-label="Самосвал {{ truck.name }}: {{ truck.label }}">
+                                <button type="button" class="mm-mobile-truck-card mm-mobile-fill-truck status-{{ truck.status }}{% if truck.plan_has_plan %} has-plan-progress{% endif %}{% if truck.plan_visual.is_overrun %} is-plan-overrun{% endif %}"{% if truck.plan_has_plan %} style="--mm-mobile-plan-progress: {{ truck.plan_visual.loop_progress }}%;"{% endif %} data-equipment-card-id="{{ truck.card_id }}" data-mm-mobile-fill-truck-id="{{ truck.card_id }}" data-mm-mobile-fill-truck-number="{{ truck.name }}" data-mm-mobile-truck-sort="{{ truck.name }}" data-mm-mobile-truck-state="{{ truck.status }}" data-mm-mobile-equipment-state="{{ truck.equipment_state_code }}" data-plan-percent="{% if truck.plan_has_plan %}{{ truck.percent }}{% endif %}" data-plan-loop-percent="{% if truck.plan_has_plan %}{{ truck.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ truck.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if truck.plan_has_plan %}{{ truck.plan_visual.phase }}{% endif %}" title="{{ truck.label }}" aria-label="Самосвал {{ truck.name }}: {{ truck.label }}">
                                     <img src="{% static truck.icon %}" alt="">
                                     <strong>{{ truck.name }}</strong>
                                     <span></span>
+                                    {% if truck.plan_has_plan %}<i class="mm-mobile-plan-ring-layer" aria-hidden="true"></i>{% endif %}
+                                    {% if truck.plan_visual.has_completed_loops %}<b class="mm-mobile-plan-loop-badge">×{{ truck.plan_visual.completed_loops }}</b>{% endif %}
                                 </button>
                             {% empty %}
                                 <div class="mm-mobile-detail-empty">самосвалов в гараже нет</div>
@@ -867,7 +879,7 @@ document.addEventListener("DOMContentLoaded", function () {
     var dispatcherRealtimeConnected = true;
     var dispatcherRealtimeLastSuccessAt = 0;
     var dispatcherRealtimeLastReason = "";
-    var miningMasterShellVersion = "mining-master-mobile-shell-v99";
+    var miningMasterShellVersion = "mining-master-mobile-shell-v100";
     function readDispatcherSyncQueue() {
         try {
             return JSON.parse(window.localStorage.getItem(dispatcherSyncQueueKey) || "[]");
@@ -2760,6 +2772,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 mini.dataset.mmMobileHomeSourceExcavatorId = excavatorId;
                 mini.dataset.mmMobileEquipmentState = source.dataset.mmMobileEquipmentState || "";
                 mini.textContent = mini.dataset.mmMobileHomeTruckNumber || "";
+                syncMobilePlanVisual(source, mini);
                 preview.appendChild(mini);
                 bindMobileHomeTruckDrag(mini);
                 removeMobileTruckFromGarages(mini.dataset.mmMobileHomeTruckId);
@@ -2839,6 +2852,50 @@ document.addEventListener("DOMContentLoaded", function () {
                 syncMobileTruckGarageEmpty(truckPanelGrid);
             }
         }
+        function syncMobilePlanVisual(source, target) {
+            if (!source || !target) return target;
+            ["planPercent", "planLoopPercent", "planCompletedLoops", "planProgressPhase"].forEach(function (key) {
+                var value = source.dataset[key] || "";
+                if (value) {
+                    target.dataset[key] = value;
+                } else {
+                    delete target.dataset[key];
+                }
+            });
+            var loopProgress = source.dataset.planLoopPercent || "";
+            var completedLoops = parseInt(source.dataset.planCompletedLoops || "0", 10);
+            if (!Number.isFinite(completedLoops)) completedLoops = 0;
+            target.classList.toggle("has-plan-progress", loopProgress !== "");
+            target.classList.toggle("is-plan-overrun", completedLoops > 0);
+            if (loopProgress !== "") {
+                target.style.setProperty("--mm-mobile-plan-progress", loopProgress + "%");
+            } else {
+                target.style.removeProperty("--mm-mobile-plan-progress");
+            }
+            var ringLayer = target.querySelector(".mm-mobile-plan-ring-layer");
+            if (loopProgress !== "") {
+                if (!ringLayer) {
+                    ringLayer = document.createElement("i");
+                    ringLayer.className = "mm-mobile-plan-ring-layer";
+                    ringLayer.setAttribute("aria-hidden", "true");
+                    target.appendChild(ringLayer);
+                }
+            } else if (ringLayer) {
+                ringLayer.remove();
+            }
+            var badge = target.querySelector(".mm-mobile-plan-loop-badge");
+            if (completedLoops > 0) {
+                if (!badge) {
+                    badge = document.createElement("b");
+                    badge.className = "mm-mobile-plan-loop-badge";
+                    target.appendChild(badge);
+                }
+                badge.textContent = "×" + completedLoops;
+            } else if (badge) {
+                badge.remove();
+            }
+            return target;
+        }
         function ensureMobileTruckPanelGarageTruck(source) {
             var grid = shell.querySelector("[data-mm-mobile-panel='trucks'] .mm-mobile-detail-trucks");
             if (!grid || !source) return null;
@@ -2870,6 +2927,7 @@ document.addEventListener("DOMContentLoaded", function () {
             if (image) image.src = getMobileGarageTruckIcon(source);
             var title = card.querySelector("strong");
             if (title) title.textContent = truckNumber;
+            syncMobilePlanVisual(source, card);
             return card;
         }
         function restoreMobileTruckToGarages(source) {
@@ -2907,6 +2965,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 var existingImage = existing.querySelector("img");
                 if (existingImage) existingImage.src = getMobileGarageTruckIcon(source);
                 existing.hidden = false;
+                syncMobilePlanVisual(source, existing);
                 return existing;
             }
             var button = document.createElement("button");
@@ -2932,6 +2991,7 @@ document.addEventListener("DOMContentLoaded", function () {
             bindMobileFillTruckDrag(button);
             bindEquipmentCardTrigger(button);
             sortMobileTruckCards(garage, ".mm-mobile-fill-truck");
+            syncMobilePlanVisual(source, button);
             return button;
         }
         function removeMobileFillGarageTruck(screen, truckId) {
@@ -2947,6 +3007,7 @@ document.addEventListener("DOMContentLoaded", function () {
             mini.dataset.mmMobileEquipmentState = homeTruck.dataset.mmMobileEquipmentState || "";
             mini.dataset.mmMobileFillOriginal = "true";
             mini.textContent = mini.dataset.mmMobileAssignedTruckNumber || "";
+            syncMobilePlanVisual(homeTruck, mini);
             return mini;
         }
         function syncMobileFillScreenFromHome(screen) {
@@ -3935,6 +3996,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 mini.dataset.mmMobileFillAdded = "true";
             }
             mini.textContent = truckButton.dataset.mmMobileFillTruckNumber || (truckButton.querySelector("strong") && truckButton.querySelector("strong").textContent) || "";
+            syncMobilePlanVisual(truckButton, mini);
             assigned.appendChild(mini);
             bindMobileFillAssignedTruckRelease(mini);
             updateMobileFillAssignedLayout(assigned);
@@ -3976,6 +4038,7 @@ document.addEventListener("DOMContentLoaded", function () {
             button.appendChild(img);
             button.appendChild(strong);
             button.appendChild(status);
+            syncMobilePlanVisual(mini, button);
             garage.prepend(button);
             bindMobileFillTruckDrag(button);
             bindEquipmentCardTrigger(button);
