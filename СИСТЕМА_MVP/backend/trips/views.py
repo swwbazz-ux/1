@@ -370,7 +370,7 @@ DISPATCHER_MANIFEST = {
 }
 
 DISPATCHER_SERVICE_WORKER_JS = r"""
-const CACHE_NAME = "dispatcher-desktop-shell-v28";
+const CACHE_NAME = "dispatcher-desktop-shell-v29";
 const APP_SHELL_URL = "/dispatcher/control/";
 const MANIFEST_URL = "/dispatcher.webmanifest";
 const CORE_ASSETS = [

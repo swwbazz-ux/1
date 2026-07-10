@@ -62,7 +62,7 @@ Backend является основным рабочим приложением.
 - View: `СИСТЕМА_MVP/backend/trips/views.py`.
 - Маршрут: `/dispatcher/control/`.
 - Service worker: `/dispatcher-sw.js`.
-- Shell: `dispatcher-desktop-shell-v28`.
+- Shell: `dispatcher-desktop-shell-v29`.
 
 ## Правило локализации задачи
 

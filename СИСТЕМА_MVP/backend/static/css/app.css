@@ -23405,37 +23405,37 @@ body.management-dynamics-chart-modal-open {
         conic-gradient(from -90deg, var(--dispatcher-plan-track) 0 100%);
 }
 
-body.mining-master-mobile-screen .dispatcher-complex-card[data-plan-progress-phase]:not([data-plan-progress-phase=""])::before {
+body.dispatcher-control-screen .dispatcher-complex-card[data-plan-progress-phase]:not([data-plan-progress-phase=""])::before {
     padding: 6px;
     filter: saturate(1.45) brightness(1.28) drop-shadow(0 0 5px var(--dispatcher-plan-glow));
 }
 
-body.mining-master-mobile-screen :is(.dispatcher-excavator-garage-tile, .dispatcher-truck-tile, .dispatcher-complex-card)[data-plan-progress-phase="green"] {
+body.dispatcher-control-screen :is(.dispatcher-excavator-garage-tile, .dispatcher-truck-tile, .dispatcher-complex-card)[data-plan-progress-phase="green"] {
     --dispatcher-plan-color: rgba(74, 222, 128, 1);
     --dispatcher-plan-glow: rgba(74, 222, 128, .6);
     --dispatcher-plan-complete-color: rgba(74, 222, 128, .68);
 }
 
-body.mining-master-mobile-screen :is(.dispatcher-excavator-garage-tile, .dispatcher-truck-tile, .dispatcher-complex-card)[data-plan-progress-phase="amber"] {
+body.dispatcher-control-screen :is(.dispatcher-excavator-garage-tile, .dispatcher-truck-tile, .dispatcher-complex-card)[data-plan-progress-phase="amber"] {
     --dispatcher-plan-color: rgba(250, 204, 21, 1);
     --dispatcher-plan-glow: rgba(250, 204, 21, .58);
     --dispatcher-plan-complete-color: rgba(74, 222, 128, .7);
 }
 
-body.mining-master-mobile-screen :is(.dispatcher-excavator-garage-tile, .dispatcher-truck-tile, .dispatcher-complex-card)[data-plan-progress-phase="cyan"] {
+body.dispatcher-control-screen :is(.dispatcher-excavator-garage-tile, .dispatcher-truck-tile, .dispatcher-complex-card)[data-plan-progress-phase="cyan"] {
     --dispatcher-plan-color: rgba(56, 189, 248, 1);
     --dispatcher-plan-glow: rgba(56, 189, 248, .54);
     --dispatcher-plan-complete-color: rgba(250, 204, 21, .62);
 }
 
-body.mining-master-mobile-screen :is(.dispatcher-excavator-garage-tile, .dispatcher-truck-tile, .dispatcher-complex-card)[data-plan-progress-phase="orange"] {
+body.dispatcher-control-screen :is(.dispatcher-excavator-garage-tile, .dispatcher-truck-tile, .dispatcher-complex-card)[data-plan-progress-phase="orange"] {
     --dispatcher-plan-color: rgba(251, 146, 60, 1);
     --dispatcher-plan-glow: rgba(251, 146, 60, .6);
     --dispatcher-plan-complete-color: rgba(56, 189, 248, .56);
 }
 
-body.mining-master-mobile-screen .dispatcher-excavator-garage-tile[data-plan-progress-phase]:not([data-plan-progress-phase=""])::before,
-body.mining-master-mobile-screen .dispatcher-truck-tile[data-plan-progress-phase]:not([data-plan-progress-phase=""])::before {
+body.dispatcher-control-screen .dispatcher-excavator-garage-tile[data-plan-progress-phase]:not([data-plan-progress-phase=""])::before,
+body.dispatcher-control-screen .dispatcher-truck-tile[data-plan-progress-phase]:not([data-plan-progress-phase=""])::before {
     padding: 4px;
     filter: saturate(1.45) brightness(1.28) drop-shadow(0 0 3px var(--dispatcher-plan-glow));
 }
