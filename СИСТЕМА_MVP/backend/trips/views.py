@@ -2510,6 +2510,9 @@ def excavator_truck_load_block_reason(
 
 
 EXCAVATOR_WORK_SETTINGS_SESSION_KEY = 'excavator_work_settings'
+EXCAVATOR_AUTO_DOWNTIME_TRANSFER = 'Перегон экскаватора'
+EXCAVATOR_AUTO_DOWNTIME_WAITING_TRUCKS = 'Ожидание самосвалов'
+EXCAVATOR_AUTO_DOWNTIME_COMMENT = 'Автоматически по производственному событию'
 
 
 def excavator_work_settings_key(current_excavator):
@@ -2525,6 +2528,137 @@ def get_excavator_work_placement(current_excavator):
         .filter(excavator=current_excavator)
         .first()
     )
+
+
+def excavator_auto_downtime_reason(excavator, reason_name):
+    if not excavator:
+        return None
+    return (
+        DowntimeReason.for_workplace('excavator_operator', excavator.equipment_type)
+        .filter(name=reason_name)
+        .first()
+    )
+
+
+def start_excavator_auto_downtime(excavator, employee, reason_name, *, replace_active=False):
+    reason = excavator_auto_downtime_reason(excavator, reason_name)
+    if not reason:
+        return None
+    with transaction.atomic():
+        excavator = Equipment.objects.select_for_update().get(pk=excavator.pk)
+        active_events = list(
+            DowntimeEvent.objects
+            .select_for_update()
+            .filter(equipment=excavator, ended_at__isnull=True)
+            .select_related('reason')
+            .order_by('-started_at', '-id')
+        )
+        for event in active_events:
+            if event.reason_id == reason.id:
+                return event
+        if active_events and not replace_active:
+            return None
+        now = timezone.now()
+        for event in active_events:
+            event.ended_at = now
+            event.save(update_fields=['ended_at'])
+        return DowntimeEvent.objects.create(
+            equipment=excavator,
+            employee=employee,
+            reason=reason,
+            started_at=now,
+            comment=EXCAVATOR_AUTO_DOWNTIME_COMMENT,
+        )
+
+
+def close_excavator_auto_downtime(excavator, reason_name):
+    if not excavator:
+        return 0
+    now = timezone.now()
+    closed = 0
+    with transaction.atomic():
+        excavator = Equipment.objects.select_for_update().get(pk=excavator.pk)
+        events = list(
+            DowntimeEvent.objects
+            .select_for_update()
+            .filter(
+                equipment=excavator,
+                reason__name=reason_name,
+                ended_at__isnull=True,
+                comment=EXCAVATOR_AUTO_DOWNTIME_COMMENT,
+            )
+        )
+        for event in events:
+            event.ended_at = now
+            event.save(update_fields=['ended_at'])
+            closed += 1
+    return closed
+
+
+def excavator_has_loadable_assigned_truck(excavator):
+    if not excavator:
+        return False
+    assignments = (
+        HaulAssignment.objects
+        .filter(
+            excavator=excavator,
+            ended_at__isnull=True,
+            status=AssignmentStatus.ACCEPTED,
+        )
+        .select_related('truck', 'truck__equipment_type')
+    )
+    return any(
+        not excavator_truck_load_block(assignment, current_excavator=excavator)
+        for assignment in assignments
+    )
+
+
+def reconcile_excavator_waiting_for_trucks(excavator, employee=None, *, start_when_empty=False):
+    if not excavator:
+        return None
+    with transaction.atomic():
+        excavator = Equipment.objects.select_for_update().get(pk=excavator.pk)
+        if excavator_has_loadable_assigned_truck(excavator):
+            close_excavator_auto_downtime(excavator, EXCAVATOR_AUTO_DOWNTIME_WAITING_TRUCKS)
+            return None
+        if start_when_empty:
+            return start_excavator_auto_downtime(
+                excavator,
+                employee,
+                EXCAVATOR_AUTO_DOWNTIME_WAITING_TRUCKS,
+            )
+        return None
+
+
+def excavator_work_context_changed(
+    current_excavator,
+    previous_session_settings,
+    *,
+    rock_type,
+    dump_points,
+    loading_horizon,
+    loading_block,
+):
+    placement = get_excavator_work_placement(current_excavator)
+    previous_session_settings = previous_session_settings or {}
+    previous_dump_ids = previous_session_settings.get('dump_point_ids')
+    if not isinstance(previous_dump_ids, list):
+        previous_dump_ids = [placement.work_dump_point_id] if placement and placement.work_dump_point_id else []
+    previous_rock_id = previous_session_settings.get('rock_type_id')
+    if previous_rock_id is None and placement:
+        previous_rock_id = placement.work_rock_type_id
+    previous_horizon = previous_session_settings.get('loading_horizon')
+    if previous_horizon is None and placement:
+        previous_horizon = placement.loading_horizon
+    previous_block = previous_session_settings.get('loading_block')
+    if previous_block is None and placement:
+        previous_block = placement.loading_block
+    return any((
+        str(previous_rock_id or '') != str(rock_type.id),
+        [str(value) for value in previous_dump_ids] != [str(point.id) for point in dump_points],
+        normalize_excavator_numeric_setting(previous_horizon) != loading_horizon,
+        normalize_excavator_numeric_setting(previous_block) != loading_block,
+    ))
 
 
 def save_excavator_work_context(*, current_excavator, actor, rock_type, dump_points, loading_horizon, loading_block):
@@ -2687,6 +2821,7 @@ def finalize_trip_unloaded(trip, *, driver, unloading_shift):
         'actual_dump_point',
         'is_carryover',
     ])
+    reconcile_excavator_waiting_for_trucks(trip.excavator)
 
 
 def trip_loaded_payload(trip, *, client_action_id=''):
@@ -2821,6 +2956,12 @@ def excavator_truck_loaded_view(request):
             trip=trip,
             actor=access.employee,
         )
+        close_excavator_auto_downtime(current_excavator, EXCAVATOR_AUTO_DOWNTIME_TRANSFER)
+        reconcile_excavator_waiting_for_trucks(
+            current_excavator,
+            access.employee,
+            start_when_empty=True,
+        )
         state = bump_operational_state(
             'Trip:truck_loaded',
             event_type='trip_changed',
@@ -2906,6 +3047,7 @@ def excavator_truck_loaded_cancel_view(request):
 
         trip.status = TripStatus.CANCELLED
         trip.save(update_fields=['status'])
+        reconcile_excavator_waiting_for_trucks(current_excavator)
         TripClientAction.objects.create(
             action_type='truck_loaded_cancel',
             client_action_id=client_action_id,
@@ -2981,6 +3123,14 @@ def excavator_work_settings_view(request):
     loading_block = normalize_excavator_numeric_setting(payload.get('loading_block'))
     session_settings = request.session.get(EXCAVATOR_WORK_SETTINGS_SESSION_KEY, {})
     setting_key = excavator_work_settings_key(current_excavator)
+    work_context_changed = excavator_work_context_changed(
+        current_excavator,
+        session_settings.get(setting_key),
+        rock_type=rock_type,
+        dump_points=dump_points,
+        loading_horizon=loading_horizon,
+        loading_block=loading_block,
+    )
     session_settings[setting_key] = {
         'client_action_id': str(payload.get('client_action_id') or ''),
         'rock_type_id': rock_type.id,
@@ -2991,14 +3141,23 @@ def excavator_work_settings_view(request):
     }
     request.session[EXCAVATOR_WORK_SETTINGS_SESSION_KEY] = session_settings
     request.session.modified = True
-    save_excavator_work_context(
-        current_excavator=current_excavator,
-        actor=access.employee,
-        rock_type=rock_type,
-        dump_points=dump_points,
-        loading_horizon=loading_horizon,
-        loading_block=loading_block,
-    )
+    with transaction.atomic():
+        save_excavator_work_context(
+            current_excavator=current_excavator,
+            actor=access.employee,
+            rock_type=rock_type,
+            dump_points=dump_points,
+            loading_horizon=loading_horizon,
+            loading_block=loading_block,
+        )
+        active_downtime = None
+        if work_context_changed:
+            active_downtime = start_excavator_auto_downtime(
+                current_excavator,
+                access.employee,
+                EXCAVATOR_AUTO_DOWNTIME_TRANSFER,
+                replace_active=True,
+            )
 
     state = bump_operational_state(
         'ExcavatorWorkSettings:update',
@@ -3024,6 +3183,8 @@ def excavator_work_settings_view(request):
         'dump_points': [{'id': point.id, 'name': str(point)} for point in dump_points],
         'loading_horizon': loading_horizon,
         'loading_block': loading_block,
+        'work_context_changed': work_context_changed,
+        'active_downtime_reason': str(active_downtime.reason) if active_downtime else '',
         'version': state.version,
     })
 
@@ -3222,6 +3383,7 @@ def excavator_work_view(request):
 
     open_shift = get_excavator_open_shift(access.employee)
     current_excavator = open_shift.equipment if open_shift else None
+    reconcile_excavator_waiting_for_trucks(current_excavator)
     shift_start_excavator = current_excavator or get_excavator_for_shift_start(access.employee, {})
     previous_equipment_shift = None if open_shift else get_previous_closed_equipment_shift(shift_start_excavator)
 
@@ -3242,6 +3404,12 @@ def excavator_work_view(request):
                 messages.error(request, block_reason)
                 return redirect('excavator_work')
             trip = form.create_trip(excavator_operator=access.employee)
+            close_excavator_auto_downtime(current_excavator, EXCAVATOR_AUTO_DOWNTIME_TRANSFER)
+            reconcile_excavator_waiting_for_trucks(
+                current_excavator,
+                access.employee,
+                start_when_empty=True,
+            )
             if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
                 return JsonResponse({
                     'ok': True,

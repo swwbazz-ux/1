@@ -1065,6 +1065,8 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         payload = json.loads(response.content.decode('utf-8'))
         self.assertTrue(payload['ok'])
+        self.assertTrue(payload['work_context_changed'])
+        self.assertEqual(payload['active_downtime_reason'], 'Перегон экскаватора')
         self.assertEqual(payload['rock_type_id'], second_rock.id)
         self.assertEqual(payload['dump_point_ids'], [second_dump.id, self.dump_point.id])
         self.assertEqual(payload['loading_horizon'], '75')
@@ -1092,6 +1094,39 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(screen, f'data-eo-dump-target="{second_dump.id}"')
         self.assertContains(screen, f'data-eo-dump-target="{self.dump_point.id}"')
         self.assertContains(screen, f'value="{second_rock.id}" selected')
+
+        transfer = DowntimeEvent.objects.get(equipment=self.excavator, ended_at__isnull=True)
+        self.assertEqual(transfer.reason.name, 'Перегон экскаватора')
+        self.assertEqual(transfer.employee, self.operator)
+
+    def test_excavator_work_settings_same_context_does_not_restart_transfer(self):
+        settings = {
+            'rock_type_id': self.rock.id,
+            'dump_point_ids': [self.dump_point.id],
+            'loading_horizon': '75',
+            'loading_block': '52',
+        }
+        first_response = self.client.post(
+            reverse('excavator_work_settings'),
+            data=json.dumps({'client_action_id': 'settings-first', **settings}),
+            content_type='application/json',
+        )
+        transfer = DowntimeEvent.objects.get(equipment=self.excavator, ended_at__isnull=True)
+        transfer.ended_at = timezone.now()
+        transfer.save(update_fields=['ended_at'])
+
+        second_response = self.client.post(
+            reverse('excavator_work_settings'),
+            data=json.dumps({'client_action_id': 'settings-same', **settings}),
+            content_type='application/json',
+        )
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(second_response.status_code, 200)
+        second_payload = json.loads(second_response.content.decode('utf-8'))
+        self.assertFalse(second_payload['work_context_changed'])
+        self.assertEqual(second_payload['active_downtime_reason'], '')
+        self.assertFalse(DowntimeEvent.objects.filter(equipment=self.excavator, ended_at__isnull=True).exists())
 
     def test_excavator_work_settings_rejects_inactive_reference_values(self):
         inactive_dump = DumpPoint.objects.create(name='Закрытая точка', is_active=False)
@@ -1763,6 +1798,70 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
             ).exists()
         )
 
+    def test_truck_loaded_closes_transfer_when_another_truck_remains_available(self):
+        second_truck = Equipment.objects.create(
+            equipment_type=self.truck_type,
+            garage_number='22',
+        )
+        second_driver, _, second_shift = self.create_registered_driver_shift(
+            second_truck,
+            full_name='Сидоров С.С.',
+            access_code='200022',
+        )
+        self.create_driver_assignment(second_truck, driver=second_driver, shift=second_shift)
+        HaulAssignment.objects.create(
+            truck=second_truck,
+            excavator=self.excavator,
+            status=AssignmentStatus.ACCEPTED,
+        )
+        transfer_reason = DowntimeReason.objects.get(name='Перегон экскаватора')
+        transfer = DowntimeEvent.objects.create(
+            equipment=self.excavator,
+            employee=self.operator,
+            reason=transfer_reason,
+            comment='Автоматически по производственному событию',
+            started_at=timezone.now() - timedelta(minutes=5),
+        )
+
+        response = self.post_truck_loaded(client_action_id='close-transfer')
+
+        self.assertEqual(response.status_code, 200)
+        transfer.refresh_from_db()
+        self.assertIsNotNone(transfer.ended_at)
+        self.assertFalse(
+            DowntimeEvent.objects.filter(
+                equipment=self.excavator,
+                reason__name='Ожидание самосвалов',
+                ended_at__isnull=True,
+            ).exists()
+        )
+
+    def test_truck_loaded_starts_waiting_when_last_available_truck_is_sent(self):
+        response = self.post_truck_loaded(client_action_id='last-loadable-truck')
+
+        self.assertEqual(response.status_code, 200)
+        waiting = DowntimeEvent.objects.get(
+            equipment=self.excavator,
+            reason__name='Ожидание самосвалов',
+            ended_at__isnull=True,
+        )
+        self.assertEqual(waiting.employee, self.operator)
+        self.assertEqual(waiting.comment, 'Автоматически по производственному событию')
+
+    def test_trip_unloaded_closes_automatic_waiting_for_trucks(self):
+        load_response = self.post_truck_loaded(client_action_id='waiting-unload')
+        trip = Trip.objects.get(id=json.loads(load_response.content.decode('utf-8'))['trip_id'])
+        waiting = DowntimeEvent.objects.get(
+            equipment=self.excavator,
+            reason__name='Ожидание самосвалов',
+            ended_at__isnull=True,
+        )
+
+        finalize_trip_unloaded(trip, driver=self.driver, unloading_shift=self.truck_shift)
+
+        waiting.refresh_from_db()
+        self.assertIsNotNone(waiting.ended_at)
+
     def test_truck_loaded_reuses_same_client_action_id(self):
         first_response = self.post_truck_loaded(client_action_id='same-action')
         second_response = self.post_truck_loaded(client_action_id='same-action')
@@ -1910,6 +2009,13 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
                 client_action_id='cancel-1',
                 trip=trip,
                 actor=self.operator,
+            ).exists()
+        )
+        self.assertFalse(
+            DowntimeEvent.objects.filter(
+                equipment=self.excavator,
+                reason__name='Ожидание самосвалов',
+                ended_at__isnull=True,
             ).exists()
         )
 
