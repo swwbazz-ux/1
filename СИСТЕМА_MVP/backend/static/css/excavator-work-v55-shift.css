@@ -2448,7 +2448,7 @@ body.excavator-operator-screen .eo-reason-grid .eo-hold-action.is-selected:disab
 /* Give condensed Cyrillic and numeric glyphs their full line box in face fields. */
 body.excavator-operator-screen .eo-large-field {
     row-gap: 2px !important;
-    padding-block: clamp(6px, .65dvh, 7px) !important;
+    padding-block: 5px !important;
 }
 
 body.excavator-operator-screen .eo-large-field span {
@@ -2457,9 +2457,9 @@ body.excavator-operator-screen .eo-large-field span {
 
 body.excavator-operator-screen .eo-large-field input,
 body.excavator-operator-screen .eo-large-field select {
-    height: 1.18em !important;
-    min-height: 1.18em !important;
-    line-height: 1.15 !important;
+    height: 1.34em !important;
+    min-height: 1.34em !important;
+    line-height: 1.22 !important;
     overflow: visible !important;
 }
 
