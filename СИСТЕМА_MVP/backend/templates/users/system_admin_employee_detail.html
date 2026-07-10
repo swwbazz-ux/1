@@ -254,6 +254,26 @@
                             </span>
                             <span>Последний вход: {{ item.last_login_at|date:"d.m.Y H:i"|default:"-" }}</span>
                         </div>
+                        {% if item.status == "not_activated" and item.primary_code_issued_at %}
+                            <div
+                                class="employee-login-share"
+                                data-login-share
+                                data-login-url="https://driverform.ru"
+                                data-login-phone="{{ employee.phone|default:'-' }}"
+                                data-login-code="{{ item.access_code }}"
+                            >
+                                <span class="employee-login-share-title">Сообщение для отправки</span>
+                                <div class="employee-login-share-text" data-login-share-text>
+                                    <span>https://driverform.ru</span>
+                                    <span>Телефон: {{ employee.phone|default:"-" }}</span>
+                                    <span>Пин код: {{ item.access_code }}</span>
+                                </div>
+                                <div class="employee-login-share-actions">
+                                    <button type="button" data-login-copy>Скопировать</button>
+                                    <button type="button" data-login-share-button>Отправить</button>
+                                </div>
+                            </div>
+                        {% endif %}
                         <div class="employee-access-actions">
                             <form method="post" action="{% url 'system_admin_access_action' item.id 'block' %}" data-confirm="Заблокировать этот доступ? Пользователь не сможет войти по этому пинкоду.">
                                 {% csrf_token %}
@@ -418,6 +438,83 @@ document.addEventListener('DOMContentLoaded', function () {
     if (profileForm) {
         profileForm.addEventListener('submit', syncHiddenFields);
     }
+
+    document.querySelectorAll('[data-login-share]').forEach(function (block) {
+        var copyButton = block.querySelector('[data-login-copy]');
+        var shareButton = block.querySelector('[data-login-share-button]');
+
+        function loginMessage() {
+            return [
+                block.dataset.loginUrl || 'https://driverform.ru',
+                'Телефон: ' + (block.dataset.loginPhone || '-'),
+                'Пин код: ' + (block.dataset.loginCode || '-')
+            ].join('\n');
+        }
+
+        function setButtonState(button, text) {
+            if (!button) return;
+            var defaultText = button.dataset.defaultText || button.textContent;
+            button.dataset.defaultText = defaultText;
+            button.textContent = text;
+            window.setTimeout(function () {
+                button.textContent = defaultText;
+            }, 1600);
+        }
+
+        function fallbackCopy(text) {
+            var area = document.createElement('textarea');
+            area.value = text;
+            area.setAttribute('readonly', '');
+            area.style.position = 'fixed';
+            area.style.left = '-9999px';
+            area.style.top = '0';
+            document.body.appendChild(area);
+            area.focus();
+            area.select();
+            try {
+                document.execCommand('copy');
+            } finally {
+                document.body.removeChild(area);
+            }
+        }
+
+        function copyLogin(button) {
+            var text = loginMessage();
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(text).then(function () {
+                    setButtonState(button, 'Скопировано');
+                }).catch(function () {
+                    fallbackCopy(text);
+                    setButtonState(button, 'Скопировано');
+                });
+                return;
+            }
+            fallbackCopy(text);
+            setButtonState(button, 'Скопировано');
+        }
+
+        if (copyButton) {
+            copyButton.addEventListener('click', function () {
+                copyLogin(copyButton);
+            });
+        }
+
+        if (shareButton) {
+            shareButton.addEventListener('click', function () {
+                var text = loginMessage();
+                if (navigator.share) {
+                    navigator.share({ text: text }).then(function () {
+                        setButtonState(shareButton, 'Отправлено');
+                    }).catch(function (error) {
+                        if (error && error.name === 'AbortError') return;
+                        copyLogin(shareButton);
+                    });
+                    return;
+                }
+                copyLogin(shareButton);
+            });
+        }
+    });
 
     if (!input) return;
 
