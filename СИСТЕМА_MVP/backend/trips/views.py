@@ -7,6 +7,7 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from django.contrib import messages
 from django.db import transaction
 from django.db.models import Count, Q, Sum
+from django.db.models.functions import Coalesce
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -535,7 +536,7 @@ EXCAVATOR_MANIFEST = {
 }
 
 EXCAVATOR_SERVICE_WORKER_JS = r"""
-const CACHE_NAME = "excavator-mobile-shell-v91";
+const CACHE_NAME = "excavator-mobile-shell-v92";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const CORE_ASSETS = [
@@ -794,6 +795,16 @@ def format_whole_number(value):
         return str(value)
     rounded = int(parsed.to_integral_value(rounding=ROUND_HALF_UP))
     return f'{rounded:,}'.replace(',', ' ')
+
+
+def format_decimal_input_value(value):
+    if value in {None, ''}:
+        return ''
+    try:
+        parsed = Decimal(value)
+    except (InvalidOperation, TypeError, ValueError):
+        return str(value)
+    return format(parsed, 'f').rstrip('0').rstrip('.') or '0'
 
 
 def format_whole_value_with_unit(value, unit):
@@ -2650,9 +2661,12 @@ def finalize_trip_unloaded(trip, *, driver, unloading_shift):
     if trip.assigned_dump_point_id is None:
         trip.assigned_dump_point = trip.dump_point
     trip.is_carryover = bool(
-        trip.loading_shift
-        and unloading_shift
-        and trip.loading_shift.shift_type != unloading_shift.shift_type
+        trip.is_carryover
+        or (
+            trip.loading_shift_id
+            and unloading_shift
+            and trip.loading_shift_id != unloading_shift.id
+        )
     )
     trip.save(update_fields=[
         'volume_m3',
@@ -3067,6 +3081,17 @@ def get_excavator_for_shift_start(employee, payload):
     )
 
 
+def get_previous_closed_equipment_shift(equipment):
+    if not equipment:
+        return None
+    return (
+        EmployeeShift.objects
+        .filter(equipment=equipment, closed_at__isnull=False)
+        .order_by('-closed_at', '-opened_at')
+        .first()
+    )
+
+
 @require_POST
 def excavator_shift_action_view(request):
     access = excavator_access_from_request(request)
@@ -3110,6 +3135,10 @@ def excavator_shift_action_view(request):
             open_shift.closed_at = timezone.now()
             open_shift.closed_by = access.employee
             open_shift.save(update_fields=['end_fuel', 'end_mileage', 'end_engine_hours', 'closed_at', 'closed_by'])
+            Trip.objects.filter(
+                loading_shift=open_shift,
+                status__in=OPEN_TRIP_STATUSES,
+            ).update(is_carryover=True)
             return JsonResponse({
                 'ok': True,
                 'action': 'shift_closed',
@@ -3139,6 +3168,15 @@ def excavator_shift_action_view(request):
             return JsonResponse({'ok': False, 'error': 'Не найден свободный экскаватор для начала смены.'}, status=409)
         if EmployeeShift.objects.filter(equipment=excavator, closed_at__isnull=True).exists():
             return JsonResponse({'ok': False, 'error': 'На этом экскаваторе уже открыта смена.'}, status=409)
+
+        previous_shift = get_previous_closed_equipment_shift(excavator)
+        if previous_shift:
+            if fuel is None:
+                fuel = previous_shift.end_fuel
+            if mileage is None:
+                mileage = previous_shift.end_mileage
+            if engine_hours is None:
+                engine_hours = previous_shift.end_engine_hours
 
         shift_type = str(payload.get('shift_type') or default_excavator_shift_type())
         if shift_type not in {'day', 'night'}:
@@ -3178,6 +3216,8 @@ def excavator_work_view(request):
 
     open_shift = get_excavator_open_shift(access.employee)
     current_excavator = open_shift.equipment if open_shift else None
+    shift_start_excavator = current_excavator or get_excavator_for_shift_start(access.employee, {})
+    previous_equipment_shift = None if open_shift else get_previous_closed_equipment_shift(shift_start_excavator)
 
     if request.method == 'POST':
         form = restrict_excavator_trip_form(
@@ -3567,30 +3607,34 @@ def excavator_work_view(request):
         if point_id:
             active_trips_by_dump_id[point_id].append(trip)
 
-    completed_by_dump_id = defaultdict(int)
-    completed_filter = {
-        'excavator_operator': access.employee,
-        'status': TripStatus.COMPLETED,
-        'completed_at__date': timezone.localdate(),
-    }
-    if current_excavator:
-        completed_filter['excavator'] = current_excavator
-    completed_queryset = Trip.objects.filter(**completed_filter)
-    if face_horizon:
-        completed_queryset = completed_queryset.filter(loading_horizon=face_horizon)
-    if face_block:
-        completed_queryset = completed_queryset.filter(loading_block=face_block)
-    if current_rock:
-        completed_queryset = completed_queryset.filter(rock_type=current_rock)
-    for row in completed_queryset.values('actual_dump_point_id').annotate(total=Count('id')):
-        if row['actual_dump_point_id']:
-            completed_by_dump_id[row['actual_dump_point_id']] = row['total']
+    shift_trip_queryset = Trip.objects.none()
+    if open_shift:
+        shift_trip_queryset = Trip.objects.filter(
+            loading_shift=open_shift,
+        ).exclude(status=TripStatus.CANCELLED)
 
-    completed_shift_count = completed_queryset.count()
-    completed_shift_volume = completed_queryset.aggregate(total=Sum('volume_m3'))['total'] or Decimal('0')
+    completed_shift_count = shift_trip_queryset.count()
+    completed_shift_volume = shift_trip_queryset.aggregate(total=Sum('volume_m3'))['total'] or Decimal('0')
     shift_fact_label = 'Факт'
     shift_fact_value = format_whole_value_with_unit(completed_shift_volume, 'м³')
     shift_fact_meta = f'{completed_shift_count} маш.'
+
+    completed_by_dump_id = defaultdict(int)
+    completed_face_queryset = shift_trip_queryset.filter(status=TripStatus.COMPLETED)
+    if face_horizon:
+        completed_face_queryset = completed_face_queryset.filter(loading_horizon=face_horizon)
+    if face_block:
+        completed_face_queryset = completed_face_queryset.filter(loading_block=face_block)
+    if current_rock:
+        completed_face_queryset = completed_face_queryset.filter(rock_type=current_rock)
+    for row in (
+        completed_face_queryset
+        .annotate(effective_dump_point_id=Coalesce('actual_dump_point_id', 'assigned_dump_point_id', 'dump_point_id'))
+        .values('effective_dump_point_id')
+        .annotate(total=Count('id'))
+    ):
+        if row['effective_dump_point_id']:
+            completed_by_dump_id[row['effective_dump_point_id']] = row['total']
 
     for card in dump_cards:
         point_id = card['point'].id
@@ -3617,6 +3661,7 @@ def excavator_work_view(request):
             'form': form,
             'open_shift': open_shift,
             'current_excavator': current_excavator,
+            'shift_start_excavator': shift_start_excavator,
             'available_assignments': available_assignments,
             'active_trips': active_trips,
             'available_assignments_count': len(available_assignments),
@@ -3649,9 +3694,15 @@ def excavator_work_view(request):
             'shift_fact_label': shift_fact_label,
             'shift_fact_value': shift_fact_value,
             'shift_fact_meta': shift_fact_meta,
-            'shift_fuel_display': format_whole_number(open_shift.start_fuel) if open_shift else '',
-            'shift_mileage_display': format_whole_number(open_shift.start_mileage) if open_shift else '',
-            'shift_engine_hours_display': format_whole_number(open_shift.start_engine_hours) if open_shift else '',
+            'shift_fuel_display': format_decimal_input_value(
+                open_shift.start_fuel if open_shift else getattr(previous_equipment_shift, 'end_fuel', None)
+            ),
+            'shift_mileage_display': format_decimal_input_value(
+                open_shift.start_mileage if open_shift else getattr(previous_equipment_shift, 'end_mileage', None)
+            ),
+            'shift_engine_hours_display': format_decimal_input_value(
+                open_shift.start_engine_hours if open_shift else getattr(previous_equipment_shift, 'end_engine_hours', None)
+            ),
             'active_downtime': active_downtime,
             'active_downtime_started_at': active_downtime_started_at,
             'active_downtime_elapsed_seconds': active_downtime_elapsed_seconds,

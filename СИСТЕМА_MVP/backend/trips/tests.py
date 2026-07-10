@@ -24,7 +24,7 @@ from references.models import (
 from shifts.models import EmployeeShift, EquipmentPlanGroup, PlanAssignmentStatus, PlanCalculationMode
 from shifts.services import assign_shift_plan_snapshot, progress_cycle_visual_context
 from trips.models import Trip, TripClientAction, TripStatus
-from trips.views import build_dispatcher_dashboard_context
+from trips.views import build_dispatcher_dashboard_context, finalize_trip_unloaded
 from users.models import DriverPrimaryRegistration, Employee, EmployeeAccess, Role
 
 
@@ -637,7 +637,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/static/css/excavator-work-v55-shift.css')
         self.assertContains(response, '/excavator-sw.js')
         self.assertContains(response, 'scope: "/excavator/"')
-        self.assertContains(response, 'excavator-mobile-shell-v91')
+        self.assertContains(response, 'excavator-mobile-shell-v92')
         self.assertContains(response, 'Простои')
         self.assertNotContains(response, 'Отпустить сюда')
         self.assertContains(response, 'resolveExcavatorUpdateVersion')
@@ -1125,6 +1125,147 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
             ).exists()
         )
 
+    def test_excavator_shift_close_marks_unfinished_loaded_trips_as_carryover(self):
+        shift = EmployeeShift.objects.get(employee=self.operator, closed_at__isnull=True)
+        trip = Trip.objects.create(
+            excavator=self.excavator,
+            truck=self.truck,
+            excavator_operator=self.operator,
+            loading_shift=shift,
+            rock_type=self.rock,
+            dump_point=self.dump_point,
+            assigned_dump_point=self.dump_point,
+            volume_m3='40.00',
+            status=TripStatus.LOADED_WAITING_UNLOAD,
+        )
+
+        response = self.client.post(
+            reverse('excavator_shift_action'),
+            data=json.dumps({
+                'action': 'close',
+                'client_action_id': 'shift-close-carryover',
+                'fuel': '87.5',
+                'mileage': '1234',
+                'engine_hours': '1208.25',
+            }),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        trip.refresh_from_db()
+        self.assertTrue(trip.is_carryover)
+
+        unloading_shift = EmployeeShift.objects.create(
+            employee=self.driver,
+            shift_type='day',
+            equipment=self.truck,
+            opened_at=timezone.now(),
+            opened_by=self.driver,
+        )
+        finalize_trip_unloaded(trip, driver=self.driver, unloading_shift=unloading_shift)
+        trip.refresh_from_db()
+        self.assertTrue(trip.is_carryover)
+
+    def test_excavator_shift_summary_uses_exact_open_shift_and_dump_count_uses_current_face(self):
+        current_shift = EmployeeShift.objects.get(employee=self.operator, closed_at__isnull=True)
+        previous_shift = EmployeeShift.objects.create(
+            employee=self.operator,
+            shift_type='day',
+            equipment=self.excavator,
+            opened_at=current_shift.opened_at - timedelta(hours=8),
+            closed_at=current_shift.opened_at - timedelta(minutes=1),
+            opened_by=self.operator,
+            closed_by=self.operator,
+        )
+        ExcavatorPlacement.objects.create(
+            excavator=self.excavator,
+            zone=ExcavatorPlacement.Zone.ACTIVE,
+            work_rock_type=self.rock,
+            work_dump_point=self.dump_point,
+            loading_horizon='75',
+            loading_block='52',
+        )
+        Trip.objects.create(
+            excavator=self.excavator,
+            truck=self.other_truck,
+            excavator_operator=self.operator,
+            loading_shift=previous_shift,
+            rock_type=self.rock,
+            dump_point=self.dump_point,
+            actual_dump_point=self.dump_point,
+            volume_m3='90.00',
+            loading_horizon='75',
+            loading_block='52',
+            status=TripStatus.COMPLETED,
+            completed_at=timezone.now(),
+        )
+        Trip.objects.create(
+            excavator=self.excavator,
+            truck=self.truck,
+            excavator_operator=self.operator,
+            loading_shift=current_shift,
+            rock_type=self.rock,
+            dump_point=self.dump_point,
+            actual_dump_point=self.dump_point,
+            volume_m3='40.00',
+            loading_horizon='75',
+            loading_block='52',
+            status=TripStatus.COMPLETED,
+            completed_at=timezone.now(),
+        )
+        Trip.objects.create(
+            excavator=self.excavator,
+            truck=self.other_truck,
+            excavator_operator=self.operator,
+            loading_shift=current_shift,
+            rock_type=self.rock,
+            dump_point=self.dump_point,
+            actual_dump_point=self.dump_point,
+            volume_m3='60.00',
+            loading_horizon='90',
+            loading_block='60',
+            status=TripStatus.COMPLETED,
+            completed_at=timezone.now(),
+        )
+        pending_truck = Equipment.objects.create(equipment_type=self.truck_type, garage_number='31')
+        Trip.objects.create(
+            excavator=self.excavator,
+            truck=pending_truck,
+            excavator_operator=self.operator,
+            loading_shift=current_shift,
+            rock_type=self.rock,
+            dump_point=self.dump_point,
+            assigned_dump_point=self.dump_point,
+            volume_m3='30.00',
+            loading_horizon='75',
+            loading_block='52',
+            status=TripStatus.LOADED_WAITING_UNLOAD,
+        )
+        fallback_truck = Equipment.objects.create(equipment_type=self.truck_type, garage_number='32')
+        Trip.objects.create(
+            excavator=self.excavator,
+            truck=fallback_truck,
+            excavator_operator=self.operator,
+            loading_shift=current_shift,
+            rock_type=self.rock,
+            dump_point=self.dump_point,
+            assigned_dump_point=self.dump_point,
+            actual_dump_point=None,
+            volume_m3='20.00',
+            loading_horizon='75',
+            loading_block='52',
+            status=TripStatus.COMPLETED,
+            completed_at=timezone.now(),
+        )
+
+        response = self.client.get(reverse('excavator_work'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context['shift_fact_value'], '150 м³')
+        self.assertEqual(response.context['shift_fact_meta'], '4 маш.')
+        dump_card = next(card for card in response.context['dump_cards'] if card['point'] == self.dump_point)
+        self.assertEqual(dump_card['completed_count'], 2)
+
     def test_excavator_shift_action_opens_shift_when_none_is_open(self):
         EmployeeShift.objects.filter(employee=self.operator, closed_at__isnull=True).update(closed_at=timezone.now())
         group = EquipmentPlanGroup.objects.create(
@@ -1167,6 +1308,47 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(payload['plan_status'], 'assigned')
         self.assertEqual(payload['calculation_mode'], 'volume_m3')
         self.assertEqual(payload['plan_value'], '4200.00')
+
+    def test_excavator_shift_open_inherits_previous_equipment_meter_values_when_blank(self):
+        previous_shift = EmployeeShift.objects.get(employee=self.operator, closed_at__isnull=True)
+        previous_shift.end_fuel = '87.50'
+        previous_shift.end_mileage = '1234.00'
+        previous_shift.end_engine_hours = '1208.25'
+        previous_shift.closed_at = timezone.now()
+        previous_shift.closed_by = self.operator
+        previous_shift.save(update_fields=[
+            'end_fuel',
+            'end_mileage',
+            'end_engine_hours',
+            'closed_at',
+            'closed_by',
+        ])
+
+        screen = self.client.get(reverse('excavator_work'))
+
+        self.assertEqual(screen.status_code, 200)
+        self.assertEqual(screen.context['shift_fuel_display'], '87.5')
+        self.assertEqual(screen.context['shift_mileage_display'], '1234')
+        self.assertEqual(screen.context['shift_engine_hours_display'], '1208.25')
+
+        response = self.client.post(
+            reverse('excavator_shift_action'),
+            data=json.dumps({
+                'action': 'open',
+                'client_action_id': 'shift-open-inherit-meters',
+                'excavator_id': self.excavator.id,
+                'fuel': '',
+                'mileage': '',
+                'engine_hours': '',
+            }),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        shift = EmployeeShift.objects.get(id=response.json()['shift_id'])
+        self.assertEqual(str(shift.start_fuel), '87.50')
+        self.assertEqual(str(shift.start_mileage), '1234.00')
+        self.assertEqual(str(shift.start_engine_hours), '1208.25')
 
     def test_excavator_downtime_reasons_come_from_role_reference_without_limit(self):
         waiting_state = EquipmentState.objects.get(code='waiting')
@@ -1320,7 +1502,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/excavator/')
-        self.assertIn('excavator-mobile-shell-v91', script)
+        self.assertIn('excavator-mobile-shell-v92', script)
         self.assertIn(reverse('excavator_work'), script)
         self.assertIn(reverse('excavator_manifest'), script)
         self.assertIn('/static/js/realtime-client.js', script)

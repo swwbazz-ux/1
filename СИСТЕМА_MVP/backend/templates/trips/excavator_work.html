@@ -5,9 +5,9 @@
 {% block body_class %}excavator-operator-screen{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v91">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v91">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v91">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v92">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v92">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v92">
 <meta name="theme-color" content="#030708">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Погрузка">
@@ -19,6 +19,7 @@
     data-eo-shell
     data-eo-active-tab="trucks"
     data-eo-current-excavator-id="{% if current_excavator %}{{ current_excavator.id }}{% endif %}"
+    data-eo-shift-excavator-id="{% if shift_start_excavator %}{{ shift_start_excavator.id }}{% endif %}"
     data-eo-settings-url="{% url 'excavator_work_settings' %}"
     data-eo-shift-url="{% url 'excavator_shift_action' %}"
     data-eo-truck-loaded-url="{% url 'excavator_truck_loaded' %}"
@@ -378,7 +379,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v91";
+var excavatorShellVersion = "excavator-mobile-shell-v92";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var excavatorRelevantEvents = {
     assignment_changed: true,
@@ -2097,7 +2098,7 @@ window.initExcavatorWorkShell = function () {
         var payload = {
             action: action,
             client_action_id: generateClientActionId("excavator-shift"),
-            excavator_id: shell.dataset.eoCurrentExcavatorId || "",
+            excavator_id: shell.dataset.eoShiftExcavatorId || shell.dataset.eoCurrentExcavatorId || "",
             fuel: shell.querySelector("[data-eo-shift-fuel]") ? shell.querySelector("[data-eo-shift-fuel]").value : "",
             mileage: shell.querySelector("[data-eo-shift-mileage]") ? shell.querySelector("[data-eo-shift-mileage]").value : "",
             engine_hours: shell.querySelector("[data-eo-shift-engine-hours]") ? shell.querySelector("[data-eo-shift-engine-hours]").value : ""
