@@ -637,8 +637,24 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/static/css/excavator-work-v55-shift.css')
         self.assertContains(response, '/excavator-sw.js')
         self.assertContains(response, 'scope: "/excavator/"')
-        self.assertContains(response, 'excavator-mobile-shell-v92')
+        self.assertContains(response, 'excavator-mobile-shell-v93')
         self.assertContains(response, 'Простои')
+        self.assertContains(response, '>Работа</span>')
+        self.assertContains(response, '>Простой</span>')
+        self.assertContains(response, 'class="mm-mobile-nav-icon"')
+        self.assertContains(response, 'data-eo-tab="shift" data-eo-pwa-update-nav-target')
+        self.assertContains(response, 'tab.setAttribute("aria-current", "page")')
+        self.assertNotContains(response, 'class="eo-nav-clock"')
+        self.assertNotContains(response, 'class="eo-nav-bell"')
+        self.assertNotContains(response, 'data-eo-icon-idle')
+        nav_css = (
+            Path(__file__).resolve().parents[1]
+            / 'static'
+            / 'css'
+            / 'excavator-work-v55-shift.css'
+        ).read_text(encoding='utf-8')
+        self.assertIn('.mm-mobile-nav-item.is-active.has-pwa-update', nav_css)
+        self.assertIn('.mm-mobile-nav-item:not(.is-active).has-pwa-update', nav_css)
         self.assertNotContains(response, 'Отпустить сюда')
         self.assertContains(response, 'resolveExcavatorUpdateVersion')
         self.assertContains(response, 'renderUpdateModal')
@@ -1502,7 +1518,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/excavator/')
-        self.assertIn('excavator-mobile-shell-v92', script)
+        self.assertIn('excavator-mobile-shell-v93', script)
         self.assertIn(reverse('excavator_work'), script)
         self.assertIn(reverse('excavator_manifest'), script)
         self.assertIn('/static/js/realtime-client.js', script)

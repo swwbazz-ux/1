@@ -2468,3 +2468,136 @@ body.excavator-operator-screen .eo-large-field select {
         animation: none !important;
     }
 }
+
+/* v93: unified semantic bottom navigation. */
+body.excavator-operator-screen {
+    --eo-fixed-nav-h: 76px;
+    --eo-fixed-nav-reserve: calc(var(--eo-fixed-nav-h) + var(--eo-fixed-nav-safe));
+}
+
+body.excavator-operator-screen .mm-mobile-bottom-nav {
+    height: var(--eo-fixed-nav-reserve) !important;
+    min-height: var(--eo-fixed-nav-reserve) !important;
+    border-top: 1px solid #263943 !important;
+    background: #08131b !important;
+    box-shadow: none !important;
+}
+
+body.excavator-operator-screen .mm-mobile-bottom-nav .mm-mobile-nav-item {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: center !important;
+    min-width: 0 !important;
+    min-height: var(--eo-fixed-nav-h) !important;
+    height: var(--eo-fixed-nav-h) !important;
+    gap: 5px !important;
+    padding: 7px 2px 6px !important;
+    border: 0 !important;
+    background: transparent !important;
+    color: #8a9aa3 !important;
+    font-size: 12px !important;
+    font-weight: 600 !important;
+    line-height: 16px !important;
+    letter-spacing: 0 !important;
+    text-transform: none !important;
+    box-shadow: none !important;
+    transform: none !important;
+}
+
+body.excavator-operator-screen .mm-mobile-bottom-nav .mm-mobile-nav-item.is-active {
+    color: var(--eo-green, #58df52) !important;
+    background: rgba(88, 223, 82, .055) !important;
+}
+
+body.excavator-operator-screen .mm-mobile-bottom-nav .mm-mobile-nav-item.is-active::before {
+    content: "" !important;
+    position: absolute !important;
+    top: 0 !important;
+    left: 50% !important;
+    right: auto !important;
+    width: 40px !important;
+    height: 2px !important;
+    border-radius: 0 0 2px 2px !important;
+    background: currentColor !important;
+    box-shadow: 0 0 6px rgba(88, 223, 82, .28) !important;
+    opacity: 1 !important;
+    filter: none !important;
+    transform: translateX(-50%) !important;
+}
+
+body.excavator-operator-screen .mm-mobile-bottom-nav .mm-mobile-nav-item::after {
+    display: none !important;
+}
+
+body.excavator-operator-screen .mm-mobile-bottom-nav .mm-mobile-nav-item:focus-visible {
+    outline: 2px solid #63c7d8 !important;
+    outline-offset: -3px !important;
+}
+
+body.excavator-operator-screen .mm-mobile-nav-icon {
+    position: relative !important;
+    display: grid !important;
+    place-items: center !important;
+    flex: 0 0 26px !important;
+    width: 26px !important;
+    height: 26px !important;
+    min-width: 26px !important;
+    overflow: visible !important;
+}
+
+body.excavator-operator-screen .mm-mobile-nav-icon svg {
+    display: block !important;
+    width: 26px !important;
+    height: 26px !important;
+    stroke: currentColor !important;
+}
+
+body.excavator-operator-screen .mm-mobile-nav-label {
+    display: block !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+}
+
+body.excavator-operator-screen .mm-mobile-bottom-nav .mm-mobile-nav-item:not(.is-active).has-pwa-update {
+    color: #8a9aa3 !important;
+}
+
+body.excavator-operator-screen .mm-mobile-bottom-nav .mm-mobile-nav-item.is-active.has-pwa-update {
+    color: var(--eo-green, #58df52) !important;
+}
+
+body.excavator-operator-screen .mm-mobile-bottom-nav .mm-mobile-update-badge {
+    position: absolute !important;
+    top: -2px !important;
+    right: -3px !important;
+    width: 9px !important;
+    height: 9px !important;
+    border: 2px solid #08131b !important;
+    border-radius: 50% !important;
+    background: #f6c344 !important;
+    box-shadow: none !important;
+    animation: none !important;
+    pointer-events: none !important;
+}
+
+body.excavator-operator-screen .mm-mobile-bottom-nav .mm-mobile-update-badge[hidden] {
+    display: none !important;
+}
+
+@media (min-width: 768px) {
+    body.excavator-operator-screen {
+        --eo-fixed-nav-h: 72px;
+    }
+
+    body.excavator-operator-screen .mm-mobile-nav-icon,
+    body.excavator-operator-screen .mm-mobile-nav-icon svg {
+        flex-basis: 24px !important;
+        width: 24px !important;
+        height: 24px !important;
+        min-width: 24px !important;
+    }
+}

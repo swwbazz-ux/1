@@ -5,9 +5,9 @@
 {% block body_class %}excavator-operator-screen{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v92">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v92">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v92">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v93">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v93">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v93">
 <meta name="theme-color" content="#030708">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Погрузка">
@@ -333,22 +333,46 @@
     </form>
 
     <nav class="mm-mobile-bottom-nav" aria-label="Навигация экскаваторщика">
-        <button class="mm-mobile-nav-item" type="button" data-eo-tab="trucks">
-            <img src="{% static 'img/equipment/truck-gray.png' %}" data-eo-icon-idle="{% static 'img/equipment/truck-gray.png' %}" data-eo-icon-active="{% static 'img/equipment/truck-yellow.png' %}" alt="">
-            <span>Погрузка</span>
+        <button class="mm-mobile-nav-item" type="button" data-eo-tab="trucks" aria-label="Работа">
+            <span class="mm-mobile-nav-icon" aria-hidden="true">
+                <svg class="lucide lucide-truck" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M10 17h4V5H2v12h3"></path>
+                    <path d="M14 9h4l4 4v4h-2"></path>
+                    <circle cx="7.5" cy="17.5" r="2.5"></circle>
+                    <circle cx="17.5" cy="17.5" r="2.5"></circle>
+                </svg>
+            </span>
+            <span class="mm-mobile-nav-label">Работа</span>
         </button>
-        <button class="mm-mobile-nav-item" type="button" data-eo-tab="shift">
-            <span class="eo-nav-clock"></span>
-            <span>Смена</span>
+        <button class="mm-mobile-nav-item" type="button" data-eo-tab="shift" data-eo-pwa-update-nav-target aria-label="Смена">
+            <span class="mm-mobile-nav-icon" aria-hidden="true">
+                <svg class="lucide lucide-clipboard-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect width="8" height="4" x="8" y="2" rx="1"></rect>
+                    <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path>
+                    <path d="m9 14 2 2 4-4"></path>
+                </svg>
+                <span class="mm-mobile-update-badge" data-eo-pwa-update-badge hidden></span>
+            </span>
+            <span class="mm-mobile-nav-label">Смена</span>
         </button>
-        <button class="mm-mobile-nav-item" type="button" data-eo-tab="face">
-            <img src="{% static 'img/equipment/excavator-gray.png' %}" data-eo-icon-idle="{% static 'img/equipment/excavator-gray.png' %}" data-eo-icon-active="{% static 'img/equipment/excavator-yellow.png' %}" alt="">
-            <span>Забой</span>
+        <button class="mm-mobile-nav-item" type="button" data-eo-tab="face" aria-label="Забой">
+            <span class="mm-mobile-nav-icon" aria-hidden="true">
+                <svg class="lucide lucide-map-pin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M20 10c0 5-8 12-8 12S4 15 4 10a8 8 0 1 1 16 0"></path>
+                    <circle cx="12" cy="10" r="3"></circle>
+                </svg>
+            </span>
+            <span class="mm-mobile-nav-label">Забой</span>
         </button>
-        <button class="mm-mobile-nav-item" type="button" data-eo-tab="events" data-eo-pwa-update-nav-target>
-            <span class="eo-nav-bell"></span>
-            <span>Простои</span>
-            <span class="mm-mobile-update-badge" data-eo-pwa-update-badge hidden aria-hidden="true"></span>
+        <button class="mm-mobile-nav-item" type="button" data-eo-tab="events" aria-label="Простой">
+            <span class="mm-mobile-nav-icon" aria-hidden="true">
+                <svg class="lucide lucide-circle-pause" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <path d="M10 15V9"></path>
+                    <path d="M14 15V9"></path>
+                </svg>
+            </span>
+            <span class="mm-mobile-nav-label">Простой</span>
         </button>
     </nav>
 </main>
@@ -379,7 +403,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v92";
+var excavatorShellVersion = "excavator-mobile-shell-v93";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var excavatorRelevantEvents = {
     assignment_changed: true,
@@ -1099,10 +1123,11 @@ window.initExcavatorWorkShell = function () {
         });
         tabs.forEach(function (tab) {
             var isActive = tab.dataset.eoTab === name;
-            var icon = tab.querySelector("[data-eo-icon-idle]");
             tab.classList.toggle("is-active", isActive);
-            if (icon) {
-                icon.src = isActive ? icon.dataset.eoIconActive : icon.dataset.eoIconIdle;
+            if (isActive) {
+                tab.setAttribute("aria-current", "page");
+            } else {
+                tab.removeAttribute("aria-current");
             }
         });
         shell.dataset.eoActiveTab = name;
@@ -2405,6 +2430,7 @@ function initExcavatorPwaUpdates() {
         }
         document.querySelectorAll("[data-eo-pwa-update-nav-target]").forEach(function (item) {
             item.classList.toggle("has-pwa-update", visible);
+            item.setAttribute("aria-label", visible ? "Смена, доступно обновление" : "Смена");
             if (visible) {
                 item.title = "Доступна новая версия приложения";
             } else {
