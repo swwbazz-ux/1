@@ -1,11 +1,36 @@
-from django.test import TestCase
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+from django.test import SimpleTestCase, TestCase, override_settings
 from django.urls import reverse
 
 from assignments.models import AssignmentStatus, ExcavatorPlacement, HaulAssignment
 from references.models import Equipment, EquipmentType
 from users.models import Employee, EmployeeAccess, Role
 
+from .checks import media_storage_writable_check
 from .models import OperationalStateEvent, OperationalStateVersion
+
+
+class MediaStorageWritableCheckTests(SimpleTestCase):
+    def test_existing_media_and_employee_photo_directories_pass_check(self):
+        with TemporaryDirectory() as media_root:
+            Path(media_root, 'employee_photos').mkdir()
+
+            with override_settings(MEDIA_ROOT=media_root):
+                errors = media_storage_writable_check(None)
+
+        self.assertEqual(errors, [])
+
+    def test_missing_media_root_returns_clear_error(self):
+        with TemporaryDirectory() as parent_dir:
+            missing_media_root = Path(parent_dir, 'missing-media')
+
+            with override_settings(MEDIA_ROOT=missing_media_root):
+                errors = media_storage_writable_check(None)
+
+        self.assertEqual(len(errors), 1)
+        self.assertEqual(errors[0].id, 'core.E001')
 
 
 class OperationalStateVersionViewTests(TestCase):
