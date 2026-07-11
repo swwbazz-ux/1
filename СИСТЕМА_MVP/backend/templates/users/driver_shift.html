@@ -2019,6 +2019,44 @@ body.driver-mobile-screen .driver-downtime-close {
     font-size: clamp(15px, 3.95vw, 18px);
 }
 
+/* Match the excavator downtime controls and override the legacy circular badge/action fill. */
+body.driver-mobile-screen .driver-downtime-state-dot,
+body.driver-mobile-screen .driver-downtime-card.is-active .driver-downtime-state-dot {
+    display: grid !important;
+    place-items: center !important;
+    width: 44px !important;
+    height: 44px !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+}
+
+body.driver-mobile-screen .driver-downtime-state-dot::before,
+body.driver-mobile-screen .driver-downtime-state-dot::after {
+    content: none !important;
+    display: none !important;
+    border: 0 !important;
+    background: none !important;
+    box-shadow: none !important;
+}
+
+body.driver-mobile-screen .driver-downtime-close:not(:disabled) {
+    border: 1px solid #58df52 !important;
+    color: #58df52 !important;
+    background: linear-gradient(180deg, rgba(18, 55, 29, .38), rgba(7, 24, 17, .82)) !important;
+    font-weight: 600 !important;
+    box-shadow: inset 0 0 14px rgba(88, 223, 82, .06) !important;
+}
+
+body.driver-mobile-screen .driver-downtime-close:disabled,
+body.driver-mobile-screen .driver-downtime-close.is-disabled {
+    color: rgba(138, 154, 163, .5) !important;
+    border-color: rgba(138, 154, 163, .28) !important;
+    background: rgba(8, 19, 27, .72) !important;
+    box-shadow: none !important;
+}
+
 @media (min-width: 768px) {
     body.driver-mobile-screen .driver-downtime-list {
         grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -2572,7 +2610,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
 {% endblock %}
 
 {% block body %}
-<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v91' }}">
+<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v92' }}">
     {% if messages %}
         <div class="driver-messages">
             {% for message in messages %}
@@ -3718,7 +3756,7 @@ window.bindDriverMobileShell = function () {
         if (!("serviceWorker" in navigator)) {
             return;
         }
-        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v91' }}";
+        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v92' }}";
         var updateModal = document.querySelector("[data-driver-pwa-update-modal]");
         var updateBadge = document.querySelector("[data-driver-pwa-update-badge]");
         var updateTarget = document.querySelector("[data-driver-pwa-update-nav-target]");
