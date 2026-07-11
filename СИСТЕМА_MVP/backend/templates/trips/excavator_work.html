@@ -5,9 +5,9 @@
 {% block body_class %}excavator-operator-screen{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v98">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v98">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v98">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v99">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v99">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v99">
 <meta name="theme-color" content="#030708">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Погрузка">
@@ -307,13 +307,9 @@
                 <h1>Простои</h1>
                 <button class="eo-refresh-button" type="button" aria-label="Обновить" data-eo-refresh-work>↻</button>
             </div>
-            <div class="eo-downtime-card status-{{ active_downtime_state.color_group }}{% if active_downtime %} is-active{% endif %}" data-eo-active-downtime-id="{% if active_downtime %}{{ active_downtime.id }}{% endif %}" data-eo-active-started-at="{{ active_downtime_started_at }}" data-eo-active-elapsed-seconds="{{ active_downtime_elapsed_seconds }}" data-eo-downtime-state="{% if active_downtime %}{{ active_downtime_state.code }}{% endif %}">
-                <span class="eo-downtime-state-dot status-{{ active_downtime_state.color_group }}" data-eo-downtime-indicator aria-hidden="true"></span>
-                <div>
-                    <strong data-eo-active-title>{% if active_downtime %}Активный простой{% else %}Простоя нет{% endif %}</strong>
-                    <b data-eo-active-duration>{% if active_downtime %}{{ active_downtime_elapsed_label }}{% else %}00:00:00{% endif %}</b>
-                    <em data-eo-active-reason>{% if active_downtime %}{{ active_downtime.reason }}{% else %}Выберите причину для начала{% endif %}</em>
-                </div>
+            <div class="eo-downtime-card status-{{ active_downtime_state.color_group }}{% if active_downtime %} is-active{% endif %}" data-eo-active-downtime-id="{% if active_downtime %}{{ active_downtime.id }}{% endif %}" data-eo-active-started-at="{{ active_downtime_started_at }}" data-eo-active-elapsed-seconds="{{ active_downtime_elapsed_seconds }}" data-eo-downtime-state="{% if active_downtime %}{{ active_downtime_state.code }}{% endif %}" role="status" aria-label="{% if active_downtime %}Простой активен{% else %}Экскаватор работает{% endif %}">
+                <span class="eo-downtime-state-dot" data-eo-downtime-indicator aria-hidden="true"></span>
+                <b data-eo-active-duration>{% if active_downtime %}{{ active_downtime_elapsed_label }}{% else %}00:00:00{% endif %}</b>
             </div>
             <div class="eo-reason-grid">
                 {% for card in downtime_reason_cards %}
@@ -400,7 +396,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v98";
+var excavatorShellVersion = "excavator-mobile-shell-v99";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var excavatorRelevantEvents = {
     assignment_changed: true,
@@ -590,10 +586,8 @@ window.initExcavatorWorkShell = function () {
     var dumpInput = shell.querySelector("[data-eo-dump-input]");
     var dumpPointsInput = shell.querySelector("[data-eo-dump-points-input]");
     var downtimeInput = shell.querySelector("[data-eo-downtime-input]");
-    var activeReason = shell.querySelector("[data-eo-active-reason]");
     var activeDuration = shell.querySelector("[data-eo-active-duration]");
     var downtimeCard = shell.querySelector("[data-eo-active-downtime-id]");
-    var activeTitle = shell.querySelector("[data-eo-active-title]");
     var downtimeIndicator = shell.querySelector("[data-eo-downtime-indicator]");
     var selectedTruck = shell.querySelector("[data-eo-truck-card].is-selected");
     var csrfToken = shell.querySelector("input[name='csrfmiddlewaretoken']") ? shell.querySelector("input[name='csrfmiddlewaretoken']").value : "";
@@ -1067,8 +1061,7 @@ window.initExcavatorWorkShell = function () {
         downtimeCard.dataset.eoDowntimeState = payload.equipment_state_code || "waiting";
         downtimeCard.classList.add("is-active");
         setDowntimeStatusClass(payload.status_key || "yellow");
-        if (activeTitle) activeTitle.textContent = "Активный простой";
-        if (activeReason) activeReason.textContent = payload.reason || "";
+        downtimeCard.setAttribute("aria-label", "Простой активен");
         startDowntimeTimer(payload.started_at, payload.elapsed_seconds);
         if (closeEvent) {
             closeEvent.disabled = false;
@@ -1082,8 +1075,6 @@ window.initExcavatorWorkShell = function () {
     function clearActiveDowntime(payload) {
         clearDowntimeTimer();
         if (downtimeInput) downtimeInput.value = "";
-        if (activeTitle) activeTitle.textContent = "Простоя нет";
-        if (activeReason) activeReason.textContent = "Выберите причину для начала";
         if (activeDuration) activeDuration.textContent = "00:00:00";
         if (downtimeCard) {
             downtimeCard.dataset.eoActiveDowntimeId = "";
@@ -1091,6 +1082,7 @@ window.initExcavatorWorkShell = function () {
             downtimeCard.dataset.eoActiveElapsedSeconds = String((payload && payload.elapsed_seconds) || 0);
             downtimeCard.dataset.eoDowntimeState = "";
             downtimeCard.classList.remove("is-active");
+            downtimeCard.setAttribute("aria-label", "Экскаватор работает");
             setDowntimeStatusClass("yellow");
         }
         if (closeEvent) {
@@ -2046,9 +2038,6 @@ window.initExcavatorWorkShell = function () {
             button.classList.add("is-selected");
             if (downtimeInput) {
                 downtimeInput.value = button.dataset.eoReason || "";
-            }
-            if (activeReason) {
-                activeReason.textContent = button.dataset.eoReason || "";
             }
             if (button.dataset.eoDowntimeReasonId) {
                 button.disabled = true;

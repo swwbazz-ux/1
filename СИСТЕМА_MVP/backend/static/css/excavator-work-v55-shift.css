@@ -2645,3 +2645,52 @@ body.excavator-operator-screen .eo-screen[data-eo-screen="face"] > .eo-primary-a
     cursor: default;
     opacity: 1;
 }
+
+body.excavator-operator-screen .eo-downtime-card {
+    grid-template-columns: clamp(44px, 11vw, 58px) minmax(0, 1fr) !important;
+}
+
+body.excavator-operator-screen .eo-downtime-state-dot {
+    position: relative !important;
+    display: block !important;
+    width: clamp(38px, 9vw, 50px) !important;
+    height: clamp(38px, 9vw, 50px) !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+}
+
+body.excavator-operator-screen .eo-downtime-state-dot::before {
+    content: "" !important;
+    position: absolute !important;
+    top: 50% !important;
+    left: 53% !important;
+    width: 0 !important;
+    height: 0 !important;
+    border-top: clamp(12px, 2.7vw, 16px) solid transparent !important;
+    border-bottom: clamp(12px, 2.7vw, 16px) solid transparent !important;
+    border-left: clamp(20px, 4.5vw, 27px) solid #55e65a !important;
+    filter: drop-shadow(0 0 7px rgba(85, 230, 90, .62)) !important;
+    transform: translate(-45%, -50%) !important;
+}
+
+body.excavator-operator-screen .eo-downtime-card.is-active .eo-downtime-state-dot::before {
+    left: 50% !important;
+    width: clamp(22px, 5.2vw, 30px) !important;
+    height: clamp(26px, 6vw, 34px) !important;
+    border: 0 !important;
+    background: linear-gradient(90deg, #ffd400 0 34%, transparent 34% 66%, #ffd400 66% 100%) !important;
+    filter: drop-shadow(0 0 7px rgba(255, 212, 0, .68)) !important;
+    transform: translate(-50%, -50%) !important;
+}
+
+body.excavator-operator-screen .eo-downtime-card b[data-eo-active-duration] {
+    display: block !important;
+    color: #f4f8f9 !important;
+    font-size: clamp(34px, 8.5vw, 54px) !important;
+    font-weight: 800 !important;
+    line-height: 1 !important;
+    letter-spacing: 0 !important;
+    font-variant-numeric: tabular-nums !important;
+}
