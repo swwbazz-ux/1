@@ -1,0 +1,641 @@
+.admin-employee-detail-shell {
+    --employee-control-height: 40px;
+    --employee-button-height: 40px;
+    --employee-radius: 6px;
+    --employee-space-1: 4px;
+    --employee-space-2: 8px;
+    --employee-space-3: 12px;
+    --employee-space-4: 16px;
+    --employee-space-5: 24px;
+    --employee-panel-padding: clamp(14px, 1.1vw, 20px);
+    --employee-page-gap: clamp(12px, 1vw, 20px);
+}
+
+body.employee-detail-screen {
+    height: auto;
+    max-height: none;
+    overflow-x: hidden;
+    overflow-y: auto;
+}
+
+.admin-employee-detail-shell .employee-detail-page {
+    width: calc(100% - clamp(24px, 2.5vw, 48px));
+    max-width: 1920px;
+    margin: 0 auto;
+    gap: var(--employee-page-gap);
+}
+
+.admin-employee-detail-shell .employee-detail-card {
+    padding: var(--employee-panel-padding);
+    border: 1px solid var(--admin-line);
+    border-radius: var(--employee-radius);
+    background: var(--admin-panel);
+    box-shadow: 0 8px 22px rgba(7, 17, 23, .08);
+}
+
+.admin-employee-detail-shell.admin-night .employee-detail-card {
+    box-shadow: none;
+}
+
+.admin-employee-detail-shell .employee-detail-card-head {
+    display: flex;
+    gap: var(--employee-space-3);
+    align-items: flex-start;
+    justify-content: space-between;
+    margin: 0;
+    padding-bottom: var(--employee-space-3);
+    border-bottom: 1px solid var(--admin-line-soft);
+}
+
+.admin-employee-detail-shell .employee-detail-card-head h2 {
+    margin: 0;
+    font-size: 20px;
+    line-height: 1.2;
+}
+
+.admin-employee-detail-shell .employee-detail-card-head p {
+    max-width: 46ch;
+    margin: var(--employee-space-1) 0 0;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.35;
+}
+
+.admin-employee-detail-shell .employee-profile-form {
+    display: grid;
+    gap: var(--employee-space-4);
+    align-content: start;
+    min-width: 0;
+    container: employee-profile / inline-size;
+}
+
+.admin-employee-detail-shell .employee-profile-form > .employee-detail-card-head p {
+    display: none;
+}
+
+.admin-employee-detail-shell .employee-card-v2-top {
+    display: grid;
+    grid-template-columns: clamp(144px, 16cqi, 180px) minmax(0, 1fr);
+    gap: var(--employee-space-4);
+    align-items: start;
+}
+
+.admin-employee-detail-shell .employee-card-v2-photo-box,
+.admin-employee-detail-shell .employee-card-v2-photo {
+    width: clamp(144px, 16cqi, 180px);
+}
+
+.admin-employee-detail-shell .employee-card-v2-photo {
+    height: auto;
+    flex-basis: auto;
+    aspect-ratio: 1;
+    border-radius: var(--employee-radius);
+}
+
+.admin-employee-detail-shell .employee-card-v2-photo img {
+    border-radius: var(--employee-radius);
+}
+
+.admin-employee-detail-shell .employee-card-v2-photo-controls {
+    display: flex;
+    gap: var(--employee-space-2);
+    justify-content: center;
+    min-height: 36px;
+    margin-top: var(--employee-space-2);
+}
+
+.admin-employee-detail-shell .employee-photo-symbol {
+    display: inline-grid;
+    place-items: center;
+    width: 36px;
+    min-width: 36px;
+    height: 36px;
+    min-height: 36px;
+    margin: 0;
+    padding: 0;
+    border: 1px solid var(--admin-line);
+    border-radius: var(--employee-radius);
+    background: var(--admin-panel-soft);
+    color: var(--admin-green);
+    font-family: "Segoe UI", Arial, sans-serif;
+    font-size: 20px;
+    font-weight: 700;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.admin-employee-detail-shell .employee-photo-symbol.remove {
+    color: var(--admin-red);
+}
+
+.admin-employee-detail-shell .employee-photo-symbol:hover:not(:disabled) {
+    border-color: currentColor;
+    background: var(--admin-panel);
+}
+
+.admin-employee-detail-shell .employee-card-v2-name-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--employee-space-3);
+}
+
+.admin-employee-detail-shell .employee-card-v2-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--employee-space-3);
+    margin: 0;
+}
+
+.admin-employee-detail-shell .employee-card-v2-textareas {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--employee-space-3);
+    margin: 0;
+}
+
+.admin-employee-detail-shell .employee-detail-field {
+    display: grid;
+    gap: var(--employee-space-1);
+    min-width: 0;
+}
+
+.admin-employee-detail-shell .employee-detail-field label,
+.admin-employee-detail-shell .employee-access-issue-form label {
+    color: var(--admin-muted);
+    font-family: "Segoe UI", Arial, sans-serif;
+    font-size: 12px;
+    font-weight: 650;
+    line-height: 1.3;
+    letter-spacing: 0;
+    text-transform: none;
+}
+
+.admin-employee-detail-shell .employee-detail-field input,
+.admin-employee-detail-shell .employee-detail-field select,
+.admin-employee-detail-shell .employee-access-issue-form select,
+.admin-employee-detail-shell .employee-access-actions input,
+.admin-employee-detail-shell .employee-card-v2-grid .employee-detail-field input,
+.admin-employee-detail-shell .employee-card-v2-grid .employee-detail-field select,
+.admin-employee-detail-shell .employee-card-v2-name-grid .employee-detail-field input {
+    width: 100%;
+    height: var(--employee-control-height);
+    min-height: var(--employee-control-height);
+    padding: 0 12px;
+    border: 1px solid var(--admin-line);
+    border-radius: var(--employee-radius);
+    background: var(--admin-panel-soft);
+    color: var(--admin-ink);
+    font-family: "Segoe UI", Arial, sans-serif;
+    font-size: 14px;
+    font-weight: 500;
+    line-height: var(--employee-control-height);
+}
+
+.admin-employee-detail-shell .employee-detail-field select,
+.admin-employee-detail-shell .employee-access-issue-form select,
+.admin-employee-detail-shell .employee-card-v2-grid .employee-detail-field select {
+    padding-right: 36px;
+}
+
+.admin-employee-detail-shell .employee-detail-field textarea,
+.admin-employee-detail-shell .employee-card-v2-textareas .employee-detail-field textarea {
+    width: 100%;
+    min-height: 72px;
+    padding: 10px 12px;
+    border: 1px solid var(--admin-line);
+    border-radius: var(--employee-radius);
+    background: var(--admin-panel-soft);
+    color: var(--admin-ink);
+    font-family: "Segoe UI", Arial, sans-serif;
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 1.4;
+    resize: vertical;
+}
+
+.admin-employee-detail-shell .employee-detail-field input:focus,
+.admin-employee-detail-shell .employee-detail-field select:focus,
+.admin-employee-detail-shell .employee-detail-field textarea:focus,
+.admin-employee-detail-shell .employee-access-issue-form select:focus {
+    border-color: var(--admin-green);
+    outline: 2px solid color-mix(in srgb, var(--admin-green) 28%, transparent);
+    outline-offset: 1px;
+}
+
+.admin-employee-detail-shell .employee-detail-save-row {
+    display: flex;
+    justify-content: flex-end;
+    margin: 0;
+    padding-top: var(--employee-space-3);
+    border-top: 1px solid var(--admin-line-soft);
+}
+
+.admin-employee-detail-shell .employee-save-button,
+.admin-employee-detail-shell .employee-access-issue-form button,
+.admin-employee-detail-shell .employee-login-share-actions button,
+.admin-employee-detail-shell .employee-danger-actions button,
+.admin-employee-detail-shell .employee-access-actions button {
+    min-height: var(--employee-button-height);
+    margin: 0;
+    border-radius: var(--employee-radius);
+    font-family: "Segoe UI", Arial, sans-serif;
+    font-size: 13px;
+    font-weight: 700;
+    line-height: 1.2;
+    letter-spacing: 0;
+    text-transform: none;
+    box-shadow: none;
+}
+
+.admin-employee-detail-shell .employee-save-button {
+    width: auto;
+    min-width: 240px;
+    padding: 0 24px;
+    background: var(--admin-green);
+    color: #061311;
+}
+
+.admin-employee-detail-shell .employee-detail-side {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--employee-page-gap);
+    align-content: start;
+    min-width: 0;
+    overflow: visible;
+}
+
+.admin-employee-detail-shell .employee-access-panel {
+    display: grid;
+    gap: 0;
+}
+
+.admin-employee-detail-shell .employee-access-panel-section {
+    display: grid;
+    gap: var(--employee-space-3);
+    padding-top: var(--employee-space-4);
+}
+
+.admin-employee-detail-shell .employee-access-panel-section + .employee-access-panel-section {
+    margin-top: var(--employee-space-4);
+    border-top: 1px solid var(--admin-line-soft);
+}
+
+.admin-employee-detail-shell .employee-access-panel-section h3 {
+    margin: 0;
+    color: var(--admin-ink);
+    font-family: "Segoe UI", Arial, sans-serif;
+    font-size: 14px;
+    font-weight: 750;
+    line-height: 1.3;
+}
+
+.admin-employee-detail-shell .employee-access-issue-form {
+    display: grid;
+    gap: var(--employee-space-2);
+}
+
+.admin-employee-detail-shell .employee-access-issue-form button {
+    width: 100%;
+    padding: 0 16px;
+    border: 1px solid var(--admin-green);
+    background: var(--admin-green);
+    color: #061311;
+}
+
+.admin-employee-detail-shell .employee-access-list {
+    display: grid;
+    gap: var(--employee-space-3);
+    max-height: none;
+    overflow: visible;
+}
+
+.admin-employee-detail-shell .employee-access-card,
+.admin-employee-detail-shell .employee-access-card.access-not_activated,
+.admin-employee-detail-shell .employee-access-card.access-blocked,
+.admin-employee-detail-shell .employee-access-card.access-deactivated {
+    display: grid;
+    gap: var(--employee-space-3);
+    padding: 14px;
+    border: 1px solid var(--admin-line);
+    border-left: 3px solid var(--admin-gray);
+    border-radius: var(--employee-radius);
+    background: var(--admin-panel-soft);
+    box-shadow: none;
+}
+
+.admin-employee-detail-shell .employee-access-card.access-not_activated {
+    border-left-color: var(--admin-yellow);
+}
+
+.admin-employee-detail-shell .employee-access-card.access-blocked,
+.admin-employee-detail-shell .employee-access-card.access-deactivated {
+    border-left-color: var(--admin-red);
+}
+
+.admin-employee-detail-shell .employee-access-main {
+    gap: var(--employee-space-2);
+}
+
+.admin-employee-detail-shell .employee-access-main strong {
+    color: var(--admin-ink);
+    font-family: "Segoe UI", Arial, sans-serif;
+    font-size: 14px;
+    font-weight: 750;
+    line-height: 1.3;
+}
+
+.admin-employee-detail-shell .employee-access-meta {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--employee-space-1);
+    color: var(--admin-muted);
+    font-family: "Segoe UI", Arial, sans-serif;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.4;
+}
+
+.admin-employee-detail-shell .access-code {
+    display: inline-flex;
+    min-height: 32px;
+    padding: 4px 10px;
+    border: 1px solid color-mix(in srgb, var(--admin-cyan) 35%, var(--admin-line));
+    border-radius: var(--employee-radius);
+    background: var(--admin-cyan-soft);
+    color: var(--admin-cyan);
+    font-family: "Segoe UI", Arial, sans-serif;
+    font-size: 22px;
+    font-weight: 800;
+    line-height: 1;
+    letter-spacing: .08em;
+}
+
+.admin-employee-detail-shell .employee-login-share {
+    display: grid;
+    grid-template-columns: 1fr;
+    grid-template-areas:
+        "title"
+        "text"
+        "actions";
+    gap: var(--employee-space-2);
+    padding: 12px;
+    border: 1px solid color-mix(in srgb, var(--admin-line) 78%, var(--admin-green) 22%);
+    border-radius: var(--employee-radius);
+    background: color-mix(in srgb, var(--admin-panel) 94%, var(--admin-green) 6%);
+}
+
+.admin-employee-detail-shell .employee-login-share-title {
+    grid-area: title;
+    color: var(--admin-muted);
+    font-family: "Segoe UI", Arial, sans-serif;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1.3;
+}
+
+.admin-employee-detail-shell .employee-login-share-text {
+    grid-area: text;
+    gap: 2px;
+    color: var(--admin-ink);
+    font-family: "Segoe UI", Arial, sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.4;
+}
+
+.admin-employee-detail-shell .employee-login-share-actions {
+    grid-area: actions;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--employee-space-2);
+}
+
+.admin-employee-detail-shell .employee-login-share-actions button {
+    width: 100%;
+    padding: 0 14px;
+    border: 1px solid var(--admin-line);
+    background: var(--admin-panel);
+    color: var(--admin-ink);
+}
+
+.admin-employee-detail-shell .employee-login-share-actions button[data-login-share-button] {
+    border-color: var(--admin-green);
+    background: transparent;
+    color: var(--admin-green);
+}
+
+.admin-employee-detail-shell .employee-danger-card {
+    display: grid;
+    gap: var(--employee-space-3);
+}
+
+.admin-employee-detail-shell .employee-danger-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--employee-space-2);
+}
+
+.admin-employee-detail-shell .employee-danger-actions form {
+    min-width: 0;
+}
+
+.admin-employee-detail-shell .employee-danger-actions form:last-child {
+    grid-column: 1 / -1;
+}
+
+.admin-employee-detail-shell .employee-danger-actions button {
+    width: 100%;
+    padding: 0 12px;
+}
+
+.admin-employee-detail-shell .employee-danger-actions .button-warning {
+    border: 1px solid color-mix(in srgb, var(--admin-yellow) 55%, var(--admin-line));
+    background: var(--admin-yellow-soft);
+    color: var(--admin-yellow);
+}
+
+.admin-employee-detail-shell .employee-danger-actions .button-muted {
+    border: 1px solid var(--admin-line);
+    background: var(--admin-panel-soft);
+    color: var(--admin-ink);
+}
+
+.admin-employee-detail-shell .employee-danger-actions .button-danger {
+    border: 1px solid color-mix(in srgb, var(--admin-red) 60%, var(--admin-line));
+    background: transparent;
+    color: var(--admin-red);
+}
+
+.admin-employee-detail-shell .employee-danger-note {
+    margin: 0;
+    color: var(--admin-muted);
+    font-family: "Segoe UI", Arial, sans-serif;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.4;
+}
+
+@media (min-width: 1181px) {
+    body.employee-detail-screen .admin-employee-detail-shell {
+        display: block;
+        height: auto;
+        min-height: calc(100dvh / var(--admin-interface-scale));
+    }
+
+    body.employee-detail-screen .admin-employee-detail-shell .admin-page,
+    .admin-employee-detail-shell .employee-detail-page {
+        height: auto;
+        max-height: none;
+        min-height: 0;
+        padding: clamp(10px, 1.2dvh, 16px) 0;
+        overflow: visible;
+    }
+
+    .admin-employee-detail-shell .employee-detail-page {
+        grid-template-columns: minmax(0, 1fr) clamp(400px, 28vw, 500px);
+        grid-template-rows: auto;
+        align-items: start;
+    }
+
+    .admin-employee-detail-shell .employee-profile-form,
+    .admin-employee-detail-shell .employee-detail-side {
+        max-height: none;
+        overflow: visible;
+    }
+}
+
+@media (min-width: 1181px) and (max-height: 820px) {
+    .admin-employee-detail-shell {
+        --employee-control-height: 38px;
+        --employee-button-height: 38px;
+        --employee-panel-padding: 14px;
+        --employee-space-4: 12px;
+    }
+
+    .admin-employee-detail-shell .employee-detail-page {
+        align-items: start;
+    }
+
+    .admin-employee-detail-shell .employee-card-v2-photo-box,
+    .admin-employee-detail-shell .employee-card-v2-photo {
+        width: 132px;
+    }
+
+    .admin-employee-detail-shell .employee-card-v2-textareas .employee-detail-field textarea {
+        min-height: 58px;
+    }
+}
+
+@container employee-profile (max-width: 980px) {
+    .admin-employee-detail-shell .employee-card-v2-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@container employee-profile (max-width: 680px) {
+    .admin-employee-detail-shell .employee-card-v2-top {
+        grid-template-columns: 112px minmax(0, 1fr);
+    }
+
+    .admin-employee-detail-shell .employee-card-v2-photo-box,
+    .admin-employee-detail-shell .employee-card-v2-photo {
+        width: 112px;
+    }
+
+    .admin-employee-detail-shell .employee-card-v2-name-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .admin-employee-detail-shell .employee-card-v2-grid,
+    .admin-employee-detail-shell .employee-card-v2-textareas {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 1180px) {
+    body.employee-detail-screen,
+    body.employee-detail-screen .admin-employee-detail-shell {
+        height: auto;
+        max-height: none;
+        overflow: visible;
+    }
+
+    .admin-employee-detail-shell .employee-detail-page {
+        grid-template-columns: 1fr;
+        width: calc(100% - 24px);
+        max-width: 960px;
+        height: auto;
+        max-height: none;
+        padding: 12px 0 24px;
+        overflow: visible;
+    }
+
+    .admin-employee-detail-shell .employee-profile-form,
+    .admin-employee-detail-shell .employee-detail-side {
+        width: 100%;
+        max-height: none;
+        overflow: visible;
+    }
+}
+
+@media (max-width: 520px) {
+    .admin-employee-detail-shell {
+        --employee-control-height: 44px;
+        --employee-button-height: 44px;
+        --employee-panel-padding: 12px;
+        --employee-page-gap: 12px;
+    }
+
+    .admin-employee-detail-shell .employee-detail-page {
+        width: calc(100% - 16px);
+        padding-top: 8px;
+    }
+
+    .admin-employee-detail-shell .employee-detail-card-head {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .admin-employee-detail-shell .employee-detail-card-head h2 {
+        font-size: 18px;
+    }
+
+    .admin-employee-detail-shell .employee-detail-card-head .employee-state-badge {
+        align-self: stretch;
+        justify-content: center;
+    }
+
+    .admin-employee-detail-shell .employee-card-v2-top {
+        grid-template-columns: 96px minmax(0, 1fr);
+        gap: 12px;
+    }
+
+    .admin-employee-detail-shell .employee-card-v2-photo-box,
+    .admin-employee-detail-shell .employee-card-v2-photo {
+        width: 96px;
+    }
+
+    .admin-employee-detail-shell .employee-card-v2-name-grid,
+    .admin-employee-detail-shell .employee-card-v2-grid,
+    .admin-employee-detail-shell .employee-card-v2-textareas {
+        grid-template-columns: 1fr;
+    }
+
+    .admin-employee-detail-shell .employee-detail-save-row {
+        padding-top: 12px;
+    }
+
+    .admin-employee-detail-shell .employee-save-button {
+        width: 100%;
+        min-width: 0;
+    }
+
+    .admin-employee-detail-shell .employee-login-share-actions,
+    .admin-employee-detail-shell .employee-danger-actions {
+        grid-template-columns: 1fr;
+    }
+
+    .admin-employee-detail-shell .employee-danger-actions form:last-child {
+        grid-column: auto;
+    }
+}

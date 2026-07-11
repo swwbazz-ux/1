@@ -1,7 +1,11 @@
 {% extends "base.html" %}
+{% load static %}
 
 {% block title %}{{ employee.full_name }}{% endblock %}
 {% block body_class %}employee-detail-screen system-admin-employee-detail-screen{% endblock %}
+{% block extra_head %}
+<link rel="stylesheet" href="{% static 'css/admin-employee-detail.css' %}?v={% now 'U' %}">
+{% endblock %}
 
 {% block body %}
 <div class="admin-shell admin-exports-shell admin-employee-detail-shell admin-day" data-admin-theme>
@@ -71,11 +75,11 @@
                             </label>
                         {% endif %}
                         <div class="employee-photo-controls employee-card-v2-photo-controls">
-                            <label class="employee-photo-symbol add" for="{{ form.photo.id_for_label }}" title="Добавить или заменить фото">+</label>
+                            <label class="employee-photo-symbol add" for="{{ form.photo.id_for_label }}" title="Добавить или заменить фото" aria-label="Добавить или заменить фото">+</label>
                             {% if employee.photo %}
-                                <button class="employee-photo-symbol remove" type="submit" name="remove_photo" value="1" data-confirm="Удалить фото сотрудника?">-</button>
+                                <button class="employee-photo-symbol remove" type="submit" name="remove_photo" value="1" data-confirm="Удалить фото сотрудника?" aria-label="Удалить фото">-</button>
                             {% else %}
-                                <button class="employee-photo-symbol remove" type="button" disabled title="Фото еще не загружено">-</button>
+                                <button class="employee-photo-symbol remove" type="button" disabled title="Фото еще не загружено" aria-label="Фото еще не загружено">-</button>
                             {% endif %}
                         </div>
                     </div>
@@ -177,34 +181,106 @@
             </div>
 
             <div class="employee-detail-save-row">
-                <button type="submit">Сохранить карточку</button>
+                <button class="employee-save-button" type="submit">Сохранить карточку</button>
             </div>
         </form>
 
         <aside class="employee-detail-side">
-            <section class="card employee-detail-card employee-access-issue-card">
+            <section class="card employee-detail-card employee-access-panel">
                 <div class="employee-detail-card-head">
                     <div>
-                        <h2>Выдать доступ</h2>
-                        <p class="muted">Первичный пинкод одноразовый. После первого входа сотрудник задает постоянный.</p>
+                        <h2>Доступ сотрудника</h2>
+                        <p class="muted">Роль, PIN-код и данные для первого входа.</p>
                     </div>
                 </div>
-                <form class="employee-access-issue-form" method="post" action="{% url 'system_admin_generate_access' employee.id %}">
-                    {% csrf_token %}
-                    {% for field in role_form %}
-                        <label for="{{ field.id_for_label }}">{{ field.label }}</label>
-                        {{ field }}
-                        {{ field.errors }}
-                    {% endfor %}
-                    <button type="submit">Выдать / сбросить первичный пинкод</button>
-                </form>
+                <div class="employee-access-panel-section employee-access-issue-section">
+                    <h3>Выдача доступа</h3>
+                    <form class="employee-access-issue-form" method="post" action="{% url 'system_admin_generate_access' employee.id %}">
+                        {% csrf_token %}
+                        {% for field in role_form %}
+                            <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                            {{ field }}
+                            {{ field.errors }}
+                        {% endfor %}
+                        <button type="submit">Выдать / сбросить PIN</button>
+                    </form>
+                </div>
+
+                <div class="employee-access-panel-section employee-access-list-section">
+                    <div class="employee-access-section-head">
+                        <h3>Текущие доступы</h3>
+                    </div>
+                    <div class="employee-access-list">
+                        {% for item in employee_accesses %}
+                            <article class="employee-access-card access-{{ item.status }}">
+                                <div class="employee-access-main">
+                                    <strong>{{ item.role.name }}</strong>
+                                    <span class="status-chip access-{{ item.status }}">{{ item.get_status_display }}</span>
+                                </div>
+                                <div class="employee-access-meta">
+                                    <span>
+                                        {% if item.status == "not_activated" and item.primary_code_issued_at %}
+                                            Первичный пинкод: <strong class="access-code">{{ item.access_code }}</strong>, ожидает первого входа
+                                        {% elif item.status == "activated" %}
+                                            Пинкод активирован
+                                        {% elif item.status == "blocked" %}
+                                            Доступ заблокирован
+                                        {% elif item.status == "deactivated" %}
+                                            Доступ деактивирован
+                                        {% else %}
+                                            Пинкод не выдан
+                                        {% endif %}
+                                    </span>
+                                    <span>Последний вход: {{ item.last_login_at|date:"d.m.Y H:i"|default:"-" }}</span>
+                                </div>
+                                {% if item.status == "not_activated" and item.primary_code_issued_at %}
+                                    <div
+                                        class="employee-login-share"
+                                        data-login-share
+                                        data-login-url="https://driverform.ru"
+                                        data-login-phone="{{ employee.phone|default:'-' }}"
+                                        data-login-code="{{ item.access_code }}"
+                                    >
+                                        <span class="employee-login-share-title">Сообщение для отправки</span>
+                                        <div class="employee-login-share-text" data-login-share-text>
+                                            <span>https://driverform.ru</span>
+                                            <span>Телефон: {{ employee.phone|default:"-" }}</span>
+                                            <span>Пин код: {{ item.access_code }}</span>
+                                        </div>
+                                        <div class="employee-login-share-actions">
+                                            <button type="button" data-login-copy>Скопировать</button>
+                                            <button type="button" data-login-share-button>Отправить</button>
+                                        </div>
+                                    </div>
+                                {% endif %}
+                                <div class="employee-access-actions">
+                                    <form method="post" action="{% url 'system_admin_access_action' item.id 'block' %}" data-confirm="Заблокировать этот доступ? Пользователь не сможет войти по этому пинкоду.">
+                                        {% csrf_token %}
+                                        <input type="text" name="reason" placeholder="Причина блокировки">
+                                        <button type="submit" class="button-small button-warning">Заблокировать</button>
+                                    </form>
+                                    <form method="post" action="{% url 'system_admin_access_action' item.id 'unblock' %}">
+                                        {% csrf_token %}
+                                        <button type="submit" class="button-small">Разблокировать</button>
+                                    </form>
+                                    <form method="post" action="{% url 'system_admin_access_action' item.id 'deactivate' %}" data-confirm="Деактивировать этот доступ? Пользователь не сможет войти по этому пинкоду.">
+                                        {% csrf_token %}
+                                        <button type="submit" class="button-small button-muted">Деактивировать</button>
+                                    </form>
+                                </div>
+                            </article>
+                        {% empty %}
+                            <div class="empty-state">Доступов пока нет.</div>
+                        {% endfor %}
+                    </div>
+                </div>
             </section>
 
             <section class="card employee-detail-card employee-danger-card">
                 <div class="employee-detail-card-head">
                     <div>
-                        <h2>Действия</h2>
-                        <p class="muted">Опасные операции требуют подтверждения.</p>
+                        <h2>Управление сотрудником</h2>
+                        <p class="muted">Редкие и необратимые действия требуют подтверждения.</p>
                     </div>
                 </div>
                 <div class="employee-danger-actions">
@@ -223,99 +299,26 @@
                 </div>
                 <p class="muted employee-danger-note">Если у сотрудника есть производственная история, система заблокирует полное удаление и предложит архив.</p>
             </section>
-            <div class="employee-detail-bottom-grid">
-        <section class="card employee-detail-card employee-access-list-card">
-            <div class="employee-detail-card-head">
-                <div>
-                    <h2>Доступы</h2>
-                    <p class="muted">Роли, статусы входа и последние действия по доступам.</p>
-                </div>
-            </div>
-            <div class="employee-access-list">
-                {% for item in employee_accesses %}
-                    <article class="employee-access-card access-{{ item.status }}">
-                        <div class="employee-access-main">
-                            <strong>{{ item.role.name }}</strong>
-                            <span class="status-chip access-{{ item.status }}">{{ item.get_status_display }}</span>
-                        </div>
-                        <div class="employee-access-meta">
-                            <span>
-                                {% if item.status == "not_activated" and item.primary_code_issued_at %}
-                                    Первичный пинкод: <strong class="access-code">{{ item.access_code }}</strong>, ожидает первого входа
-                                {% elif item.status == "activated" %}
-                                    Пинкод активирован
-                                {% elif item.status == "blocked" %}
-                                    Доступ заблокирован
-                                {% elif item.status == "deactivated" %}
-                                    Доступ деактивирован
-                                {% else %}
-                                    Пинкод не выдан
-                                {% endif %}
-                            </span>
-                            <span>Последний вход: {{ item.last_login_at|date:"d.m.Y H:i"|default:"-" }}</span>
-                        </div>
-                        {% if item.status == "not_activated" and item.primary_code_issued_at %}
-                            <div
-                                class="employee-login-share"
-                                data-login-share
-                                data-login-url="https://driverform.ru"
-                                data-login-phone="{{ employee.phone|default:'-' }}"
-                                data-login-code="{{ item.access_code }}"
-                            >
-                                <span class="employee-login-share-title">Сообщение для отправки</span>
-                                <div class="employee-login-share-text" data-login-share-text>
-                                    <span>https://driverform.ru</span>
-                                    <span>Телефон: {{ employee.phone|default:"-" }}</span>
-                                    <span>Пин код: {{ item.access_code }}</span>
-                                </div>
-                                <div class="employee-login-share-actions">
-                                    <button type="button" data-login-copy>Скопировать</button>
-                                    <button type="button" data-login-share-button>Отправить</button>
-                                </div>
-                            </div>
-                        {% endif %}
-                        <div class="employee-access-actions">
-                            <form method="post" action="{% url 'system_admin_access_action' item.id 'block' %}" data-confirm="Заблокировать этот доступ? Пользователь не сможет войти по этому пинкоду.">
-                                {% csrf_token %}
-                                <input type="text" name="reason" placeholder="Причина блокировки">
-                                <button type="submit" class="button-small button-warning">Заблокировать</button>
-                            </form>
-                            <form method="post" action="{% url 'system_admin_access_action' item.id 'unblock' %}">
-                                {% csrf_token %}
-                                <button type="submit" class="button-small">Разблокировать</button>
-                            </form>
-                            <form method="post" action="{% url 'system_admin_access_action' item.id 'deactivate' %}" data-confirm="Деактивировать этот доступ? Пользователь не сможет войти по этому пинкоду.">
-                                {% csrf_token %}
-                                <button type="submit" class="button-small button-muted">Деактивировать</button>
-                            </form>
-                        </div>
-                    </article>
-                {% empty %}
-                    <div class="empty-state">Доступов пока нет.</div>
-                {% endfor %}
-            </div>
-        </section>
 
-        <section class="card employee-detail-card employee-log-card" hidden>
-            <div class="employee-detail-card-head">
-                <div>
-                    <h2>Последние действия</h2>
-                    <p class="muted">Журнал изменений по этой карточке.</p>
-                </div>
-            </div>
-            <div class="employee-log-list">
-                {% for log in logs %}
-                    <div class="employee-log-row">
-                        <span>{{ log.created_at|date:"d.m.Y H:i" }}</span>
-                        <strong>{{ log.action }}</strong>
-                        <span>{{ log.comment|default:"-" }}</span>
+            <section class="card employee-detail-card employee-log-card" hidden>
+                <div class="employee-detail-card-head">
+                    <div>
+                        <h2>Последние действия</h2>
+                        <p class="muted">Журнал изменений по этой карточке.</p>
                     </div>
-                {% empty %}
-                    <div class="empty-state">Действий пока нет.</div>
-                {% endfor %}
-            </div>
-        </section>
-            </div>
+                </div>
+                <div class="employee-log-list">
+                    {% for log in logs %}
+                        <div class="employee-log-row">
+                            <span>{{ log.created_at|date:"d.m.Y H:i" }}</span>
+                            <strong>{{ log.action }}</strong>
+                            <span>{{ log.comment|default:"-" }}</span>
+                        </div>
+                    {% empty %}
+                        <div class="empty-state">Действий пока нет.</div>
+                    {% endfor %}
+                </div>
+            </section>
         </aside>
     </section>
 </main>
