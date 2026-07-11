@@ -1257,13 +1257,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         trip.refresh_from_db()
         self.assertTrue(trip.is_carryover)
 
-        unloading_shift = EmployeeShift.objects.create(
-            employee=self.driver,
-            shift_type='day',
-            equipment=self.truck,
-            opened_at=timezone.now(),
-            opened_by=self.driver,
-        )
+        unloading_shift = self.truck_shift
         finalize_trip_unloaded(trip, driver=self.driver, unloading_shift=unloading_shift)
         trip.refresh_from_db()
         self.assertTrue(trip.is_carryover)

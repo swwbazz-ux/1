@@ -168,6 +168,8 @@ class ShiftPlanServiceTests(TestCase):
         )
         old_group.equipment.remove(truck)
         new_group.equipment.add(truck)
+        old_shift.closed_at = timezone.now()
+        old_shift.save(update_fields=['closed_at'])
 
         new_shift = self.create_shift_with_snapshot(truck, employee_name='Водитель новая смена')
         old_shift.refresh_from_db()
@@ -190,6 +192,8 @@ class ShiftPlanServiceTests(TestCase):
         )
 
         day_shift = self.create_shift_with_snapshot(truck, shift_type='day', employee_name='Водитель день')
+        day_shift.closed_at = timezone.now()
+        day_shift.save(update_fields=['closed_at'])
         night_shift = self.create_shift_with_snapshot(
             truck,
             shift_type='night',

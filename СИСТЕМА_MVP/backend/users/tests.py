@@ -3188,8 +3188,19 @@ class AccessLoginTests(TestCase):
         dispatcher = Employee.objects.create(full_name='Тестовый диспетчер')
         EmployeeAccess.objects.create(employee=dispatcher, role=dispatcher_role, access_code='5000')
         operator = Employee.objects.create(full_name='Машинист')
-        day_shift = EmployeeShift.objects.create(employee=operator, shift_type='day', opened_at=timezone.now())
-        night_shift = EmployeeShift.objects.create(employee=operator, shift_type='night', opened_at=timezone.now())
+        closed_at = timezone.now()
+        day_shift = EmployeeShift.objects.create(
+            employee=operator,
+            shift_type='day',
+            opened_at=closed_at - timedelta(days=1),
+            closed_at=closed_at - timedelta(hours=12),
+        )
+        night_shift = EmployeeShift.objects.create(
+            employee=operator,
+            shift_type='night',
+            opened_at=closed_at - timedelta(hours=11),
+            closed_at=closed_at,
+        )
         Trip.objects.create(
             excavator=excavator,
             truck=truck,
@@ -3440,6 +3451,7 @@ class AccessLoginTests(TestCase):
             shift_type='day',
             equipment=excavator,
             opened_at=report_datetime,
+            closed_at=report_datetime + timedelta(hours=1),
         )
         Trip.objects.create(
             excavator=excavator,
@@ -3463,6 +3475,7 @@ class AccessLoginTests(TestCase):
             shift_type='day',
             equipment=excavator,
             opened_at=previous_datetime,
+            closed_at=previous_datetime + timedelta(hours=1),
         )
         Trip.objects.create(
             excavator=excavator,

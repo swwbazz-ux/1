@@ -2,6 +2,7 @@ import json
 from datetime import timedelta
 
 from django.core.exceptions import ValidationError
+from django.db import IntegrityError, transaction
 from django.test import Client, TestCase
 from django.urls import reverse
 from django.utils import timezone
@@ -151,6 +152,22 @@ class WorkAssignmentServiceTests(WorkAssignmentFixtureMixin, TestCase):
         access.save(update_fields=['status', 'is_active'])
 
         self.assertEqual(work_assignment_state(self.driver, assignment), 'access_inactive')
+
+    def test_database_rejects_two_open_shifts_for_same_equipment(self):
+        EmployeeShift.objects.create(
+            employee=self.driver,
+            equipment=self.truck_1,
+            shift_type='day',
+            opened_at=timezone.now(),
+        )
+
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            EmployeeShift.objects.create(
+                employee=self.other_driver,
+                equipment=self.truck_1,
+                shift_type='night',
+                opened_at=timezone.now(),
+            )
 
     def test_employee_history_includes_assignment_ended_by(self):
         assignment = self.assign(

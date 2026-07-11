@@ -156,12 +156,14 @@ class ShiftAnalyticsReportTests(TestCase):
             shift_type='day',
             equipment=self.excavator,
             opened_at=previous_opened_at,
+            closed_at=timezone.now(),
         )
         long_driver_shift = EmployeeShift.objects.create(
             employee=self.driver,
             shift_type='day',
             equipment=self.truck,
             opened_at=previous_opened_at,
+            closed_at=timezone.now(),
         )
         Trip.objects.create(
             excavator=self.excavator,
@@ -290,6 +292,7 @@ class ShiftAnalyticsReportTests(TestCase):
             shift_type='day',
             equipment=other_excavator,
             opened_at=created_at,
+            closed_at=loaded_at,
         )
         trip = Trip.objects.create(
             excavator=other_excavator,
