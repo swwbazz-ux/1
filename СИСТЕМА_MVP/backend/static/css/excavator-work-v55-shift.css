@@ -2653,7 +2653,7 @@ body.excavator-operator-screen .eo-shift-metrics .eo-field-card.is-disabled em {
 /* v107: readable work location and an always-visible current app version. */
 body.excavator-operator-screen .eo-topbar .eo-face-cell-full {
     display: grid !important;
-    grid-template-columns: 28px auto minmax(0, 1fr) !important;
+    grid-template-columns: auto minmax(0, 1fr) !important;
     align-items: center !important;
     gap: 10px !important;
     min-width: 0 !important;
@@ -2702,22 +2702,17 @@ body.excavator-operator-screen .eo-shift-update-group {
 
 body.excavator-operator-screen .eo-current-app-version {
     color: rgba(184, 199, 206, .7) !important;
-    font-size: clamp(11px, 2.7vw, 13px) !important;
-    font-weight: 700 !important;
+    font-size: clamp(14px, 3.25vw, 16px) !important;
+    font-weight: 800 !important;
     line-height: 1 !important;
     white-space: nowrap !important;
 }
 
 @media (max-width: 767px) {
     body.excavator-operator-screen .eo-topbar .eo-face-cell-full {
-        grid-template-columns: 24px auto minmax(0, 1fr) !important;
+        grid-template-columns: auto minmax(0, 1fr) !important;
         gap: clamp(5px, 1.35vw, 8px) !important;
         padding-inline: clamp(5px, 1.4vw, 8px) !important;
-    }
-
-    body.excavator-operator-screen .eo-topbar .eo-pin-icon {
-        width: 24px !important;
-        height: 24px !important;
     }
 
     body.excavator-operator-screen .eo-topbar .eo-face-coordinates {
