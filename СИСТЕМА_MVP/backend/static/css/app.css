@@ -28624,343 +28624,391 @@ body.employee-detail-screen .admin-employee-detail-shell .admin-page {
     }
 }
 
-body.employee-detail-screen {
-    height: 100dvh;
-    max-height: 100dvh;
-    overflow: hidden;
-}
+/* The admin console header is a shared component. Keep one desktop height on every admin page. */
+@media (min-width: 1181px) {
+    .admin-exports-shell {
+        --admin-console-header-height: 158px;
+    }
 
-body.employee-detail-screen .admin-employee-detail-shell {
-    display: grid;
-    grid-template-rows: auto minmax(0, 1fr);
-    height: calc(100dvh / var(--admin-interface-scale));
-    min-height: 0;
-    overflow: hidden;
-}
+    .admin-exports-shell .admin-console-header {
+        height: var(--admin-console-header-height);
+        min-height: var(--admin-console-header-height);
+        max-height: var(--admin-console-header-height);
+    }
 
-.admin-employee-detail-shell .admin-console-header {
-    grid-template-columns: minmax(200px, 270px) minmax(0, 1fr) minmax(230px, 300px);
-    min-height: 0;
-}
+    body.employee-detail-screen .admin-employee-detail-shell {
+        display: block;
+        height: calc(100dvh / var(--admin-interface-scale));
+    }
 
-.admin-employee-detail-shell .admin-console-identity,
-.admin-employee-detail-shell .admin-console-main,
-.admin-employee-detail-shell .admin-console-actions {
-    padding: 9px 14px;
-}
+    .admin-employee-detail-shell .admin-console-header {
+        grid-template-columns: minmax(230px, 300px) minmax(0, 1fr) minmax(260px, 330px);
+    }
 
-.admin-employee-detail-shell .admin-console-identity {
-    grid-template-columns: 46px minmax(0, 1fr);
-    gap: 10px;
-}
+    .admin-employee-detail-shell .admin-console-identity,
+    .admin-employee-detail-shell .admin-console-main,
+    .admin-employee-detail-shell .admin-console-actions {
+        padding: 16px 20px;
+    }
 
-.admin-employee-detail-shell .admin-console-avatar {
-    width: 46px;
-    height: 46px;
-    font-size: 21px;
-}
+    .admin-employee-detail-shell .admin-console-identity {
+        grid-template-columns: 56px minmax(0, 1fr);
+        gap: 12px;
+    }
 
-.admin-employee-detail-shell .admin-console-main {
-    gap: 6px;
-}
+    .admin-employee-detail-shell .admin-console-avatar {
+        width: 56px;
+        height: 56px;
+        font-size: 24px;
+    }
 
-.admin-employee-detail-shell .admin-console-title h1 {
-    max-width: 100%;
-    overflow: hidden;
-    font-size: 30px;
-    line-height: .9;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
+    .admin-employee-detail-shell .admin-console-main {
+        gap: 10px;
+    }
 
-.admin-employee-detail-shell .admin-console-title p {
-    display: none;
-}
+    .admin-employee-detail-shell .admin-console-title h1 {
+        max-width: 100%;
+        overflow: hidden;
+        font-size: 36px;
+        line-height: .96;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
 
-.admin-employee-detail-shell .admin-console-nav {
-    gap: 6px;
-}
+    .admin-employee-detail-shell .admin-console-title p {
+        display: block;
+    }
 
-.admin-employee-detail-shell .admin-console-nav a,
-.admin-employee-detail-shell .admin-utility-link,
-.admin-employee-detail-shell .admin-theme-button {
-    min-height: 34px;
-    font-size: 12px;
-}
+    .admin-employee-detail-shell .admin-console-nav {
+        gap: 8px;
+    }
 
-.admin-employee-detail-shell .admin-console-nav a {
-    min-width: 96px;
-    padding: 0 10px;
-}
+    .admin-employee-detail-shell .admin-console-nav a,
+    .admin-employee-detail-shell .admin-utility-link,
+    .admin-employee-detail-shell .admin-theme-button {
+        min-height: 40px;
+        font-size: 13px;
+    }
 
-.admin-employee-detail-shell .admin-theme-button {
-    width: 38px;
-    min-width: 38px;
-}
+    .admin-employee-detail-shell .admin-console-nav a {
+        min-width: 112px;
+        padding: 0 13px;
+    }
 
-.admin-employee-detail-shell .admin-console-actions {
-    grid-template-columns: 38px repeat(2, minmax(0, 1fr));
-    gap: 8px;
-}
+    .admin-employee-detail-shell .admin-theme-button {
+        width: 44px;
+        min-width: 44px;
+        font-size: 0;
+    }
 
-body.employee-detail-screen .admin-employee-detail-shell .admin-page,
-.admin-employee-detail-shell .employee-detail-page {
-    height: 100%;
-    max-height: 100%;
-    padding-top: 8px;
-    padding-bottom: 8px;
-    overflow: hidden;
-}
+    .admin-employee-detail-shell .admin-console-actions {
+        grid-template-columns: 44px repeat(2, minmax(0, 1fr));
+        gap: 10px;
+    }
 
-.admin-employee-detail-shell .employee-detail-page {
-    grid-template-columns: minmax(650px, 1fr) clamp(640px, 36vw, 760px);
-    gap: 10px;
-}
-
-.admin-employee-detail-shell .employee-profile-form {
-    align-content: start;
-    gap: 7px;
-    overflow: hidden;
-}
-
-.admin-employee-detail-shell .employee-detail-card {
-    padding: 9px;
-}
-
-.admin-employee-detail-shell .employee-detail-card-head h2 {
-    font-size: 19px;
-}
-
-.admin-employee-detail-shell .employee-detail-card-head p {
-    display: none;
-}
-
-.admin-employee-detail-shell .employee-detail-card-head .employee-state-badge {
-    align-self: start;
-}
-
-.admin-employee-detail-shell .employee-card-v2-top {
-    grid-template-columns: 170px minmax(0, 1fr);
-    gap: 12px;
-}
-
-.admin-employee-detail-shell .employee-card-v2-photo-box {
-    width: 170px;
-    gap: 6px;
-}
-
-.admin-employee-detail-shell .employee-card-v2-photo {
-    width: 170px;
-    height: 170px;
-    flex-basis: 170px;
-}
-
-.admin-employee-detail-shell .employee-card-v2-photo-controls {
-    min-height: 20px;
-    margin-top: 3px;
-}
-
-.admin-employee-detail-shell .employee-photo-symbol {
-    min-width: 28px;
-    min-height: 28px;
-    font-size: 22px;
-    line-height: 1;
-}
-
-.admin-employee-detail-shell .employee-card-v2-name-grid {
-    gap: 5px;
-}
-
-.admin-employee-detail-shell .employee-detail-field {
-    gap: 3px;
-}
-
-.admin-employee-detail-shell .employee-detail-field label,
-.admin-employee-detail-shell .employee-access-issue-form label {
-    font-size: 11px;
-    line-height: 1;
-}
-
-.admin-employee-detail-shell .employee-detail-field input,
-.admin-employee-detail-shell .employee-detail-field select,
-.admin-employee-detail-shell .employee-access-issue-form select,
-.admin-employee-detail-shell .employee-access-actions input,
-.admin-employee-detail-shell .employee-card-v2-grid .employee-detail-field input,
-.admin-employee-detail-shell .employee-card-v2-grid .employee-detail-field select,
-.admin-employee-detail-shell .employee-card-v2-name-grid .employee-detail-field input {
-    height: 34px;
-    min-height: 34px;
-    font-size: 13px;
-    line-height: 34px;
-}
-
-.admin-employee-detail-shell .employee-detail-field select,
-.admin-employee-detail-shell .employee-access-issue-form select,
-.admin-employee-detail-shell .employee-card-v2-grid .employee-detail-field select {
-    padding-right: 34px;
-    line-height: 34px;
-}
-
-.admin-employee-detail-shell .employee-card-v2-grid,
-.admin-employee-detail-shell .employee-card-v2-textareas {
-    gap: 6px 10px;
-    margin-top: 4px;
-}
-
-.admin-employee-detail-shell .employee-detail-field textarea,
-.admin-employee-detail-shell .employee-card-v2-textareas .employee-detail-field textarea {
-    min-height: 52px;
-    font-size: 13px;
-}
-
-.admin-employee-detail-shell .employee-detail-save-row {
-    align-items: center;
-    margin-top: 0;
-}
-
-.admin-employee-detail-shell .employee-detail-save-row button {
-    height: 34px;
-}
-
-.admin-employee-detail-shell .employee-detail-save-row button,
-.admin-employee-detail-shell .employee-access-issue-form button,
-.admin-employee-detail-shell .employee-danger-actions button,
-.admin-employee-detail-shell .employee-access-actions button {
-    min-height: 34px;
-    font-size: 12px;
-    letter-spacing: .06em;
-}
-
-.admin-employee-detail-shell .employee-detail-side {
-    grid-template-columns: minmax(0, .92fr) minmax(0, 1.08fr);
-    grid-template-rows: auto minmax(0, 1fr);
-    gap: 8px;
-    align-content: stretch;
-    align-items: stretch;
-    overflow: hidden;
-}
-
-.admin-employee-detail-shell .employee-access-issue-card {
-    grid-column: 1;
-    grid-row: 1;
-}
-
-.admin-employee-detail-shell .employee-danger-card {
-    grid-column: 1;
-    grid-row: 2;
-    min-height: 0;
-}
-
-.admin-employee-detail-shell .employee-detail-bottom-grid {
-    grid-column: 2;
-    grid-row: 1 / span 2;
-    min-height: 0;
-}
-
-.admin-employee-detail-shell .employee-access-list-card {
-    align-content: start;
-    display: grid;
-    grid-template-rows: auto minmax(0, 1fr);
-    height: 100%;
-    overflow: hidden;
-}
-
-.admin-employee-detail-shell .employee-access-list {
-    align-content: start;
-    min-height: 0;
-    overflow-y: hidden;
-}
-
-.admin-employee-detail-shell .employee-access-issue-form {
-    gap: 6px;
-}
-
-.admin-employee-detail-shell .employee-danger-actions {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 6px;
-}
-
-.admin-employee-detail-shell .employee-danger-actions form:last-child {
-    grid-column: 1 / -1;
-}
-
-.admin-employee-detail-shell .employee-danger-actions button {
-    padding-left: 8px;
-    padding-right: 8px;
-    white-space: normal;
-}
-
-.admin-employee-detail-shell .employee-danger-note {
-    display: none;
-}
-
-.admin-employee-detail-shell .employee-access-card {
-    align-content: start;
-    gap: 6px;
-    padding: 8px;
-}
-
-.admin-employee-detail-shell .employee-access-main {
-    gap: 6px;
-}
-
-.admin-employee-detail-shell .employee-access-main strong {
-    font-size: 14px;
-}
-
-.admin-employee-detail-shell .employee-access-meta {
-    gap: 2px;
-    font-size: 11px;
-}
-
-.admin-employee-detail-shell .access-code {
-    font-size: 20px;
-    line-height: 1;
-}
-
-.admin-employee-detail-shell .employee-login-share {
-    align-self: start;
-    grid-template-columns: minmax(0, 1fr) 112px;
-    grid-template-areas:
-        "title actions"
-        "text actions";
-    align-items: center;
-    gap: 5px 8px;
-    padding: 7px;
-}
-
-.admin-employee-detail-shell .employee-login-share-title {
-    grid-area: title;
-    font-size: 10px;
-}
-
-.admin-employee-detail-shell .employee-login-share-text {
-    grid-area: text;
-    gap: 0;
-    font-size: 11px;
-    line-height: 1.25;
-}
-
-.admin-employee-detail-shell .employee-login-share-actions {
-    grid-area: actions;
-    grid-template-columns: 1fr;
-    gap: 5px;
-}
-
-.admin-employee-detail-shell .employee-login-share-actions button {
-    min-height: 28px;
-    font-size: 11px;
-}
-
-@media (max-width: 1500px) {
+    body.employee-detail-screen .admin-employee-detail-shell .admin-page,
     .admin-employee-detail-shell .employee-detail-page {
-        grid-template-columns: minmax(620px, 1fr) minmax(430px, 470px);
+        height: calc((100dvh / var(--admin-interface-scale)) - var(--admin-console-header-height));
+        max-height: calc((100dvh / var(--admin-interface-scale)) - var(--admin-console-header-height));
+        padding-top: 12px;
+        padding-bottom: 12px;
+        overflow: hidden;
+    }
+
+    .admin-employee-detail-shell .employee-detail-page {
+        grid-template-columns: minmax(760px, 1fr) clamp(500px, 31vw, 620px);
+        grid-template-rows: minmax(0, 1fr);
+        gap: 12px;
+        align-items: start;
+    }
+
+    .admin-employee-detail-shell .employee-profile-form {
+        align-self: start;
+        align-content: start;
+        max-height: 100%;
+        gap: 10px;
+        padding: 12px;
+        overflow-y: auto;
+        scrollbar-gutter: stable;
+    }
+
+    .admin-employee-detail-shell .employee-detail-card-head h2 {
+        font-size: 22px;
+    }
+
+    .admin-employee-detail-shell .employee-detail-card-head p,
+    .admin-employee-detail-shell .employee-danger-note {
+        display: none;
+    }
+
+    .admin-employee-detail-shell .employee-card-v2-top {
+        grid-template-columns: 180px minmax(0, 1fr);
+        gap: 16px;
+    }
+
+    .admin-employee-detail-shell .employee-card-v2-photo-box,
+    .admin-employee-detail-shell .employee-card-v2-photo {
+        width: 180px;
+    }
+
+    .admin-employee-detail-shell .employee-card-v2-photo {
+        height: 180px;
+        flex-basis: 180px;
+    }
+
+    .admin-employee-detail-shell .employee-card-v2-photo-controls {
+        min-height: 28px;
+        margin-top: 6px;
+    }
+
+    .admin-employee-detail-shell .employee-detail-field,
+    .admin-employee-detail-shell .employee-card-v2-name-grid {
+        gap: 4px;
+    }
+
+    .admin-employee-detail-shell .employee-detail-field label,
+    .admin-employee-detail-shell .employee-access-issue-form label {
+        font-size: 12px;
+        line-height: 1.15;
+    }
+
+    .admin-employee-detail-shell .employee-detail-field input,
+    .admin-employee-detail-shell .employee-detail-field select,
+    .admin-employee-detail-shell .employee-access-issue-form select,
+    .admin-employee-detail-shell .employee-access-actions input,
+    .admin-employee-detail-shell .employee-card-v2-grid .employee-detail-field input,
+    .admin-employee-detail-shell .employee-card-v2-grid .employee-detail-field select,
+    .admin-employee-detail-shell .employee-card-v2-name-grid .employee-detail-field input {
+        height: 40px;
+        min-height: 40px;
+        font-size: 14px;
+        line-height: 40px;
+    }
+
+    .admin-employee-detail-shell .employee-detail-field textarea,
+    .admin-employee-detail-shell .employee-card-v2-textareas .employee-detail-field textarea {
+        min-height: 68px;
+        font-size: 14px;
+    }
+
+    .admin-employee-detail-shell .employee-card-v2-grid,
+    .admin-employee-detail-shell .employee-card-v2-textareas {
+        gap: 8px 12px;
+        margin-top: 6px;
+    }
+
+    .admin-employee-detail-shell .employee-detail-save-row button,
+    .admin-employee-detail-shell .employee-access-issue-form button,
+    .admin-employee-detail-shell .employee-danger-actions button,
+    .admin-employee-detail-shell .employee-access-actions button {
+        min-height: 40px;
+        height: auto;
+        font-size: 13px;
+        letter-spacing: .06em;
+    }
+
+    .admin-employee-detail-shell .employee-detail-side {
+        display: grid;
+        grid-template-columns: 1fr;
+        grid-template-rows: repeat(3, auto);
+        gap: 10px;
+        align-content: start;
+        align-items: start;
+        width: 100%;
+        max-height: 100%;
+        overflow-y: auto;
+        scrollbar-gutter: stable;
+    }
+
+    .admin-employee-detail-shell .employee-access-issue-card {
+        grid-column: 1;
+        grid-row: 1;
+    }
+
+    .admin-employee-detail-shell .employee-detail-bottom-grid {
+        grid-column: 1;
+        grid-row: 2;
+        height: auto;
+        min-height: 0;
+    }
+
+    .admin-employee-detail-shell .employee-danger-card {
+        grid-column: 1;
+        grid-row: 3;
+    }
+
+    .admin-employee-detail-shell .employee-access-list-card {
+        display: grid;
+        grid-template-rows: auto auto;
+        height: auto;
+        min-height: 0;
+        overflow: visible;
+    }
+
+    .admin-employee-detail-shell .employee-access-list {
+        min-height: 0;
+        overflow: visible;
+    }
+
+    .admin-employee-detail-shell .employee-access-card {
+        gap: 8px;
+        padding: 10px;
+    }
+
+    .admin-employee-detail-shell .employee-access-main strong {
+        font-size: 15px;
+    }
+
+    .admin-employee-detail-shell .employee-access-meta {
+        gap: 4px;
+        font-size: 12px;
+    }
+
+    .admin-employee-detail-shell .access-code {
+        font-size: 24px;
+        line-height: 1;
+    }
+
+    .admin-employee-detail-shell .employee-login-share {
+        grid-template-columns: 1fr;
+        grid-template-areas:
+            "title"
+            "text"
+            "actions";
+        gap: 7px;
+        padding: 9px;
+    }
+
+    .admin-employee-detail-shell .employee-login-share-title {
+        grid-area: title;
+        font-size: 11px;
+    }
+
+    .admin-employee-detail-shell .employee-login-share-text {
+        grid-area: text;
+        gap: 2px;
+        font-size: 13px;
+        line-height: 1.3;
+    }
+
+    .admin-employee-detail-shell .employee-login-share-actions {
+        grid-area: actions;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+    }
+
+    .admin-employee-detail-shell .employee-login-share-actions button {
+        min-height: 36px;
+        font-size: 12px;
+    }
+
+    .admin-employee-detail-shell .employee-danger-actions {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+    }
+
+    .admin-employee-detail-shell .employee-danger-actions form:last-child {
+        grid-column: 1 / -1;
+    }
+}
+
+@media (max-width: 1180px) {
+    body.employee-detail-screen {
+        height: auto;
+        max-height: none;
+        overflow: auto;
+    }
+
+    body.employee-detail-screen .admin-employee-detail-shell {
+        display: block;
+        height: auto;
+        min-height: 100dvh;
+        overflow: visible;
+    }
+
+    .admin-employee-detail-shell .admin-console-header {
+        grid-template-columns: 1fr;
+        min-height: 108px;
+    }
+
+    .admin-employee-detail-shell .admin-console-identity,
+    .admin-employee-detail-shell .admin-console-main,
+    .admin-employee-detail-shell .admin-console-actions {
+        padding: 14px 12px;
+    }
+
+    .admin-employee-detail-shell .admin-console-identity {
+        grid-template-columns: 56px minmax(0, 1fr);
+        gap: 12px;
+    }
+
+    .admin-employee-detail-shell .admin-console-avatar {
+        width: 56px;
+        height: 56px;
+        font-size: 24px;
+    }
+
+    .admin-employee-detail-shell .admin-console-main {
+        gap: 10px;
+    }
+
+    .admin-employee-detail-shell .admin-console-title h1 {
+        max-width: 100%;
+        overflow: visible;
+        font-size: 30px;
+        line-height: .96;
+        text-overflow: clip;
+        white-space: normal;
+    }
+
+    .admin-employee-detail-shell .admin-console-title p {
+        display: block;
+    }
+
+    .admin-employee-detail-shell .admin-console-nav {
+        gap: 8px;
+    }
+
+    .admin-employee-detail-shell .admin-console-nav a,
+    .admin-employee-detail-shell .admin-utility-link,
+    .admin-employee-detail-shell .admin-theme-button {
+        min-height: 40px;
+        font-size: 13px;
+    }
+
+    .admin-employee-detail-shell .admin-theme-button {
+        width: 44px;
+        min-width: 44px;
+        font-size: 0;
+    }
+
+    .admin-employee-detail-shell .admin-console-actions {
+        grid-template-columns: 44px repeat(2, minmax(0, 1fr));
+        gap: 10px;
+    }
+
+    body.employee-detail-screen .admin-employee-detail-shell .admin-page,
+    .admin-employee-detail-shell .employee-detail-page {
+        grid-template-columns: 1fr;
+        height: auto;
+        max-height: none;
+        overflow: visible;
+    }
+
+    .admin-employee-detail-shell .employee-profile-form,
+    .admin-employee-detail-shell .employee-detail-side,
+    .admin-employee-detail-shell .employee-detail-bottom-grid,
+    .admin-employee-detail-shell .employee-access-list-card,
+    .admin-employee-detail-shell .employee-access-list {
+        width: 100%;
+        height: auto;
+        max-height: none;
+        overflow: visible;
     }
 
     .admin-employee-detail-shell .employee-detail-side {
         grid-template-columns: 1fr;
-        grid-template-rows: auto auto minmax(0, 1fr);
-        overflow: hidden;
+        grid-template-rows: auto;
     }
 
     .admin-employee-detail-shell .employee-access-issue-card,
@@ -28968,6 +29016,25 @@ body.employee-detail-screen .admin-employee-detail-shell .admin-page,
     .admin-employee-detail-shell .employee-detail-bottom-grid {
         grid-column: 1;
         grid-row: auto;
+    }
+
+    .admin-employee-detail-shell .employee-access-issue-card {
+        order: 1;
+    }
+
+    .admin-employee-detail-shell .employee-detail-bottom-grid {
+        order: 2;
+    }
+
+    .admin-employee-detail-shell .employee-danger-card {
+        order: 3;
+    }
+}
+
+@media (max-width: 720px) {
+    .admin-employee-detail-shell .admin-console-nav a {
+        min-width: 0;
+        padding: 0 10px;
     }
 }
 
