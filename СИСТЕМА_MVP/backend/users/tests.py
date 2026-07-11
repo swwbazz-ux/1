@@ -149,7 +149,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, reverse('driver_manifest'))
         self.assertContains(response, 'rel="manifest"')
         self.assertContains(response, '/driver-sw.js')
-        self.assertContains(response, 'driver-mobile-shell-v81')
+        self.assertContains(response, 'driver-mobile-shell-v82')
         self.assertContains(response, 'data-driver-pwa-update-modal')
         self.assertContains(response, 'data-driver-pwa-update-badge')
         self.assertContains(response, 'mode: "custom", path: "^/driver/(?:shift/?)?$"')
@@ -290,7 +290,7 @@ class AccessLoginTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Service-Worker-Allowed'], '/driver/')
-        self.assertIn('driver-mobile-shell-v81', script)
+        self.assertIn('driver-mobile-shell-v82', script)
         self.assertIn('/driver/', script)
         self.assertIn('/driver/shift/', script)
         self.assertIn('/driver.webmanifest', script)
@@ -2030,7 +2030,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(driver_shift_response, 'ККД')
         self.assertContains(driver_shift_response, 'window.applyOperationalStateRefresh')
         self.assertContains(driver_shift_response, 'data-realtime-mode="custom"')
-        self.assertContains(driver_shift_response, 'driver-mobile-shell-v81')
+        self.assertContains(driver_shift_response, 'driver-mobile-shell-v82')
 
     def test_driver_downtime_buttons_are_rendered_from_server_reference(self):
         truck = self.create_registered_driver_shift()
@@ -2064,7 +2064,14 @@ class AccessLoginTests(TestCase):
         response = self.client.get('/driver/?tab=downtimes', HTTP_HOST='localhost')
 
         self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'class="driver-downtime-title-row"')
+        self.assertContains(response, '>Простои<')
+        self.assertContains(response, 'data-driver-downtime-refresh')
+        self.assertContains(response, 'driver-downtime-state-icon-play')
+        self.assertContains(response, 'driver-downtime-state-icon-pause')
         self.assertContains(response, 'class="driver-downtime-list"')
+        self.assertContains(response, 'Удерживайте 2 секунды, чтобы начать простой')
+        self.assertContains(response, 'registerDriverDowntimeHold')
         self.assertContains(response, f'data-driver-downtime-reason-id="{waiting_reason.id}"')
         self.assertContains(response, f'name="reason_id" value="{waiting_reason.id}"')
         self.assertContains(response, 'Фронт')

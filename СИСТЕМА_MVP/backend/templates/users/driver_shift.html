@@ -1783,6 +1783,192 @@ body.driver-mobile-screen .driver-downtime-close {
     align-self: end;
 }
 
+/* Downtime workspace mirrors the excavator operator screen. */
+body.driver-mobile-screen [data-driver-tab-panel="downtimes"].is-active {
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
+    gap: clamp(9px, 1.4dvh, 13px);
+}
+
+body.driver-mobile-screen .driver-downtime-title-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+}
+
+body.driver-mobile-screen .driver-downtime-title-row h2 {
+    margin: 0;
+    color: #f6fbfd;
+    font-size: clamp(28px, 6.8vw, 31px);
+    font-weight: 700;
+    line-height: 1;
+}
+
+body.driver-mobile-screen .driver-downtime-refresh {
+    width: 42px;
+    height: 42px;
+    border: 1px solid rgba(139, 159, 170, .44);
+    border-radius: 8px;
+    display: grid;
+    place-items: center;
+    color: #cbd6dc;
+    background: rgba(18, 27, 33, .7);
+    font-size: 25px;
+    line-height: 1;
+}
+
+body.driver-mobile-screen .driver-downtime-card {
+    --driver-downtime-accent: #94a3b8;
+    --driver-downtime-glow: rgba(148, 163, 184, .24);
+    min-height: clamp(88px, 12dvh, 112px);
+    grid-template-columns: clamp(44px, 11vw, 58px) minmax(0, 1fr);
+    padding: clamp(12px, 1.8dvh, 18px);
+    border: 1px solid rgba(126, 145, 154, .42);
+    border-radius: 8px;
+    background: linear-gradient(180deg, rgba(14, 25, 30, .94), rgba(7, 14, 18, .98));
+    box-shadow: inset 0 0 18px var(--driver-downtime-glow);
+}
+
+body.driver-mobile-screen .driver-downtime-card.is-active {
+    --driver-downtime-accent: #facc15;
+    --driver-downtime-glow: rgba(250, 204, 21, .48);
+    border-color: var(--driver-downtime-accent);
+    box-shadow: inset 0 0 24px var(--driver-downtime-glow), 0 0 20px var(--driver-downtime-glow);
+}
+
+body.driver-mobile-screen .driver-downtime-card.is-active.status-red {
+    --driver-downtime-accent: #ff5a47;
+    --driver-downtime-glow: rgba(255, 90, 71, .5);
+}
+
+body.driver-mobile-screen .driver-downtime-card.is-active.status-orange {
+    --driver-downtime-accent: #fb923c;
+    --driver-downtime-glow: rgba(251, 146, 60, .48);
+}
+
+body.driver-mobile-screen .driver-downtime-state-dot {
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+}
+
+body.driver-mobile-screen .driver-downtime-state-icon {
+    display: block;
+    width: 28px;
+    height: 28px;
+    fill: currentColor;
+}
+
+body.driver-mobile-screen .driver-downtime-state-icon-play {
+    color: #51df61;
+    filter: drop-shadow(0 0 3px rgba(81, 223, 97, .38));
+}
+
+body.driver-mobile-screen .driver-downtime-state-icon-pause {
+    display: none;
+    color: var(--driver-downtime-accent);
+}
+
+body.driver-mobile-screen .driver-downtime-card.is-active .driver-downtime-state-icon-play {
+    display: none;
+}
+
+body.driver-mobile-screen .driver-downtime-card.is-active .driver-downtime-state-icon-pause {
+    display: block;
+    filter: drop-shadow(0 0 8px var(--driver-downtime-glow));
+}
+
+body.driver-mobile-screen .driver-downtime-card b[data-driver-active-duration] {
+    margin: 0;
+    color: #f4f8f9;
+    font-size: clamp(34px, 8.5vw, 54px);
+    font-weight: 800;
+    line-height: 1;
+    letter-spacing: 0;
+    font-variant-numeric: tabular-nums;
+}
+
+body.driver-mobile-screen .driver-downtime-card.is-active b[data-driver-active-duration] {
+    color: var(--driver-downtime-accent);
+    filter: drop-shadow(0 0 8px var(--driver-downtime-glow));
+}
+
+body.driver-mobile-screen .driver-downtime-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-auto-rows: minmax(64px, 1fr);
+    align-content: stretch;
+    gap: clamp(8px, 2.2vw, 12px);
+    padding-bottom: 0;
+}
+
+body.driver-mobile-screen .driver-downtime-list form {
+    min-height: 0;
+}
+
+body.driver-mobile-screen .driver-downtime-list button {
+    --driver-reason-accent: #a8b5bd;
+    --driver-reason-fill: rgba(148, 163, 184, .09);
+    --driver-reason-glow: rgba(148, 163, 184, .28);
+    position: relative;
+    isolation: isolate;
+    height: 100%;
+    min-height: 64px;
+    aspect-ratio: auto;
+    overflow: hidden;
+    border-color: var(--driver-reason-accent);
+    padding: 10px 12px;
+    color: var(--driver-reason-accent);
+    background: linear-gradient(180deg, var(--driver-reason-fill), rgba(8, 14, 17, .98));
+    font-size: clamp(18px, 4.6vw, 21px);
+    font-weight: 700;
+    line-height: 1.12;
+    white-space: normal;
+    text-wrap: balance;
+}
+
+body.driver-mobile-screen .driver-downtime-list button::before,
+body.driver-mobile-screen .driver-downtime-close::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    width: var(--driver-action-hold, 0%);
+    background: color-mix(in srgb, currentColor 26%, transparent);
+}
+
+body.driver-mobile-screen .driver-downtime-list button.status-yellow { --driver-reason-accent: #facc15; --driver-reason-fill: rgba(250, 204, 21, .1); --driver-reason-glow: rgba(250, 204, 21, .42); }
+body.driver-mobile-screen .driver-downtime-list button.status-green { --driver-reason-accent: #4ade80; --driver-reason-fill: rgba(74, 222, 128, .1); --driver-reason-glow: rgba(74, 222, 128, .4); }
+body.driver-mobile-screen .driver-downtime-list button.status-blue { --driver-reason-accent: #38bdf8; --driver-reason-fill: rgba(56, 189, 248, .1); --driver-reason-glow: rgba(56, 189, 248, .42); }
+body.driver-mobile-screen .driver-downtime-list button.status-orange { --driver-reason-accent: #fb923c; --driver-reason-fill: rgba(251, 146, 60, .11); --driver-reason-glow: rgba(251, 146, 60, .42); }
+body.driver-mobile-screen .driver-downtime-list button.status-red { --driver-reason-accent: #ff5a47; --driver-reason-fill: rgba(255, 90, 71, .11); --driver-reason-glow: rgba(255, 90, 71, .44); }
+
+body.driver-mobile-screen .driver-downtime-list button.is-selected {
+    color: #f8fbfc;
+    background: radial-gradient(circle at 50% 48%, var(--driver-reason-glow), transparent 68%), linear-gradient(180deg, var(--driver-reason-fill), rgba(8, 14, 17, .96));
+    box-shadow: inset 0 0 26px var(--driver-reason-glow), 0 0 0 2px var(--driver-reason-accent), 0 0 22px var(--driver-reason-glow);
+    text-shadow: 0 0 9px var(--driver-reason-accent);
+}
+
+body.driver-mobile-screen .driver-downtime-close {
+    position: relative;
+    isolation: isolate;
+    min-height: clamp(52px, 6.8dvh, 62px);
+    overflow: hidden;
+    border-radius: 8px;
+    font-size: clamp(18px, 4.8vw, 22px);
+}
+
+@media (min-width: 768px) {
+    body.driver-mobile-screen .driver-downtime-list {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+}
+
 body.driver-mobile-screen .driver-trip-list,
 body.driver-mobile-screen [data-driver-tab-panel="shift"].is-active,
 body.driver-mobile-screen [data-driver-tab-panel="downtimes"].is-active,
@@ -2246,7 +2432,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
 {% endblock %}
 
 {% block body %}
-<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v81' }}">
+<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v82' }}">
     {% if messages %}
         <div class="driver-messages">
             {% for message in messages %}
@@ -2471,20 +2657,23 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
     </section>
 
     <section class="driver-panel driver-tab {% if active_tab == 'downtimes' %}is-active{% endif %}" data-driver-tab-panel="downtimes" data-driver-downtime-url="{% url 'driver_downtime_action' %}">
+        <div class="driver-downtime-title-row">
+            <h2>Простои</h2>
+            <button class="driver-downtime-refresh" type="button" aria-label="Обновить" data-driver-downtime-refresh>↻</button>
+        </div>
         <div class="driver-downtime-card status-{{ active_downtime_status_key }}{% if active_downtime %} is-active{% endif %}" data-driver-active-downtime-id="{% if active_downtime %}{{ active_downtime.id }}{% endif %}" data-driver-active-started-at="{{ active_downtime_started_at }}" data-driver-active-elapsed-seconds="{{ active_downtime_elapsed_seconds }}">
-            <span class="driver-downtime-state-dot" data-driver-downtime-indicator aria-hidden="true"></span>
-            <div>
-                <strong data-driver-active-title>{% if active_downtime %}Активный простой{% else %}Простоя нет{% endif %}</strong>
-                <b data-driver-active-duration>{{ active_downtime_elapsed_label }}</b>
-                <em data-driver-active-reason>{% if active_downtime %}{{ active_downtime.reason }}{% else %}Выберите причину для начала{% endif %}</em>
-            </div>
+            <span class="driver-downtime-state-dot" data-driver-downtime-indicator aria-hidden="true">
+                <svg class="driver-downtime-state-icon driver-downtime-state-icon-play" viewBox="0 0 24 24" focusable="false"><path d="M7 4.8v14.4L19 12 7 4.8Z"></path></svg>
+                <svg class="driver-downtime-state-icon driver-downtime-state-icon-pause" viewBox="0 0 24 24" focusable="false"><path d="M6.5 5h4v14h-4V5Zm7 0h4v14h-4V5Z"></path></svg>
+            </span>
+            <b data-driver-active-duration>{{ active_downtime_elapsed_label }}</b>
         </div>
         <div class="driver-downtime-list">
             {% for reason in downtime_reasons %}
                 <form method="post" action="{% url 'driver_downtime_action' %}" data-driver-downtime-reason-id="{{ reason.id }}">
                     {% csrf_token %}
                     <input type="hidden" name="reason_id" value="{{ reason.id }}">
-                    <button class="status-{{ reason.effective_color_group }}{% if active_downtime and active_downtime.reason_id == reason.id %} is-selected{% endif %}" type="submit" data-driver-downtime-reason-button data-driver-downtime-reason-id="{{ reason.id }}" data-driver-reason="{{ reason }}" data-driver-status-key="{{ reason.effective_color_group }}">
+                    <button class="driver-downtime-hold status-{{ reason.effective_color_group }}{% if active_downtime and active_downtime.reason_id == reason.id %} is-selected{% endif %}" type="button" data-driver-downtime-reason-button data-driver-downtime-reason-id="{{ reason.id }}" data-driver-reason="{{ reason }}" data-driver-status-key="{{ reason.effective_color_group }}" style="--driver-action-hold: 0%" aria-label="Удерживайте 2 секунды, чтобы начать простой: {{ reason.button_label }}">
                         <span>{{ reason.button_label }}</span>
                         <strong>›</strong>
                     </button>
@@ -2493,7 +2682,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
                 <div class="driver-inline-note">Активные причины простоев для самосвалов не найдены.</div>
             {% endfor %}
         </div>
-        <button class="driver-primary-action driver-downtime-close{% if not active_downtime %} is-disabled{% endif %}" type="button" data-driver-close-downtime {% if not active_downtime %}disabled aria-disabled="true"{% endif %}>Завершить простой</button>
+        <button class="driver-primary-action driver-downtime-close driver-downtime-hold{% if not active_downtime %} is-disabled{% endif %}" type="button" data-driver-close-downtime style="--driver-action-hold: 0%" {% if not active_downtime %}disabled aria-disabled="true"{% else %}aria-label="Удерживайте 2 секунды, чтобы завершить простой"{% endif %}>Завершить простой</button>
     </section>
 
     <section class="driver-panel driver-tab {% if active_tab == 'manifest' %}is-active{% endif %}" data-driver-tab-panel="manifest">
@@ -3164,20 +3353,64 @@ window.bindDriverMobileShell = function () {
         });
     }
 
-    shell.querySelectorAll("form[data-driver-downtime-reason-id]").forEach(function (form) {
-        form.addEventListener("submit", function (event) {
-            event.preventDefault();
-            var button = form.querySelector("[data-driver-downtime-reason-button]");
-            if (!button || button.disabled) {
-                return;
-            }
+    function registerDriverDowntimeHold(button, onComplete) {
+        if (!button || typeof onComplete !== "function") return;
+        var timer = null;
+        var frame = null;
+        var startedAt = 0;
+        var holdMs = 2000;
+        function reset() {
+            window.clearTimeout(timer);
+            if (frame) window.cancelAnimationFrame(frame);
+            timer = null;
+            frame = null;
+            startedAt = 0;
+            button.classList.remove("is-holding");
+            button.style.setProperty("--driver-action-hold", "0%");
+        }
+        function draw() {
+            if (!startedAt) return;
+            var progress = Math.min(100, ((Date.now() - startedAt) / holdMs) * 100);
+            button.style.setProperty("--driver-action-hold", progress + "%");
+            if (progress < 100) frame = window.requestAnimationFrame(draw);
+        }
+        function complete() {
+            reset();
+            onComplete();
+        }
+        function begin(event) {
+            if (button.disabled || button.getAttribute("aria-disabled") === "true" || startedAt) return;
+            if (event) event.preventDefault();
+            startedAt = Date.now();
+            button.classList.add("is-holding");
+            draw();
+            timer = window.setTimeout(complete, holdMs);
+        }
+        button.addEventListener("click", function (event) { event.preventDefault(); });
+        button.addEventListener("pointerdown", begin);
+        ["pointerup", "pointercancel", "pointerleave"].forEach(function (name) {
+            button.addEventListener(name, reset);
+        });
+        button.addEventListener("keydown", function (event) {
+            if (event.key === "Enter" || event.key === " ") begin(event);
+        });
+        button.addEventListener("keyup", function (event) {
+            if (event.key === "Enter" || event.key === " ") reset();
+        });
+    }
+
+    var downtimeRefresh = shell.querySelector("[data-driver-downtime-refresh]");
+    if (downtimeRefresh) {
+        downtimeRefresh.addEventListener("click", function () { window.location.reload(); });
+    }
+
+    shell.querySelectorAll("[data-driver-downtime-reason-button]").forEach(function (button) {
+        registerDriverDowntimeHold(button, function () {
+            if (button.disabled) return;
             shell.querySelectorAll("[data-driver-downtime-reason-button]").forEach(function (item) {
                 item.classList.remove("is-selected");
             });
             button.classList.add("is-selected");
-            if (downtimeReason) {
-                downtimeReason.textContent = button.dataset.driverReason || button.textContent.trim();
-            }
             button.disabled = true;
             postDriverDowntimeAction({
                 action: "start",
@@ -3198,7 +3431,7 @@ window.bindDriverMobileShell = function () {
     });
 
     if (downtimeClose) {
-        downtimeClose.addEventListener("click", function () {
+        registerDriverDowntimeHold(downtimeClose, function () {
             if (downtimeClose.disabled || downtimeClose.getAttribute("aria-disabled") === "true") {
                 return;
             }
@@ -3344,7 +3577,7 @@ window.bindDriverMobileShell = function () {
         if (!("serviceWorker" in navigator)) {
             return;
         }
-        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v81' }}";
+        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v82' }}";
         var updateModal = document.querySelector("[data-driver-pwa-update-modal]");
         var updateBadge = document.querySelector("[data-driver-pwa-update-badge]");
         var updateTarget = document.querySelector("[data-driver-pwa-update-nav-target]");
