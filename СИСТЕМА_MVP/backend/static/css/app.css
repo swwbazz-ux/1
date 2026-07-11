@@ -28762,8 +28762,9 @@ body.employee-detail-screen .admin-employee-detail-shell .admin-page,
 
 .admin-employee-detail-shell .employee-photo-symbol {
     min-width: 28px;
-    min-height: 22px;
+    min-height: 28px;
     font-size: 22px;
+    line-height: 1;
 }
 
 .admin-employee-detail-shell .employee-card-v2-name-grid {
