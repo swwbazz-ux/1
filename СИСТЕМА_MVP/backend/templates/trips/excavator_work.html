@@ -5,9 +5,9 @@
 {% block body_class %}excavator-operator-screen{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v106">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v106">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v106">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v107">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v107">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v107">
 <meta name="theme-color" content="#030708">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Погрузка">
@@ -52,8 +52,12 @@
             </div>
             <div class="eo-topbar-cell eo-face-cell eo-face-cell-full">
                 <span class="eo-pin-icon" aria-hidden="true"></span>
-                <strong title="Горизонт {{ face_horizon|default:"125" }} / Блок {{ face_block|default:"4" }}{% if current_rock %} / Порода: {{ current_rock }}{% endif %}">
-                    Гор.{{ face_horizon|default:"125" }} / Бл.{{ face_block|default:"4" }}{% if current_rock %} / {{ current_rock }}{% endif %}
+                <strong class="eo-face-summary" title="Горизонт {{ face_horizon|default:"125" }} / Блок {{ face_block|default:"4" }}{% if current_rock %} / Порода: {{ current_rock }}{% endif %}">
+                    <span class="eo-face-coordinates">
+                        <span>Гор. {{ face_horizon|default:"125" }}</span>
+                        <span>Бл. {{ face_block|default:"4" }}</span>
+                    </span>
+                    {% if current_rock %}<span class="eo-face-rock">{{ current_rock }}</span>{% endif %}
                 </strong>
             </div>
         </header>
@@ -61,11 +65,14 @@
         <section class="eo-screen mm-mobile-shift-form" data-eo-screen="shift">
             <div class="eo-shift-titlebar">
                 <h1>Смена</h1>
-                <button class="eo-shift-update-button" type="button" data-eo-pwa-update-check aria-label="Проверить обновление приложения">
-                    <span aria-hidden="true"></span>
-                    <b data-eo-pwa-update-check-label>Обновить</b>
-                    <em data-eo-pwa-update-check-version hidden></em>
-                </button>
+                <div class="eo-shift-update-group">
+                    <span class="eo-current-app-version" aria-label="Текущая версия приложения">v107</span>
+                    <button class="eo-shift-update-button" type="button" data-eo-pwa-update-check aria-label="Проверить обновление приложения">
+                        <span aria-hidden="true"></span>
+                        <b data-eo-pwa-update-check-label>Обновить</b>
+                        <em data-eo-pwa-update-check-version hidden></em>
+                    </button>
+                </div>
             </div>
             <div class="eo-shift-section eo-shift-check-panel">
                 <div class="eo-shift-section-head">
@@ -403,7 +410,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v106";
+var excavatorShellVersion = "excavator-mobile-shell-v107";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var excavatorRelevantEvents = {
     assignment_changed: true,

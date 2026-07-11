@@ -2650,6 +2650,90 @@ body.excavator-operator-screen .eo-shift-metrics .eo-field-card.is-disabled em {
     cursor: not-allowed !important;
 }
 
+/* v107: readable work location and an always-visible current app version. */
+body.excavator-operator-screen .eo-topbar .eo-face-cell-full {
+    display: grid !important;
+    grid-template-columns: 28px auto minmax(0, 1fr) !important;
+    align-items: center !important;
+    gap: 10px !important;
+    min-width: 0 !important;
+    padding-inline: 10px 14px !important;
+}
+
+body.excavator-operator-screen .eo-topbar .eo-face-summary {
+    display: contents !important;
+}
+
+body.excavator-operator-screen .eo-topbar .eo-face-coordinates {
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 12px !important;
+    min-width: max-content !important;
+    color: #eef5f7 !important;
+    font-size: clamp(14px, 1.05vw, 17px) !important;
+    font-weight: 800 !important;
+    line-height: 1 !important;
+    white-space: nowrap !important;
+}
+
+body.excavator-operator-screen .eo-topbar .eo-face-coordinates > span + span {
+    padding-left: 12px !important;
+    border-left: 1px solid rgba(139, 159, 170, .42) !important;
+}
+
+body.excavator-operator-screen .eo-topbar .eo-face-rock {
+    display: block !important;
+    min-width: 0 !important;
+    overflow: hidden !important;
+    color: #dce7ea !important;
+    font-size: clamp(13px, .98vw, 16px) !important;
+    font-weight: 650 !important;
+    line-height: 1.1 !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+}
+
+body.excavator-operator-screen .eo-shift-update-group {
+    display: inline-flex !important;
+    align-items: center !important;
+    flex: 0 0 auto !important;
+    gap: 8px !important;
+}
+
+body.excavator-operator-screen .eo-current-app-version {
+    color: rgba(184, 199, 206, .7) !important;
+    font-size: clamp(11px, 2.7vw, 13px) !important;
+    font-weight: 700 !important;
+    line-height: 1 !important;
+    white-space: nowrap !important;
+}
+
+@media (max-width: 767px) {
+    body.excavator-operator-screen .eo-topbar .eo-face-cell-full {
+        grid-template-columns: 24px auto minmax(0, 1fr) !important;
+        gap: clamp(5px, 1.35vw, 8px) !important;
+        padding-inline: clamp(5px, 1.4vw, 8px) !important;
+    }
+
+    body.excavator-operator-screen .eo-topbar .eo-pin-icon {
+        width: 24px !important;
+        height: 24px !important;
+    }
+
+    body.excavator-operator-screen .eo-topbar .eo-face-coordinates {
+        gap: clamp(5px, 1.4vw, 8px) !important;
+        font-size: clamp(12px, 3.15vw, 14px) !important;
+    }
+
+    body.excavator-operator-screen .eo-topbar .eo-face-coordinates > span + span {
+        padding-left: clamp(5px, 1.4vw, 8px) !important;
+    }
+
+    body.excavator-operator-screen .eo-topbar .eo-face-rock {
+        font-size: clamp(11.5px, 3vw, 13px) !important;
+    }
+}
+
 @media (prefers-reduced-motion: reduce) {
     body.excavator-operator-screen .eo-downtime-card.is-active {
         animation: eo-active-downtime-card-pulse 1.65s ease-in-out infinite !important;
