@@ -1787,8 +1787,8 @@ body.driver-mobile-screen .driver-downtime-close {
 body.driver-mobile-screen [data-driver-tab-panel="downtimes"].is-active {
     width: calc(100% + (var(--driver-edge) * 2) - 22px);
     margin-left: calc((var(--driver-edge) * -1) + 11px);
-    grid-template-rows: clamp(36px, 4.45dvh, 40px) clamp(70px, 9.35dvh, 86px) minmax(0, 1fr) clamp(50px, 6.75dvh, 62px) !important;
-    gap: clamp(8px, 1.05dvh, 10px);
+    grid-template-rows: clamp(36px, 4.45dvh, 40px) clamp(68px, 8.25dvh, 80px) minmax(0, 1fr) clamp(50px, 6.2dvh, 58px) !important;
+    gap: clamp(8px, 1.05dvh, 10px) !important;
     padding-top: clamp(8px, 1.2dvh, 10px);
     padding-bottom: clamp(4px, .6dvh, 8px);
 }
@@ -1832,7 +1832,7 @@ body.driver-mobile-screen .driver-downtime-card {
     grid-row: 2 !important;
     --driver-downtime-accent: #94a3b8;
     --driver-downtime-glow: rgba(148, 163, 184, .24);
-    min-height: clamp(70px, 9.35dvh, 86px);
+    min-height: clamp(68px, 8.25dvh, 80px);
     grid-template-columns: clamp(44px, 11vw, 58px) minmax(0, 1fr);
     padding: clamp(8px, 1.1dvh, 11px) clamp(10px, 2.7vw, 14px);
     border: 1px solid rgba(126, 145, 154, .42);
@@ -1976,7 +1976,7 @@ body.driver-mobile-screen .driver-downtime-close {
     grid-row: 4 !important;
     position: relative;
     isolation: isolate;
-    min-height: clamp(52px, 6.8dvh, 62px);
+    min-height: clamp(50px, 6.2dvh, 58px);
     overflow: hidden;
     border-radius: 8px;
     font-size: clamp(15px, 3.95vw, 18px);
@@ -2451,7 +2451,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
 {% endblock %}
 
 {% block body %}
-<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v85' }}">
+<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v86' }}">
     {% if messages %}
         <div class="driver-messages">
             {% for message in messages %}
@@ -3595,7 +3595,7 @@ window.bindDriverMobileShell = function () {
         if (!("serviceWorker" in navigator)) {
             return;
         }
-        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v85' }}";
+        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v86' }}";
         var updateModal = document.querySelector("[data-driver-pwa-update-modal]");
         var updateBadge = document.querySelector("[data-driver-pwa-update-badge]");
         var updateTarget = document.querySelector("[data-driver-pwa-update-nav-target]");
