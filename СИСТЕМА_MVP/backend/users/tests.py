@@ -149,7 +149,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, reverse('driver_manifest'))
         self.assertContains(response, 'rel="manifest"')
         self.assertContains(response, '/driver-sw.js')
-        self.assertContains(response, 'driver-mobile-shell-v79')
+        self.assertContains(response, 'driver-mobile-shell-v80')
         self.assertContains(response, 'data-driver-pwa-update-modal')
         self.assertContains(response, 'data-driver-pwa-update-badge')
         self.assertContains(response, 'mode: "custom", path: "^/driver/(?:shift/?)?$"')
@@ -290,7 +290,7 @@ class AccessLoginTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Service-Worker-Allowed'], '/driver/')
-        self.assertIn('driver-mobile-shell-v79', script)
+        self.assertIn('driver-mobile-shell-v80', script)
         self.assertIn('/driver/', script)
         self.assertIn('/driver/shift/', script)
         self.assertIn('/driver.webmanifest', script)
@@ -2030,7 +2030,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(driver_shift_response, 'ККД')
         self.assertContains(driver_shift_response, 'window.applyOperationalStateRefresh')
         self.assertContains(driver_shift_response, 'data-realtime-mode="custom"')
-        self.assertContains(driver_shift_response, 'driver-mobile-shell-v79')
+        self.assertContains(driver_shift_response, 'driver-mobile-shell-v80')
 
     def test_driver_downtime_buttons_are_rendered_from_server_reference(self):
         truck = self.create_registered_driver_shift()
@@ -3188,19 +3188,8 @@ class AccessLoginTests(TestCase):
         dispatcher = Employee.objects.create(full_name='Тестовый диспетчер')
         EmployeeAccess.objects.create(employee=dispatcher, role=dispatcher_role, access_code='5000')
         operator = Employee.objects.create(full_name='Машинист')
-        closed_at = timezone.now()
-        day_shift = EmployeeShift.objects.create(
-            employee=operator,
-            shift_type='day',
-            opened_at=closed_at - timedelta(days=1),
-            closed_at=closed_at - timedelta(hours=12),
-        )
-        night_shift = EmployeeShift.objects.create(
-            employee=operator,
-            shift_type='night',
-            opened_at=closed_at - timedelta(hours=11),
-            closed_at=closed_at,
-        )
+        day_shift = EmployeeShift.objects.create(employee=operator, shift_type='day', opened_at=timezone.now())
+        night_shift = EmployeeShift.objects.create(employee=operator, shift_type='night', opened_at=timezone.now())
         Trip.objects.create(
             excavator=excavator,
             truck=truck,
@@ -3451,7 +3440,6 @@ class AccessLoginTests(TestCase):
             shift_type='day',
             equipment=excavator,
             opened_at=report_datetime,
-            closed_at=report_datetime + timedelta(hours=1),
         )
         Trip.objects.create(
             excavator=excavator,
@@ -3475,7 +3463,6 @@ class AccessLoginTests(TestCase):
             shift_type='day',
             equipment=excavator,
             opened_at=previous_datetime,
-            closed_at=previous_datetime + timedelta(hours=1),
         )
         Trip.objects.create(
             excavator=excavator,

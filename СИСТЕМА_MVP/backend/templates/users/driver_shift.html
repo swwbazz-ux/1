@@ -2246,7 +2246,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
 {% endblock %}
 
 {% block body %}
-<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v79' }}">
+<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v80' }}">
     {% if messages %}
         <div class="driver-messages">
             {% for message in messages %}
@@ -2442,10 +2442,6 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
                 {% else %}
                 <div class="driver-shift-section">
                     <div class="driver-shift-section-head"><span>Показатели техники</span></div>
-                    <div class="driver-shift-empty-state" role="status">
-                        <strong>Смена и самосвал еще не назначены</strong>
-                        <span>Обратитесь к руководителю. После назначения данные появятся здесь автоматически.</span>
-                    </div>
                     <div class="driver-shift-metrics">
                         <div class="driver-shift-field"><span>Топливо</span><span class="driver-shift-metric-value"><strong>—</strong><em>л</em></span></div>
                         <div class="driver-shift-field"><span>Пробег</span><span class="driver-shift-metric-value"><strong>—</strong><em>км</em></span></div>
@@ -2455,7 +2451,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
                 <div class="driver-shift-section">
                     <div class="driver-shift-section-head"><span>Итог смены</span><b>Сейчас</b></div>
                     <div class="driver-shift-result-grid">
-                        <div class="driver-shift-result-cell"><span>План</span><strong>Нет плана</strong></div>
+                        <div class="driver-shift-result-cell"><span>План</span><strong>0%</strong></div>
                         <div class="driver-shift-result-cell"><span>Рейсы</span><strong>0 шт.</strong></div>
                         <div class="driver-shift-result-cell"><span>Самосвал</span><strong>—</strong></div>
                         <div class="driver-shift-result-cell"><span>Состояние</span><strong>Нет назначения</strong></div>
@@ -3344,7 +3340,7 @@ window.bindDriverMobileShell = function () {
         if (!("serviceWorker" in navigator)) {
             return;
         }
-        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v79' }}";
+        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v80' }}";
         var updateModal = document.querySelector("[data-driver-pwa-update-modal]");
         var updateBadge = document.querySelector("[data-driver-pwa-update-badge]");
         var updateTarget = document.querySelector("[data-driver-pwa-update-nav-target]");
