@@ -2518,6 +2518,18 @@ body.excavator-operator-screen .mm-mobile-bottom-nav {
     box-shadow: none !important;
 }
 
+body.excavator-operator-screen .eo-downtime-state-dot::before,
+body.excavator-operator-screen .eo-downtime-state-dot::after,
+body.excavator-operator-screen .eo-downtime-card.is-active .eo-downtime-state-dot::before,
+body.excavator-operator-screen .eo-downtime-card.is-active .eo-downtime-state-dot::after {
+    content: none !important;
+    display: none !important;
+    animation: none !important;
+    border: 0 !important;
+    background: none !important;
+    box-shadow: none !important;
+}
+
 body.excavator-operator-screen .mm-mobile-bottom-nav .mm-mobile-nav-item {
     display: flex !important;
     flex-direction: column !important;
