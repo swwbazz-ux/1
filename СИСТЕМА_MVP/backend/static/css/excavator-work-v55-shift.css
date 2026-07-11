@@ -2590,6 +2590,48 @@ body.excavator-operator-screen .eo-reason-grid .eo-hold-action {
     }
 }
 
+/* v104: pulse independent layers; legacy !important filters cannot suppress these. */
+body.excavator-operator-screen .eo-downtime-card,
+body.excavator-operator-screen .eo-reason-grid .eo-hold-action {
+    position: relative !important;
+    isolation: isolate !important;
+}
+
+body.excavator-operator-screen .eo-downtime-card.is-active::after,
+body.excavator-operator-screen .eo-reason-grid .eo-hold-action.is-selected::after {
+    content: "" !important;
+    position: absolute !important;
+    inset: 2px !important;
+    z-index: 3 !important;
+    border: 2px solid currentColor !important;
+    border-radius: calc(var(--eo-ui-radius) - 2px) !important;
+    opacity: .32;
+    pointer-events: none !important;
+    animation: eo-downtime-visible-ring-pulse 1.15s ease-in-out infinite !important;
+}
+
+body.excavator-operator-screen .eo-downtime-card.is-active b[data-eo-active-duration],
+body.excavator-operator-screen .eo-downtime-card.is-active .eo-downtime-state-icon-pause {
+    transform-origin: center !important;
+    animation: eo-downtime-visible-content-pulse 1.15s ease-in-out infinite !important;
+}
+
+@keyframes eo-downtime-visible-ring-pulse {
+    0%, 100% {
+        opacity: .25;
+        box-shadow: inset 0 0 5px currentColor, 0 0 5px currentColor;
+    }
+    50% {
+        opacity: 1;
+        box-shadow: inset 0 0 18px currentColor, 0 0 18px currentColor;
+    }
+}
+
+@keyframes eo-downtime-visible-content-pulse {
+    0%, 100% { opacity: .72; transform: scale(1); }
+    50% { opacity: 1; transform: scale(1.045); }
+}
+
 @media (prefers-reduced-motion: reduce) {
     body.excavator-operator-screen .eo-downtime-card.is-active {
         animation: eo-active-downtime-card-pulse 1.65s ease-in-out infinite !important;
