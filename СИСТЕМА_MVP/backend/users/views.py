@@ -117,7 +117,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v90'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v91'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -1658,19 +1658,36 @@ def driver_format_duration_label(seconds):
     return f'{hours:02d}:{minutes:02d}:{seconds % 60:02d}'
 
 
+def driver_shift_downtime_seconds(equipment, shift, *, until=None):
+    if not equipment or not shift or not shift.opened_at:
+        return 0
+    period_end = until or shift.closed_at or timezone.now()
+    events = DowntimeEvent.objects.filter(
+        equipment=equipment,
+        started_at__lt=period_end,
+    ).filter(Q(ended_at__isnull=True) | Q(ended_at__gt=shift.opened_at))
+    total_seconds = 0
+    for event in events.only('started_at', 'ended_at'):
+        overlap_start = max(event.started_at, shift.opened_at)
+        overlap_end = min(event.ended_at or period_end, period_end)
+        total_seconds += max(0, int((overlap_end - overlap_start).total_seconds()))
+    return total_seconds
+
+
 def driver_downtime_reason_status_key(reason):
     if reason:
         return reason.effective_color_group
     return 'yellow'
 
 
-def driver_downtime_event_payload(event, *, action='', closed=False):
+def driver_downtime_event_payload(event, *, action='', closed=False, shift=None):
     now = timezone.now()
     started_at = event.started_at or now
     ended_at = event.ended_at
     elapsed_until = ended_at or now
     elapsed_seconds = max(0, int((elapsed_until - started_at).total_seconds()))
     reason = event.reason if event.reason_id else None
+    shift_total_seconds = driver_shift_downtime_seconds(event.equipment, shift)
     return {
         'ok': True,
         'action': action,
@@ -1683,6 +1700,8 @@ def driver_downtime_event_payload(event, *, action='', closed=False):
         'ended_at': ended_at.isoformat() if ended_at else '',
         'elapsed_seconds': elapsed_seconds,
         'elapsed_label': driver_format_duration_label(elapsed_seconds),
+        'shift_total_seconds': shift_total_seconds,
+        'shift_total_label': driver_format_duration_label(shift_total_seconds),
         'status_key': driver_downtime_reason_status_key(reason),
     }
 
@@ -1970,6 +1989,11 @@ def driver_shift_view(request):
         active_trip_actual_dump_point_id = (active_trip.actual_dump_point_id or active_trip.dump_point_id)
     active_downtime_elapsed_seconds = 0
     active_downtime_elapsed_label = '00:00:00'
+    shift_downtime_total_seconds = driver_shift_downtime_seconds(
+        open_shift.equipment if open_shift else current_truck,
+        open_shift,
+    )
+    shift_downtime_total_label = driver_format_duration_label(shift_downtime_total_seconds)
     active_downtime_started_at = ''
     active_downtime_status_key = 'yellow'
     if active_downtime and active_downtime.started_at:
@@ -2046,6 +2070,8 @@ def driver_shift_view(request):
             'active_downtime_started_at': active_downtime_started_at,
             'active_downtime_elapsed_seconds': active_downtime_elapsed_seconds,
             'active_downtime_elapsed_label': active_downtime_elapsed_label,
+            'shift_downtime_total_seconds': shift_downtime_total_seconds,
+            'shift_downtime_total_label': shift_downtime_total_label,
             'active_downtime_status_key': active_downtime_status_key,
             'downtime_reasons': downtime_reasons,
             'shift_trips': shift_trips,
@@ -2194,7 +2220,7 @@ def driver_downtime_action_view(request):
             active_event.ended_at = timezone.now()
             active_event.save(update_fields=['ended_at'])
             if wants_json:
-                return JsonResponse(driver_downtime_event_payload(active_event, action='downtime_closed', closed=True))
+                return JsonResponse(driver_downtime_event_payload(active_event, action='downtime_closed', closed=True, shift=open_shift))
         else:
             if wants_json:
                 return JsonResponse({
@@ -2203,6 +2229,8 @@ def driver_downtime_action_view(request):
                     'closed': False,
                     'elapsed_seconds': 0,
                     'elapsed_label': '00:00:00',
+                    'shift_total_seconds': driver_shift_downtime_seconds(open_shift.equipment, open_shift),
+                    'shift_total_label': driver_format_duration_label(driver_shift_downtime_seconds(open_shift.equipment, open_shift)),
                 })
             messages.error(request, 'Активный простой не найден.')
         return redirect(f'{reverse("driver_work")}?tab=downtimes')
@@ -2229,7 +2257,7 @@ def driver_downtime_action_view(request):
         )
         action_label = 'downtime_started'
     if wants_json:
-        return JsonResponse(driver_downtime_event_payload(event, action=action_label))
+        return JsonResponse(driver_downtime_event_payload(event, action=action_label, shift=open_shift))
     return redirect(f'{reverse("driver_work")}?tab=downtimes')
 
 # Create your views here.

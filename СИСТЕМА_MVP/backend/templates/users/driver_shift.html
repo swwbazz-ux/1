@@ -1926,6 +1926,27 @@ body.driver-mobile-screen .driver-downtime-card.is-active b[data-driver-active-d
     filter: drop-shadow(0 0 8px var(--driver-downtime-glow));
 }
 
+body.driver-mobile-screen .driver-downtime-card.is-active,
+body.driver-mobile-screen .driver-downtime-list button.is-selected {
+    animation: driver-downtime-active-pulse 1.15s ease-in-out infinite;
+}
+
+body.driver-mobile-screen .driver-downtime-card.is-active .driver-downtime-state-icon-pause,
+body.driver-mobile-screen .driver-downtime-card.is-active b[data-driver-active-duration] {
+    transform-origin: center;
+    animation: driver-downtime-content-pulse 1.15s ease-in-out infinite;
+}
+
+@keyframes driver-downtime-active-pulse {
+    0%, 100% { filter: brightness(1); }
+    50% { filter: brightness(1.2); }
+}
+
+@keyframes driver-downtime-content-pulse {
+    0%, 100% { transform: scale(1); opacity: .88; }
+    50% { transform: scale(1.035); opacity: 1; }
+}
+
 body.driver-mobile-screen .driver-downtime-list {
     grid-row: 3 !important;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2551,7 +2572,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
 {% endblock %}
 
 {% block body %}
-<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v90' }}">
+<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v91' }}">
     {% if messages %}
         <div class="driver-messages">
             {% for message in messages %}
@@ -2780,12 +2801,12 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
             <h2>Простои</h2>
             <button class="driver-downtime-refresh" type="button" aria-label="Обновить" data-driver-downtime-refresh>↻</button>
         </div>
-        <div class="driver-downtime-card status-{{ active_downtime_status_key }}{% if active_downtime %} is-active{% endif %}" data-driver-active-downtime-id="{% if active_downtime %}{{ active_downtime.id }}{% endif %}" data-driver-active-started-at="{{ active_downtime_started_at }}" data-driver-active-elapsed-seconds="{{ active_downtime_elapsed_seconds }}">
+        <div class="driver-downtime-card status-{{ active_downtime_status_key }}{% if active_downtime %} is-active{% endif %}" data-driver-active-downtime-id="{% if active_downtime %}{{ active_downtime.id }}{% endif %}" data-driver-active-started-at="{{ active_downtime_started_at }}" data-driver-active-elapsed-seconds="{{ active_downtime_elapsed_seconds }}" data-driver-shift-downtime-seconds="{{ shift_downtime_total_seconds }}" role="status" aria-label="{% if active_downtime %}Простой активен{% else %}Простои за смену: {{ shift_downtime_total_label }}{% endif %}">
             <span class="driver-downtime-state-dot" data-driver-downtime-indicator aria-hidden="true">
                 <svg class="driver-downtime-state-icon driver-downtime-state-icon-play" viewBox="0 0 24 24" focusable="false"><path d="M7 4.8v14.4L19 12 7 4.8Z"></path></svg>
                 <svg class="driver-downtime-state-icon driver-downtime-state-icon-pause" viewBox="0 0 24 24" focusable="false"><path d="M6.5 5h4v14h-4V5Zm7 0h4v14h-4V5Z"></path></svg>
             </span>
-            <b data-driver-active-duration>{{ active_downtime_elapsed_label }}</b>
+            <b data-driver-active-duration>{% if active_downtime %}{{ active_downtime_elapsed_label }}{% else %}{{ shift_downtime_total_label }}{% endif %}</b>
         </div>
         <div class="driver-downtime-list">
             {% for reason in downtime_reasons %}
@@ -3429,11 +3450,13 @@ window.bindDriverMobileShell = function () {
         clearDriverDowntimeTimer();
         if (downtimeTitle) downtimeTitle.textContent = "Простоя нет";
         if (downtimeReason) downtimeReason.textContent = "Выберите причину для начала";
-        if (downtimeDuration) downtimeDuration.textContent = "00:00:00";
+        var shiftTotalSeconds = Math.max(0, Number(payload && payload.shift_total_seconds) || Number(downtimeCard && downtimeCard.dataset.driverShiftDowntimeSeconds) || 0);
+        if (downtimeDuration) downtimeDuration.textContent = (payload && payload.shift_total_label) || formatDriverDowntimeDuration(shiftTotalSeconds);
         if (downtimeCard) {
             downtimeCard.dataset.driverActiveDowntimeId = "";
             downtimeCard.dataset.driverActiveStartedAt = "";
             downtimeCard.dataset.driverActiveElapsedSeconds = String((payload && payload.elapsed_seconds) || 0);
+            downtimeCard.dataset.driverShiftDowntimeSeconds = String(shiftTotalSeconds);
             downtimeCard.classList.remove("is-active");
             setDriverDowntimeStatusClass("yellow");
         }
@@ -3581,7 +3604,7 @@ window.bindDriverMobileShell = function () {
     if (downtimeCard && downtimeCard.dataset.driverActiveDowntimeId && downtimeCard.dataset.driverActiveStartedAt) {
         startDriverDowntimeTimer(downtimeCard.dataset.driverActiveStartedAt, downtimeCard.dataset.driverActiveElapsedSeconds);
     } else if (downtimeDuration) {
-        downtimeDuration.textContent = "00:00:00";
+        downtimeDuration.textContent = formatDriverDowntimeDuration(downtimeCard && downtimeCard.dataset.driverShiftDowntimeSeconds);
         clearDriverDowntimeTimer();
     }
 
@@ -3695,7 +3718,7 @@ window.bindDriverMobileShell = function () {
         if (!("serviceWorker" in navigator)) {
             return;
         }
-        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v90' }}";
+        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v91' }}";
         var updateModal = document.querySelector("[data-driver-pwa-update-modal]");
         var updateBadge = document.querySelector("[data-driver-pwa-update-badge]");
         var updateTarget = document.querySelector("[data-driver-pwa-update-nav-target]");
