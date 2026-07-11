@@ -2344,6 +2344,90 @@ body.driver-mobile-screen .driver-mobile-update-badge {
     box-shadow: 0 0 12px rgba(255,75,67,0.75);
 }
 
+/* Driver navigation uses the excavator operator navigation language. */
+body.driver-mobile-screen .driver-bottom-nav {
+    border-top-color: #263943;
+    background: #08131b;
+    box-shadow: none;
+}
+
+body.driver-mobile-screen .driver-bottom-nav .mm-mobile-nav-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    padding: 7px 2px 6px;
+    border: 0;
+    color: #8a9aa3;
+    background: transparent;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 16px;
+    letter-spacing: 0;
+    text-transform: none;
+    box-shadow: none;
+    transform: none;
+}
+
+body.driver-mobile-screen .driver-bottom-nav .mm-mobile-nav-item.is-active {
+    color: #58df52;
+    background: rgba(88, 223, 82, .055);
+    font-weight: 600;
+}
+
+body.driver-mobile-screen .driver-bottom-nav .mm-mobile-nav-item.is-active::before {
+    top: 0;
+    left: 50%;
+    right: auto;
+    width: 40px;
+    height: 2px;
+    border-radius: 0 0 2px 2px;
+    background: currentColor;
+    box-shadow: 0 0 6px rgba(88, 223, 82, .28);
+    transform: translateX(-50%);
+}
+
+body.driver-mobile-screen .driver-bottom-nav .mm-mobile-nav-item::after {
+    display: none;
+}
+
+body.driver-mobile-screen .driver-nav-icon {
+    position: relative;
+    display: grid;
+    place-items: center;
+    flex: 0 0 26px;
+    width: 26px;
+    height: 26px;
+    min-width: 26px;
+    opacity: 1;
+    overflow: visible;
+    transform: none;
+    filter: none;
+}
+
+body.driver-mobile-screen .driver-nav-icon svg {
+    display: block;
+    width: 26px;
+    height: 26px;
+    stroke: currentColor;
+}
+
+body.driver-mobile-screen .mm-mobile-nav-item.is-active .driver-nav-icon {
+    opacity: 1;
+    transform: none;
+    filter: none;
+}
+
+body.driver-mobile-screen .driver-nav-label {
+    display: block;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 body.driver-mobile-screen .driver-mobile-update-modal[hidden] {
     display: none !important;
 }
@@ -2465,7 +2549,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
 {% endblock %}
 
 {% block body %}
-<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v87' }}">
+<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v88' }}">
     {% if messages %}
         <div class="driver-messages">
             {% for message in messages %}
@@ -2750,20 +2834,20 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
 
 <nav class="mm-mobile-bottom-nav driver-bottom-nav" aria-label="Навигация водителя" data-driver-bottom-nav>
     <button class="mm-mobile-nav-item {% if active_tab == 'work' %}is-active{% endif %}" type="button" data-driver-tab-open="work">
-        <img class="driver-nav-icon driver-nav-truck" src="{% static 'img/equipment/truck-green.png' %}" alt="">
-        <span>Работа</span>
+        <span class="driver-nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 17h4V5H2v12h3"></path><path d="M14 9h4l4 4v4h-2"></path><circle cx="7.5" cy="17.5" r="2.5"></circle><circle cx="17.5" cy="17.5" r="2.5"></circle></svg></span>
+        <span class="driver-nav-label">Работа</span>
     </button>
     <button class="mm-mobile-nav-item {% if active_tab == 'shift' %}is-active{% endif %}" type="button" data-driver-tab-open="shift">
-        <span class="driver-nav-icon driver-nav-clock" aria-hidden="true"></span>
-        <span>Смена</span>
+        <span class="driver-nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="8" height="4" x="8" y="2" rx="1"></rect><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><path d="m9 14 2 2 4-4"></path></svg></span>
+        <span class="driver-nav-label">Смена</span>
     </button>
     <button class="mm-mobile-nav-item {% if active_tab == 'downtimes' %}is-active{% endif %}" type="button" data-driver-tab-open="downtimes">
-        <span class="driver-nav-icon driver-nav-alert" aria-hidden="true"></span>
-        <span>Простои</span>
+        <span class="driver-nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M10 15V9"></path><path d="M14 15V9"></path></svg></span>
+        <span class="driver-nav-label">Простои</span>
     </button>
     <button class="mm-mobile-nav-item {% if active_tab == 'manifest' %}is-active{% endif %}" type="button" data-driver-tab-open="manifest" data-driver-pwa-update-nav-target>
-        <span class="driver-nav-icon driver-nav-doc" aria-hidden="true"></span>
-        <span>Путевка</span>
+        <span class="driver-nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"></path><path d="M14 2v6h6"></path><path d="M16 13H8"></path><path d="M16 17H8"></path></svg></span>
+        <span class="driver-nav-label">Путевка</span>
         <span class="driver-mobile-update-badge" data-driver-pwa-update-badge hidden aria-hidden="true"></span>
     </button>
 </nav>
@@ -3609,7 +3693,7 @@ window.bindDriverMobileShell = function () {
         if (!("serviceWorker" in navigator)) {
             return;
         }
-        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v87' }}";
+        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v88' }}";
         var updateModal = document.querySelector("[data-driver-pwa-update-modal]");
         var updateBadge = document.querySelector("[data-driver-pwa-update-badge]");
         var updateTarget = document.querySelector("[data-driver-pwa-update-nav-target]");
