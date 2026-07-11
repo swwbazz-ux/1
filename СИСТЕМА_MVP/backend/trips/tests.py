@@ -639,6 +639,8 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, 'scope: "/excavator/"')
         self.assertContains(response, 'excavator-mobile-shell-v100')
         self.assertContains(response, 'class="eo-downtime-state-dot"')
+        self.assertContains(response, 'eo-downtime-state-icon-play')
+        self.assertContains(response, 'eo-downtime-state-icon-pause')
         self.assertContains(response, 'data-eo-active-duration')
         self.assertNotContains(response, 'data-eo-active-title')
         self.assertNotContains(response, 'data-eo-active-reason')

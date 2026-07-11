@@ -2651,38 +2651,40 @@ body.excavator-operator-screen .eo-downtime-card {
 }
 
 body.excavator-operator-screen .eo-downtime-state-dot {
-    position: relative !important;
-    display: block !important;
-    width: clamp(38px, 9vw, 50px) !important;
-    height: clamp(38px, 9vw, 50px) !important;
+    display: grid !important;
+    place-items: center !important;
+    width: 44px !important;
+    height: 44px !important;
     border: 0 !important;
     border-radius: 0 !important;
     background: transparent !important;
     box-shadow: none !important;
 }
 
-body.excavator-operator-screen .eo-downtime-state-dot::before {
-    content: "" !important;
-    position: absolute !important;
-    top: 50% !important;
-    left: 53% !important;
-    width: 0 !important;
-    height: 0 !important;
-    border-top: clamp(12px, 2.7vw, 16px) solid transparent !important;
-    border-bottom: clamp(12px, 2.7vw, 16px) solid transparent !important;
-    border-left: clamp(20px, 4.5vw, 27px) solid #55e65a !important;
-    filter: drop-shadow(0 0 7px rgba(85, 230, 90, .62)) !important;
-    transform: translate(-45%, -50%) !important;
+body.excavator-operator-screen .eo-downtime-state-icon {
+    display: block !important;
+    width: 28px !important;
+    height: 28px !important;
+    fill: currentColor !important;
 }
 
-body.excavator-operator-screen .eo-downtime-card.is-active .eo-downtime-state-dot::before {
-    left: 50% !important;
-    width: clamp(22px, 5.2vw, 30px) !important;
-    height: clamp(26px, 6vw, 34px) !important;
-    border: 0 !important;
-    background: linear-gradient(90deg, #ffd400 0 34%, transparent 34% 66%, #ffd400 66% 100%) !important;
-    filter: drop-shadow(0 0 7px rgba(255, 212, 0, .68)) !important;
-    transform: translate(-50%, -50%) !important;
+body.excavator-operator-screen .eo-downtime-state-icon-play {
+    color: #51df61 !important;
+    filter: drop-shadow(0 0 3px rgba(81, 223, 97, .38)) !important;
+}
+
+body.excavator-operator-screen .eo-downtime-state-icon-pause {
+    display: none !important;
+    color: #f5ba32 !important;
+    filter: drop-shadow(0 0 3px rgba(245, 186, 50, .4)) !important;
+}
+
+body.excavator-operator-screen .eo-downtime-card.is-active .eo-downtime-state-icon-play {
+    display: none !important;
+}
+
+body.excavator-operator-screen .eo-downtime-card.is-active .eo-downtime-state-icon-pause {
+    display: block !important;
 }
 
 body.excavator-operator-screen .eo-downtime-card b[data-eo-active-duration] {
@@ -2693,4 +2695,34 @@ body.excavator-operator-screen .eo-downtime-card b[data-eo-active-duration] {
     line-height: 1 !important;
     letter-spacing: 0 !important;
     font-variant-numeric: tabular-nums !important;
+}
+
+body.excavator-operator-screen .eo-reason-grid .eo-hold-action {
+    min-width: 0 !important;
+    padding: 10px 12px !important;
+    font-size: clamp(15px, 3.8vw, 18px) !important;
+    font-weight: 700 !important;
+    line-height: 1.18 !important;
+    letter-spacing: 0 !important;
+    white-space: normal !important;
+    text-align: center !important;
+    text-wrap: balance;
+    overflow-wrap: normal !important;
+}
+
+@media (min-width: 768px) {
+    body.excavator-operator-screen .eo-downtime-state-dot {
+        width: 48px !important;
+        height: 48px !important;
+    }
+
+    body.excavator-operator-screen .eo-downtime-state-icon {
+        width: 30px !important;
+        height: 30px !important;
+    }
+
+    body.excavator-operator-screen .eo-reason-grid .eo-hold-action {
+        font-size: clamp(17px, 1.15vw, 19px) !important;
+        padding: 12px 16px !important;
+    }
 }

@@ -308,7 +308,14 @@
                 <button class="eo-refresh-button" type="button" aria-label="Обновить" data-eo-refresh-work>↻</button>
             </div>
             <div class="eo-downtime-card status-{{ active_downtime_state.color_group }}{% if active_downtime %} is-active{% endif %}" data-eo-active-downtime-id="{% if active_downtime %}{{ active_downtime.id }}{% endif %}" data-eo-active-started-at="{{ active_downtime_started_at }}" data-eo-active-elapsed-seconds="{{ active_downtime_elapsed_seconds }}" data-eo-downtime-state="{% if active_downtime %}{{ active_downtime_state.code }}{% endif %}" role="status" aria-label="{% if active_downtime %}Простой активен{% else %}Экскаватор работает{% endif %}">
-                <span class="eo-downtime-state-dot" data-eo-downtime-indicator aria-hidden="true"></span>
+                <span class="eo-downtime-state-dot" data-eo-downtime-indicator aria-hidden="true">
+                    <svg class="eo-downtime-state-icon eo-downtime-state-icon-play" viewBox="0 0 24 24" focusable="false">
+                        <path d="M7 4.8v14.4L19 12 7 4.8Z"></path>
+                    </svg>
+                    <svg class="eo-downtime-state-icon eo-downtime-state-icon-pause" viewBox="0 0 24 24" focusable="false">
+                        <path d="M6.5 5h4v14h-4V5Zm7 0h4v14h-4V5Z"></path>
+                    </svg>
+                </span>
                 <b data-eo-active-duration>{% if active_downtime %}{{ active_downtime_elapsed_label }}{% else %}00:00:00{% endif %}</b>
             </div>
             <div class="eo-reason-grid">
