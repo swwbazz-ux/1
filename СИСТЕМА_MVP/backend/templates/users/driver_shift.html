@@ -1458,9 +1458,9 @@ body.driver-mobile-screen .driver-shift-metrics {
 body.driver-mobile-screen .driver-shift-field {
     min-width: 0;
     min-height: 0;
-    display: flex;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(72px, auto);
     align-items: center;
-    justify-content: space-between;
     gap: 12px;
     padding: clamp(10px, 1.45dvh, 14px) clamp(13px, 3.5vw, 17px);
     border: 1px solid rgba(127, 163, 177, .24);
@@ -1664,6 +1664,20 @@ body.driver-mobile-screen .driver-shift-logout::before {
         padding: 8px 12px;
     }
 
+}
+
+/* Shift cards keep the same left-aligned two-line hierarchy as the operator screen. */
+body.driver-mobile-screen .driver-shift-result-cell {
+    justify-content: stretch;
+    justify-items: start;
+}
+
+body.driver-mobile-screen .driver-shift-result-cell span,
+body.driver-mobile-screen .driver-shift-result-cell strong {
+    width: 100%;
+    letter-spacing: 0;
+    line-height: 1;
+    text-align: left;
 }
 
 body.driver-mobile-screen .driver-downtime-card {
@@ -2451,7 +2465,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
 {% endblock %}
 
 {% block body %}
-<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v86' }}">
+<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v87' }}">
     {% if messages %}
         <div class="driver-messages">
             {% for message in messages %}
@@ -3595,7 +3609,7 @@ window.bindDriverMobileShell = function () {
         if (!("serviceWorker" in navigator)) {
             return;
         }
-        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v86' }}";
+        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v87' }}";
         var updateModal = document.querySelector("[data-driver-pwa-update-modal]");
         var updateBadge = document.querySelector("[data-driver-pwa-update-badge]");
         var updateTarget = document.querySelector("[data-driver-pwa-update-nav-target]");
