@@ -2530,6 +2530,72 @@ body.excavator-operator-screen .eo-downtime-card.is-active .eo-downtime-state-do
     box-shadow: none !important;
 }
 
+/* Shift downtime summary stays quiet; an active reason uses its server color. */
+body.excavator-operator-screen .eo-downtime-card:not(.is-active) {
+    border-color: rgba(148, 163, 184, .34) !important;
+    background: linear-gradient(180deg, rgba(17, 25, 29, .78), rgba(8, 14, 17, .92)) !important;
+    color: #87949c !important;
+    box-shadow: none !important;
+    filter: saturate(.55) brightness(.8) !important;
+}
+
+body.excavator-operator-screen .eo-downtime-card.is-active {
+    --eo-downtime-accent: #facc15;
+    --eo-downtime-glow: rgba(250, 204, 21, .5);
+    border-color: var(--eo-downtime-accent) !important;
+    color: #f8fbfc !important;
+    box-shadow:
+        inset 0 0 24px var(--eo-downtime-glow),
+        0 0 0 1px var(--eo-downtime-accent),
+        0 0 22px var(--eo-downtime-glow) !important;
+    animation: eo-active-downtime-card-pulse 1.65s ease-in-out infinite !important;
+}
+
+body.excavator-operator-screen .eo-downtime-card.is-active.status-red {
+    --eo-downtime-accent: #ff5a47;
+    --eo-downtime-glow: rgba(255, 90, 71, .5);
+}
+
+body.excavator-operator-screen .eo-downtime-card.is-active.status-orange {
+    --eo-downtime-accent: #fb923c;
+    --eo-downtime-glow: rgba(251, 146, 60, .48);
+}
+
+body.excavator-operator-screen .eo-downtime-card.is-active .eo-downtime-state-icon,
+body.excavator-operator-screen .eo-downtime-card.is-active b {
+    color: var(--eo-downtime-accent) !important;
+    fill: var(--eo-downtime-accent) !important;
+    filter: drop-shadow(0 0 8px var(--eo-downtime-glow)) !important;
+}
+
+@keyframes eo-active-downtime-card-pulse {
+    0%, 100% { filter: brightness(1); }
+    50% { filter: brightness(1.16); }
+}
+
+body.excavator-operator-screen .eo-reason-grid .eo-hold-action {
+    font-size: clamp(18px, 4.6vw, 21px) !important;
+    line-height: 1.12 !important;
+}
+
+@media (max-width: 370px) {
+    body.excavator-operator-screen .eo-reason-grid .eo-hold-action {
+        font-size: clamp(17px, 4.55vw, 19px) !important;
+    }
+}
+
+@media (min-width: 768px) {
+    body.excavator-operator-screen .eo-reason-grid .eo-hold-action {
+        font-size: clamp(21px, 1.45vw, 26px) !important;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    body.excavator-operator-screen .eo-downtime-card.is-active {
+        animation: none !important;
+    }
+}
+
 body.excavator-operator-screen .mm-mobile-bottom-nav .mm-mobile-nav-item {
     display: flex !important;
     flex-direction: column !important;
@@ -2736,5 +2802,30 @@ body.excavator-operator-screen .eo-reason-grid .eo-hold-action {
     body.excavator-operator-screen .eo-reason-grid .eo-hold-action {
         font-size: clamp(17px, 1.15vw, 19px) !important;
         padding: 12px 16px !important;
+    }
+}
+
+/* Final downtime typography and semantic active-state precedence. */
+body.excavator-operator-screen .eo-reason-grid .eo-hold-action {
+    font-size: clamp(18px, 4.6vw, 21px) !important;
+    line-height: 1.12 !important;
+}
+
+body.excavator-operator-screen .eo-downtime-card.is-active .eo-downtime-state-icon-pause,
+body.excavator-operator-screen .eo-downtime-card.is-active b[data-eo-active-duration] {
+    color: var(--eo-downtime-accent) !important;
+    fill: var(--eo-downtime-accent) !important;
+    filter: drop-shadow(0 0 8px var(--eo-downtime-glow)) !important;
+}
+
+@media (max-width: 370px) {
+    body.excavator-operator-screen .eo-reason-grid .eo-hold-action {
+        font-size: clamp(17px, 4.55vw, 19px) !important;
+    }
+}
+
+@media (min-width: 768px) {
+    body.excavator-operator-screen .eo-reason-grid .eo-hold-action {
+        font-size: clamp(21px, 1.45vw, 26px) !important;
     }
 }

@@ -637,7 +637,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/static/css/excavator-work-v55-shift.css')
         self.assertContains(response, '/excavator-sw.js')
         self.assertContains(response, 'scope: "/excavator/"')
-        self.assertContains(response, 'excavator-mobile-shell-v101')
+        self.assertContains(response, 'excavator-mobile-shell-v102')
         self.assertContains(response, 'class="eo-downtime-state-dot"')
         self.assertContains(response, 'eo-downtime-state-icon-play')
         self.assertContains(response, 'eo-downtime-state-icon-pause')
@@ -1585,7 +1585,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/excavator/')
-        self.assertIn('excavator-mobile-shell-v101', script)
+        self.assertIn('excavator-mobile-shell-v102', script)
         self.assertIn(reverse('excavator_work'), script)
         self.assertIn(reverse('excavator_manifest'), script)
         self.assertIn('/static/js/realtime-client.js', script)
@@ -2133,6 +2133,8 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(close_payload['action'], 'downtime_closed')
         self.assertFalse(close_payload['active'])
         self.assertIn('elapsed_seconds', close_payload)
+        self.assertIn('shift_total_seconds', close_payload)
+        self.assertIn('shift_total_label', close_payload)
 
     def test_excavator_downtime_action_rejects_reason_outside_role_reference(self):
         wrong_type = EquipmentType.objects.create(name='Погрузчик')
@@ -2211,6 +2213,30 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, 'startDowntimeTimer')
         self.assertContains(response, '>00:')
         self.assertNotContains(response, 'eo-downtime-clock')
+
+    def test_excavator_events_screen_shows_current_shift_downtime_total_when_inactive(self):
+        shift_start = timezone.now() - timedelta(hours=2)
+        excavator_shift = EmployeeShift.objects.get(employee=self.operator, equipment=self.excavator, closed_at__isnull=True)
+        excavator_shift.opened_at = shift_start
+        excavator_shift.save(update_fields=['opened_at'])
+        reason = DowntimeReason.objects.create(
+            name='Сменный итог простоя',
+            equipment_type=self.excavator.equipment_type,
+            show_for_excavator_operator=True,
+        )
+        DowntimeEvent.objects.create(
+            equipment=self.excavator,
+            employee=self.operator,
+            reason=reason,
+            started_at=shift_start + timedelta(minutes=10),
+            ended_at=shift_start + timedelta(minutes=25),
+        )
+
+        response = self.client.get(reverse('excavator_work'))
+
+        self.assertEqual(response.context['shift_downtime_total_seconds'], 15 * 60)
+        self.assertContains(response, 'data-eo-shift-downtime-seconds="900"')
+        self.assertContains(response, '>00:15:00</b>')
         self.assertNotContains(response, '>активен<')
 
     def test_excavator_close_downtime_button_disabled_without_active_downtime(self):

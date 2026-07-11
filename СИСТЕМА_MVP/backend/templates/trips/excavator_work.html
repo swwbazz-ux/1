@@ -5,9 +5,9 @@
 {% block body_class %}excavator-operator-screen{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v101">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v101">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v101">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v102">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v102">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v102">
 <meta name="theme-color" content="#030708">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Погрузка">
@@ -307,7 +307,7 @@
                 <h1>Простои</h1>
                 <button class="eo-refresh-button" type="button" aria-label="Обновить" data-eo-refresh-work>↻</button>
             </div>
-            <div class="eo-downtime-card status-{{ active_downtime_state.color_group }}{% if active_downtime %} is-active{% endif %}" data-eo-active-downtime-id="{% if active_downtime %}{{ active_downtime.id }}{% endif %}" data-eo-active-started-at="{{ active_downtime_started_at }}" data-eo-active-elapsed-seconds="{{ active_downtime_elapsed_seconds }}" data-eo-downtime-state="{% if active_downtime %}{{ active_downtime_state.code }}{% endif %}" role="status" aria-label="{% if active_downtime %}Простой активен{% else %}Экскаватор работает{% endif %}">
+            <div class="eo-downtime-card status-{{ active_downtime_state.color_group }}{% if active_downtime %} is-active{% endif %}" data-eo-active-downtime-id="{% if active_downtime %}{{ active_downtime.id }}{% endif %}" data-eo-active-started-at="{{ active_downtime_started_at }}" data-eo-active-elapsed-seconds="{{ active_downtime_elapsed_seconds }}" data-eo-shift-downtime-seconds="{{ shift_downtime_total_seconds }}" data-eo-downtime-state="{% if active_downtime %}{{ active_downtime_state.code }}{% endif %}" role="status" aria-label="{% if active_downtime %}Простой активен{% else %}Простои за смену: {{ shift_downtime_total_label }}{% endif %}">
                 <span class="eo-downtime-state-dot" data-eo-downtime-indicator aria-hidden="true">
                     <svg class="eo-downtime-state-icon eo-downtime-state-icon-play" viewBox="0 0 24 24" focusable="false">
                         <path d="M7 4.8v14.4L19 12 7 4.8Z"></path>
@@ -316,7 +316,7 @@
                         <path d="M6.5 5h4v14h-4V5Zm7 0h4v14h-4V5Z"></path>
                     </svg>
                 </span>
-                <b data-eo-active-duration>{% if active_downtime %}{{ active_downtime_elapsed_label }}{% else %}00:00:00{% endif %}</b>
+                <b data-eo-active-duration>{% if active_downtime %}{{ active_downtime_elapsed_label }}{% else %}{{ shift_downtime_total_label }}{% endif %}</b>
             </div>
             <div class="eo-reason-grid">
                 {% for card in downtime_reason_cards %}
@@ -403,7 +403,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v101";
+var excavatorShellVersion = "excavator-mobile-shell-v102";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var excavatorRelevantEvents = {
     assignment_changed: true,
@@ -1082,15 +1082,17 @@ window.initExcavatorWorkShell = function () {
     function clearActiveDowntime(payload) {
         clearDowntimeTimer();
         if (downtimeInput) downtimeInput.value = "";
-        if (activeDuration) activeDuration.textContent = "00:00:00";
+        var shiftTotalSeconds = Math.max(0, Number(payload && payload.shift_total_seconds) || 0);
+        if (activeDuration) activeDuration.textContent = (payload && payload.shift_total_label) || formatDowntimeDuration(shiftTotalSeconds);
         if (downtimeCard) {
             downtimeCard.dataset.eoActiveDowntimeId = "";
             downtimeCard.dataset.eoActiveStartedAt = "";
-            downtimeCard.dataset.eoActiveElapsedSeconds = String((payload && payload.elapsed_seconds) || 0);
+            downtimeCard.dataset.eoActiveElapsedSeconds = "0";
+            downtimeCard.dataset.eoShiftDowntimeSeconds = String(shiftTotalSeconds);
             downtimeCard.dataset.eoDowntimeState = "";
             downtimeCard.classList.remove("is-active");
-            downtimeCard.setAttribute("aria-label", "Экскаватор работает");
-            setDowntimeStatusClass("yellow");
+            downtimeCard.setAttribute("aria-label", "Простои за смену: " + formatDowntimeDuration(shiftTotalSeconds));
+            setDowntimeStatusClass("gray");
         }
         if (closeEvent) {
             closeEvent.disabled = true;
