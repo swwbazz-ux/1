@@ -5,9 +5,9 @@
 {% block body_class %}excavator-operator-screen{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v108">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v108">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v108">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v109">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v109">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v109">
 <meta name="theme-color" content="#030708">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Погрузка">
@@ -65,7 +65,7 @@
             <div class="eo-shift-titlebar">
                 <h1>Смена</h1>
                 <div class="eo-shift-update-group">
-                    <span class="eo-current-app-version" aria-label="Текущая версия приложения">Версия 108</span>
+                    <span class="eo-current-app-version" aria-label="Текущая версия приложения">Версия 109</span>
                     <button class="eo-shift-update-button" type="button" data-eo-pwa-update-check aria-label="Проверить обновление приложения">
                         <span aria-hidden="true"></span>
                         <b data-eo-pwa-update-check-label>Обновить</b>
@@ -409,7 +409,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v108";
+var excavatorShellVersion = "excavator-mobile-shell-v109";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var excavatorRelevantEvents = {
     assignment_changed: true,
@@ -1856,7 +1856,7 @@ window.initExcavatorWorkShell = function () {
             var tabName = tab.dataset.eoTab;
             activateTab(tabName);
             if (tabName === "events") {
-                refreshExcavatorWorkFromServer({ preserveTab: true });
+                syncDowntimeStatus();
             }
         });
     });
@@ -2056,6 +2056,30 @@ window.initExcavatorWorkShell = function () {
                 });
             }
             return response.json();
+        });
+    }
+
+    function syncDowntimeStatus() {
+        return fetch("{% url 'excavator_downtime_action' %}?_eo_status=" + Date.now(), {
+            method: "GET",
+            credentials: "same-origin",
+            cache: "no-store",
+            headers: {
+                "Accept": "application/json",
+                "X-Requested-With": "XMLHttpRequest"
+            }
+        }).then(function (response) {
+            if (!response.ok) throw new Error("Не удалось обновить простой");
+            return response.json();
+        }).then(function (payload) {
+            if (payload.active) {
+                applyActiveDowntime(payload);
+            } else {
+                clearActiveDowntime(payload);
+            }
+            return payload;
+        }).catch(function () {
+            return null;
         });
     }
 

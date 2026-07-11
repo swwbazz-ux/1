@@ -637,8 +637,8 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/static/css/excavator-work-v55-shift.css')
         self.assertContains(response, '/excavator-sw.js')
         self.assertContains(response, 'scope: "/excavator/"')
-        self.assertContains(response, 'excavator-mobile-shell-v108')
-        self.assertContains(response, 'class="eo-current-app-version" aria-label="Текущая версия приложения">Версия 108</span>')
+        self.assertContains(response, 'excavator-mobile-shell-v109')
+        self.assertContains(response, 'class="eo-current-app-version" aria-label="Текущая версия приложения">Версия 109</span>')
         self.assertNotContains(response, 'class="eo-pin-icon"')
         self.assertContains(response, 'class="eo-face-coordinates"')
         self.assertContains(response, 'class="eo-face-rock"')
@@ -663,7 +663,8 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, 'data-eo-tab="shift" data-eo-pwa-update-nav-target')
         self.assertContains(response, 'tab.setAttribute("aria-current", "page")')
         self.assertContains(response, 'if (tabName === "events")')
-        self.assertContains(response, 'refreshExcavatorWorkFromServer({ preserveTab: true })')
+        self.assertContains(response, 'syncDowntimeStatus()')
+        self.assertContains(response, 'cache: "no-store"')
         self.assertNotContains(response, 'class="eo-nav-clock"')
         self.assertNotContains(response, 'class="eo-nav-bell"')
         self.assertNotContains(response, 'data-eo-icon-idle')
@@ -1594,7 +1595,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/excavator/')
-        self.assertIn('excavator-mobile-shell-v108', script)
+        self.assertIn('excavator-mobile-shell-v109', script)
         self.assertIn(reverse('excavator_work'), script)
         self.assertIn(reverse('excavator_manifest'), script)
         self.assertIn('/static/js/realtime-client.js', script)
@@ -2261,6 +2262,27 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, 'data-eo-shift-downtime-seconds="900"')
         self.assertContains(response, '>00:15:00</b>')
         self.assertNotContains(response, '>активен<')
+
+    def test_excavator_downtime_status_get_returns_current_shift_total_when_inactive(self):
+        shift_start = timezone.now() - timedelta(hours=2)
+        excavator_shift = EmployeeShift.objects.get(employee=self.operator, equipment=self.excavator, closed_at__isnull=True)
+        excavator_shift.opened_at = shift_start
+        excavator_shift.save(update_fields=['opened_at'])
+        DowntimeEvent.objects.create(
+            equipment=self.excavator,
+            employee=self.operator,
+            reason=self.reason,
+            started_at=shift_start + timedelta(minutes=10),
+            ended_at=shift_start + timedelta(minutes=25),
+        )
+
+        response = self.client.get(reverse('excavator_downtime_action'))
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertFalse(payload['active'])
+        self.assertEqual(payload['shift_total_seconds'], 15 * 60)
+        self.assertEqual(payload['shift_total_label'], '00:15:00')
 
     def test_excavator_close_downtime_button_disabled_without_active_downtime(self):
         response = self.client.get(reverse('excavator_work'))

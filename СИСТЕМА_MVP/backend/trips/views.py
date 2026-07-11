@@ -12,7 +12,7 @@ from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_http_methods, require_POST
 
 from assignments.models import AssignmentStatus, EquipmentAssignment, ExcavatorPlacement, HaulAssignment
 from assignments.services import reconcile_due_haul_assignments, schedule_haul_assignment, schedule_haul_release
@@ -587,7 +587,7 @@ EXCAVATOR_MANIFEST = {
 }
 
 EXCAVATOR_SERVICE_WORKER_JS = r"""
-const CACHE_NAME = "excavator-mobile-shell-v108";
+const CACHE_NAME = "excavator-mobile-shell-v109";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const CORE_ASSETS = [
@@ -3953,7 +3953,7 @@ def excavator_work_view(request):
     )
 
 
-@require_POST
+@require_http_methods(["GET", "POST"])
 def excavator_downtime_action_view(request):
     access = excavator_access_from_request(request)
     if not access:
@@ -3962,6 +3962,9 @@ def excavator_downtime_action_view(request):
     current_excavator = open_shift.equipment if open_shift else None
     if not current_excavator:
         return JsonResponse({'ok': False, 'error': 'Сначала нужно открыть смену на экскаваторе.'}, status=409)
+
+    if request.method == 'GET':
+        return JsonResponse(excavator_downtime_status_payload(current_excavator, open_shift))
 
     payload = excavator_json_payload(request)
     action = (payload.get('action') or '').strip()
