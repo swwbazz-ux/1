@@ -1785,7 +1785,7 @@ body.driver-mobile-screen .driver-downtime-close {
 
 /* Downtime workspace mirrors the excavator operator screen. */
 body.driver-mobile-screen [data-driver-tab-panel="downtimes"].is-active {
-    grid-template-rows: auto auto minmax(0, 1fr) auto;
+    grid-template-rows: 42px clamp(88px, 12dvh, 112px) minmax(0, 1fr) clamp(52px, 6.8dvh, 62px) !important;
     gap: clamp(9px, 1.4dvh, 13px);
 }
 
@@ -2436,7 +2436,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
 {% endblock %}
 
 {% block body %}
-<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v83' }}">
+<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v84' }}">
     {% if messages %}
         <div class="driver-messages">
             {% for message in messages %}
@@ -3581,7 +3581,7 @@ window.bindDriverMobileShell = function () {
         if (!("serviceWorker" in navigator)) {
             return;
         }
-        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v83' }}";
+        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v84' }}";
         var updateModal = document.querySelector("[data-driver-pwa-update-modal]");
         var updateBadge = document.querySelector("[data-driver-pwa-update-badge]");
         var updateTarget = document.querySelector("[data-driver-pwa-update-nav-target]");
