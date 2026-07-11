@@ -2632,6 +2632,24 @@ body.excavator-operator-screen .eo-downtime-card.is-active .eo-downtime-state-ic
     50% { opacity: 1; transform: scale(1.045); }
 }
 
+/* Mileage is temporarily not used by excavator operators. Preserve its layout and value. */
+body.excavator-operator-screen .eo-shift-metrics .eo-field-card.is-disabled {
+    border-color: rgba(126, 145, 154, .28) !important;
+    background: rgba(14, 22, 26, .58) !important;
+    color: rgba(166, 181, 189, .48) !important;
+    box-shadow: none !important;
+    filter: grayscale(1) saturate(.35) !important;
+    cursor: not-allowed !important;
+}
+
+body.excavator-operator-screen .eo-shift-metrics .eo-field-card.is-disabled input,
+body.excavator-operator-screen .eo-shift-metrics .eo-field-card.is-disabled em {
+    color: rgba(166, 181, 189, .46) !important;
+    -webkit-text-fill-color: rgba(166, 181, 189, .46) !important;
+    opacity: 1 !important;
+    cursor: not-allowed !important;
+}
+
 @media (prefers-reduced-motion: reduce) {
     body.excavator-operator-screen .eo-downtime-card.is-active {
         animation: eo-active-downtime-card-pulse 1.65s ease-in-out infinite !important;

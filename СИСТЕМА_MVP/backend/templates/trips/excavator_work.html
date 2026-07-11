@@ -5,9 +5,9 @@
 {% block body_class %}excavator-operator-screen{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v105">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v105">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v105">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v106">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v106">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v106">
 <meta name="theme-color" content="#030708">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Погрузка">
@@ -79,10 +79,10 @@
                             <em>л</em>
                         </span>
                     </label>
-                    <label class="eo-field-card">
+                    <label class="eo-field-card is-disabled" aria-disabled="true">
                         <span>Пробег</span>
                         <span class="eo-shift-metric-value">
-                            <input type="text" inputmode="decimal" name="shift_mileage" value="{{ shift_mileage_display }}" placeholder="0" data-eo-shift-mileage>
+                            <input type="text" name="shift_mileage" value="{{ shift_mileage_display }}" placeholder="0" data-eo-shift-mileage disabled aria-disabled="true" tabindex="-1">
                             <em>км</em>
                         </span>
                     </label>
@@ -403,7 +403,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v105";
+var excavatorShellVersion = "excavator-mobile-shell-v106";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var excavatorRelevantEvents = {
     assignment_changed: true,
