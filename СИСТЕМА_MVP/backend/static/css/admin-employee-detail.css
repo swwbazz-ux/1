@@ -63,26 +63,37 @@ body.employee-detail-screen {
 
 .admin-employee-detail-shell .employee-profile-form {
     display: grid;
+    grid-template-columns: clamp(144px, 16cqi, 180px) minmax(0, 1fr);
     gap: var(--employee-space-4);
     align-content: start;
     min-width: 0;
     container: employee-profile / inline-size;
 }
 
+.admin-employee-detail-shell .employee-profile-form > .employee-detail-card-head,
+.admin-employee-detail-shell .employee-profile-form > .errorlist,
+.admin-employee-detail-shell .employee-card-v2-textareas,
+.admin-employee-detail-shell .employee-detail-save-row {
+    grid-column: 1 / -1;
+}
+
 .admin-employee-detail-shell .employee-profile-form > .employee-detail-card-head p {
     display: none;
 }
 
+.admin-employee-detail-shell .employee-profile-head,
 .admin-employee-detail-shell .employee-card-v2-top {
-    display: grid;
-    grid-template-columns: clamp(144px, 16cqi, 180px) minmax(0, 1fr);
-    gap: var(--employee-space-4);
-    align-items: start;
+    display: contents;
 }
 
 .admin-employee-detail-shell .employee-card-v2-photo-box,
 .admin-employee-detail-shell .employee-card-v2-photo {
     width: clamp(144px, 16cqi, 180px);
+}
+
+.admin-employee-detail-shell .employee-card-v2-photo-box {
+    grid-column: 1;
+    grid-row: 2 / span 2;
 }
 
 .admin-employee-detail-shell .employee-card-v2-photo {
@@ -134,12 +145,16 @@ body.employee-detail-screen {
 }
 
 .admin-employee-detail-shell .employee-card-v2-name-grid {
+    grid-column: 2;
+    grid-row: 2;
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: var(--employee-space-3);
 }
 
 .admin-employee-detail-shell .employee-card-v2-grid {
+    grid-column: 2;
+    grid-row: 3;
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: var(--employee-space-3);
@@ -502,6 +517,64 @@ body.employee-detail-screen {
         max-height: none;
         overflow: visible;
     }
+
+    .admin-employee-detail-shell .employee-access-panel-section {
+        gap: var(--employee-space-2);
+        padding-top: var(--employee-space-3);
+    }
+
+    .admin-employee-detail-shell .employee-access-panel-section + .employee-access-panel-section {
+        margin-top: var(--employee-space-3);
+    }
+
+    .admin-employee-detail-shell .employee-access-card,
+    .admin-employee-detail-shell .employee-access-card.access-not_activated,
+    .admin-employee-detail-shell .employee-access-card.access-blocked,
+    .admin-employee-detail-shell .employee-access-card.access-deactivated {
+        gap: var(--employee-space-2);
+        padding: 12px;
+    }
+
+    .admin-employee-detail-shell .employee-login-share {
+        padding: 10px;
+    }
+
+    .admin-employee-detail-shell .employee-danger-card {
+        gap: var(--employee-space-2);
+    }
+}
+
+@media (min-width: 1600px) {
+    .admin-employee-detail-shell .employee-access-issue-form {
+        grid-template-columns: minmax(0, 1fr) minmax(170px, .8fr);
+        align-items: end;
+    }
+
+    .admin-employee-detail-shell .employee-access-issue-form label,
+    .admin-employee-detail-shell .employee-access-issue-form .errorlist {
+        grid-column: 1 / -1;
+    }
+
+    .admin-employee-detail-shell .employee-access-issue-form select {
+        grid-column: 1;
+    }
+
+    .admin-employee-detail-shell .employee-access-issue-form button {
+        grid-column: 2;
+        grid-row: 2;
+    }
+
+    .admin-employee-detail-shell .employee-login-share {
+        grid-template-columns: minmax(0, 1fr) minmax(190px, .8fr);
+        grid-template-areas:
+            "title title"
+            "text actions";
+        align-items: end;
+    }
+
+    .admin-employee-detail-shell .employee-login-share-actions {
+        grid-template-columns: repeat(2, minmax(84px, 1fr));
+    }
 }
 
 @media (min-width: 1181px) and (max-height: 820px) {
@@ -533,7 +606,7 @@ body.employee-detail-screen {
 }
 
 @container employee-profile (max-width: 680px) {
-    .admin-employee-detail-shell .employee-card-v2-top {
+    .admin-employee-detail-shell .employee-profile-form {
         grid-template-columns: 112px minmax(0, 1fr);
     }
 
@@ -543,12 +616,19 @@ body.employee-detail-screen {
     }
 
     .admin-employee-detail-shell .employee-card-v2-name-grid {
+        grid-column: 2;
+        grid-row: 2;
         grid-template-columns: 1fr;
     }
 
     .admin-employee-detail-shell .employee-card-v2-grid,
     .admin-employee-detail-shell .employee-card-v2-textareas {
+        grid-column: 1 / -1;
         grid-template-columns: 1fr;
+    }
+
+    .admin-employee-detail-shell .employee-card-v2-grid {
+        grid-row: 3;
     }
 }
 
@@ -605,7 +685,7 @@ body.employee-detail-screen {
         justify-content: center;
     }
 
-    .admin-employee-detail-shell .employee-card-v2-top {
+    .admin-employee-detail-shell .employee-profile-form {
         grid-template-columns: 96px minmax(0, 1fr);
         gap: 12px;
     }
