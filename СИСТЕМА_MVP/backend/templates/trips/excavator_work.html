@@ -5,9 +5,9 @@
 {% block body_class %}excavator-operator-screen{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v109">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v109">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v109">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v110">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v110">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v110">
 <meta name="theme-color" content="#030708">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Погрузка">
@@ -47,8 +47,8 @@
                 <img src="{% static 'img/equipment/excavator-yellow.png' %}" alt="">
                 <strong>{{ excavator_label }}</strong>
             </div>
-            <div class="eo-topbar-cell eo-shift-kind-cell" aria-label="Смена -1">
-                <span class="eo-shift-status-text">Смена -1</span>
+            <div class="eo-topbar-cell eo-shift-kind-cell" aria-label="{{ work_assignment_shift_label|default:'Смена не назначена' }}">
+                <span class="eo-shift-status-text">{% if open_shift %}{% if open_shift.shift_type == 'day' %}Смена 1{% else %}Смена 2{% endif %}{% else %}{{ work_assignment_shift_label|default:'Нет смены' }}{% endif %}</span>
             </div>
             <div class="eo-topbar-cell eo-face-cell eo-face-cell-full">
                 <strong class="eo-face-summary" title="Горизонт {{ face_horizon|default:"125" }} / Блок {{ face_block|default:"4" }}{% if current_rock %} / Порода: {{ current_rock }}{% endif %}">
@@ -65,7 +65,7 @@
             <div class="eo-shift-titlebar">
                 <h1>Смена</h1>
                 <div class="eo-shift-update-group">
-                    <span class="eo-current-app-version" aria-label="Текущая версия приложения">Версия 109</span>
+                    <span class="eo-current-app-version" aria-label="Текущая версия приложения">Версия 110</span>
                     <button class="eo-shift-update-button" type="button" data-eo-pwa-update-check aria-label="Проверить обновление приложения">
                         <span aria-hidden="true"></span>
                         <b data-eo-pwa-update-check-label>Обновить</b>
@@ -73,6 +73,19 @@
                     </button>
                 </div>
             </div>
+            {% if not open_shift %}
+            <div class="eo-shift-section eo-shift-result-panel">
+                <div class="eo-shift-section-head"><span>Назначение</span></div>
+                {% if work_assignment_state == 'assigned' %}
+                <div class="eo-shift-result-grid">
+                    <div class="eo-shift-result-cell"><span>Смена</span><strong>{{ work_assignment_shift_label }}</strong></div>
+                    <div class="eo-shift-result-cell"><span>Экскаватор</span><strong>{{ shift_start_excavator.garage_number }}</strong></div>
+                </div>
+                {% else %}
+                <div class="eo-empty-state"><strong>Нет рабочего назначения</strong><span>{{ work_assignment_error }}</span></div>
+                {% endif %}
+            </div>
+            {% endif %}
             <div class="eo-shift-section eo-shift-check-panel">
                 <div class="eo-shift-section-head">
                     <span>Показатели техники</span>
@@ -120,7 +133,7 @@
             </div>
 
             <div class="eo-shift-actions">
-                <button class="mm-mobile-shift-button{% if open_shift %} is-danger{% endif %}" type="button" data-eo-shift-button data-eo-shift-action="{% if open_shift %}close{% else %}open{% endif %}" style="--eo-shift-hold: 0%" {% if open_shift %}aria-label="Удерживайте 2 секунды, чтобы завершить смену"{% endif %}>
+                <button class="mm-mobile-shift-button{% if open_shift %} is-danger{% endif %}" type="button" data-eo-shift-button data-eo-shift-action="{% if open_shift %}close{% else %}open{% endif %}" style="--eo-shift-hold: 0%" {% if open_shift %}aria-label="Удерживайте 2 секунды, чтобы завершить смену"{% elif work_assignment_state != 'assigned' %}disabled aria-disabled="true"{% endif %}>
                     <span data-eo-shift-label>{% if open_shift %}Завершить смену{% else %}Начать смену{% endif %}</span>
                 </button>
                 <button class="eo-logout-button" type="button" data-eo-logout-button data-eo-logout-url="{% url 'logout' %}" style="--eo-logout-hold: 0%" aria-label="Удерживайте 2 секунды, чтобы выйти">
@@ -409,10 +422,11 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v109";
+var excavatorShellVersion = "excavator-mobile-shell-v110";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var excavatorRelevantEvents = {
     assignment_changed: true,
+    personnel_assignment_changed: true,
     trip_changed: true,
     downtime_changed: true,
     shift_changed: true,

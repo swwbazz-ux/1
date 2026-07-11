@@ -165,6 +165,31 @@
                     <label for="employee-bed">Место</label>
                     <input id="employee-bed" type="text" autocomplete="off">
                 </div>
+                <div class="employee-detail-field employee-work-assignment-field" data-employee-assignment-role>
+                    <label for="{{ form.assignment_role.id_for_label }}">{{ form.assignment_role.label }}</label>
+                    {{ form.assignment_role }}
+                    {{ form.assignment_role.errors }}
+                </div>
+                <div class="employee-detail-field employee-work-assignment-field">
+                    <label for="{{ form.assignment_shift_type.id_for_label }}">{{ form.assignment_shift_type.label }}</label>
+                    {{ form.assignment_shift_type }}
+                    {{ form.assignment_shift_type.errors }}
+                </div>
+                <div class="employee-detail-field employee-work-assignment-field" data-employee-assignment-equipment>
+                    <label for="{{ form.assignment_equipment.id_for_label }}">{{ form.assignment_equipment.label }}</label>
+                    {{ form.assignment_equipment }}
+                    {{ form.assignment_equipment.errors }}
+                </div>
+            </div>
+
+            <div class="employee-work-assignment-meta" data-employee-assignment-status>
+                {% if active_equipment_assignment %}
+                    <strong>{{ active_equipment_assignment.work_shift_label }} · {{ active_equipment_assignment.equipment }}</strong>
+                    <span>Назначил: {{ active_equipment_assignment.assigned_by|default:"Система" }} · {{ active_equipment_assignment.assigned_at|date:"d.m.Y H:i" }}</span>
+                {% else %}
+                    <strong>Рабочее назначение не задано</strong>
+                    <span>После назначения смена и техника будут автоматически подставляться в рабочем приложении.</span>
+                {% endif %}
             </div>
 
             <div class="employee-card-v2-textareas">
@@ -353,6 +378,8 @@ document.addEventListener('DOMContentLoaded', function () {
     var modalImage = modal ? modal.querySelector('img') : null;
     var modalClose = modal ? modal.querySelector('.employee-photo-modal-close') : null;
     var selected = document.getElementById('employee-photo-selected');
+    var assignmentRole = document.getElementById('{{ form.assignment_role.id_for_label }}');
+    var assignmentEquipment = document.getElementById('{{ form.assignment_equipment.id_for_label }}');
     if (selected) {
         selected.textContent = '';
         selected.hidden = true;
@@ -440,6 +467,25 @@ document.addEventListener('DOMContentLoaded', function () {
     fillVisualFields();
     if (profileForm) {
         profileForm.addEventListener('submit', syncHiddenFields);
+    }
+
+    function filterAssignmentEquipment() {
+        if (!assignmentRole || !assignmentEquipment) return;
+        var selectedRole = assignmentRole.options[assignmentRole.selectedIndex];
+        var roleCode = selectedRole ? selectedRole.dataset.workRole || '' : '';
+        var currentOption = assignmentEquipment.options[assignmentEquipment.selectedIndex];
+        var currentAllowed = !currentOption || !currentOption.value || currentOption.dataset.workRole === roleCode;
+        Array.prototype.forEach.call(assignmentEquipment.options, function (option) {
+            var allowed = !option.value || !roleCode || option.dataset.workRole === roleCode;
+            option.hidden = !allowed;
+            option.disabled = !allowed;
+        });
+        if (!currentAllowed) assignmentEquipment.value = '';
+    }
+
+    if (assignmentRole && assignmentEquipment) {
+        filterAssignmentEquipment();
+        assignmentRole.addEventListener('change', filterAssignmentEquipment);
     }
 
     document.querySelectorAll('[data-login-share]').forEach(function (block) {

@@ -609,6 +609,15 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
             equipment=self.excavator,
             opened_at=timezone.now(),
         )
+        EquipmentAssignment.objects.create(
+            employee=self.operator,
+            role=self.role,
+            equipment=self.excavator,
+            shift_type='day',
+            assigned_by=self.operator,
+            status=AssignmentStatus.ACCEPTED,
+            accepted_at=timezone.now(),
+        )
         HaulAssignment.objects.create(
             truck=self.truck,
             excavator=self.excavator,
@@ -637,8 +646,8 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/static/css/excavator-work-v55-shift.css')
         self.assertContains(response, '/excavator-sw.js')
         self.assertContains(response, 'scope: "/excavator/"')
-        self.assertContains(response, 'excavator-mobile-shell-v109')
-        self.assertContains(response, 'class="eo-current-app-version" aria-label="Текущая версия приложения">Версия 109</span>')
+        self.assertContains(response, 'excavator-mobile-shell-v110')
+        self.assertContains(response, 'class="eo-current-app-version" aria-label="Текущая версия приложения">Версия 110</span>')
         self.assertNotContains(response, 'class="eo-pin-icon"')
         self.assertContains(response, 'class="eo-face-coordinates"')
         self.assertContains(response, 'class="eo-face-rock"')
@@ -775,7 +784,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertNotContains(response, '<small>Выполнение нормы</small>')
         self.assertContains(response, 'class="eo-topbar-cell eo-shift-kind-cell"')
         self.assertContains(response, 'class="eo-shift-status-text"')
-        self.assertContains(response, 'Смена -1')
+        self.assertContains(response, 'Смена 1')
         self.assertNotContains(response, 'class="eo-sun-icon"')
         self.assertContains(response, 'Гор. 125')
         self.assertContains(response, 'Бл. 4')
@@ -1248,13 +1257,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         trip.refresh_from_db()
         self.assertTrue(trip.is_carryover)
 
-        unloading_shift = EmployeeShift.objects.create(
-            employee=self.driver,
-            shift_type='day',
-            equipment=self.truck,
-            opened_at=timezone.now(),
-            opened_by=self.driver,
-        )
+        unloading_shift = self.truck_shift
         finalize_trip_unloaded(trip, driver=self.driver, unloading_shift=unloading_shift)
         trip.refresh_from_db()
         self.assertTrue(trip.is_carryover)
@@ -1595,7 +1598,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/excavator/')
-        self.assertIn('excavator-mobile-shell-v109', script)
+        self.assertIn('excavator-mobile-shell-v110', script)
         self.assertIn(reverse('excavator_work'), script)
         self.assertIn(reverse('excavator_manifest'), script)
         self.assertIn('/static/js/realtime-client.js', script)

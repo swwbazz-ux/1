@@ -133,6 +133,18 @@ class EmployeeShift(models.Model):
         verbose_name = 'Смена сотрудника'
         verbose_name_plural = 'Смены сотрудников'
         ordering = ['-opened_at']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['employee'],
+                condition=models.Q(closed_at__isnull=True),
+                name='unique_open_shift_per_employee',
+            ),
+            models.UniqueConstraint(
+                fields=['equipment'],
+                condition=models.Q(closed_at__isnull=True, equipment__isnull=False),
+                name='unique_open_shift_per_equipment',
+            ),
+        ]
 
     def __str__(self):
         return f'{self.employee} / {self.get_shift_type_display()} / {self.opened_at:%d.%m.%Y}'

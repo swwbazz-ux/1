@@ -6,6 +6,15 @@ from django.core.files.base import ContentFile
 from django.core.exceptions import ValidationError
 from PIL import Image, ImageOps
 
+from assignments.models import WorkShiftType
+from assignments.services import (
+    WORK_ASSIGNMENT_ROLE_EQUIPMENT_TYPES,
+    clear_active_equipment_assignment,
+    equipment_queryset_for_work_role,
+    get_active_equipment_assignment,
+    set_active_equipment_assignment,
+    validate_work_assignment,
+)
 from references.models import DormitorySection, Equipment
 from shifts.models import EmployeeShift
 
@@ -16,6 +25,28 @@ MAX_EMPLOYEE_PHOTO_UPLOAD_SIZE = 5 * 1024 * 1024
 MAX_EMPLOYEE_PHOTO_SIDE = 512
 EMPLOYEE_PHOTO_QUALITY = 82
 EMPLOYEE_PHOTO_ALLOWED_TYPES = {'image/jpeg', 'image/png', 'image/webp'}
+
+
+class WorkAssignmentRoleSelect(forms.Select):
+    def create_option(self, name, value, label, selected, index, subindex=None, attrs=None):
+        option = super().create_option(name, value, label, selected, index, subindex, attrs)
+        instance = getattr(value, 'instance', None)
+        if instance:
+            option['attrs']['data-work-role'] = instance.code
+        return option
+
+
+class WorkAssignmentEquipmentSelect(forms.Select):
+    def create_option(self, name, value, label, selected, index, subindex=None, attrs=None):
+        option = super().create_option(name, value, label, selected, index, subindex, attrs)
+        instance = getattr(value, 'instance', None)
+        if instance:
+            equipment_type = (instance.equipment_type.name or '').casefold()
+            for role_code, type_name in WORK_ASSIGNMENT_ROLE_EQUIPMENT_TYPES.items():
+                if equipment_type == type_name.casefold():
+                    option['attrs']['data-work-role'] = role_code
+                    break
+        return option
 
 
 def optimize_employee_photo(uploaded_file):
@@ -108,6 +139,25 @@ class AdminEmployeeForm(forms.ModelForm):
 
 
 class AdminEmployeeEditForm(forms.ModelForm):
+    assignment_role = forms.ModelChoiceField(
+        label='Рабочая роль',
+        queryset=Role.objects.none(),
+        required=False,
+        widget=WorkAssignmentRoleSelect,
+    )
+    assignment_shift_type = forms.ChoiceField(
+        label='Назначенная смена',
+        choices=[('', 'Нет назначения'), *WorkShiftType.choices],
+        required=False,
+    )
+    assignment_equipment = forms.ModelChoiceField(
+        label='Назначенная техника',
+        queryset=Equipment.objects.none(),
+        required=False,
+        empty_label='Нет назначения',
+        widget=WorkAssignmentEquipmentSelect,
+    )
+
     class Meta:
         model = Employee
         fields = [
@@ -134,6 +184,89 @@ class AdminEmployeeEditForm(forms.ModelForm):
 
     def clean_photo(self):
         return optimize_employee_photo(self.cleaned_data.get('photo'))
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        employee = self.instance if self.instance and self.instance.pk else None
+        if not employee:
+            return
+
+        active_assignment = get_active_equipment_assignment(employee)
+        supported_accesses = (
+            employee.accesses
+            .filter(role__code__in=WORK_ASSIGNMENT_ROLE_EQUIPMENT_TYPES, role__is_active=True, is_active=True)
+            .exclude(status=EmployeeAccess.Status.DEACTIVATED)
+            .select_related('role')
+            .order_by('role__name')
+        )
+        supported_roles = Role.objects.filter(
+            id__in=supported_accesses.values_list('role_id', flat=True),
+        ).order_by('name')
+        self.fields['assignment_role'].queryset = supported_roles
+
+        selected_role_id = self.data.get(self.add_prefix('assignment_role')) if self.is_bound else None
+        selected_role_id = selected_role_id or (active_assignment.role_id if active_assignment else None)
+        selected_role_id = selected_role_id or supported_roles.values_list('id', flat=True).first()
+
+        equipment_ids = set()
+        for role_code in supported_roles.values_list('code', flat=True):
+            equipment_ids.update(equipment_queryset_for_work_role(role_code).values_list('id', flat=True))
+        equipment_queryset = (
+            Equipment.objects
+            .filter(id__in=equipment_ids)
+            .select_related('equipment_type', 'model')
+            .order_by('equipment_type__name', 'garage_number')
+        )
+        if active_assignment and not equipment_queryset.filter(id=active_assignment.equipment_id).exists():
+            equipment_queryset = Equipment.objects.filter(
+                id__in=[*equipment_queryset.values_list('id', flat=True), active_assignment.equipment_id],
+            ).select_related('equipment_type', 'model').order_by('garage_number')
+        self.fields['assignment_equipment'].queryset = equipment_queryset
+
+        if not self.is_bound:
+            self.initial.update({
+                'assignment_role': active_assignment.role_id if active_assignment else selected_role_id,
+                'assignment_shift_type': active_assignment.shift_type if active_assignment else '',
+                'assignment_equipment': active_assignment.equipment_id if active_assignment else None,
+            })
+
+    def clean(self):
+        cleaned_data = super().clean()
+        role = cleaned_data.get('assignment_role')
+        shift_type = cleaned_data.get('assignment_shift_type')
+        equipment = cleaned_data.get('assignment_equipment')
+        if not equipment:
+            return cleaned_data
+        if not role:
+            self.add_error('assignment_role', 'Выберите рабочую роль.')
+        if not shift_type:
+            self.add_error('assignment_shift_type', 'Выберите смену 1 или смену 2.')
+        if role and shift_type:
+            try:
+                validate_work_assignment(
+                    employee=self.instance,
+                    role=role,
+                    equipment=equipment,
+                    shift_type=shift_type,
+                    exclude_assignment=get_active_equipment_assignment(self.instance),
+                )
+            except ValidationError as error:
+                self.add_error('assignment_equipment', error)
+        return cleaned_data
+
+    def save_work_assignment(self, *, assigned_by):
+        equipment = self.cleaned_data.get('assignment_equipment')
+        if not equipment:
+            clear_active_equipment_assignment(employee=self.instance, assigned_by=assigned_by)
+            return None
+        assignment, _created = set_active_equipment_assignment(
+            employee=self.instance,
+            role=self.cleaned_data['assignment_role'],
+            equipment=equipment,
+            shift_type=self.cleaned_data['assignment_shift_type'],
+            assigned_by=assigned_by,
+        )
+        return assignment
 
 
 class AdminAccessRoleForm(forms.Form):
@@ -271,19 +404,29 @@ class DriverOpenShiftForm(forms.ModelForm):
             'start_engine_hours': forms.NumberInput(attrs={'step': '0.01', 'min': '0'}),
         }
 
-    def __init__(self, *args, employee=None, **kwargs):
+    def __init__(self, *args, employee=None, work_assignment=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.employee = employee
+        self.work_assignment = work_assignment
         self.fields['truck'].queryset = Equipment.objects.filter(equipment_type__name='Самосвал', is_active=True).order_by('garage_number')
         self.fields['truck'].widget.attrs['onchange'] = "if (this.value) window.location='?truck=' + this.value;"
         self.fields['start_fuel'].required = True
         self.fields['start_mileage'].required = True
         self.fields['start_engine_hours'].required = True
+        if work_assignment:
+            self.fields.pop('shift_type')
+            self.fields.pop('truck')
 
     def clean(self):
         cleaned_data = super().clean()
-        shift_type = cleaned_data.get('shift_type')
-        truck = cleaned_data.get('truck')
+        if self.work_assignment:
+            shift_type = self.work_assignment.shift_type
+            truck = self.work_assignment.equipment
+            cleaned_data['shift_type'] = shift_type
+            cleaned_data['truck'] = truck
+        else:
+            shift_type = cleaned_data.get('shift_type')
+            truck = cleaned_data.get('truck')
         if not shift_type or not truck:
             return cleaned_data
 

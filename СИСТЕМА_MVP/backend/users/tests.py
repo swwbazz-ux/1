@@ -13,7 +13,7 @@ from django.utils import timezone
 from openpyxl import load_workbook
 from PIL import Image
 
-from assignments.models import AssignmentStatus, ExcavatorPlacement, HaulAssignment
+from assignments.models import AssignmentStatus, EquipmentAssignment, ExcavatorPlacement, HaulAssignment
 from core.models import OperationalStateEvent
 from downtimes.models import DowntimeEvent, DowntimeReason
 from references.models import (
@@ -43,6 +43,27 @@ class AccessLoginTests(TestCase):
             employee=self.employee,
             role=self.role,
             access_code='2000',
+        )
+
+    def assign_driver_work(self, truck, *, shift_type='day'):
+        group, _ = EquipmentPlanGroup.objects.get_or_create(
+            code='driver-work-assignment-tests',
+            defaults={
+                'name': 'Самосвалы для тестов назначений',
+                'calculation_mode': PlanCalculationMode.TRIPS,
+                'plan_value': '18.00',
+                'is_active': True,
+            },
+        )
+        group.equipment.add(truck)
+        return EquipmentAssignment.objects.create(
+            employee=self.employee,
+            role=self.role,
+            equipment=truck,
+            shift_type=shift_type,
+            assigned_by=self.employee,
+            status=AssignmentStatus.ACCEPTED,
+            accepted_at=timezone.now(),
         )
 
     def create_registered_driver_shift(self, truck=None):
@@ -77,15 +98,18 @@ class AccessLoginTests(TestCase):
             employee=self.employee,
             dormitory_section=section,
         )
+        self.assign_driver_work(truck)
 
         response = self.client.post('/', {'access_code': '2000'}, follow=True, HTTP_HOST='localhost')
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'Работа водителя')
-        self.assertContains(response, 'Открыть смену')
+        self.assertContains(response, 'Начать смену')
         self.assertContains(response, 'driver-shift-workspace driver-shift-opening')
-        self.assertContains(response, 'Параметры смены')
         self.assertContains(response, 'Показатели техники')
+        self.assertContains(response, 'Итог смены')
+        self.assertContains(response, 'Смена закрыта')
+        self.assertContains(response, '0 шт.')
         self.assertContains(response, 'driver-shift-actions')
         self.assertNotContains(response, 'class="driver-form-card"')
         self.assertEqual(self.client.session.get('employee_access_id'), self.access.id)
@@ -125,7 +149,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, reverse('driver_manifest'))
         self.assertContains(response, 'rel="manifest"')
         self.assertContains(response, '/driver-sw.js')
-        self.assertContains(response, 'driver-mobile-shell-v77')
+        self.assertContains(response, 'driver-mobile-shell-v79')
         self.assertContains(response, 'data-driver-pwa-update-modal')
         self.assertContains(response, 'data-driver-pwa-update-badge')
         self.assertContains(response, 'mode: "custom", path: "^/driver/(?:shift/?)?$"')
@@ -266,7 +290,7 @@ class AccessLoginTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Service-Worker-Allowed'], '/driver/')
-        self.assertIn('driver-mobile-shell-v77', script)
+        self.assertIn('driver-mobile-shell-v79', script)
         self.assertIn('/driver/', script)
         self.assertIn('/driver/shift/', script)
         self.assertIn('/driver.webmanifest', script)
@@ -1429,6 +1453,7 @@ class AccessLoginTests(TestCase):
         dormitory = Dormitory.objects.create(number='5')
         block = DormitoryBlock.objects.create(dormitory=dormitory, name='Блок 1')
         section = DormitorySection.objects.create(block=block, name='А')
+        self.assign_driver_work(truck)
 
         login_response = self.client.post('/', {'access_code': '2000'}, follow=True, HTTP_HOST='localhost')
         self.assertRedirects(login_response, '/driver/registration/', target_status_code=200)
@@ -1443,7 +1468,7 @@ class AccessLoginTests(TestCase):
         )
 
         self.assertEqual(registration_response.status_code, 200)
-        self.assertContains(registration_response, 'Открыть смену')
+        self.assertContains(registration_response, 'Начать смену')
         self.assertTrue(self.employee.driver_registration)
 
     def test_driver_can_open_shift_after_registration(self):
@@ -1457,6 +1482,15 @@ class AccessLoginTests(TestCase):
             is_active=True,
         )
         group.equipment.add(truck)
+        EquipmentAssignment.objects.create(
+            employee=self.employee,
+            role=self.role,
+            equipment=truck,
+            shift_type='day',
+            assigned_by=self.employee,
+            status=AssignmentStatus.ACCEPTED,
+            accepted_at=timezone.now(),
+        )
         dormitory = Dormitory.objects.create(number='5')
         block = DormitoryBlock.objects.create(dormitory=dormitory, name='Блок 1')
         section = DormitorySection.objects.create(block=block, name='А')
@@ -1490,6 +1524,7 @@ class AccessLoginTests(TestCase):
         dormitory = Dormitory.objects.create(number='5')
         block = DormitoryBlock.objects.create(dormitory=dormitory, name='Блок 1')
         section = DormitorySection.objects.create(block=block, name='А')
+        self.assign_driver_work(truck)
 
         self.client.post('/', {'access_code': '2000'}, follow=True, HTTP_HOST='localhost')
         self.client.post(
@@ -1533,6 +1568,7 @@ class AccessLoginTests(TestCase):
         dormitory = Dormitory.objects.create(number='5')
         block = DormitoryBlock.objects.create(dormitory=dormitory, name='Блок 1')
         section = DormitorySection.objects.create(block=block, name='А')
+        self.assign_driver_work(truck)
 
         self.client.post('/', {'access_code': '2000'}, follow=True, HTTP_HOST='localhost')
         self.client.post(
@@ -1754,6 +1790,7 @@ class AccessLoginTests(TestCase):
         dormitory = Dormitory.objects.create(number='5')
         block = DormitoryBlock.objects.create(dormitory=dormitory, name='Блок 1')
         section = DormitorySection.objects.create(block=block, name='А')
+        self.assign_driver_work(truck)
 
         self.client.post('/', {'access_code': '2000'}, follow=True, HTTP_HOST='localhost')
         self.client.post(
@@ -1809,6 +1846,7 @@ class AccessLoginTests(TestCase):
             equipment=excavator,
             opened_at=timezone.now(),
         )
+        self.assign_driver_work(truck)
 
         driver_client = self.client
         driver_client.post('/', {'access_code': '2000'}, follow=True, HTTP_HOST='localhost')
@@ -1923,6 +1961,7 @@ class AccessLoginTests(TestCase):
         dormitory = Dormitory.objects.create(number='5')
         block = DormitoryBlock.objects.create(dormitory=dormitory, name='Блок 1')
         section = DormitorySection.objects.create(block=block, name='А')
+        self.assign_driver_work(truck)
         excavator_role = Role.objects.create(code='excavator_operator', name='Машинист экскаватора')
         excavator_operator = Employee.objects.create(full_name='Тестовый машинист')
         EmployeeAccess.objects.create(employee=excavator_operator, role=excavator_role, access_code='3000')
@@ -1991,7 +2030,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(driver_shift_response, 'ККД')
         self.assertContains(driver_shift_response, 'window.applyOperationalStateRefresh')
         self.assertContains(driver_shift_response, 'data-realtime-mode="custom"')
-        self.assertContains(driver_shift_response, 'driver-mobile-shell-v77')
+        self.assertContains(driver_shift_response, 'driver-mobile-shell-v79')
 
     def test_driver_downtime_buttons_are_rendered_from_server_reference(self):
         truck = self.create_registered_driver_shift()
@@ -2125,6 +2164,7 @@ class AccessLoginTests(TestCase):
         dormitory = Dormitory.objects.create(number='5')
         block = DormitoryBlock.objects.create(dormitory=dormitory, name='Блок 1')
         section = DormitorySection.objects.create(block=block, name='А')
+        self.assign_driver_work(truck, shift_type='night')
         excavator_operator = Employee.objects.create(full_name='Тестовый машинист')
         loading_shift = EmployeeShift.objects.create(
             employee=excavator_operator,
@@ -3148,8 +3188,19 @@ class AccessLoginTests(TestCase):
         dispatcher = Employee.objects.create(full_name='Тестовый диспетчер')
         EmployeeAccess.objects.create(employee=dispatcher, role=dispatcher_role, access_code='5000')
         operator = Employee.objects.create(full_name='Машинист')
-        day_shift = EmployeeShift.objects.create(employee=operator, shift_type='day', opened_at=timezone.now())
-        night_shift = EmployeeShift.objects.create(employee=operator, shift_type='night', opened_at=timezone.now())
+        closed_at = timezone.now()
+        day_shift = EmployeeShift.objects.create(
+            employee=operator,
+            shift_type='day',
+            opened_at=closed_at - timedelta(days=1),
+            closed_at=closed_at - timedelta(hours=12),
+        )
+        night_shift = EmployeeShift.objects.create(
+            employee=operator,
+            shift_type='night',
+            opened_at=closed_at - timedelta(hours=11),
+            closed_at=closed_at,
+        )
         Trip.objects.create(
             excavator=excavator,
             truck=truck,
@@ -3400,6 +3451,7 @@ class AccessLoginTests(TestCase):
             shift_type='day',
             equipment=excavator,
             opened_at=report_datetime,
+            closed_at=report_datetime + timedelta(hours=1),
         )
         Trip.objects.create(
             excavator=excavator,
@@ -3423,6 +3475,7 @@ class AccessLoginTests(TestCase):
             shift_type='day',
             equipment=excavator,
             opened_at=previous_datetime,
+            closed_at=previous_datetime + timedelta(hours=1),
         )
         Trip.objects.create(
             excavator=excavator,

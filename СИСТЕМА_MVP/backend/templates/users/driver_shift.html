@@ -1498,6 +1498,15 @@ body.driver-mobile-screen .driver-shift-metric-value input {
     text-align: right;
 }
 
+body.driver-mobile-screen .driver-shift-metric-value strong {
+    min-width: 2ch;
+    color: #f6fbfd;
+    font-size: clamp(23px, 6vw, 26px);
+    font-weight: 600;
+    line-height: 1;
+    text-align: right;
+}
+
 body.driver-mobile-screen .driver-shift-metric-value em {
     color: #82969d;
     font-size: clamp(12px, 3vw, 13px);
@@ -1576,6 +1585,32 @@ body.driver-mobile-screen .driver-shift-logout {
     background: rgba(7, 18, 23, .88);
 }
 
+body.driver-mobile-screen .driver-shift-opening-form {
+    display: contents;
+}
+
+body.driver-mobile-screen .driver-shift-empty-state {
+    display: grid;
+    gap: 5px;
+    margin-bottom: 10px;
+    padding: 10px 12px;
+    border: 1px solid rgba(255, 207, 29, .5);
+    border-radius: 7px;
+    color: #e7eef0;
+    background: rgba(55, 45, 7, .42);
+}
+
+body.driver-mobile-screen .driver-shift-empty-state strong {
+    color: #ffdf58;
+    font-size: 14px;
+}
+
+body.driver-mobile-screen .driver-shift-empty-state span {
+    color: #b9c8cd;
+    font-size: 12px;
+    line-height: 1.35;
+}
+
 body.driver-mobile-screen .driver-shift-open {
     border-color: rgba(140, 255, 46, .72);
     color: #071006;
@@ -1583,35 +1618,11 @@ body.driver-mobile-screen .driver-shift-open {
     box-shadow: 0 0 20px rgba(140, 255, 46, .18);
 }
 
-body.driver-mobile-screen .driver-shift-opening {
-    grid-template-rows: auto minmax(0, .72fr) minmax(0, 1.3fr) auto;
-}
-
-body.driver-mobile-screen .driver-shift-opening-fields {
-    flex: 1 1 auto;
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: clamp(8px, 1.15dvh, 12px);
-}
-
-body.driver-mobile-screen .driver-shift-select-field {
-    align-items: stretch;
-    flex-direction: column;
-    justify-content: center;
-}
-
-body.driver-mobile-screen .driver-shift-select-field select {
-    width: 100%;
-    min-width: 0;
-    min-height: 42px;
-    border: 0;
-    padding: 0 26px 0 0;
-    color: #f6fbfd;
-    background: transparent;
-    outline: none;
-    font: inherit;
-    font-size: clamp(17px, 4.3vw, 22px);
-    font-weight: 600;
+body.driver-mobile-screen .driver-shift-open:disabled {
+    border-color: rgba(127, 163, 177, .28);
+    color: rgba(185, 200, 205, .46);
+    background: rgba(7, 18, 23, .72);
+    box-shadow: none;
 }
 
 body.driver-mobile-screen .driver-shift-field .errorlist {
@@ -1653,9 +1664,6 @@ body.driver-mobile-screen .driver-shift-logout::before {
         padding: 8px 12px;
     }
 
-    body.driver-mobile-screen .driver-shift-opening-fields {
-        grid-template-columns: 1fr;
-    }
 }
 
 body.driver-mobile-screen .driver-downtime-card {
@@ -2238,7 +2246,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
 {% endblock %}
 
 {% block body %}
-<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v77' }}">
+<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v79' }}">
     {% if messages %}
         <div class="driver-messages">
             {% for message in messages %}
@@ -2400,19 +2408,15 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
                 </div>
             </form>
         {% else %}
-            <form method="post" class="driver-shift-workspace driver-shift-opening">
-                {% csrf_token %}
+            <div class="driver-shift-workspace driver-shift-opening">
                 <div class="driver-shift-titlebar">
                     <h2>Смена</h2>
                     <button class="driver-shift-update" type="button" data-driver-shift-update><span class="driver-shift-update-icon" aria-hidden="true"></span><span>Обновить</span></button>
                 </div>
-                <div class="driver-shift-section">
-                    <div class="driver-shift-section-head"><span>Параметры смены</span><b>{{ registration.dormitory_section }}</b></div>
-                    <div class="driver-shift-opening-fields">
-                        <label class="driver-shift-field driver-shift-select-field"><span>{{ form.shift_type.label }}</span>{{ form.shift_type }}{{ form.shift_type.errors }}</label>
-                        <label class="driver-shift-field driver-shift-select-field"><span>{{ form.truck.label }}</span>{{ form.truck }}{{ form.truck.errors }}</label>
-                    </div>
-                </div>
+                {% if form %}
+                <form method="post" class="driver-shift-opening-form">
+                    {% csrf_token %}
+                    {{ form.non_field_errors }}
                 <div class="driver-shift-section">
                     <div class="driver-shift-section-head"><span>Показатели техники</span>{% if last_closed_shift %}<b>Предыдущая смена</b>{% endif %}</div>
                     <div class="driver-shift-metrics">
@@ -2421,11 +2425,48 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
                         <label class="driver-shift-field"><span>Моточасы</span><span class="driver-shift-metric-value">{{ form.start_engine_hours }}<em>м/ч</em></span>{{ form.start_engine_hours.errors }}</label>
                     </div>
                 </div>
+                <div class="driver-shift-section">
+                    <div class="driver-shift-section-head"><span>Итог смены</span><b>Сейчас</b></div>
+                    <div class="driver-shift-result-grid">
+                        <div class="driver-shift-result-cell"><span>План</span><strong>0%</strong></div>
+                        <div class="driver-shift-result-cell"><span>Рейсы</span><strong>0 шт.</strong></div>
+                        <div class="driver-shift-result-cell"><span>Самосвал</span><strong>{{ work_assignment_equipment.garage_number|default:"—" }}</strong></div>
+                        <div class="driver-shift-result-cell"><span>Состояние</span><strong>Смена закрыта</strong></div>
+                    </div>
+                </div>
                 <div class="driver-shift-actions">
-                    <button class="driver-shift-open" type="submit">Открыть смену</button>
+                    <button class="driver-shift-open" type="submit">Начать смену</button>
                     <button class="driver-shift-logout" type="button" data-driver-shift-logout data-driver-logout-url="{% url 'logout' %}" style="--driver-logout-hold: 0%;">Выйти</button>
                 </div>
-            </form>
+                </form>
+                {% else %}
+                <div class="driver-shift-section">
+                    <div class="driver-shift-section-head"><span>Показатели техники</span></div>
+                    <div class="driver-shift-empty-state" role="status">
+                        <strong>Смена и самосвал еще не назначены</strong>
+                        <span>Обратитесь к руководителю. После назначения данные появятся здесь автоматически.</span>
+                    </div>
+                    <div class="driver-shift-metrics">
+                        <div class="driver-shift-field"><span>Топливо</span><span class="driver-shift-metric-value"><strong>—</strong><em>л</em></span></div>
+                        <div class="driver-shift-field"><span>Пробег</span><span class="driver-shift-metric-value"><strong>—</strong><em>км</em></span></div>
+                        <div class="driver-shift-field"><span>Моточасы</span><span class="driver-shift-metric-value"><strong>—</strong><em>м/ч</em></span></div>
+                    </div>
+                </div>
+                <div class="driver-shift-section">
+                    <div class="driver-shift-section-head"><span>Итог смены</span><b>Сейчас</b></div>
+                    <div class="driver-shift-result-grid">
+                        <div class="driver-shift-result-cell"><span>План</span><strong>Нет плана</strong></div>
+                        <div class="driver-shift-result-cell"><span>Рейсы</span><strong>0 шт.</strong></div>
+                        <div class="driver-shift-result-cell"><span>Самосвал</span><strong>—</strong></div>
+                        <div class="driver-shift-result-cell"><span>Состояние</span><strong>Нет назначения</strong></div>
+                    </div>
+                </div>
+                <div class="driver-shift-actions">
+                    <button class="driver-shift-open" type="button" disabled>Начать смену</button>
+                    <button class="driver-shift-logout" type="button" data-driver-shift-logout data-driver-logout-url="{% url 'logout' %}" style="--driver-logout-hold: 0%;">Выйти</button>
+                </div>
+                {% endif %}
+            </div>
         {% endif %}
     </section>
 
@@ -3303,7 +3344,7 @@ window.bindDriverMobileShell = function () {
         if (!("serviceWorker" in navigator)) {
             return;
         }
-        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v77' }}";
+        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v79' }}";
         var updateModal = document.querySelector("[data-driver-pwa-update-modal]");
         var updateBadge = document.querySelector("[data-driver-pwa-update-badge]");
         var updateTarget = document.querySelector("[data-driver-pwa-update-nav-target]");

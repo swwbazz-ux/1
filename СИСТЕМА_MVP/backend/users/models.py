@@ -47,6 +47,7 @@ class Employee(models.Model):
             DowntimeEvent.objects.filter(employee=self).exists(),
             EquipmentAssignment.objects.filter(employee=self).exists(),
             EquipmentAssignment.objects.filter(assigned_by=self).exists(),
+            EquipmentAssignment.objects.filter(ended_by=self).exists(),
             HaulAssignment.objects.filter(assigned_by=self).exists(),
             DispatcherActionLog.objects.filter(actor=self).exists(),
         ])

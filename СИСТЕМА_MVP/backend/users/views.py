@@ -6,7 +6,7 @@ from io import BytesIO
 from urllib.parse import urlencode
 
 from django.contrib import messages
-from django.core.exceptions import FieldDoesNotExist
+from django.core.exceptions import FieldDoesNotExist, ValidationError
 from django.forms import modelform_factory
 from django.db import transaction
 from django.db.models import Count, Q
@@ -20,7 +20,13 @@ from django.views.decorators.http import require_POST
 from openpyxl import Workbook
 
 from assignments.models import AssignmentStatus, ExcavatorPlacement, HaulAssignment, HaulAssignmentAction
-from assignments.services import apply_pending_haul_assignment, reconcile_due_haul_assignments
+from assignments.services import (
+    apply_pending_haul_assignment,
+    clear_active_equipment_assignment,
+    get_active_equipment_assignment,
+    reconcile_due_haul_assignments,
+    work_assignment_state,
+)
 from core.models import OperationalStateEvent, bump_operational_state
 from downtimes.models import DowntimeEvent, DowntimeReason
 from references.models import Dormitory, DormitorySection, DumpPoint, Equipment, EquipmentState, EquipmentType, RockType
@@ -111,7 +117,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v77'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v79'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -1365,12 +1371,27 @@ def system_admin_employee_detail_view(request, employee_id):
             return redirect_after_admin_action(request, 'system_admin_employee_detail', employee_id=employee.id)
         form = AdminEmployeeEditForm(request.POST, request.FILES, instance=employee)
         if form.is_valid():
-            saved_employee = form.save()
-            if request.FILES.get('photo') and old_photo_name and old_photo_name != saved_employee.photo.name:
-                saved_employee.photo.storage.delete(old_photo_name)
-            log_admin_action(access.employee, 'Изменена карточка сотрудника', employee)
-            messages.success(request, 'Карточка сотрудника сохранена.')
-            return redirect_after_admin_action(request, 'system_admin_employee_detail', employee_id=employee.id)
+            try:
+                with transaction.atomic():
+                    saved_employee = form.save()
+                    work_assignment = form.save_work_assignment(assigned_by=access.employee)
+            except ValidationError as error:
+                form.add_error('assignment_equipment', error)
+            else:
+                if request.FILES.get('photo') and old_photo_name and old_photo_name != saved_employee.photo.name:
+                    saved_employee.photo.storage.delete(old_photo_name)
+                assignment_label = (
+                    f'{work_assignment.work_shift_label}; {work_assignment.equipment}'
+                    if work_assignment else 'назначение снято'
+                )
+                log_admin_action(
+                    access.employee,
+                    'Изменена карточка сотрудника',
+                    employee,
+                    new_value=f'Рабочее назначение: {assignment_label}',
+                )
+                messages.success(request, 'Карточка сотрудника и рабочее назначение сохранены.')
+                return redirect_after_admin_action(request, 'system_admin_employee_detail', employee_id=employee.id)
     else:
         form = AdminEmployeeEditForm(instance=employee)
 
@@ -1384,6 +1405,7 @@ def system_admin_employee_detail_view(request, employee_id):
         or employee_accesses.first()
     )
     role_form_initial = {'role': current_role_access.role_id} if current_role_access else None
+    active_equipment_assignment = get_active_equipment_assignment(employee)
 
     return render(
         request,
@@ -1396,6 +1418,7 @@ def system_admin_employee_detail_view(request, employee_id):
             'block_form': AdminAccessBlockForm(),
             'employee_accesses': employee_accesses,
             'current_role_access': current_role_access,
+            'active_equipment_assignment': active_equipment_assignment,
             'logs': AdminActionLog.objects.filter(object_repr=str(employee))[:10],
         },
     )
@@ -1474,6 +1497,11 @@ def system_admin_access_action_view(request, access_id, action):
             employee_access.is_active = False
             employee_access.deactivated_at = timezone.now()
             employee_access.save(update_fields=['status', 'is_active', 'deactivated_at'])
+            clear_active_equipment_assignment(
+                employee=employee_access.employee,
+                assigned_by=admin_access.employee,
+                role_code=employee_access.role.code,
+            )
             log_admin_action(admin_access.employee, 'Доступ деактивирован', employee_access)
             messages.success(request, 'Доступ деактивирован.')
     return redirect_after_admin_action(request, 'system_admin_employee_detail', employee_id=employee_access.employee.id)
@@ -1492,12 +1520,14 @@ def system_admin_employee_status_action_view(request, employee_id, action):
             employee.status = Employee.Status.DEACTIVATED
             employee.is_active = False
             employee.accesses.update(status=EmployeeAccess.Status.DEACTIVATED, is_active=False, deactivated_at=timezone.now())
+            clear_active_equipment_assignment(employee=employee, assigned_by=access.employee)
             messages.success(request, 'Сотрудник деактивирован.')
             log_admin_action(access.employee, 'Сотрудник деактивирован', employee)
         elif action == 'archive':
             employee.status = Employee.Status.ARCHIVED
             employee.is_active = False
             employee.accesses.update(status=EmployeeAccess.Status.DEACTIVATED, is_active=False, deactivated_at=timezone.now())
+            clear_active_equipment_assignment(employee=employee, assigned_by=access.employee)
             messages.success(request, 'Сотрудник отправлен в архив.')
             log_admin_action(access.employee, 'Сотрудник отправлен в архив', employee)
         elif action == 'delete':
@@ -1773,7 +1803,11 @@ def driver_shift_view(request):
         return redirect('driver_registration')
 
     open_shift = EmployeeShift.objects.filter(employee=access.employee, closed_at__isnull=True).order_by('-opened_at').first()
+    work_assignment = get_active_equipment_assignment(access.employee, 'driver')
+    assignment_state = work_assignment_state(access.employee, work_assignment)
     current_truck = open_shift.equipment if open_shift else None
+    assigned_truck = work_assignment.equipment if work_assignment and assignment_state == 'assigned' else None
+    header_truck = current_truck or assigned_truck
     if current_truck:
         reconcile_due_haul_assignments(truck_id=current_truck.id)
     current_assignment = None
@@ -1849,7 +1883,7 @@ def driver_shift_view(request):
     shift_progress = calculate_truck_shift_progress(current_truck, reference_shift=open_shift)
     shift_plan = shift_plan_display_context(shift_progress)
     shift_plan_percent = shift_plan['percent']
-    active_tab = request.GET.get('tab', 'work')
+    active_tab = request.GET.get('tab', 'work' if open_shift else 'shift')
     if active_tab not in {'work', 'shift', 'downtimes', 'manifest'}:
         active_tab = 'work'
     driver_status = 'ПУСТОЙ'
@@ -1890,8 +1924,8 @@ def driver_shift_view(request):
             .first()
         )
     driver_header_label = (
-        f'Самосвал {driver_equipment_number(current_truck)} · {driver_employee_short_name(access.employee)}'
-        if current_truck
+        f'Самосвал {driver_equipment_number(header_truck)} · {driver_employee_short_name(access.employee)}'
+        if header_truck
         else f'Самосвал · {driver_employee_short_name(access.employee)}'
     )
     driver_context_rock = (
@@ -1944,27 +1978,37 @@ def driver_shift_view(request):
         active_downtime_started_at = active_downtime.started_at.isoformat()
         active_downtime_status_key = driver_downtime_reason_status_key(active_downtime.reason)
 
-    selected_truck_id = request.POST.get('truck') if request.method == 'POST' else request.GET.get('truck')
     last_closed_shift = None
-    if selected_truck_id:
+    if assigned_truck:
         last_closed_shift = EmployeeShift.objects.filter(
-            equipment_id=selected_truck_id,
+            equipment=assigned_truck,
             closed_at__isnull=False,
         ).order_by('-closed_at').first()
 
     if request.method == 'POST' and not open_shift:
-        form = DriverOpenShiftForm(request.POST, employee=access.employee)
-        if form.is_valid():
-            shift = form.save(commit=False)
-            shift.employee = access.employee
-            shift.opened_by = access.employee
-            shift.shift_type = form.cleaned_data['shift_type']
-            shift.equipment = form.cleaned_data['truck']
-            shift.opened_at = timezone.now()
-            shift.save()
-            assign_shift_plan_snapshot(shift)
-            messages.success(request, 'Смена открыта.')
-            return redirect('driver_work')
+        form = DriverOpenShiftForm(request.POST, employee=access.employee, work_assignment=work_assignment) if assignment_state == 'assigned' else None
+        if form and form.is_valid():
+            with transaction.atomic():
+                Employee.objects.select_for_update().get(pk=access.employee_id)
+                current_work_assignment = get_active_equipment_assignment(access.employee, 'driver')
+                if current_work_assignment:
+                    Equipment.objects.select_for_update().get(pk=current_work_assignment.equipment_id)
+                current_assignment_state = work_assignment_state(access.employee, current_work_assignment)
+                if current_assignment_state != 'assigned':
+                    form.add_error(None, 'Назначение изменилось. Обновите экран перед началом смены.')
+                elif EmployeeShift.objects.filter(employee=access.employee, closed_at__isnull=True).exists():
+                    form.add_error(None, 'Смена уже открыта. Обновите экран.')
+                else:
+                    shift = form.save(commit=False)
+                    shift.employee = access.employee
+                    shift.opened_by = access.employee
+                    shift.shift_type = current_work_assignment.shift_type
+                    shift.equipment = current_work_assignment.equipment
+                    shift.opened_at = timezone.now()
+                    shift.save()
+                    assign_shift_plan_snapshot(shift)
+                    messages.success(request, 'Смена открыта.')
+                    return redirect('driver_work')
     else:
         form_initial = {}
         if last_closed_shift:
@@ -1973,9 +2017,11 @@ def driver_shift_view(request):
                 'start_mileage': last_closed_shift.end_mileage,
                 'start_engine_hours': last_closed_shift.end_engine_hours,
             }
-        if selected_truck_id:
-            form_initial['truck'] = selected_truck_id
-        form = DriverOpenShiftForm(initial=form_initial, employee=access.employee)
+        form = (
+            DriverOpenShiftForm(initial=form_initial, employee=access.employee, work_assignment=work_assignment)
+            if not open_shift and assignment_state == 'assigned'
+            else None
+        )
 
     response = render(
         request,
@@ -1984,7 +2030,12 @@ def driver_shift_view(request):
             'access': access,
             'registration': registration,
             'current_truck': current_truck,
+            'header_truck': header_truck,
             'open_shift': open_shift,
+            'work_assignment': work_assignment,
+            'work_assignment_state': assignment_state,
+            'work_assignment_shift_label': work_assignment.work_shift_label if work_assignment else '',
+            'work_assignment_equipment': assigned_truck,
             'current_assignment': current_assignment,
             'active_trip': active_trip,
             'form': form,

@@ -15,7 +15,13 @@ from django.utils import timezone
 from django.views.decorators.http import require_http_methods, require_POST
 
 from assignments.models import AssignmentStatus, EquipmentAssignment, ExcavatorPlacement, HaulAssignment
-from assignments.services import reconcile_due_haul_assignments, schedule_haul_assignment, schedule_haul_release
+from assignments.services import (
+    get_active_equipment_assignment,
+    reconcile_due_haul_assignments,
+    schedule_haul_assignment,
+    schedule_haul_release,
+    work_assignment_state,
+)
 from core.models import OperationalStateVersion, bump_operational_state
 from downtimes.models import DowntimeEvent, DowntimeReason
 from references.equipment_states import DEFAULT_EQUIPMENT_STATES
@@ -587,7 +593,7 @@ EXCAVATOR_MANIFEST = {
 }
 
 EXCAVATOR_SERVICE_WORKER_JS = r"""
-const CACHE_NAME = "excavator-mobile-shell-v109";
+const CACHE_NAME = "excavator-mobile-shell-v110";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const CORE_ASSETS = [
@@ -2484,8 +2490,17 @@ def excavator_truck_has_driver_assignment(truck):
             equipment=truck,
             ended_at__isnull=True,
             status__in=(AssignmentStatus.PENDING, AssignmentStatus.ACCEPTED),
-            employee__accesses__role__code='driver',
-            employee__accesses__is_active=True,
+            employee__is_active=True,
+            employee_id__in=(
+                EmployeeAccess.objects
+                .filter(role__code='driver', is_active=True)
+                .exclude(status=EmployeeAccess.Status.DEACTIVATED)
+                .values('employee_id')
+            ),
+        )
+        .filter(
+            Q(role__code='driver')
+            | Q(role__isnull=True)
         )
         .exists()
     )
@@ -2856,9 +2871,9 @@ def finalize_trip_unloaded(trip, *, driver, unloading_shift):
     trip.is_carryover = bool(
         trip.is_carryover
         or (
-            trip.loading_shift_id
+            trip.loading_shift
             and unloading_shift
-            and trip.loading_shift_id != unloading_shift.id
+            and trip.loading_shift.shift_type != unloading_shift.shift_type
         )
     )
     trip.save(update_fields=[
@@ -3266,36 +3281,20 @@ def default_excavator_shift_type(now=None):
 
 
 def get_excavator_for_shift_start(employee, payload):
-    raw_excavator_id = payload.get('excavator_id') or payload.get('equipment_id') or ''
-    if raw_excavator_id:
-        try:
-            excavator_id = int(raw_excavator_id)
-        except (TypeError, ValueError):
-            return None
-        return Equipment.objects.filter(
-            id=excavator_id,
-            equipment_type__name__icontains='Экскаватор',
-            is_active=True,
-        ).first()
+    assignment = get_active_equipment_assignment(employee, 'excavator_operator')
+    if work_assignment_state(employee, assignment) != 'assigned':
+        return None
+    return assignment.equipment
 
-    last_shift = (
-        EmployeeShift.objects
-        .filter(employee=employee, equipment__equipment_type__name__icontains='Экскаватор')
-        .select_related('equipment', 'equipment__equipment_type')
-        .order_by('-opened_at')
-        .first()
-    )
-    if last_shift and last_shift.equipment and last_shift.equipment.is_active:
-        return last_shift.equipment
 
-    busy_equipment_ids = EmployeeShift.objects.filter(closed_at__isnull=True, equipment_id__isnull=False).values('equipment_id')
-    return (
-        Equipment.objects
-        .filter(equipment_type__name__icontains='Экскаватор', is_active=True)
-        .exclude(id__in=busy_equipment_ids)
-        .order_by('garage_number')
-        .first()
-    )
+def work_assignment_error_message(state):
+    if state in {'employee_inactive', 'access_inactive'}:
+        return 'Рабочий доступ неактивен. Обратитесь к администратору.'
+    if state == 'equipment_inactive':
+        return 'Назначенная техника неактивна. Обратитесь к руководителю.'
+    if state == 'assignment_conflict':
+        return 'Назначенная техника уже занята в открытой смене. Обратитесь к руководителю.'
+    return 'Смена и техника не назначены. Обратитесь к руководителю.'
 
 
 def get_previous_closed_equipment_shift(equipment):
@@ -3380,9 +3379,14 @@ def excavator_shift_action_view(request):
                 'version': get_operational_state_version(),
             })
 
-        excavator = get_excavator_for_shift_start(access.employee, payload)
-        if not excavator:
-            return JsonResponse({'ok': False, 'error': 'Не найден свободный экскаватор для начала смены.'}, status=409)
+        access.employee.__class__.objects.select_for_update().get(pk=access.employee_id)
+        work_assignment = get_active_equipment_assignment(access.employee, 'excavator_operator')
+        if work_assignment:
+            Equipment.objects.select_for_update().get(pk=work_assignment.equipment_id)
+        assignment_state = work_assignment_state(access.employee, work_assignment)
+        if assignment_state != 'assigned':
+            return JsonResponse({'ok': False, 'error': work_assignment_error_message(assignment_state), 'assignment_state': assignment_state}, status=409)
+        excavator = work_assignment.equipment
         if EmployeeShift.objects.filter(equipment=excavator, closed_at__isnull=True).exists():
             return JsonResponse({'ok': False, 'error': 'На этом экскаваторе уже открыта смена.'}, status=409)
 
@@ -3395,13 +3399,10 @@ def excavator_shift_action_view(request):
             if engine_hours is None:
                 engine_hours = previous_shift.end_engine_hours
 
-        shift_type = str(payload.get('shift_type') or default_excavator_shift_type())
-        if shift_type not in {'day', 'night'}:
-            shift_type = default_excavator_shift_type()
         shift = EmployeeShift.objects.create(
             employee=access.employee,
             equipment=excavator,
-            shift_type=shift_type,
+            shift_type=work_assignment.shift_type,
             start_fuel=fuel,
             start_mileage=mileage,
             start_engine_hours=engine_hours,
@@ -3434,13 +3435,17 @@ def excavator_work_view(request):
     reconcile_due_haul_assignments()
 
     open_shift = get_excavator_open_shift(access.employee)
+    work_assignment = get_active_equipment_assignment(access.employee, 'excavator_operator')
+    assignment_state = work_assignment_state(access.employee, work_assignment)
     current_excavator = open_shift.equipment if open_shift else None
     reconcile_excavator_waiting_for_trucks(
         current_excavator,
         access.employee,
         start_when_empty=bool(open_shift),
     )
-    shift_start_excavator = current_excavator or get_excavator_for_shift_start(access.employee, {})
+    shift_start_excavator = current_excavator or (
+        work_assignment.equipment if work_assignment and assignment_state == 'assigned' else None
+    )
     previous_equipment_shift = None if open_shift else get_previous_closed_equipment_shift(shift_start_excavator)
 
     if request.method == 'POST':
@@ -3550,8 +3555,17 @@ def excavator_work_view(request):
                 equipment_id__in=assignment_truck_ids,
                 ended_at__isnull=True,
                 status__in=(AssignmentStatus.PENDING, AssignmentStatus.ACCEPTED),
-                employee__accesses__role__code='driver',
-                employee__accesses__is_active=True,
+                employee__is_active=True,
+                employee_id__in=(
+                    EmployeeAccess.objects
+                    .filter(role__code='driver', is_active=True)
+                    .exclude(status=EmployeeAccess.Status.DEACTIVATED)
+                    .values('employee_id')
+                ),
+            )
+            .filter(
+                Q(role__code='driver')
+                | Q(role__isnull=True)
             )
             .values_list('equipment_id', flat=True)
             .distinct()
@@ -3913,8 +3927,19 @@ def excavator_work_view(request):
             'face_block': face_block,
             'current_rock': current_rock,
             'selected_dump_point': selected_dump_point,
-            'shift_time_label': '07:00-19:00' if not open_shift or open_shift.shift_type == 'day' else '19:00-07:00',
-            'excavator_label': excavator_operator_label(current_excavator),
+            'shift_time_label': (
+                '07:00-19:00'
+                if (open_shift and open_shift.shift_type == 'day')
+                or (not open_shift and work_assignment and work_assignment.shift_type == 'day')
+                else '19:00-07:00'
+                if open_shift or work_assignment
+                else 'Не назначена'
+            ),
+            'excavator_label': excavator_operator_label(current_excavator or shift_start_excavator) if (current_excavator or shift_start_excavator) else 'Не назначен',
+            'work_assignment': work_assignment,
+            'work_assignment_state': assignment_state,
+            'work_assignment_error': work_assignment_error_message(assignment_state),
+            'work_assignment_shift_label': work_assignment.work_shift_label if work_assignment else '',
             'shift_plan_percent': shift_plan_percent,
             'shift_plan_visual': shift_plan_visual,
             'shift_plan_status': shift_plan['status'],

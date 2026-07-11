@@ -168,6 +168,27 @@ body.employee-detail-screen {
     margin: 0;
 }
 
+.admin-employee-detail-shell .employee-work-assignment-meta {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 12px;
+    align-items: baseline;
+    padding: 10px 12px;
+    border: 1px solid color-mix(in srgb, var(--admin-green) 28%, var(--admin-line));
+    border-radius: var(--employee-radius);
+    background: color-mix(in srgb, var(--admin-panel-soft) 94%, var(--admin-green) 6%);
+    color: var(--admin-muted);
+    font-family: "Segoe UI", Arial, sans-serif;
+    font-size: 12px;
+    line-height: 1.35;
+}
+
+.admin-employee-detail-shell .employee-work-assignment-meta strong {
+    color: var(--admin-ink);
+    font-size: 13px;
+}
+
 .admin-employee-detail-shell .employee-detail-field {
     display: grid;
     gap: var(--employee-space-1);
