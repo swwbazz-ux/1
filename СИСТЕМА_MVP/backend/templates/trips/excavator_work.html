@@ -5,9 +5,9 @@
 {% block body_class %}excavator-operator-screen{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v104">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v104">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v104">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v105">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v105">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v105">
 <meta name="theme-color" content="#030708">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Погрузка">
@@ -403,7 +403,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v104";
+var excavatorShellVersion = "excavator-mobile-shell-v105";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var excavatorRelevantEvents = {
     assignment_changed: true,
@@ -1847,7 +1847,11 @@ window.initExcavatorWorkShell = function () {
 
     tabs.forEach(function (tab) {
         tab.addEventListener("click", function () {
-            activateTab(tab.dataset.eoTab);
+            var tabName = tab.dataset.eoTab;
+            activateTab(tabName);
+            if (tabName === "events") {
+                refreshExcavatorWorkFromServer({ preserveTab: true });
+            }
         });
     });
 
