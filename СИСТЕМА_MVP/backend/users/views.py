@@ -117,7 +117,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v92'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v93'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -1899,6 +1899,73 @@ def driver_shift_view(request):
 
     completed_shift_trips = [trip for trip in shift_trips if trip.status == TripStatus.COMPLETED]
     shift_trip_count = len(completed_shift_trips)
+    report_trip_map = {}
+    for trip in completed_shift_trips:
+        report_key = (trip.driver_excavator_label, trip.driver_dump_point_label)
+        report_trip_map.setdefault(report_key, 0)
+        report_trip_map[report_key] += 1
+    driver_shift_report_trip_rows = [
+        {'excavator': key[0], 'dump_point': key[1], 'count': count}
+        for key, count in report_trip_map.items()
+    ]
+
+    driver_shift_downtime_events = []
+    driver_shift_downtime_rows = []
+    driver_shift_timeline = []
+    if current_truck and open_shift:
+        shift_period_end = timezone.now()
+        driver_shift_downtime_events = list(
+            DowntimeEvent.objects
+            .select_related('reason')
+            .filter(
+                equipment=current_truck,
+                employee=access.employee,
+                started_at__lt=shift_period_end,
+            )
+            .filter(Q(ended_at__isnull=True) | Q(ended_at__gt=open_shift.opened_at))
+            .order_by('started_at')
+        )
+        downtime_totals = {}
+        for event in driver_shift_downtime_events:
+            overlap_start = max(event.started_at, open_shift.opened_at)
+            overlap_end = min(event.ended_at or shift_period_end, shift_period_end)
+            duration_seconds = max(0, int((overlap_end - overlap_start).total_seconds()))
+            reason_label = event.reason.button_label
+            downtime_totals.setdefault(reason_label, 0)
+            downtime_totals[reason_label] += duration_seconds
+            driver_shift_timeline.append({
+                'at': overlap_start,
+                'time': timezone.localtime(overlap_start).strftime('%H:%M'),
+                'kind': 'downtime-start',
+                'title': f'Начат простой: {reason_label}',
+                'meta': '',
+            })
+            if event.ended_at:
+                driver_shift_timeline.append({
+                    'at': overlap_end,
+                    'time': timezone.localtime(overlap_end).strftime('%H:%M'),
+                    'kind': 'downtime-end',
+                    'title': f'Завершён простой: {reason_label}',
+                    'meta': driver_format_duration_label(duration_seconds),
+                })
+        driver_shift_downtime_rows = [
+            {
+                'reason': reason,
+                'seconds': seconds,
+                'duration': driver_format_duration_label(seconds),
+            }
+            for reason, seconds in downtime_totals.items()
+        ]
+
+    for index, trip in enumerate(shift_trips, start=1):
+        driver_shift_timeline.append({
+            'at': trip.created_at,
+            'time': timezone.localtime(trip.created_at).strftime('%H:%M'),
+            'kind': 'trip',
+            'title': f'Рейс {index:02d} · {trip.driver_excavator_label} → {trip.driver_dump_point_label}',
+            'meta': trip.driver_time_range_label,
+        })
+    driver_shift_timeline.sort(key=lambda item: item['at'])
     shift_progress = calculate_truck_shift_progress(current_truck, reference_shift=open_shift)
     shift_plan = shift_plan_display_context(shift_progress)
     shift_plan_percent = shift_plan['percent']
@@ -2076,6 +2143,13 @@ def driver_shift_view(request):
             'downtime_reasons': downtime_reasons,
             'shift_trips': shift_trips,
             'shift_trip_count': shift_trip_count,
+            'driver_shift_report_trip_rows': driver_shift_report_trip_rows,
+            'driver_shift_downtime_rows': driver_shift_downtime_rows,
+            'driver_shift_timeline': driver_shift_timeline,
+            'driver_shift_report_date': timezone.localtime(open_shift.opened_at).strftime('%d.%m.%Y') if open_shift else '—',
+            'driver_shift_report_shift': open_shift.get_shift_type_display() if open_shift else 'Смена не открыта',
+            'driver_shift_report_driver': driver_employee_short_name(access.employee),
+            'driver_shift_report_truck': driver_equipment_number(current_truck) if current_truck else '—',
             'shift_plan_percent': shift_plan_percent,
             'shift_plan_status': shift_plan['status'],
             'shift_plan_status_label': shift_plan['status_label'],

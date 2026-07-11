@@ -128,6 +128,13 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, '>Выйти<')
         self.assertNotContains(response, '>Закрытие смены<')
         self.assertNotContains(response, '>Закрыть смену<')
+        self.assertContains(response, 'data-driver-manifest-view-open="report"')
+        self.assertContains(response, 'data-driver-manifest-view-open="timeline"')
+        self.assertContains(response, 'data-driver-report-copy')
+        self.assertContains(response, 'data-driver-report-share')
+        self.assertContains(response, 'buildDriverShiftReportText')
+        self.assertContains(response, 'Отчёт водителя за смену')
+        self.assertContains(response, 'Событий в текущей смене пока нет')
 
     def test_driver_screen_includes_own_pwa_install_metadata(self):
         truck_type = EquipmentType.objects.create(name='Самосвал')
@@ -149,7 +156,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, reverse('driver_manifest'))
         self.assertContains(response, 'rel="manifest"')
         self.assertContains(response, '/driver-sw.js')
-        self.assertContains(response, 'driver-mobile-shell-v92')
+        self.assertContains(response, 'driver-mobile-shell-v93')
         self.assertContains(response, 'data-driver-pwa-update-modal')
         self.assertContains(response, 'data-driver-pwa-update-badge')
         self.assertContains(response, 'mode: "custom", path: "^/driver/(?:shift/?)?$"')
@@ -290,7 +297,7 @@ class AccessLoginTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Service-Worker-Allowed'], '/driver/')
-        self.assertIn('driver-mobile-shell-v92', script)
+        self.assertIn('driver-mobile-shell-v93', script)
         self.assertIn('/driver/', script)
         self.assertIn('/driver/shift/', script)
         self.assertIn('/driver.webmanifest', script)
@@ -2030,7 +2037,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(driver_shift_response, 'ККД')
         self.assertContains(driver_shift_response, 'window.applyOperationalStateRefresh')
         self.assertContains(driver_shift_response, 'data-realtime-mode="custom"')
-        self.assertContains(driver_shift_response, 'driver-mobile-shell-v92')
+        self.assertContains(driver_shift_response, 'driver-mobile-shell-v93')
 
     def test_driver_downtime_buttons_are_rendered_from_server_reference(self):
         truck = self.create_registered_driver_shift()

@@ -2075,6 +2075,176 @@ body.driver-mobile-screen .driver-trip-list {
     gap: 8px;
 }
 
+body.driver-mobile-screen [data-driver-tab-panel="manifest"].is-active {
+    grid-template-rows: auto minmax(0, 1fr) !important;
+    gap: 10px !important;
+    padding-bottom: 0;
+}
+
+body.driver-mobile-screen .driver-manifest-head {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+}
+
+body.driver-mobile-screen .driver-manifest-head h2 {
+    margin: 0;
+    font-size: clamp(28px, 7vw, 33px);
+    line-height: 1;
+}
+
+body.driver-mobile-screen .driver-manifest-tabs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: min(210px, 54vw);
+    padding: 3px;
+    border: 1px solid rgba(127, 163, 177, .3);
+    border-radius: 7px;
+    background: #07141a;
+}
+
+body.driver-mobile-screen .driver-manifest-tabs button {
+    min-height: 34px;
+    border: 0;
+    border-radius: 5px;
+    color: #8a9aa3;
+    background: transparent;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+body.driver-mobile-screen .driver-manifest-tabs button.is-active {
+    color: #58df52;
+    background: rgba(88, 223, 82, .1);
+}
+
+body.driver-mobile-screen .driver-manifest-view {
+    display: none;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding-bottom: 12px;
+}
+
+body.driver-mobile-screen .driver-manifest-view.is-active {
+    display: block;
+}
+
+body.driver-mobile-screen .driver-report-card,
+body.driver-mobile-screen .driver-report-section {
+    border: 1px solid rgba(88, 223, 82, .3);
+    border-radius: 8px;
+    background: rgba(7, 18, 22, .92);
+}
+
+body.driver-mobile-screen .driver-report-card {
+    padding: 14px;
+}
+
+body.driver-mobile-screen .driver-report-card h3 {
+    margin: 0 0 5px;
+    color: #f4f8f9;
+    font-size: 18px;
+}
+
+body.driver-mobile-screen .driver-report-card p {
+    margin: 3px 0;
+    color: #a8b5bd;
+    font-size: 13px;
+}
+
+body.driver-mobile-screen .driver-report-grid {
+    display: grid;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+body.driver-mobile-screen .driver-report-section {
+    padding: 12px 14px;
+}
+
+body.driver-mobile-screen .driver-report-section h4 {
+    margin: 0 0 8px;
+    color: #dbe7e9;
+    font-size: 13px;
+    text-transform: uppercase;
+}
+
+body.driver-mobile-screen .driver-report-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+    padding: 7px 0;
+    border-top: 1px solid rgba(127, 163, 177, .14);
+    color: #f4f8f9;
+    font-size: 14px;
+}
+
+body.driver-mobile-screen .driver-report-row:first-of-type {
+    border-top: 0;
+}
+
+body.driver-mobile-screen .driver-report-row strong {
+    color: #58df52;
+    font-variant-numeric: tabular-nums;
+}
+
+body.driver-mobile-screen .driver-report-actions {
+    position: sticky;
+    bottom: 0;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    padding-top: 10px;
+    background: linear-gradient(180deg, transparent, #030b0e 30%);
+}
+
+body.driver-mobile-screen .driver-report-actions button {
+    min-height: 48px;
+    border: 1px solid #58df52;
+    border-radius: 7px;
+    color: #58df52;
+    background: rgba(12, 38, 22, .84);
+    font-size: 14px;
+    font-weight: 700;
+}
+
+body.driver-mobile-screen .driver-timeline {
+    display: grid;
+    gap: 8px;
+}
+
+body.driver-mobile-screen .driver-timeline-row {
+    display: grid;
+    grid-template-columns: 48px minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: center;
+    min-height: 58px;
+    padding: 9px 11px;
+    border: 1px solid rgba(127, 163, 177, .24);
+    border-radius: 7px;
+    background: rgba(7, 18, 22, .9);
+}
+
+body.driver-mobile-screen .driver-timeline-row time {
+    color: #58df52;
+    font-weight: 700;
+}
+
+body.driver-mobile-screen .driver-timeline-row strong {
+    min-width: 0;
+    color: #f4f8f9;
+    font-size: 14px;
+    line-height: 1.15;
+}
+
+body.driver-mobile-screen .driver-timeline-row span {
+    color: #8a9aa3;
+    font-size: 12px;
+    white-space: nowrap;
+}
+
 body.driver-mobile-screen .driver-trip-row {
     padding: 0;
 }
@@ -2610,7 +2780,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
 {% endblock %}
 
 {% block body %}
-<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v92' }}">
+<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v93' }}">
     {% if messages %}
         <div class="driver-messages">
             {% for message in messages %}
@@ -2862,32 +3032,53 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
         <button class="driver-primary-action driver-downtime-close driver-downtime-hold{% if not active_downtime %} is-disabled{% endif %}" type="button" data-driver-close-downtime style="--driver-action-hold: 0%" {% if not active_downtime %}disabled aria-disabled="true"{% else %}aria-label="Удерживайте 2 секунды, чтобы завершить простой"{% endif %}>Завершить простой</button>
     </section>
 
-    <section class="driver-panel driver-tab {% if active_tab == 'manifest' %}is-active{% endif %}" data-driver-tab-panel="manifest">
-        <div class="driver-section-title">
-            <span>Путевка</span>
-            <strong>{{ shift_trip_count }} рейсов · {% if shift_plan_has_plan %}{{ shift_plan_percent }}% плана{% else %}{{ shift_plan_status_label }}{% endif %}</strong>
+    <section class="driver-panel driver-tab {% if active_tab == 'manifest' %}is-active{% endif %}" data-driver-tab-panel="manifest" data-driver-report-date="{{ driver_shift_report_date }}" data-driver-report-shift="{{ driver_shift_report_shift }}" data-driver-report-driver="{{ driver_shift_report_driver }}" data-driver-report-truck="{{ driver_shift_report_truck }}" data-driver-report-trip-total="{{ shift_trip_count }}" data-driver-report-downtime-total="{{ shift_downtime_total_label }}">
+        <div class="driver-manifest-head">
+            <h2>Путёвка</h2>
+            <div class="driver-manifest-tabs" role="tablist" aria-label="Вид путёвки">
+                <button class="is-active" type="button" role="tab" aria-selected="true" data-driver-manifest-view-open="report">Отчёт</button>
+                <button type="button" role="tab" aria-selected="false" data-driver-manifest-view-open="timeline">Журнал</button>
+            </div>
         </div>
-        <div class="driver-trip-list">
-            {% for trip in shift_trips %}
-                <details class="driver-trip-row">
-                    <summary>
-                        <span>{{ forloop.counter|stringformat:"02d" }}</span>
-                        <strong>{{ trip.driver_excavator_label }}</strong>
-                        <em>{{ trip.driver_dump_point_label }}</em>
-                        <b>{{ trip.driver_time_range_label }}</b>
-                        <small>{{ trip.driver_duration_label }}</small>
-                    </summary>
-                    <dl>
-                        <div><dt>Статус</dt><dd>{{ trip.get_status_display }}</dd></div>
-                        <div><dt>Порода</dt><dd>{{ trip.rock_type }}</dd></div>
-                        <div><dt>Объем</dt><dd>{{ trip.volume_m3|default:"—" }}</dd></div>
-                        <div><dt>Время создания</dt><dd>{{ trip.created_at|date:"H:i" }}</dd></div>
-                        <div><dt>Время разгрузки</dt><dd>{% if trip.completed_at %}{{ trip.completed_at|date:"H:i" }}{% else %}—{% endif %}</dd></div>
-                    </dl>
-                </details>
-            {% empty %}
-                <div class="driver-empty-state">Рейсов за текущую смену пока нет.</div>
-            {% endfor %}
+        <div class="driver-manifest-view is-active" data-driver-manifest-view="report">
+            <div class="driver-report-card">
+                <h3>Отчёт водителя за смену</h3>
+                <p>{{ driver_shift_report_date }} · {{ driver_shift_report_shift }}</p>
+                <p>Самосвал {{ driver_shift_report_truck }} · {{ driver_shift_report_driver }}</p>
+            </div>
+            <div class="driver-report-grid">
+                <section class="driver-report-section">
+                    <h4>Рейсы</h4>
+                    {% for row in driver_shift_report_trip_rows %}
+                        <div class="driver-report-row" data-driver-report-trip data-excavator="{{ row.excavator }}" data-dump-point="{{ row.dump_point }}" data-count="{{ row.count }}"><span>{{ row.excavator }} → {{ row.dump_point }}</span><strong>{{ row.count }}</strong></div>
+                    {% empty %}<div class="driver-report-row"><span>Завершённых рейсов нет</span><strong>0</strong></div>{% endfor %}
+                    <div class="driver-report-row"><span>Всего рейсов</span><strong>{{ shift_trip_count }}</strong></div>
+                </section>
+                <section class="driver-report-section">
+                    <h4>Простои</h4>
+                    {% for row in driver_shift_downtime_rows %}
+                        <div class="driver-report-row" data-driver-report-downtime data-reason="{{ row.reason }}" data-duration="{{ row.duration }}"><span>{{ row.reason }}</span><strong>{{ row.duration }}</strong></div>
+                    {% empty %}<div class="driver-report-row"><span>Простоев нет</span><strong>00:00:00</strong></div>{% endfor %}
+                    <div class="driver-report-row"><span>Всего простоев</span><strong>{{ shift_downtime_total_label }}</strong></div>
+                </section>
+                <section class="driver-report-section" data-driver-report-metrics>
+                    <h4>Техника на конец смены</h4>
+                    <div class="driver-report-row"><span>Топливо</span><strong data-driver-report-metric="end_fuel">—</strong></div>
+                    <div class="driver-report-row"><span>Пробег</span><strong data-driver-report-metric="end_mileage">—</strong></div>
+                    <div class="driver-report-row"><span>Моточасы</span><strong data-driver-report-metric="end_engine_hours">—</strong></div>
+                </section>
+            </div>
+            <div class="driver-report-actions">
+                <button type="button" data-driver-report-copy>Скопировать</button>
+                <button type="button" data-driver-report-share>Поделиться</button>
+            </div>
+        </div>
+        <div class="driver-manifest-view" data-driver-manifest-view="timeline">
+            <div class="driver-timeline">
+                {% for event in driver_shift_timeline %}
+                    <div class="driver-timeline-row is-{{ event.kind }}"><time>{{ event.time }}</time><strong>{{ event.title }}</strong><span>{{ event.meta }}</span></div>
+                {% empty %}<div class="driver-empty-state">Событий в текущей смене пока нет.</div>{% endfor %}
+            </div>
         </div>
     </section>
 
@@ -3404,6 +3595,98 @@ window.bindDriverMobileShell = function () {
             openDriverTab(button.dataset.driverTabOpen);
         });
     });
+
+    var manifestPanel = shell.querySelector("[data-driver-tab-panel='manifest']");
+    function driverMetricValue(name) {
+        var input = shell.querySelector("[name='" + name + "']");
+        return input && String(input.value || "").trim() ? String(input.value).trim() : "—";
+    }
+    function syncDriverReportMetrics() {
+        if (!manifestPanel) return;
+        var units = {end_fuel: " л", end_mileage: " км", end_engine_hours: " м/ч"};
+        manifestPanel.querySelectorAll("[data-driver-report-metric]").forEach(function (node) {
+            var name = node.dataset.driverReportMetric;
+            var value = driverMetricValue(name);
+            node.textContent = value === "—" ? value : value + (units[name] || "");
+        });
+    }
+    function buildDriverShiftReportText() {
+        if (!manifestPanel) return "";
+        syncDriverReportMetrics();
+        var lines = [
+            "ОТЧЁТ ВОДИТЕЛЯ ЗА СМЕНУ",
+            manifestPanel.dataset.driverReportDate + " · " + manifestPanel.dataset.driverReportShift,
+            "Самосвал " + manifestPanel.dataset.driverReportTruck + " · " + manifestPanel.dataset.driverReportDriver,
+            "",
+            "РЕЙСЫ"
+        ];
+        var tripRows = manifestPanel.querySelectorAll("[data-driver-report-trip]");
+        if (tripRows.length) {
+            tripRows.forEach(function (row) {
+                lines.push(row.dataset.excavator + " → " + row.dataset.dumpPoint + " — " + row.dataset.count + " рейс.");
+            });
+        } else {
+            lines.push("Завершённых рейсов нет");
+        }
+        lines.push("Всего: " + manifestPanel.dataset.driverReportTripTotal + " рейс.", "", "ПРОСТОИ");
+        var downtimeRows = manifestPanel.querySelectorAll("[data-driver-report-downtime]");
+        if (downtimeRows.length) {
+            downtimeRows.forEach(function (row) {
+                lines.push(row.dataset.reason + " — " + row.dataset.duration);
+            });
+        } else {
+            lines.push("Простоев нет");
+        }
+        lines.push(
+            "Всего простоев: " + manifestPanel.dataset.driverReportDowntimeTotal,
+            "",
+            "ТЕХНИКА НА КОНЕЦ СМЕНЫ",
+            "Топливо: " + driverMetricValue("end_fuel") + (driverMetricValue("end_fuel") === "—" ? "" : " л"),
+            "Пробег: " + driverMetricValue("end_mileage") + (driverMetricValue("end_mileage") === "—" ? "" : " км"),
+            "Моточасы: " + driverMetricValue("end_engine_hours") + (driverMetricValue("end_engine_hours") === "—" ? "" : " м/ч")
+        );
+        return lines.join("\n");
+    }
+    if (manifestPanel) {
+        manifestPanel.querySelectorAll("[data-driver-manifest-view-open]").forEach(function (button) {
+            button.addEventListener("click", function () {
+                var view = button.dataset.driverManifestViewOpen;
+                manifestPanel.querySelectorAll("[data-driver-manifest-view-open]").forEach(function (item) {
+                    var active = item === button;
+                    item.classList.toggle("is-active", active);
+                    item.setAttribute("aria-selected", active ? "true" : "false");
+                });
+                manifestPanel.querySelectorAll("[data-driver-manifest-view]").forEach(function (panel) {
+                    panel.classList.toggle("is-active", panel.dataset.driverManifestView === view);
+                });
+            });
+        });
+        var copyReport = manifestPanel.querySelector("[data-driver-report-copy]");
+        if (copyReport) copyReport.addEventListener("click", function () {
+            navigator.clipboard.writeText(buildDriverShiftReportText()).then(function () {
+                showDriverToast("Отчёт скопирован");
+            }).catch(function () {
+                showDriverToast("Не удалось скопировать отчёт");
+            });
+        });
+        var shareReport = manifestPanel.querySelector("[data-driver-report-share]");
+        if (shareReport) shareReport.addEventListener("click", function () {
+            var text = buildDriverShiftReportText();
+            if (navigator.share) {
+                navigator.share({title: "Отчёт водителя за смену", text: text}).catch(function (error) {
+                    if (error && error.name !== "AbortError") showDriverToast("Не удалось открыть отправку");
+                });
+            } else {
+                navigator.clipboard.writeText(text).then(function () {
+                    showDriverToast("Отчёт скопирован для отправки");
+                });
+            }
+        });
+        shell.querySelectorAll("[name='end_fuel'], [name='end_mileage'], [name='end_engine_hours']").forEach(function (input) {
+            input.addEventListener("input", syncDriverReportMetrics);
+        });
+        syncDriverReportMetrics();
+    }
     shell.querySelectorAll("form").forEach(function (form) {
         if (!form.matches("[data-driver-hold-form]")) {
             form.addEventListener("submit", function () {
@@ -3756,7 +4039,7 @@ window.bindDriverMobileShell = function () {
         if (!("serviceWorker" in navigator)) {
             return;
         }
-        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v92' }}";
+        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v93' }}";
         var updateModal = document.querySelector("[data-driver-pwa-update-modal]");
         var updateBadge = document.querySelector("[data-driver-pwa-update-badge]");
         var updateTarget = document.querySelector("[data-driver-pwa-update-nav-target]");
