@@ -2131,6 +2131,21 @@ body.driver-mobile-screen .driver-manifest-view.is-active {
     display: block;
 }
 
+body.driver-mobile-screen .driver-manifest-view[data-driver-manifest-view="report"].is-active {
+    display: grid;
+    grid-template-rows: minmax(0, 1fr) auto;
+    gap: 8px;
+    overflow: hidden;
+    padding-bottom: 0;
+}
+
+body.driver-mobile-screen .driver-report-scroll {
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding-bottom: 4px;
+}
+
 body.driver-mobile-screen .driver-report-card,
 body.driver-mobile-screen .driver-report-section {
     border: 1px solid rgba(88, 223, 82, .3);
@@ -2191,13 +2206,11 @@ body.driver-mobile-screen .driver-report-row strong {
 }
 
 body.driver-mobile-screen .driver-report-actions {
-    position: sticky;
-    bottom: 0;
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 8px;
-    padding-top: 10px;
-    background: linear-gradient(180deg, transparent, #030b0e 30%);
+    padding-top: 0;
+    background: #030b0e;
 }
 
 body.driver-mobile-screen .driver-report-actions button {
@@ -2780,7 +2793,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
 {% endblock %}
 
 {% block body %}
-<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v93' }}">
+<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v94' }}">
     {% if messages %}
         <div class="driver-messages">
             {% for message in messages %}
@@ -3041,6 +3054,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
             </div>
         </div>
         <div class="driver-manifest-view is-active" data-driver-manifest-view="report">
+            <div class="driver-report-scroll">
             <div class="driver-report-card">
                 <h3>Отчёт водителя за смену</h3>
                 <p>{{ driver_shift_report_date }} · {{ driver_shift_report_shift }}</p>
@@ -3067,6 +3081,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
                     <div class="driver-report-row"><span>Пробег</span><strong data-driver-report-metric="end_mileage">—</strong></div>
                     <div class="driver-report-row"><span>Моточасы</span><strong data-driver-report-metric="end_engine_hours">—</strong></div>
                 </section>
+            </div>
             </div>
             <div class="driver-report-actions">
                 <button type="button" data-driver-report-copy>Скопировать</button>
@@ -4039,7 +4054,7 @@ window.bindDriverMobileShell = function () {
         if (!("serviceWorker" in navigator)) {
             return;
         }
-        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v93' }}";
+        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v94' }}";
         var updateModal = document.querySelector("[data-driver-pwa-update-modal]");
         var updateBadge = document.querySelector("[data-driver-pwa-update-badge]");
         var updateTarget = document.querySelector("[data-driver-pwa-update-nav-target]");

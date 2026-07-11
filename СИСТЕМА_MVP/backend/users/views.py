@@ -117,7 +117,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v93'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v94'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
