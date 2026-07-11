@@ -1790,6 +1790,7 @@ body.driver-mobile-screen [data-driver-tab-panel="downtimes"].is-active {
 }
 
 body.driver-mobile-screen .driver-downtime-title-row {
+    grid-row: 1;
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
@@ -1818,6 +1819,7 @@ body.driver-mobile-screen .driver-downtime-refresh {
 }
 
 body.driver-mobile-screen .driver-downtime-card {
+    grid-row: 2 !important;
     --driver-downtime-accent: #94a3b8;
     --driver-downtime-glow: rgba(148, 163, 184, .24);
     min-height: clamp(88px, 12dvh, 112px);
@@ -1899,6 +1901,7 @@ body.driver-mobile-screen .driver-downtime-card.is-active b[data-driver-active-d
 }
 
 body.driver-mobile-screen .driver-downtime-list {
+    grid-row: 3 !important;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     grid-auto-rows: minmax(64px, 1fr);
     align-content: stretch;
@@ -1955,6 +1958,7 @@ body.driver-mobile-screen .driver-downtime-list button.is-selected {
 }
 
 body.driver-mobile-screen .driver-downtime-close {
+    grid-row: 4 !important;
     position: relative;
     isolation: isolate;
     min-height: clamp(52px, 6.8dvh, 62px);
@@ -2432,7 +2436,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
 {% endblock %}
 
 {% block body %}
-<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v82' }}">
+<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v83' }}">
     {% if messages %}
         <div class="driver-messages">
             {% for message in messages %}
@@ -3577,7 +3581,7 @@ window.bindDriverMobileShell = function () {
         if (!("serviceWorker" in navigator)) {
             return;
         }
-        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v82' }}";
+        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v83' }}";
         var updateModal = document.querySelector("[data-driver-pwa-update-modal]");
         var updateBadge = document.querySelector("[data-driver-pwa-update-badge]");
         var updateTarget = document.querySelector("[data-driver-pwa-update-nav-target]");
