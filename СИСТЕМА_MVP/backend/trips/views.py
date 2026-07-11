@@ -335,6 +335,40 @@ def equipment_shift_downtime_seconds(equipment, shift, *, until=None):
     return total_seconds
 
 
+def excavator_downtime_status_payload(excavator, shift):
+    shift_total_seconds = equipment_shift_downtime_seconds(excavator, shift)
+    active_event = (
+        DowntimeEvent.objects
+        .filter(equipment=excavator, ended_at__isnull=True)
+        .select_related('reason', 'reason__equipment_state')
+        .order_by('-started_at')
+        .first()
+    ) if excavator else None
+    if active_event:
+        payload = downtime_event_payload(active_event)
+    else:
+        payload = {
+            'ok': True,
+            'active': False,
+            'closed': True,
+            'event_id': None,
+            'reason_id': None,
+            'reason': '',
+            'started_at': '',
+            'ended_at': '',
+            'elapsed_seconds': 0,
+            'elapsed_label': '00:00:00',
+            'equipment_state_code': '',
+            'status_key': 'gray',
+            'status_label': '',
+        }
+    payload.update({
+        'shift_total_seconds': shift_total_seconds,
+        'shift_total_label': format_duration_label(shift_total_seconds),
+    })
+    return payload
+
+
 def get_operational_state_version():
     state = (
         OperationalStateVersion.objects
@@ -553,7 +587,7 @@ EXCAVATOR_MANIFEST = {
 }
 
 EXCAVATOR_SERVICE_WORKER_JS = r"""
-const CACHE_NAME = "excavator-mobile-shell-v102";
+const CACHE_NAME = "excavator-mobile-shell-v103";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const CORE_ASSETS = [
@@ -2998,6 +3032,7 @@ def excavator_truck_loaded_view(request):
 
     response_payload = trip_loaded_payload(trip, client_action_id=client_action_id)
     response_payload['version'] = state.version
+    response_payload['downtime_status'] = excavator_downtime_status_payload(current_excavator, open_shift)
     return JsonResponse(response_payload)
 
 

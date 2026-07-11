@@ -5,9 +5,9 @@
 {% block body_class %}excavator-operator-screen{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v102">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v102">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v102">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v103">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v103">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v103">
 <meta name="theme-color" content="#030708">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Погрузка">
@@ -403,7 +403,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v102";
+var excavatorShellVersion = "excavator-mobile-shell-v103";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var excavatorRelevantEvents = {
     assignment_changed: true,
@@ -1070,6 +1070,9 @@ window.initExcavatorWorkShell = function () {
         setDowntimeStatusClass(payload.status_key || "yellow");
         downtimeCard.setAttribute("aria-label", "Простой активен");
         startDowntimeTimer(payload.started_at, payload.elapsed_seconds);
+        shell.querySelectorAll("[data-eo-downtime-reason-id]").forEach(function (item) {
+            item.classList.toggle("is-selected", String(item.dataset.eoDowntimeReasonId || "") === String(payload.reason_id || ""));
+        });
         if (closeEvent) {
             closeEvent.disabled = false;
             closeEvent.classList.remove("is-disabled");
@@ -1694,6 +1697,13 @@ window.initExcavatorWorkShell = function () {
         }).then(function (data) {
             confirmTruckLoaded(card, data);
             updatePendingTruckBadgeTrip(dumpTarget, truckId, data.trip_id || "");
+            if (data.downtime_status) {
+                if (data.downtime_status.active) {
+                    applyActiveDowntime(data.downtime_status);
+                } else {
+                    clearActiveDowntime(data.downtime_status);
+                }
+            }
             if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
                 window.AppRealtime.wake("truck_loaded");
             }

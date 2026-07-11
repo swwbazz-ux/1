@@ -2500,7 +2500,7 @@ body.excavator-operator-screen .eo-large-field select {
 
 @media (prefers-reduced-motion: reduce) {
     body.excavator-operator-screen .eo-reason-grid .eo-hold-action.is-selected {
-        animation: none !important;
+        animation: eo-active-downtime-reason-pulse 1.8s ease-in-out infinite !important;
     }
 }
 
@@ -2592,7 +2592,7 @@ body.excavator-operator-screen .eo-reason-grid .eo-hold-action {
 
 @media (prefers-reduced-motion: reduce) {
     body.excavator-operator-screen .eo-downtime-card.is-active {
-        animation: none !important;
+        animation: eo-active-downtime-card-pulse 1.65s ease-in-out infinite !important;
     }
 }
 

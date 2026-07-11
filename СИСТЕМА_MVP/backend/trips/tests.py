@@ -637,7 +637,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/static/css/excavator-work-v55-shift.css')
         self.assertContains(response, '/excavator-sw.js')
         self.assertContains(response, 'scope: "/excavator/"')
-        self.assertContains(response, 'excavator-mobile-shell-v102')
+        self.assertContains(response, 'excavator-mobile-shell-v103')
         self.assertContains(response, 'class="eo-downtime-state-dot"')
         self.assertContains(response, 'eo-downtime-state-icon-play')
         self.assertContains(response, 'eo-downtime-state-icon-pause')
@@ -1585,7 +1585,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/excavator/')
-        self.assertIn('excavator-mobile-shell-v102', script)
+        self.assertIn('excavator-mobile-shell-v103', script)
         self.assertIn(reverse('excavator_work'), script)
         self.assertIn(reverse('excavator_manifest'), script)
         self.assertIn('/static/js/realtime-client.js', script)
@@ -1827,6 +1827,13 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         )
 
     def test_truck_loaded_closes_transfer_when_another_truck_remains_available(self):
+        excavator_shift = EmployeeShift.objects.get(
+            employee=self.operator,
+            equipment=self.excavator,
+            closed_at__isnull=True,
+        )
+        excavator_shift.opened_at = timezone.now() - timedelta(minutes=10)
+        excavator_shift.save(update_fields=['opened_at'])
         second_truck = Equipment.objects.create(
             equipment_type=self.truck_type,
             garage_number='22',
@@ -1854,6 +1861,9 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         response = self.post_truck_loaded(client_action_id='close-transfer')
 
         self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.content.decode('utf-8'))
+        self.assertFalse(payload['downtime_status']['active'])
+        self.assertGreaterEqual(payload['downtime_status']['shift_total_seconds'], (5 * 60) - 1)
         transfer.refresh_from_db()
         self.assertIsNotNone(transfer.ended_at)
         self.assertFalse(
@@ -1868,6 +1878,10 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         response = self.post_truck_loaded(client_action_id='last-loadable-truck')
 
         self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.content.decode('utf-8'))
+        self.assertTrue(payload['downtime_status']['active'])
+        self.assertEqual(payload['downtime_status']['reason'], 'Ожидание самосвалов')
+        self.assertEqual(payload['downtime_status']['status_key'], 'yellow')
         waiting = DowntimeEvent.objects.get(
             equipment=self.excavator,
             reason__name='Ожидание самосвалов',
