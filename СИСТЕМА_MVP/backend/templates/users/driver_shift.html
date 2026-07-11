@@ -1344,6 +1344,7 @@ body.driver-mobile-screen .driver-primary-action:disabled {
 body.driver-mobile-screen [data-driver-tab-panel="shift"].is-active {
     grid-template-rows: minmax(0, 1fr) !important;
     gap: 0 !important;
+    padding-bottom: 0 !important;
 }
 
 body.driver-mobile-screen .driver-shift-workspace {
@@ -2550,7 +2551,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
 {% endblock %}
 
 {% block body %}
-<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v89' }}">
+<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v90' }}">
     {% if messages %}
         <div class="driver-messages">
             {% for message in messages %}
@@ -3694,7 +3695,7 @@ window.bindDriverMobileShell = function () {
         if (!("serviceWorker" in navigator)) {
             return;
         }
-        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v89' }}";
+        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v90' }}";
         var updateModal = document.querySelector("[data-driver-pwa-update-modal]");
         var updateBadge = document.querySelector("[data-driver-pwa-update-badge]");
         var updateTarget = document.querySelector("[data-driver-pwa-update-nav-target]");
