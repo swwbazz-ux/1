@@ -189,6 +189,16 @@ body.employee-detail-screen {
     font-size: 13px;
 }
 
+.admin-employee-detail-shell .employee-work-assignment-meta.is-warning {
+    border-color: color-mix(in srgb, var(--admin-yellow) 58%, var(--admin-line));
+    background: var(--admin-yellow-soft);
+    color: var(--admin-ink);
+}
+
+.admin-employee-detail-shell .employee-work-assignment-meta.is-warning strong {
+    color: var(--admin-yellow);
+}
+
 .admin-employee-detail-shell .employee-detail-field {
     display: grid;
     gap: var(--employee-space-1);

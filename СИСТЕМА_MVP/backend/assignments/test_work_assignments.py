@@ -139,6 +139,66 @@ class WorkAssignmentServiceTests(WorkAssignmentFixtureMixin, TestCase):
         self.assertIn('data-work-role="driver"', rendered)
         self.assertIn('data-work-role="excavator_operator"', rendered)
 
+    def test_employee_card_marks_busy_equipment_for_the_occupied_shift(self):
+        self.assign(
+            self.other_driver,
+            self.driver_role,
+            self.truck_1,
+            WorkShiftType.SHIFT_1,
+        )
+
+        form = AdminEmployeeEditForm(instance=self.driver)
+        rendered = str(form['assignment_equipment'])
+
+        self.assertIn('data-busy-day="Водитель 2"', rendered)
+        self.assertNotIn('data-busy-night="Водитель 2"', rendered)
+
+    def test_employee_card_does_not_mark_own_active_assignment_as_busy(self):
+        self.assign(
+            self.driver,
+            self.driver_role,
+            self.truck_1,
+            WorkShiftType.SHIFT_1,
+        )
+
+        form = AdminEmployeeEditForm(instance=self.driver)
+
+        self.assertNotIn('data-busy-day=', str(form['assignment_equipment']))
+
+    def test_employee_card_conflict_uses_full_width_assignment_warning(self):
+        admin_role = Role.objects.create(code='admin', name='Администратор')
+        EmployeeAccess.objects.create(
+            employee=self.admin,
+            role=admin_role,
+            access_code='110001',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+        self.assign(
+            self.other_driver,
+            self.driver_role,
+            self.truck_1,
+            WorkShiftType.SHIFT_1,
+        )
+        client = self.authenticated_client(self.admin, admin_role)
+
+        response = client.post(
+            reverse('system_admin_employee_detail', args=[self.driver.id]),
+            {
+                'full_name': self.driver.full_name,
+                'status': self.driver.status,
+                'assignment_role': self.driver_role.id,
+                'assignment_shift_type': WorkShiftType.SHIFT_1,
+                'assignment_equipment': self.truck_1.id,
+            },
+            HTTP_HOST='localhost',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'employee-work-assignment-meta is-warning')
+        self.assertContains(response, 'Назначение не сохранено')
+        self.assertContains(response, 'Эта техника уже назначена другому сотруднику')
+
     def test_inactive_access_makes_assignment_unavailable(self):
         assignment = self.assign(
             self.driver,

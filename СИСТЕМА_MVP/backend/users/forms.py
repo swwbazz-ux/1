@@ -6,7 +6,7 @@ from django.core.files.base import ContentFile
 from django.core.exceptions import ValidationError
 from PIL import Image, ImageOps
 
-from assignments.models import WorkShiftType
+from assignments.models import AssignmentStatus, EquipmentAssignment, WorkShiftType
 from assignments.services import (
     WORK_ASSIGNMENT_ROLE_EQUIPMENT_TYPES,
     clear_active_equipment_assignment,
@@ -37,15 +37,20 @@ class WorkAssignmentRoleSelect(forms.Select):
 
 
 class WorkAssignmentEquipmentSelect(forms.Select):
+    busy_assignments = None
+
     def create_option(self, name, value, label, selected, index, subindex=None, attrs=None):
         option = super().create_option(name, value, label, selected, index, subindex, attrs)
         instance = getattr(value, 'instance', None)
         if instance:
+            option['attrs']['data-base-label'] = str(label)
             equipment_type = (instance.equipment_type.name or '').casefold()
             for role_code, type_name in WORK_ASSIGNMENT_ROLE_EQUIPMENT_TYPES.items():
                 if equipment_type == type_name.casefold():
                     option['attrs']['data-work-role'] = role_code
                     break
+            for shift_type, employee_name in (self.busy_assignments or {}).get(instance.id, {}).items():
+                option['attrs'][f'data-busy-{shift_type}'] = employee_name
         return option
 
 
@@ -222,6 +227,25 @@ class AdminEmployeeEditForm(forms.ModelForm):
                 id__in=[*equipment_queryset.values_list('id', flat=True), active_assignment.equipment_id],
             ).select_related('equipment_type', 'model').order_by('garage_number')
         self.fields['assignment_equipment'].queryset = equipment_queryset
+        occupied_assignments = (
+            EquipmentAssignment.objects
+            .filter(
+                equipment_id__in=equipment_queryset.values_list('id', flat=True),
+                status=AssignmentStatus.ACCEPTED,
+                ended_at__isnull=True,
+                shift__isnull=True,
+                role__isnull=False,
+                shift_type__in=WorkShiftType.values,
+            )
+            .exclude(employee=employee)
+            .select_related('employee')
+            .order_by('equipment_id', 'shift_type', '-assigned_at')
+        )
+        busy_assignments = {}
+        for assignment in occupied_assignments:
+            equipment_busy = busy_assignments.setdefault(assignment.equipment_id, {})
+            equipment_busy.setdefault(assignment.shift_type, assignment.employee.full_name)
+        self.fields['assignment_equipment'].widget.busy_assignments = busy_assignments
 
         if not self.is_bound:
             self.initial.update({
