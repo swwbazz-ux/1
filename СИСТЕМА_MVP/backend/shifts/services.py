@@ -80,7 +80,7 @@ def open_driver_shift(*, employee, work_assignment, readings, client_action_id):
     try:
         with transaction.atomic():
             Employee.objects.select_for_update().get(pk=employee.pk)
-            equipment = Equipment.objects.select_for_update().select_related('model').get(pk=work_assignment.equipment_id)
+            equipment = Equipment.objects.select_for_update(of=('self',)).select_related('model').get(pk=work_assignment.equipment_id)
             existing_shift = _existing_driver_shift_action('driver_shift_opened', client_action_id)
             if existing_shift:
                 return existing_shift, False
@@ -154,7 +154,7 @@ def close_driver_shift(*, shift, employee, readings, client_action_id):
     from users.models import Employee
     with transaction.atomic():
         Employee.objects.select_for_update().get(pk=employee.pk)
-        locked_shift = EmployeeShift.objects.select_for_update().select_related('equipment__model').get(pk=shift.pk)
+        locked_shift = EmployeeShift.objects.select_for_update(of=('self',)).select_related('equipment__model').get(pk=shift.pk)
         Equipment.objects.select_for_update().get(pk=locked_shift.equipment_id)
         existing_shift = _existing_driver_shift_action('driver_shift_closed', client_action_id)
         if existing_shift:
@@ -707,7 +707,7 @@ def open_excavator_shift(*, employee, equipment, shift_type, fuel_value, engine_
         return existing
 
     Employee.objects.select_for_update().get(pk=employee.pk)
-    equipment = Equipment.objects.select_for_update().select_related('model', 'equipment_type').get(pk=equipment.pk)
+    equipment = Equipment.objects.select_for_update(of=('self',)).select_related('model', 'equipment_type').get(pk=equipment.pk)
     existing = existing_shift_action_payload(action_type, client_action_id)
     if existing:
         return existing
@@ -727,7 +727,7 @@ def open_excavator_shift(*, employee, equipment, shift_type, fuel_value, engine_
 
     fuel, engine_hours = validate_excavator_shift_readings(equipment, fuel_value, engine_hours_value)
     previous_shift = (
-        EmployeeShift.objects.select_for_update()
+        EmployeeShift.objects.select_for_update(of=('self',))
         .filter(equipment=equipment, closed_at__isnull=False)
         .order_by('-closed_at', '-opened_at')
         .first()
