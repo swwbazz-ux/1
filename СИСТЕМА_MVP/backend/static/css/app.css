@@ -29096,6 +29096,7 @@ body.employee-detail-screen .admin-employee-detail-shell .admin-page {
 .admin-employee-create-shell .employee-create-main {
     display: grid;
     gap: 10px;
+    align-content: start;
 }
 
 .admin-employee-create-shell .employee-detail-card-head {
@@ -29125,21 +29126,21 @@ body.employee-detail-screen .admin-employee-detail-shell .admin-page {
 }
 
 .admin-employee-create-shell .employee-card-v2-top {
-    grid-template-columns: 196px minmax(0, 1fr);
+    grid-template-columns: 180px minmax(0, 1fr);
     gap: 16px;
 }
 
 .admin-employee-create-shell .employee-card-v2-photo-box {
-    width: 196px;
+    width: 180px;
     gap: 8px;
 }
 
 .admin-employee-create-shell .employee-card-v2-photo,
 .admin-employee-create-shell .employee-create-card-v2 .employee-create-photo {
-    width: 196px;
-    height: 196px;
-    min-height: 196px;
-    flex-basis: 196px;
+    width: 180px;
+    height: 180px;
+    min-height: 180px;
+    flex-basis: 180px;
     border: 1px solid var(--admin-line);
     border-radius: 8px;
     background: color-mix(in srgb, var(--admin-panel-soft) 82%, var(--admin-green) 18%);
@@ -29167,7 +29168,8 @@ body.employee-detail-screen .admin-employee-detail-shell .admin-page {
 }
 
 .admin-employee-create-shell .employee-card-v2-name-grid {
-    gap: 7px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px 12px;
     max-width: none;
 }
 
@@ -29347,6 +29349,7 @@ body.employee-detail-screen .admin-employee-detail-shell .admin-page {
 
 @media (max-width: 720px) {
     .admin-employee-create-shell .employee-card-v2-top,
+    .admin-employee-create-shell .employee-card-v2-name-grid,
     .admin-employee-create-shell .employee-card-v2-grid,
     .admin-employee-create-shell .employee-card-v2-textareas {
         grid-template-columns: 1fr;
