@@ -2793,7 +2793,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
 {% endblock %}
 
 {% block body %}
-<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v94' }}">
+<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v95' }}">
     {% if messages %}
         <div class="driver-messages">
             {% for message in messages %}
@@ -3045,7 +3045,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
         <button class="driver-primary-action driver-downtime-close driver-downtime-hold{% if not active_downtime %} is-disabled{% endif %}" type="button" data-driver-close-downtime style="--driver-action-hold: 0%" {% if not active_downtime %}disabled aria-disabled="true"{% else %}aria-label="Удерживайте 2 секунды, чтобы завершить простой"{% endif %}>Завершить простой</button>
     </section>
 
-    <section class="driver-panel driver-tab {% if active_tab == 'manifest' %}is-active{% endif %}" data-driver-tab-panel="manifest" data-driver-report-date="{{ driver_shift_report_date }}" data-driver-report-shift="{{ driver_shift_report_shift }}" data-driver-report-driver="{{ driver_shift_report_driver }}" data-driver-report-truck="{{ driver_shift_report_truck }}" data-driver-report-trip-total="{{ shift_trip_count }}" data-driver-report-downtime-total="{{ shift_downtime_total_label }}">
+    <section class="driver-panel driver-tab {% if active_tab == 'manifest' %}is-active{% endif %}" data-driver-tab-panel="manifest" data-driver-report-date="{{ driver_shift_report_date }}" data-driver-report-shift="{{ driver_shift_report_shift }}" data-driver-report-driver="{{ driver_shift_report_driver }}" data-driver-report-truck="{{ driver_shift_report_truck }}" data-driver-report-trip-total="{{ shift_trip_count }}" data-driver-report-downtime-total="{{ shift_downtime_report_total_label }}">
         <div class="driver-manifest-head">
             <h2>Путёвка</h2>
             <div class="driver-manifest-tabs" role="tablist" aria-label="Вид путёвки">
@@ -3056,15 +3056,13 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
         <div class="driver-manifest-view is-active" data-driver-manifest-view="report">
             <div class="driver-report-scroll">
             <div class="driver-report-card">
-                <h3>Отчёт водителя за смену</h3>
-                <p>{{ driver_shift_report_date }} · {{ driver_shift_report_shift }}</p>
-                <p>Самосвал {{ driver_shift_report_truck }} · {{ driver_shift_report_driver }}</p>
+                <h3>Б-{{ driver_shift_report_truck }} · {{ driver_shift_report_driver }}</h3>
             </div>
             <div class="driver-report-grid">
                 <section class="driver-report-section">
                     <h4>Рейсы</h4>
                     {% for row in driver_shift_report_trip_rows %}
-                        <div class="driver-report-row" data-driver-report-trip data-excavator="{{ row.excavator }}" data-dump-point="{{ row.dump_point }}" data-count="{{ row.count }}"><span>{{ row.excavator }} → {{ row.dump_point }}</span><strong>{{ row.count }}</strong></div>
+                        <div class="driver-report-row" data-driver-report-trip data-excavator="{{ row.excavator }}" data-dump-point="{{ row.dump_point }}" data-count="{{ row.count }}"><span>{{ row.excavator }} {{ row.dump_point }}</span><strong>{{ row.count }}</strong></div>
                     {% empty %}<div class="driver-report-row"><span>Завершённых рейсов нет</span><strong>0</strong></div>{% endfor %}
                     <div class="driver-report-row"><span>Всего рейсов</span><strong>{{ shift_trip_count }}</strong></div>
                 </section>
@@ -3073,12 +3071,12 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
                     {% for row in driver_shift_downtime_rows %}
                         <div class="driver-report-row" data-driver-report-downtime data-reason="{{ row.reason }}" data-duration="{{ row.duration }}"><span>{{ row.reason }}</span><strong>{{ row.duration }}</strong></div>
                     {% empty %}<div class="driver-report-row"><span>Простоев нет</span><strong>00:00:00</strong></div>{% endfor %}
-                    <div class="driver-report-row"><span>Всего простоев</span><strong>{{ shift_downtime_total_label }}</strong></div>
+                    <div class="driver-report-row"><span>Всего простоев</span><strong>{{ shift_downtime_report_total_label }}</strong></div>
                 </section>
                 <section class="driver-report-section" data-driver-report-metrics>
                     <h4>Техника на конец смены</h4>
                     <div class="driver-report-row"><span>Топливо</span><strong data-driver-report-metric="end_fuel">—</strong></div>
-                    <div class="driver-report-row"><span>Пробег</span><strong data-driver-report-metric="end_mileage">—</strong></div>
+                    <div class="driver-report-row"><span>Одометр</span><strong data-driver-report-metric="end_mileage">—</strong></div>
                     <div class="driver-report-row"><span>Моточасы</span><strong data-driver-report-metric="end_engine_hours">—</strong></div>
                 </section>
             </div>
@@ -3628,22 +3626,22 @@ window.bindDriverMobileShell = function () {
     function buildDriverShiftReportText() {
         if (!manifestPanel) return "";
         syncDriverReportMetrics();
-        var lines = [
-            "ОТЧЁТ ВОДИТЕЛЯ ЗА СМЕНУ",
-            manifestPanel.dataset.driverReportDate + " · " + manifestPanel.dataset.driverReportShift,
-            "Самосвал " + manifestPanel.dataset.driverReportTruck + " · " + manifestPanel.dataset.driverReportDriver,
-            "",
-            "РЕЙСЫ"
-        ];
+        function tripWord(count) {
+            count = Math.abs(Number(count) || 0);
+            if (count % 10 === 1 && count % 100 !== 11) return "рейс";
+            if ([2, 3, 4].includes(count % 10) && ![12, 13, 14].includes(count % 100)) return "рейса";
+            return "рейсов";
+        }
+        var lines = ["Б-" + manifestPanel.dataset.driverReportTruck + " · " + manifestPanel.dataset.driverReportDriver, "", "РЕЙСЫ"];
         var tripRows = manifestPanel.querySelectorAll("[data-driver-report-trip]");
         if (tripRows.length) {
             tripRows.forEach(function (row) {
-                lines.push(row.dataset.excavator + " → " + row.dataset.dumpPoint + " — " + row.dataset.count + " рейс.");
+                lines.push(row.dataset.excavator + " " + row.dataset.dumpPoint + " - " + row.dataset.count + " " + tripWord(row.dataset.count) + ".");
             });
         } else {
             lines.push("Завершённых рейсов нет");
         }
-        lines.push("Всего: " + manifestPanel.dataset.driverReportTripTotal + " рейс.", "", "ПРОСТОИ");
+        lines.push("Всего: " + manifestPanel.dataset.driverReportTripTotal + " " + tripWord(manifestPanel.dataset.driverReportTripTotal) + ".", "", "ПРОСТОИ");
         var downtimeRows = manifestPanel.querySelectorAll("[data-driver-report-downtime]");
         if (downtimeRows.length) {
             downtimeRows.forEach(function (row) {
@@ -3656,9 +3654,9 @@ window.bindDriverMobileShell = function () {
             "Всего простоев: " + manifestPanel.dataset.driverReportDowntimeTotal,
             "",
             "ТЕХНИКА НА КОНЕЦ СМЕНЫ",
-            "Топливо: " + driverMetricValue("end_fuel") + (driverMetricValue("end_fuel") === "—" ? "" : " л"),
-            "Пробег: " + driverMetricValue("end_mileage") + (driverMetricValue("end_mileage") === "—" ? "" : " км"),
-            "Моточасы: " + driverMetricValue("end_engine_hours") + (driverMetricValue("end_engine_hours") === "—" ? "" : " м/ч")
+            "Топливо: " + driverMetricValue("end_fuel") + (driverMetricValue("end_fuel") === "—" ? "" : " л."),
+            "Одометр: " + driverMetricValue("end_mileage") + (driverMetricValue("end_mileage") === "—" ? "" : " км."),
+            "Моточасы: " + driverMetricValue("end_engine_hours") + (driverMetricValue("end_engine_hours") === "—" ? "" : " м/ч.")
         );
         return lines.join("\n");
     }
@@ -4054,7 +4052,7 @@ window.bindDriverMobileShell = function () {
         if (!("serviceWorker" in navigator)) {
             return;
         }
-        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v94' }}";
+        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v95' }}";
         var updateModal = document.querySelector("[data-driver-pwa-update-modal]");
         var updateBadge = document.querySelector("[data-driver-pwa-update-badge]");
         var updateTarget = document.querySelector("[data-driver-pwa-update-nav-target]");

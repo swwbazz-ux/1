@@ -117,7 +117,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v94'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v95'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -1658,6 +1658,19 @@ def driver_format_duration_label(seconds):
     return f'{hours:02d}:{minutes:02d}:{seconds % 60:02d}'
 
 
+def driver_report_duration_label(seconds, *, total=False):
+    rounded_minutes = max(0, int((max(0, int(seconds or 0)) + 30) // 60))
+    hours, minutes = divmod(rounded_minutes, 60)
+    if total and hours:
+        return f'{hours}:{minutes:02d} мин.'
+    if hours and minutes:
+        return f'{hours} ч. {minutes} мин.'
+    if hours:
+        hour_word = 'час' if hours % 10 == 1 and hours % 100 != 11 else ('часа' if hours % 10 in {2, 3, 4} and hours % 100 not in {12, 13, 14} else 'часов')
+        return f'{hours} {hour_word}.'
+    return f'{rounded_minutes} мин.'
+
+
 def driver_shift_downtime_seconds(equipment, shift, *, until=None):
     if not equipment or not shift or not shift.opened_at:
         return 0
@@ -1952,7 +1965,7 @@ def driver_shift_view(request):
             {
                 'reason': reason,
                 'seconds': seconds,
-                'duration': driver_format_duration_label(seconds),
+                'duration': driver_report_duration_label(seconds),
             }
             for reason, seconds in downtime_totals.items()
         ]
@@ -2061,6 +2074,7 @@ def driver_shift_view(request):
         open_shift,
     )
     shift_downtime_total_label = driver_format_duration_label(shift_downtime_total_seconds)
+    shift_downtime_report_total_label = driver_report_duration_label(shift_downtime_total_seconds, total=True)
     active_downtime_started_at = ''
     active_downtime_status_key = 'yellow'
     if active_downtime and active_downtime.started_at:
@@ -2139,6 +2153,7 @@ def driver_shift_view(request):
             'active_downtime_elapsed_label': active_downtime_elapsed_label,
             'shift_downtime_total_seconds': shift_downtime_total_seconds,
             'shift_downtime_total_label': shift_downtime_total_label,
+            'shift_downtime_report_total_label': shift_downtime_report_total_label,
             'active_downtime_status_key': active_downtime_status_key,
             'downtime_reasons': downtime_reasons,
             'shift_trips': shift_trips,
