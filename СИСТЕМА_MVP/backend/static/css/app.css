@@ -29328,6 +29328,83 @@ body.employee-detail-screen .admin-employee-detail-shell .admin-page {
     background: var(--admin-panel-soft);
 }
 
+@media (min-width: 1181px) and (max-height: 900px) {
+    .admin-employee-create-shell .employee-create-page {
+        padding-top: 8px;
+        padding-bottom: 8px;
+    }
+
+    .admin-employee-create-shell .employee-create-card {
+        padding: 10px;
+    }
+
+    .admin-employee-create-shell .employee-create-main {
+        gap: 8px;
+    }
+
+    .admin-employee-create-shell .employee-detail-card-head p {
+        display: none;
+    }
+
+    .admin-employee-create-shell .employee-card-v2-top {
+        grid-template-columns: 160px minmax(0, 1fr);
+        gap: 14px;
+    }
+
+    .admin-employee-create-shell .employee-card-v2-photo-box,
+    .admin-employee-create-shell .employee-card-v2-photo,
+    .admin-employee-create-shell .employee-create-card-v2 .employee-create-photo {
+        width: 160px;
+    }
+
+    .admin-employee-create-shell .employee-card-v2-photo,
+    .admin-employee-create-shell .employee-create-card-v2 .employee-create-photo {
+        height: 160px;
+        min-height: 160px;
+        flex-basis: 160px;
+    }
+
+    .admin-employee-create-shell .employee-card-v2-grid,
+    .admin-employee-create-shell .employee-card-v2-textareas {
+        gap: 6px 10px;
+        margin-top: 4px;
+    }
+
+    .admin-employee-create-shell .employee-detail-field {
+        gap: 3px;
+    }
+
+    .admin-employee-create-shell .employee-detail-field input,
+    .admin-employee-create-shell .employee-detail-field select,
+    .admin-employee-create-shell .employee-card-v2-grid .employee-detail-field input,
+    .admin-employee-create-shell .employee-card-v2-grid .employee-detail-field select,
+    .admin-employee-create-shell .employee-card-v2-name-grid .employee-detail-field input {
+        height: 36px;
+        min-height: 36px;
+        line-height: 36px;
+    }
+
+    .admin-employee-create-shell .employee-detail-field select,
+    .admin-employee-create-shell .employee-card-v2-grid .employee-detail-field select {
+        line-height: 36px;
+    }
+
+    .admin-employee-create-shell .employee-detail-field input,
+    .admin-employee-create-shell .employee-card-v2-grid .employee-detail-field input,
+    .admin-employee-create-shell .employee-card-v2-name-grid .employee-detail-field input {
+        line-height: 36px;
+    }
+
+    .admin-employee-create-shell .employee-detail-field textarea,
+    .admin-employee-create-shell .employee-card-v2-textareas .employee-detail-field textarea {
+        min-height: 56px;
+    }
+
+    .admin-employee-create-shell .employee-work-assignment-meta {
+        padding: 8px 10px;
+    }
+}
+
 @media (max-width: 1180px) {
     .admin-employee-create-shell .employee-create-page {
         height: auto;
