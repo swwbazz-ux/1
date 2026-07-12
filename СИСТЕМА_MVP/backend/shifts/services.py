@@ -1,6 +1,7 @@
 from collections import defaultdict
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
+from django.db import transaction
 from django.db.models import Count, Q, Sum
 from django.utils import timezone
 
@@ -14,6 +15,8 @@ from .models import (
     PlanCalculationMode,
     ShiftPlan,
     ShiftPlanScope,
+    ShiftClientAction,
+    ShiftReadingCorrection,
 )
 
 
@@ -435,3 +438,279 @@ def calculate_open_shift_progress(open_shift):
         timezone.localtime(open_shift.opened_at).date(),
         open_shift.shift_type,
     )
+
+
+class ExcavatorShiftError(Exception):
+    def __init__(self, message, *, field_errors=None, status=400, code='invalid_readings'):
+        super().__init__(message)
+        self.message = message
+        self.field_errors = field_errors or {}
+        self.status = status
+        self.code = code
+
+
+def parse_required_shift_decimal(value, label, field_name):
+    raw = str(value if value is not None else '').strip().replace('\u00a0', '').replace(' ', '').replace(',', '.')
+    if not raw:
+        raise ExcavatorShiftError(
+            f'{label}: укажите значение.',
+            field_errors={field_name: f'Укажите значение «{label.lower()}».'},
+        )
+    try:
+        parsed = Decimal(raw)
+    except (InvalidOperation, ValueError):
+        parsed = None
+    if parsed is None or not parsed.is_finite():
+        raise ExcavatorShiftError(
+            f'{label}: укажите корректное число.',
+            field_errors={field_name: 'Введите корректное число.'},
+        )
+    if parsed < 0:
+        raise ExcavatorShiftError(
+            f'{label}: значение не может быть меньше нуля.',
+            field_errors={field_name: 'Значение не может быть меньше нуля.'},
+        )
+    try:
+        return parsed.quantize(Decimal('0.01'))
+    except InvalidOperation:
+        raise ExcavatorShiftError(
+            f'{label}: значение имеет недопустимый формат.',
+            field_errors={field_name: 'Допустимо не более двух знаков после запятой.'},
+        )
+
+
+def excavator_fuel_limit(equipment):
+    model = getattr(equipment, 'model', None)
+    limit = getattr(model, 'fuel_capacity_limit_l', None)
+    if limit is None:
+        raise ExcavatorShiftError(
+            'Для модели этого экскаватора не настроен допустимый объем топлива. Обратитесь к администратору.',
+            field_errors={'fuel': 'Лимит топлива для модели не настроен.'},
+            status=409,
+            code='fuel_limit_not_configured',
+        )
+    return Decimal(limit)
+
+
+def validate_excavator_shift_readings(equipment, fuel_value, engine_hours_value, *, opening_shift=None):
+    fuel = parse_required_shift_decimal(fuel_value, 'Топливо', 'fuel')
+    engine_hours = parse_required_shift_decimal(engine_hours_value, 'Моточасы', 'engine_hours')
+    fuel_limit = excavator_fuel_limit(equipment)
+    if fuel > fuel_limit:
+        raise ExcavatorShiftError(
+            f'Топливо не может превышать {int(fuel_limit)} л для модели этого экскаватора.',
+            field_errors={'fuel': f'Максимум для этой модели: {int(fuel_limit)} л.'},
+        )
+    if opening_shift is not None:
+        start_hours = opening_shift.start_engine_hours
+        if start_hours is None:
+            raise ExcavatorShiftError('В открытой смене отсутствуют начальные моточасы.', status=409)
+        if engine_hours < start_hours:
+            raise ExcavatorShiftError(
+                'Конечные моточасы не могут быть меньше начальных.',
+                field_errors={'engine_hours': f'Не меньше {start_hours}.'},
+            )
+        if engine_hours - start_hours > Decimal('12'):
+            raise ExcavatorShiftError(
+                'Моточасы за смену не могут увеличиться более чем на 12. Проверьте показания.',
+                field_errors={'engine_hours': 'Допустимый прирост за смену: не более 12 моточасов.'},
+            )
+    return fuel, engine_hours
+
+
+def existing_shift_action_payload(action_type, client_action_id):
+    action = ShiftClientAction.objects.filter(
+        action_type=action_type,
+        client_action_id=client_action_id,
+    ).first()
+    if not action:
+        return None
+    payload = dict(action.response_payload or {})
+    payload['deduplicated'] = True
+    return payload
+
+
+@transaction.atomic
+def open_excavator_shift(*, employee, equipment, shift_type, fuel_value, engine_hours_value, client_action_id):
+    from references.models import Equipment
+    from users.models import Employee
+
+    action_type = 'excavator_shift_opened'
+    existing = existing_shift_action_payload(action_type, client_action_id)
+    if existing:
+        return existing
+
+    Employee.objects.select_for_update().get(pk=employee.pk)
+    equipment = Equipment.objects.select_for_update().select_related('model', 'equipment_type').get(pk=equipment.pk)
+    existing = existing_shift_action_payload(action_type, client_action_id)
+    if existing:
+        return existing
+
+    if EmployeeShift.objects.filter(employee=employee, closed_at__isnull=True).exists():
+        raise ExcavatorShiftError(
+            'У машиниста уже есть открытая смена.',
+            status=409,
+            code='employee_shift_already_open',
+        )
+    if EmployeeShift.objects.filter(equipment=equipment, closed_at__isnull=True).exists():
+        raise ExcavatorShiftError(
+            'Смена на этом экскаваторе уже открыта другим машинистом.',
+            status=409,
+            code='equipment_shift_already_open',
+        )
+
+    fuel, engine_hours = validate_excavator_shift_readings(equipment, fuel_value, engine_hours_value)
+    previous_shift = (
+        EmployeeShift.objects.select_for_update()
+        .filter(equipment=equipment, closed_at__isnull=False)
+        .order_by('-closed_at', '-opened_at')
+        .first()
+    )
+    shift = EmployeeShift.objects.create(
+        employee=employee,
+        equipment=equipment,
+        shift_type=shift_type,
+        start_fuel=fuel,
+        start_mileage=None,
+        start_engine_hours=engine_hours,
+        opened_at=timezone.now(),
+        opened_by=employee,
+    )
+    shift_progress = assign_shift_plan_snapshot(shift)
+
+    corrected_metrics = []
+    if previous_shift:
+        transferred_values = {
+            ShiftReadingCorrection.Metric.FUEL: previous_shift.end_fuel,
+            ShiftReadingCorrection.Metric.ENGINE_HOURS: previous_shift.end_engine_hours,
+        }
+        actual_values = {
+            ShiftReadingCorrection.Metric.FUEL: fuel,
+            ShiftReadingCorrection.Metric.ENGINE_HOURS: engine_hours,
+        }
+        for metric, transferred in transferred_values.items():
+            if transferred is not None and transferred != actual_values[metric]:
+                ShiftReadingCorrection.objects.create(
+                    equipment=equipment,
+                    new_shift=shift,
+                    previous_shift=previous_shift,
+                    metric=metric,
+                    transferred_value=transferred,
+                    actual_value=actual_values[metric],
+                    employee=employee,
+                )
+                corrected_metrics.append(metric)
+
+    if corrected_metrics:
+        from core.models import bump_operational_state
+        bump_operational_state(
+            'excavator_shift_readings_corrected',
+            event_type='excavator_shift_readings_corrected',
+            object_type='EmployeeShift',
+            object_id=shift.id,
+            payload={
+                'action': 'excavator_shift_readings_corrected',
+                'shift_id': shift.id,
+                'previous_shift_id': previous_shift.id,
+                'equipment_id': equipment.id,
+                'employee_id': employee.id,
+                'metrics': corrected_metrics,
+            },
+        )
+
+    response = {
+        'ok': True,
+        'action': action_type,
+        'client_action_id': client_action_id,
+        'shift_id': shift.id,
+        'shift_open': True,
+        'equipment_id': equipment.id,
+        'plan_status': shift_progress.get('plan_status'),
+        'plan_value': str(shift_progress.get('plan_value') or ''),
+        'calculation_mode': shift_progress.get('calculation_mode') or '',
+    }
+    client_action = ShiftClientAction.objects.create(
+        action_type=action_type,
+        client_action_id=client_action_id,
+        employee=employee,
+        shift=shift,
+        response_payload=response,
+    )
+    from core.models import bump_operational_state
+    state = bump_operational_state(
+        action_type,
+        event_type=action_type,
+        object_type='EmployeeShift',
+        object_id=shift.id,
+        payload={**response, 'employee_id': employee.id},
+    )
+    response['version'] = state.version
+    client_action.response_payload = response
+    client_action.save(update_fields=['response_payload'])
+    return response
+
+
+@transaction.atomic
+def close_excavator_shift(*, employee, fuel_value, engine_hours_value, client_action_id):
+    from trips.models import OPEN_TRIP_STATUSES, Trip
+    from users.models import Employee
+
+    action_type = 'excavator_shift_closed'
+    existing = existing_shift_action_payload(action_type, client_action_id)
+    if existing:
+        return existing
+
+    Employee.objects.select_for_update().get(pk=employee.pk)
+    existing = existing_shift_action_payload(action_type, client_action_id)
+    if existing:
+        return existing
+    shift = (
+        EmployeeShift.objects.select_for_update()
+        .select_related('equipment', 'equipment__model', 'equipment__equipment_type')
+        .filter(employee=employee, closed_at__isnull=True)
+        .order_by('-opened_at')
+        .first()
+    )
+    if not shift:
+        raise ExcavatorShiftError('Открытая смена уже закрыта.', status=409, code='shift_already_closed')
+
+    fuel, engine_hours = validate_excavator_shift_readings(
+        shift.equipment,
+        fuel_value,
+        engine_hours_value,
+        opening_shift=shift,
+    )
+    shift.end_fuel = fuel
+    shift.end_mileage = None
+    shift.end_engine_hours = engine_hours
+    shift.closed_at = timezone.now()
+    shift.closed_by = employee
+    shift.save(update_fields=['end_fuel', 'end_mileage', 'end_engine_hours', 'closed_at', 'closed_by'])
+    Trip.objects.filter(loading_shift=shift, status__in=OPEN_TRIP_STATUSES).update(is_carryover=True)
+
+    response = {
+        'ok': True,
+        'action': action_type,
+        'client_action_id': client_action_id,
+        'shift_id': shift.id,
+        'shift_open': False,
+    }
+    client_action = ShiftClientAction.objects.create(
+        action_type=action_type,
+        client_action_id=client_action_id,
+        employee=employee,
+        shift=shift,
+        response_payload=response,
+    )
+    from core.models import bump_operational_state
+    state = bump_operational_state(
+        action_type,
+        event_type=action_type,
+        object_type='EmployeeShift',
+        object_id=shift.id,
+        payload={**response, 'employee_id': employee.id, 'equipment_id': shift.equipment_id},
+    )
+    response['version'] = state.version
+    client_action.response_payload = response
+    client_action.save(update_fields=['response_payload'])
+    return response

@@ -29,14 +29,17 @@ from references.models import DumpPoint, Equipment, EquipmentState, RockType, Tr
 from shifts.models import EmployeeShift
 from shifts.models import PlanAssignmentStatus, PlanCalculationMode
 from shifts.services import (
+    ExcavatorShiftError,
     assign_shift_plan_snapshot,
     calculate_open_shift_progress,
     calculate_truck_shift_progress,
+    close_excavator_shift,
     equipment_is_truck,
     format_progress_percent,
     plan_status_label,
     progress_cycle_visual_context,
     plan_unit_label,
+    open_excavator_shift,
 )
 from users.access_auth import find_employee_access_by_credentials
 from users.models import EmployeeAccess
@@ -593,7 +596,7 @@ EXCAVATOR_MANIFEST = {
 }
 
 EXCAVATOR_SERVICE_WORKER_JS = r"""
-const CACHE_NAME = "excavator-mobile-shell-v110";
+const CACHE_NAME = "excavator-mobile-shell-v111";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const CORE_ASSETS = [
@@ -3327,101 +3330,35 @@ def excavator_shift_action_view(request):
         return JsonResponse({'ok': False, 'error': 'Неизвестное действие смены.'}, status=400)
 
     try:
-        fuel = parse_excavator_shift_decimal(payload.get('fuel'), 'Топливо')
-        mileage = parse_excavator_shift_decimal(payload.get('mileage'), 'Пробег')
-        engine_hours = parse_excavator_shift_decimal(payload.get('engine_hours'), 'Моточасы')
-    except ValueError as error:
-        return JsonResponse({'ok': False, 'error': str(error)}, status=400)
-
-    with transaction.atomic():
         if action == 'close':
-            open_shift = (
-                EmployeeShift.objects
-                .select_for_update(of=('self',))
-                .filter(employee=access.employee, closed_at__isnull=True)
-                .select_related('equipment')
-                .order_by('-opened_at')
-                .first()
+            response_payload = close_excavator_shift(
+                employee=access.employee,
+                fuel_value=payload.get('fuel'),
+                engine_hours_value=payload.get('engine_hours'),
+                client_action_id=client_action_id,
             )
-            if not open_shift:
-                return JsonResponse({'ok': False, 'error': 'Открытая смена уже закрыта.'}, status=409)
-            open_shift.end_fuel = fuel
-            open_shift.end_mileage = mileage
-            open_shift.end_engine_hours = engine_hours
-            open_shift.closed_at = timezone.now()
-            open_shift.closed_by = access.employee
-            open_shift.save(update_fields=['end_fuel', 'end_mileage', 'end_engine_hours', 'closed_at', 'closed_by'])
-            Trip.objects.filter(
-                loading_shift=open_shift,
-                status__in=OPEN_TRIP_STATUSES,
-            ).update(is_carryover=True)
-            return JsonResponse({
-                'ok': True,
-                'action': 'shift_closed',
-                'client_action_id': client_action_id,
-                'shift_id': open_shift.id,
-                'shift_open': False,
-                'version': get_operational_state_version(),
-            })
+            return JsonResponse(response_payload)
 
-        if open_shift:
-            shift_progress = calculate_open_shift_progress(open_shift)
-            return JsonResponse({
-                'ok': True,
-                'action': 'shift_opened',
-                'client_action_id': client_action_id,
-                'shift_id': open_shift.id,
-                'shift_open': True,
-                'deduplicated': True,
-                'plan_status': shift_progress.get('plan_status') if shift_progress else '',
-                'plan_value': str(shift_progress.get('plan_value') or '') if shift_progress else '',
-                'calculation_mode': shift_progress.get('calculation_mode') if shift_progress else '',
-                'version': get_operational_state_version(),
-            })
-
-        access.employee.__class__.objects.select_for_update().get(pk=access.employee_id)
         work_assignment = get_active_equipment_assignment(access.employee, 'excavator_operator')
-        if work_assignment:
-            Equipment.objects.select_for_update().get(pk=work_assignment.equipment_id)
         assignment_state = work_assignment_state(access.employee, work_assignment)
-        if assignment_state != 'assigned':
+        if assignment_state not in {'assigned', 'assignment_conflict'}:
             return JsonResponse({'ok': False, 'error': work_assignment_error_message(assignment_state), 'assignment_state': assignment_state}, status=409)
-        excavator = work_assignment.equipment
-        if EmployeeShift.objects.filter(equipment=excavator, closed_at__isnull=True).exists():
-            return JsonResponse({'ok': False, 'error': 'На этом экскаваторе уже открыта смена.'}, status=409)
-
-        previous_shift = get_previous_closed_equipment_shift(excavator)
-        if previous_shift:
-            if fuel is None:
-                fuel = previous_shift.end_fuel
-            if mileage is None:
-                mileage = previous_shift.end_mileage
-            if engine_hours is None:
-                engine_hours = previous_shift.end_engine_hours
-
-        shift = EmployeeShift.objects.create(
+        response_payload = open_excavator_shift(
             employee=access.employee,
-            equipment=excavator,
+            equipment=work_assignment.equipment,
             shift_type=work_assignment.shift_type,
-            start_fuel=fuel,
-            start_mileage=mileage,
-            start_engine_hours=engine_hours,
-            opened_at=timezone.now(),
-            opened_by=access.employee,
+            fuel_value=payload.get('fuel'),
+            engine_hours_value=payload.get('engine_hours'),
+            client_action_id=client_action_id,
         )
-        shift_progress = assign_shift_plan_snapshot(shift)
+        return JsonResponse(response_payload)
+    except ExcavatorShiftError as error:
         return JsonResponse({
-            'ok': True,
-            'action': 'shift_opened',
-            'client_action_id': client_action_id,
-            'shift_id': shift.id,
-            'shift_open': True,
-            'equipment_id': excavator.id,
-            'plan_status': shift_progress.get('plan_status'),
-            'plan_value': str(shift_progress.get('plan_value') or ''),
-            'calculation_mode': shift_progress.get('calculation_mode') or '',
-            'version': get_operational_state_version(),
-        })
+            'ok': False,
+            'error': error.message,
+            'code': error.code,
+            'field_errors': error.field_errors,
+        }, status=error.status)
 
 
 def excavator_work_view(request):
@@ -3443,10 +3380,17 @@ def excavator_work_view(request):
         access.employee,
         start_when_empty=bool(open_shift),
     )
-    shift_start_excavator = current_excavator or (
-        work_assignment.equipment if work_assignment and assignment_state == 'assigned' else None
-    )
-    previous_equipment_shift = None if open_shift else get_previous_closed_equipment_shift(shift_start_excavator)
+    shift_start_excavator = current_excavator or (work_assignment.equipment if work_assignment else None)
+    equipment_open_shift = None
+    if shift_start_excavator and not open_shift:
+        equipment_open_shift = (
+            EmployeeShift.objects
+            .filter(equipment=shift_start_excavator, closed_at__isnull=True)
+            .select_related('employee')
+            .order_by('-opened_at')
+            .first()
+        )
+    previous_equipment_shift = None if open_shift or equipment_open_shift else get_previous_closed_equipment_shift(shift_start_excavator)
 
     if request.method == 'POST':
         form = restrict_excavator_trip_form(
@@ -3940,6 +3884,11 @@ def excavator_work_view(request):
             'work_assignment_state': assignment_state,
             'work_assignment_error': work_assignment_error_message(assignment_state),
             'work_assignment_shift_label': work_assignment.work_shift_label if work_assignment else '',
+            'equipment_open_shift': equipment_open_shift,
+            'shift_fuel_limit': getattr(getattr(shift_start_excavator, 'model', None), 'fuel_capacity_limit_l', None),
+            'shift_previous_readings': bool(previous_equipment_shift),
+            'shift_start_fuel_display': format_decimal_input_value(open_shift.start_fuel if open_shift else None),
+            'shift_start_engine_hours_display': format_decimal_input_value(open_shift.start_engine_hours if open_shift else None),
             'shift_plan_percent': shift_plan_percent,
             'shift_plan_visual': shift_plan_visual,
             'shift_plan_status': shift_plan['status'],
@@ -3953,13 +3902,10 @@ def excavator_work_view(request):
             'shift_fact_value': shift_fact_value,
             'shift_fact_meta': shift_fact_meta,
             'shift_fuel_display': format_decimal_input_value(
-                open_shift.start_fuel if open_shift else getattr(previous_equipment_shift, 'end_fuel', None)
-            ),
-            'shift_mileage_display': format_decimal_input_value(
-                open_shift.start_mileage if open_shift else getattr(previous_equipment_shift, 'end_mileage', None)
+                open_shift.end_fuel if open_shift else getattr(previous_equipment_shift, 'end_fuel', None)
             ),
             'shift_engine_hours_display': format_decimal_input_value(
-                open_shift.start_engine_hours if open_shift else getattr(previous_equipment_shift, 'end_engine_hours', None)
+                open_shift.end_engine_hours if open_shift else getattr(previous_equipment_shift, 'end_engine_hours', None)
             ),
             'active_downtime': active_downtime,
             'active_downtime_started_at': active_downtime_started_at,

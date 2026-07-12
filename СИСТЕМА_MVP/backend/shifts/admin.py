@@ -1,7 +1,17 @@
 from django.contrib import admin
 
 from .forms import EquipmentPlanGroupForm
-from .models import AchievementPrize, AchievementUnlock, EmployeeShift, EquipmentPlanGroup, EquipmentShiftPlan, ShiftPlan, WatchPeriod
+from .models import (
+    AchievementPrize,
+    AchievementUnlock,
+    EmployeeShift,
+    EquipmentPlanGroup,
+    EquipmentShiftPlan,
+    ShiftClientAction,
+    ShiftPlan,
+    ShiftReadingCorrection,
+    WatchPeriod,
+)
 
 
 @admin.register(WatchPeriod)
@@ -16,6 +26,22 @@ class EmployeeShiftAdmin(admin.ModelAdmin):
     list_display = ('employee', 'shift_type', 'equipment', 'plan_group_name', 'plan_calculation_mode', 'plan_value', 'plan_status', 'opened_at', 'closed_at', 'is_service_closed')
     search_fields = ('employee__full_name',)
     list_filter = ('shift_type', 'watch_period', 'equipment', 'plan_status', 'plan_group', 'is_service_closed')
+
+
+@admin.register(ShiftClientAction)
+class ShiftClientActionAdmin(admin.ModelAdmin):
+    list_display = ('created_at', 'action_type', 'client_action_id', 'employee', 'shift')
+    search_fields = ('client_action_id', 'employee__full_name', 'shift__equipment__garage_number')
+    list_filter = ('action_type', 'created_at')
+    readonly_fields = ('created_at', 'response_payload')
+
+
+@admin.register(ShiftReadingCorrection)
+class ShiftReadingCorrectionAdmin(admin.ModelAdmin):
+    list_display = ('corrected_at', 'equipment', 'employee', 'metric', 'transferred_value', 'actual_value', 'previous_shift', 'new_shift')
+    search_fields = ('equipment__garage_number', 'employee__full_name')
+    list_filter = ('metric', 'equipment', 'corrected_at')
+    readonly_fields = ('corrected_at',)
 
 
 @admin.register(AchievementPrize)
