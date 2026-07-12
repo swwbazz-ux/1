@@ -1477,6 +1477,26 @@ body.driver-mobile-screen .driver-shift-field > span:first-child {
     text-transform: uppercase;
 }
 
+body.driver-mobile-screen .driver-shift-field-label {
+    min-width: 0;
+    display: grid;
+    gap: 5px;
+}
+
+body.driver-mobile-screen .driver-shift-field-label small {
+    color: #6f858d;
+    font-size: clamp(10px, 2.55vw, 12px);
+    font-weight: 500;
+    line-height: 1;
+    white-space: nowrap;
+}
+
+body.driver-mobile-screen .driver-shift-field-label small strong {
+    color: #c6d5d9;
+    font: inherit;
+    font-weight: 700;
+}
+
 body.driver-mobile-screen .driver-shift-metric-value {
     min-width: 0;
     display: flex;
@@ -2809,7 +2829,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
 {% endblock %}
 
 {% block body %}
-<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v96' }}">
+<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v97' }}">
     {% if messages %}
         <div class="driver-messages">
             {% for message in messages %}
@@ -2946,19 +2966,27 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
                     {{ close_form.non_field_errors }}
                     <div class="driver-shift-metrics">
                         <label class="driver-shift-field">
-                            <span>Топливо</span>
+                            <span class="driver-shift-field-label"><span>Топливо</span><small>Начало <strong>{{ open_shift.start_fuel|default_if_none:"—" }}</strong> л</small></span>
                             <span class="driver-shift-metric-value">{{ close_form.end_fuel }}<em>л</em></span>{{ close_form.end_fuel.errors }}
                         </label>
                         <label class="driver-shift-field">
-                            <span>Одометр</span>
+                            <span class="driver-shift-field-label"><span>Одометр</span><small>Начало <strong>{{ open_shift.start_mileage|default_if_none:"—" }}</strong> км</small></span>
                             <span class="driver-shift-metric-value">{{ close_form.end_mileage }}<em>км</em></span>{{ close_form.end_mileage.errors }}
                         </label>
                         <label class="driver-shift-field">
-                            <span>Моточасы</span>
+                            <span class="driver-shift-field-label"><span>Моточасы</span><small>Начало <strong>{{ open_shift.start_engine_hours|default_if_none:"—" }}</strong> м/ч</small></span>
                             <span class="driver-shift-metric-value">{{ close_form.end_engine_hours }}<em>м/ч</em></span>{{ close_form.end_engine_hours.errors }}
                         </label>
                     </div>
                 </div>
+                {% if close_review %}
+                <div class="driver-shift-review" data-driver-shift-review>
+                    <div class="driver-shift-review-row"><span>Топливо</span><strong>{{ close_review.start_fuel }} → {{ close_review.end_fuel }} л</strong></div>
+                    <div class="driver-shift-review-row"><span>Одометр</span><strong>{{ close_review.start_mileage }} → {{ close_review.end_mileage }} км (+{{ close_review.mileage_delta }})</strong></div>
+                    <div class="driver-shift-review-row"><span>Моточасы</span><strong>{{ close_review.start_engine_hours }} → {{ close_review.end_engine_hours }} (+{{ close_review.engine_hours_delta }})</strong></div>
+                    <button class="driver-shift-edit" type="button" data-driver-shift-edit>Изменить показания</button>
+                </div>
+                {% endif %}
                 <div class="driver-shift-section">
                     <div class="driver-shift-section-head"><span>Итог смены</span><b>Сейчас</b></div>
                     <div class="driver-shift-result-grid">
@@ -2979,14 +3007,6 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
                     <h2>Смена</h2>
                     <button class="driver-shift-update" type="button" data-driver-shift-update><span class="driver-shift-update-icon" aria-hidden="true"></span><span>Обновить</span></button>
                 </div>
-                {% if close_review %}
-                <div class="driver-shift-review" data-driver-shift-review>
-                    <div class="driver-shift-review-row"><span>Топливо</span><strong>{{ close_review.start_fuel }} → {{ close_review.end_fuel }} л</strong></div>
-                    <div class="driver-shift-review-row"><span>Одометр</span><strong>{{ close_review.start_mileage }} → {{ close_review.end_mileage }} км (+{{ close_review.mileage_delta }})</strong></div>
-                    <div class="driver-shift-review-row"><span>Моточасы</span><strong>{{ close_review.start_engine_hours }} → {{ close_review.end_engine_hours }} (+{{ close_review.engine_hours_delta }})</strong></div>
-                    <button class="driver-shift-edit" type="button" data-driver-shift-edit>Изменить показания</button>
-                </div>
-                {% endif %}
                 {% if form %}
                 <form method="post" class="driver-shift-opening-form">
                     {% csrf_token %}
@@ -4124,7 +4144,7 @@ window.bindDriverMobileShell = function () {
         if (!("serviceWorker" in navigator)) {
             return;
         }
-        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v96' }}";
+        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v97' }}";
         var updateModal = document.querySelector("[data-driver-pwa-update-modal]");
         var updateBadge = document.querySelector("[data-driver-pwa-update-badge]");
         var updateTarget = document.querySelector("[data-driver-pwa-update-nav-target]");

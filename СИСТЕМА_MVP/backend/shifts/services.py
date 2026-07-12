@@ -48,7 +48,7 @@ def validate_driver_close_readings(shift, *, end_fuel, end_mileage, end_engine_h
     elif end_mileage is None:
         errors['end_mileage'] = 'Укажите одометр на конец смены.'
     elif end_mileage < shift.start_mileage:
-        errors['end_mileage'] = 'Одометр на конец смены не может быть меньше показания на начало.'
+        errors['end_mileage'] = f'Одометр не может быть меньше начального показания {shift.start_mileage:g} км.'
     elif end_mileage - shift.start_mileage > Decimal('250'):
         errors['end_mileage'] = 'Пробег за смену не может превышать 250 км. Проверьте показания.'
     if shift.start_engine_hours is None:
@@ -56,7 +56,7 @@ def validate_driver_close_readings(shift, *, end_fuel, end_mileage, end_engine_h
     elif end_engine_hours is None:
         errors['end_engine_hours'] = 'Укажите моточасы на конец смены.'
     elif end_engine_hours < shift.start_engine_hours:
-        errors['end_engine_hours'] = 'Моточасы на конец смены не могут быть меньше показания на начало.'
+        errors['end_engine_hours'] = f'Моточасы не могут быть меньше начального показания {shift.start_engine_hours:g} м/ч.'
     elif end_engine_hours - shift.start_engine_hours > Decimal('12'):
         errors['end_engine_hours'] = 'Моточасы за смену не могут увеличиться более чем на 12. Проверьте показания.'
     if errors:

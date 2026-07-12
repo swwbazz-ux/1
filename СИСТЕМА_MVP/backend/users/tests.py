@@ -91,6 +91,9 @@ class AccessLoginTests(TestCase):
             employee=self.employee,
             shift_type='day',
             equipment=truck,
+            start_fuel='1000.00',
+            start_mileage='12560.00',
+            start_engine_hours='1354.00',
             opened_at=timezone.now(),
             opened_by=self.employee,
         )
@@ -136,6 +139,9 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, 'Итог смены')
         self.assertContains(response, 'data-driver-shift-close-button')
         self.assertContains(response, 'Проверить показания')
+        self.assertContains(response, 'Начало')
+        self.assertContains(response, '12560')
+        self.assertContains(response, '1354')
         self.assertContains(response, '>Выйти<')
         self.assertNotContains(response, '>Закрытие смены<')
         self.assertNotContains(response, '>Закрыть смену<')
@@ -167,7 +173,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, reverse('driver_manifest'))
         self.assertContains(response, 'rel="manifest"')
         self.assertContains(response, '/driver-sw.js')
-        self.assertContains(response, 'driver-mobile-shell-v96')
+        self.assertContains(response, 'driver-mobile-shell-v97')
         self.assertContains(response, 'data-driver-pwa-update-modal')
         self.assertContains(response, 'data-driver-pwa-update-badge')
         self.assertContains(response, 'mode: "custom", path: "^/driver/(?:shift/?)?$"')
@@ -308,7 +314,7 @@ class AccessLoginTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Service-Worker-Allowed'], '/driver/')
-        self.assertIn('driver-mobile-shell-v96', script)
+        self.assertIn('driver-mobile-shell-v97', script)
         self.assertIn('/driver/', script)
         self.assertIn('/driver/shift/', script)
         self.assertIn('/driver.webmanifest', script)
@@ -1963,6 +1969,8 @@ class AccessLoginTests(TestCase):
             HTTP_HOST='localhost',
         )
         self.assertContains(review_response, 'Закрыть смену')
+        self.assertContains(review_response, 'data-driver-shift-review')
+        self.assertContains(review_response, '→ 90')
         close_response = self.client.post(
             '/driver/shift/close/',
             {'end_fuel': '90', 'end_mileage': '2600', 'end_engine_hours': '712', 'shift_action': 'close', 'client_action_id': 'close-handoff'},
@@ -2453,7 +2461,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(driver_shift_response, 'ККД')
         self.assertContains(driver_shift_response, 'window.applyOperationalStateRefresh')
         self.assertContains(driver_shift_response, 'data-realtime-mode="custom"')
-        self.assertContains(driver_shift_response, 'driver-mobile-shell-v96')
+        self.assertContains(driver_shift_response, 'driver-mobile-shell-v97')
 
     def test_driver_downtime_buttons_are_rendered_from_server_reference(self):
         truck = self.create_registered_driver_shift()
