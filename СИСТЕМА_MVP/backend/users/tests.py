@@ -13,7 +13,7 @@ from django.utils import timezone
 from openpyxl import load_workbook
 from PIL import Image
 
-from assignments.models import AssignmentStatus, EquipmentAssignment, ExcavatorPlacement, HaulAssignment
+from assignments.models import AssignmentStatus, EquipmentAssignment, ExcavatorPlacement, HaulAssignment, WorkShiftType
 from core.models import OperationalStateEvent
 from downtimes.models import DowntimeEvent, DowntimeReason
 from references.models import (
@@ -1435,6 +1435,127 @@ class AccessLoginTests(TestCase):
         values = [cell.value for row in workbook['Доступы'].iter_rows() for cell in row]
         self.assertIn('Новый водитель', values)
         self.assertIn('Водитель самосвала', values)
+
+    def test_employee_create_form_contains_position_shift_and_role_filtered_equipment(self):
+        admin_role = Role.objects.create(code='admin', name='Администратор')
+        excavator_role = Role.objects.create(code='excavator_operator', name='Машинист экскаватора')
+        admin_employee = Employee.objects.create(full_name='Администратор MVP', status=Employee.Status.ACTIVE)
+        EmployeeAccess.objects.create(
+            employee=admin_employee,
+            role=admin_role,
+            access_code='1000',
+            status=EmployeeAccess.Status.ACTIVATED,
+        )
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        truck = Equipment.objects.create(equipment_type=truck_type, garage_number='10', is_active=True)
+        excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='1', is_active=True)
+
+        self.client.post('/', {'access_code': '1000'}, follow=True, HTTP_HOST='localhost')
+        response = self.client.get('/system-admin/employees/create/', HTTP_HOST='localhost')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'name="position"', html=False)
+        self.assertContains(response, 'name="role"', html=False)
+        self.assertContains(response, 'name="assignment_shift_type"', html=False)
+        self.assertContains(response, 'name="assignment_equipment"', html=False)
+        self.assertContains(response, f'value="{self.role.id}" data-work-role="driver"', html=False)
+        self.assertContains(response, f'value="{excavator_role.id}" data-work-role="excavator_operator"', html=False)
+        self.assertContains(response, f'value="{truck.id}" data-base-label="Самосвал 10" data-work-role="driver"', html=False)
+        self.assertContains(response, f'value="{excavator.id}" data-base-label="Экскаватор 1" data-work-role="excavator_operator"', html=False)
+
+    def test_admin_creates_employee_with_work_shift_and_equipment_assignment(self):
+        admin_role = Role.objects.create(code='admin', name='Администратор')
+        admin_employee = Employee.objects.create(full_name='Администратор MVP', status=Employee.Status.ACTIVE)
+        EmployeeAccess.objects.create(
+            employee=admin_employee,
+            role=admin_role,
+            access_code='1000',
+            status=EmployeeAccess.Status.ACTIVATED,
+        )
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        truck = Equipment.objects.create(equipment_type=truck_type, garage_number='10', is_active=True)
+
+        self.client.post('/', {'access_code': '1000'}, follow=True, HTTP_HOST='localhost')
+        response = self.client.post(
+            '/system-admin/employees/create/',
+            {
+                'full_name': 'Водитель с назначением',
+                'position': 'Водитель автомобиля',
+                'phone': '+79990000001',
+                'status': Employee.Status.NOT_ACTIVATED,
+                'role': self.role.id,
+                'assignment_shift_type': WorkShiftType.SHIFT_1,
+                'assignment_equipment': truck.id,
+            },
+            follow=True,
+            HTTP_HOST='localhost',
+        )
+        employee = Employee.objects.get(full_name='Водитель с назначением')
+        access = EmployeeAccess.objects.get(employee=employee)
+        assignment = EquipmentAssignment.objects.get(employee=employee, ended_at__isnull=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(employee.position, 'Водитель автомобиля')
+        self.assertEqual(access.role, self.role)
+        self.assertEqual(access.access_code, '')
+        self.assertEqual(access.status, EmployeeAccess.Status.NOT_ACTIVATED)
+        self.assertIsNone(access.primary_code_issued_at)
+        self.assertEqual(assignment.role, self.role)
+        self.assertEqual(assignment.shift_type, WorkShiftType.SHIFT_1)
+        self.assertEqual(assignment.equipment, truck)
+        self.assertEqual(assignment.status, AssignmentStatus.ACCEPTED)
+        self.assertContains(response, 'Смена 1')
+        self.assertContains(response, 'Самосвал 10')
+
+    def test_employee_creation_rolls_back_when_equipment_becomes_occupied(self):
+        admin_role = Role.objects.create(code='admin', name='Администратор')
+        admin_employee = Employee.objects.create(full_name='Администратор MVP', status=Employee.Status.ACTIVE)
+        occupied_employee = Employee.objects.create(full_name='Занявший технику', status=Employee.Status.ACTIVE)
+        EmployeeAccess.objects.create(
+            employee=admin_employee,
+            role=admin_role,
+            access_code='1000',
+            status=EmployeeAccess.Status.ACTIVATED,
+        )
+        EmployeeAccess.objects.create(
+            employee=occupied_employee,
+            role=self.role,
+            access_code='2000',
+            status=EmployeeAccess.Status.ACTIVATED,
+        )
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        truck = Equipment.objects.create(equipment_type=truck_type, garage_number='10', is_active=True)
+        EquipmentAssignment.objects.create(
+            employee=occupied_employee,
+            role=self.role,
+            equipment=truck,
+            shift_type=WorkShiftType.SHIFT_1,
+            assigned_by=admin_employee,
+            status=AssignmentStatus.ACCEPTED,
+            accepted_at=timezone.now(),
+        )
+
+        self.client.post('/', {'access_code': '1000'}, follow=True, HTTP_HOST='localhost')
+        response = self.client.post(
+            '/system-admin/employees/create/',
+            {
+                'full_name': 'Конфликтующий водитель',
+                'position': 'Водитель автомобиля',
+                'phone': '+79990000002',
+                'status': Employee.Status.NOT_ACTIVATED,
+                'role': self.role.id,
+                'assignment_shift_type': WorkShiftType.SHIFT_1,
+                'assignment_equipment': truck.id,
+                'generate_access': 'on',
+            },
+            HTTP_HOST='localhost',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Employee.objects.filter(full_name='Конфликтующий водитель').exists())
+        self.assertContains(response, 'Эта техника уже назначена другому сотруднику в выбранной смене.')
+        self.assertContains(response, 'data-busy-day="Занявший технику"', html=False)
 
     def test_primary_pin_requires_activation_and_becomes_invalid(self):
         driver_role = self.role

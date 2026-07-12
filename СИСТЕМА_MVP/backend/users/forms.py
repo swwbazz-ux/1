@@ -95,9 +95,22 @@ def optimize_employee_photo(uploaded_file):
 
 class AdminEmployeeForm(forms.ModelForm):
     role = forms.ModelChoiceField(
-        label='Должность/роль',
+        label='Рабочая роль',
         queryset=Role.objects.filter(is_active=True).order_by('name'),
         required=True,
+        widget=WorkAssignmentRoleSelect,
+    )
+    assignment_shift_type = forms.ChoiceField(
+        label='Назначенная смена',
+        choices=[('', 'Нет назначения'), *WorkShiftType.choices],
+        required=False,
+    )
+    assignment_equipment = forms.ModelChoiceField(
+        label='Назначенная техника',
+        queryset=Equipment.objects.none(),
+        required=False,
+        empty_label='Нет назначения',
+        widget=WorkAssignmentEquipmentSelect,
     )
     generate_access = forms.BooleanField(label='Сгенерировать первичный пинкод', required=False, initial=True)
 
@@ -141,6 +154,78 @@ class AdminEmployeeForm(forms.ModelForm):
 
     def clean_photo(self):
         return optimize_employee_photo(self.cleaned_data.get('photo'))
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        equipment_ids = set()
+        for role_code in WORK_ASSIGNMENT_ROLE_EQUIPMENT_TYPES:
+            equipment_ids.update(equipment_queryset_for_work_role(role_code).values_list('id', flat=True))
+        equipment_queryset = (
+            Equipment.objects
+            .filter(id__in=equipment_ids)
+            .select_related('equipment_type', 'model')
+            .order_by('equipment_type__name', 'garage_number')
+        )
+        self.fields['assignment_equipment'].queryset = equipment_queryset
+        occupied_assignments = (
+            EquipmentAssignment.objects
+            .filter(
+                equipment_id__in=equipment_queryset.values_list('id', flat=True),
+                status=AssignmentStatus.ACCEPTED,
+                ended_at__isnull=True,
+                shift__isnull=True,
+                role__isnull=False,
+                shift_type__in=WorkShiftType.values,
+            )
+            .select_related('employee')
+            .order_by('equipment_id', 'shift_type', '-assigned_at')
+        )
+        busy_assignments = {}
+        for assignment in occupied_assignments:
+            equipment_busy = busy_assignments.setdefault(assignment.equipment_id, {})
+            equipment_busy.setdefault(assignment.shift_type, assignment.employee.full_name)
+        self.fields['assignment_equipment'].widget.busy_assignments = busy_assignments
+
+    def clean(self):
+        cleaned_data = super().clean()
+        role = cleaned_data.get('role')
+        shift_type = cleaned_data.get('assignment_shift_type')
+        equipment = cleaned_data.get('assignment_equipment')
+        if not shift_type and not equipment:
+            return cleaned_data
+        if not shift_type:
+            self.add_error('assignment_shift_type', 'Выберите смену 1 или смену 2.')
+        if not equipment:
+            self.add_error('assignment_equipment', 'Выберите технику для назначения.')
+            return cleaned_data
+        if not role or role.code not in WORK_ASSIGNMENT_ROLE_EQUIPMENT_TYPES:
+            self.add_error('assignment_equipment', 'Для выбранной роли назначение техники не поддерживается.')
+            return cleaned_data
+        if not equipment_queryset_for_work_role(role.code).filter(id=equipment.id).exists():
+            self.add_error('assignment_equipment', 'Выбранная техника не соответствует рабочей роли или неактивна.')
+            return cleaned_data
+        if shift_type in WorkShiftType.values and EquipmentAssignment.objects.filter(
+            equipment=equipment,
+            shift_type=shift_type,
+            status=AssignmentStatus.ACCEPTED,
+            ended_at__isnull=True,
+            shift__isnull=True,
+        ).exists():
+            self.add_error('assignment_equipment', 'Эта техника уже назначена другому сотруднику в выбранной смене.')
+        return cleaned_data
+
+    def save_work_assignment(self, *, employee, assigned_by):
+        equipment = self.cleaned_data.get('assignment_equipment')
+        if not equipment:
+            return None
+        assignment, _created = set_active_equipment_assignment(
+            employee=employee,
+            role=self.cleaned_data['role'],
+            equipment=equipment,
+            shift_type=self.cleaned_data['assignment_shift_type'],
+            assigned_by=assigned_by,
+        )
+        return assignment
 
 
 class AdminEmployeeEditForm(forms.ModelForm):

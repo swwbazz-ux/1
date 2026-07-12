@@ -137,6 +137,21 @@
                     {{ form.status.errors }}
                 </div>
                 <div class="employee-detail-field">
+                    <label for="{{ form.role.id_for_label }}">{{ form.role.label }}</label>
+                    {{ form.role }}
+                    {{ form.role.errors }}
+                </div>
+                <div class="employee-detail-field">
+                    <label for="{{ form.assignment_shift_type.id_for_label }}">{{ form.assignment_shift_type.label }}</label>
+                    {{ form.assignment_shift_type }}
+                    {{ form.assignment_shift_type.errors }}
+                </div>
+                <div class="employee-detail-field">
+                    <label for="{{ form.assignment_equipment.id_for_label }}">{{ form.assignment_equipment.label }}</label>
+                    {{ form.assignment_equipment }}
+                    {{ form.assignment_equipment.errors }}
+                </div>
+                <div class="employee-detail-field">
                     <label for="{{ form.hired_at.id_for_label }}">{{ form.hired_at.label }}</label>
                     {{ form.hired_at }}
                     {{ form.hired_at.errors }}
@@ -182,16 +197,11 @@
             <section class="card employee-create-card employee-create-access-card">
                 <div class="employee-detail-card-head">
                     <div>
-                        <h2>Выдать доступ</h2>
-                        <p class="muted">Роль обязательна. Первичный пинкод можно создать сразу.</p>
+                        <h2>Первичный доступ</h2>
+                        <p class="muted">Рабочая роль задается в карточке. PIN можно создать сразу.</p>
                     </div>
                 </div>
                 <div class="employee-create-access-stack">
-                    <div class="employee-detail-field">
-                        <label for="{{ form.role.id_for_label }}">{{ form.role.label }}</label>
-                        {{ form.role }}
-                        {{ form.role.errors }}
-                    </div>
                     <label class="employee-create-checkline" for="{{ form.generate_access.id_for_label }}">
                         {{ form.generate_access }}
                         <span>
@@ -220,6 +230,11 @@
                         <span class="summary-main">Первичный пинкод</span>
                         <span>одноразовый</span>
                         <strong>выдать</strong>
+                    </div>
+                    <div class="admin-summary-row row-neutral">
+                        <span class="summary-main">Смена и техника</span>
+                        <span>при выборе</span>
+                        <strong>назначить</strong>
                     </div>
                     <div class="admin-summary-row row-neutral">
                         <span class="summary-main">Журнал действий</span>
@@ -256,6 +271,9 @@ document.addEventListener('DOMContentLoaded', function () {
     var photoCard = document.querySelector('.employee-create-photo');
     var selected = document.getElementById('employee-photo-selected');
     var image = null;
+    var assignmentRole = document.getElementById('{{ form.role.id_for_label }}');
+    var assignmentShift = document.getElementById('{{ form.assignment_shift_type.id_for_label }}');
+    var assignmentEquipment = document.getElementById('{{ form.assignment_equipment.id_for_label }}');
 
     function setAdminTheme(theme) {
         if (!shell) return;
@@ -338,6 +356,40 @@ document.addEventListener('DOMContentLoaded', function () {
     fillVisualFields();
     if (createForm) {
         createForm.addEventListener('submit', syncHiddenFields);
+    }
+
+    function filterAssignmentEquipment() {
+        if (!assignmentRole || !assignmentShift || !assignmentEquipment) return;
+        var selectedRole = assignmentRole.options[assignmentRole.selectedIndex];
+        var roleCode = selectedRole ? selectedRole.dataset.workRole || '' : '';
+        var roleSupported = Array.prototype.some.call(assignmentEquipment.options, function (option) {
+            return option.value && option.dataset.workRole === roleCode;
+        });
+        if (!roleSupported) assignmentShift.value = '';
+        assignmentShift.disabled = !roleSupported;
+        var shiftType = assignmentShift.value || '';
+        var currentOption = assignmentEquipment.options[assignmentEquipment.selectedIndex];
+        var currentBusyBy = currentOption && shiftType ? currentOption.dataset[shiftType === 'day' ? 'busyDay' : 'busyNight'] || '' : '';
+        var currentAllowed = !currentOption || !currentOption.value || (
+            currentOption.dataset.workRole === roleCode && !currentBusyBy
+        );
+        Array.prototype.forEach.call(assignmentEquipment.options, function (option) {
+            if (!option.value) return;
+            var roleAllowed = roleSupported && option.dataset.workRole === roleCode;
+            var busyBy = shiftType ? option.dataset[shiftType === 'day' ? 'busyDay' : 'busyNight'] || '' : '';
+            var baseLabel = option.dataset.baseLabel || option.textContent;
+            option.textContent = busyBy ? baseLabel + ' — занято: ' + busyBy : baseLabel;
+            option.hidden = !roleAllowed;
+            option.disabled = !roleAllowed || Boolean(busyBy);
+        });
+        if (!currentAllowed || !roleSupported) assignmentEquipment.value = '';
+        assignmentEquipment.disabled = !roleSupported || !shiftType;
+    }
+
+    if (assignmentRole && assignmentShift && assignmentEquipment) {
+        filterAssignmentEquipment();
+        assignmentRole.addEventListener('change', filterAssignmentEquipment);
+        assignmentShift.addEventListener('change', filterAssignmentEquipment);
     }
 
     if (!input || !photoCard) return;

@@ -1337,23 +1337,55 @@ def system_admin_employee_create_view(request):
     if request.method == 'POST':
         form = AdminEmployeeForm(request.POST, request.FILES)
         if form.is_valid():
-            employee = form.save()
-            role = form.cleaned_data['role']
-            if form.cleaned_data['generate_access']:
-                code = generate_unique_access_code()
-                EmployeeAccess.objects.create(
-                    employee=employee,
-                    role=role,
-                    access_code=code,
-                    status=EmployeeAccess.Status.NOT_ACTIVATED,
-                    primary_code_issued_at=timezone.now(),
-                )
-                log_admin_action(access.employee, 'Создан сотрудник и выдан первичный пинкод', employee, new_value=f'Роль: {role}; пинкод: {code}')
-                messages.success(request, f'Сотрудник создан. Первичный пинкод: {code}')
+            try:
+                with transaction.atomic():
+                    employee = form.save()
+                    role = form.cleaned_data['role']
+                    code = ''
+                    if form.cleaned_data['generate_access']:
+                        code = generate_unique_access_code()
+                        EmployeeAccess.objects.create(
+                            employee=employee,
+                            role=role,
+                            access_code=code,
+                            status=EmployeeAccess.Status.NOT_ACTIVATED,
+                            primary_code_issued_at=timezone.now(),
+                        )
+                    else:
+                        EmployeeAccess.objects.create(
+                            employee=employee,
+                            role=role,
+                            access_code='',
+                            status=EmployeeAccess.Status.NOT_ACTIVATED,
+                        )
+                    work_assignment = form.save_work_assignment(
+                        employee=employee,
+                        assigned_by=access.employee,
+                    )
+            except ValidationError as error:
+                form.add_error('assignment_equipment', error)
             else:
-                log_admin_action(access.employee, 'Создан сотрудник без пинкода', employee, new_value=f'Роль: {role}')
-                messages.success(request, 'Сотрудник создан.')
-            return redirect_after_admin_action(request, 'system_admin_employee_detail', employee_id=employee.id)
+                assignment_label = (
+                    f'{work_assignment.work_shift_label}; {work_assignment.equipment}'
+                    if work_assignment else 'не задано'
+                )
+                if code:
+                    log_admin_action(
+                        access.employee,
+                        'Создан сотрудник и выдан первичный пинкод',
+                        employee,
+                        new_value=f'Роль: {role}; назначение: {assignment_label}; пинкод: {code}',
+                    )
+                    messages.success(request, f'Сотрудник создан. Первичный пинкод: {code}')
+                else:
+                    log_admin_action(
+                        access.employee,
+                        'Создан сотрудник без пинкода',
+                        employee,
+                        new_value=f'Роль: {role}; назначение: {assignment_label}',
+                    )
+                    messages.success(request, 'Сотрудник создан.')
+                return redirect_after_admin_action(request, 'system_admin_employee_detail', employee_id=employee.id)
     else:
         form = AdminEmployeeForm()
 
