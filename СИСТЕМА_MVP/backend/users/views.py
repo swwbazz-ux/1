@@ -1460,6 +1460,75 @@ def system_admin_generate_access_view(request, employee_id):
     return redirect_after_admin_action(request, 'system_admin_employee_detail', employee_id=employee.id)
 
 
+@require_POST
+def system_admin_change_access_role_view(request, access_id):
+    admin_access = require_admin_access(request)
+    if not admin_access:
+        return redirect('role_home')
+
+    form = AdminAccessRoleForm(request.POST)
+    employee_access = get_object_or_404(
+        EmployeeAccess.objects.select_related('employee', 'role'),
+        id=access_id,
+    )
+    employee_id = employee_access.employee_id
+    if not form.is_valid():
+        messages.error(request, 'Выберите новую роль сотрудника.')
+        return redirect_after_admin_action(request, 'system_admin_employee_detail', employee_id=employee_id)
+
+    new_role = form.cleaned_data['role']
+    if employee_access.role_id == new_role.id:
+        messages.info(request, 'У сотрудника уже назначена эта роль.')
+        return redirect_after_admin_action(request, 'system_admin_employee_detail', employee_id=employee_id)
+    if employee_access.id == admin_access.id:
+        messages.error(request, 'Нельзя изменить собственную роль администратора.')
+        return redirect_after_admin_action(request, 'system_admin_employee_detail', employee_id=employee_id)
+
+    with transaction.atomic():
+        employee_access = (
+            EmployeeAccess.objects
+            .select_for_update()
+            .select_related('employee', 'role')
+            .get(id=access_id)
+        )
+        Employee.objects.select_for_update().get(id=employee_access.employee_id)
+        if EmployeeShift.objects.filter(employee_id=employee_id, closed_at__isnull=True).exists():
+            messages.error(request, 'Сначала закройте текущую смену сотрудника, затем измените его роль.')
+            return redirect_after_admin_action(request, 'system_admin_employee_detail', employee_id=employee_id)
+        if (
+            EmployeeAccess.objects
+            .filter(employee_id=employee_id, role=new_role)
+            .exclude(id=employee_access.id)
+            .exists()
+        ):
+            messages.error(request, 'У сотрудника уже есть отдельный доступ с выбранной ролью.')
+            return redirect_after_admin_action(request, 'system_admin_employee_detail', employee_id=employee_id)
+
+        old_role = employee_access.role
+        cleared_assignments = clear_active_equipment_assignment(
+            employee=employee_access.employee,
+            assigned_by=admin_access.employee,
+            role_code=old_role.code,
+        )
+        employee_access.role = new_role
+        employee_access.save(update_fields=['role'])
+
+    log_admin_action(
+        admin_access.employee,
+        'Изменена роль доступа сотрудника',
+        employee_access,
+        old_value=old_role.name,
+        new_value=new_role.name,
+        comment='PIN, пароль и статус доступа сохранены.',
+    )
+    assignment_note = ' Старое назначение на технику снято.' if cleared_assignments else ''
+    messages.success(
+        request,
+        f'Роль изменена: {old_role.name} → {new_role.name}. PIN и пароль сохранены.{assignment_note}',
+    )
+    return redirect_after_admin_action(request, 'system_admin_employee_detail', employee_id=employee_id)
+
+
 def system_admin_access_action_view(request, access_id, action):
     admin_access = require_admin_access(request)
     if not admin_access:

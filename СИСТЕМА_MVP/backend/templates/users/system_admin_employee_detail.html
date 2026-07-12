@@ -223,16 +223,35 @@
                     </div>
                 </div>
                 <div class="employee-access-panel-section employee-access-issue-section">
-                    <h3>Выдача доступа</h3>
-                    <form class="employee-access-issue-form" method="post" action="{% url 'system_admin_generate_access' employee.id %}">
-                        {% csrf_token %}
-                        {% for field in role_form %}
-                            <label for="{{ field.id_for_label }}">{{ field.label }}</label>
-                            {{ field }}
-                            {{ field.errors }}
-                        {% endfor %}
-                        <button type="submit">Выдать / сбросить PIN</button>
-                    </form>
+                    {% if current_role_access %}
+                        <h3>Роль и вход</h3>
+                        <form class="employee-access-issue-form" method="post" action="{% url 'system_admin_change_access_role' current_role_access.id %}">
+                            {% csrf_token %}
+                            {% for field in role_form %}
+                                <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                                {{ field }}
+                                {{ field.errors }}
+                            {% endfor %}
+                            <button type="submit">Сохранить роль</button>
+                        </form>
+                        <p class="employee-access-role-note">PIN, пароль и статус активации останутся прежними.</p>
+                        <form class="employee-access-reset-form" method="post" action="{% url 'system_admin_generate_access' employee.id %}" data-confirm="Сбросить текущий PIN? Сотруднику потребуется войти по новому первичному PIN-коду.">
+                            {% csrf_token %}
+                            <input type="hidden" name="role" value="{{ current_role_access.role_id }}">
+                            <button type="submit">Сбросить PIN</button>
+                        </form>
+                    {% else %}
+                        <h3>Выдача доступа</h3>
+                        <form class="employee-access-issue-form" method="post" action="{% url 'system_admin_generate_access' employee.id %}">
+                            {% csrf_token %}
+                            {% for field in role_form %}
+                                <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                                {{ field }}
+                                {{ field.errors }}
+                            {% endfor %}
+                            <button type="submit">Выдать первичный PIN</button>
+                        </form>
+                    {% endif %}
                 </div>
 
                 <div class="employee-access-panel-section employee-access-list-section">

@@ -619,6 +619,258 @@ class AccessLoginTests(TestCase):
         self.assertContains(reset_response, 'ожидает первого входа')
         self.assertNotContains(reset_response, '8642')
 
+    def test_admin_can_change_employee_role_without_resetting_credentials(self):
+        admin_role = Role.objects.create(code='admin', name='Администратор')
+        manager_role = Role.objects.create(code='manager_role_change', name='Руководство')
+        driver_role = Role.objects.create(code='driver_role_change', name='Водитель самосвала')
+        admin_employee = Employee.objects.create(full_name='Администратор MVP', status=Employee.Status.ACTIVE)
+        employee = Employee.objects.create(full_name='Сотрудник для смены роли', status=Employee.Status.ACTIVE)
+        admin_access = EmployeeAccess.objects.create(
+            employee=admin_employee,
+            role=admin_role,
+            access_code='100000',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+        activated_at = timezone.now() - timedelta(days=10)
+        last_login_at = timezone.now() - timedelta(hours=2)
+        employee_access = EmployeeAccess.objects.create(
+            employee=employee,
+            role=manager_role,
+            access_code='654321',
+            status=EmployeeAccess.Status.ACTIVATED,
+            activated_at=activated_at,
+            last_login_at=last_login_at,
+            is_active=True,
+        )
+        session = self.client.session
+        session['employee_access_id'] = admin_access.id
+        session.save()
+
+        response = self.client.post(
+            reverse('system_admin_change_access_role', args=[employee_access.id]),
+            {'role': driver_role.id},
+            follow=True,
+            HTTP_HOST='localhost',
+        )
+        employee_access.refresh_from_db()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(employee_access.role, driver_role)
+        self.assertEqual(employee_access.access_code, '654321')
+        self.assertEqual(employee_access.status, EmployeeAccess.Status.ACTIVATED)
+        self.assertEqual(employee_access.activated_at, activated_at)
+        self.assertEqual(employee_access.last_login_at, last_login_at)
+        self.assertTrue(employee_access.is_active)
+        self.assertEqual(EmployeeAccess.objects.filter(employee=employee).count(), 1)
+        self.assertContains(response, f'<option value="{driver_role.id}" selected>', html=False)
+        self.assertTrue(
+            AdminActionLog.objects.filter(
+                action='Изменена роль доступа сотрудника',
+                old_value=manager_role.name,
+                new_value=driver_role.name,
+            ).exists()
+        )
+
+    def test_employee_card_has_separate_role_change_and_pin_reset_actions(self):
+        admin_role = Role.objects.create(code='admin', name='Администратор')
+        manager_role = Role.objects.create(code='manager_role_ui', name='Руководство')
+        admin_employee = Employee.objects.create(full_name='Администратор MVP', status=Employee.Status.ACTIVE)
+        employee = Employee.objects.create(full_name='Сотрудник с ролью', status=Employee.Status.ACTIVE)
+        admin_access = EmployeeAccess.objects.create(
+            employee=admin_employee,
+            role=admin_role,
+            access_code='100000',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+        employee_access = EmployeeAccess.objects.create(
+            employee=employee,
+            role=manager_role,
+            access_code='654321',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+        session = self.client.session
+        session['employee_access_id'] = admin_access.id
+        session.save()
+
+        response = self.client.get(
+            reverse('system_admin_employee_detail', args=[employee.id]),
+            HTTP_HOST='localhost',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, reverse('system_admin_change_access_role', args=[employee_access.id]))
+        self.assertContains(response, 'Сохранить роль')
+        self.assertContains(response, 'PIN, пароль и статус активации останутся прежними.')
+        self.assertContains(response, 'Сбросить PIN')
+        self.assertContains(response, f'name="role" value="{manager_role.id}"', html=False)
+
+    def test_role_change_clears_incompatible_permanent_equipment_assignment(self):
+        admin_role = Role.objects.create(code='admin', name='Администратор')
+        driver_role = self.role
+        manager_role = Role.objects.create(code='manager_role_assignment', name='Руководство')
+        admin_employee = Employee.objects.create(full_name='Администратор MVP', status=Employee.Status.ACTIVE)
+        employee = Employee.objects.create(full_name='Водитель со старым назначением', status=Employee.Status.ACTIVE)
+        admin_access = EmployeeAccess.objects.create(
+            employee=admin_employee,
+            role=admin_role,
+            access_code='100000',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+        employee_access = EmployeeAccess.objects.create(
+            employee=employee,
+            role=driver_role,
+            access_code='654321',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        truck = Equipment.objects.create(equipment_type=truck_type, garage_number='10')
+        assignment = EquipmentAssignment.objects.create(
+            employee=employee,
+            role=driver_role,
+            equipment=truck,
+            shift_type='day',
+            assigned_by=admin_employee,
+            status=AssignmentStatus.ACCEPTED,
+            accepted_at=timezone.now(),
+        )
+        session = self.client.session
+        session['employee_access_id'] = admin_access.id
+        session.save()
+
+        response = self.client.post(
+            reverse('system_admin_change_access_role', args=[employee_access.id]),
+            {'role': manager_role.id},
+            follow=True,
+            HTTP_HOST='localhost',
+        )
+        assignment.refresh_from_db()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNotNone(assignment.ended_at)
+        self.assertEqual(assignment.ended_by, admin_employee)
+        employee_access.refresh_from_db()
+        self.assertEqual(employee_access.role, manager_role)
+
+    def test_role_change_is_blocked_while_employee_shift_is_open(self):
+        admin_role = Role.objects.create(code='admin', name='Администратор')
+        manager_role = Role.objects.create(code='manager_role_open_shift', name='Руководство')
+        driver_role = Role.objects.create(code='driver_role_open_shift', name='Водитель самосвала')
+        admin_employee = Employee.objects.create(full_name='Администратор MVP', status=Employee.Status.ACTIVE)
+        employee = Employee.objects.create(full_name='Сотрудник в открытой смене', status=Employee.Status.ACTIVE)
+        admin_access = EmployeeAccess.objects.create(
+            employee=admin_employee,
+            role=admin_role,
+            access_code='100000',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+        employee_access = EmployeeAccess.objects.create(
+            employee=employee,
+            role=manager_role,
+            access_code='654321',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+        EmployeeShift.objects.create(
+            employee=employee,
+            shift_type='day',
+            opened_at=timezone.now(),
+            opened_by=employee,
+        )
+        session = self.client.session
+        session['employee_access_id'] = admin_access.id
+        session.save()
+
+        response = self.client.post(
+            reverse('system_admin_change_access_role', args=[employee_access.id]),
+            {'role': driver_role.id},
+            follow=True,
+            HTTP_HOST='localhost',
+        )
+        employee_access.refresh_from_db()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(employee_access.role, manager_role)
+        self.assertEqual(employee_access.access_code, '654321')
+        self.assertFalse(AdminActionLog.objects.filter(action='Изменена роль доступа сотрудника').exists())
+
+    def test_role_change_does_not_create_duplicate_employee_role_access(self):
+        admin_role = Role.objects.create(code='admin', name='Администратор')
+        manager_role = Role.objects.create(code='manager_role_duplicate', name='Руководство')
+        driver_role = Role.objects.create(code='driver_role_duplicate', name='Водитель самосвала')
+        admin_employee = Employee.objects.create(full_name='Администратор MVP', status=Employee.Status.ACTIVE)
+        employee = Employee.objects.create(full_name='Сотрудник с двумя доступами', status=Employee.Status.ACTIVE)
+        admin_access = EmployeeAccess.objects.create(
+            employee=admin_employee,
+            role=admin_role,
+            access_code='100000',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+        manager_access = EmployeeAccess.objects.create(
+            employee=employee,
+            role=manager_role,
+            access_code='654321',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+        EmployeeAccess.objects.create(
+            employee=employee,
+            role=driver_role,
+            access_code='123456',
+            status=EmployeeAccess.Status.DEACTIVATED,
+            is_active=False,
+        )
+        session = self.client.session
+        session['employee_access_id'] = admin_access.id
+        session.save()
+
+        response = self.client.post(
+            reverse('system_admin_change_access_role', args=[manager_access.id]),
+            {'role': driver_role.id},
+            follow=True,
+            HTTP_HOST='localhost',
+        )
+        manager_access.refresh_from_db()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(manager_access.role, manager_role)
+        self.assertEqual(manager_access.access_code, '654321')
+        self.assertEqual(EmployeeAccess.objects.filter(employee=employee).count(), 2)
+
+    def test_admin_cannot_change_own_access_role(self):
+        admin_role = Role.objects.create(code='admin', name='Администратор')
+        manager_role = Role.objects.create(code='manager_role_self_change', name='Руководство')
+        admin_employee = Employee.objects.create(full_name='Администратор MVP', status=Employee.Status.ACTIVE)
+        admin_access = EmployeeAccess.objects.create(
+            employee=admin_employee,
+            role=admin_role,
+            access_code='100000',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+        session = self.client.session
+        session['employee_access_id'] = admin_access.id
+        session.save()
+
+        response = self.client.post(
+            reverse('system_admin_change_access_role', args=[admin_access.id]),
+            {'role': manager_role.id},
+            follow=True,
+            HTTP_HOST='localhost',
+        )
+        admin_access.refresh_from_db()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(admin_access.role, admin_role)
+        self.assertEqual(admin_access.access_code, '100000')
+        self.assertTrue(admin_access.is_active)
+
     def test_admin_employee_card_with_photo_has_remove_confirmation_and_modal(self):
         with TemporaryDirectory() as media_root:
             with override_settings(MEDIA_ROOT=media_root):
