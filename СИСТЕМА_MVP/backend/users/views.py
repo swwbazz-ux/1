@@ -33,7 +33,14 @@ from references.models import Dormitory, DormitorySection, DumpPoint, Equipment,
 from reports.models import ReportTemplate
 from shifts.forms import EquipmentPlanGroupForm
 from shifts.models import AchievementPrize, EmployeeShift, EquipmentPlanGroup, EquipmentShiftPlan, PlanAssignmentStatus, PlanCalculationMode, ShiftPlan, ShiftPlanScope
-from shifts.services import assign_shift_plan_snapshot, calculate_truck_shift_progress, plan_status_label, plan_unit_label, progress_cycle_visual_context
+from shifts.services import (
+    calculate_truck_shift_progress,
+    close_driver_shift,
+    open_driver_shift,
+    plan_status_label,
+    plan_unit_label,
+    progress_cycle_visual_context,
+)
 from trips.models import DispatcherActionLog, OPEN_TRIP_STATUSES, Trip, TripClientAction, TripStatus
 
 from .access_auth import find_employee_access_by_credentials
@@ -117,7 +124,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v95'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v96'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -2093,25 +2100,24 @@ def driver_shift_view(request):
     if request.method == 'POST' and not open_shift:
         form = DriverOpenShiftForm(request.POST, employee=access.employee, work_assignment=work_assignment) if assignment_state == 'assigned' else None
         if form and form.is_valid():
-            with transaction.atomic():
-                Employee.objects.select_for_update().get(pk=access.employee_id)
-                current_work_assignment = get_active_equipment_assignment(access.employee, 'driver')
-                if current_work_assignment:
-                    Equipment.objects.select_for_update().get(pk=current_work_assignment.equipment_id)
-                current_assignment_state = work_assignment_state(access.employee, current_work_assignment)
-                if current_assignment_state != 'assigned':
-                    form.add_error(None, 'Назначение изменилось. Обновите экран перед началом смены.')
-                elif EmployeeShift.objects.filter(employee=access.employee, closed_at__isnull=True).exists():
-                    form.add_error(None, 'Смена уже открыта. Обновите экран.')
+            current_work_assignment = get_active_equipment_assignment(access.employee, 'driver')
+            if work_assignment_state(access.employee, current_work_assignment) != 'assigned':
+                form.add_error(None, 'Назначение изменилось. Обновите экран перед началом смены.')
+            else:
+                try:
+                    open_driver_shift(
+                        employee=access.employee,
+                        work_assignment=current_work_assignment,
+                        readings={
+                            'start_fuel': form.cleaned_data['start_fuel'],
+                            'start_mileage': form.cleaned_data['start_mileage'],
+                            'start_engine_hours': form.cleaned_data['start_engine_hours'],
+                        },
+                        client_action_id=form.cleaned_data.get('client_action_id') or secrets.token_urlsafe(24),
+                    )
+                except ValidationError as error:
+                    form.add_error(None, error)
                 else:
-                    shift = form.save(commit=False)
-                    shift.employee = access.employee
-                    shift.opened_by = access.employee
-                    shift.shift_type = current_work_assignment.shift_type
-                    shift.equipment = current_work_assignment.equipment
-                    shift.opened_at = timezone.now()
-                    shift.save()
-                    assign_shift_plan_snapshot(shift)
                     messages.success(request, 'Смена открыта.')
                     return redirect('driver_work')
     else:
@@ -2122,10 +2128,18 @@ def driver_shift_view(request):
                 'start_mileage': last_closed_shift.end_mileage,
                 'start_engine_hours': last_closed_shift.end_engine_hours,
             }
+        form_initial['client_action_id'] = secrets.token_urlsafe(24)
         form = (
             DriverOpenShiftForm(initial=form_initial, employee=access.employee, work_assignment=work_assignment)
             if not open_shift and assignment_state == 'assigned'
             else None
+        )
+
+    close_form = getattr(request, '_driver_close_form', None)
+    if close_form is None and open_shift:
+        close_form = DriverCloseShiftForm(
+            instance=open_shift,
+            initial={'client_action_id': secrets.token_urlsafe(24)},
         )
 
     response = render(
@@ -2144,7 +2158,8 @@ def driver_shift_view(request):
             'current_assignment': current_assignment,
             'active_trip': active_trip,
             'form': form,
-            'close_form': DriverCloseShiftForm(instance=open_shift) if open_shift else None,
+            'close_form': close_form,
+            'close_review': getattr(request, '_driver_close_review', None),
             'last_closed_shift': last_closed_shift,
             'active_tab': active_tab,
             'active_downtime': active_downtime,
@@ -2249,15 +2264,49 @@ def driver_close_shift_view(request):
         messages.error(request, 'Открытая смена не найдена.')
         return redirect('driver_work')
 
-    if request.method == 'POST':
-        form = DriverCloseShiftForm(request.POST, instance=open_shift)
-        if form.is_valid():
-            shift = form.save(commit=False)
-            shift.closed_at = timezone.now()
-            shift.closed_by = access.employee
-            shift.save(update_fields=['end_fuel', 'end_mileage', 'end_engine_hours', 'closed_at', 'closed_by'])
-            messages.success(request, 'Смена закрыта.')
-    return redirect('driver_work')
+    form = DriverCloseShiftForm(request.POST, instance=open_shift)
+    request._driver_close_form = form
+    request._driver_close_review = None
+    action = request.POST.get('shift_action', 'review')
+    if form.is_valid():
+        readings = {
+            'end_fuel': form.cleaned_data['end_fuel'],
+            'end_mileage': form.cleaned_data['end_mileage'],
+            'end_engine_hours': form.cleaned_data['end_engine_hours'],
+        }
+        review_key = f'driver_shift_close_review_{open_shift.pk}'
+        normalized = {field: str(value) for field, value in readings.items()}
+        if action == 'review':
+            request.session[review_key] = normalized
+            request._driver_close_review = {
+                'start_fuel': open_shift.start_fuel,
+                'end_fuel': readings['end_fuel'],
+                'start_mileage': open_shift.start_mileage,
+                'end_mileage': readings['end_mileage'],
+                'mileage_delta': readings['end_mileage'] - open_shift.start_mileage,
+                'start_engine_hours': open_shift.start_engine_hours,
+                'end_engine_hours': readings['end_engine_hours'],
+                'engine_hours_delta': readings['end_engine_hours'] - open_shift.start_engine_hours,
+            }
+        elif request.session.get(review_key) != normalized:
+            form.add_error(None, 'Показания изменились после проверки. Проверьте их повторно.')
+        else:
+            try:
+                close_driver_shift(
+                    shift=open_shift,
+                    employee=access.employee,
+                    readings=readings,
+                    client_action_id=form.cleaned_data.get('client_action_id') or secrets.token_urlsafe(24),
+                )
+            except ValidationError as error:
+                form.add_error(None, error)
+            else:
+                request.session.pop(review_key, None)
+                messages.success(request, 'Смена закрыта.')
+                return redirect('driver_work')
+    request.GET = request.GET.copy()
+    request.GET['tab'] = 'shift'
+    return driver_shift_view(request)
 
 
 def driver_downtime_action_view(request):

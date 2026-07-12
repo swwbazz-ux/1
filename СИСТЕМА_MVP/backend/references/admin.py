@@ -23,7 +23,7 @@ class EquipmentTypeAdmin(admin.ModelAdmin):
 
 @admin.register(EquipmentModel)
 class EquipmentModelAdmin(admin.ModelAdmin):
-    list_display = ('name', 'equipment_type', 'payload_tons', 'body_volume_m3', 'is_active')
+    list_display = ('name', 'equipment_type', 'payload_tons', 'body_volume_m3', 'fuel_capacity_limit_l', 'is_active')
     search_fields = ('name', 'equipment_type__name')
     list_filter = ('equipment_type', 'is_active')
 

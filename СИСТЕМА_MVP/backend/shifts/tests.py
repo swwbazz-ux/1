@@ -1,18 +1,231 @@
 from datetime import timedelta
+from decimal import Decimal
+from types import SimpleNamespace
+
 from django.core.exceptions import ValidationError
+from django.db import IntegrityError, transaction
 from django.test import TestCase
 from django.utils import timezone
 
+from core.models import OperationalStateEvent
+from downtimes.models import DowntimeEvent, DowntimeReason
 from references.models import DumpPoint, Equipment, EquipmentModel, EquipmentType, RockType
 from trips.models import Trip, TripStatus
 from users.models import Employee
 
-from .models import EmployeeShift, EquipmentPlanGroup, EquipmentShiftPlan, PlanAssignmentStatus, PlanCalculationMode, ShiftPlan
+from .models import DriverShiftAction, EmployeeShift, EquipmentPlanGroup, EquipmentShiftPlan, PlanAssignmentStatus, PlanCalculationMode, ShiftPlan, ShiftReadingCorrection
 from .equipment_plan_groups import (
     reconcile_default_equipment_plan_groups,
     validate_equipment_plan_group_membership,
 )
-from .services import assign_shift_plan_snapshot, calculate_equipment_shift_progress, calculate_open_shift_progress, shift_plan_totals
+from .services import (
+    assign_shift_plan_snapshot,
+    calculate_equipment_shift_progress,
+    calculate_open_shift_progress,
+    close_driver_shift,
+    open_driver_shift,
+    shift_plan_totals,
+    validate_driver_close_readings,
+    validate_driver_fuel_reading,
+)
+
+
+class DriverShiftLifecycleTests(TestCase):
+    def setUp(self):
+        self.truck_type = EquipmentType.objects.create(name='Самосвал')
+        self.belaz = EquipmentModel.objects.create(
+            equipment_type=self.truck_type, name='БелАЗ 75131', fuel_capacity_limit_l=Decimal('2000'),
+        )
+        self.nhl = EquipmentModel.objects.create(
+            equipment_type=self.truck_type, name='NHL', fuel_capacity_limit_l=Decimal('3000'),
+        )
+        self.truck = Equipment.objects.create(equipment_type=self.truck_type, model=self.belaz, garage_number='54')
+        self.driver = Employee.objects.create(full_name='Петров П.П.')
+        self.assignment = SimpleNamespace(equipment_id=self.truck.pk, shift_type='day')
+
+    def readings(self, fuel='1000', mileage='10000', hours='1000'):
+        return {
+            'start_fuel': Decimal(fuel),
+            'start_mileage': Decimal(mileage),
+            'start_engine_hours': Decimal(hours),
+        }
+
+    def open_shift(self, action='open-1', **overrides):
+        readings = self.readings(**overrides)
+        return open_driver_shift(
+            employee=self.driver, work_assignment=self.assignment, readings=readings, client_action_id=action,
+        )[0]
+
+    def close_readings(self, fuel='900', mileage='10100', hours='1010'):
+        return {
+            'end_fuel': Decimal(fuel),
+            'end_mileage': Decimal(mileage),
+            'end_engine_hours': Decimal(hours),
+        }
+
+    def test_first_shift_saves_independent_start_snapshot(self):
+        shift = self.open_shift()
+        self.assertEqual(shift.start_mileage, Decimal('10000'))
+        self.assertFalse(ShiftReadingCorrection.objects.exists())
+
+    def test_open_requires_non_negative_fuel(self):
+        with self.assertRaises(ValidationError):
+            self.open_shift(fuel='-1')
+
+    def test_model_without_fuel_limit_is_blocked(self):
+        model = EquipmentModel.objects.create(equipment_type=self.truck_type, name='Без лимита')
+        self.truck.model = model
+        self.truck.save(update_fields=['model'])
+        with self.assertRaisesMessage(ValidationError, 'не настроен'):
+            self.open_shift()
+
+    def test_belaz_fuel_limit_allows_2000(self):
+        validate_driver_fuel_reading(self.truck, Decimal('2000'))
+
+    def test_belaz_fuel_limit_blocks_above_2000(self):
+        with self.assertRaises(ValidationError):
+            validate_driver_fuel_reading(self.truck, Decimal('2000.01'))
+
+    def test_nhl_fuel_limit_allows_3000(self):
+        self.truck.model = self.nhl
+        self.truck.save(update_fields=['model'])
+        validate_driver_fuel_reading(self.truck, Decimal('3000'))
+
+    def test_nhl_fuel_limit_blocks_above_3000(self):
+        self.truck.model = self.nhl
+        self.truck.save(update_fields=['model'])
+        with self.assertRaises(ValidationError):
+            validate_driver_fuel_reading(self.truck, Decimal('3000.01'))
+
+    def test_previous_end_readings_can_be_opened_unchanged(self):
+        previous = self.open_shift()
+        close_driver_shift(
+            shift=previous, employee=self.driver, readings=self.close_readings(), client_action_id='close-1',
+        )
+        shift = self.open_shift(action='open-2', fuel='900', mileage='10100', hours='1010')
+        self.assertFalse(shift.reading_corrections.exists())
+
+    def test_changed_inherited_reading_creates_audit(self):
+        previous = self.open_shift()
+        close_driver_shift(
+            shift=previous, employee=self.driver, readings=self.close_readings(), client_action_id='close-1',
+        )
+        shift = self.open_shift(action='open-2', fuel='850', mileage='10100', hours='1010')
+        correction = shift.reading_corrections.get()
+        self.assertEqual(correction.inherited_value, Decimal('900'))
+        self.assertEqual(correction.corrected_value, Decimal('850'))
+
+    def test_second_open_shift_for_driver_is_blocked(self):
+        self.open_shift()
+        other = Equipment.objects.create(equipment_type=self.truck_type, model=self.belaz, garage_number='55')
+        with self.assertRaises(ValidationError):
+            open_driver_shift(
+                employee=self.driver,
+                work_assignment=SimpleNamespace(equipment_id=other.pk, shift_type='day'),
+                readings=self.readings(),
+                client_action_id='open-2',
+            )
+
+    def test_second_open_shift_for_truck_is_blocked(self):
+        self.open_shift()
+        other_driver = Employee.objects.create(full_name='Иванов И.И.')
+        with self.assertRaisesMessage(ValidationError, 'уже открыта другим водителем'):
+            open_driver_shift(
+                employee=other_driver, work_assignment=self.assignment, readings=self.readings(), client_action_id='other-open',
+            )
+
+    def test_database_constraint_blocks_concurrent_duplicate_truck_shift(self):
+        self.open_shift()
+        other_driver = Employee.objects.create(full_name='Сидоров С.С.')
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            EmployeeShift.objects.create(
+                employee=other_driver, equipment=self.truck, shift_type='night', opened_at=timezone.now(),
+            )
+
+    def test_duplicate_open_client_action_is_idempotent(self):
+        first, created = open_driver_shift(
+            employee=self.driver, work_assignment=self.assignment, readings=self.readings(), client_action_id='same-open',
+        )
+        second, created_again = open_driver_shift(
+            employee=self.driver, work_assignment=self.assignment, readings=self.readings(), client_action_id='same-open',
+        )
+        self.assertEqual(first.pk, second.pk)
+        self.assertTrue(created)
+        self.assertFalse(created_again)
+        self.assertEqual(DriverShiftAction.objects.filter(action_type='driver_shift_opened').count(), 1)
+
+    def test_end_fuel_may_exceed_start_fuel(self):
+        shift = self.open_shift(fuel='500')
+        validate_driver_close_readings(shift, **self.close_readings(fuel='700'))
+
+    def test_mileage_may_increase_by_250(self):
+        shift = self.open_shift()
+        validate_driver_close_readings(shift, **self.close_readings(mileage='10250'))
+
+    def test_mileage_above_250_is_blocked(self):
+        shift = self.open_shift()
+        with self.assertRaises(ValidationError):
+            validate_driver_close_readings(shift, **self.close_readings(mileage='10250.01'))
+
+    def test_mileage_decrease_is_blocked(self):
+        shift = self.open_shift()
+        with self.assertRaises(ValidationError):
+            validate_driver_close_readings(shift, **self.close_readings(mileage='9999'))
+
+    def test_engine_hours_may_increase_by_12(self):
+        shift = self.open_shift()
+        validate_driver_close_readings(shift, **self.close_readings(hours='1012'))
+
+    def test_engine_hours_above_12_is_blocked(self):
+        shift = self.open_shift()
+        with self.assertRaisesMessage(ValidationError, 'не могут увеличиться более чем на 12'):
+            validate_driver_close_readings(shift, **self.close_readings(hours='1012.01'))
+
+    def test_engine_hours_decrease_is_blocked(self):
+        shift = self.open_shift()
+        with self.assertRaises(ValidationError):
+            validate_driver_close_readings(shift, **self.close_readings(hours='999'))
+
+    def test_close_with_active_trip_is_blocked(self):
+        shift = self.open_shift()
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='ЭКС-1')
+        rock = RockType.objects.create(name='Руда', density='2.50')
+        point = DumpPoint.objects.create(name='ККД')
+        Trip.objects.create(truck=self.truck, excavator=excavator, driver=self.driver, rock_type=rock, dump_point=point)
+        with self.assertRaisesMessage(ValidationError, 'активный рейс'):
+            close_driver_shift(
+                shift=shift, employee=self.driver, readings=self.close_readings(), client_action_id='blocked-trip',
+            )
+
+    def test_close_with_active_downtime_is_blocked(self):
+        shift = self.open_shift()
+        reason, _ = DowntimeReason.objects.get_or_create(name='Ремонт', defaults={'equipment_type': self.truck_type})
+        DowntimeEvent.objects.create(equipment=self.truck, employee=self.driver, reason=reason, started_at=timezone.now())
+        with self.assertRaisesMessage(ValidationError, 'активный простой'):
+            close_driver_shift(
+                shift=shift, employee=self.driver, readings=self.close_readings(), client_action_id='blocked-downtime',
+            )
+
+    def test_duplicate_close_client_action_is_idempotent(self):
+        shift = self.open_shift()
+        first, created = close_driver_shift(
+            shift=shift, employee=self.driver, readings=self.close_readings(), client_action_id='same-close',
+        )
+        second, created_again = close_driver_shift(
+            shift=shift, employee=self.driver, readings=self.close_readings(), client_action_id='same-close',
+        )
+        self.assertEqual(first.pk, second.pk)
+        self.assertTrue(created)
+        self.assertFalse(created_again)
+
+    def test_open_and_close_emit_realtime_events(self):
+        shift = self.open_shift()
+        close_driver_shift(
+            shift=shift, employee=self.driver, readings=self.close_readings(), client_action_id='close-event',
+        )
+        self.assertTrue(OperationalStateEvent.objects.filter(event_type='driver_shift_opened').exists())
+        self.assertTrue(OperationalStateEvent.objects.filter(event_type='driver_shift_closed').exists())
 
 
 class ShiftPlanServiceTests(TestCase):

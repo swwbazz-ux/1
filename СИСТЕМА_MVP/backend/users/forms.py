@@ -413,13 +413,14 @@ class DriverPrimaryRegistrationForm(forms.ModelForm):
 class DriverOpenShiftForm(forms.ModelForm):
     shift_type = forms.ChoiceField(label='Смена', choices=EmployeeShift._meta.get_field('shift_type').choices)
     truck = forms.ModelChoiceField(label='Самосвал', queryset=Equipment.objects.none())
+    client_action_id = forms.CharField(widget=forms.HiddenInput, required=False)
 
     class Meta:
         model = EmployeeShift
         fields = ['shift_type', 'truck', 'start_fuel', 'start_mileage', 'start_engine_hours']
         labels = {
             'start_fuel': 'Топливо на начало смены',
-            'start_mileage': 'Пробег на начало смены',
+            'start_mileage': 'Одометр на начало смены',
             'start_engine_hours': 'Моточасы на начало смены',
         }
         widgets = {
@@ -432,7 +433,7 @@ class DriverOpenShiftForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         self.employee = employee
         self.work_assignment = work_assignment
-        self.fields['truck'].queryset = Equipment.objects.filter(equipment_type__name='Самосвал', is_active=True).order_by('garage_number')
+        self.fields['truck'].queryset = Equipment.objects.filter(equipment_type__name='Самосвал', is_active=True).select_related('model').order_by('garage_number')
         self.fields['truck'].widget.attrs['onchange'] = "if (this.value) window.location='?truck=' + this.value;"
         self.fields['start_fuel'].required = True
         self.fields['start_mileage'].required = True
@@ -454,24 +455,28 @@ class DriverOpenShiftForm(forms.ModelForm):
         if not shift_type or not truck:
             return cleaned_data
 
-        truck_busy = EmployeeShift.objects.filter(
-            shift_type=shift_type,
-            equipment=truck,
-            closed_at__isnull=True,
-        ).exclude(employee=self.employee).exists()
+        truck_busy = EmployeeShift.objects.filter(equipment=truck, closed_at__isnull=True).exists()
         if truck_busy:
-            raise ValidationError('Этот самосвал уже занят в выбранной смене.')
+            raise ValidationError('Смена по этому самосвалу уже открыта другим водителем.')
+
+        from shifts.services import validate_driver_fuel_reading
+        try:
+            validate_driver_fuel_reading(truck, cleaned_data.get('start_fuel'))
+        except ValidationError as error:
+            self.add_error('start_fuel', error)
 
         return cleaned_data
 
 
 class DriverCloseShiftForm(forms.ModelForm):
+    client_action_id = forms.CharField(widget=forms.HiddenInput, required=False)
+
     class Meta:
         model = EmployeeShift
         fields = ['end_fuel', 'end_mileage', 'end_engine_hours']
         labels = {
             'end_fuel': 'Топливо на конец смены',
-            'end_mileage': 'Пробег на конец смены',
+            'end_mileage': 'Одометр на конец смены',
             'end_engine_hours': 'Моточасы на конец смены',
         }
         widgets = {
@@ -479,3 +484,28 @@ class DriverCloseShiftForm(forms.ModelForm):
             'end_mileage': forms.NumberInput(attrs={'step': '0.01', 'min': '0'}),
             'end_engine_hours': forms.NumberInput(attrs={'step': '0.01', 'min': '0'}),
         }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for field_name in ('end_fuel', 'end_mileage', 'end_engine_hours'):
+            self.fields[field_name].required = True
+
+    def clean(self):
+        cleaned_data = super().clean()
+        if self.instance and self.instance.pk and not self.errors:
+            from shifts.services import validate_driver_close_readings
+            try:
+                validate_driver_close_readings(
+                    self.instance,
+                    end_fuel=cleaned_data.get('end_fuel'),
+                    end_mileage=cleaned_data.get('end_mileage'),
+                    end_engine_hours=cleaned_data.get('end_engine_hours'),
+                )
+            except ValidationError as error:
+                if hasattr(error, 'error_dict'):
+                    for field_name, field_errors in error.error_dict.items():
+                        for field_error in field_errors:
+                            self.add_error(field_name, field_error)
+                else:
+                    self.add_error('end_fuel', error)
+        return cleaned_data

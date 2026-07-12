@@ -1,20 +1,186 @@
 from collections import defaultdict
 from decimal import Decimal
 
+from django.core.exceptions import ValidationError
+from django.db import IntegrityError, transaction
 from django.db.models import Count, Q, Sum
 from django.utils import timezone
 
-from trips.models import Trip, TripStatus
+from core.models import bump_operational_state
+from downtimes.models import DowntimeEvent
+from references.models import Equipment
+from trips.models import OPEN_TRIP_STATUSES, Trip, TripStatus
+from users.models import Employee
 
 from .models import (
     EmployeeShift,
+    DriverShiftAction,
     EquipmentPlanGroup,
     EquipmentShiftPlan,
     PlanAssignmentStatus,
     PlanCalculationMode,
     ShiftPlan,
     ShiftPlanScope,
+    ShiftReadingCorrection,
 )
+
+
+DRIVER_SHIFT_READING_FIELDS = (
+    ('start_fuel', 'end_fuel'),
+    ('start_mileage', 'end_mileage'),
+    ('start_engine_hours', 'end_engine_hours'),
+)
+
+
+def validate_driver_fuel_reading(equipment, value):
+    if value is None:
+        raise ValidationError('Укажите остаток топлива.')
+    if value < 0:
+        raise ValidationError('Остаток топлива не может быть отрицательным.')
+    limit = getattr(getattr(equipment, 'model', None), 'fuel_capacity_limit_l', None)
+    if limit is None:
+        raise ValidationError('Для модели этого самосвала не настроен максимальный остаток топлива.')
+    if value > limit:
+        raise ValidationError(f'Остаток топлива не может превышать {limit:g} л для этой модели.')
+
+
+def validate_driver_close_readings(shift, *, end_fuel, end_mileage, end_engine_hours):
+    validate_driver_fuel_reading(shift.equipment, end_fuel)
+    errors = {}
+    if shift.start_mileage is None:
+        errors['end_mileage'] = 'В открытой смене отсутствует начальное показание одометра. Обратитесь к диспетчеру.'
+    elif end_mileage is None:
+        errors['end_mileage'] = 'Укажите одометр на конец смены.'
+    elif end_mileage < shift.start_mileage:
+        errors['end_mileage'] = 'Одометр на конец смены не может быть меньше показания на начало.'
+    elif end_mileage - shift.start_mileage > Decimal('250'):
+        errors['end_mileage'] = 'Пробег за смену не может превышать 250 км. Проверьте показания.'
+    if shift.start_engine_hours is None:
+        errors['end_engine_hours'] = 'В открытой смене отсутствует начальное показание моточасов. Обратитесь к диспетчеру.'
+    elif end_engine_hours is None:
+        errors['end_engine_hours'] = 'Укажите моточасы на конец смены.'
+    elif end_engine_hours < shift.start_engine_hours:
+        errors['end_engine_hours'] = 'Моточасы на конец смены не могут быть меньше показания на начало.'
+    elif end_engine_hours - shift.start_engine_hours > Decimal('12'):
+        errors['end_engine_hours'] = 'Моточасы за смену не могут увеличиться более чем на 12. Проверьте показания.'
+    if errors:
+        raise ValidationError(errors)
+
+
+def open_driver_shift(*, employee, work_assignment, readings, client_action_id):
+    existing = DriverShiftAction.objects.select_related('shift').filter(
+        action_type='driver_shift_opened', client_action_id=client_action_id,
+    ).first()
+    if existing:
+        return existing.shift, False
+    try:
+        with transaction.atomic():
+            Employee.objects.select_for_update().get(pk=employee.pk)
+            equipment = Equipment.objects.select_for_update().select_related('model').get(pk=work_assignment.equipment_id)
+            existing = DriverShiftAction.objects.select_related('shift').filter(
+                action_type='driver_shift_opened', client_action_id=client_action_id,
+            ).first()
+            if existing:
+                return existing.shift, False
+            if EmployeeShift.objects.filter(employee=employee, closed_at__isnull=True).exists():
+                raise ValidationError('У этого водителя уже открыта смена.')
+            if EmployeeShift.objects.filter(equipment=equipment, closed_at__isnull=True).exists():
+                raise ValidationError('Смена по этому самосвалу уже открыта другим водителем.')
+            validate_driver_fuel_reading(equipment, readings['start_fuel'])
+            previous_shift = EmployeeShift.objects.filter(
+                equipment=equipment, closed_at__isnull=False,
+            ).order_by('-closed_at').first()
+            shift = EmployeeShift.objects.create(
+                employee=employee,
+                opened_by=employee,
+                shift_type=work_assignment.shift_type,
+                equipment=equipment,
+                opened_at=timezone.now(),
+                **readings,
+            )
+            assign_shift_plan_snapshot(shift)
+            if previous_shift:
+                corrections = []
+                for start_field, end_field in DRIVER_SHIFT_READING_FIELDS:
+                    inherited = getattr(previous_shift, end_field)
+                    corrected = getattr(shift, start_field)
+                    if inherited is not None and corrected != inherited:
+                        corrections.append(ShiftReadingCorrection(
+                            shift=shift,
+                            previous_shift=previous_shift,
+                            equipment=equipment,
+                            driver=employee,
+                            field_name=start_field,
+                            inherited_value=inherited,
+                            corrected_value=corrected,
+                        ))
+                ShiftReadingCorrection.objects.bulk_create(corrections)
+                if corrections:
+                    bump_operational_state(
+                        'DriverShift:readings_corrected',
+                        event_type='shift_readings_corrected',
+                        object_type='EmployeeShift',
+                        object_id=shift.pk,
+                        payload={
+                            'shift_id': shift.pk,
+                            'previous_shift_id': previous_shift.pk,
+                            'truck_id': equipment.pk,
+                            'driver_id': employee.pk,
+                            'fields': [item.field_name for item in corrections],
+                        },
+                    )
+            DriverShiftAction.objects.create(
+                action_type='driver_shift_opened', client_action_id=client_action_id, shift=shift, actor=employee,
+            )
+            bump_operational_state(
+                'DriverShift:opened', event_type='driver_shift_opened', object_type='EmployeeShift', object_id=shift.pk,
+                payload={'shift_id': shift.pk, 'truck_id': equipment.pk, 'driver_id': employee.pk},
+            )
+            return shift, True
+    except IntegrityError as error:
+        existing = DriverShiftAction.objects.select_related('shift').filter(
+            action_type='driver_shift_opened', client_action_id=client_action_id,
+        ).first()
+        if existing:
+            return existing.shift, False
+        raise ValidationError('Смена по этому самосвалу уже открыта другим водителем.') from error
+
+
+def close_driver_shift(*, shift, employee, readings, client_action_id):
+    existing = DriverShiftAction.objects.select_related('shift').filter(
+        action_type='driver_shift_closed', client_action_id=client_action_id,
+    ).first()
+    if existing:
+        return existing.shift, False
+    with transaction.atomic():
+        Employee.objects.select_for_update().get(pk=employee.pk)
+        locked_shift = EmployeeShift.objects.select_for_update().select_related('equipment__model').get(pk=shift.pk)
+        Equipment.objects.select_for_update().get(pk=locked_shift.equipment_id)
+        existing = DriverShiftAction.objects.select_related('shift').filter(
+            action_type='driver_shift_closed', client_action_id=client_action_id,
+        ).first()
+        if existing:
+            return existing.shift, False
+        if locked_shift.closed_at:
+            raise ValidationError('Смена уже закрыта.')
+        if Trip.objects.filter(truck=locked_shift.equipment, status__in=OPEN_TRIP_STATUSES).exists():
+            raise ValidationError('Нельзя закрыть смену: у самосвала есть активный рейс.')
+        if DowntimeEvent.objects.filter(equipment=locked_shift.equipment, ended_at__isnull=True).exists():
+            raise ValidationError('Нельзя закрыть смену: у самосвала есть активный простой, ремонт или авария.')
+        validate_driver_close_readings(locked_shift, **readings)
+        for field, value in readings.items():
+            setattr(locked_shift, field, value)
+        locked_shift.closed_at = timezone.now()
+        locked_shift.closed_by = employee
+        locked_shift.save(update_fields=[*readings, 'closed_at', 'closed_by'])
+        DriverShiftAction.objects.create(
+            action_type='driver_shift_closed', client_action_id=client_action_id, shift=locked_shift, actor=employee,
+        )
+        bump_operational_state(
+            'DriverShift:closed', event_type='driver_shift_closed', object_type='EmployeeShift', object_id=locked_shift.pk,
+            payload={'shift_id': locked_shift.pk, 'truck_id': locked_shift.equipment_id, 'driver_id': employee.pk},
+        )
+        return locked_shift, True
 
 
 def decimal_zero():

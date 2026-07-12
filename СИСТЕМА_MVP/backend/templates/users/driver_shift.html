@@ -1554,6 +1554,22 @@ body.driver-mobile-screen .driver-shift-result-cell strong {
     white-space: nowrap;
 }
 
+body.driver-mobile-screen .driver-shift-review {
+    display: grid;
+    gap: 8px;
+    padding: 12px;
+    border: 1px solid rgba(140, 255, 46, .34);
+    background: rgba(5, 23, 22, .88);
+}
+body.driver-mobile-screen .driver-shift-review-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 12px;
+    color: #adc0c5;
+}
+body.driver-mobile-screen .driver-shift-review-row strong { color: #f0fff0; }
+body.driver-mobile-screen .driver-shift-edit { color: #9bd2dc; background: transparent; border: 0; text-decoration: underline; }
+
 body.driver-mobile-screen .driver-shift-actions {
     min-height: 0;
     display: grid;
@@ -2793,7 +2809,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
 {% endblock %}
 
 {% block body %}
-<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v95' }}">
+<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v96' }}">
     {% if messages %}
         <div class="driver-messages">
             {% for message in messages %}
@@ -2919,24 +2935,27 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
         {% if open_shift %}
             <form method="post" action="{% url 'driver_close_shift' %}" class="driver-shift-workspace" data-driver-shift-close-form>
                 {% csrf_token %}
+                {{ close_form.client_action_id }}
+                <input type="hidden" name="shift_action" value="{% if close_review %}close{% else %}review{% endif %}" data-driver-shift-action>
                 <div class="driver-shift-titlebar">
                     <h2>Смена</h2>
                     <button class="driver-shift-update" type="button" data-driver-shift-update><span class="driver-shift-update-icon" aria-hidden="true"></span><span>Обновить</span></button>
                 </div>
                 <div class="driver-shift-section">
                     <div class="driver-shift-section-head"><span>Показатели техники</span></div>
+                    {{ close_form.non_field_errors }}
                     <div class="driver-shift-metrics">
                         <label class="driver-shift-field">
                             <span>Топливо</span>
-                            <span class="driver-shift-metric-value">{{ close_form.end_fuel }}<em>л</em></span>
+                            <span class="driver-shift-metric-value">{{ close_form.end_fuel }}<em>л</em></span>{{ close_form.end_fuel.errors }}
                         </label>
                         <label class="driver-shift-field">
-                            <span>Пробег</span>
-                            <span class="driver-shift-metric-value">{{ close_form.end_mileage }}<em>км</em></span>
+                            <span>Одометр</span>
+                            <span class="driver-shift-metric-value">{{ close_form.end_mileage }}<em>км</em></span>{{ close_form.end_mileage.errors }}
                         </label>
                         <label class="driver-shift-field">
                             <span>Моточасы</span>
-                            <span class="driver-shift-metric-value">{{ close_form.end_engine_hours }}<em>м/ч</em></span>
+                            <span class="driver-shift-metric-value">{{ close_form.end_engine_hours }}<em>м/ч</em></span>{{ close_form.end_engine_hours.errors }}
                         </label>
                     </div>
                 </div>
@@ -2950,7 +2969,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
                     </div>
                 </div>
                 <div class="driver-shift-actions">
-                    <button class="driver-shift-submit" type="submit" data-driver-shift-close-button style="--driver-shift-hold: 0%;">Завершить смену</button>
+                    <button class="driver-shift-submit" type="submit" data-driver-shift-close-button style="--driver-shift-hold: 0%;">{% if close_review %}Закрыть смену{% else %}Проверить показания{% endif %}</button>
                     <button class="driver-shift-logout" type="button" data-driver-shift-logout data-driver-logout-url="{% url 'logout' %}" style="--driver-logout-hold: 0%;">Выйти</button>
                 </div>
             </form>
@@ -2960,15 +2979,24 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
                     <h2>Смена</h2>
                     <button class="driver-shift-update" type="button" data-driver-shift-update><span class="driver-shift-update-icon" aria-hidden="true"></span><span>Обновить</span></button>
                 </div>
+                {% if close_review %}
+                <div class="driver-shift-review" data-driver-shift-review>
+                    <div class="driver-shift-review-row"><span>Топливо</span><strong>{{ close_review.start_fuel }} → {{ close_review.end_fuel }} л</strong></div>
+                    <div class="driver-shift-review-row"><span>Одометр</span><strong>{{ close_review.start_mileage }} → {{ close_review.end_mileage }} км (+{{ close_review.mileage_delta }})</strong></div>
+                    <div class="driver-shift-review-row"><span>Моточасы</span><strong>{{ close_review.start_engine_hours }} → {{ close_review.end_engine_hours }} (+{{ close_review.engine_hours_delta }})</strong></div>
+                    <button class="driver-shift-edit" type="button" data-driver-shift-edit>Изменить показания</button>
+                </div>
+                {% endif %}
                 {% if form %}
                 <form method="post" class="driver-shift-opening-form">
                     {% csrf_token %}
+                    {{ form.client_action_id }}
                     {{ form.non_field_errors }}
                 <div class="driver-shift-section">
                     <div class="driver-shift-section-head"><span>Показатели техники</span>{% if last_closed_shift %}<b>Предыдущая смена</b>{% endif %}</div>
                     <div class="driver-shift-metrics">
                         <label class="driver-shift-field"><span>Топливо</span><span class="driver-shift-metric-value">{{ form.start_fuel }}<em>л</em></span>{{ form.start_fuel.errors }}</label>
-                        <label class="driver-shift-field"><span>Пробег</span><span class="driver-shift-metric-value">{{ form.start_mileage }}<em>км</em></span>{{ form.start_mileage.errors }}</label>
+                        <label class="driver-shift-field"><span>Одометр</span><span class="driver-shift-metric-value">{{ form.start_mileage }}<em>км</em></span>{{ form.start_mileage.errors }}</label>
                         <label class="driver-shift-field"><span>Моточасы</span><span class="driver-shift-metric-value">{{ form.start_engine_hours }}<em>м/ч</em></span>{{ form.start_engine_hours.errors }}</label>
                     </div>
                 </div>
@@ -2982,7 +3010,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
                     </div>
                 </div>
                 <div class="driver-shift-actions">
-                    <button class="driver-shift-open" type="submit">Начать смену</button>
+                    <button class="driver-shift-open" type="submit" data-driver-shift-open-button disabled>Подтвердить показания и начать смену</button>
                     <button class="driver-shift-logout" type="button" data-driver-shift-logout data-driver-logout-url="{% url 'logout' %}" style="--driver-logout-hold: 0%;">Выйти</button>
                 </div>
                 </form>
@@ -3217,6 +3245,22 @@ window.bindDriverMobileShell = function () {
     shell.querySelectorAll(".driver-shift-metric-value input").forEach(function (input) {
         if (!input.getAttribute("placeholder")) input.setAttribute("placeholder", "0");
     });
+    var openShiftForm = shell.querySelector(".driver-shift-opening-form");
+    var openShiftButton = shell.querySelector("[data-driver-shift-open-button]");
+    if (openShiftForm && openShiftButton) {
+        var openReadings = Array.from(openShiftForm.querySelectorAll("input[type='number']"));
+        function syncOpenShiftButton() {
+            openShiftButton.disabled = !openReadings.length || openReadings.some(function (input) {
+                return input.value.trim() === "" || !input.checkValidity();
+            });
+        }
+        openReadings.forEach(function (input) { input.addEventListener("input", syncOpenShiftButton); });
+        openShiftForm.addEventListener("submit", function () {
+            openShiftButton.disabled = true;
+            openShiftButton.textContent = "Открываем смену";
+        });
+        syncOpenShiftButton();
+    }
     function syncDriverDialProgress() {
         shell.querySelectorAll(".driver-work-dial").forEach(function (dial) {
             var loopProgress = Number(dial.dataset.driverLoopProgress || 0);
@@ -3281,6 +3325,9 @@ window.bindDriverMobileShell = function () {
         var closeButton = shell.querySelector("[data-driver-shift-close-button]");
         var updateButton = shell.querySelector("[data-driver-shift-update]");
         var logoutButton = shell.querySelector("[data-driver-shift-logout]");
+        var shiftAction = form ? form.querySelector("[data-driver-shift-action]") : null;
+        var reviewPanel = form ? form.querySelector("[data-driver-shift-review]") : null;
+        var editButton = form ? form.querySelector("[data-driver-shift-edit]") : null;
         var holdStartedAt = 0;
         var holdFrame = null;
         var holdMs = 2000;
@@ -3313,6 +3360,9 @@ window.bindDriverMobileShell = function () {
         if (form && closeButton && closeButton.dataset.driverShiftBound !== "true") {
             closeButton.dataset.driverShiftBound = "true";
             closeButton.addEventListener("pointerdown", function (event) {
+                if (!shiftAction || shiftAction.value !== "close") {
+                    return;
+                }
                 event.preventDefault();
                 holdStartedAt = Date.now();
                 holdFrame = window.requestAnimationFrame(drawHold);
@@ -3321,15 +3371,37 @@ window.bindDriverMobileShell = function () {
                 closeButton.addEventListener(eventName, resetHold);
             });
             closeButton.addEventListener("click", function (event) {
-                if (form.dataset.driverShiftConfirmed !== "true") {
+                if (shiftAction && shiftAction.value === "close" && form.dataset.driverShiftConfirmed !== "true") {
                     event.preventDefault();
                 }
             });
             form.addEventListener("submit", function (event) {
-                if (form.dataset.driverShiftConfirmed !== "true") {
+                if (shiftAction && shiftAction.value === "close" && form.dataset.driverShiftConfirmed !== "true") {
                     event.preventDefault();
+                    return;
                 }
+                closeButton.disabled = true;
             });
+            form.querySelectorAll("input[type='number']").forEach(function (input) {
+                input.addEventListener("input", function () {
+                    if (shiftAction && shiftAction.value === "close") {
+                        shiftAction.value = "review";
+                        closeButton.textContent = "Проверить показания";
+                        form.dataset.driverShiftConfirmed = "false";
+                        if (reviewPanel) reviewPanel.hidden = true;
+                        resetHold();
+                    }
+                });
+            });
+            if (editButton) {
+                editButton.addEventListener("click", function () {
+                    shiftAction.value = "review";
+                    closeButton.textContent = "Проверить показания";
+                    if (reviewPanel) reviewPanel.hidden = true;
+                    var firstInput = form.querySelector("input[type='number']");
+                    if (firstInput) firstInput.focus();
+                });
+            }
         }
 
         if (updateButton && updateButton.dataset.driverShiftUpdateBound !== "true") {
@@ -4052,7 +4124,7 @@ window.bindDriverMobileShell = function () {
         if (!("serviceWorker" in navigator)) {
             return;
         }
-        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v95' }}";
+        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v96' }}";
         var updateModal = document.querySelector("[data-driver-pwa-update-modal]");
         var updateBadge = document.querySelector("[data-driver-pwa-update-badge]");
         var updateTarget = document.querySelector("[data-driver-pwa-update-nav-target]");

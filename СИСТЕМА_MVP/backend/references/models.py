@@ -19,6 +19,13 @@ class EquipmentModel(models.Model):
     name = models.CharField('Модель', max_length=128)
     payload_tons = models.DecimalField('Грузоподъемность, т', max_digits=10, decimal_places=2, null=True, blank=True)
     body_volume_m3 = models.DecimalField('Объем кузова/ковша, м3', max_digits=10, decimal_places=2, null=True, blank=True)
+    fuel_capacity_limit_l = models.DecimalField(
+        'Максимальный остаток топлива, л',
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
     is_active = models.BooleanField('Активна', default=True)
 
     class Meta:

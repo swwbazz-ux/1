@@ -7,7 +7,7 @@ from django.test import Client, TestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from references.models import Dormitory, DormitoryBlock, DormitorySection, Equipment, EquipmentType
+from references.models import Dormitory, DormitoryBlock, DormitorySection, Equipment, EquipmentModel, EquipmentType
 from shifts.models import EmployeeShift, EquipmentPlanGroup, PlanCalculationMode
 from users.models import DriverPrimaryRegistration, Employee, EmployeeAccess, Role
 from users.forms import AdminEmployeeEditForm
@@ -36,8 +36,13 @@ class WorkAssignmentFixtureMixin:
 
         self.truck_type = EquipmentType.objects.create(name='Самосвал')
         self.excavator_type = EquipmentType.objects.create(name='Экскаватор')
-        self.truck_1 = Equipment.objects.create(equipment_type=self.truck_type, garage_number='Т-01')
-        self.truck_2 = Equipment.objects.create(equipment_type=self.truck_type, garage_number='Т-02')
+        truck_model = EquipmentModel.objects.create(
+            equipment_type=self.truck_type,
+            name='БелАЗ тестовый',
+            fuel_capacity_limit_l='2000',
+        )
+        self.truck_1 = Equipment.objects.create(equipment_type=self.truck_type, model=truck_model, garage_number='Т-01')
+        self.truck_2 = Equipment.objects.create(equipment_type=self.truck_type, model=truck_model, garage_number='Т-02')
         self.excavator_1 = Equipment.objects.create(equipment_type=self.excavator_type, garage_number='Э-01')
         self.excavator_2 = Equipment.objects.create(equipment_type=self.excavator_type, garage_number='Э-02')
 
