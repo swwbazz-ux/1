@@ -29181,6 +29181,36 @@ body.employee-detail-screen .admin-employee-detail-shell .admin-page {
     grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.admin-employee-create-shell .employee-work-assignment-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 12px;
+    align-items: baseline;
+    padding: 10px 12px;
+    border: 1px solid color-mix(in srgb, var(--admin-green) 28%, var(--admin-line));
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--admin-panel-soft) 94%, var(--admin-green) 6%);
+    color: var(--admin-muted);
+    font-family: "Segoe UI", Arial, sans-serif;
+    font-size: 12px;
+    line-height: 1.35;
+}
+
+.admin-employee-create-shell .employee-work-assignment-meta strong {
+    color: var(--admin-ink);
+    font-size: 13px;
+}
+
+.admin-employee-create-shell .employee-work-assignment-meta.is-warning {
+    border-color: color-mix(in srgb, var(--admin-yellow) 58%, var(--admin-line));
+    background: var(--admin-yellow-soft);
+    color: var(--admin-ink);
+}
+
+.admin-employee-create-shell .employee-work-assignment-meta.is-warning strong {
+    color: var(--admin-yellow);
+}
+
 .admin-employee-create-shell .employee-card-v2-textareas {
     grid-template-columns: repeat(2, minmax(0, 1fr));
 }

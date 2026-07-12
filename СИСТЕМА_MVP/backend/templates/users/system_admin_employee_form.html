@@ -137,21 +137,6 @@
                     {{ form.status.errors }}
                 </div>
                 <div class="employee-detail-field">
-                    <label for="{{ form.role.id_for_label }}">{{ form.role.label }}</label>
-                    {{ form.role }}
-                    {{ form.role.errors }}
-                </div>
-                <div class="employee-detail-field">
-                    <label for="{{ form.assignment_shift_type.id_for_label }}">{{ form.assignment_shift_type.label }}</label>
-                    {{ form.assignment_shift_type }}
-                    {{ form.assignment_shift_type.errors }}
-                </div>
-                <div class="employee-detail-field">
-                    <label for="{{ form.assignment_equipment.id_for_label }}">{{ form.assignment_equipment.label }}</label>
-                    {{ form.assignment_equipment }}
-                    {{ form.assignment_equipment.errors }}
-                </div>
-                <div class="employee-detail-field">
                     <label for="{{ form.hired_at.id_for_label }}">{{ form.hired_at.label }}</label>
                     {{ form.hired_at }}
                     {{ form.hired_at.errors }}
@@ -177,6 +162,32 @@
                     <label for="employee-bed">Место</label>
                     <input id="employee-bed" type="text" autocomplete="off">
                 </div>
+                <div class="employee-detail-field employee-work-assignment-field" data-employee-assignment-role>
+                    <label for="{{ form.role.id_for_label }}">{{ form.role.label }}</label>
+                    {{ form.role }}
+                </div>
+                <div class="employee-detail-field employee-work-assignment-field">
+                    <label for="{{ form.assignment_shift_type.id_for_label }}">{{ form.assignment_shift_type.label }}</label>
+                    {{ form.assignment_shift_type }}
+                </div>
+                <div class="employee-detail-field employee-work-assignment-field" data-employee-assignment-equipment>
+                    <label for="{{ form.assignment_equipment.id_for_label }}">{{ form.assignment_equipment.label }}</label>
+                    {{ form.assignment_equipment }}
+                </div>
+            </div>
+
+            <div class="employee-work-assignment-meta{% if form.role.errors or form.assignment_shift_type.errors or form.assignment_equipment.errors %} is-warning{% endif %}" data-employee-assignment-status>
+                {% if form.role.errors or form.assignment_shift_type.errors or form.assignment_equipment.errors %}
+                    <strong>Назначение не сохранено</strong>
+                    <span>
+                        {% for error in form.role.errors %}{{ error }}{% endfor %}
+                        {% for error in form.assignment_shift_type.errors %}{{ error }}{% endfor %}
+                        {% for error in form.assignment_equipment.errors %}{{ error }}{% endfor %}
+                    </span>
+                {% else %}
+                    <strong data-employee-assignment-status-title>Рабочее назначение не задано</strong>
+                    <span data-employee-assignment-status-text>После назначения смена и техника будут автоматически подставляться в рабочем приложении.</span>
+                {% endif %}
             </div>
 
             <div class="employee-card-v2-textareas">
@@ -274,6 +285,9 @@ document.addEventListener('DOMContentLoaded', function () {
     var assignmentRole = document.getElementById('{{ form.role.id_for_label }}');
     var assignmentShift = document.getElementById('{{ form.assignment_shift_type.id_for_label }}');
     var assignmentEquipment = document.getElementById('{{ form.assignment_equipment.id_for_label }}');
+    var assignmentStatus = document.querySelector('[data-employee-assignment-status]');
+    var assignmentStatusTitle = document.querySelector('[data-employee-assignment-status-title]');
+    var assignmentStatusText = document.querySelector('[data-employee-assignment-status-text]');
 
     function setAdminTheme(theme) {
         if (!shell) return;
@@ -358,6 +372,24 @@ document.addEventListener('DOMContentLoaded', function () {
         createForm.addEventListener('submit', syncHiddenFields);
     }
 
+    function updateAssignmentStatus() {
+        if (!assignmentStatus || assignmentStatus.classList.contains('is-warning') || !assignmentStatusTitle || !assignmentStatusText) return;
+        var roleOption = assignmentRole ? assignmentRole.options[assignmentRole.selectedIndex] : null;
+        var shiftOption = assignmentShift ? assignmentShift.options[assignmentShift.selectedIndex] : null;
+        var equipmentOption = assignmentEquipment ? assignmentEquipment.options[assignmentEquipment.selectedIndex] : null;
+        var roleCode = roleOption ? roleOption.dataset.workRole || '' : '';
+        var roleSupported = equipmentOption && Array.prototype.some.call(assignmentEquipment.options, function (option) {
+            return option.value && option.dataset.workRole === roleCode;
+        });
+        if (roleSupported && shiftOption && shiftOption.value && equipmentOption && equipmentOption.value) {
+            assignmentStatusTitle.textContent = shiftOption.textContent.trim() + ' · ' + (equipmentOption.dataset.baseLabel || equipmentOption.textContent).trim();
+            assignmentStatusText.textContent = 'Назначение будет создано вместе с карточкой сотрудника.';
+            return;
+        }
+        assignmentStatusTitle.textContent = 'Рабочее назначение не задано';
+        assignmentStatusText.textContent = 'После назначения смена и техника будут автоматически подставляться в рабочем приложении.';
+    }
+
     function filterAssignmentEquipment() {
         if (!assignmentRole || !assignmentShift || !assignmentEquipment) return;
         var selectedRole = assignmentRole.options[assignmentRole.selectedIndex];
@@ -384,12 +416,14 @@ document.addEventListener('DOMContentLoaded', function () {
         });
         if (!currentAllowed || !roleSupported) assignmentEquipment.value = '';
         assignmentEquipment.disabled = !roleSupported || !shiftType;
+        updateAssignmentStatus();
     }
 
     if (assignmentRole && assignmentShift && assignmentEquipment) {
         filterAssignmentEquipment();
         assignmentRole.addEventListener('change', filterAssignmentEquipment);
         assignmentShift.addEventListener('change', filterAssignmentEquipment);
+        assignmentEquipment.addEventListener('change', updateAssignmentStatus);
     }
 
     if (!input || !photoCard) return;

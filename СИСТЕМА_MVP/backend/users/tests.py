@@ -1463,6 +1463,26 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, f'value="{excavator_role.id}" data-work-role="excavator_operator"', html=False)
         self.assertContains(response, f'value="{truck.id}" data-base-label="Самосвал 10" data-work-role="driver"', html=False)
         self.assertContains(response, f'value="{excavator.id}" data-base-label="Экскаватор 1" data-work-role="excavator_operator"', html=False)
+        self.assertContains(response, 'employee-work-assignment-meta')
+        html = response.content.decode('utf-8')
+        expected_order = [
+            'name="position"',
+            'name="rotation"',
+            'name="status"',
+            'name="hired_at"',
+            'name="dismissed_at"',
+            'id="employee-residence-general"',
+            'id="employee-dormitory"',
+            'id="employee-room"',
+            'id="employee-bed"',
+            'name="role"',
+            'name="assignment_shift_type"',
+            'name="assignment_equipment"',
+            'name="comment"',
+            'name="hr_data"',
+        ]
+        positions = [html.index(marker) for marker in expected_order]
+        self.assertEqual(positions, sorted(positions))
 
     def test_admin_creates_employee_with_work_shift_and_equipment_assignment(self):
         admin_role = Role.objects.create(code='admin', name='Администратор')
