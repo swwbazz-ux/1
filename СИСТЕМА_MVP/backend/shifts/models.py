@@ -150,38 +150,83 @@ class EmployeeShift(models.Model):
         return f'{self.employee} / {self.get_shift_type_display()} / {self.opened_at:%d.%m.%Y}'
 
 
-class DriverShiftAction(models.Model):
-    action_type = models.CharField('Тип действия', max_length=64)
+class ShiftClientAction(models.Model):
+    action_type = models.CharField('Действие', max_length=64)
     client_action_id = models.CharField('ID действия клиента', max_length=128)
-    shift = models.ForeignKey(EmployeeShift, verbose_name='Смена', on_delete=models.PROTECT, related_name='driver_actions')
-    actor = models.ForeignKey('users.Employee', verbose_name='Водитель', on_delete=models.PROTECT)
-    created_at = models.DateTimeField('Создано', default=timezone.now)
+    employee = models.ForeignKey(
+        'users.Employee',
+        verbose_name='Машинист',
+        on_delete=models.PROTECT,
+        related_name='shift_client_actions',
+    )
+    shift = models.ForeignKey(
+        EmployeeShift,
+        verbose_name='Смена',
+        on_delete=models.PROTECT,
+        related_name='client_actions',
+        null=True,
+        blank=True,
+    )
+    response_payload = models.JSONField('Ответ сервера', default=dict, blank=True)
+    created_at = models.DateTimeField('Создано', auto_now_add=True)
 
     class Meta:
-        verbose_name = 'Действие со сменой водителя'
-        verbose_name_plural = 'Действия со сменами водителей'
+        verbose_name = 'Клиентское действие со сменой'
+        verbose_name_plural = 'Клиентские действия со сменами'
+        ordering = ['-created_at']
         constraints = [
             models.UniqueConstraint(
                 fields=['action_type', 'client_action_id'],
-                name='unique_driver_shift_client_action',
+                name='unique_shift_client_action',
             ),
         ]
 
 
 class ShiftReadingCorrection(models.Model):
-    shift = models.ForeignKey(EmployeeShift, verbose_name='Новая смена', on_delete=models.PROTECT, related_name='reading_corrections')
-    previous_shift = models.ForeignKey(EmployeeShift, verbose_name='Предыдущая смена', on_delete=models.PROTECT, related_name='inherited_corrections')
-    equipment = models.ForeignKey('references.Equipment', verbose_name='Самосвал', on_delete=models.PROTECT)
-    driver = models.ForeignKey('users.Employee', verbose_name='Водитель', on_delete=models.PROTECT)
-    field_name = models.CharField('Поле', max_length=64)
-    inherited_value = models.DecimalField('Унаследованное значение', max_digits=10, decimal_places=2)
-    corrected_value = models.DecimalField('Новое значение', max_digits=10, decimal_places=2)
-    created_at = models.DateTimeField('Создано', default=timezone.now)
+    class Metric(models.TextChoices):
+        FUEL = 'fuel', 'Топливо'
+        MILEAGE = 'mileage', 'Одометр'
+        ENGINE_HOURS = 'engine_hours', 'Моточасы'
+
+    equipment = models.ForeignKey(
+        'references.Equipment',
+        verbose_name='Техника',
+        on_delete=models.PROTECT,
+        related_name='shift_reading_corrections',
+    )
+    new_shift = models.ForeignKey(
+        EmployeeShift,
+        verbose_name='Новая смена',
+        on_delete=models.PROTECT,
+        related_name='reading_corrections',
+    )
+    previous_shift = models.ForeignKey(
+        EmployeeShift,
+        verbose_name='Предыдущая смена',
+        on_delete=models.PROTECT,
+        related_name='handover_corrections',
+    )
+    metric = models.CharField('Показатель', max_length=32, choices=Metric.choices)
+    transferred_value = models.DecimalField('Переданное значение', max_digits=10, decimal_places=2)
+    actual_value = models.DecimalField('Фактическое значение', max_digits=10, decimal_places=2)
+    employee = models.ForeignKey(
+        'users.Employee',
+        verbose_name='Сотрудник',
+        on_delete=models.PROTECT,
+        related_name='shift_reading_corrections',
+    )
+    corrected_at = models.DateTimeField('Скорректировано', auto_now_add=True)
 
     class Meta:
-        verbose_name = 'Исправление показаний при передаче смены'
-        verbose_name_plural = 'Исправления показаний при передаче смены'
-        ordering = ['-created_at']
+        verbose_name = 'Корректировка показаний при передаче смены'
+        verbose_name_plural = 'Корректировки показаний при передаче смены'
+        ordering = ['-corrected_at']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['new_shift', 'previous_shift', 'metric'],
+                name='unique_shift_handover_metric_correction',
+            ),
+        ]
 
 
 class AchievementPrize(models.Model):

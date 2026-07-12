@@ -13,7 +13,7 @@ from references.models import DumpPoint, Equipment, EquipmentModel, EquipmentTyp
 from trips.models import Trip, TripStatus
 from users.models import Employee
 
-from .models import DriverShiftAction, EmployeeShift, EquipmentPlanGroup, EquipmentShiftPlan, PlanAssignmentStatus, PlanCalculationMode, ShiftPlan, ShiftReadingCorrection
+from .models import EmployeeShift, EquipmentPlanGroup, EquipmentShiftPlan, PlanAssignmentStatus, PlanCalculationMode, ShiftClientAction, ShiftPlan, ShiftReadingCorrection
 from .equipment_plan_groups import (
     reconcile_default_equipment_plan_groups,
     validate_equipment_plan_group_membership,
@@ -112,8 +112,8 @@ class DriverShiftLifecycleTests(TestCase):
         )
         shift = self.open_shift(action='open-2', fuel='850', mileage='10100', hours='1010')
         correction = shift.reading_corrections.get()
-        self.assertEqual(correction.inherited_value, Decimal('900'))
-        self.assertEqual(correction.corrected_value, Decimal('850'))
+        self.assertEqual(correction.transferred_value, Decimal('900'))
+        self.assertEqual(correction.actual_value, Decimal('850'))
 
     def test_second_open_shift_for_driver_is_blocked(self):
         self.open_shift()
@@ -152,7 +152,7 @@ class DriverShiftLifecycleTests(TestCase):
         self.assertEqual(first.pk, second.pk)
         self.assertTrue(created)
         self.assertFalse(created_again)
-        self.assertEqual(DriverShiftAction.objects.filter(action_type='driver_shift_opened').count(), 1)
+        self.assertEqual(ShiftClientAction.objects.filter(action_type='driver_shift_opened').count(), 1)
 
     def test_end_fuel_may_exceed_start_fuel(self):
         shift = self.open_shift(fuel='500')

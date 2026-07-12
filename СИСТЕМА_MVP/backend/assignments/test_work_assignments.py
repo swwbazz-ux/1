@@ -36,15 +36,20 @@ class WorkAssignmentFixtureMixin:
 
         self.truck_type = EquipmentType.objects.create(name='Самосвал')
         self.excavator_type = EquipmentType.objects.create(name='Экскаватор')
-        truck_model = EquipmentModel.objects.create(
+        self.excavator_model = EquipmentModel.objects.create(
+            equipment_type=self.excavator_type,
+            name='Экскаватор 4000 тест',
+            fuel_capacity_limit_l=7000,
+        )
+        self.truck_model = EquipmentModel.objects.create(
             equipment_type=self.truck_type,
             name='БелАЗ тестовый',
-            fuel_capacity_limit_l='2000',
+            fuel_capacity_limit_l=2000,
         )
-        self.truck_1 = Equipment.objects.create(equipment_type=self.truck_type, model=truck_model, garage_number='Т-01')
-        self.truck_2 = Equipment.objects.create(equipment_type=self.truck_type, model=truck_model, garage_number='Т-02')
-        self.excavator_1 = Equipment.objects.create(equipment_type=self.excavator_type, garage_number='Э-01')
-        self.excavator_2 = Equipment.objects.create(equipment_type=self.excavator_type, garage_number='Э-02')
+        self.truck_1 = Equipment.objects.create(equipment_type=self.truck_type, model=self.truck_model, garage_number='Т-01')
+        self.truck_2 = Equipment.objects.create(equipment_type=self.truck_type, model=self.truck_model, garage_number='Т-02')
+        self.excavator_1 = Equipment.objects.create(equipment_type=self.excavator_type, model=self.excavator_model, garage_number='Э-01')
+        self.excavator_2 = Equipment.objects.create(equipment_type=self.excavator_type, model=self.excavator_model, garage_number='Э-02')
 
         truck_group = EquipmentPlanGroup.objects.create(
             code='test-trucks',

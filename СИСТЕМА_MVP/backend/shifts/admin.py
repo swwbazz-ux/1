@@ -1,7 +1,17 @@
 from django.contrib import admin
 
 from .forms import EquipmentPlanGroupForm
-from .models import AchievementPrize, AchievementUnlock, DriverShiftAction, EmployeeShift, EquipmentPlanGroup, EquipmentShiftPlan, ShiftPlan, ShiftReadingCorrection, WatchPeriod
+from .models import (
+    AchievementPrize,
+    AchievementUnlock,
+    EmployeeShift,
+    EquipmentPlanGroup,
+    EquipmentShiftPlan,
+    ShiftClientAction,
+    ShiftPlan,
+    ShiftReadingCorrection,
+    WatchPeriod,
+)
 
 
 @admin.register(WatchPeriod)
@@ -18,18 +28,20 @@ class EmployeeShiftAdmin(admin.ModelAdmin):
     list_filter = ('shift_type', 'watch_period', 'equipment', 'plan_status', 'plan_group', 'is_service_closed')
 
 
-@admin.register(DriverShiftAction)
-class DriverShiftActionAdmin(admin.ModelAdmin):
-    list_display = ('created_at', 'action_type', 'client_action_id', 'shift', 'actor')
-    search_fields = ('client_action_id', 'actor__full_name', 'shift__equipment__garage_number')
-    readonly_fields = ('created_at',)
+@admin.register(ShiftClientAction)
+class ShiftClientActionAdmin(admin.ModelAdmin):
+    list_display = ('created_at', 'action_type', 'client_action_id', 'employee', 'shift')
+    search_fields = ('client_action_id', 'employee__full_name', 'shift__equipment__garage_number')
+    list_filter = ('action_type', 'created_at')
+    readonly_fields = ('created_at', 'response_payload')
 
 
 @admin.register(ShiftReadingCorrection)
 class ShiftReadingCorrectionAdmin(admin.ModelAdmin):
-    list_display = ('created_at', 'equipment', 'driver', 'field_name', 'inherited_value', 'corrected_value', 'shift')
-    search_fields = ('equipment__garage_number', 'driver__full_name', 'field_name')
-    readonly_fields = ('created_at',)
+    list_display = ('corrected_at', 'equipment', 'employee', 'metric', 'transferred_value', 'actual_value', 'previous_shift', 'new_shift')
+    search_fields = ('equipment__garage_number', 'employee__full_name')
+    list_filter = ('metric', 'equipment', 'corrected_at')
+    readonly_fields = ('corrected_at',)
 
 
 @admin.register(AchievementPrize)

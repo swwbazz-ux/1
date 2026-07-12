@@ -28,7 +28,7 @@ from references.models import (
     TruckCapacityRule,
 )
 from reports.models import PilotFeedback, ReportTemplate, ReportType
-from shifts.models import AchievementPrize, DriverShiftAction, EmployeeShift, EquipmentPlanGroup, EquipmentShiftPlan, PlanAssignmentStatus, PlanCalculationMode, ShiftPlan, ShiftReadingCorrection
+from shifts.models import AchievementPrize, EmployeeShift, EquipmentPlanGroup, EquipmentShiftPlan, PlanAssignmentStatus, PlanCalculationMode, ShiftPlan
 from trips.models import DispatcherActionLog, DispatcherActionType, Trip, TripClientAction, TripStatus
 
 from .forms import AdminEmployeeEditForm

@@ -5,9 +5,9 @@
 {% block body_class %}excavator-operator-screen{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v110">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v110">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v110">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v111">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v111">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v111">
 <meta name="theme-color" content="#030708">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Погрузка">
@@ -65,7 +65,7 @@
             <div class="eo-shift-titlebar">
                 <h1>Смена</h1>
                 <div class="eo-shift-update-group">
-                    <span class="eo-current-app-version" aria-label="Текущая версия приложения">Версия 110</span>
+                    <span class="eo-current-app-version" aria-label="Текущая версия приложения">Версия 111</span>
                     <button class="eo-shift-update-button" type="button" data-eo-pwa-update-check aria-label="Проверить обновление приложения">
                         <span aria-hidden="true"></span>
                         <b data-eo-pwa-update-check-label>Обновить</b>
@@ -76,7 +76,12 @@
             {% if not open_shift %}
             <div class="eo-shift-section eo-shift-result-panel">
                 <div class="eo-shift-section-head"><span>Назначение</span></div>
-                {% if work_assignment_state == 'assigned' %}
+                {% if equipment_open_shift %}
+                <div class="eo-empty-state eo-shift-occupied">
+                    <strong>Экскаватор занят</strong>
+                    <span>{{ equipment_open_shift.employee.full_name }} · с {{ equipment_open_shift.opened_at|date:"H:i" }}</span>
+                </div>
+                {% elif work_assignment_state == 'assigned' %}
                 <div class="eo-shift-result-grid">
                     <div class="eo-shift-result-cell"><span>Смена</span><strong>{{ work_assignment_shift_label }}</strong></div>
                     <div class="eo-shift-result-cell"><span>Экскаватор</span><strong>{{ shift_start_excavator.garage_number }}</strong></div>
@@ -88,32 +93,52 @@
             {% endif %}
             <div class="eo-shift-section eo-shift-check-panel">
                 <div class="eo-shift-section-head">
-                    <span>Показатели техники</span>
+                    <span>Показатели техники · {% if open_shift %}конец смены{% else %}начало смены{% endif %}</span>
                 </div>
+                {% if open_shift %}
+                <div class="eo-shift-start-readings">
+                    <span>Начало смены</span>
+                    <strong>Топливо {{ shift_start_fuel_display }} л</strong>
+                    <strong>Моточасы {{ shift_start_engine_hours_display }}</strong>
+                </div>
+                {% elif shift_previous_readings %}
+                <p class="eo-shift-handover-note">Показания переданы предыдущей сменой. Сверьте их с экскаватором и при необходимости исправьте.</p>
+                {% endif %}
+                <div class="eo-shift-form-error" data-eo-shift-form-error hidden></div>
                 <div class="eo-shift-metrics">
-                    <label class="eo-field-card">
+                    <label class="eo-field-card" data-eo-shift-field="fuel">
                         <span>Топливо</span>
                         <span class="eo-shift-metric-value">
-                            <input type="text" inputmode="decimal" name="shift_fuel" value="{{ shift_fuel_display }}" placeholder="0" data-eo-shift-fuel>
+                            <input type="text" inputmode="decimal" name="shift_fuel" value="{{ shift_fuel_display }}" placeholder="0" data-eo-shift-fuel data-eo-fuel-limit="{{ shift_fuel_limit|default:'' }}" {% if equipment_open_shift %}disabled{% endif %}>
                             <em>л</em>
                         </span>
+                        <small data-eo-shift-field-error="fuel"></small>
                     </label>
-                    <label class="eo-field-card is-disabled" aria-disabled="true">
-                        <span>Пробег</span>
-                        <span class="eo-shift-metric-value">
-                            <input type="text" name="shift_mileage" value="{{ shift_mileage_display }}" placeholder="0" data-eo-shift-mileage disabled aria-disabled="true" tabindex="-1">
-                            <em>км</em>
-                        </span>
-                    </label>
-                    <label class="eo-field-card">
+                    <label class="eo-field-card" data-eo-shift-field="engine_hours">
                         <span>Моточасы</span>
                         <span class="eo-shift-metric-value">
-                            <input type="text" inputmode="decimal" name="shift_engine_hours" value="{{ shift_engine_hours_display }}" placeholder="0" data-eo-shift-engine-hours>
+                            <input type="text" inputmode="decimal" name="shift_engine_hours" value="{{ shift_engine_hours_display }}" placeholder="0" data-eo-shift-engine-hours data-eo-start-engine-hours="{{ shift_start_engine_hours_display }}" {% if equipment_open_shift %}disabled{% endif %}>
                             <em>м/ч</em>
                         </span>
+                        <small data-eo-shift-field-error="engine_hours"></small>
                     </label>
                 </div>
+                {% if not shift_fuel_limit and shift_start_excavator %}
+                <div class="eo-shift-config-error">Для модели этого экскаватора не настроен допустимый объем топлива. Обратитесь к администратору.</div>
+                {% endif %}
             </div>
+
+            {% if open_shift %}
+            <div class="eo-shift-section eo-shift-review" data-eo-shift-review hidden>
+                <div class="eo-shift-section-head"><span>Проверка перед закрытием</span></div>
+                <div class="eo-shift-review-grid">
+                    <div><span>Топливо</span><strong data-eo-review-fuel></strong></div>
+                    <div><span>Моточасы</span><strong data-eo-review-hours></strong></div>
+                    <div><span>Прирост</span><strong data-eo-review-hours-delta></strong></div>
+                </div>
+                <button type="button" class="eo-shift-edit-button" data-eo-shift-edit>Вернуться к редактированию</button>
+            </div>
+            {% endif %}
 
             <div class="eo-shift-section eo-shift-result-panel">
                 <div class="eo-shift-section-head">
@@ -133,8 +158,13 @@
             </div>
 
             <div class="eo-shift-actions">
-                <button class="mm-mobile-shift-button{% if open_shift %} is-danger{% endif %}" type="button" data-eo-shift-button data-eo-shift-action="{% if open_shift %}close{% else %}open{% endif %}" style="--eo-shift-hold: 0%" {% if open_shift %}aria-label="Удерживайте 2 секунды, чтобы завершить смену"{% elif work_assignment_state != 'assigned' %}disabled aria-disabled="true"{% endif %}>
-                    <span data-eo-shift-label>{% if open_shift %}Завершить смену{% else %}Начать смену{% endif %}</span>
+                {% if open_shift %}
+                <button class="mm-mobile-shift-button" type="button" data-eo-shift-check disabled aria-disabled="true">
+                    <span>Проверить показания</span>
+                </button>
+                {% endif %}
+                <button class="mm-mobile-shift-button{% if open_shift %} is-danger{% endif %}" type="button" data-eo-shift-button data-eo-shift-action="{% if open_shift %}close{% else %}open{% endif %}" style="--eo-shift-hold: 0%" {% if open_shift %}hidden aria-label="Удерживайте 2 секунды, чтобы закрыть смену"{% elif work_assignment_state != 'assigned' or equipment_open_shift or not shift_fuel_limit %}disabled aria-disabled="true"{% endif %}>
+                    <span data-eo-shift-label>{% if open_shift %}Закрыть смену{% else %}Подтвердить показания и начать смену{% endif %}</span>
                 </button>
                 <button class="eo-logout-button" type="button" data-eo-logout-button data-eo-logout-url="{% url 'logout' %}" style="--eo-logout-hold: 0%" aria-label="Удерживайте 2 секунды, чтобы выйти">
                     <span data-eo-logout-label>Выйти</span>
@@ -422,7 +452,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v110";
+var excavatorShellVersion = "excavator-mobile-shell-v111";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var excavatorRelevantEvents = {
     assignment_changed: true,
@@ -627,6 +657,14 @@ window.initExcavatorWorkShell = function () {
     var activeQueueDrag = null;
     var shiftButton = shell.querySelector("[data-eo-shift-button]");
     var shiftLabel = shell.querySelector("[data-eo-shift-label]");
+    var shiftCheckButton = shell.querySelector("[data-eo-shift-check]");
+    var shiftEditButton = shell.querySelector("[data-eo-shift-edit]");
+    var shiftReview = shell.querySelector("[data-eo-shift-review]");
+    var shiftFuelInput = shell.querySelector("[data-eo-shift-fuel]");
+    var shiftHoursInput = shell.querySelector("[data-eo-shift-engine-hours]");
+    var shiftFormError = shell.querySelector("[data-eo-shift-form-error]");
+    var shiftServerBlocked = !!(shiftButton && shiftButton.disabled);
+    var shiftReadingsVerified = false;
     var shiftHoldTimer = null;
     var shiftHoldFrame = null;
     var shiftHoldStart = 0;
@@ -2219,6 +2257,112 @@ window.initExcavatorWorkShell = function () {
         });
     }
 
+    function parseShiftNumber(value) {
+        var normalized = String(value || "").trim().replace(/\s+/g, "").replace(",", ".");
+        if (!normalized) return null;
+        var parsed = Number(normalized);
+        return Number.isFinite(parsed) ? parsed : NaN;
+    }
+
+    function clearShiftErrors() {
+        if (shiftFormError) {
+            shiftFormError.hidden = true;
+            shiftFormError.textContent = "";
+        }
+        shell.querySelectorAll("[data-eo-shift-field]").forEach(function (field) {
+            field.classList.remove("has-error");
+        });
+        shell.querySelectorAll("[data-eo-shift-field-error]").forEach(function (node) {
+            node.textContent = "";
+        });
+    }
+
+    function showShiftErrors(message, fieldErrors) {
+        clearShiftErrors();
+        if (shiftFormError) {
+            shiftFormError.textContent = message || "Проверьте показания.";
+            shiftFormError.hidden = false;
+        }
+        Object.keys(fieldErrors || {}).forEach(function (name) {
+            var field = shell.querySelector('[data-eo-shift-field="' + name + '"]');
+            var errorNode = shell.querySelector('[data-eo-shift-field-error="' + name + '"]');
+            if (field) field.classList.add("has-error");
+            if (errorNode) errorNode.textContent = fieldErrors[name];
+        });
+    }
+
+    function validateShiftReadings(showErrors) {
+        var errors = {};
+        var fuel = parseShiftNumber(shiftFuelInput && shiftFuelInput.value);
+        var hours = parseShiftNumber(shiftHoursInput && shiftHoursInput.value);
+        var fuelLimit = parseShiftNumber(shiftFuelInput && shiftFuelInput.dataset.eoFuelLimit);
+        var startHours = parseShiftNumber(shiftHoursInput && shiftHoursInput.dataset.eoStartEngineHours);
+        if (fuel === null || Number.isNaN(fuel)) errors.fuel = "Укажите корректное число.";
+        else if (fuel < 0) errors.fuel = "Значение не может быть меньше нуля.";
+        else if (fuelLimit !== null && !Number.isNaN(fuelLimit) && fuel > fuelLimit) errors.fuel = "Максимум для этой модели: " + fuelLimit + " л.";
+        if (hours === null || Number.isNaN(hours)) errors.engine_hours = "Укажите корректное число.";
+        else if (hours < 0) errors.engine_hours = "Значение не может быть меньше нуля.";
+        if (isShiftCloseAction() && !errors.engine_hours && startHours !== null && !Number.isNaN(startHours)) {
+            if (hours < startHours) errors.engine_hours = "Не меньше начального значения " + startHours + ".";
+            else if (hours - startHours > 12) errors.engine_hours = "Прирост не может превышать 12 моточасов.";
+        }
+        if (showErrors) {
+            if (Object.keys(errors).length) showShiftErrors("Проверьте показания.", errors);
+            else clearShiftErrors();
+        }
+        return { valid: Object.keys(errors).length === 0, fuel: fuel, hours: hours, startHours: startHours, errors: errors };
+    }
+
+    function resetShiftVerification() {
+        shiftReadingsVerified = false;
+        if (shiftReview) shiftReview.hidden = true;
+        if (shiftButton && isShiftCloseAction()) shiftButton.hidden = true;
+        if (shiftCheckButton) shiftCheckButton.hidden = false;
+    }
+
+    function updateShiftActionState() {
+        var validation = validateShiftReadings(false);
+        if (shiftCheckButton) {
+            shiftCheckButton.disabled = !validation.valid;
+            shiftCheckButton.setAttribute("aria-disabled", validation.valid ? "false" : "true");
+        } else if (shiftButton && !isShiftCloseAction() && !shiftServerBlocked) {
+            shiftButton.disabled = !validation.valid;
+            shiftButton.setAttribute("aria-disabled", validation.valid ? "false" : "true");
+        }
+    }
+
+    [shiftFuelInput, shiftHoursInput].forEach(function (input) {
+        if (!input) return;
+        input.addEventListener("input", function () {
+            clearShiftErrors();
+            if (isShiftCloseAction()) resetShiftVerification();
+            updateShiftActionState();
+        });
+    });
+
+    if (shiftCheckButton) {
+        shiftCheckButton.addEventListener("click", function () {
+            var values = validateShiftReadings(true);
+            if (!values.valid) return;
+            shiftReadingsVerified = true;
+            var reviewFuel = shell.querySelector("[data-eo-review-fuel]");
+            var reviewHours = shell.querySelector("[data-eo-review-hours]");
+            var reviewDelta = shell.querySelector("[data-eo-review-hours-delta]");
+            if (reviewFuel) reviewFuel.textContent = "{{ shift_start_fuel_display }} → " + values.fuel + " л";
+            if (reviewHours) reviewHours.textContent = "{{ shift_start_engine_hours_display }} → " + values.hours;
+            if (reviewDelta) reviewDelta.textContent = (values.hours - values.startHours).toFixed(2) + " м/ч";
+            if (shiftReview) shiftReview.hidden = false;
+            shiftCheckButton.hidden = true;
+            if (shiftButton) shiftButton.hidden = false;
+        });
+    }
+
+    if (shiftEditButton) {
+        shiftEditButton.addEventListener("click", resetShiftVerification);
+    }
+
+    updateShiftActionState();
+
     function submitExcavatorShiftAction() {
         if (!shiftButton) {
             return;
@@ -2227,12 +2371,15 @@ window.initExcavatorWorkShell = function () {
             return;
         }
         var action = shiftButton.dataset.eoShiftAction || "toggle";
+        var validation = validateShiftReadings(true);
+        if (!validation.valid || (action === "close" && !shiftReadingsVerified)) {
+            return;
+        }
         var payload = {
             action: action,
             client_action_id: generateClientActionId("excavator-shift"),
             excavator_id: shell.dataset.eoShiftExcavatorId || shell.dataset.eoCurrentExcavatorId || "",
             fuel: shell.querySelector("[data-eo-shift-fuel]") ? shell.querySelector("[data-eo-shift-fuel]").value : "",
-            mileage: shell.querySelector("[data-eo-shift-mileage]") ? shell.querySelector("[data-eo-shift-mileage]").value : "",
             engine_hours: shell.querySelector("[data-eo-shift-engine-hours]") ? shell.querySelector("[data-eo-shift-engine-hours]").value : ""
         };
         resetShiftHold();
@@ -2254,7 +2401,7 @@ window.initExcavatorWorkShell = function () {
         }).then(function (response) {
             return response.json().catch(function () { return {}; }).then(function (data) {
                 if (!response.ok || !data.ok) {
-                    throw new Error(data.error || "Смена не сохранена");
+                    throw data;
                 }
                 return data;
             });
@@ -2268,11 +2415,11 @@ window.initExcavatorWorkShell = function () {
                 }
             });
         }).catch(function (error) {
-            window.alert(error.message || "Смена не сохранена");
+            showShiftErrors(error.error || error.message || "Смена не сохранена", error.field_errors || {});
             shiftButton.disabled = false;
             shiftButton.classList.remove("is-pending");
             if (shiftLabel) {
-                shiftLabel.textContent = action === "close" ? "Завершить смену" : "Начать смену";
+                shiftLabel.textContent = action === "close" ? "Закрыть смену" : "Подтвердить показания и начать смену";
             }
         });
     }
