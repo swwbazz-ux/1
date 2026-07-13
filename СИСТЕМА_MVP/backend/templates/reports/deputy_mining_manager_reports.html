@@ -4,6 +4,7 @@
 {% block title %}Отчёты по расстановке{% endblock %}
 {% block body_class %}deputy-mining-manager-screen deputy-reports-screen{% endblock %}
 {% block extra_head %}
+{% include "includes/deputy_mining_manager_pwa_head.html" %}
 <link rel="stylesheet" href="{% static 'css/deputy-mining-manager-v3.css' %}">
 {% endblock %}
 
@@ -58,4 +59,5 @@
 </div>
 
 <script src="{% static 'js/deputy-mining-manager-v3.js' %}" defer></script>
+<script src="{% static 'js/deputy-mining-manager-pwa-v1.js' %}" defer></script>
 {% endblock %}

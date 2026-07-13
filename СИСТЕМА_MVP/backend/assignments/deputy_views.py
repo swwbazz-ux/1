@@ -4,7 +4,7 @@ from urllib.parse import urlencode
 
 from django.core.exceptions import ValidationError
 from django.db.models import Count, Q
-from django.http import JsonResponse
+from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.templatetags.static import static
 from django.urls import reverse
@@ -35,6 +35,238 @@ TARGET_ROLE_LABELS = {
     'driver': 'Самосвалы',
     'excavator_operator': 'Экскаваторы',
 }
+
+DEPUTY_MANIFEST = {
+    'id': '/deputy-mining-manager/',
+    'name': 'Заместитель начальника горного участка',
+    'short_name': 'Расстановка',
+    'description': 'Рабочее место для расстановки сотрудников по технике и контроля опубликованных назначений.',
+    'start_url': '/deputy-mining-manager/',
+    'scope': '/deputy-mining-manager/',
+    'display': 'standalone',
+    'display_override': ['standalone', 'fullscreen'],
+    'orientation': 'landscape',
+    'background_color': '#dce4e7',
+    'theme_color': '#198e55',
+    'lang': 'ru',
+    'categories': ['business', 'productivity'],
+    'prefer_related_applications': False,
+    'icons': [
+        {
+            'src': '/static/img/pwa/deputy-mining-manager-192.png',
+            'sizes': '192x192',
+            'type': 'image/png',
+            'purpose': 'any',
+        },
+        {
+            'src': '/static/img/pwa/deputy-mining-manager-512.png',
+            'sizes': '512x512',
+            'type': 'image/png',
+            'purpose': 'any',
+        },
+        {
+            'src': '/static/img/pwa/deputy-mining-manager-maskable-512.png',
+            'sizes': '512x512',
+            'type': 'image/png',
+            'purpose': 'maskable',
+        },
+    ],
+    'shortcuts': [
+        {
+            'name': 'Расстановка',
+            'short_name': 'Расстановка',
+            'url': '/deputy-mining-manager/',
+            'description': 'Открыть расстановку сотрудников по технике.',
+        },
+        {
+            'name': 'Отчёты',
+            'short_name': 'Отчёты',
+            'url': '/deputy-mining-manager/reports/',
+            'description': 'Открыть историю опубликованных расстановок.',
+        },
+    ],
+}
+
+DEPUTY_SERVICE_WORKER_JS = r"""
+const CACHE_PREFIX = "deputy-mining-manager-desktop-shell-";
+const CACHE_NAME = `${CACHE_PREFIX}v1`;
+const APP_SCOPE = "/deputy-mining-manager/";
+const MANIFEST_URL = "/deputy-mining-manager.webmanifest";
+const LEGACY_ROOT_FALLBACK_URL = "/mining-master/assignments/";
+const LEGACY_CACHE_PREFIX = "mining-master-mobile-shell-";
+const CORE_ASSETS = [
+  MANIFEST_URL,
+  "/static/css/app.css",
+  "/static/css/deputy-mining-manager-v3.css",
+  "/static/js/deputy-mining-manager-v3.js",
+  "/static/js/deputy-mining-manager-pwa-v1.js",
+  "/static/favicon.ico",
+  "/static/img/pwa/deputy-mining-manager-180.png",
+  "/static/img/pwa/deputy-mining-manager-192.png",
+  "/static/img/pwa/deputy-mining-manager-512.png",
+  "/static/img/pwa/deputy-mining-manager-maskable-512.png",
+  "/static/img/equipment/truck-green.png",
+  "/static/img/equipment/truck-gray.png",
+  "/static/img/equipment/excavator-green.png",
+  "/static/img/equipment/excavator-gray.png"
+];
+const STATIC_ASSET_PATHS = new Set(
+  CORE_ASSETS.filter(url => url.startsWith("/static/"))
+);
+
+async function removeCachedPlanningDocuments() {
+  const cacheNames = await caches.keys();
+  await Promise.all(cacheNames.map(async cacheName => {
+    const cache = await caches.open(cacheName);
+    const requests = await cache.keys();
+    await Promise.all(requests.map(async request => {
+      const url = new URL(request.url);
+      if (url.origin !== self.location.origin) return;
+      if (url.pathname.startsWith(APP_SCOPE)) {
+        await cache.delete(request);
+        return;
+      }
+      if (
+        !cacheName.startsWith(LEGACY_CACHE_PREFIX) ||
+        url.pathname !== LEGACY_ROOT_FALLBACK_URL
+      ) return;
+      const cachedResponse = await cache.match(request);
+      if (!cachedResponse) return;
+      const contentType = cachedResponse.headers.get("Content-Type") || "";
+      if (!contentType.includes("text/html")) return;
+      const cachedHtml = await cachedResponse.clone().text();
+      if (
+        cachedHtml.includes("deputy-mining-manager-screen") ||
+        cachedHtml.includes("data-deputy-planning-root")
+      ) {
+        await cache.delete(request);
+      }
+    }));
+  }));
+}
+
+self.addEventListener("install", event => {
+  event.waitUntil(
+    caches.open(CACHE_NAME)
+      .then(cache => Promise.allSettled(
+        CORE_ASSETS.map(url => cache.add(new Request(url, { cache: "reload" })))
+      ))
+      .then(() => self.skipWaiting())
+  );
+});
+
+self.addEventListener("activate", event => {
+  event.waitUntil(
+    caches.keys()
+      .then(keys => Promise.all(
+        keys
+          .filter(key => key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME)
+          .map(key => caches.delete(key))
+      ))
+      .then(() => removeCachedPlanningDocuments())
+      .then(() => self.clients.claim())
+  );
+});
+
+function offlineDocument() {
+  return new Response(`<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#198e55">
+  <title>Нет подключения</title>
+  <style>
+    *{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;background:#dce4e7;color:#162022;font-family:Arial,sans-serif}.offline{width:min(460px,100%);padding:28px;border:1px solid #cdd7da;border-top:5px solid #198e55;border-radius:10px;background:#f7faf9;box-shadow:0 18px 44px rgba(53,70,78,.18)}h1{margin:0 0 10px;font-size:24px}p{margin:0;color:#647277;font-size:16px;line-height:1.5}
+  </style>
+</head>
+<body><main class="offline"><h1>Нет подключения к серверу</h1><p>Для работы с расстановкой требуется сеть. Подключитесь к интернету и откройте приложение ещё раз.</p></main></body>
+</html>`, {
+    status: 503,
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "no-store"
+    }
+  });
+}
+
+async function networkOnlyNavigation(request) {
+  try {
+    return await fetch(request, { cache: "no-store" });
+  } catch (error) {
+    return offlineDocument();
+  }
+}
+
+async function networkFirst(request) {
+  const cache = await caches.open(CACHE_NAME);
+  try {
+    const response = await fetch(request, { cache: "no-store" });
+    if (response && response.ok) {
+      cache.put(request, response.clone()).catch(() => undefined);
+    }
+    return response;
+  } catch (error) {
+    return (await cache.match(request, { ignoreSearch: true })) ||
+      new Response("Ресурс недоступен без сети.", {
+        status: 503,
+        headers: { "Content-Type": "text/plain; charset=utf-8" }
+      });
+  }
+}
+
+function canonicalStaticRequest(request) {
+  const url = new URL(request.url);
+  return new Request(`${url.origin}${url.pathname}`, {
+    method: "GET",
+    credentials: "same-origin"
+  });
+}
+
+async function networkFirstStatic(request) {
+  const cache = await caches.open(CACHE_NAME);
+  const cacheKey = canonicalStaticRequest(request);
+  try {
+    const response = await fetch(request, { cache: "no-store" });
+    if (response && response.ok) {
+      cache.put(cacheKey, response.clone()).catch(() => undefined);
+    }
+    return response;
+  } catch (error) {
+    return (await cache.match(cacheKey)) ||
+      new Response("Ресурс недоступен без сети.", {
+        status: 503,
+        headers: { "Content-Type": "text/plain; charset=utf-8" }
+      });
+  }
+}
+
+self.addEventListener("fetch", event => {
+  const request = event.request;
+  if (request.method !== "GET") return;
+  const url = new URL(request.url);
+  if (url.origin !== self.location.origin) return;
+
+  if (request.mode === "navigate" && url.pathname.startsWith(APP_SCOPE)) {
+    event.respondWith(networkOnlyNavigation(request));
+    return;
+  }
+  if (url.pathname === MANIFEST_URL) {
+    event.respondWith(networkFirst(request));
+    return;
+  }
+  if (STATIC_ASSET_PATHS.has(url.pathname)) {
+    event.respondWith(networkFirstStatic(request));
+  }
+});
+
+self.addEventListener("message", event => {
+  if (!event.data) return;
+  if (event.data.type === "SKIP_WAITING") {
+    self.skipWaiting();
+  }
+});
+"""
 
 
 def deputy_access_from_request(request):
@@ -329,6 +561,25 @@ def deputy_mining_manager_placement_view(request):
             'current_production_date': production_work_date(),
         },
     )
+
+
+def deputy_mining_manager_manifest_view(request):
+    response = JsonResponse(DEPUTY_MANIFEST, json_dumps_params={'ensure_ascii': False})
+    response['Content-Type'] = 'application/manifest+json; charset=utf-8'
+    response['Cache-Control'] = 'no-cache'
+    response['X-Content-Type-Options'] = 'nosniff'
+    return response
+
+
+def deputy_mining_manager_service_worker_view(request):
+    response = HttpResponse(
+        DEPUTY_SERVICE_WORKER_JS,
+        content_type='application/javascript; charset=utf-8',
+    )
+    response['Cache-Control'] = 'no-cache'
+    response['Service-Worker-Allowed'] = '/deputy-mining-manager/'
+    response['X-Content-Type-Options'] = 'nosniff'
+    return response
 
 
 def _json_payload(request):
