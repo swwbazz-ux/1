@@ -135,9 +135,13 @@
                     {{ form.rotation.errors }}
                 </div>
                 <div class="employee-detail-field">
-                    <label for="{{ form.status.id_for_label }}">{{ form.status.label }}</label>
-                    {{ form.status }}
-                    {{ form.status.errors }}
+                    <label for="employee-status-readonly">Статус</label>
+                    <input id="employee-status-readonly"
+                           type="text"
+                           value="{{ employee.get_status_display }}"
+                           readonly
+                           aria-readonly="true">
+                    <small>Увольнение оформляет ОУП. Остальные изменения статуса выполняются отдельными действиями администратора.</small>
                 </div>
                 <div class="employee-detail-field">
                     <label for="{{ form.hired_at.id_for_label }}">{{ form.hired_at.label }}</label>

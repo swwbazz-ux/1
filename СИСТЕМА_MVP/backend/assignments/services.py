@@ -627,7 +627,7 @@ def _emit_work_assignment_changed(assignment, action):
 @transaction.atomic
 def set_active_equipment_assignment(*, employee, role, equipment, shift_type, assigned_by=None, now=None):
     now = now or timezone.now()
-    employee.__class__.objects.select_for_update().get(pk=employee.pk)
+    employee = employee.__class__.objects.select_for_update().get(pk=employee.pk)
     equipment = Equipment.objects.select_for_update().get(pk=equipment.pk)
     current = (
         EquipmentAssignment.objects.select_for_update()

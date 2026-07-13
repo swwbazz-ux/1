@@ -11,7 +11,7 @@ from core.models import OperationalStateEvent
 from downtimes.models import DowntimeEvent, DowntimeReason
 from references.models import DumpPoint, Equipment, EquipmentModel, EquipmentType, RockType
 from trips.models import Trip, TripStatus
-from users.models import Employee
+from users.models import Employee, EmployeeAccess, Role
 
 from .models import EmployeeShift, EquipmentPlanGroup, EquipmentShiftPlan, PlanAssignmentStatus, PlanCalculationMode, ShiftClientAction, ShiftPlan, ShiftReadingCorrection
 from .equipment_plan_groups import (
@@ -19,10 +19,12 @@ from .equipment_plan_groups import (
     validate_equipment_plan_group_membership,
 )
 from .services import (
+    ExcavatorShiftError,
     assign_shift_plan_snapshot,
     calculate_equipment_shift_progress,
     calculate_open_shift_progress,
     close_driver_shift,
+    open_excavator_shift,
     open_driver_shift,
     shift_plan_totals,
     validate_driver_close_readings,
@@ -32,6 +34,11 @@ from .services import (
 
 class DriverShiftLifecycleTests(TestCase):
     def setUp(self):
+        self.driver_role = Role.objects.create(code='driver', name='Водитель')
+        self.excavator_role = Role.objects.create(
+            code='excavator_operator',
+            name='Машинист экскаватора',
+        )
         self.truck_type = EquipmentType.objects.create(name='Самосвал')
         self.belaz = EquipmentModel.objects.create(
             equipment_type=self.truck_type, name='БелАЗ 75131', fuel_capacity_limit_l=Decimal('2000'),
@@ -40,8 +47,32 @@ class DriverShiftLifecycleTests(TestCase):
             equipment_type=self.truck_type, name='NHL', fuel_capacity_limit_l=Decimal('3000'),
         )
         self.truck = Equipment.objects.create(equipment_type=self.truck_type, model=self.belaz, garage_number='54')
-        self.driver = Employee.objects.create(full_name='Петров П.П.')
+        self.driver = Employee.objects.create(
+            full_name='Петров П.П.',
+            status=Employee.Status.ACTIVE,
+        )
+        EmployeeAccess.objects.create(
+            employee=self.driver,
+            role=self.driver_role,
+            access_code='200001',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
         self.assignment = SimpleNamespace(equipment_id=self.truck.pk, shift_type='day')
+
+    def create_active_driver(self, full_name, access_code):
+        employee = Employee.objects.create(
+            full_name=full_name,
+            status=Employee.Status.ACTIVE,
+        )
+        EmployeeAccess.objects.create(
+            employee=employee,
+            role=self.driver_role,
+            access_code=access_code,
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+        return employee
 
     def readings(self, fuel='1000', mileage='10000', hours='1000'):
         return {
@@ -67,6 +98,64 @@ class DriverShiftLifecycleTests(TestCase):
         shift = self.open_shift()
         self.assertEqual(shift.start_mileage, Decimal('10000'))
         self.assertFalse(ShiftReadingCorrection.objects.exists())
+
+    def test_open_reloads_employee_and_rejects_dismissed_stale_object(self):
+        Employee.objects.filter(pk=self.driver.pk).update(
+            status=Employee.Status.DISMISSED,
+            is_active=False,
+        )
+
+        with self.assertRaisesMessage(ValidationError, 'Сотрудник неактивен или уволен'):
+            self.open_shift(action='dismissed-driver-open')
+
+        self.assertFalse(EmployeeShift.objects.filter(employee_id=self.driver.pk).exists())
+        self.assertFalse(
+            ShiftClientAction.objects.filter(client_action_id='dismissed-driver-open').exists()
+        )
+
+    def test_excavator_open_reloads_employee_and_rejects_dismissed_stale_object(self):
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        excavator_model = EquipmentModel.objects.create(
+            equipment_type=excavator_type,
+            name='Экскаватор тест',
+            fuel_capacity_limit_l=Decimal('7000'),
+        )
+        excavator = Equipment.objects.create(
+            equipment_type=excavator_type,
+            model=excavator_model,
+            garage_number='Э-01',
+        )
+        operator = Employee.objects.create(
+            full_name='Машинист экскаватора',
+            status=Employee.Status.ACTIVE,
+        )
+        EmployeeAccess.objects.create(
+            employee=operator,
+            role=self.excavator_role,
+            access_code='300001',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+        Employee.objects.filter(pk=operator.pk).update(
+            status=Employee.Status.DISMISSED,
+            is_active=False,
+        )
+
+        with self.assertRaises(ExcavatorShiftError) as raised:
+            open_excavator_shift(
+                employee=operator,
+                equipment=excavator,
+                shift_type='day',
+                fuel_value='100',
+                engine_hours_value='1200',
+                client_action_id='dismissed-excavator-open',
+            )
+
+        self.assertEqual(raised.exception.code, 'employee_inactive')
+        self.assertFalse(EmployeeShift.objects.filter(employee_id=operator.pk).exists())
+        self.assertFalse(
+            ShiftClientAction.objects.filter(client_action_id='dismissed-excavator-open').exists()
+        )
 
     def test_open_requires_non_negative_fuel(self):
         with self.assertRaises(ValidationError):
@@ -128,7 +217,7 @@ class DriverShiftLifecycleTests(TestCase):
 
     def test_second_open_shift_for_truck_is_blocked(self):
         self.open_shift()
-        other_driver = Employee.objects.create(full_name='Иванов И.И.')
+        other_driver = self.create_active_driver('Иванов И.И.', '200002')
         with self.assertRaisesMessage(ValidationError, 'уже открыта другим водителем'):
             open_driver_shift(
                 employee=other_driver, work_assignment=self.assignment, readings=self.readings(), client_action_id='other-open',
@@ -136,7 +225,7 @@ class DriverShiftLifecycleTests(TestCase):
 
     def test_database_constraint_blocks_concurrent_duplicate_truck_shift(self):
         self.open_shift()
-        other_driver = Employee.objects.create(full_name='Сидоров С.С.')
+        other_driver = self.create_active_driver('Сидоров С.С.', '200003')
         with self.assertRaises(IntegrityError), transaction.atomic():
             EmployeeShift.objects.create(
                 employee=other_driver, equipment=self.truck, shift_type='night', opened_at=timezone.now(),

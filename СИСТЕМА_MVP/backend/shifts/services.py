@@ -28,6 +28,29 @@ DRIVER_SHIFT_READING_FIELDS = (
 )
 
 
+def lock_active_employee_for_shift(employee, *, role_code):
+    from users.models import Employee, EmployeeAccess
+
+    locked_employee = Employee.objects.select_for_update().get(pk=employee.pk)
+    if not locked_employee.is_active or locked_employee.status != Employee.Status.ACTIVE:
+        raise ValidationError('Сотрудник неактивен или уволен. Начало смены недоступно.')
+    active_access = (
+        EmployeeAccess.objects.select_for_update(of=('self',))
+        .filter(
+            employee=locked_employee,
+            role__code=role_code,
+            role__is_active=True,
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+        .order_by('id')
+        .first()
+    )
+    if not active_access:
+        raise ValidationError('Активированный доступ сотрудника не найден. Начало смены недоступно.')
+    return locked_employee
+
+
 def validate_driver_fuel_reading(equipment, value):
     if value is None:
         raise ValidationError('Укажите остаток топлива.')
@@ -76,10 +99,9 @@ def open_driver_shift(*, employee, work_assignment, readings, client_action_id):
     if existing_shift:
         return existing_shift, False
     from references.models import Equipment
-    from users.models import Employee
     try:
         with transaction.atomic():
-            Employee.objects.select_for_update().get(pk=employee.pk)
+            employee = lock_active_employee_for_shift(employee, role_code='driver')
             equipment = Equipment.objects.select_for_update(of=('self',)).select_related('model').get(pk=work_assignment.equipment_id)
             existing_shift = _existing_driver_shift_action('driver_shift_opened', client_action_id)
             if existing_shift:
@@ -699,14 +721,20 @@ def existing_shift_action_payload(action_type, client_action_id):
 @transaction.atomic
 def open_excavator_shift(*, employee, equipment, shift_type, fuel_value, engine_hours_value, client_action_id):
     from references.models import Equipment
-    from users.models import Employee
 
     action_type = 'excavator_shift_opened'
     existing = existing_shift_action_payload(action_type, client_action_id)
     if existing:
         return existing
 
-    Employee.objects.select_for_update().get(pk=employee.pk)
+    try:
+        employee = lock_active_employee_for_shift(employee, role_code='excavator_operator')
+    except ValidationError as error:
+        raise ExcavatorShiftError(
+            '; '.join(error.messages),
+            status=409,
+            code='employee_inactive',
+        ) from error
     equipment = Equipment.objects.select_for_update(of=('self',)).select_related('model', 'equipment_type').get(pk=equipment.pk)
     existing = existing_shift_action_payload(action_type, client_action_id)
     if existing:

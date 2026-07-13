@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from io import BytesIO
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from django.core.files.base import ContentFile
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -656,12 +657,28 @@ class AccessLoginTests(TestCase):
         session['employee_access_id'] = admin_access.id
         session.save()
 
-        response = self.client.post(
-            reverse('system_admin_change_access_role', args=[employee_access.id]),
-            {'role': driver_role.id},
-            follow=True,
-            HTTP_HOST='localhost',
-        )
+        lock_order = []
+        employee_select_for_update = Employee.objects.select_for_update
+        access_select_for_update = EmployeeAccess.objects.select_for_update
+
+        def lock_employee(*args, **kwargs):
+            lock_order.append('employee')
+            return employee_select_for_update(*args, **kwargs)
+
+        def lock_access(*args, **kwargs):
+            lock_order.append('access')
+            return access_select_for_update(*args, **kwargs)
+
+        with (
+            patch.object(Employee.objects, 'select_for_update', side_effect=lock_employee),
+            patch.object(EmployeeAccess.objects, 'select_for_update', side_effect=lock_access),
+        ):
+            response = self.client.post(
+                reverse('system_admin_change_access_role', args=[employee_access.id]),
+                {'role': driver_role.id},
+                follow=True,
+                HTTP_HOST='localhost',
+            )
         employee_access.refresh_from_db()
 
         self.assertEqual(response.status_code, 200)
@@ -671,6 +688,7 @@ class AccessLoginTests(TestCase):
         self.assertEqual(employee_access.activated_at, activated_at)
         self.assertEqual(employee_access.last_login_at, last_login_at)
         self.assertTrue(employee_access.is_active)
+        self.assertEqual(lock_order[:2], ['employee', 'access'])
         self.assertEqual(EmployeeAccess.objects.filter(employee=employee).count(), 1)
         self.assertContains(response, f'<option value="{driver_role.id}" selected>', html=False)
         self.assertTrue(
@@ -1706,7 +1724,8 @@ class AccessLoginTests(TestCase):
         EmployeeShift.objects.create(
             employee=employee,
             shift_type='day',
-            opened_at=timezone.now(),
+            opened_at=timezone.now() - timedelta(hours=1),
+            closed_at=timezone.now(),
         )
 
         self.client.post('/', {'access_code': '1000'}, follow=True, HTTP_HOST='localhost')

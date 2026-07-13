@@ -3,6 +3,8 @@ import json
 from decimal import Decimal
 
 from django.contrib import messages
+from django.core.exceptions import ValidationError
+from django.db import transaction
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse
@@ -11,6 +13,7 @@ from django.views.decorators.http import require_POST
 
 from references.models import Equipment
 from shifts.models import EmployeeShift, ShiftType
+from shifts.services import lock_active_employee_for_shift
 from trips.views import dispatcher_control_view as render_dispatcher_control_view
 from users.access_auth import find_employee_access_by_credentials
 from users.models import EmployeeAccess
@@ -482,18 +485,26 @@ def close_active_assignments(assignments, now):
 def handle_shift_action(request, action, access, current_shift, blocking_shift):
     now = timezone.now()
     if action == 'start_shift':
+        try:
+            with transaction.atomic():
+                employee = lock_active_employee_for_shift(access.employee, role_code='mining_master')
+                current_shift, blocking_shift = get_shift_state(employee)
+                if not current_shift and not blocking_shift:
+                    EmployeeShift.objects.create(
+                        employee=employee,
+                        shift_type=get_shift_type_for_now(now),
+                        opened_at=now,
+                        opened_by=employee,
+                    )
+        except ValidationError as error:
+            messages.error(request, '; '.join(error.messages))
+            return
         if current_shift:
             messages.info(request, 'Ваша смена уже открыта.')
             return
         if blocking_shift:
             messages.error(request, 'Предыдущий горный мастер еще не закрыл смену.')
             return
-        EmployeeShift.objects.create(
-            employee=access.employee,
-            shift_type=get_shift_type_for_now(now),
-            opened_at=now,
-            opened_by=access.employee,
-        )
         messages.success(request, 'Смена горного мастера открыта. Расстановка унаследована.')
         return
 

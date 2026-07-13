@@ -9,7 +9,7 @@ from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_POST
 
-from .models import AdminActionLog, Employee, Role
+from .models import AdminActionLog, Employee
 from .oup_forms import OupDismissEmployeeForm, OupEmployeeForm
 from .oup_services import (
     close_oup_shift,
@@ -22,6 +22,7 @@ from .oup_services import (
     get_open_oup_shift,
     log_oup_action,
     lock_current_crew_drafts,
+    lock_oup_write_context,
     open_oup_shift,
 )
 from .views import get_current_access
@@ -49,6 +50,14 @@ def _require_open_shift(request, access):
         return True
     messages.error(request, 'Сначала начните дневную смену ОУП.')
     return False
+
+
+def _employee_is_read_only(employee):
+    return employee.status in {
+        Employee.Status.DISMISSED,
+        Employee.Status.ARCHIVED,
+        Employee.Status.DELETED,
+    }
 
 
 def _safe_return_target(request):
@@ -160,10 +169,13 @@ def oup_employee_create_view(request):
         if form.is_valid():
             try:
                 with transaction.atomic():
-                    Role.objects.select_for_update().get(code='oup')
+                    actor, _shift = lock_oup_write_context(employee=access.employee)
                     personnel_number = form.cleaned_data['personnel_number']
                     if Employee.objects.filter(personnel_number__iexact=personnel_number).exists():
-                        raise ValidationError('Сотрудник с таким табельным номером уже существует.')
+                        raise ValidationError(
+                            'Сотрудник с таким табельным номером уже существует.',
+                            code='duplicate_personnel_number',
+                        )
                     employee = form.save(commit=False)
                     employee.status = Employee.Status.ACTIVE
                     employee.is_active = True
@@ -171,14 +183,17 @@ def oup_employee_create_view(request):
                     employee.save()
                     snapshot = employee_audit_snapshot(employee)
                     log_oup_action(
-                        access.employee,
+                        actor,
                         'создан сотрудник',
                         employee,
                         new_value='; '.join(f'{label}: {value}' for label, value in snapshot.values()),
                     )
                     emit_employee_changed(employee, 'created')
             except ValidationError as error:
-                form.add_error('personnel_number', error)
+                form.add_error(
+                    'personnel_number' if getattr(error, 'code', '') == 'duplicate_personnel_number' else None,
+                    error,
+                )
             else:
                 messages.success(request, f'Сотрудник {employee.full_name} добавлен в рабочую базу.')
                 return redirect('oup_employee_detail', employee_id=employee.id)
@@ -195,11 +210,7 @@ def oup_employee_detail_view(request, employee_id):
     if not access:
         return redirect('role_home')
     employee = get_object_or_404(Employee, id=employee_id)
-    is_dismissed = employee.status in {
-        Employee.Status.DISMISSED,
-        Employee.Status.ARCHIVED,
-        Employee.Status.DELETED,
-    }
+    is_dismissed = _employee_is_read_only(employee)
 
     if request.method == 'POST':
         if is_dismissed:
@@ -207,27 +218,56 @@ def oup_employee_detail_view(request, employee_id):
             return redirect('oup_employee_detail', employee_id=employee.id)
         if not _require_open_shift(request, access):
             return redirect('oup_employee_detail', employee_id=employee.id)
-        old_photo_name = employee.photo.name if employee.photo else ''
         if request.POST.get('remove_photo') == '1':
-            if old_photo_name:
-                photo_storage = employee.photo.storage
+            old_photo_name = ''
+            photo_storage = None
+            try:
                 with transaction.atomic():
-                    employee.photo = ''
-                    employee.save(update_fields=['photo', 'updated_at'])
-                    log_oup_action(access.employee, 'удалено фото сотрудника', employee, old_value='Фото: Добавлено', new_value='Фото: Нет')
-                    emit_employee_changed(employee, 'updated')
-                photo_storage.delete(old_photo_name)
-                messages.success(request, 'Фото сотрудника удалено.')
+                    actor, _shift = lock_oup_write_context(employee=access.employee)
+                    locked_employee = Employee.objects.select_for_update().get(pk=employee.pk)
+                    if _employee_is_read_only(locked_employee):
+                        raise ValidationError(
+                            'Карточка уволенного сотрудника доступна только для просмотра.',
+                            code='employee_read_only',
+                        )
+                    old_photo_name = locked_employee.photo.name if locked_employee.photo else ''
+                    if old_photo_name:
+                        photo_storage = locked_employee.photo.storage
+                        locked_employee.photo = ''
+                        locked_employee.save(update_fields=['photo', 'updated_at'])
+                        log_oup_action(
+                            actor,
+                            'удалено фото сотрудника',
+                            locked_employee,
+                            old_value='Фото: Добавлено',
+                            new_value='Фото: Нет',
+                        )
+                        emit_employee_changed(locked_employee, 'updated')
+                        transaction.on_commit(
+                            lambda storage=photo_storage, name=old_photo_name: storage.delete(name)
+                        )
+            except ValidationError as error:
+                messages.error(request, '; '.join(error.messages))
+            else:
+                if old_photo_name:
+                    messages.success(request, 'Фото сотрудника удалено.')
             return redirect('oup_employee_detail', employee_id=employee.id)
 
+        old_photo_name = employee.photo.name if employee.photo else ''
         form = OupEmployeeForm(request.POST, request.FILES, instance=employee)
         if form.is_valid():
             new_category = form.cleaned_data['work_category']
             try:
                 with transaction.atomic():
-                    Role.objects.select_for_update().get(code='oup')
+                    actor, _shift = lock_oup_write_context(employee=access.employee)
                     lock_current_crew_drafts()
                     locked_employee = Employee.objects.select_for_update().get(pk=employee.pk)
+                    if _employee_is_read_only(locked_employee):
+                        raise ValidationError(
+                            'Карточка уволенного сотрудника доступна только для просмотра.',
+                            code='employee_read_only',
+                        )
+                    old_photo_name = locked_employee.photo.name if locked_employee.photo else ''
                     category_changed = locked_employee.work_category != new_category
                     if category_changed:
                         blockers = employee_work_category_blockers(locked_employee)
@@ -256,23 +296,29 @@ def oup_employee_detail_view(request, employee_id):
                     after = employee_audit_snapshot(saved_employee)
                     changes = format_employee_changes(before, after)
                     log_oup_action(
-                        access.employee,
+                        actor,
                         'изменена карточка сотрудника',
                         saved_employee,
                         old_value=changes,
                         new_value='Изменения сохранены',
                     )
                     emit_employee_changed(saved_employee, 'updated')
+                    if (
+                        request.FILES.get('photo')
+                        and old_photo_name
+                        and old_photo_name != saved_employee.photo.name
+                    ):
+                        transaction.on_commit(
+                            lambda storage=saved_employee.photo.storage, name=old_photo_name: storage.delete(name)
+                        )
             except ValidationError as error:
-                field_name = (
-                    'work_category'
-                    if getattr(error, 'code', '') == 'work_category_blocked'
-                    else 'personnel_number'
-                )
+                error_code = getattr(error, 'code', '')
+                field_name = {
+                    'work_category_blocked': 'work_category',
+                    'duplicate_personnel_number': 'personnel_number',
+                }.get(error_code)
                 form.add_error(field_name, error)
             else:
-                if request.FILES.get('photo') and old_photo_name and old_photo_name != saved_employee.photo.name:
-                    saved_employee.photo.storage.delete(old_photo_name)
                 messages.success(request, 'Карточка сотрудника сохранена.')
                 return redirect('oup_employee_detail', employee_id=employee.id)
     else:
@@ -303,11 +349,7 @@ def oup_employee_dismiss_view(request, employee_id):
     if employee.pk == access.employee_id:
         messages.error(request, 'Нельзя оформить собственное увольнение.')
         return redirect('oup_employee_detail', employee_id=employee.id)
-    if employee.status in {
-        Employee.Status.DISMISSED,
-        Employee.Status.ARCHIVED,
-        Employee.Status.DELETED,
-    }:
+    if _employee_is_read_only(employee):
         messages.info(request, 'Сотрудник уже исключен из текущих рабочих списков.')
         return redirect('oup_employee_detail', employee_id=employee.id)
     if not _require_open_shift(request, access):

@@ -29,7 +29,10 @@ class WorkAssignmentFixtureMixin:
             code='excavator_operator',
             name='Машинист экскаватора',
         )
-        self.admin = Employee.objects.create(full_name='Администратор')
+        self.admin = Employee.objects.create(
+            full_name='Администратор',
+            status=Employee.Status.ACTIVE,
+        )
         self.driver = self.create_employee_with_access('Водитель 1', self.driver_role, '210001')
         self.other_driver = self.create_employee_with_access('Водитель 2', self.driver_role, '210002')
         self.operator = self.create_employee_with_access('Машинист 1', self.excavator_role, '310001')

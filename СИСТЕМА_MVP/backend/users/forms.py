@@ -23,8 +23,10 @@ from .models import DriverPrimaryRegistration, Employee, EmployeeAccess, Role
 
 MAX_EMPLOYEE_PHOTO_UPLOAD_SIZE = 5 * 1024 * 1024
 MAX_EMPLOYEE_PHOTO_SIDE = 512
+MAX_EMPLOYEE_PHOTO_PIXELS = 25_000_000
 EMPLOYEE_PHOTO_QUALITY = 82
 EMPLOYEE_PHOTO_ALLOWED_TYPES = {'image/jpeg', 'image/png', 'image/webp'}
+EMPLOYEE_PHOTO_ALLOWED_FORMATS = {'JPEG', 'PNG', 'WEBP'}
 
 
 class WorkAssignmentRoleSelect(forms.Select):
@@ -58,21 +60,26 @@ def optimize_employee_photo(uploaded_file):
     if not uploaded_file:
         return uploaded_file
 
-    content_type = getattr(uploaded_file, 'content_type', '')
-    if not content_type:
-        return uploaded_file
-
-    if content_type not in EMPLOYEE_PHOTO_ALLOWED_TYPES:
+    content_type = (getattr(uploaded_file, 'content_type', '') or '').lower()
+    if content_type and content_type not in EMPLOYEE_PHOTO_ALLOWED_TYPES:
         raise ValidationError('Можно загружать только изображения JPG, PNG или WEBP.')
 
     if uploaded_file.size > MAX_EMPLOYEE_PHOTO_UPLOAD_SIZE:
         raise ValidationError('Фото слишком большое. Максимальный размер файла - 5 МБ.')
 
     try:
+        uploaded_file.seek(0)
         image = Image.open(uploaded_file)
+        detected_format = (image.format or '').upper()
+        width, height = image.size
         image.verify()
     except Exception as exc:
         raise ValidationError('Файл не является корректным изображением.') from exc
+
+    if detected_format not in EMPLOYEE_PHOTO_ALLOWED_FORMATS:
+        raise ValidationError('Можно загружать только изображения JPG, PNG или WEBP.')
+    if width * height > MAX_EMPLOYEE_PHOTO_PIXELS:
+        raise ValidationError('Разрешение фото слишком большое.')
 
     uploaded_file.seek(0)
     image = Image.open(uploaded_file)
@@ -145,8 +152,8 @@ class AdminEmployeeForm(forms.ModelForm):
             'photo': 'Фото сотрудника',
         }
         widgets = {
-            'hired_at': forms.DateInput(attrs={'type': 'date'}),
-            'dismissed_at': forms.DateInput(attrs={'type': 'date'}),
+            'hired_at': forms.DateInput(format='%Y-%m-%d', attrs={'type': 'date'}),
+            'dismissed_at': forms.DateInput(format='%Y-%m-%d', attrs={'type': 'date'}),
             'comment': forms.Textarea(attrs={'rows': 3}),
             'hr_data': forms.Textarea(attrs={'rows': 3}),
             'photo': forms.FileInput(attrs={'accept': 'image/jpeg,image/png,image/webp', 'class': 'employee-photo-input'}),
@@ -255,7 +262,6 @@ class AdminEmployeeEditForm(forms.ModelForm):
             'position',
             'personnel_number',
             'phone',
-            'status',
             'comment',
             'hired_at',
             'dismissed_at',
@@ -265,8 +271,8 @@ class AdminEmployeeEditForm(forms.ModelForm):
             'photo',
         ]
         widgets = {
-            'hired_at': forms.DateInput(attrs={'type': 'date'}),
-            'dismissed_at': forms.DateInput(attrs={'type': 'date'}),
+            'hired_at': forms.DateInput(format='%Y-%m-%d', attrs={'type': 'date'}),
+            'dismissed_at': forms.DateInput(format='%Y-%m-%d', attrs={'type': 'date'}),
             'comment': forms.Textarea(attrs={'rows': 3}),
             'hr_data': forms.Textarea(attrs={'rows': 3}),
             'photo': forms.FileInput(attrs={'accept': 'image/jpeg,image/png,image/webp', 'class': 'employee-photo-input'}),

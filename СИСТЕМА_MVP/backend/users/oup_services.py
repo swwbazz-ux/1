@@ -131,13 +131,56 @@ def get_open_oup_shift(employee):
     )
 
 
+def lock_open_oup_shift(*, employee):
+    shift = (
+        EmployeeShift.objects.select_for_update(of=('self',))
+        .filter(employee=employee, workplace_code=OUP_ROLE_CODE, closed_at__isnull=True)
+        .order_by('id')
+        .first()
+    )
+    if not shift:
+        raise ValidationError(
+            'Сначала начните дневную смену ОУП.',
+            code='oup_shift_required',
+        )
+    return shift
+
+
+def _lock_oup_actor(*, employee):
+    try:
+        oup_role = Role.objects.select_for_update().get(code=OUP_ROLE_CODE, is_active=True)
+    except Role.DoesNotExist as error:
+        raise ValidationError('Роль ОУП не настроена.', code='oup_role_unavailable') from error
+
+    employee = Employee.objects.select_for_update().get(pk=employee.pk)
+    if not employee.is_active or employee.status != Employee.Status.ACTIVE:
+        raise ValidationError('Сотрудник ОУП неактивен или уволен.')
+
+    active_access = (
+        EmployeeAccess.objects.select_for_update()
+        .filter(
+            employee=employee,
+            role=oup_role,
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+        .order_by('id')
+        .first()
+    )
+    if not active_access:
+        raise ValidationError('Активированный доступ ОУП не найден.')
+    return employee
+
+
+def lock_oup_write_context(*, employee):
+    employee = _lock_oup_actor(employee=employee)
+    shift = lock_open_oup_shift(employee=employee)
+    return employee, shift
+
+
 @transaction.atomic
 def open_oup_shift(*, employee):
-    try:
-        Role.objects.select_for_update().get(code=OUP_ROLE_CODE, is_active=True)
-    except Role.DoesNotExist as error:
-        raise ValidationError('Роль ОУП не настроена.') from error
-    Employee.objects.select_for_update().get(pk=employee.pk)
+    employee = _lock_oup_actor(employee=employee)
     current = get_open_oup_shift(employee)
     if current:
         return current, False
@@ -152,16 +195,14 @@ def open_oup_shift(*, employee):
         raise ValidationError('Сначала завершите открытую смену в другом рабочем контуре.')
 
     other_shift = (
-        EmployeeShift.objects.select_for_update()
+        EmployeeShift.objects.select_for_update(of=('self',))
         .filter(
             closed_at__isnull=True,
             workplace_code=OUP_ROLE_CODE,
-            employee__accesses__role__code=OUP_ROLE_CODE,
-            employee__accesses__is_active=True,
         )
         .exclude(employee=employee)
         .select_related('employee')
-        .distinct()
+        .order_by('id')
         .first()
     )
     if other_shift:
@@ -189,14 +230,7 @@ def open_oup_shift(*, employee):
 
 @transaction.atomic
 def close_oup_shift(*, employee):
-    shift = (
-        EmployeeShift.objects.select_for_update()
-        .filter(employee=employee, workplace_code=OUP_ROLE_CODE, closed_at__isnull=True)
-        .order_by('-opened_at')
-        .first()
-    )
-    if not shift:
-        raise ValidationError('У вас нет открытой смены ОУП.')
+    employee, shift = lock_oup_write_context(employee=employee)
     now = timezone.now()
     shift.closed_at = now
     shift.closed_by = employee
@@ -252,6 +286,7 @@ def employee_dismissal_blockers(employee):
 
 @transaction.atomic
 def dismiss_employee(*, employee, actor, dismissed_at, reason=''):
+    actor, _shift = lock_oup_write_context(employee=actor)
     draft_plan_ids = lock_current_crew_drafts()
 
     employee = Employee.objects.select_for_update().get(pk=employee.pk)
@@ -281,12 +316,17 @@ def dismiss_employee(*, employee, actor, dismissed_at, reason=''):
     )
 
     affected_plan_ids = list(
-        CrewPlanSlot.objects.filter(plan_id__in=draft_plan_ids, employee=employee)
+        CrewPlanSlot.objects.filter(plan_id__in=draft_plan_ids)
+        .filter(Q(employee=employee) | Q(baseline_employee=employee))
         .values_list('plan_id', flat=True)
         .distinct()
     )
     if affected_plan_ids:
         CrewPlanSlot.objects.filter(plan_id__in=affected_plan_ids, employee=employee).update(employee=None)
+        CrewPlanSlot.objects.filter(
+            plan_id__in=affected_plan_ids,
+            baseline_employee=employee,
+        ).update(baseline_employee=None)
         CrewPlan.objects.filter(id__in=affected_plan_ids).update(
             version=F('version') + 1,
             updated_by=actor,

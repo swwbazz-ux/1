@@ -178,6 +178,24 @@ class CrewPlanningServiceTests(TestCase):
         slot = updated.slots.get(equipment=self.truck_1, shift_type=WorkShiftType.SHIFT_2)
         self.assertEqual(slot.employee, employee)
 
+    def test_assignment_reloads_locked_employee_before_validation(self):
+        stale_employee = self.free_driver
+        Employee.objects.filter(pk=stale_employee.pk).update(
+            status=Employee.Status.DISMISSED,
+            is_active=False,
+        )
+
+        with self.assertRaises(ValidationError):
+            set_active_equipment_assignment(
+                employee=stale_employee,
+                role=self.driver_role,
+                equipment=self.truck_1,
+                shift_type=WorkShiftType.SHIFT_1,
+                assigned_by=self.actor,
+            )
+
+        self.assertFalse(EquipmentAssignment.objects.filter(employee=stale_employee).exists())
+
     def test_explicit_work_category_overrides_legacy_activated_access(self):
         employee = Employee.objects.create(
             full_name='Переведенный машинист',

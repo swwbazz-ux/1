@@ -5,6 +5,7 @@ from collections import defaultdict
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 from django.contrib import messages
+from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Count, Q, Sum
 from django.db.models.functions import Coalesce
@@ -4203,7 +4204,14 @@ def dispatcher_toggle_shift_view(request):
         if EmployeeShift.objects.filter(employee=access.employee, closed_at__isnull=True).exists():
             messages.warning(request, 'Смена горного диспетчера уже открыта.')
             return redirect(redirect_url)
-        open_dispatcher_shift(access)
+        try:
+            shift = open_dispatcher_shift(access)
+        except ValidationError as error:
+            messages.error(request, '; '.join(error.messages))
+            return redirect(redirect_url)
+        if not shift:
+            messages.warning(request, 'Смена горного диспетчера уже открыта.')
+            return redirect(redirect_url)
         messages.success(request, 'Смена горного диспетчера открыта.')
         return redirect(redirect_url)
 

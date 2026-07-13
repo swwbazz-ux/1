@@ -8,6 +8,7 @@ from urllib.parse import urlencode
 from django.contrib import messages
 from django.core.exceptions import FieldDoesNotExist, ValidationError
 from django.forms import modelform_factory
+from django.forms.models import construct_instance
 from django.db import transaction
 from django.db.models import Count, Q
 from django.http import HttpResponse, JsonResponse
@@ -283,10 +284,11 @@ def get_current_access(request):
         .filter(
             id=access_id,
             is_active=True,
+            status=EmployeeAccess.Status.ACTIVATED,
             employee__is_active=True,
+            employee__status=Employee.Status.ACTIVE,
             role__is_active=True,
         )
-        .exclude(status__in=[EmployeeAccess.Status.BLOCKED, EmployeeAccess.Status.DEACTIVATED])
         .first()
     )
 
@@ -452,10 +454,7 @@ def logout_view(request):
 
 
 def role_home_view(request):
-    access_id = request.session.get('employee_access_id')
-    if not access_id:
-        return redirect('login')
-    access = EmployeeAccess.objects.select_related('employee', 'role').filter(id=access_id, is_active=True).first()
+    access = get_current_access(request)
     if not access:
         request.session.flush()
         return redirect('login')
@@ -1414,6 +1413,7 @@ def system_admin_employee_detail_view(request, employee_id):
 
     employee = get_object_or_404(Employee, id=employee_id)
     if request.method == 'POST':
+        initial_status = employee.status
         old_photo_name = employee.photo.name if employee.photo else ''
         if request.POST.get('remove_photo') == '1':
             if old_photo_name:
@@ -1427,10 +1427,25 @@ def system_admin_employee_detail_view(request, employee_id):
         if form.is_valid():
             try:
                 with transaction.atomic():
+                    locked_employee = Employee.objects.select_for_update().get(pk=employee.pk)
+                    if locked_employee.status != initial_status:
+                        raise ValidationError(
+                            'Статус сотрудника уже изменился. Обновите страницу.',
+                            code='stale_employee_status',
+                        )
+                    form.instance = construct_instance(
+                        form,
+                        locked_employee,
+                        form._meta.fields,
+                        form._meta.exclude,
+                    )
                     saved_employee = form.save()
                     work_assignment = form.save_work_assignment(assigned_by=access.employee)
             except ValidationError as error:
-                form.add_error('assignment_equipment', error)
+                form.add_error(
+                    None if getattr(error, 'code', '') == 'stale_employee_status' else 'assignment_equipment',
+                    error,
+                )
             else:
                 if request.FILES.get('photo') and old_photo_name and old_photo_name != saved_employee.photo.name:
                     saved_employee.photo.storage.delete(old_photo_name)
@@ -1441,7 +1456,7 @@ def system_admin_employee_detail_view(request, employee_id):
                 log_admin_action(
                     access.employee,
                     'Изменена карточка сотрудника',
-                    employee,
+                    saved_employee,
                     new_value=f'Рабочее назначение: {assignment_label}',
                 )
                 messages.success(request, 'Карточка сотрудника и рабочее назначение сохранены.')
@@ -1489,23 +1504,32 @@ def system_admin_generate_access_view(request, employee_id):
     if request.method == 'POST':
         form = AdminAccessRoleForm(request.POST)
         if form.is_valid():
-            role = form.cleaned_data['role']
-            code = generate_unique_access_code()
-            employee_access, _created = EmployeeAccess.objects.update_or_create(
-                employee=employee,
-                role=role,
-                defaults={
-                    'access_code': code,
-                    'status': EmployeeAccess.Status.NOT_ACTIVATED,
-                    'is_active': True,
-                    'primary_code_issued_at': timezone.now(),
-                    'activated_at': None,
-                    'deactivated_at': None,
-                    'blocked_at': None,
-                    'block_reason': '',
-                },
-            )
-            log_admin_action(access.employee, 'Выдан новый первичный пинкод', employee_access, new_value=code)
+            with transaction.atomic():
+                employee = Employee.objects.select_for_update().get(pk=employee.pk)
+                if EmployeeShift.objects.filter(employee=employee, closed_at__isnull=True).exists():
+                    messages.error(request, 'Сначала закройте текущую смену сотрудника, затем сбросьте PIN.')
+                    return redirect_after_admin_action(
+                        request,
+                        'system_admin_employee_detail',
+                        employee_id=employee.id,
+                    )
+                role = form.cleaned_data['role']
+                code = generate_unique_access_code()
+                employee_access, _created = EmployeeAccess.objects.update_or_create(
+                    employee=employee,
+                    role=role,
+                    defaults={
+                        'access_code': code,
+                        'status': EmployeeAccess.Status.NOT_ACTIVATED,
+                        'is_active': True,
+                        'primary_code_issued_at': timezone.now(),
+                        'activated_at': None,
+                        'deactivated_at': None,
+                        'blocked_at': None,
+                        'block_reason': '',
+                    },
+                )
+                log_admin_action(access.employee, 'Выдан новый первичный пинкод', employee_access, new_value=code)
             messages.success(request, f'Новый первичный пинкод: {code}')
     return redirect_after_admin_action(request, 'system_admin_employee_detail', employee_id=employee.id)
 
@@ -1535,13 +1559,13 @@ def system_admin_change_access_role_view(request, access_id):
         return redirect_after_admin_action(request, 'system_admin_employee_detail', employee_id=employee_id)
 
     with transaction.atomic():
+        locked_employee = Employee.objects.select_for_update().get(id=employee_id)
         employee_access = (
             EmployeeAccess.objects
             .select_for_update()
-            .select_related('employee', 'role')
-            .get(id=access_id)
+            .select_related('role')
+            .get(id=access_id, employee_id=employee_id)
         )
-        Employee.objects.select_for_update().get(id=employee_access.employee_id)
         if EmployeeShift.objects.filter(employee_id=employee_id, closed_at__isnull=True).exists():
             messages.error(request, 'Сначала закройте текущую смену сотрудника, затем измените его роль.')
             return redirect_after_admin_action(request, 'system_admin_employee_detail', employee_id=employee_id)
@@ -1556,7 +1580,7 @@ def system_admin_change_access_role_view(request, access_id):
 
         old_role = employee_access.role
         cleared_assignments = clear_active_equipment_assignment(
-            employee=employee_access.employee,
+            employee=locked_employee,
             assigned_by=admin_access.employee,
             role_code=old_role.code,
         )
@@ -1585,51 +1609,64 @@ def system_admin_access_action_view(request, access_id, action):
         return redirect('role_home')
     employee_access = get_object_or_404(EmployeeAccess.objects.select_related('employee'), id=access_id)
     if request.method == 'POST':
-        if employee_access.id == admin_access.id and action in {'block', 'deactivate'}:
-            messages.error(request, 'Нельзя заблокировать или деактивировать собственный доступ администратора.')
-            return redirect_after_admin_action(request, 'system_admin_employee_detail', employee_id=employee_access.employee.id)
-        if action == 'block':
-            form = AdminAccessBlockForm(request.POST)
-            if form.is_valid():
-                employee_access.status = EmployeeAccess.Status.BLOCKED
-                employee_access.is_active = False
-                employee_access.blocked_at = timezone.now()
-                employee_access.block_reason = form.cleaned_data['reason']
-                employee_access.save(update_fields=['status', 'is_active', 'blocked_at', 'block_reason'])
-                log_admin_action(admin_access.employee, 'Заблокирован доступ', employee_access, comment=employee_access.block_reason)
-                messages.success(request, 'Доступ заблокирован.')
-        elif action == 'unblock':
-            if employee_access.employee.status in {Employee.Status.DISMISSED, Employee.Status.DELETED}:
-                messages.error(request, 'Нельзя разблокировать доступ у уволенного или удаленного сотрудника.')
-                return redirect_after_admin_action(request, 'system_admin_employee_detail', employee_id=employee_access.employee.id)
-            employee_access.status = EmployeeAccess.Status.ACTIVATED
-            employee_access.is_active = True
-            employee_access.blocked_at = None
-            employee_access.block_reason = ''
-            employee_access.deactivated_at = None
-            employee_access.save(update_fields=['status', 'is_active', 'blocked_at', 'block_reason', 'deactivated_at'])
-            if employee_access.employee.status in {
-                Employee.Status.NOT_ACTIVATED,
-                Employee.Status.DEACTIVATED,
-                Employee.Status.ARCHIVED,
-            }:
-                employee_access.employee.status = Employee.Status.ACTIVE
-                employee_access.employee.is_active = True
-                employee_access.employee.save(update_fields=['status', 'is_active'])
-            log_admin_action(admin_access.employee, 'Разблокирован доступ', employee_access)
-            messages.success(request, 'Доступ разблокирован.')
-        elif action == 'deactivate':
-            employee_access.status = EmployeeAccess.Status.DEACTIVATED
-            employee_access.is_active = False
-            employee_access.deactivated_at = timezone.now()
-            employee_access.save(update_fields=['status', 'is_active', 'deactivated_at'])
-            clear_active_equipment_assignment(
-                employee=employee_access.employee,
-                assigned_by=admin_access.employee,
-                role_code=employee_access.role.code,
+        with transaction.atomic():
+            employee = Employee.objects.select_for_update().get(pk=employee_access.employee_id)
+            employee_access = (
+                EmployeeAccess.objects.select_for_update()
+                .select_related('role')
+                .get(pk=employee_access.pk, employee=employee)
             )
-            log_admin_action(admin_access.employee, 'Доступ деактивирован', employee_access)
-            messages.success(request, 'Доступ деактивирован.')
+            if employee_access.id == admin_access.id and action in {'block', 'deactivate'}:
+                messages.error(request, 'Нельзя заблокировать или деактивировать собственный доступ администратора.')
+                return redirect_after_admin_action(request, 'system_admin_employee_detail', employee_id=employee.id)
+            if action in {'block', 'deactivate'} and EmployeeShift.objects.filter(
+                employee=employee,
+                closed_at__isnull=True,
+            ).exists():
+                messages.error(request, 'Сначала закройте текущую смену сотрудника, затем измените его доступ.')
+                return redirect_after_admin_action(request, 'system_admin_employee_detail', employee_id=employee.id)
+            if action == 'block':
+                form = AdminAccessBlockForm(request.POST)
+                if form.is_valid():
+                    employee_access.status = EmployeeAccess.Status.BLOCKED
+                    employee_access.is_active = False
+                    employee_access.blocked_at = timezone.now()
+                    employee_access.block_reason = form.cleaned_data['reason']
+                    employee_access.save(update_fields=['status', 'is_active', 'blocked_at', 'block_reason'])
+                    log_admin_action(admin_access.employee, 'Заблокирован доступ', employee_access, comment=employee_access.block_reason)
+                    messages.success(request, 'Доступ заблокирован.')
+            elif action == 'unblock':
+                if employee.status in {Employee.Status.DISMISSED, Employee.Status.DELETED}:
+                    messages.error(request, 'Нельзя разблокировать доступ у уволенного или удаленного сотрудника.')
+                    return redirect_after_admin_action(request, 'system_admin_employee_detail', employee_id=employee.id)
+                employee_access.status = EmployeeAccess.Status.ACTIVATED
+                employee_access.is_active = True
+                employee_access.blocked_at = None
+                employee_access.block_reason = ''
+                employee_access.deactivated_at = None
+                employee_access.save(update_fields=['status', 'is_active', 'blocked_at', 'block_reason', 'deactivated_at'])
+                if employee.status in {
+                    Employee.Status.NOT_ACTIVATED,
+                    Employee.Status.DEACTIVATED,
+                    Employee.Status.ARCHIVED,
+                }:
+                    employee.status = Employee.Status.ACTIVE
+                    employee.is_active = True
+                    employee.save(update_fields=['status', 'is_active'])
+                log_admin_action(admin_access.employee, 'Разблокирован доступ', employee_access)
+                messages.success(request, 'Доступ разблокирован.')
+            elif action == 'deactivate':
+                employee_access.status = EmployeeAccess.Status.DEACTIVATED
+                employee_access.is_active = False
+                employee_access.deactivated_at = timezone.now()
+                employee_access.save(update_fields=['status', 'is_active', 'deactivated_at'])
+                clear_active_equipment_assignment(
+                    employee=employee,
+                    assigned_by=admin_access.employee,
+                    role_code=employee_access.role.code,
+                )
+                log_admin_action(admin_access.employee, 'Доступ деактивирован', employee_access)
+                messages.success(request, 'Доступ деактивирован.')
     return redirect_after_admin_action(request, 'system_admin_employee_detail', employee_id=employee_access.employee.id)
 
 
@@ -1639,41 +1676,51 @@ def system_admin_employee_status_action_view(request, employee_id, action):
         return redirect('role_home')
     employee = get_object_or_404(Employee, id=employee_id)
     if request.method == 'POST':
-        if employee.id == access.employee.id and action in {'deactivate', 'archive', 'delete'}:
-            messages.error(request, 'Нельзя деактивировать, архивировать или удалить собственную учетную запись администратора.')
-            return redirect_after_admin_action(request, 'system_admin_employee_detail', employee_id=employee.id)
-        if action == 'deactivate':
-            employee.status = Employee.Status.DEACTIVATED
-            employee.is_active = False
-            employee.accesses.update(status=EmployeeAccess.Status.DEACTIVATED, is_active=False, deactivated_at=timezone.now())
-            clear_active_equipment_assignment(employee=employee, assigned_by=access.employee)
-            messages.success(request, 'Сотрудник деактивирован.')
-            log_admin_action(access.employee, 'Сотрудник деактивирован', employee)
-        elif action == 'archive':
-            employee.status = Employee.Status.ARCHIVED
-            employee.is_active = False
-            employee.accesses.update(status=EmployeeAccess.Status.DEACTIVATED, is_active=False, deactivated_at=timezone.now())
-            clear_active_equipment_assignment(employee=employee, assigned_by=access.employee)
-            messages.success(request, 'Сотрудник отправлен в архив.')
-            log_admin_action(access.employee, 'Сотрудник отправлен в архив', employee)
-        elif action == 'delete':
-            if employee.has_production_history():
-                AdminConflict.objects.create(
-                    employee=employee,
-                    role=employee.accesses.select_related('role').first().role if employee.accesses.exists() else None,
-                    conflict_type='Попытка удаления сотрудника с историей',
-                    process='Админка MVP',
-                    description='Полное удаление заблокировано: у сотрудника есть смены, рейсы, простои, назначения или диспетчерские действия.',
-                )
-                messages.error(request, 'Удаление запрещено: у сотрудника есть производственная история. Используйте архив.')
-                log_admin_action(access.employee, 'Удаление сотрудника заблокировано', employee)
+        with transaction.atomic():
+            employee = Employee.objects.select_for_update().get(pk=employee.pk)
+            if employee.id == access.employee.id and action in {'deactivate', 'archive', 'delete'}:
+                messages.error(request, 'Нельзя деактивировать, архивировать или удалить собственную учетную запись администратора.')
                 return redirect_after_admin_action(request, 'system_admin_employee_detail', employee_id=employee.id)
-            employee_name = employee.full_name
-            log_admin_action(access.employee, 'Сотрудник полностью удален', employee, old_value=employee_name)
-            employee.delete()
-            messages.success(request, f'Сотрудник {employee_name} удален.')
-            return redirect('system_admin_employees')
-    employee.save(update_fields=['status', 'is_active', 'updated_at'])
+            if action in {'deactivate', 'archive', 'delete'} and EmployeeShift.objects.filter(
+                employee=employee,
+                closed_at__isnull=True,
+            ).exists():
+                messages.error(request, 'Сначала закройте текущую смену сотрудника, затем измените его статус.')
+                return redirect_after_admin_action(request, 'system_admin_employee_detail', employee_id=employee.id)
+            if action == 'deactivate':
+                employee.status = Employee.Status.DEACTIVATED
+                employee.is_active = False
+                employee.accesses.update(status=EmployeeAccess.Status.DEACTIVATED, is_active=False, deactivated_at=timezone.now())
+                clear_active_equipment_assignment(employee=employee, assigned_by=access.employee)
+                messages.success(request, 'Сотрудник деактивирован.')
+                log_admin_action(access.employee, 'Сотрудник деактивирован', employee)
+            elif action == 'archive':
+                employee.status = Employee.Status.ARCHIVED
+                employee.is_active = False
+                employee.accesses.update(status=EmployeeAccess.Status.DEACTIVATED, is_active=False, deactivated_at=timezone.now())
+                clear_active_equipment_assignment(employee=employee, assigned_by=access.employee)
+                messages.success(request, 'Сотрудник отправлен в архив.')
+                log_admin_action(access.employee, 'Сотрудник отправлен в архив', employee)
+            elif action == 'delete':
+                if employee.has_production_history():
+                    AdminConflict.objects.create(
+                        employee=employee,
+                        role=employee.accesses.select_related('role').first().role if employee.accesses.exists() else None,
+                        conflict_type='Попытка удаления сотрудника с историей',
+                        process='Админка MVP',
+                        description='Полное удаление заблокировано: у сотрудника есть смены, рейсы, простои, назначения или диспетчерские действия.',
+                    )
+                    messages.error(request, 'Удаление запрещено: у сотрудника есть производственная история. Используйте архив.')
+                    log_admin_action(access.employee, 'Удаление сотрудника заблокировано', employee)
+                    return redirect_after_admin_action(request, 'system_admin_employee_detail', employee_id=employee.id)
+                employee_name = employee.full_name
+                log_admin_action(access.employee, 'Сотрудник полностью удален', employee, old_value=employee_name)
+                employee.delete()
+                messages.success(request, f'Сотрудник {employee_name} удален.')
+                return redirect('system_admin_employees')
+            else:
+                return redirect_after_admin_action(request, 'system_admin_employee_detail', employee_id=employee.id)
+            employee.save(update_fields=['status', 'is_active', 'updated_at'])
     return redirect_after_admin_action(request, 'system_admin_employee_detail', employee_id=employee.id)
 
 

@@ -1,11 +1,18 @@
 import shutil
 import tempfile
-from io import BytesIO
 from datetime import timedelta
+from io import BytesIO, StringIO
 from unittest.mock import patch
 
+from django.contrib import admin
+from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Permission
+from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import TestCase, override_settings
+from django.core.management import call_command
+from django.db import connection
+from django.db.migrations.executor import MigrationExecutor
+from django.test import RequestFactory, TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 from PIL import Image
@@ -18,10 +25,14 @@ from assignments.models import (
     EquipmentAssignment,
     WorkShiftType,
 )
+from assignments.services import publish_crew_plan
 from references.models import Equipment, EquipmentModel, EquipmentType
 from shifts.models import EmployeeShift, ShiftType
 
+from .admin import AdminActionLogAdmin
+from .forms import optimize_employee_photo
 from .models import AdminActionLog, Employee, EmployeeAccess, Role
+from .oup_services import lock_oup_write_context, open_oup_shift
 
 
 class OupWorkplaceTests(TestCase):
@@ -74,9 +85,59 @@ class OupWorkplaceTests(TestCase):
         self.assertEqual(response.status_code, 302)
         return EmployeeShift.objects.get(employee=self.oup_employee, closed_at__isnull=True)
 
+    def close_shift_after_outer_guard(self, *_args, **_kwargs):
+        EmployeeShift.objects.filter(
+            employee=self.oup_employee,
+            workplace_code='oup',
+            closed_at__isnull=True,
+        ).update(closed_at=timezone.now(), closed_by=self.oup_employee)
+        return True
+
     def test_role_home_routes_oup_to_workplace(self):
         response = self.client.get(reverse('role_home'))
         self.assertRedirects(response, reverse('oup_home'), fetch_redirect_response=False)
+
+    def test_role_home_rejects_stale_oup_session_without_redirect_loop(self):
+        invalid_states = (
+            (
+                'inactive_role',
+                lambda: Role.objects.filter(pk=self.oup_role.pk).update(is_active=False),
+            ),
+            (
+                'not_activated_access',
+                lambda: EmployeeAccess.objects.filter(pk=self.oup_access.pk).update(
+                    status=EmployeeAccess.Status.NOT_ACTIVATED,
+                ),
+            ),
+            (
+                'inactive_employee_status',
+                lambda: Employee.objects.filter(pk=self.oup_employee.pk).update(
+                    status=Employee.Status.DEACTIVATED,
+                    is_active=True,
+                ),
+            ),
+        )
+
+        for state_name, invalidate in invalid_states:
+            with self.subTest(state=state_name):
+                Role.objects.filter(pk=self.oup_role.pk).update(is_active=True)
+                EmployeeAccess.objects.filter(pk=self.oup_access.pk).update(
+                    is_active=True,
+                    status=EmployeeAccess.Status.ACTIVATED,
+                )
+                Employee.objects.filter(pk=self.oup_employee.pk).update(
+                    status=Employee.Status.ACTIVE,
+                    is_active=True,
+                )
+                session = self.client.session
+                session['employee_access_id'] = self.oup_access.id
+                session.save()
+                invalidate()
+
+                response = self.client.get(reverse('role_home'))
+
+                self.assertRedirects(response, reverse('login'), fetch_redirect_response=False)
+                self.assertNotIn('employee_access_id', self.client.session)
 
     def test_oup_pages_reject_other_role(self):
         admin_role = Role.objects.create(code='admin', name='Администратор')
@@ -117,6 +178,75 @@ class OupWorkplaceTests(TestCase):
         self.assertRedirects(response, reverse('oup_employees'), fetch_redirect_response=False)
         self.assertFalse(EmployeeShift.objects.filter(employee=second_employee, closed_at__isnull=True).exists())
 
+    def test_oup_shift_lookup_uses_postgresql_safe_row_lock_without_distinct(self):
+        with patch.object(
+            EmployeeShift.objects,
+            'select_for_update',
+            wraps=EmployeeShift.objects.select_for_update,
+        ) as shift_lock:
+            self.start_shift()
+
+        self.assertTrue(any(
+            call.kwargs.get('of') == ('self',)
+            for call in shift_lock.call_args_list
+        ))
+
+    def test_open_shift_reloads_employee_and_rejects_dismissed_stale_object(self):
+        stale_employee = self.oup_employee
+        Employee.objects.filter(pk=stale_employee.pk).update(
+            status=Employee.Status.DISMISSED,
+            is_active=False,
+        )
+
+        with self.assertRaises(ValidationError):
+            open_oup_shift(employee=stale_employee)
+
+        self.assertFalse(EmployeeShift.objects.filter(employee=stale_employee).exists())
+
+    def test_open_shift_requires_current_activated_oup_access(self):
+        EmployeeAccess.objects.filter(pk=self.oup_access.pk).update(
+            status=EmployeeAccess.Status.DEACTIVATED,
+            is_active=False,
+        )
+
+        with self.assertRaises(ValidationError):
+            open_oup_shift(employee=self.oup_employee)
+
+        self.assertFalse(EmployeeShift.objects.filter(employee=self.oup_employee).exists())
+
+    def test_oup_write_context_locks_role_actor_access_and_shift_in_shared_order(self):
+        self.start_shift()
+        lock_order = []
+        lock_methods = (
+            ('role', Role.objects, Role.objects.select_for_update),
+            ('employee', Employee.objects, Employee.objects.select_for_update),
+            ('access', EmployeeAccess.objects, EmployeeAccess.objects.select_for_update),
+            ('shift', EmployeeShift.objects, EmployeeShift.objects.select_for_update),
+        )
+
+        def record_lock(label, select_for_update):
+            def wrapper(*args, **kwargs):
+                lock_order.append(label)
+                return select_for_update(*args, **kwargs)
+
+            return wrapper
+
+        patchers = [
+            patch.object(manager, 'select_for_update', side_effect=record_lock(label, method))
+            for label, manager, method in lock_methods
+        ]
+        for patcher in patchers:
+            patcher.start()
+        try:
+            actor, shift = lock_oup_write_context(employee=self.oup_employee)
+        finally:
+            for patcher in reversed(patchers):
+                patcher.stop()
+
+        self.assertEqual(actor.pk, self.oup_employee.pk)
+        self.assertEqual(shift.employee_id, self.oup_employee.pk)
+        self.assertEqual(lock_order, ['role', 'employee', 'access', 'shift'])
+
     def test_oup_does_not_treat_another_workplace_shift_as_its_own(self):
         other_shift = EmployeeShift.objects.create(
             employee=self.oup_employee,
@@ -146,6 +276,19 @@ class OupWorkplaceTests(TestCase):
         response = self.client.post(reverse('oup_employee_create'), self.employee_payload())
         self.assertRedirects(response, reverse('oup_employees'), fetch_redirect_response=False)
         self.assertFalse(Employee.objects.filter(personnel_number='CR-1001').exists())
+
+    def test_create_rechecks_shift_inside_write_transaction(self):
+        self.start_shift()
+
+        with patch(
+            'users.oup_views._require_open_shift',
+            side_effect=self.close_shift_after_outer_guard,
+        ):
+            response = self.client.post(reverse('oup_employee_create'), self.employee_payload())
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Employee.objects.filter(personnel_number='CR-1001').exists())
+        self.assertContains(response, 'Сначала начните дневную смену ОУП.')
 
     def test_employee_card_fields_are_disabled_without_oup_shift(self):
         employee = Employee.objects.create(
@@ -227,6 +370,122 @@ class OupWorkplaceTests(TestCase):
         detail = self.client.get(reverse('oup_employee_detail', args=[employee.id]))
         self.assertContains(detail, 'изменена карточка сотрудника')
 
+    def test_edit_rechecks_shift_inside_write_transaction(self):
+        self.start_shift()
+        employee = Employee.objects.create(
+            full_name='Исходное Имя Сотрудника',
+            personnel_number='CR-RACE-EDIT',
+            work_category=Employee.WorkCategory.DRIVER,
+            hired_at=timezone.localdate(),
+            status=Employee.Status.ACTIVE,
+        )
+
+        with patch(
+            'users.oup_views._require_open_shift',
+            side_effect=self.close_shift_after_outer_guard,
+        ):
+            response = self.client.post(
+                reverse('oup_employee_detail', args=[employee.id]),
+                self.employee_payload(
+                    full_name='Несохраненное Новое Имя',
+                    personnel_number=employee.personnel_number,
+                ),
+            )
+
+        self.assertEqual(response.status_code, 200)
+        employee.refresh_from_db()
+        self.assertEqual(employee.full_name, 'Исходное Имя Сотрудника')
+        self.assertContains(response, 'Сначала начните дневную смену ОУП.')
+
+    def test_photo_remove_rechecks_shift_inside_write_transaction(self):
+        self.start_shift()
+        employee = Employee.objects.create(
+            full_name='Сотрудник С Фото',
+            personnel_number='CR-RACE-PHOTO',
+            photo='employee_photos/existing.jpg',
+            status=Employee.Status.ACTIVE,
+        )
+
+        with patch(
+            'users.oup_views._require_open_shift',
+            side_effect=self.close_shift_after_outer_guard,
+        ):
+            response = self.client.post(
+                reverse('oup_employee_detail', args=[employee.id]),
+                {'remove_photo': '1'},
+            )
+
+        self.assertRedirects(
+            response,
+            reverse('oup_employee_detail', args=[employee.id]),
+            fetch_redirect_response=False,
+        )
+        employee.refresh_from_db()
+        self.assertEqual(employee.photo.name, 'employee_photos/existing.jpg')
+
+    def test_stale_dismissed_target_is_not_edited(self):
+        self.start_shift()
+        employee = Employee.objects.create(
+            full_name='Активная Карточка До Гонки',
+            personnel_number='CR-STALE-EDIT',
+            work_category=Employee.WorkCategory.DRIVER,
+            hired_at=timezone.localdate(),
+            status=Employee.Status.ACTIVE,
+        )
+
+        def dismiss_target_after_outer_guard(*_args, **_kwargs):
+            Employee.objects.filter(pk=employee.pk).update(
+                status=Employee.Status.DISMISSED,
+                is_active=False,
+                dismissed_at=timezone.localdate(),
+            )
+            return True
+
+        with patch('users.oup_views._require_open_shift', side_effect=dismiss_target_after_outer_guard):
+            response = self.client.post(
+                reverse('oup_employee_detail', args=[employee.id]),
+                self.employee_payload(
+                    full_name='Имя Не Должно Сохраниться',
+                    personnel_number=employee.personnel_number,
+                ),
+            )
+
+        self.assertEqual(response.status_code, 200)
+        employee.refresh_from_db()
+        self.assertEqual(employee.status, Employee.Status.DISMISSED)
+        self.assertEqual(employee.full_name, 'Активная Карточка До Гонки')
+
+    def test_stale_archived_target_photo_is_not_removed(self):
+        self.start_shift()
+        employee = Employee.objects.create(
+            full_name='Карточка С Архивным Фото',
+            personnel_number='CR-STALE-PHOTO',
+            photo='employee_photos/archived.jpg',
+            status=Employee.Status.ACTIVE,
+        )
+
+        def archive_target_after_outer_guard(*_args, **_kwargs):
+            Employee.objects.filter(pk=employee.pk).update(
+                status=Employee.Status.ARCHIVED,
+                is_active=False,
+            )
+            return True
+
+        with patch('users.oup_views._require_open_shift', side_effect=archive_target_after_outer_guard):
+            response = self.client.post(
+                reverse('oup_employee_detail', args=[employee.id]),
+                {'remove_photo': '1'},
+            )
+
+        self.assertRedirects(
+            response,
+            reverse('oup_employee_detail', args=[employee.id]),
+            fetch_redirect_response=False,
+        )
+        employee.refresh_from_db()
+        self.assertEqual(employee.status, Employee.Status.ARCHIVED)
+        self.assertEqual(employee.photo.name, 'employee_photos/archived.jpg')
+
     def test_work_category_change_is_blocked_by_active_assignment(self):
         self.start_shift()
         employee = Employee.objects.create(
@@ -286,6 +545,30 @@ class OupWorkplaceTests(TestCase):
         employee.refresh_from_db()
         self.assertTrue(employee.is_active)
         self.assertContains(response, 'Увольнение сейчас заблокировано')
+
+    def test_dismissal_rechecks_shift_inside_write_transaction(self):
+        self.start_shift()
+        employee = Employee.objects.create(
+            full_name='Сотрудник Для Проверки Гонки Увольнения',
+            personnel_number='CR-RACE-DISMISS',
+            hired_at=timezone.localdate(),
+            status=Employee.Status.ACTIVE,
+        )
+
+        with patch(
+            'users.oup_views._require_open_shift',
+            side_effect=self.close_shift_after_outer_guard,
+        ):
+            response = self.client.post(
+                reverse('oup_employee_dismiss', args=[employee.id]),
+                {'dismissed_at': timezone.localdate().isoformat(), 'reason': ''},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        employee.refresh_from_db()
+        self.assertEqual(employee.status, Employee.Status.ACTIVE)
+        self.assertTrue(employee.is_active)
+        self.assertContains(response, 'Сначала начните дневную смену ОУП.')
 
     def test_successful_dismissal_deactivates_access_and_closes_assignment(self):
         self.start_shift()
@@ -365,7 +648,7 @@ class OupWorkplaceTests(TestCase):
         employee.refresh_from_db()
         self.assertEqual(employee.status, Employee.Status.ACTIVE)
 
-    def test_dismissal_clears_current_production_draft_before_seven(self):
+    def test_dismissal_rebases_current_draft_and_keeps_planned_replacement(self):
         self.start_shift()
         employee = Employee.objects.create(
             full_name='Сотрудник В Текущем Черновике',
@@ -374,9 +657,24 @@ class OupWorkplaceTests(TestCase):
             hired_at=timezone.localdate() - timedelta(days=10),
             status=Employee.Status.ACTIVE,
         )
+        replacement = Employee.objects.create(
+            full_name='Запланированный Новый Водитель',
+            personnel_number='CR-DRAFT-2',
+            work_category=Employee.WorkCategory.DRIVER,
+            hired_at=timezone.localdate() - timedelta(days=5),
+            status=Employee.Status.ACTIVE,
+        )
         equipment_type = EquipmentType.objects.create(name='Самосвал')
         equipment_model = EquipmentModel.objects.create(equipment_type=equipment_type, name='БелАЗ')
         equipment = Equipment.objects.create(equipment_type=equipment_type, model=equipment_model, garage_number='DRAFT-1')
+        EquipmentAssignment.objects.create(
+            employee=employee,
+            equipment=equipment,
+            role=self.driver_role,
+            shift_type=WorkShiftType.SHIFT_1,
+            status=AssignmentStatus.ACCEPTED,
+            assigned_at=timezone.now(),
+        )
         production_date = timezone.localdate() - timedelta(days=1)
         plan = CrewPlan.objects.create(
             work_date=production_date,
@@ -388,7 +686,15 @@ class OupWorkplaceTests(TestCase):
             plan=plan,
             equipment=equipment,
             shift_type=WorkShiftType.SHIFT_1,
-            employee=employee,
+            employee=replacement,
+            baseline_employee=employee,
+        )
+        CrewPlanSlot.objects.create(
+            plan=plan,
+            equipment=equipment,
+            shift_type=WorkShiftType.SHIFT_2,
+            employee=None,
+            baseline_employee=None,
         )
         with patch('users.oup_services.production_work_date', return_value=production_date):
             response = self.client.post(
@@ -397,7 +703,24 @@ class OupWorkplaceTests(TestCase):
             )
         self.assertRedirects(response, reverse('oup_dismissed_employees'), fetch_redirect_response=False)
         slot.refresh_from_db()
-        self.assertIsNone(slot.employee_id)
+        plan.refresh_from_db()
+        self.assertEqual(slot.employee_id, replacement.id)
+        self.assertIsNone(slot.baseline_employee_id)
+
+        with patch('assignments.services.production_work_date', return_value=production_date):
+            published = publish_crew_plan(
+                plan=plan,
+                expected_version=plan.version,
+                actor=self.oup_employee,
+            )
+        self.assertEqual(published.status, CrewPlanStatus.PUBLISHED)
+        self.assertTrue(EquipmentAssignment.objects.filter(
+            employee=replacement,
+            equipment=equipment,
+            shift_type=WorkShiftType.SHIFT_1,
+            status=AssignmentStatus.ACCEPTED,
+            ended_at__isnull=True,
+        ).exists())
 
     def test_oup_log_contains_only_current_specialist_actions(self):
         self.start_shift()
@@ -428,6 +751,307 @@ class OupWorkplaceTests(TestCase):
         self.start_shift()
         response = self.client.get(reverse('oup_dismissed_employees'))
         self.assertNotContains(response, '+ Добавить сотрудника')
+
+
+class OupSeedCommandTests(TestCase):
+    def test_demo_oup_employee_is_active_and_can_open_shift(self):
+        call_command('seed_mvp_roles', '--with-demo-users', stdout=StringIO())
+
+        employee = Employee.objects.get(full_name='Специалист ОУП MVP')
+        access = EmployeeAccess.objects.get(employee=employee, role__code='oup')
+        self.assertEqual(employee.status, Employee.Status.ACTIVE)
+        self.assertTrue(employee.is_active)
+        self.assertEqual(access.status, EmployeeAccess.Status.ACTIVATED)
+        self.assertTrue(access.is_active)
+
+        shift, created = open_oup_shift(employee=employee)
+
+        self.assertTrue(created)
+        self.assertEqual(shift.shift_type, ShiftType.DAY)
+        self.assertEqual(shift.workplace_code, 'oup')
+
+
+class OupEmployeeStatusMigrationTests(TransactionTestCase):
+    migrate_from = ('users', '0009_employee_oup_fields_and_audit_target')
+    migrate_to = ('users', '0010_normalize_activated_employee_status')
+
+    def setUp(self):
+        super().setUp()
+        executor = MigrationExecutor(connection)
+        executor.migrate([self.migrate_from])
+        old_apps = executor.loader.project_state([self.migrate_from]).apps
+        Employee = old_apps.get_model('users', 'Employee')
+        EmployeeAccess = old_apps.get_model('users', 'EmployeeAccess')
+        Role = old_apps.get_model('users', 'Role')
+
+        role = Role.objects.create(
+            code='migration_status_driver',
+            name='Водитель для миграции статуса',
+            is_active=True,
+        )
+        self.activated_employee_id = Employee.objects.create(
+            full_name='Активированный Legacy Сотрудник',
+            status='not_activated',
+            is_active=True,
+        ).pk
+        self.pending_employee_id = Employee.objects.create(
+            full_name='Неактивированный Legacy Сотрудник',
+            status='not_activated',
+            is_active=True,
+        ).pk
+        self.deactivated_employee_id = Employee.objects.create(
+            full_name='Деактивированный Legacy Сотрудник',
+            status='deactivated',
+            is_active=True,
+        ).pk
+        EmployeeAccess.objects.create(
+            employee_id=self.activated_employee_id,
+            role=role,
+            access_code='981001',
+            status='activated',
+            is_active=True,
+        )
+        EmployeeAccess.objects.create(
+            employee_id=self.pending_employee_id,
+            role=role,
+            access_code='981002',
+            status='not_activated',
+            is_active=True,
+        )
+        EmployeeAccess.objects.create(
+            employee_id=self.deactivated_employee_id,
+            role=role,
+            access_code='981003',
+            status='activated',
+            is_active=True,
+        )
+
+        executor = MigrationExecutor(connection)
+        executor.migrate([self.migrate_to])
+        self.apps = executor.loader.project_state([self.migrate_to]).apps
+
+    def test_only_legacy_employee_with_activated_access_becomes_active(self):
+        Employee = self.apps.get_model('users', 'Employee')
+
+        self.assertEqual(
+            Employee.objects.get(pk=self.activated_employee_id).status,
+            'active',
+        )
+        self.assertEqual(
+            Employee.objects.get(pk=self.pending_employee_id).status,
+            'not_activated',
+        )
+        self.assertEqual(
+            Employee.objects.get(pk=self.deactivated_employee_id).status,
+            'deactivated',
+        )
+
+
+class OupAdminActionLogPermissionsTests(TestCase):
+    def setUp(self):
+        self.factory = RequestFactory()
+        self.model_admin = AdminActionLogAdmin(AdminActionLog, admin.site)
+        self.log = AdminActionLog.objects.create(action='ОУП: тест прав журнала')
+
+    def request_for(self, user):
+        request = self.factory.get('/admin/users/adminactionlog/')
+        request.user = user
+        return request
+
+    def test_staff_object_view_requires_explicit_view_permission(self):
+        user_model = get_user_model()
+        staff_without_permission = user_model.objects.create_user(
+            username='oup-log-no-view',
+            password='test-password',
+            is_staff=True,
+        )
+        staff_with_permission = user_model.objects.create_user(
+            username='oup-log-view',
+            password='test-password',
+            is_staff=True,
+        )
+        view_permission = Permission.objects.get(
+            content_type__app_label='users',
+            content_type__model='adminactionlog',
+            codename='view_adminactionlog',
+        )
+        staff_with_permission.user_permissions.add(view_permission)
+
+        self.assertFalse(self.model_admin.has_view_permission(
+            self.request_for(staff_without_permission),
+            obj=self.log,
+        ))
+        self.assertTrue(self.model_admin.has_view_permission(
+            self.request_for(staff_with_permission),
+            obj=self.log,
+        ))
+
+    def test_change_permission_is_always_denied(self):
+        user_model = get_user_model()
+        staff_with_permission = user_model.objects.create_user(
+            username='oup-log-change',
+            password='test-password',
+            is_staff=True,
+        )
+        change_permission = Permission.objects.get(
+            content_type__app_label='users',
+            content_type__model='adminactionlog',
+            codename='change_adminactionlog',
+        )
+        staff_with_permission.user_permissions.add(change_permission)
+        superuser = user_model.objects.create_superuser(
+            username='oup-log-superuser',
+            password='test-password',
+            email='oup-log-superuser@example.test',
+        )
+
+        for user in (staff_with_permission, superuser):
+            with self.subTest(username=user.username):
+                self.assertFalse(self.model_admin.has_change_permission(
+                    self.request_for(user),
+                    obj=self.log,
+                ))
+
+
+class OupOpenShiftAdminSafetyTests(TestCase):
+    def setUp(self):
+        self.admin_role = Role.objects.create(code='admin', name='Администратор')
+        self.oup_role, _created = Role.objects.update_or_create(
+            code='oup',
+            defaults={'name': 'Специалист ОУП', 'is_active': True},
+        )
+        self.admin_employee = Employee.objects.create(
+            full_name='Администратор Проверки ОУП',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        self.admin_access = EmployeeAccess.objects.create(
+            employee=self.admin_employee,
+            role=self.admin_role,
+            access_code='100001',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+        self.oup_employee = Employee.objects.create(
+            full_name='Специалист ОУП С Открытой Сменой',
+            personnel_number='OUP-OPEN-SHIFT',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        self.oup_access = EmployeeAccess.objects.create(
+            employee=self.oup_employee,
+            role=self.oup_role,
+            access_code='812345',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+        self.shift, _created = open_oup_shift(employee=self.oup_employee)
+        session = self.client.session
+        session['employee_access_id'] = self.admin_access.id
+        session.save()
+
+    def assert_target_unchanged(self):
+        self.oup_employee.refresh_from_db()
+        self.oup_access.refresh_from_db()
+        self.shift.refresh_from_db()
+        self.assertEqual(self.oup_employee.status, Employee.Status.ACTIVE)
+        self.assertTrue(self.oup_employee.is_active)
+        self.assertEqual(self.oup_access.access_code, '812345')
+        self.assertEqual(self.oup_access.status, EmployeeAccess.Status.ACTIVATED)
+        self.assertTrue(self.oup_access.is_active)
+        self.assertIsNone(self.oup_access.blocked_at)
+        self.assertEqual(self.oup_access.block_reason, '')
+        self.assertIsNone(self.oup_access.deactivated_at)
+        self.assertIsNone(self.shift.closed_at)
+
+    def test_admin_cannot_mutate_employee_or_access_during_open_oup_shift(self):
+        actions = (
+            (
+                'reset_pin',
+                reverse('system_admin_generate_access', args=[self.oup_employee.id]),
+                {'role': self.oup_role.id},
+            ),
+            (
+                'block_access',
+                reverse('system_admin_access_action', args=[self.oup_access.id, 'block']),
+                {'reason': 'Проверка блокировки'},
+            ),
+            (
+                'deactivate_access',
+                reverse('system_admin_access_action', args=[self.oup_access.id, 'deactivate']),
+                {},
+            ),
+            (
+                'deactivate_employee',
+                reverse('system_admin_employee_status_action', args=[self.oup_employee.id, 'deactivate']),
+                {},
+            ),
+            (
+                'archive_employee',
+                reverse('system_admin_employee_status_action', args=[self.oup_employee.id, 'archive']),
+                {},
+            ),
+        )
+
+        for action_name, url, payload in actions:
+            with self.subTest(action=action_name):
+                response = self.client.post(url, payload)
+                self.assertEqual(response.status_code, 302)
+                self.assert_target_unchanged()
+
+    def test_admin_employee_form_keeps_status_read_only(self):
+        detail = self.client.get(
+            reverse('system_admin_employee_detail', args=[self.oup_employee.id]),
+        )
+
+        self.assertEqual(detail.status_code, 200)
+        self.assertContains(detail, 'id="employee-status-readonly"', html=False)
+        self.assertContains(detail, self.oup_employee.get_status_display())
+        self.assertNotContains(detail, 'name="status"', html=False)
+
+        response = self.client.post(
+            reverse('system_admin_employee_detail', args=[self.oup_employee.id]),
+            {
+                'full_name': self.oup_employee.full_name,
+                'personnel_number': self.oup_employee.personnel_number,
+                'status': Employee.Status.ARCHIVED,
+                'position': '',
+                'phone': '',
+                'comment': '',
+                'hired_at': '',
+                'dismissed_at': '',
+                'rotation': '',
+                'residence_text': '',
+                'hr_data': '',
+                'assignment_role': '',
+                'assignment_shift_type': '',
+                'assignment_equipment': '',
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assert_target_unchanged()
+
+    def test_admin_employee_form_renders_hr_dates_in_html_date_format(self):
+        self.oup_employee.hired_at = timezone.localdate() - timedelta(days=10)
+        self.oup_employee.dismissed_at = timezone.localdate() - timedelta(days=1)
+        self.oup_employee.save(update_fields=['hired_at', 'dismissed_at'])
+
+        detail = self.client.get(
+            reverse('system_admin_employee_detail', args=[self.oup_employee.id]),
+        )
+
+        self.assertEqual(detail.status_code, 200)
+        self.assertContains(
+            detail,
+            f'name="hired_at" value="{self.oup_employee.hired_at:%Y-%m-%d}"',
+            html=False,
+        )
+        self.assertContains(
+            detail,
+            f'name="dismissed_at" value="{self.oup_employee.dismissed_at:%Y-%m-%d}"',
+            html=False,
+        )
 
 
 class OupPhotoUploadTests(TestCase):
@@ -483,3 +1107,24 @@ class OupPhotoUploadTests(TestCase):
         self.assertTrue(employee.photo.name.endswith('.jpg'))
         with Image.open(employee.photo.path) as saved:
             self.assertLessEqual(max(saved.size), 512)
+
+    def test_photo_without_content_type_is_still_verified_and_optimized(self):
+        source = BytesIO()
+        Image.new('RGB', (640, 480), color=(80, 90, 100)).save(source, format='PNG')
+        photo = SimpleUploadedFile('employee.bin', source.getvalue(), content_type=None)
+
+        optimized = optimize_employee_photo(photo)
+
+        self.assertTrue(optimized.name.endswith('.jpg'))
+        with Image.open(optimized) as saved:
+            self.assertEqual(saved.format, 'JPEG')
+
+    def test_photo_without_content_type_rejects_arbitrary_file(self):
+        upload = SimpleUploadedFile(
+            'employee.bin',
+            b'<html><script>alert(1)</script></html>',
+            content_type=None,
+        )
+
+        with self.assertRaises(ValidationError):
+            optimize_employee_photo(upload)

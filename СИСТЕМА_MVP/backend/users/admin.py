@@ -45,7 +45,10 @@ class AdminActionLogAdmin(admin.ModelAdmin):
         return False
 
     def has_change_permission(self, request, obj=None):
-        return bool(obj)
+        return False
+
+    def has_view_permission(self, request, obj=None):
+        return super().has_view_permission(request, obj=obj)
 
     def has_delete_permission(self, request, obj=None):
         return False

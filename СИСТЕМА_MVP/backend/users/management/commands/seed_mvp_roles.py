@@ -47,7 +47,11 @@ class Command(BaseCommand):
             for full_name, role_code, access_code, phone in DEMO_USERS:
                 employee, _ = Employee.objects.update_or_create(
                     full_name=full_name,
-                    defaults={'is_active': True, 'phone': phone},
+                    defaults={
+                        'is_active': True,
+                        'status': Employee.Status.ACTIVE,
+                        'phone': phone,
+                    },
                 )
                 role = Role.objects.get(code=role_code)
                 EmployeeAccess.objects.update_or_create(
