@@ -237,7 +237,7 @@ def update_crew_draft_slot(
     _validate_crew_equipment(equipment, role)
     try:
         target_slot = (
-            CrewPlanSlot.objects.select_for_update()
+            CrewPlanSlot.objects.select_for_update(of=('self',))
             .select_related('employee')
             .get(plan=locked_plan, equipment=equipment, shift_type=shift_type)
         )
@@ -291,7 +291,7 @@ def publish_crew_plan(*, plan, expected_version, actor=None):
         )
 
     slots = list(
-        CrewPlanSlot.objects.select_for_update()
+        CrewPlanSlot.objects.select_for_update(of=('self',))
         .filter(plan=locked_plan)
         .select_related('equipment', 'equipment__equipment_type', 'employee', 'baseline_employee')
         .order_by('equipment_id', 'shift_type')

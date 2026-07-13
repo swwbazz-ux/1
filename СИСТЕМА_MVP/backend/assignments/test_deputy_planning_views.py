@@ -1,4 +1,5 @@
 import json
+from unittest.mock import patch
 
 from django.test import Client, TestCase
 from django.urls import reverse
@@ -15,7 +16,7 @@ from references.models import (
 from shifts.models import EmployeeShift
 from users.models import DriverPrimaryRegistration, Employee, EmployeeAccess, Role
 
-from .models import AssignmentStatus, CrewPlanStatus, EquipmentAssignment, WorkShiftType
+from .models import AssignmentStatus, CrewPlanSlot, CrewPlanStatus, EquipmentAssignment, WorkShiftType
 from .services import get_active_equipment_assignment, get_or_create_crew_draft, set_active_equipment_assignment
 
 
@@ -278,6 +279,26 @@ class DeputyPlanningViewTests(TestCase):
             self.truck_1,
         )
 
+    def test_autosave_locks_only_slot_table_with_nullable_employee_join(self):
+        plan = self.create_draft()
+
+        with patch.object(
+            CrewPlanSlot.objects,
+            'select_for_update',
+            wraps=CrewPlanSlot.objects.select_for_update,
+        ) as slot_lock:
+            self.autosave_slot(
+                plan,
+                equipment=self.truck_1,
+                shift_type=WorkShiftType.SHIFT_1,
+                employee=None,
+            )
+
+        self.assertTrue(any(
+            call.kwargs.get('of') == ('self',)
+            for call in slot_lock.call_args_list
+        ))
+
     def test_publish_replaces_base_equipment_assignment(self):
         plan = self.create_draft()
         _response, plan = self.autosave_driver_on_second_truck(plan)
@@ -303,6 +324,21 @@ class DeputyPlanningViewTests(TestCase):
             ).count(),
             1,
         )
+
+    def test_publish_locks_only_slot_table_with_nullable_employee_joins(self):
+        plan = self.create_draft()
+
+        with patch.object(
+            CrewPlanSlot.objects,
+            'select_for_update',
+            wraps=CrewPlanSlot.objects.select_for_update,
+        ) as slot_lock:
+            self.publish(plan)
+
+        self.assertTrue(any(
+            call.kwargs.get('of') == ('self',)
+            for call in slot_lock.call_args_list
+        ))
 
     def test_published_move_is_visible_in_admin_employee_card(self):
         admin_role = Role.objects.create(code='admin', name='Администратор')
