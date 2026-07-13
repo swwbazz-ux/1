@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Журнал действий ОУП{% endblock %}
+{% block body_class %}oup-workplace-screen oup-logs-screen{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'css/oup-workplace-v1.css' %}?v=1">{% endblock %}
+
+{% block body %}
+<div class="admin-shell admin-exports-shell admin-day oup-shell" data-admin-theme>
+    {% include "includes/oup_header.html" with screen_title="Журнал действий" screen_subtitle="Автоматическая история работы текущего специалиста ОУП. Записи нельзя изменить или удалить." %}
+    <main class="admin-console-page oup-page">
+        {% for message in messages %}<div class="message {{ message.tags|default:'success' }}" role="status">{{ message }}</div>{% endfor %}
+
+        <section class="oup-log-notice">
+            <span aria-hidden="true">✓</span>
+            <div><strong>Журнал ведётся автоматически</strong><p>Вы видите только собственные действия. Администратор видит полный журнал всех специалистов.</p></div>
+        </section>
+
+        <section class="oup-register-card oup-logs-card">
+            <div class="admin-section-title employee-list-toolbar">
+                <div><h2>История действий</h2><p>Дата, сотрудник, результат и краткое изменение «было → стало».</p></div>
+                <span class="admin-chip admin-chip-info">{{ page_obj.paginator.count }} записей</span>
+            </div>
+            <form method="get" class="employee-list-filters oup-log-filter">
+                <div class="field admin-search-field">
+                    <label for="oup-log-search">Поиск</label>
+                    <input id="oup-log-search" name="q" value="{{ query }}" placeholder="Сотрудник или действие" autocomplete="off">
+                </div>
+                <div class="field select-field">
+                    <label for="oup-log-action">Действие</label>
+                    <select id="oup-log-action" name="action">
+                        <option value="">Все действия</option>
+                        {% for item in actions %}
+                            <option value="{{ item.action }}" {% if selected_action == item.action %}selected{% endif %}>{{ item.action|cut:"ОУП: " }} · {{ item.total }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="field field-submit oup-filter-actions">
+                    <button class="admin-button admin-button-primary" type="submit">Найти</button>
+                    <a class="admin-button admin-button-secondary filter-reset-link" href="{% url 'oup_logs' %}">Сбросить</a>
+                </div>
+            </form>
+
+            <div class="oup-log-list">
+                {% for log in logs %}
+                    <article class="oup-log-row">
+                        <time datetime="{{ log.created_at|date:'c' }}">
+                            <strong>{{ log.created_at|date:"H:i" }}</strong>
+                            <span>{{ log.created_at|date:"d.m.Y" }}</span>
+                        </time>
+                        <div class="oup-log-main">
+                            <div><span class="oup-log-type">{{ log.action|cut:"ОУП: " }}</span><strong>{{ log.object_repr|default:"Рабочая смена" }}</strong></div>
+                            {% if log.old_value and log.old_value != 'Данные без изменений' %}<p><b>Было / изменение:</b> {{ log.old_value }}</p>{% endif %}
+                            {% if log.new_value %}<p><b>Результат:</b> {{ log.new_value }}</p>{% endif %}
+                            {% if log.comment %}<p><b>Комментарий:</b> {{ log.comment }}</p>{% endif %}
+                        </div>
+                        <span class="oup-log-lock" title="Запись только для чтения" aria-label="Запись только для чтения">●</span>
+                    </article>
+                {% empty %}
+                    <div class="oup-empty-state"><strong>Записей пока нет</strong><p>Журнал заполнится автоматически после начала смены и работы с сотрудниками.</p></div>
+                {% endfor %}
+            </div>
+            {% if page_obj.paginator.num_pages > 1 %}
+                <nav class="oup-pagination" aria-label="Страницы журнала">
+                    {% if page_obj.has_previous %}
+                        <a class="admin-button admin-button-secondary" href="?page={{ page_obj.previous_page_number }}&amp;q={{ query|urlencode }}&amp;action={{ selected_action|urlencode }}">← Назад</a>
+                    {% else %}<span></span>{% endif %}
+                    <span>Страница <strong>{{ page_obj.number }}</strong> из {{ page_obj.paginator.num_pages }}</span>
+                    {% if page_obj.has_next %}
+                        <a class="admin-button admin-button-secondary" href="?page={{ page_obj.next_page_number }}&amp;q={{ query|urlencode }}&amp;action={{ selected_action|urlencode }}">Дальше →</a>
+                    {% else %}<span></span>{% endif %}
+                </nav>
+            {% endif %}
+        </section>
+    </main>
+</div>
+<script src="{% static 'js/oup-workplace.js' %}?v=1"></script>
+{% endblock %}

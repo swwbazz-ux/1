@@ -134,7 +134,7 @@ class CrewPlanningServiceTests(TestCase):
             )
         self.assertEqual(self.validation_code(error), 'stale_version')
 
-    def test_draft_rejects_employee_without_activated_access(self):
+    def test_draft_rejects_employee_without_matching_work_category_or_activated_access(self):
         employee = Employee.objects.create(full_name='Без доступа', status=Employee.Status.ACTIVE)
         EmployeeAccess.objects.create(
             employee=employee,
@@ -155,7 +155,56 @@ class CrewPlanningServiceTests(TestCase):
                 actor=self.actor,
             )
 
-        self.assertEqual(self.validation_code(error), 'inactive_access')
+        self.assertEqual(self.validation_code(error), 'invalid_work_category')
+
+    def test_draft_accepts_employee_work_category_without_access(self):
+        employee = Employee.objects.create(
+            full_name='Новый водитель ОУП',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+            work_category=Employee.WorkCategory.DRIVER,
+        )
+        plan, _created = get_or_create_crew_draft(role=self.driver_role, actor=self.actor)
+
+        updated = update_crew_draft_slot(
+            plan=plan,
+            equipment=self.truck_1,
+            shift_type=WorkShiftType.SHIFT_2,
+            employee=employee,
+            expected_version=plan.version,
+            actor=self.actor,
+        )
+
+        slot = updated.slots.get(equipment=self.truck_1, shift_type=WorkShiftType.SHIFT_2)
+        self.assertEqual(slot.employee, employee)
+
+    def test_explicit_work_category_overrides_legacy_activated_access(self):
+        employee = Employee.objects.create(
+            full_name='Переведенный машинист',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+            work_category=Employee.WorkCategory.EXCAVATOR_OPERATOR,
+        )
+        EmployeeAccess.objects.create(
+            employee=employee,
+            role=self.driver_role,
+            access_code='218888',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+        plan, _created = get_or_create_crew_draft(role=self.driver_role, actor=self.actor)
+
+        with self.assertRaises(ValidationError) as error:
+            update_crew_draft_slot(
+                plan=plan,
+                equipment=self.truck_1,
+                shift_type=WorkShiftType.SHIFT_2,
+                employee=employee,
+                expected_version=plan.version,
+                actor=self.actor,
+            )
+
+        self.assertEqual(self.validation_code(error), 'invalid_work_category')
 
     def test_closed_production_day_cannot_be_edited_or_published(self):
         plan, _created = get_or_create_crew_draft(role=self.driver_role, actor=self.actor)

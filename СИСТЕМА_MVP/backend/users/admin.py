@@ -5,9 +5,9 @@ from .models import AdminActionLog, AdminConflict, DriverPrimaryRegistration, Em
 
 @admin.register(Employee)
 class EmployeeAdmin(admin.ModelAdmin):
-    list_display = ('full_name', 'personnel_number', 'phone', 'status', 'is_active')
-    search_fields = ('full_name', 'personnel_number', 'phone')
-    list_filter = ('status', 'is_active')
+    list_display = ('full_name', 'personnel_number', 'department', 'position', 'work_category', 'status', 'is_active')
+    search_fields = ('full_name', 'personnel_number', 'phone', 'department', 'position')
+    list_filter = ('status', 'is_active', 'work_category', 'department')
 
 
 @admin.register(Role)
@@ -36,7 +36,19 @@ class AdminActionLogAdmin(admin.ModelAdmin):
     list_display = ('created_at', 'actor', 'action', 'object_type', 'object_repr')
     search_fields = ('actor__full_name', 'action', 'object_repr', 'comment')
     list_filter = ('action', 'object_type')
-    readonly_fields = ('created_at',)
+    readonly_fields = (
+        'created_at', 'actor', 'action', 'object_type', 'object_id', 'object_repr',
+        'old_value', 'new_value', 'comment',
+    )
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return bool(obj)
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(AdminConflict)

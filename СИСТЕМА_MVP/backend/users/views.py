@@ -66,6 +66,7 @@ ROLE_INTERFACE_NAMES = {
     'excavator_operator': 'Интерфейс машиниста экскаватора',
     'mining_master': 'Интерфейс горного мастера',
     'deputy_mining_manager': 'Планирование смены зам. начальника горного участка',
+    'oup': 'Рабочее место ОУП',
     'dispatcher': 'Диспетчерский экран',
     'mechanic': 'Интерфейс механика',
     'manager': 'Витрина руководства',
@@ -94,6 +95,7 @@ INTERFACE_MAP = [
             {'title': 'Машинист экскаватора', 'url': '/excavator/work/', 'code': '3000', 'note': 'Создание рейса и параметры для отчета заказчику'},
             {'title': 'Горный мастер', 'url': '/mining-master/assignments/', 'code': '4000', 'note': 'Назначение самосвалов под экскаваторы'},
             {'title': 'Зам. начальника горного участка', 'url': '/deputy-mining-manager/', 'code': 'роль зам. начальника', 'note': 'Расстановка сотрудников по технике на две смены'},
+            {'title': 'Отдел управления персоналом', 'url': '/oup/', 'code': '800000 / роль ОУП', 'note': 'Создание, ведение и увольнение сотрудников'},
             {'title': 'Диспетчерский пульт', 'url': '/dispatcher/control/', 'code': '5000', 'note': 'Контроль активных рейсов и назначений'},
             {'title': 'Механическая служба', 'url': '/mechanic/downtimes/', 'code': '7000 / роль механика', 'note': 'Открытие и закрытие механических простоев по технике'},
         ],
@@ -310,6 +312,7 @@ def log_admin_action(actor, action, obj=None, old_value='', new_value='', commen
         actor=actor,
         action=action,
         object_type=obj.__class__.__name__ if obj else '',
+        object_id=str(obj.pk) if obj and obj.pk else '',
         object_repr=str(obj) if obj else '',
         old_value=old_value,
         new_value=new_value,
@@ -464,6 +467,8 @@ def role_home_view(request):
         return redirect('mining_master_assignments')
     if access.role.code == 'deputy_mining_manager':
         return redirect('deputy_mining_manager_placement')
+    if access.role.code == 'oup':
+        return redirect('oup_home')
     if access.role.code == 'excavator_operator':
         return redirect('excavator_work')
     if access.role.code == 'dispatcher':
@@ -1343,8 +1348,14 @@ def system_admin_employee_create_view(request):
         if form.is_valid():
             try:
                 with transaction.atomic():
-                    employee = form.save()
                     role = form.cleaned_data['role']
+                    employee = form.save(commit=False)
+                    if role.code in {
+                        Employee.WorkCategory.DRIVER,
+                        Employee.WorkCategory.EXCAVATOR_OPERATOR,
+                    }:
+                        employee.work_category = role.code
+                    employee.save()
                     code = ''
                     if form.cleaned_data['generate_access']:
                         code = generate_unique_access_code()
@@ -1462,7 +1473,10 @@ def system_admin_employee_detail_view(request, employee_id):
             'employee_accesses': employee_accesses,
             'current_role_access': current_role_access,
             'active_equipment_assignment': active_equipment_assignment,
-            'logs': AdminActionLog.objects.filter(object_repr=str(employee))[:10],
+            'logs': AdminActionLog.objects.filter(
+                Q(object_type='Employee', object_id=str(employee.id))
+                | Q(object_id='', object_repr=str(employee))
+            )[:10],
         },
     )
 

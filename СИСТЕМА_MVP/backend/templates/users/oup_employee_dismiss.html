@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Увольнение — {{ employee.full_name }}{% endblock %}
+{% block body_class %}oup-workplace-screen oup-dismiss-screen{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'css/oup-workplace-v1.css' %}?v=1">{% endblock %}
+
+{% block body %}
+<div class="admin-shell admin-exports-shell admin-day oup-shell" data-admin-theme>
+    {% include "includes/oup_header.html" with screen_title="Оформить увольнение" screen_subtitle="Техническое исключение сотрудника из рабочих процессов без удаления истории." %}
+    <main class="admin-console-page oup-page oup-dismiss-page">
+        {% for message in messages %}<div class="message {{ message.tags|default:'success' }}" role="status">{{ message }}</div>{% endfor %}
+
+        <a class="oup-back-link" href="{% url 'oup_employee_detail' employee.id %}">← Вернуться в карточку</a>
+        <div class="oup-dismiss-layout">
+            <section class="oup-dismiss-card">
+                <div class="oup-dismiss-person">
+                    <span class="oup-person-avatar" aria-hidden="true">
+                        {% if employee.photo %}<img src="{{ employee.photo.url }}" alt="">{% else %}{{ employee.full_name|first }}{% endif %}
+                    </span>
+                    <div>
+                        <span class="oup-eyebrow">Выбран сотрудник</span>
+                        <h2>{{ employee.full_name }}</h2>
+                        <p>Таб. № {{ employee.personnel_number }} · {{ employee.position }} · {{ employee.department }}</p>
+                    </div>
+                </div>
+
+                {% if blockers %}
+                    <div class="oup-blockers" role="alert">
+                        <strong>Увольнение сейчас заблокировано</strong>
+                        <p>Система не может освободить сотрудника и технику, пока остаются открытые рабочие операции.</p>
+                        {% for blocker in blockers %}
+                            <article><span>!</span><div><h3>{{ blocker.title }}</h3><p>{{ blocker.detail }}</p></div></article>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <div class="oup-dismiss-warning">
+                        <strong>После подтверждения</strong>
+                        <ul>
+                            <li>сотрудник исчезнет из текущих рабочих списков;</li>
+                            <li>все системные доступы будут отключены;</li>
+                            <li>постоянное назначение на технику будет снято;</li>
+                            <li>история смен, рейсов, отчетов и действий сохранится.</li>
+                        </ul>
+                    </div>
+                {% endif %}
+
+                <form method="post" class="oup-dismiss-form" {% if not blockers %}data-confirm="Уволить {{ employee.full_name }} и исключить из текущих рабочих списков?" data-confirm-delay="2"{% endif %}>
+                    {% csrf_token %}
+                    {% if form.errors %}
+                        <section class="oup-error-summary field-wide" role="alert" aria-labelledby="oup-dismiss-error-title">
+                            <strong id="oup-dismiss-error-title">Проверьте данные увольнения</strong>
+                            <ul>
+                                {% for field in form %}{% for error in field.errors %}<li><a href="#{{ field.id_for_label }}">{{ field.label }}: {{ error }}</a></li>{% endfor %}{% endfor %}
+                                {% for error in form.non_field_errors %}<li>{{ error }}</li>{% endfor %}
+                            </ul>
+                        </section>
+                    {% endif %}
+                    <div class="employee-detail-field">
+                        <label for="{{ form.dismissed_at.id_for_label }}">{{ form.dismissed_at.label }} <b>*</b></label>
+                        {{ form.dismissed_at }}
+                        {{ form.dismissed_at.errors }}
+                    </div>
+                    <div class="employee-detail-field field-wide">
+                        <label for="{{ form.reason.id_for_label }}">{{ form.reason.label }}</label>
+                        {{ form.reason }}
+                        {{ form.reason.errors }}
+                    </div>
+                    <div class="oup-form-actions">
+                        <a class="admin-button admin-button-secondary" href="{% url 'oup_employee_detail' employee.id %}">Отмена</a>
+                        {% if blockers %}
+                            <button class="admin-button admin-button-disabled" type="button" disabled>Сначала устраните препятствия</button>
+                        {% else %}
+                            <button class="admin-button admin-button-danger" type="submit">Уволить сотрудника</button>
+                        {% endif %}
+                    </div>
+                </form>
+            </section>
+
+            <aside class="oup-side-card">
+                <span class="oup-eyebrow">Важно</span>
+                <h3>Это не приказ</h3>
+                <p>Кадровый приказ остается в 1С. Здесь фиксируется только факт исключения сотрудника из оперативной системы.</p>
+            </aside>
+        </div>
+    </main>
+</div>
+<script src="{% static 'js/oup-workplace.js' %}?v=1"></script>
+{% endblock %}

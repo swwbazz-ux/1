@@ -64,6 +64,19 @@ Backend является основным рабочим приложением.
 - Service worker: `/dispatcher-sw.js`.
 - Shell: `dispatcher-desktop-shell-v29`.
 
+### Отдел управления персоналом
+
+- Views: `СИСТЕМА_MVP/backend/users/oup_views.py`.
+- Forms: `СИСТЕМА_MVP/backend/users/oup_forms.py`.
+- Domain services: `СИСТЕМА_MVP/backend/users/oup_services.py`.
+- Templates: `СИСТЕМА_MVP/backend/templates/users/oup_*.html`.
+- Header include: `СИСТЕМА_MVP/backend/templates/includes/oup_header.html`.
+- CSS: `СИСТЕМА_MVP/backend/static/css/oup-workplace-v1.css`.
+- JavaScript: `СИСТЕМА_MVP/backend/static/js/oup-workplace.js`.
+- Маршруты: `/oup/`, `/oup/employees/`, `/oup/dismissed/`, `/oup/log/`.
+- Рабочая смена: только дневная `EmployeeShift`, без техники.
+- Границы: создание, редактирование, фото и увольнение сотрудников; без PIN, проживания, табеля, охраны труда и назначения техники.
+
 ## Правило локализации задачи
 
 Перед изменением нужно записать для себя:

@@ -1,0 +1,59 @@
+<header class="admin-console-header oup-console-header" aria-label="Рабочая шапка отдела управления персоналом">
+    <section class="admin-console-identity">
+        <span class="admin-console-avatar" aria-hidden="true">{{ access.employee.full_name|default:"О"|first }}</span>
+        <span>
+            <strong>{{ access.employee.full_name|default:"Специалист ОУП" }}</strong>
+            <em>Отдел управления персоналом</em>
+        </span>
+    </section>
+
+    <section class="admin-console-main">
+        <div class="admin-console-title">
+            <span>Кадровый контур</span>
+            <h1>{{ screen_title|default:"Сотрудники" }}</h1>
+            <p>{{ screen_subtitle|default:"Единая рабочая база действующих и уволенных сотрудников." }}</p>
+        </div>
+        <nav class="admin-console-nav" aria-label="Разделы ОУП">
+            <a class="{% if active_nav == 'employees' %}is-active{% endif %}"
+               href="{% url 'oup_employees' %}"
+               {% if active_nav == 'employees' %}aria-current="page"{% endif %}>Сотрудники</a>
+            <a class="{% if active_nav == 'dismissed' %}is-active{% endif %}"
+               href="{% url 'oup_dismissed_employees' %}"
+               {% if active_nav == 'dismissed' %}aria-current="page"{% endif %}>Уволенные</a>
+            <a class="{% if active_nav == 'logs' %}is-active{% endif %}"
+               href="{% url 'oup_logs' %}"
+               {% if active_nav == 'logs' %}aria-current="page"{% endif %}>Журнал действий</a>
+        </nav>
+    </section>
+
+    <section class="admin-console-actions oup-console-actions" aria-label="Смена, тема и выход">
+        <div class="oup-shift-state {% if open_oup_shift %}is-open{% else %}is-closed{% endif %}">
+            <span>Дневная смена</span>
+            {% if open_oup_shift %}
+                <strong>с {{ open_oup_shift.opened_at|date:"H:i" }}</strong>
+            {% else %}
+                <strong>не начата</strong>
+            {% endif %}
+        </div>
+        {% if open_oup_shift %}
+            <form method="post" action="{% url 'oup_shift_close' %}" data-confirm="Завершить дневную смену ОУП? После завершения редактирование сотрудников будет недоступно.">
+                {% csrf_token %}
+                <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                <button class="oup-shift-button is-close" type="submit">Завершить смену</button>
+            </form>
+        {% else %}
+            <form method="post" action="{% url 'oup_shift_start' %}">
+                {% csrf_token %}
+                <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                <button class="oup-shift-button is-start" type="submit">Начать смену</button>
+            </form>
+        {% endif %}
+        <button type="button"
+                class="admin-theme-button"
+                data-admin-theme-toggle
+                data-theme-icon="sun"
+                aria-label="Включить ночную тему"
+                title="Тема интерфейса">Тема</button>
+        <a class="admin-utility-link" href="{% url 'logout' %}">Выйти</a>
+    </section>
+</header>

@@ -1,0 +1,403 @@
+from django.contrib import messages
+from django.core.exceptions import ValidationError
+from django.db import transaction
+from django.db.models import Count, Q
+from django.core.paginator import Paginator
+from django.forms.models import construct_instance
+from django.shortcuts import get_object_or_404, redirect, render
+from django.utils import timezone
+from django.utils.http import url_has_allowed_host_and_scheme
+from django.views.decorators.http import require_POST
+
+from .models import AdminActionLog, Employee, Role
+from .oup_forms import OupDismissEmployeeForm, OupEmployeeForm
+from .oup_services import (
+    close_oup_shift,
+    dismiss_employee,
+    employee_audit_snapshot,
+    employee_dismissal_blockers,
+    employee_work_category_blockers,
+    emit_employee_changed,
+    format_employee_changes,
+    get_open_oup_shift,
+    log_oup_action,
+    lock_current_crew_drafts,
+    open_oup_shift,
+)
+from .views import get_current_access
+
+
+def require_oup_access(request):
+    access = get_current_access(request)
+    if not access or access.role.code != 'oup':
+        return None
+    return access
+
+
+def _oup_base_context(access, *, active_nav):
+    open_shift = get_open_oup_shift(access.employee)
+    return {
+        'access': access,
+        'active_nav': active_nav,
+        'open_oup_shift': open_shift,
+        'can_change_employees': bool(open_shift),
+    }
+
+
+def _require_open_shift(request, access):
+    if get_open_oup_shift(access.employee):
+        return True
+    messages.error(request, 'Сначала начните дневную смену ОУП.')
+    return False
+
+
+def _safe_return_target(request):
+    target = request.POST.get('next', '')
+    if target and url_has_allowed_host_and_scheme(
+        target,
+        allowed_hosts={request.get_host()},
+        require_https=request.is_secure(),
+    ):
+        return target
+    return 'oup_employees'
+
+
+def _employee_history(employee):
+    return (
+        AdminActionLog.objects
+        .select_related('actor')
+        .filter(object_type='Employee', object_id=str(employee.id))
+        .order_by('-created_at')
+    )
+
+
+def _employees_queryset(scope):
+    queryset = Employee.objects.order_by('full_name')
+    if scope == 'dismissed':
+        return queryset.filter(status__in=[Employee.Status.DISMISSED, Employee.Status.ARCHIVED])
+    return queryset.exclude(
+        status__in=[Employee.Status.DISMISSED, Employee.Status.ARCHIVED, Employee.Status.DELETED]
+    )
+
+
+def oup_home_view(request):
+    access = require_oup_access(request)
+    if not access:
+        return redirect('role_home')
+    return redirect('oup_employees')
+
+
+def oup_employees_view(request, scope='active'):
+    access = require_oup_access(request)
+    if not access:
+        return redirect('role_home')
+
+    query = request.GET.get('q', '').strip()
+    category = request.GET.get('category', '').strip()
+    department = request.GET.get('department', '').strip()
+    rotation = request.GET.get('rotation', '').strip()
+    employees = _employees_queryset(scope)
+    if query:
+        employees = employees.filter(
+            Q(full_name__icontains=query)
+            | Q(personnel_number__icontains=query)
+            | Q(phone__icontains=query)
+            | Q(position__icontains=query)
+        )
+    if category:
+        employees = employees.filter(work_category=category)
+    if department:
+        employees = employees.filter(department=department)
+    if rotation:
+        employees = employees.filter(rotation=rotation)
+
+    active_queryset = _employees_queryset('active')
+    today = timezone.localdate()
+    month_start = today.replace(day=1)
+    context = _oup_base_context(
+        access,
+        active_nav='dismissed' if scope == 'dismissed' else 'employees',
+    )
+    context.update({
+        'screen_title': 'Уволенные' if scope == 'dismissed' else 'Сотрудники',
+        'screen_subtitle': (
+            'Архив сотрудников с сохраненной историей.'
+            if scope == 'dismissed'
+            else 'Действующие сотрудники компании и кадровая основа для других подразделений.'
+        ),
+        'scope': scope,
+        'employees': employees,
+        'query': query,
+        'selected_category': category,
+        'selected_department': department,
+        'selected_rotation': rotation,
+        'work_categories': Employee.WorkCategory.choices,
+        'departments': (
+            Employee.objects.exclude(department='')
+            .values_list('department', flat=True).distinct().order_by('department')
+        ),
+        'rotations': (
+            Employee.objects.exclude(rotation='')
+            .values_list('rotation', flat=True).distinct().order_by('rotation')
+        ),
+        'active_total': active_queryset.count(),
+        'new_this_month_total': active_queryset.filter(hired_at__gte=month_start).count(),
+        'missing_data_total': active_queryset.filter(Q(photo='') | Q(personnel_number='')).count(),
+        'dismissed_total': _employees_queryset('dismissed').count(),
+    })
+    return render(request, 'users/oup_employees.html', context)
+
+
+def oup_employee_create_view(request):
+    access = require_oup_access(request)
+    if not access:
+        return redirect('role_home')
+    if not _require_open_shift(request, access):
+        return redirect('oup_employees')
+
+    if request.method == 'POST':
+        form = OupEmployeeForm(request.POST, request.FILES)
+        if form.is_valid():
+            try:
+                with transaction.atomic():
+                    Role.objects.select_for_update().get(code='oup')
+                    personnel_number = form.cleaned_data['personnel_number']
+                    if Employee.objects.filter(personnel_number__iexact=personnel_number).exists():
+                        raise ValidationError('Сотрудник с таким табельным номером уже существует.')
+                    employee = form.save(commit=False)
+                    employee.status = Employee.Status.ACTIVE
+                    employee.is_active = True
+                    employee.dismissed_at = None
+                    employee.save()
+                    snapshot = employee_audit_snapshot(employee)
+                    log_oup_action(
+                        access.employee,
+                        'создан сотрудник',
+                        employee,
+                        new_value='; '.join(f'{label}: {value}' for label, value in snapshot.values()),
+                    )
+                    emit_employee_changed(employee, 'created')
+            except ValidationError as error:
+                form.add_error('personnel_number', error)
+            else:
+                messages.success(request, f'Сотрудник {employee.full_name} добавлен в рабочую базу.')
+                return redirect('oup_employee_detail', employee_id=employee.id)
+    else:
+        form = OupEmployeeForm(initial={'hired_at': timezone.localdate()})
+
+    context = _oup_base_context(access, active_nav='employees')
+    context.update({'form': form, 'page_mode': 'create', 'title': 'Новый сотрудник'})
+    return render(request, 'users/oup_employee_form.html', context)
+
+
+def oup_employee_detail_view(request, employee_id):
+    access = require_oup_access(request)
+    if not access:
+        return redirect('role_home')
+    employee = get_object_or_404(Employee, id=employee_id)
+    is_dismissed = employee.status in {
+        Employee.Status.DISMISSED,
+        Employee.Status.ARCHIVED,
+        Employee.Status.DELETED,
+    }
+
+    if request.method == 'POST':
+        if is_dismissed:
+            messages.error(request, 'Карточка уволенного сотрудника доступна только для просмотра.')
+            return redirect('oup_employee_detail', employee_id=employee.id)
+        if not _require_open_shift(request, access):
+            return redirect('oup_employee_detail', employee_id=employee.id)
+        old_photo_name = employee.photo.name if employee.photo else ''
+        if request.POST.get('remove_photo') == '1':
+            if old_photo_name:
+                photo_storage = employee.photo.storage
+                with transaction.atomic():
+                    employee.photo = ''
+                    employee.save(update_fields=['photo', 'updated_at'])
+                    log_oup_action(access.employee, 'удалено фото сотрудника', employee, old_value='Фото: Добавлено', new_value='Фото: Нет')
+                    emit_employee_changed(employee, 'updated')
+                photo_storage.delete(old_photo_name)
+                messages.success(request, 'Фото сотрудника удалено.')
+            return redirect('oup_employee_detail', employee_id=employee.id)
+
+        form = OupEmployeeForm(request.POST, request.FILES, instance=employee)
+        if form.is_valid():
+            new_category = form.cleaned_data['work_category']
+            try:
+                with transaction.atomic():
+                    Role.objects.select_for_update().get(code='oup')
+                    lock_current_crew_drafts()
+                    locked_employee = Employee.objects.select_for_update().get(pk=employee.pk)
+                    category_changed = locked_employee.work_category != new_category
+                    if category_changed:
+                        blockers = employee_work_category_blockers(locked_employee)
+                        if blockers:
+                            raise ValidationError(
+                                'Сначала освободите сотрудника от рабочих операций: '
+                                + '; '.join(blockers) + '.',
+                                code='work_category_blocked',
+                            )
+                    personnel_number = form.cleaned_data['personnel_number']
+                    if Employee.objects.filter(
+                        personnel_number__iexact=personnel_number,
+                    ).exclude(pk=locked_employee.pk).exists():
+                        raise ValidationError(
+                            'Сотрудник с таким табельным номером уже существует.',
+                            code='duplicate_personnel_number',
+                        )
+                    before = employee_audit_snapshot(locked_employee)
+                    form.instance = construct_instance(
+                        form,
+                        locked_employee,
+                        form._meta.fields,
+                        form._meta.exclude,
+                    )
+                    saved_employee = form.save()
+                    after = employee_audit_snapshot(saved_employee)
+                    changes = format_employee_changes(before, after)
+                    log_oup_action(
+                        access.employee,
+                        'изменена карточка сотрудника',
+                        saved_employee,
+                        old_value=changes,
+                        new_value='Изменения сохранены',
+                    )
+                    emit_employee_changed(saved_employee, 'updated')
+            except ValidationError as error:
+                field_name = (
+                    'work_category'
+                    if getattr(error, 'code', '') == 'work_category_blocked'
+                    else 'personnel_number'
+                )
+                form.add_error(field_name, error)
+            else:
+                if request.FILES.get('photo') and old_photo_name and old_photo_name != saved_employee.photo.name:
+                    saved_employee.photo.storage.delete(old_photo_name)
+                messages.success(request, 'Карточка сотрудника сохранена.')
+                return redirect('oup_employee_detail', employee_id=employee.id)
+    else:
+        form = OupEmployeeForm(instance=employee)
+
+    open_oup_shift = get_open_oup_shift(access.employee)
+    if is_dismissed or not open_oup_shift:
+        for field in form.fields.values():
+            field.disabled = True
+
+    context = _oup_base_context(access, active_nav='dismissed' if is_dismissed else 'employees')
+    context.update({
+        'form': form,
+        'employee': employee,
+        'is_dismissed': is_dismissed,
+        'page_mode': 'detail',
+        'title': employee.full_name,
+        'employee_logs': _employee_history(employee)[:20],
+    })
+    return render(request, 'users/oup_employee_form.html', context)
+
+
+def oup_employee_dismiss_view(request, employee_id):
+    access = require_oup_access(request)
+    if not access:
+        return redirect('role_home')
+    employee = get_object_or_404(Employee, id=employee_id)
+    if employee.pk == access.employee_id:
+        messages.error(request, 'Нельзя оформить собственное увольнение.')
+        return redirect('oup_employee_detail', employee_id=employee.id)
+    if employee.status in {
+        Employee.Status.DISMISSED,
+        Employee.Status.ARCHIVED,
+        Employee.Status.DELETED,
+    }:
+        messages.info(request, 'Сотрудник уже исключен из текущих рабочих списков.')
+        return redirect('oup_employee_detail', employee_id=employee.id)
+    if not _require_open_shift(request, access):
+        return redirect('oup_employee_detail', employee_id=employee.id)
+
+    blockers = employee_dismissal_blockers(employee)
+    if request.method == 'POST':
+        form = OupDismissEmployeeForm(request.POST, employee=employee)
+        if form.is_valid() and not blockers:
+            try:
+                dismiss_employee(
+                    employee=employee,
+                    actor=access.employee,
+                    dismissed_at=form.cleaned_data['dismissed_at'],
+                    reason=form.cleaned_data['reason'],
+                )
+            except ValidationError as error:
+                form.add_error(None, error)
+            else:
+                messages.success(
+                    request,
+                    f'{employee.full_name} уволен и исключен из текущих рабочих списков. История сохранена.',
+                )
+                return redirect('oup_dismissed_employees')
+    else:
+        form = OupDismissEmployeeForm(employee=employee)
+
+    context = _oup_base_context(access, active_nav='employees')
+    context.update({'employee': employee, 'form': form, 'blockers': blockers})
+    return render(request, 'users/oup_employee_dismiss.html', context)
+
+
+def oup_logs_view(request):
+    access = require_oup_access(request)
+    if not access:
+        return redirect('role_home')
+    query = request.GET.get('q', '').strip()
+    action = request.GET.get('action', '').strip()
+    logs = AdminActionLog.objects.filter(actor=access.employee, action__startswith='ОУП:').order_by('-created_at')
+    if query:
+        logs = logs.filter(
+            Q(action__icontains=query)
+            | Q(object_repr__icontains=query)
+            | Q(comment__icontains=query)
+            | Q(old_value__icontains=query)
+            | Q(new_value__icontains=query)
+        )
+    if action:
+        logs = logs.filter(action=action)
+    paginator = Paginator(logs, 50)
+    page_obj = paginator.get_page(request.GET.get('page'))
+    actions = (
+        AdminActionLog.objects
+        .filter(actor=access.employee, action__startswith='ОУП:')
+        .values('action').annotate(total=Count('id')).order_by('action')
+    )
+    context = _oup_base_context(access, active_nav='logs')
+    context.update({
+        'logs': page_obj.object_list,
+        'page_obj': page_obj,
+        'query': query,
+        'selected_action': action,
+        'actions': actions,
+    })
+    return render(request, 'users/oup_logs.html', context)
+
+
+@require_POST
+def oup_shift_start_view(request):
+    access = require_oup_access(request)
+    if not access:
+        return redirect('role_home')
+    try:
+        _shift, created = open_oup_shift(employee=access.employee)
+    except ValidationError as error:
+        messages.error(request, '; '.join(error.messages))
+    else:
+        messages.success(request, 'Дневная смена ОУП начата.' if created else 'Ваша смена уже открыта.')
+    return redirect(_safe_return_target(request))
+
+
+@require_POST
+def oup_shift_close_view(request):
+    access = require_oup_access(request)
+    if not access:
+        return redirect('role_home')
+    try:
+        close_oup_shift(employee=access.employee)
+    except ValidationError as error:
+        messages.error(request, '; '.join(error.messages))
+    else:
+        messages.success(request, 'Дневная смена ОУП завершена.')
+    return redirect(_safe_return_target(request))

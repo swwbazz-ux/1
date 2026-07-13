@@ -105,14 +105,14 @@ def _work_date_from_request(request):
     return min(selected_date, current_date)
 
 
-def _slot_issue(slot, activated_employee_ids, other_role_assignment_employee_ids):
+def _slot_issue(slot, eligible_employee_ids, other_role_assignment_employee_ids):
     employee = slot.employee
     if not employee:
         return ''
     if not employee.is_active or employee.status != Employee.Status.ACTIVE:
         return 'Сотрудник неактивен'
-    if employee.id not in activated_employee_ids:
-        return 'Нет активного доступа'
+    if employee.id not in eligible_employee_ids:
+        return 'Не соответствует рабочей категории'
     if employee.id in other_role_assignment_employee_ids:
         return 'Назначен по другой роли'
     if not slot.equipment.is_active:
@@ -153,9 +153,17 @@ def build_crew_plan_payload(plan, *, request=None):
             employee__status=Employee.Status.ACTIVE,
         ).values_list('employee_id', flat=True)
     )
+    eligible_employee_ids = set(
+        Employee.objects.filter(
+            Q(work_category=plan.role.code)
+            | Q(work_category=Employee.WorkCategory.OTHER, id__in=activated_employee_ids),
+            is_active=True,
+            status=Employee.Status.ACTIVE,
+        ).values_list('id', flat=True)
+    )
     other_role_assignment_employee_ids = set(
         EquipmentAssignment.objects.filter(
-            employee_id__in=activated_employee_ids,
+            employee_id__in=eligible_employee_ids,
             status=AssignmentStatus.ACCEPTED,
             ended_at__isnull=True,
             shift__isnull=True,
@@ -169,7 +177,7 @@ def build_crew_plan_payload(plan, *, request=None):
     eligible_employees = []
     if editable:
         eligible_employees = list(
-            Employee.objects.filter(id__in=activated_employee_ids)
+            Employee.objects.filter(id__in=eligible_employee_ids)
             .exclude(id__in=assigned_employee_ids)
             .exclude(id__in=other_role_assignment_employee_ids)
             .order_by('full_name')
@@ -204,7 +212,7 @@ def build_crew_plan_payload(plan, *, request=None):
                 continue
             issue = _slot_issue(
                 slot,
-                activated_employee_ids,
+                eligible_employee_ids,
                 other_role_assignment_employee_ids,
             )
             changed = slot.employee_id != slot.baseline_employee_id
