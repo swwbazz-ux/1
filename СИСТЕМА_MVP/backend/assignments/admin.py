@@ -1,6 +1,45 @@
 from django.contrib import admin
 
-from .models import EquipmentAssignment, ExcavatorPlacement, HaulAssignment
+from .models import (
+    CrewPlan,
+    CrewPlanSlot,
+    EquipmentAssignment,
+    ExcavatorPlacement,
+    HaulAssignment,
+)
+
+
+class CrewPlanSlotInline(admin.TabularInline):
+    model = CrewPlanSlot
+    extra = 0
+    can_delete = False
+    fields = ('equipment', 'shift_type', 'employee', 'baseline_employee')
+    readonly_fields = fields
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(CrewPlan)
+class CrewPlanAdmin(admin.ModelAdmin):
+    list_display = (
+        'work_date', 'role', 'revision', 'status', 'version',
+        'updated_by', 'updated_at', 'published_by', 'published_at',
+    )
+    list_filter = ('status', 'role', 'work_date')
+    search_fields = ('role__name', 'role__code')
+    readonly_fields = (
+        'work_date', 'role', 'revision', 'status', 'version',
+        'created_by', 'updated_by', 'published_by', 'published_at',
+        'created_at', 'updated_at',
+    )
+    inlines = (CrewPlanSlotInline,)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(EquipmentAssignment)

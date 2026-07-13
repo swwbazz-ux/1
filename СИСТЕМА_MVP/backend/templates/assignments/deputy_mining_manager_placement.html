@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Расстановка{% endblock %}
+{% block body_class %}deputy-mining-manager-screen deputy-placement-screen{% endblock %}
+{% block extra_head %}
+<link rel="stylesheet" href="{% static 'css/deputy-mining-manager-v2.css' %}">
+{% endblock %}
+
+{% block body %}
+<div class="admin-shell admin-exports-shell deputy-shell admin-day" data-admin-theme>
+    {% include "includes/deputy_mining_manager_header.html" with active_section="placement" screen_title="Расстановка" %}
+
+    <main class="admin-console-page deputy-planning-page" data-deputy-planning-root>
+        <section class="deputy-planning-toolbar" aria-label="Управление расстановкой">
+            <div class="deputy-planning-scope">
+                <div class="deputy-work-date" aria-label="Выбранные производственные сутки">
+                    <span>Производственные сутки</span>
+                    <strong data-work-date>{{ selected_date|date:"d.m.Y" }}</strong>
+                </div>
+                <nav class="deputy-category-nav" data-category-nav aria-label="Категории техники" hidden></nav>
+            </div>
+
+            <label class="deputy-search-field" for="deputy-planning-search">
+                <span>Поиск</span>
+                <input id="deputy-planning-search"
+                       type="search"
+                       autocomplete="off"
+                       placeholder="Сотрудник или техника"
+                       data-planning-search>
+            </label>
+
+            <div class="deputy-toolbar-actions">
+                <span class="deputy-autosave-state" data-autosave-state role="status" aria-live="polite">
+                    <span class="deputy-autosave-dot" aria-hidden="true"></span>
+                    <span data-autosave-text>Все изменения сохранены</span>
+                </span>
+                <button class="admin-button admin-button-primary deputy-publish-button"
+                        type="button"
+                        data-publish-button>Опубликовать</button>
+            </div>
+        </section>
+
+        <section class="deputy-filter-counts" aria-label="Фильтры расстановки">
+            <button type="button" class="is-active" data-row-filter="all" aria-pressed="true">
+                <span>Вся техника</span><strong data-summary-count="equipment_total">0</strong>
+            </button>
+            <button type="button" data-row-filter="assigned" aria-pressed="false">
+                <span>Назначено</span><strong data-summary-count="assigned_count">0</strong>
+            </button>
+            <button type="button" data-row-filter="unfilled" aria-pressed="false">
+                <span>Не заполнено</span><strong data-summary-count="unfilled_count">0</strong>
+            </button>
+            <button type="button" data-row-filter="conflict" aria-pressed="false">
+                <span>Конфликты</span><strong data-summary-count="conflict_count">0</strong>
+            </button>
+            <button type="button" data-row-filter="changed" aria-pressed="false">
+                <span>Изменено</span><strong data-summary-count="changed_count">0</strong>
+            </button>
+        </section>
+
+        {% if messages %}
+            <section class="deputy-server-messages" aria-label="Сообщения системы">
+                {% for message in messages %}
+                    <div class="message {{ message.tags|default:'info' }}">{{ message }}</div>
+                {% endfor %}
+            </section>
+        {% endif %}
+
+        <section class="deputy-planning-workspace" aria-label="Рабочая область расстановки">
+            <aside class="deputy-employee-pool" aria-labelledby="deputy-employee-pool-title">
+                <header>
+                    <h2 id="deputy-employee-pool-title">Свободные сотрудники</h2>
+                    <span data-available-count>0</span>
+                </header>
+                <div class="deputy-employee-list" data-employee-list role="list">
+                    <p class="deputy-loading-state">Загрузка сотрудников…</p>
+                </div>
+                <p class="deputy-empty-state" data-employee-empty hidden>Свободных сотрудников нет.</p>
+            </aside>
+
+            <section class="deputy-assignment-board" aria-label="Техника и смены">
+                <div class="deputy-board-scroll" data-assignment-board>
+                    <p class="deputy-loading-state">Загрузка техники…</p>
+                </div>
+                <p class="deputy-empty-state deputy-board-empty" data-board-empty hidden>По выбранному фильтру техника не найдена.</p>
+            </section>
+        </section>
+
+        <div hidden aria-hidden="true">{% csrf_token %}</div>
+    </main>
+</div>
+
+<dialog class="deputy-dialog deputy-candidate-dialog" data-candidate-dialog aria-labelledby="deputy-candidate-title">
+    <div class="deputy-dialog-head">
+        <div>
+            <span>Назначение</span>
+            <h2 id="deputy-candidate-title">Выберите сотрудника</h2>
+            <p data-candidate-context></p>
+        </div>
+        <button type="button" class="deputy-dialog-close" data-dialog-close aria-label="Закрыть">×</button>
+    </div>
+    <div class="deputy-candidate-list" data-candidate-list></div>
+    <div class="deputy-dialog-actions">
+        <button type="button" class="admin-button admin-button-secondary" data-clear-slot hidden>Снять назначение</button>
+        <button type="button" class="admin-button admin-button-secondary" data-dialog-close>Отмена</button>
+    </div>
+</dialog>
+
+<dialog class="deputy-dialog deputy-photo-dialog" data-photo-dialog aria-labelledby="deputy-photo-title">
+    <button type="button" class="deputy-dialog-close" data-photo-close aria-label="Закрыть">×</button>
+    <figure>
+        <img alt="" data-photo-image>
+        <figcaption id="deputy-photo-title" data-photo-caption></figcaption>
+    </figure>
+</dialog>
+
+<dialog class="deputy-dialog deputy-publish-dialog" data-publish-dialog aria-labelledby="deputy-publish-title">
+    <div class="deputy-dialog-head">
+        <div>
+            <span>Публикация</span>
+            <h2 id="deputy-publish-title">Опубликовать расстановку?</h2>
+            <p data-publish-summary>После публикации назначения станут доступны сотрудникам.</p>
+        </div>
+        <button type="button" class="deputy-dialog-close" data-publish-cancel aria-label="Закрыть">×</button>
+    </div>
+    <div class="deputy-dialog-actions">
+        <button type="button" class="admin-button admin-button-secondary" data-publish-cancel>Отмена</button>
+        <button type="button" class="admin-button admin-button-primary" data-publish-confirm>Опубликовать</button>
+    </div>
+</dialog>
+
+<div class="deputy-toast" data-deputy-toast role="status" aria-live="polite" hidden></div>
+
+{% if deputy_planning_payload %}
+    {{ deputy_planning_payload|json_script:"deputy-planning-data" }}
+{% else %}
+    {{ planning_payload|json_script:"deputy-planning-data" }}
+{% endif %}
+<script src="{% static 'js/deputy-mining-manager.js' %}?v=3" defer></script>
+{% endblock %}

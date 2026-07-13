@@ -65,6 +65,7 @@ ROLE_INTERFACE_NAMES = {
     'driver': 'Интерфейс водителя самосвала',
     'excavator_operator': 'Интерфейс машиниста экскаватора',
     'mining_master': 'Интерфейс горного мастера',
+    'deputy_mining_manager': 'Планирование смены зам. начальника горного участка',
     'dispatcher': 'Диспетчерский экран',
     'mechanic': 'Интерфейс механика',
     'manager': 'Витрина руководства',
@@ -92,6 +93,7 @@ INTERFACE_MAP = [
             {'title': 'Первичная регистрация водителя', 'url': '/driver/registration/', 'code': '2000', 'note': 'Первичное заполнение данных проживания; смена и техника выбираются при открытии смены'},
             {'title': 'Машинист экскаватора', 'url': '/excavator/work/', 'code': '3000', 'note': 'Создание рейса и параметры для отчета заказчику'},
             {'title': 'Горный мастер', 'url': '/mining-master/assignments/', 'code': '4000', 'note': 'Назначение самосвалов под экскаваторы'},
+            {'title': 'Зам. начальника горного участка', 'url': '/deputy-mining-manager/', 'code': 'роль зам. начальника', 'note': 'Расстановка сотрудников по технике на две смены'},
             {'title': 'Диспетчерский пульт', 'url': '/dispatcher/control/', 'code': '5000', 'note': 'Контроль активных рейсов и назначений'},
             {'title': 'Механическая служба', 'url': '/mechanic/downtimes/', 'code': '7000 / роль механика', 'note': 'Открытие и закрытие механических простоев по технике'},
         ],
@@ -460,6 +462,8 @@ def role_home_view(request):
         return redirect('driver_work')
     if access.role.code == 'mining_master':
         return redirect('mining_master_assignments')
+    if access.role.code == 'deputy_mining_manager':
+        return redirect('deputy_mining_manager_placement')
     if access.role.code == 'excavator_operator':
         return redirect('excavator_work')
     if access.role.code == 'dispatcher':

@@ -1,0 +1,34 @@
+<header class="admin-console-header deputy-console-header" aria-label="Рабочая шапка заместителя начальника горного участка">
+    <section class="admin-console-identity">
+        <span class="admin-console-avatar" aria-hidden="true">{{ access.employee.full_name|default:"З"|first }}</span>
+        <span>
+            <strong>{{ access.employee.full_name|default:"Пользователь" }}</strong>
+            <em>Зам. начальника горного участка</em>
+        </span>
+    </section>
+
+    <section class="admin-console-main">
+        <div class="admin-console-title">
+            <span>Производственный контур</span>
+            <h1>{{ screen_title|default:"Расстановка" }}</h1>
+        </div>
+        <nav class="admin-console-nav" aria-label="Разделы профиля">
+            <a class="{% if active_section == 'placement' %}is-active{% endif %}"
+               href="{% url 'deputy_mining_manager_placement' %}"
+               {% if active_section == 'placement' %}aria-current="page"{% endif %}>Расстановка</a>
+            <a class="{% if active_section == 'reports' %}is-active{% endif %}"
+               href="{% url 'deputy_mining_manager_reports' %}"
+               {% if active_section == 'reports' %}aria-current="page"{% endif %}>Отчёты</a>
+        </nav>
+    </section>
+
+    <section class="admin-console-actions" aria-label="Настройки и выход">
+        <button type="button"
+                class="admin-theme-button"
+                data-admin-theme-toggle
+                data-theme-icon="sun"
+                aria-label="Включить ночную тему"
+                title="Ночной режим">Д/Н</button>
+        <a class="admin-utility-link" href="{% url 'logout' %}">Выйти</a>
+    </section>
+</header>

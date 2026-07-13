@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Отчёты по расстановке{% endblock %}
+{% block body_class %}deputy-mining-manager-screen deputy-reports-screen{% endblock %}
+{% block extra_head %}
+<link rel="stylesheet" href="{% static 'css/deputy-mining-manager-v2.css' %}">
+{% endblock %}
+
+{% block body %}
+<div class="admin-shell admin-exports-shell deputy-shell admin-day" data-admin-theme>
+    {% include "includes/deputy_mining_manager_header.html" with active_section="reports" screen_title="Отчёты" %}
+
+    <main class="admin-console-page deputy-reports-page">
+        <section class="deputy-publications-card" aria-labelledby="deputy-publications-title">
+            <header>
+                <div>
+                    <span>История</span>
+                    <h2 id="deputy-publications-title">Опубликованные расстановки</h2>
+                </div>
+            </header>
+
+            {% if publications %}
+                <div class="deputy-publications-list" role="list">
+                    {% for publication in publications %}
+                        <article class="deputy-publication-row" role="listitem">
+                            <div>
+                                <span>Дата</span>
+                                <strong>{{ publication.work_date_label|default:"—" }}</strong>
+                            </div>
+                            <div>
+                                <span>Категория</span>
+                                <strong>{{ publication.category_label|default:publication.role.name|default:"—" }}</strong>
+                            </div>
+                            <div>
+                                <span>Опубликовано</span>
+                                <strong>{{ publication.published_at_label|default:"—" }}</strong>
+                                {% if publication.published_by_label %}<small>{{ publication.published_by_label }}</small>{% endif %}
+                            </div>
+                            <div class="deputy-publication-status">
+                                <span class="admin-chip admin-chip-ok">{{ publication.status_label|default:"Опубликовано" }}</span>
+                                {% if publication.url %}
+                                    <a class="admin-button admin-button-secondary" href="{{ publication.url }}">Открыть</a>
+                                {% endif %}
+                            </div>
+                        </article>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <div class="deputy-report-empty">
+                    <strong>Публикаций пока нет</strong>
+                    <p>После первой публикации расстановки она появится здесь.</p>
+                    <a class="admin-button admin-button-primary" href="{% url 'deputy_mining_manager_placement' %}">Перейти к расстановке</a>
+                </div>
+            {% endif %}
+        </section>
+    </main>
+</div>
+
+<script src="{% static 'js/deputy-mining-manager.js' %}?v=3" defer></script>
+{% endblock %}

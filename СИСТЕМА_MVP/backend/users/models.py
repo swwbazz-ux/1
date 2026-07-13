@@ -35,7 +35,7 @@ class Employee(models.Model):
         return self.full_name
 
     def has_production_history(self):
-        from assignments.models import EquipmentAssignment, HaulAssignment
+        from assignments.models import CrewPlan, CrewPlanSlot, EquipmentAssignment, HaulAssignment
         from downtimes.models import DowntimeEvent
         from shifts.models import EmployeeShift
         from trips.models import DispatcherActionLog, Trip
@@ -48,6 +48,11 @@ class Employee(models.Model):
             EquipmentAssignment.objects.filter(employee=self).exists(),
             EquipmentAssignment.objects.filter(assigned_by=self).exists(),
             EquipmentAssignment.objects.filter(ended_by=self).exists(),
+            CrewPlanSlot.objects.filter(employee=self).exists(),
+            CrewPlanSlot.objects.filter(baseline_employee=self).exists(),
+            CrewPlan.objects.filter(created_by=self).exists(),
+            CrewPlan.objects.filter(updated_by=self).exists(),
+            CrewPlan.objects.filter(published_by=self).exists(),
             HaulAssignment.objects.filter(assigned_by=self).exists(),
             DispatcherActionLog.objects.filter(actor=self).exists(),
         ])

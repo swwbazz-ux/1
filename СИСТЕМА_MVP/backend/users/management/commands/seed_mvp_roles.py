@@ -8,6 +8,7 @@ ROLES = [
     ('driver', 'Водитель самосвала'),
     ('excavator_operator', 'Машинист экскаватора'),
     ('mining_master', 'Горный мастер'),
+    ('deputy_mining_manager', 'Заместитель начальника горного участка'),
     ('dispatcher', 'Диспетчер'),
     ('mechanic', 'Механик'),
     ('manager', 'Руководство'),

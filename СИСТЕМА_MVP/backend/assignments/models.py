@@ -12,6 +12,12 @@ class WorkShiftType(models.TextChoices):
     SHIFT_2 = 'night', 'Смена 2 · 19:00–07:00'
 
 
+class CrewPlanStatus(models.TextChoices):
+    DRAFT = 'draft', 'Черновик'
+    PUBLISHED = 'published', 'Опубликован'
+    SUPERSEDED = 'superseded', 'Заменен новой публикацией'
+
+
 class HaulAssignmentAction(models.TextChoices):
     ASSIGN = 'assign', 'Назначить'
     RELEASE = 'release', 'Снять назначение'
@@ -89,6 +95,130 @@ class EquipmentAssignment(models.Model):
 
     def __str__(self):
         return f'{self.employee} -> {self.equipment}'
+
+
+class CrewPlan(models.Model):
+    work_date = models.DateField('Производственные сутки')
+    role = models.ForeignKey(
+        'users.Role',
+        verbose_name='Рабочая роль',
+        on_delete=models.PROTECT,
+        related_name='crew_plans',
+    )
+    revision = models.PositiveIntegerField('Ревизия', default=1)
+    status = models.CharField(
+        'Статус',
+        max_length=16,
+        choices=CrewPlanStatus.choices,
+        default=CrewPlanStatus.DRAFT,
+    )
+    version = models.PositiveIntegerField('Версия черновика', default=1)
+    created_by = models.ForeignKey(
+        'users.Employee',
+        verbose_name='Кто создал',
+        on_delete=models.SET_NULL,
+        related_name='created_crew_plans',
+        null=True,
+        blank=True,
+    )
+    updated_by = models.ForeignKey(
+        'users.Employee',
+        verbose_name='Кто изменил',
+        on_delete=models.SET_NULL,
+        related_name='updated_crew_plans',
+        null=True,
+        blank=True,
+    )
+    published_by = models.ForeignKey(
+        'users.Employee',
+        verbose_name='Кто опубликовал',
+        on_delete=models.SET_NULL,
+        related_name='published_crew_plans',
+        null=True,
+        blank=True,
+    )
+    published_at = models.DateTimeField('Опубликован', null=True, blank=True)
+    created_at = models.DateTimeField('Создан', auto_now_add=True)
+    updated_at = models.DateTimeField('Изменен', auto_now=True)
+
+    class Meta:
+        verbose_name = 'План расстановки экипажей'
+        verbose_name_plural = 'Планы расстановки экипажей'
+        ordering = ['-work_date', 'role__name', '-revision']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['work_date', 'role', 'revision'],
+                name='unique_crew_plan_revision',
+            ),
+            models.UniqueConstraint(
+                fields=['work_date', 'role'],
+                condition=models.Q(status=CrewPlanStatus.DRAFT),
+                name='unique_draft_crew_plan',
+            ),
+            models.UniqueConstraint(
+                fields=['work_date', 'role'],
+                condition=models.Q(status=CrewPlanStatus.PUBLISHED),
+                name='unique_published_crew_plan',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.work_date:%d.%m.%Y} / {self.role} / r{self.revision}'
+
+
+class CrewPlanSlot(models.Model):
+    plan = models.ForeignKey(
+        CrewPlan,
+        verbose_name='План расстановки',
+        on_delete=models.CASCADE,
+        related_name='slots',
+    )
+    equipment = models.ForeignKey(
+        'references.Equipment',
+        verbose_name='Техника',
+        on_delete=models.PROTECT,
+        related_name='crew_plan_slots',
+    )
+    shift_type = models.CharField(
+        'Рабочая смена',
+        max_length=16,
+        choices=WorkShiftType.choices,
+    )
+    employee = models.ForeignKey(
+        'users.Employee',
+        verbose_name='Назначенный сотрудник',
+        on_delete=models.SET_NULL,
+        related_name='crew_plan_slots',
+        null=True,
+        blank=True,
+    )
+    baseline_employee = models.ForeignKey(
+        'users.Employee',
+        verbose_name='Сотрудник в базовой расстановке',
+        on_delete=models.SET_NULL,
+        related_name='baseline_crew_plan_slots',
+        null=True,
+        blank=True,
+    )
+
+    class Meta:
+        verbose_name = 'Слот плана расстановки'
+        verbose_name_plural = 'Слоты плана расстановки'
+        ordering = ['equipment__garage_number', 'shift_type']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['plan', 'equipment', 'shift_type'],
+                name='unique_crew_plan_equipment_shift',
+            ),
+            models.UniqueConstraint(
+                fields=['plan', 'employee'],
+                condition=models.Q(employee__isnull=False),
+                name='unique_crew_plan_employee',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.plan} / {self.equipment} / {self.get_shift_type_display()}'
 
 
 class HaulAssignment(models.Model):
