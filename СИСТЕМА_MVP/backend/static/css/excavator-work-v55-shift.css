@@ -2590,6 +2590,106 @@ body.excavator-operator-screen .eo-reason-grid .eo-hold-action {
     }
 }
 
+/* v112: stable three-zone shift workspace with a single scrolling content area. */
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form {
+    display: grid !important;
+    grid-template-rows: auto minmax(0, 1fr) auto !important;
+    grid-auto-rows: unset !important;
+    align-content: stretch !important;
+    overflow: hidden !important;
+}
+
+body.excavator-operator-screen .eo-shift-scroll {
+    min-width: 0 !important;
+    min-height: 0 !important;
+    display: grid !important;
+    align-content: start !important;
+    gap: clamp(9px, 1.3dvh, 13px) !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+    overscroll-behavior-y: contain !important;
+    scrollbar-width: thin;
+    padding: 1px 1px 10px !important;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-check-panel,
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-review,
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-panel {
+    flex: none !important;
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-metrics,
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-grid {
+    height: auto !important;
+    min-height: 0 !important;
+    grid-auto-rows: minmax(58px, auto) !important;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-metrics {
+    grid-template-rows: repeat(2, minmax(58px, auto)) !important;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-grid {
+    grid-template-rows: repeat(2, minmax(58px, auto)) !important;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form [data-eo-shift-inputs][hidden],
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form [data-eo-shift-review][hidden] {
+    display: none !important;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-field-card {
+    margin: 0 !important;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-field-card small {
+    flex: 0 0 100% !important;
+    width: 100% !important;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-review-grid strong {
+    min-width: 0 !important;
+    white-space: normal !important;
+    overflow-wrap: anywhere !important;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-actions {
+    position: relative !important;
+    z-index: 2 !important;
+    align-self: stretch !important;
+    flex: none !important;
+    margin: 0 !important;
+}
+
+@media (max-width: 520px) {
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-review-grid > div {
+        display: grid !important;
+        grid-template-columns: 1fr !important;
+        gap: 4px !important;
+    }
+}
+
+@media (min-width: 768px) and (max-height: 800px) {
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form {
+        gap: 9px !important;
+    }
+
+    body.excavator-operator-screen .eo-shift-scroll {
+        gap: 8px !important;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-section {
+        padding: 10px 12px !important;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-section-head {
+        margin-bottom: 8px !important;
+    }
+}
+
 /* v104: pulse independent layers; legacy !important filters cannot suppress these. */
 body.excavator-operator-screen .eo-downtime-card,
 body.excavator-operator-screen .eo-reason-grid .eo-hold-action {

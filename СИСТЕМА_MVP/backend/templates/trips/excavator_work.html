@@ -5,9 +5,9 @@
 {% block body_class %}excavator-operator-screen{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v111">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v111">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v111">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v112">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v112">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v112">
 <meta name="theme-color" content="#030708">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Погрузка">
@@ -65,7 +65,7 @@
             <div class="eo-shift-titlebar">
                 <h1>Смена</h1>
                 <div class="eo-shift-update-group">
-                    <span class="eo-current-app-version" aria-label="Текущая версия приложения">Версия 111</span>
+                    <span class="eo-current-app-version" aria-label="Текущая версия приложения">Версия 112</span>
                     <button class="eo-shift-update-button" type="button" data-eo-pwa-update-check aria-label="Проверить обновление приложения">
                         <span aria-hidden="true"></span>
                         <b data-eo-pwa-update-check-label>Обновить</b>
@@ -73,6 +73,7 @@
                     </button>
                 </div>
             </div>
+            <div class="eo-shift-scroll" data-eo-shift-scroll>
             {% if not open_shift %}
             <div class="eo-shift-section eo-shift-result-panel">
                 <div class="eo-shift-section-head"><span>Назначение</span></div>
@@ -91,7 +92,7 @@
                 {% endif %}
             </div>
             {% endif %}
-            <div class="eo-shift-section eo-shift-check-panel">
+            <div class="eo-shift-section eo-shift-check-panel" data-eo-shift-inputs>
                 <div class="eo-shift-section-head">
                     <span>Показатели техники · {% if open_shift %}конец смены{% else %}начало смены{% endif %}</span>
                 </div>
@@ -155,6 +156,7 @@
                     <div class="eo-shift-result-cell"><span>Назначено</span><strong>{{ truck_cards|length }} шт.</strong></div>
                     <div class="eo-shift-result-cell"><span>В пути</span><strong>{{ active_trips_count }} шт.</strong></div>
                 </div>
+            </div>
             </div>
 
             <div class="eo-shift-actions">
@@ -452,7 +454,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v111";
+var excavatorShellVersion = "excavator-mobile-shell-v112";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var excavatorRelevantEvents = {
     assignment_changed: true,
@@ -510,6 +512,15 @@ function isExcavatorRefreshUnsafe() {
     var active = document.activeElement;
     var activeTag = active && active.tagName ? active.tagName.toLowerCase() : "";
     if (active && shell.contains(active) && (active.isContentEditable || activeTag === "input" || activeTag === "textarea" || activeTag === "select")) {
+        return true;
+    }
+    var shiftScreen = shell.querySelector('[data-eo-screen="shift"]');
+    if (shiftScreen && (
+        shiftScreen.dataset.eoShiftDirty === "true" ||
+        shiftScreen.classList.contains("is-reviewed") ||
+        shiftScreen.querySelector("[data-eo-shift-form-error]:not([hidden])") ||
+        shiftScreen.querySelector("[data-eo-shift-field].has-error")
+    )) {
         return true;
     }
     return !!document.querySelector(".eo-truck-card.is-pending, .eo-truck-card.is-dragging, .mm-mobile-shift-button.is-holding, .eo-hold-action.is-holding, .eo-logout-button.is-holding, .eo-shift-update-button.is-checking, .eo-truck-detail-modal:not([hidden]), .eo-mobile-update-modal:not([hidden]), .app-confirm-modal:not([hidden])");
@@ -660,6 +671,9 @@ window.initExcavatorWorkShell = function () {
     var shiftCheckButton = shell.querySelector("[data-eo-shift-check]");
     var shiftEditButton = shell.querySelector("[data-eo-shift-edit]");
     var shiftReview = shell.querySelector("[data-eo-shift-review]");
+    var shiftScreen = shell.querySelector('[data-eo-screen="shift"]');
+    var shiftScroll = shell.querySelector("[data-eo-shift-scroll]");
+    var shiftInputs = shell.querySelector("[data-eo-shift-inputs]");
     var shiftFuelInput = shell.querySelector("[data-eo-shift-fuel]");
     var shiftHoursInput = shell.querySelector("[data-eo-shift-engine-hours]");
     var shiftFormError = shell.querySelector("[data-eo-shift-form-error]");
@@ -2289,6 +2303,22 @@ window.initExcavatorWorkShell = function () {
             if (field) field.classList.add("has-error");
             if (errorNode) errorNode.textContent = fieldErrors[name];
         });
+        var firstErrorField = shell.querySelector("[data-eo-shift-field].has-error");
+        var firstErrorInput = firstErrorField ? firstErrorField.querySelector("input") : null;
+        window.requestAnimationFrame(function () {
+            if (firstErrorField) {
+                firstErrorField.scrollIntoView({block: "center", behavior: "smooth"});
+            } else if (shiftScroll) {
+                shiftScroll.scrollTop = 0;
+            }
+            if (firstErrorInput) {
+                try {
+                    firstErrorInput.focus({preventScroll: true});
+                } catch (error) {
+                    firstErrorInput.focus();
+                }
+            }
+        });
     }
 
     function validateShiftReadings(showErrors) {
@@ -2313,18 +2343,26 @@ window.initExcavatorWorkShell = function () {
         return { valid: Object.keys(errors).length === 0, fuel: fuel, hours: hours, startHours: startHours, errors: errors };
     }
 
-    function resetShiftVerification() {
+    function resetShiftVerification(focusFirstField) {
         shiftReadingsVerified = false;
         if (shiftReview) shiftReview.hidden = true;
+        if (shiftInputs) shiftInputs.hidden = false;
+        if (shiftScreen) shiftScreen.classList.remove("is-reviewed");
         if (shiftButton && isShiftCloseAction()) shiftButton.hidden = true;
         if (shiftCheckButton) shiftCheckButton.hidden = false;
+        if (focusFirstField && shiftFuelInput) {
+            window.requestAnimationFrame(function () {
+                shiftFuelInput.focus();
+            });
+        }
     }
 
     function updateShiftActionState() {
         var validation = validateShiftReadings(false);
         if (shiftCheckButton) {
-            shiftCheckButton.disabled = !validation.valid;
-            shiftCheckButton.setAttribute("aria-disabled", validation.valid ? "false" : "true");
+            var hasReadings = validation.fuel !== null && !Number.isNaN(validation.fuel) && validation.hours !== null && !Number.isNaN(validation.hours);
+            shiftCheckButton.disabled = !hasReadings;
+            shiftCheckButton.setAttribute("aria-disabled", hasReadings ? "false" : "true");
         } else if (shiftButton && !isShiftCloseAction() && !shiftServerBlocked) {
             shiftButton.disabled = !validation.valid;
             shiftButton.setAttribute("aria-disabled", validation.valid ? "false" : "true");
@@ -2334,6 +2372,7 @@ window.initExcavatorWorkShell = function () {
     [shiftFuelInput, shiftHoursInput].forEach(function (input) {
         if (!input) return;
         input.addEventListener("input", function () {
+            if (shiftScreen) shiftScreen.dataset.eoShiftDirty = "true";
             clearShiftErrors();
             if (isShiftCloseAction()) resetShiftVerification();
             updateShiftActionState();
@@ -2351,14 +2390,20 @@ window.initExcavatorWorkShell = function () {
             if (reviewFuel) reviewFuel.textContent = "{{ shift_start_fuel_display }} → " + values.fuel + " л";
             if (reviewHours) reviewHours.textContent = "{{ shift_start_engine_hours_display }} → " + values.hours;
             if (reviewDelta) reviewDelta.textContent = (values.hours - values.startHours).toFixed(2) + " м/ч";
+            if (shiftInputs) shiftInputs.hidden = true;
             if (shiftReview) shiftReview.hidden = false;
+            if (shiftScreen) shiftScreen.classList.add("is-reviewed");
             shiftCheckButton.hidden = true;
             if (shiftButton) shiftButton.hidden = false;
+            if (shiftScroll) shiftScroll.scrollTop = 0;
         });
     }
 
     if (shiftEditButton) {
-        shiftEditButton.addEventListener("click", resetShiftVerification);
+        shiftEditButton.addEventListener("click", function () {
+            if (shiftScreen) shiftScreen.dataset.eoShiftDirty = "true";
+            resetShiftVerification(true);
+        });
     }
 
     updateShiftActionState();
@@ -2415,6 +2460,9 @@ window.initExcavatorWorkShell = function () {
                 }
             });
         }).catch(function (error) {
+            if (action === "close") {
+                resetShiftVerification();
+            }
             showShiftErrors(error.error || error.message || "Смена не сохранена", error.field_errors || {});
             shiftButton.disabled = false;
             shiftButton.classList.remove("is-pending");

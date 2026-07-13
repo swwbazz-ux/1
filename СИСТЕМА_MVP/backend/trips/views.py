@@ -596,7 +596,7 @@ EXCAVATOR_MANIFEST = {
 }
 
 EXCAVATOR_SERVICE_WORKER_JS = r"""
-const CACHE_NAME = "excavator-mobile-shell-v111";
+const CACHE_NAME = "excavator-mobile-shell-v112";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const CORE_ASSETS = [
