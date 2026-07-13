@@ -1356,6 +1356,36 @@ body.driver-mobile-screen .driver-shift-workspace {
     overflow: hidden;
 }
 
+body.driver-mobile-screen [data-driver-shift-close-form] {
+    grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+body.driver-mobile-screen .driver-shift-scroll {
+    min-height: 0;
+    display: grid;
+    align-content: start;
+    gap: clamp(8px, 1.15dvh, 12px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    padding: 2px 0 10px;
+}
+
+body.driver-mobile-screen [data-driver-shift-close-form] .driver-shift-section {
+    flex: none;
+    overflow: visible;
+}
+
+body.driver-mobile-screen [data-driver-shift-close-form] .driver-shift-metrics {
+    flex: none;
+    grid-template-rows: repeat(3, minmax(58px, auto));
+}
+
+body.driver-mobile-screen [data-driver-shift-close-form] .driver-shift-result-grid {
+    flex: none;
+    grid-auto-rows: minmax(68px, auto);
+}
+
 body.driver-mobile-screen .driver-shift-titlebar {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
@@ -1470,11 +1500,20 @@ body.driver-mobile-screen .driver-shift-field {
     background: rgba(2, 12, 17, .76);
 }
 
+body.driver-mobile-screen [data-driver-shift-close-form] .driver-shift-field {
+    margin: 0;
+}
+
 body.driver-mobile-screen .driver-shift-field > span:first-child {
     color: #91a4aa;
     font-size: clamp(14px, 3.55vw, 15px);
     line-height: 1;
     text-transform: uppercase;
+}
+
+body.driver-mobile-screen .driver-shift-inputs[hidden],
+body.driver-mobile-screen .driver-shift-review[hidden] {
+    display: none !important;
 }
 
 body.driver-mobile-screen .driver-shift-field-label {
@@ -1575,20 +1614,55 @@ body.driver-mobile-screen .driver-shift-result-cell strong {
 }
 
 body.driver-mobile-screen .driver-shift-review {
+    min-height: 0;
     display: grid;
-    gap: 8px;
-    padding: 12px;
+    align-content: center;
+    gap: clamp(9px, 1.35dvh, 13px);
+    padding: clamp(14px, 2dvh, 20px) clamp(14px, 3.8vw, 18px);
     border: 1px solid rgba(140, 255, 46, .34);
+    border-radius: 8px;
     background: rgba(5, 23, 22, .88);
+    overflow: hidden;
 }
 body.driver-mobile-screen .driver-shift-review-row {
+    min-width: 0;
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     gap: 12px;
     color: #adc0c5;
+    font-size: clamp(14px, 3.55vw, 16px);
+    line-height: 1.15;
 }
-body.driver-mobile-screen .driver-shift-review-row strong { color: #f0fff0; }
-body.driver-mobile-screen .driver-shift-edit { color: #9bd2dc; background: transparent; border: 0; text-decoration: underline; }
+body.driver-mobile-screen .driver-shift-review-row strong {
+    min-width: 0;
+    color: #f0fff0;
+    text-align: right;
+    white-space: nowrap;
+}
+
+@media (max-width: 420px) {
+    body.driver-mobile-screen .driver-shift-review-row {
+        grid-template-columns: 1fr;
+        gap: 3px;
+    }
+
+    body.driver-mobile-screen .driver-shift-review-row strong {
+        text-align: left;
+        white-space: normal;
+    }
+}
+body.driver-mobile-screen .driver-shift-edit {
+    justify-self: end;
+    min-height: 40px;
+    margin-top: 2px;
+    border: 1px solid rgba(127, 163, 177, .3);
+    border-radius: 7px;
+    padding: 0 13px;
+    color: #9bd2dc;
+    background: rgba(7, 18, 23, .78);
+    font-size: 13px;
+    font-weight: 700;
+}
 
 body.driver-mobile-screen .driver-shift-actions {
     min-height: 0;
@@ -1664,11 +1738,22 @@ body.driver-mobile-screen .driver-shift-open:disabled {
 }
 
 body.driver-mobile-screen .driver-shift-field .errorlist {
+    grid-column: 1 / -1;
     margin: 4px 0 0;
     padding: 0;
     color: #ff7d7d;
     font-size: 11px;
     list-style: none;
+}
+
+@media (max-height: 780px) {
+    body.driver-mobile-screen [data-driver-shift-close-form] .driver-shift-section {
+        padding: 10px 12px;
+    }
+
+    body.driver-mobile-screen [data-driver-shift-close-form] .driver-shift-section-head {
+        margin-bottom: 8px;
+    }
 }
 
 body.driver-mobile-screen .driver-shift-submit::before {
@@ -1692,6 +1777,10 @@ body.driver-mobile-screen .driver-shift-logout::before {
 @media (max-width: 640px) {
     body.driver-mobile-screen .driver-shift-workspace {
         grid-template-rows: auto minmax(0, 1.3fr) minmax(0, .9fr) auto;
+    }
+
+    body.driver-mobile-screen [data-driver-shift-close-form] {
+        grid-template-rows: auto minmax(0, 1fr) auto;
     }
 
     body.driver-mobile-screen .driver-shift-section {
@@ -2829,7 +2918,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
 {% endblock %}
 
 {% block body %}
-<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v97' }}">
+<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v98' }}">
     {% if messages %}
         <div class="driver-messages">
             {% for message in messages %}
@@ -2953,7 +3042,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
 
     <section class="driver-panel driver-tab {% if active_tab == 'shift' %}is-active{% endif %}" data-driver-tab-panel="shift">
         {% if open_shift %}
-            <form method="post" action="{% url 'driver_close_shift' %}" class="driver-shift-workspace" data-driver-shift-close-form>
+            <form method="post" action="{% url 'driver_close_shift' %}" class="driver-shift-workspace{% if close_review %} is-reviewed{% endif %}" data-driver-shift-close-form>
                 {% csrf_token %}
                 {{ close_form.client_action_id }}
                 <input type="hidden" name="shift_action" value="{% if close_review %}close{% else %}review{% endif %}" data-driver-shift-action>
@@ -2961,7 +3050,8 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
                     <h2>Смена</h2>
                     <button class="driver-shift-update" type="button" data-driver-shift-update><span class="driver-shift-update-icon" aria-hidden="true"></span><span>Обновить</span></button>
                 </div>
-                <div class="driver-shift-section">
+                <div class="driver-shift-scroll" data-driver-shift-scroll>
+                <div class="driver-shift-section driver-shift-inputs" data-driver-shift-inputs{% if close_review %} hidden{% endif %}>
                     <div class="driver-shift-section-head"><span>Показатели техники</span></div>
                     {{ close_form.non_field_errors }}
                     <div class="driver-shift-metrics">
@@ -2995,6 +3085,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
                         <div class="driver-shift-result-cell"><span>Самосвал</span><strong>{{ current_truck.garage_number|default:"—" }}</strong></div>
                         <div class="driver-shift-result-cell"><span>Состояние</span><strong>{% if active_trip %}В пути{% else %}Свободен{% endif %}</strong></div>
                     </div>
+                </div>
                 </div>
                 <div class="driver-shift-actions">
                     <button class="driver-shift-submit" type="submit" data-driver-shift-close-button style="--driver-shift-hold: 0%;">{% if close_review %}Закрыть смену{% else %}Проверить показания{% endif %}</button>
@@ -3192,6 +3283,14 @@ window.applyOperationalStateRefresh = function (context) {
     if (!currentShell || !window.fetch || !window.DOMParser) {
         return Promise.resolve(false);
     }
+    var activeShiftForm = currentShell.querySelector("[data-driver-shift-close-form]");
+    if (activeShiftForm && (
+        activeShiftForm.dataset.driverShiftDirty === "true" ||
+        activeShiftForm.classList.contains("is-reviewed") ||
+        activeShiftForm.querySelector(".errorlist")
+    )) {
+        return Promise.resolve(false);
+    }
     var activeTab = currentShell.dataset.activeTab || "work";
     var url = new URL(window.location.href);
     url.searchParams.set("_driver_refresh", Date.now());
@@ -3346,6 +3445,8 @@ window.bindDriverMobileShell = function () {
         var updateButton = shell.querySelector("[data-driver-shift-update]");
         var logoutButton = shell.querySelector("[data-driver-shift-logout]");
         var shiftAction = form ? form.querySelector("[data-driver-shift-action]") : null;
+        var inputsSection = form ? form.querySelector("[data-driver-shift-inputs]") : null;
+        var shiftScroll = form ? form.querySelector("[data-driver-shift-scroll]") : null;
         var reviewPanel = form ? form.querySelector("[data-driver-shift-review]") : null;
         var editButton = form ? form.querySelector("[data-driver-shift-edit]") : null;
         var holdStartedAt = 0;
@@ -3404,22 +3505,44 @@ window.bindDriverMobileShell = function () {
             });
             form.querySelectorAll("input[type='number']").forEach(function (input) {
                 input.addEventListener("input", function () {
+                    form.dataset.driverShiftDirty = "true";
                     if (shiftAction && shiftAction.value === "close") {
                         shiftAction.value = "review";
                         closeButton.textContent = "Проверить показания";
                         form.dataset.driverShiftConfirmed = "false";
                         if (reviewPanel) reviewPanel.hidden = true;
+                        if (inputsSection) inputsSection.hidden = false;
+                        form.classList.remove("is-reviewed");
                         resetHold();
                     }
                 });
             });
             if (editButton) {
                 editButton.addEventListener("click", function () {
+                    form.dataset.driverShiftDirty = "true";
                     shiftAction.value = "review";
                     closeButton.textContent = "Проверить показания";
                     if (reviewPanel) reviewPanel.hidden = true;
+                    if (inputsSection) inputsSection.hidden = false;
+                    form.classList.remove("is-reviewed");
                     var firstInput = form.querySelector("input[type='number']");
                     if (firstInput) firstInput.focus();
+                });
+            }
+
+            var firstError = form.querySelector(".driver-shift-field .errorlist");
+            if (firstError) {
+                window.requestAnimationFrame(function () {
+                    var errorField = firstError.closest(".driver-shift-field");
+                    var errorInput = errorField ? errorField.querySelector("input") : null;
+                    if (errorField) {
+                        errorField.scrollIntoView({block: "center"});
+                    } else if (shiftScroll) {
+                        shiftScroll.scrollTop = 0;
+                    }
+                    if (errorInput) {
+                        errorInput.focus({preventScroll: true});
+                    }
                 });
             }
         }
@@ -4144,7 +4267,7 @@ window.bindDriverMobileShell = function () {
         if (!("serviceWorker" in navigator)) {
             return;
         }
-        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v97' }}";
+        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v98' }}";
         var updateModal = document.querySelector("[data-driver-pwa-update-modal]");
         var updateBadge = document.querySelector("[data-driver-pwa-update-badge]");
         var updateTarget = document.querySelector("[data-driver-pwa-update-nav-target]");
