@@ -59,6 +59,7 @@
     var categoryNav = root.querySelector("[data-category-nav]");
     var workDate = root.querySelector("[data-work-date]");
     var searchInput = root.querySelector("[data-planning-search]");
+    var employeePool = root.querySelector("[data-employee-pool-drop]");
     var employeeList = root.querySelector("[data-employee-list]");
     var employeeEmpty = root.querySelector("[data-employee-empty]");
     var availableCount = root.querySelector("[data-available-count]");
@@ -80,11 +81,19 @@
     var publishSummary = document.querySelector("[data-publish-summary]");
     var publishConfirm = document.querySelector("[data-publish-confirm]");
     var toast = document.querySelector("[data-deputy-toast]");
+    var notice = document.querySelector("[data-deputy-notice]");
+    var noticeTitle = notice && notice.querySelector("[data-notice-title]");
+    var noticeMessage = notice && notice.querySelector("[data-notice-message]");
+    var noticeAction = notice && notice.querySelector("[data-notice-action]");
+    var noticeClose = notice && notice.querySelector("[data-notice-close]");
     var currentFilter = "all";
     var currentSlot = null;
     var saving = false;
     var toastTimer = null;
     var dragPayload = null;
+    var dragPreview = null;
+    var transparentDragImage = null;
+    var noticeActionHandler = null;
 
     function textValue(value) {
         return value === null || value === undefined ? "" : String(value);
@@ -162,6 +171,32 @@
         }, isError ? 6000 : 3200);
     }
 
+    function hideNotice() {
+        if (!notice) return;
+        notice.hidden = true;
+        noticeActionHandler = null;
+        if (noticeAction) {
+            noticeAction.hidden = true;
+            noticeAction.textContent = "Обновить данные";
+        }
+    }
+
+    function showNotice(message, options) {
+        if (!notice) {
+            showToast(message, true);
+            return;
+        }
+        options = options || {};
+        if (noticeTitle) noticeTitle.textContent = options.title || "Назначение не изменено";
+        if (noticeMessage) noticeMessage.textContent = message || "Повторите действие.";
+        noticeActionHandler = typeof options.action === "function" ? options.action : null;
+        if (noticeAction) {
+            noticeAction.hidden = !noticeActionHandler;
+            noticeAction.textContent = options.actionLabel || "Обновить данные";
+        }
+        notice.hidden = false;
+    }
+
     function updateAutosave(mode, message) {
         if (!autosaveState || !autosaveText) return;
         autosaveState.classList.toggle("is-saving", mode === "saving");
@@ -203,6 +238,7 @@
             var image = document.createElement("img");
             image.src = photo;
             image.alt = "";
+            image.draggable = false;
             avatar.appendChild(image);
             if (canOpenPhoto) {
                 avatar.type = "button";
@@ -248,10 +284,83 @@
         });
     }
 
-    function bindDragSource(node, employee) {
+    function moveDragPreview(event) {
+        if (!dragPreview || !event || !event.clientX || !event.clientY) return;
+        var padding = 8;
+        var offset = 14;
+        var width = dragPreview.offsetWidth || 280;
+        var height = dragPreview.offsetHeight || 56;
+        var left = Math.min(event.clientX + offset, window.innerWidth - width - padding);
+        var top = Math.min(event.clientY + offset, window.innerHeight - height - padding);
+        dragPreview.style.left = Math.max(padding, left) + "px";
+        dragPreview.style.top = Math.max(padding, top) + "px";
+    }
+
+    function clearDropHighlights() {
+        Array.prototype.slice.call(root.querySelectorAll(".is-drag-over")).forEach(function (node) {
+            node.classList.remove("is-drag-over");
+        });
+    }
+
+    function removeDragPreview() {
+        if (dragPreview) {
+            dragPreview.remove();
+            dragPreview = null;
+        }
+        if (transparentDragImage) {
+            transparentDragImage.remove();
+            transparentDragImage = null;
+        }
+    }
+
+    function applyDragPreviewTheme(preview) {
+        if (!preview || !shell || typeof window.getComputedStyle !== "function") return;
+        var styles = window.getComputedStyle(shell);
+        [
+            "--admin-panel",
+            "--admin-ink",
+            "--admin-line",
+            "--admin-green",
+            "--admin-green-soft",
+            "--admin-muted"
+        ].forEach(function (token) {
+            var value = styles.getPropertyValue(token).trim();
+            if (value) preview.style.setProperty(token, value);
+        });
+    }
+
+    function finishDrag() {
+        Array.prototype.slice.call(root.querySelectorAll(".is-dragging")).forEach(function (node) {
+            node.classList.remove("is-dragging");
+        });
+        clearDropHighlights();
+        removeDragPreview();
+        dragPayload = null;
+    }
+
+    function createDragPreview(employee, event) {
+        removeDragPreview();
+        var preview = createElement("div", "deputy-drag-preview is-visible");
+        preview.appendChild(createAvatar(employee, false));
+        var main = createElement("span", "deputy-employee-main");
+        main.appendChild(createElement("strong", "", employeeName(employee)));
+        main.appendChild(createElement("small", "", employeeMeta(employee) || "Сотрудник"));
+        preview.appendChild(main);
+        applyDragPreviewTheme(preview);
+        document.body.appendChild(preview);
+        dragPreview = preview;
+        moveDragPreview(event);
+
+        transparentDragImage = createElement("span", "deputy-transparent-drag-image");
+        document.body.appendChild(transparentDragImage);
+        return transparentDragImage;
+    }
+
+    function bindDragSource(node, employee, visualNode) {
         var canDrag = planEditable() && !employee.disabled && !employee.busy;
+        var visual = visualNode || node;
         node.draggable = canDrag;
-        node.classList.toggle("is-disabled", !canDrag && Boolean(employee.disabled || employee.busy));
+        visual.classList.toggle("is-disabled", !canDrag && Boolean(employee.disabled || employee.busy));
         if (!canDrag) return;
         node.addEventListener("dragstart", function (event) {
             var source = sourceForEmployee(employee);
@@ -260,17 +369,16 @@
                 sourceEquipmentId: source.source_equipment_id,
                 sourceShiftType: source.source_shift_type
             };
-            node.classList.add("is-dragging");
+            visual.classList.add("is-dragging");
             if (event.dataTransfer) {
                 event.dataTransfer.effectAllowed = "move";
                 event.dataTransfer.setData("application/json", JSON.stringify(dragPayload));
                 event.dataTransfer.setData("text/plain", textValue(employee.id));
+                event.dataTransfer.setDragImage(createDragPreview(employee, event), 0, 0);
             }
         });
-        node.addEventListener("dragend", function () {
-            node.classList.remove("is-dragging");
-            dragPayload = null;
-        });
+        node.addEventListener("drag", moveDragPreview);
+        node.addEventListener("dragend", finishDrag);
     }
 
     function createEmployeeCard(employee) {
@@ -414,14 +522,34 @@
     }
 
     function dropPayloadFromEvent(event) {
-        if (dragPayload) return dragPayload;
-        if (!event.dataTransfer) return null;
+        var payload = dragPayload;
+        if (!payload && !event.dataTransfer) return null;
         try {
-            return JSON.parse(event.dataTransfer.getData("application/json") || "null");
+            payload = payload || JSON.parse(event.dataTransfer.getData("application/json") || "null");
         } catch (error) {
             var employeeId = event.dataTransfer.getData("text/plain");
-            return employeeId ? { employeeId: employeeId } : null;
+            payload = employeeId ? { employeeId: employeeId } : null;
         }
+        if (!payload) return null;
+        return {
+            employeeId: payload.employeeId || payload.employee_id || null,
+            sourceEquipmentId: payload.sourceEquipmentId || payload.source_equipment_id || null,
+            sourceShiftType: payload.sourceShiftType || payload.source_shift_type || null
+        };
+    }
+
+    function findSlot(equipmentId, shiftType) {
+        var matched = null;
+        state.rows.some(function (row) {
+            if (textValue(row.equipment && row.equipment.id) !== textValue(equipmentId)) return false;
+            var slot = (row.slots || []).find(function (candidate) {
+                return textValue(candidate.shift_type) === textValue(shiftType);
+            });
+            if (!slot) return false;
+            matched = { row: row, slot: slot };
+            return true;
+        });
+        return matched;
     }
 
     function createSlot(row, slot) {
@@ -445,10 +573,10 @@
             if (slot.conflict) flags.appendChild(createElement("span", "deputy-slot-flag is-conflict", "!"));
             person.appendChild(flags);
             button.appendChild(person);
-            bindDragSource(button, Object.assign({}, slot.employee, {
+            bindDragSource(person, Object.assign({}, slot.employee, {
                 source_equipment_id: row.equipment && row.equipment.id,
                 source_shift_type: slot.shift_type
-            }));
+            }), button);
             person.addEventListener("click", function () {
                 openCandidatePicker(row, slot);
             });
@@ -478,6 +606,12 @@
             button.classList.remove("is-drag-over");
             var payload = dropPayloadFromEvent(event);
             if (!payload || !payload.employeeId) return;
+            if (
+                textValue(payload.sourceEquipmentId) === textValue(row.equipment && row.equipment.id)
+                && textValue(payload.sourceShiftType) === textValue(slot.shift_type)
+            ) {
+                return;
+            }
             saveSlot(row, slot, payload.employeeId, {
                 source_equipment_id: payload.sourceEquipmentId,
                 source_shift_type: payload.sourceShiftType
@@ -584,6 +718,7 @@
         if (!response.ok || !result.ok) {
             var requestError = new Error(result.error || result.message || "Не удалось сохранить изменения.");
             requestError.payload = result.payload;
+            requestError.code = result.code || "";
             throw requestError;
         }
         return result.payload;
@@ -611,12 +746,21 @@
         try {
             var payload = await postJson(state.endpoints.slot, body);
             applyPayload(payload);
+            hideNotice();
             var savedLabel = state.plan.updated_at_label ? "Сохранено · " + state.plan.updated_at_label : "Все изменения сохранены";
             updateAutosave("saved", savedLabel);
         } catch (error) {
             if (error.payload) applyPayload(error.payload);
             updateAutosave("error", "Не сохранено");
-            showToast(error.message, true);
+            var shouldReload = ["stale_version", "stale_baseline", "plan_work_date_closed"].indexOf(error.code) !== -1;
+            var title = error.code === "plan_work_date_closed"
+                ? "Производственные сутки завершены"
+                : (shouldReload ? "Данные изменились" : "Назначение не изменено");
+            showNotice(error.message, {
+                title: title,
+                actionLabel: shouldReload ? "Обновить данные" : "",
+                action: shouldReload ? function () { window.location.reload(); } : null
+            });
         } finally {
             saving = false;
             updatePublishButton();
@@ -628,8 +772,8 @@
         var unfilled = Number(state.summary.unfilled_count || 0);
         if (publishSummary) {
             publishSummary.textContent = unfilled > 0
-                ? "Останутся незаполненные слоты: " + unfilled + ". Опубликовать текущую расстановку?"
-                : "После публикации назначения станут доступны сотрудникам.";
+                ? "Останутся незаполненные слоты: " + unfilled + ". Карточки сотрудников будут обновлены по текущей расстановке."
+                : "После публикации назначения и карточки сотрудников будут обновлены.";
         }
         openDialog(publishDialog);
     }
@@ -646,12 +790,18 @@
                 expected_version: state.plan.version
             });
             applyPayload(payload);
+            hideNotice();
             updateAutosave("saved", "Расстановка опубликована");
-            showToast("Расстановка опубликована.", false);
+            showToast("Расстановка опубликована. Карточки сотрудников обновлены.", false);
         } catch (error) {
             if (error.payload) applyPayload(error.payload);
             updateAutosave("error", "Не опубликовано");
-            showToast(error.message, true);
+            var shouldReload = ["stale_version", "stale_baseline", "plan_work_date_closed"].indexOf(error.code) !== -1;
+            showNotice(error.message, {
+                title: shouldReload ? "Данные изменились" : "Расстановка не опубликована",
+                actionLabel: shouldReload ? "Обновить данные" : "",
+                action: shouldReload ? function () { window.location.reload(); } : null
+            });
         } finally {
             saving = false;
             updatePublishButton();
@@ -677,6 +827,45 @@
         });
     }
 
+    if (employeePool) {
+        employeePool.addEventListener("dragover", function (event) {
+            var payload = dragPayload;
+            if (
+                !planEditable()
+                || saving
+                || !payload
+                || !payload.sourceEquipmentId
+                || !payload.sourceShiftType
+            ) return;
+            event.preventDefault();
+            employeePool.classList.add("is-drag-over");
+            if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+            moveDragPreview(event);
+        });
+        employeePool.addEventListener("dragleave", function (event) {
+            if (!event.relatedTarget || !employeePool.contains(event.relatedTarget)) {
+                employeePool.classList.remove("is-drag-over");
+            }
+        });
+        employeePool.addEventListener("drop", function (event) {
+            if (!planEditable() || saving) return;
+            var payload = dropPayloadFromEvent(event);
+            if (!payload || !payload.sourceEquipmentId || !payload.sourceShiftType) return;
+            event.preventDefault();
+            employeePool.classList.remove("is-drag-over");
+            var source = findSlot(payload.sourceEquipmentId, payload.sourceShiftType);
+            if (!source) {
+                showNotice("Исходное назначение не найдено. Обновите данные и повторите действие.", {
+                    title: "Назначение не изменено",
+                    actionLabel: "Обновить данные",
+                    action: function () { window.location.reload(); }
+                });
+                return;
+            }
+            saveSlot(source.row, source.slot, null, null);
+        });
+    }
+
     Array.prototype.slice.call(document.querySelectorAll("[data-dialog-close]")).forEach(function (button) {
         button.addEventListener("click", function () { closeDialog(candidateDialog); });
     });
@@ -696,6 +885,14 @@
     }
     if (publishButton) publishButton.addEventListener("click", openPublishConfirmation);
     if (publishConfirm) publishConfirm.addEventListener("click", publishPlan);
+    if (noticeClose) noticeClose.addEventListener("click", hideNotice);
+    if (noticeAction) {
+        noticeAction.addEventListener("click", function () {
+            var handler = noticeActionHandler;
+            hideNotice();
+            if (handler) handler();
+        });
+    }
 
     if (photoDialog) {
         photoDialog.addEventListener("click", function (event) {
@@ -714,7 +911,10 @@
     }
     document.addEventListener("keydown", function (event) {
         if (event.key === "Escape" && photoDialog && photoDialog.open) closeDialog(photoDialog);
+        if (event.key === "Escape" && notice && !notice.hidden) hideNotice();
     });
+    document.addEventListener("dragover", moveDragPreview);
+    document.addEventListener("drop", finishDrag);
 
     var initialSavedLabel = state.plan.updated_at_label
         ? "Сохранено · " + state.plan.updated_at_label

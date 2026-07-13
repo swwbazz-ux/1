@@ -108,15 +108,15 @@ class DeputyPlanningViewTests(TestCase):
         )
         return plan
 
-    def autosave_driver_on_second_truck(self, plan):
+    def autosave_slot(self, plan, *, equipment, shift_type, employee):
         response = self.client.post(
             reverse('deputy_mining_manager_slot'),
             data=json.dumps({
                 'plan_id': plan.id,
                 'expected_version': plan.version,
-                'equipment_id': self.truck_2.id,
-                'shift_type': WorkShiftType.SHIFT_1,
-                'employee_id': self.driver.id,
+                'equipment_id': equipment.id,
+                'shift_type': shift_type,
+                'employee_id': employee.id if employee else None,
             }),
             content_type='application/json',
             HTTP_HOST='localhost',
@@ -124,6 +124,14 @@ class DeputyPlanningViewTests(TestCase):
         self.assertEqual(response.status_code, 200, response.content)
         plan.refresh_from_db()
         return response, plan
+
+    def autosave_driver_on_second_truck(self, plan):
+        return self.autosave_slot(
+            plan,
+            equipment=self.truck_2,
+            shift_type=WorkShiftType.SHIFT_1,
+            employee=self.driver,
+        )
 
     def publish(self, plan):
         response = self.client.post(
@@ -217,6 +225,59 @@ class DeputyPlanningViewTests(TestCase):
             self.driver,
         )
 
+    def test_autosave_moves_employee_between_equipment_and_shift(self):
+        plan = self.create_draft()
+
+        response, plan = self.autosave_slot(
+            plan,
+            equipment=self.truck_2,
+            shift_type=WorkShiftType.SHIFT_2,
+            employee=self.driver,
+        )
+
+        self.assertTrue(response.json()['ok'])
+        self.assertIsNone(
+            plan.slots.get(
+                equipment=self.truck_1,
+                shift_type=WorkShiftType.SHIFT_1,
+            ).employee,
+        )
+        self.assertEqual(
+            plan.slots.get(
+                equipment=self.truck_2,
+                shift_type=WorkShiftType.SHIFT_2,
+            ).employee,
+            self.driver,
+        )
+        active_assignment = get_active_equipment_assignment(self.driver, 'driver')
+        self.assertEqual(active_assignment.equipment, self.truck_1)
+        self.assertEqual(active_assignment.shift_type, WorkShiftType.SHIFT_1)
+
+    def test_autosave_clears_slot_and_returns_employee_to_free_pool(self):
+        plan = self.create_draft()
+
+        response, plan = self.autosave_slot(
+            plan,
+            equipment=self.truck_1,
+            shift_type=WorkShiftType.SHIFT_1,
+            employee=None,
+        )
+
+        self.assertIsNone(
+            plan.slots.get(
+                equipment=self.truck_1,
+                shift_type=WorkShiftType.SHIFT_1,
+            ).employee,
+        )
+        free_employee_ids = {
+            item['id'] for item in response.json()['payload']['employees']
+        }
+        self.assertIn(self.driver.id, free_employee_ids)
+        self.assertEqual(
+            get_active_equipment_assignment(self.driver, 'driver').equipment,
+            self.truck_1,
+        )
+
     def test_publish_replaces_base_equipment_assignment(self):
         plan = self.create_draft()
         _response, plan = self.autosave_driver_on_second_truck(plan)
@@ -242,6 +303,63 @@ class DeputyPlanningViewTests(TestCase):
             ).count(),
             1,
         )
+
+    def test_published_move_is_visible_in_admin_employee_card(self):
+        admin_role = Role.objects.create(code='admin', name='Администратор')
+        _admin, admin_access = self.create_employee_with_access(
+            'Администратор тестовый',
+            admin_role,
+            phone='+79000000099',
+            access_code='110099',
+        )
+        admin_client = Client()
+        self.authenticate(admin_client, admin_access)
+        plan = self.create_draft()
+        _response, plan = self.autosave_slot(
+            plan,
+            equipment=self.truck_2,
+            shift_type=WorkShiftType.SHIFT_2,
+            employee=self.driver,
+        )
+
+        self.publish(plan)
+        response = admin_client.get(
+            reverse('system_admin_employee_detail', args=[self.driver.id]),
+            HTTP_HOST='localhost',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        active_assignment = response.context['active_equipment_assignment']
+        self.assertEqual(active_assignment.equipment, self.truck_2)
+        self.assertEqual(active_assignment.shift_type, WorkShiftType.SHIFT_2)
+
+    def test_published_removal_is_visible_in_admin_employee_card(self):
+        admin_role = Role.objects.create(code='admin', name='Администратор')
+        _admin, admin_access = self.create_employee_with_access(
+            'Администратор тестовый',
+            admin_role,
+            phone='+79000000099',
+            access_code='110099',
+        )
+        admin_client = Client()
+        self.authenticate(admin_client, admin_access)
+        plan = self.create_draft()
+        _response, plan = self.autosave_slot(
+            plan,
+            equipment=self.truck_1,
+            shift_type=WorkShiftType.SHIFT_1,
+            employee=None,
+        )
+
+        self.publish(plan)
+        response = admin_client.get(
+            reverse('system_admin_employee_detail', args=[self.driver.id]),
+            HTTP_HOST='localhost',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.context['active_equipment_assignment'])
+        self.assertContains(response, 'Рабочее назначение не задано')
 
     def test_publish_does_not_change_snapshot_of_already_open_shift(self):
         open_shift = EmployeeShift.objects.create(

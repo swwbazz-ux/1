@@ -4,7 +4,7 @@
 {% block title %}Расстановка{% endblock %}
 {% block body_class %}deputy-mining-manager-screen deputy-placement-screen{% endblock %}
 {% block extra_head %}
-<link rel="stylesheet" href="{% static 'css/deputy-mining-manager-v2.css' %}">
+<link rel="stylesheet" href="{% static 'css/deputy-mining-manager-v3.css' %}">
 {% endblock %}
 
 {% block body %}
@@ -68,7 +68,9 @@
         {% endif %}
 
         <section class="deputy-planning-workspace" aria-label="Рабочая область расстановки">
-            <aside class="deputy-employee-pool" aria-labelledby="deputy-employee-pool-title">
+            <aside class="deputy-employee-pool"
+                   data-employee-pool-drop
+                   aria-labelledby="deputy-employee-pool-title">
                 <header>
                     <h2 id="deputy-employee-pool-title">Свободные сотрудники</h2>
                     <span data-available-count>0</span>
@@ -77,6 +79,11 @@
                     <p class="deputy-loading-state">Загрузка сотрудников…</p>
                 </div>
                 <p class="deputy-empty-state" data-employee-empty hidden>Свободных сотрудников нет.</p>
+                <div class="deputy-employee-drop-hint" aria-hidden="true">
+                    <span>↙</span>
+                    <strong>Снять с техники</strong>
+                    <small>Отпустите сотрудника здесь</small>
+                </div>
             </aside>
 
             <section class="deputy-assignment-board" aria-label="Техника и смены">
@@ -89,7 +96,6 @@
 
         <div hidden aria-hidden="true">{% csrf_token %}</div>
     </main>
-</div>
 
 <dialog class="deputy-dialog deputy-candidate-dialog" data-candidate-dialog aria-labelledby="deputy-candidate-title">
     <div class="deputy-dialog-head">
@@ -120,7 +126,7 @@
         <div>
             <span>Публикация</span>
             <h2 id="deputy-publish-title">Опубликовать расстановку?</h2>
-            <p data-publish-summary>После публикации назначения станут доступны сотрудникам.</p>
+            <p data-publish-summary>После публикации назначения и карточки сотрудников будут обновлены.</p>
         </div>
         <button type="button" class="deputy-dialog-close" data-publish-cancel aria-label="Закрыть">×</button>
     </div>
@@ -132,10 +138,27 @@
 
 <div class="deputy-toast" data-deputy-toast role="status" aria-live="polite" hidden></div>
 
+<div class="deputy-notice is-error"
+     data-deputy-notice
+     role="alert"
+     aria-live="assertive"
+     aria-atomic="true"
+     hidden>
+    <span class="deputy-notice__accent" aria-hidden="true"></span>
+    <span class="deputy-notice__icon" aria-hidden="true">!</span>
+    <div class="deputy-notice__content">
+        <strong data-notice-title>Назначение не изменено</strong>
+        <p data-notice-message></p>
+        <button class="deputy-notice__action" data-notice-action type="button" hidden>Обновить данные</button>
+    </div>
+    <button class="deputy-notice__close" data-notice-close type="button" aria-label="Закрыть сообщение">×</button>
+</div>
+</div>
+
 {% if deputy_planning_payload %}
     {{ deputy_planning_payload|json_script:"deputy-planning-data" }}
 {% else %}
     {{ planning_payload|json_script:"deputy-planning-data" }}
 {% endif %}
-<script src="{% static 'js/deputy-mining-manager.js' %}?v=3" defer></script>
+<script src="{% static 'js/deputy-mining-manager-v3.js' %}" defer></script>
 {% endblock %}

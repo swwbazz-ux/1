@@ -266,8 +266,62 @@
 }
 
 .deputy-employee-pool {
+    position: relative;
     display: grid;
     grid-template-rows: auto minmax(0, 1fr);
+}
+
+.deputy-employee-pool.is-drag-over {
+    box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--admin-green) 52%, transparent);
+}
+
+.deputy-employee-drop-hint {
+    position: absolute;
+    inset: 54px 8px 8px;
+    z-index: 8;
+    display: grid;
+    align-content: center;
+    justify-items: center;
+    gap: 4px;
+    padding: 16px;
+    border: 2px dashed var(--admin-green);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--admin-panel) 94%, var(--admin-green) 6%);
+    color: var(--admin-ink);
+    opacity: 0;
+    pointer-events: none;
+    transform: scale(.985);
+    transition: opacity .12s ease, transform .12s ease;
+    visibility: hidden;
+}
+
+.deputy-employee-pool.is-drag-over .deputy-employee-drop-hint {
+    opacity: 1;
+    transform: scale(1);
+    visibility: visible;
+}
+
+.deputy-employee-drop-hint > span {
+    display: grid;
+    width: 36px;
+    height: 36px;
+    place-items: center;
+    border-radius: 7px;
+    background: var(--admin-green-soft);
+    color: var(--admin-green);
+    font-size: 22px;
+    font-weight: 900;
+}
+
+.deputy-employee-drop-hint strong {
+    font-size: 15px;
+    font-weight: 900;
+}
+
+.deputy-employee-drop-hint small {
+    color: var(--admin-muted);
+    font-size: 12px;
+    font-weight: 800;
 }
 
 .deputy-employee-pool > header {
@@ -328,8 +382,60 @@
 }
 
 .deputy-employee-card.is-dragging {
-    opacity: .45;
+    border-color: var(--admin-green);
+    background: color-mix(in srgb, var(--admin-green) 8%, var(--admin-panel));
+    box-shadow: inset 3px 0 0 var(--admin-green);
     cursor: grabbing;
+}
+
+.deputy-drag-preview {
+    position: fixed;
+    left: -9999px;
+    top: -9999px;
+    z-index: 3000;
+    display: grid;
+    width: min(280px, calc(100vw - 24px));
+    grid-template-columns: 38px minmax(0, 1fr) 24px;
+    gap: 9px;
+    align-items: center;
+    min-height: 56px;
+    padding: 8px 10px 8px 8px;
+    border: 1px solid var(--admin-line);
+    border-left: 4px solid var(--admin-green);
+    border-radius: 7px;
+    background: var(--admin-panel);
+    color: var(--admin-ink);
+    box-shadow: 0 18px 42px rgba(6, 18, 24, .32);
+    opacity: 1;
+    pointer-events: none;
+}
+
+.deputy-drag-preview.is-visible {
+    left: 0;
+    top: 0;
+}
+
+.deputy-drag-preview::after {
+    content: "↗";
+    display: grid;
+    width: 24px;
+    height: 24px;
+    place-items: center;
+    border-radius: 5px;
+    background: var(--admin-green-soft);
+    color: var(--admin-green);
+    font-size: 14px;
+    font-weight: 900;
+}
+
+.deputy-transparent-drag-image {
+    position: fixed;
+    left: -9999px;
+    top: -9999px;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    pointer-events: none;
 }
 
 .deputy-employee-card.is-disabled {
@@ -560,6 +666,12 @@ button.deputy-avatar {
     column-gap: 8px;
     border-style: solid;
     background: var(--admin-panel);
+}
+
+.deputy-slot.is-dragging {
+    border-color: var(--admin-green);
+    background: color-mix(in srgb, var(--admin-green) 8%, var(--admin-panel));
+    box-shadow: inset 3px 0 0 var(--admin-green);
 }
 
 .deputy-slot.has-conflict {
@@ -855,6 +967,113 @@ button.deputy-avatar {
     color: var(--admin-red);
 }
 
+.deputy-notice {
+    position: fixed;
+    right: 18px;
+    bottom: 18px;
+    z-index: 3200;
+    display: grid;
+    width: min(440px, calc(100vw - 36px));
+    max-height: min(340px, calc(100dvh - 36px));
+    grid-template-columns: 4px 36px minmax(0, 1fr) 32px;
+    gap: 10px;
+    align-items: start;
+    padding: 12px 12px 12px 0;
+    overflow: auto;
+    border: 1px solid var(--admin-line);
+    border-radius: 8px;
+    background: var(--admin-panel);
+    color: var(--admin-ink);
+    box-shadow: 0 20px 54px rgba(6, 18, 24, .32);
+}
+
+.deputy-notice[hidden] {
+    display: none;
+}
+
+.deputy-notice__accent {
+    align-self: stretch;
+    border-radius: 0 3px 3px 0;
+    background: var(--admin-red);
+}
+
+.deputy-notice__icon {
+    display: grid;
+    width: 36px;
+    height: 36px;
+    place-items: center;
+    border-radius: 7px;
+    background: var(--admin-red-soft);
+    color: var(--admin-red);
+    font-size: 18px;
+    font-weight: 900;
+}
+
+.deputy-notice__content {
+    min-width: 0;
+    padding-top: 1px;
+}
+
+.deputy-notice__content > strong {
+    display: block;
+    color: var(--admin-ink);
+    font-size: 15px;
+    font-weight: 900;
+    line-height: 1.2;
+}
+
+.deputy-notice__content > p {
+    margin: 5px 0 0;
+    color: var(--admin-muted);
+    font-size: 13px;
+    font-weight: 700;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+}
+
+.deputy-notice__action {
+    min-height: 36px;
+    margin-top: 10px;
+    padding: 7px 12px;
+    border: 1px solid var(--admin-line);
+    border-radius: 6px;
+    background: var(--admin-panel-soft);
+    color: var(--admin-ink);
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 900;
+    cursor: pointer;
+}
+
+.deputy-notice__action:hover,
+.deputy-notice__action:focus-visible {
+    border-color: var(--admin-green);
+    outline: 0;
+}
+
+.deputy-notice__close {
+    display: grid;
+    width: 32px;
+    height: 32px;
+    place-items: center;
+    padding: 0;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--admin-muted);
+    font-family: inherit;
+    font-size: 22px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.deputy-notice__close:hover,
+.deputy-notice__close:focus-visible {
+    outline: 0;
+    background: var(--admin-panel-soft);
+    color: var(--admin-ink);
+}
+
 .deputy-reports-page {
     grid-template-rows: minmax(0, 1fr);
 }
@@ -1038,6 +1257,18 @@ button.deputy-avatar {
         overflow-y: hidden;
     }
 
+    .deputy-employee-drop-hint {
+        inset: 54px 8px 8px;
+        min-height: 60px;
+        padding: 10px;
+    }
+
+    .deputy-employee-drop-hint > span {
+        width: 30px;
+        height: 30px;
+        font-size: 18px;
+    }
+
     .deputy-assignment-board {
         min-height: 470px;
     }
@@ -1053,6 +1284,23 @@ button.deputy-avatar {
     .deputy-dialog-actions [data-clear-slot] {
         flex-basis: 100%;
         margin-right: 0;
+    }
+
+    .deputy-notice {
+        right: 10px;
+        bottom: max(10px, env(safe-area-inset-bottom));
+        left: 10px;
+        width: auto;
+        max-height: 45dvh;
+        grid-template-columns: 4px 36px minmax(0, 1fr) 32px;
+    }
+
+    .deputy-notice__content > p {
+        font-size: 14px;
+    }
+
+    .deputy-notice__action {
+        min-height: 44px;
     }
 
     .deputy-publications-card {
