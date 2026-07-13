@@ -35,6 +35,9 @@ class WorkAssignmentRoleSelect(forms.Select):
         instance = getattr(value, 'instance', None)
         if instance:
             option['attrs']['data-work-role'] = instance.code
+            option['attrs']['data-supports-equipment'] = (
+                'true' if instance.code in WORK_ASSIGNMENT_ROLE_EQUIPMENT_TYPES else 'false'
+            )
         return option
 
 
@@ -288,24 +291,27 @@ class AdminEmployeeEditForm(forms.ModelForm):
             return
 
         active_assignment = get_active_equipment_assignment(employee)
-        supported_accesses = (
+        available_accesses = (
             employee.accesses
-            .filter(role__code__in=WORK_ASSIGNMENT_ROLE_EQUIPMENT_TYPES, role__is_active=True, is_active=True)
+            .filter(role__is_active=True, is_active=True)
             .exclude(status=EmployeeAccess.Status.DEACTIVATED)
             .select_related('role')
             .order_by('role__name')
         )
-        supported_roles = Role.objects.filter(
-            id__in=supported_accesses.values_list('role_id', flat=True),
+        available_roles = Role.objects.filter(
+            id__in=available_accesses.values_list('role_id', flat=True),
         ).order_by('name')
-        self.fields['assignment_role'].queryset = supported_roles
+        self.fields['assignment_role'].queryset = available_roles
 
         selected_role_id = self.data.get(self.add_prefix('assignment_role')) if self.is_bound else None
         selected_role_id = selected_role_id or (active_assignment.role_id if active_assignment else None)
-        selected_role_id = selected_role_id or supported_roles.values_list('id', flat=True).first()
+        selected_role_id = selected_role_id or available_roles.values_list('id', flat=True).first()
 
         equipment_ids = set()
-        for role_code in supported_roles.values_list('code', flat=True):
+        equipment_role_codes = available_roles.filter(
+            code__in=WORK_ASSIGNMENT_ROLE_EQUIPMENT_TYPES,
+        ).values_list('code', flat=True)
+        for role_code in equipment_role_codes:
             equipment_ids.update(equipment_queryset_for_work_role(role_code).values_list('id', flat=True))
         equipment_queryset = (
             Equipment.objects

@@ -1032,6 +1032,48 @@ class OupOpenShiftAdminSafetyTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assert_target_unchanged()
 
+    def test_admin_employee_card_shows_oup_as_non_equipment_work_role(self):
+        detail = self.client.get(
+            reverse('system_admin_employee_detail', args=[self.oup_employee.id]),
+        )
+
+        self.assertEqual(detail.status_code, 200)
+        form = detail.context['form']
+        self.assertEqual(
+            list(form.fields['assignment_role'].queryset),
+            [self.oup_role],
+        )
+        self.assertEqual(int(form['assignment_role'].value()), self.oup_role.id)
+        self.assertContains(detail, 'data-work-role="oup"', html=False)
+        self.assertContains(detail, 'data-supports-equipment="false"', html=False)
+        self.assertContains(
+            detail,
+            'Для этой роли постоянное назначение на смену и технику не требуется.',
+        )
+
+        response = self.client.post(
+            reverse('system_admin_employee_detail', args=[self.oup_employee.id]),
+            {
+                'full_name': self.oup_employee.full_name,
+                'personnel_number': self.oup_employee.personnel_number,
+                'position': '',
+                'phone': '',
+                'comment': '',
+                'hired_at': '',
+                'dismissed_at': '',
+                'rotation': '',
+                'residence_text': '',
+                'hr_data': '',
+                'assignment_role': self.oup_role.id,
+                'assignment_shift_type': '',
+                'assignment_equipment': '',
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(EquipmentAssignment.objects.filter(employee=self.oup_employee).exists())
+        self.assert_target_unchanged()
+
     def test_admin_employee_form_renders_hr_dates_in_html_date_format(self):
         self.oup_employee.hired_at = timezone.localdate() - timedelta(days=10)
         self.oup_employee.dismissed_at = timezone.localdate() - timedelta(days=1)

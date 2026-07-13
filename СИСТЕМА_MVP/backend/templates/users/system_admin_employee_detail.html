@@ -194,6 +194,9 @@
                 {% elif active_equipment_assignment %}
                     <strong>{{ active_equipment_assignment.work_shift_label }} · {{ active_equipment_assignment.equipment }}</strong>
                     <span>Назначил: {{ active_equipment_assignment.assigned_by|default:"Система" }} · {{ active_equipment_assignment.assigned_at|date:"d.m.Y H:i" }}</span>
+                {% elif work_assignment_role and not work_assignment_supports_equipment %}
+                    <strong>{{ work_assignment_role.name }}</strong>
+                    <span>Для этой роли постоянное назначение на смену и технику не требуется. Рабочая смена открывается в профильном приложении.</span>
                 {% else %}
                     <strong>Рабочее назначение не задано</strong>
                     <span>После назначения смена и техника будут автоматически подставляться в рабочем приложении.</span>
@@ -501,7 +504,16 @@ document.addEventListener('DOMContentLoaded', function () {
         if (!assignmentRole || !assignmentShift || !assignmentEquipment) return;
         var selectedRole = assignmentRole.options[assignmentRole.selectedIndex];
         var roleCode = selectedRole ? selectedRole.dataset.workRole || '' : '';
+        var supportsEquipment = selectedRole && selectedRole.dataset.supportsEquipment === 'true';
         var shiftType = assignmentShift.value || '';
+        if (!supportsEquipment) {
+            assignmentShift.value = '';
+            assignmentEquipment.value = '';
+            assignmentShift.disabled = true;
+            assignmentEquipment.disabled = true;
+            return;
+        }
+        assignmentShift.disabled = false;
         var currentOption = assignmentEquipment.options[assignmentEquipment.selectedIndex];
         var currentBusyBy = currentOption && shiftType ? currentOption.dataset[shiftType === 'day' ? 'busyDay' : 'busyNight'] || '' : '';
         var currentAllowed = !currentOption || !currentOption.value || (
@@ -517,7 +529,7 @@ document.addEventListener('DOMContentLoaded', function () {
             option.disabled = !roleAllowed || Boolean(busyBy);
         });
         if (!currentAllowed) assignmentEquipment.value = '';
-        assignmentEquipment.disabled = !roleCode || !shiftType;
+        assignmentEquipment.disabled = !shiftType;
     }
 
     if (assignmentRole && assignmentShift && assignmentEquipment) {

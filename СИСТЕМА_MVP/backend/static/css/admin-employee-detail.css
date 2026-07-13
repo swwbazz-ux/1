@@ -631,25 +631,104 @@ body.employee-detail-screen {
     }
 }
 
-@media (min-width: 1181px) and (max-height: 820px) {
+@media (min-width: 1181px) and (max-height: 900px) {
     .admin-employee-detail-shell {
-        --employee-control-height: 38px;
-        --employee-button-height: 38px;
-        --employee-panel-padding: 14px;
-        --employee-space-4: 12px;
+        --employee-control-height: 36px;
+        --employee-button-height: 36px;
+        --employee-panel-padding: 12px;
+        --employee-page-gap: 10px;
+        --employee-space-2: 6px;
+        --employee-space-3: 8px;
+        --employee-space-4: 10px;
     }
 
     .admin-employee-detail-shell .employee-detail-page {
         align-items: start;
+        padding-block: 8px;
+    }
+
+    .admin-employee-detail-shell .employee-profile-form {
+        gap: 8px;
+    }
+
+    .admin-employee-detail-shell .employee-detail-card-head {
+        padding-bottom: 8px;
+    }
+
+    .admin-employee-detail-shell .employee-detail-card-head h2 {
+        font-size: 18px;
     }
 
     .admin-employee-detail-shell .employee-card-v2-photo-box,
     .admin-employee-detail-shell .employee-card-v2-photo {
-        width: 132px;
+        width: 124px;
+    }
+
+    .admin-employee-detail-shell .employee-card-v2-photo-controls {
+        min-height: 32px;
+        margin-top: 6px;
+    }
+
+    .admin-employee-detail-shell .employee-photo-symbol {
+        width: 32px;
+        min-width: 32px;
+        height: 32px;
+        min-height: 32px;
+    }
+
+    .admin-employee-detail-shell .employee-card-v2-name-grid,
+    .admin-employee-detail-shell .employee-card-v2-grid,
+    .admin-employee-detail-shell .employee-card-v2-textareas {
+        gap: 8px;
+    }
+
+    .admin-employee-detail-shell .employee-detail-field {
+        gap: 2px;
+    }
+
+    .admin-employee-detail-shell .employee-detail-field > small,
+    .admin-employee-detail-shell .employee-access-role-note,
+    .admin-employee-detail-shell .employee-danger-note,
+    .admin-employee-detail-shell .employee-detail-side .employee-detail-card-head p {
+        display: none;
+    }
+
+    .admin-employee-detail-shell .employee-work-assignment-meta {
+        padding: 7px 10px;
     }
 
     .admin-employee-detail-shell .employee-card-v2-textareas .employee-detail-field textarea {
-        min-height: 58px;
+        height: 48px;
+        min-height: 48px;
+        resize: none;
+    }
+
+    .admin-employee-detail-shell .employee-detail-save-row {
+        padding-top: 8px;
+    }
+
+    .admin-employee-detail-shell .employee-detail-side,
+    .admin-employee-detail-shell .employee-access-card,
+    .admin-employee-detail-shell .employee-login-share,
+    .admin-employee-detail-shell .employee-danger-card {
+        gap: 8px;
+    }
+
+    .admin-employee-detail-shell .employee-access-panel-section {
+        gap: 6px;
+        padding-top: 8px;
+    }
+
+    .admin-employee-detail-shell .employee-access-panel-section + .employee-access-panel-section {
+        margin-top: 8px;
+    }
+
+    .admin-employee-detail-shell .employee-access-card,
+    .admin-employee-detail-shell .employee-access-card.access-not_activated,
+    .admin-employee-detail-shell .employee-access-card.access-blocked,
+    .admin-employee-detail-shell .employee-access-card.access-deactivated,
+    .admin-employee-detail-shell .employee-login-share {
+        padding: 8px;
     }
 }
 

@@ -22,6 +22,7 @@ from openpyxl import Workbook
 
 from assignments.models import AssignmentStatus, ExcavatorPlacement, HaulAssignment, HaulAssignmentAction
 from assignments.services import (
+    WORK_ASSIGNMENT_ROLE_EQUIPMENT_TYPES,
     apply_pending_haul_assignment,
     clear_active_equipment_assignment,
     get_active_equipment_assignment,
@@ -1475,6 +1476,9 @@ def system_admin_employee_detail_view(request, employee_id):
     )
     role_form_initial = {'role': current_role_access.role_id} if current_role_access else None
     active_equipment_assignment = get_active_equipment_assignment(employee)
+    work_assignment_role = active_equipment_assignment.role if active_equipment_assignment else None
+    if not work_assignment_role and current_role_access:
+        work_assignment_role = current_role_access.role
 
     return render(
         request,
@@ -1488,6 +1492,11 @@ def system_admin_employee_detail_view(request, employee_id):
             'employee_accesses': employee_accesses,
             'current_role_access': current_role_access,
             'active_equipment_assignment': active_equipment_assignment,
+            'work_assignment_role': work_assignment_role,
+            'work_assignment_supports_equipment': bool(
+                work_assignment_role
+                and work_assignment_role.code in WORK_ASSIGNMENT_ROLE_EQUIPMENT_TYPES
+            ),
             'logs': AdminActionLog.objects.filter(
                 Q(object_type='Employee', object_id=str(employee.id))
                 | Q(object_id='', object_repr=str(employee))
