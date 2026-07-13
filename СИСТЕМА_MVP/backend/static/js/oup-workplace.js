@@ -11,8 +11,8 @@
             shell.classList.toggle("admin-night", isNight);
             shell.classList.toggle("admin-day", !isNight);
             toggle.dataset.themeIcon = isNight ? "moon" : "sun";
-            toggle.setAttribute("aria-label", isNight ? "Включить дневную тему" : "Включить ночную тему");
-            toggle.setAttribute("title", isNight ? "Дневная тема" : "Ночная тема");
+            toggle.setAttribute("aria-label", isNight ? "Включить светлую тему" : "Включить тёмную тему");
+            toggle.setAttribute("title", isNight ? "Светлая тема" : "Тёмная тема");
         }
 
         var storedTheme = "day";

@@ -3,7 +3,10 @@
 
 {% block title %}Увольнение — {{ employee.full_name }}{% endblock %}
 {% block body_class %}oup-workplace-screen oup-dismiss-screen{% endblock %}
-{% block extra_head %}<link rel="stylesheet" href="{% static 'css/oup-workplace-v1.css' %}?v=1">{% endblock %}
+{% block extra_head %}
+<link rel="stylesheet" href="{% static 'css/oup-workplace-v1.css' %}?v=20260713-1">
+<link rel="stylesheet" href="{% static 'css/oup-work-period-v1.css' %}">
+{% endblock %}
 
 {% block body %}
 <div class="admin-shell admin-exports-shell admin-day oup-shell" data-admin-theme>
@@ -85,5 +88,6 @@
         </div>
     </main>
 </div>
-<script src="{% static 'js/oup-workplace.js' %}?v=1"></script>
+<script src="{% static 'js/oup-workplace.js' %}?v=20260713-1"></script>
+<script src="{% static 'js/oup-work-period-v1.js' %}"></script>
 {% endblock %}

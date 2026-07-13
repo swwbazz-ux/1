@@ -71,13 +71,22 @@ def employee_work_category_blockers(employee):
     return blockers
 
 
-def log_oup_action(actor, action, obj=None, *, old_value='', new_value='', comment=''):
+def log_oup_action(
+    actor,
+    action,
+    obj=None,
+    *,
+    old_value='',
+    new_value='',
+    comment='',
+    object_repr=None,
+):
     return AdminActionLog.objects.create(
         actor=actor,
         action=f'ОУП: {action}',
         object_type=obj.__class__.__name__ if obj else '',
         object_id=str(obj.pk) if obj and obj.pk else '',
-        object_repr=str(obj) if obj else '',
+        object_repr=(str(obj) if obj else '') if object_repr is None else object_repr,
         old_value=old_value,
         new_value=new_value,
         comment=comment,
@@ -122,6 +131,16 @@ def format_employee_changes(before, after):
     return '; '.join(changes) or 'Данные без изменений'
 
 
+def get_active_oup_period():
+    return (
+        EmployeeShift.objects
+        .filter(workplace_code=OUP_ROLE_CODE, closed_at__isnull=True)
+        .select_related('employee')
+        .order_by('id')
+        .first()
+    )
+
+
 def get_open_oup_shift(employee):
     return (
         EmployeeShift.objects
@@ -140,7 +159,7 @@ def lock_open_oup_shift(*, employee):
     )
     if not shift:
         raise ValidationError(
-            'Сначала начните дневную смену ОУП.',
+            'Сначала начните рабочий период ОУП.',
             code='oup_shift_required',
         )
     return shift
@@ -206,8 +225,10 @@ def open_oup_shift(*, employee):
         .first()
     )
     if other_shift:
+        opened_at = timezone.localtime(other_shift.opened_at)
         raise ValidationError(
-            f'Дневная смена ОУП уже открыта сотрудником {other_shift.employee.full_name}.'
+            'Рабочий период ОУП уже занят: '
+            f'{other_shift.employee.full_name}, с {opened_at:%d.%m.%Y %H:%M}.'
         )
 
     now = timezone.now()
@@ -221,9 +242,10 @@ def open_oup_shift(*, employee):
     )
     log_oup_action(
         employee,
-        'начата дневная смена',
+        'начат рабочий период',
         shift,
         new_value=f'Начало: {timezone.localtime(now):%d.%m.%Y %H:%M}',
+        object_repr='Рабочий период ОУП',
     )
     return shift, True
 
@@ -237,10 +259,11 @@ def close_oup_shift(*, employee):
     shift.save(update_fields=['closed_at', 'closed_by'])
     log_oup_action(
         employee,
-        'завершена дневная смена',
+        'завершён рабочий период',
         shift,
         old_value=f'Начало: {timezone.localtime(shift.opened_at):%d.%m.%Y %H:%M}',
         new_value=f'Завершение: {timezone.localtime(now):%d.%m.%Y %H:%M}',
+        object_repr='Рабочий период ОУП',
     )
     return shift
 

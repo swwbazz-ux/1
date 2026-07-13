@@ -19,6 +19,7 @@ from .oup_services import (
     employee_work_category_blockers,
     emit_employee_changed,
     format_employee_changes,
+    get_active_oup_period,
     get_open_oup_shift,
     log_oup_action,
     lock_current_crew_drafts,
@@ -26,6 +27,27 @@ from .oup_services import (
     open_oup_shift,
 )
 from .views import get_current_access
+
+
+OUP_PERIOD_ACTIONS = {
+    'ОУП: начата дневная смена': ('period_started', 'начат рабочий период'),
+    'ОУП: начат рабочий период': ('period_started', 'начат рабочий период'),
+    'ОУП: завершена дневная смена': ('period_finished', 'завершён рабочий период'),
+    'ОУП: завершён рабочий период': ('period_finished', 'завершён рабочий период'),
+}
+
+
+def _oup_action_meta(action):
+    return OUP_PERIOD_ACTIONS.get(action, (action, action.removeprefix('ОУП: ')))
+
+
+def _oup_action_values(filter_value):
+    values = [
+        action
+        for action, (value, _label) in OUP_PERIOD_ACTIONS.items()
+        if value == filter_value
+    ]
+    return values or [filter_value]
 
 
 def require_oup_access(request):
@@ -36,19 +58,24 @@ def require_oup_access(request):
 
 
 def _oup_base_context(access, *, active_nav):
-    open_shift = get_open_oup_shift(access.employee)
+    active_period = get_active_oup_period()
+    owns_period = bool(active_period and active_period.employee_id == access.employee_id)
     return {
         'access': access,
         'active_nav': active_nav,
-        'open_oup_shift': open_shift,
-        'can_change_employees': bool(open_shift),
+        'active_oup_period': active_period,
+        'open_oup_shift': active_period if owns_period else None,
+        'owns_oup_period': owns_period,
+        'oup_period_is_occupied': bool(active_period and not owns_period),
+        'can_start_oup_period': active_period is None,
+        'can_change_employees': owns_period,
     }
 
 
 def _require_open_shift(request, access):
     if get_open_oup_shift(access.employee):
         return True
-    messages.error(request, 'Сначала начните дневную смену ОУП.')
+    messages.error(request, 'Сначала начните рабочий период ОУП.')
     return False
 
 
@@ -387,7 +414,8 @@ def oup_logs_view(request):
     if not access:
         return redirect('role_home')
     query = request.GET.get('q', '').strip()
-    action = request.GET.get('action', '').strip()
+    requested_action = request.GET.get('action', '').strip()
+    action = _oup_action_meta(requested_action)[0] if requested_action else ''
     logs = AdminActionLog.objects.filter(actor=access.employee, action__startswith='ОУП:').order_by('-created_at')
     if query:
         logs = logs.filter(
@@ -398,17 +426,33 @@ def oup_logs_view(request):
             | Q(new_value__icontains=query)
         )
     if action:
-        logs = logs.filter(action=action)
+        logs = logs.filter(action__in=_oup_action_values(action))
     paginator = Paginator(logs, 50)
     page_obj = paginator.get_page(request.GET.get('page'))
-    actions = (
+    action_totals = (
         AdminActionLog.objects
         .filter(actor=access.employee, action__startswith='ОУП:')
         .values('action').annotate(total=Count('id')).order_by('action')
     )
+    grouped_actions = {}
+    for item in action_totals:
+        value, label = _oup_action_meta(item['action'])
+        grouped = grouped_actions.setdefault(value, {'value': value, 'label': label, 'total': 0})
+        grouped['total'] += item['total']
+    actions = sorted(grouped_actions.values(), key=lambda item: item['label'])
+
+    rendered_logs = list(page_obj.object_list)
+    for log in rendered_logs:
+        action_value, action_label = _oup_action_meta(log.action)
+        log.display_action = action_label
+        log.display_object_repr = (
+            'Рабочий период ОУП'
+            if action_value in {'period_started', 'period_finished'}
+            else log.object_repr
+        )
     context = _oup_base_context(access, active_nav='logs')
     context.update({
-        'logs': page_obj.object_list,
+        'logs': rendered_logs,
         'page_obj': page_obj,
         'query': query,
         'selected_action': action,
@@ -427,7 +471,10 @@ def oup_shift_start_view(request):
     except ValidationError as error:
         messages.error(request, '; '.join(error.messages))
     else:
-        messages.success(request, 'Дневная смена ОУП начата.' if created else 'Ваша смена уже открыта.')
+        messages.success(
+            request,
+            'Рабочий период ОУП начат.' if created else 'Рабочий период уже открыт вами.',
+        )
     return redirect(_safe_return_target(request))
 
 
@@ -441,5 +488,5 @@ def oup_shift_close_view(request):
     except ValidationError as error:
         messages.error(request, '; '.join(error.messages))
     else:
-        messages.success(request, 'Дневная смена ОУП завершена.')
+        messages.success(request, 'Рабочий период ОУП завершён.')
     return redirect(_safe_return_target(request))

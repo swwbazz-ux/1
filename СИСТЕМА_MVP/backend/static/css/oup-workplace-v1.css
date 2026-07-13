@@ -4,6 +4,7 @@
     --oup-focus: color-mix(in srgb, var(--admin-green) 34%, transparent);
     min-height: calc(100dvh / var(--admin-interface-scale));
     overflow-x: hidden;
+    overflow-y: visible;
 }
 
 .oup-console-header {
@@ -22,7 +23,8 @@
 .oup-shift-state {
     display: grid;
     gap: 3px;
-    min-height: 40px;
+    min-width: 0;
+    min-height: 46px;
     align-content: center;
     padding: 6px 10px;
     border: 1px solid var(--admin-line);
@@ -36,6 +38,11 @@
     background: var(--admin-green-soft);
 }
 
+.oup-shift-state.is-occupied {
+    border-left-color: var(--admin-red);
+    background: var(--admin-red-soft);
+}
+
 .oup-shift-state span {
     color: var(--admin-muted);
     font-size: 10px;
@@ -46,9 +53,23 @@
 }
 
 .oup-shift-state strong {
+    min-width: 0;
+    overflow: hidden;
     color: var(--admin-ink);
     font-size: 13px;
     line-height: 1.1;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.oup-shift-state small {
+    overflow: hidden;
+    color: var(--admin-muted);
+    font-size: 9px;
+    font-weight: 800;
+    line-height: 1;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .oup-shift-button {
@@ -72,12 +93,26 @@
     color: var(--admin-yellow);
 }
 
+.oup-shift-button.is-occupied,
+.oup-shift-button:disabled {
+    border-color: var(--admin-red);
+    background: var(--admin-red-soft);
+    color: var(--admin-red);
+    cursor: not-allowed;
+    opacity: 1;
+}
+
 .oup-page {
     display: grid;
+    grid-template-rows: none;
+    grid-auto-rows: auto;
     gap: 16px;
     width: min(1600px, calc(100% - 28px));
+    height: auto;
+    min-height: 0;
     margin: 0 auto;
     padding: 18px 0 30px;
+    overflow: visible;
 }
 
 .oup-page .message {
@@ -96,34 +131,31 @@
     background: var(--admin-red-soft);
 }
 
-.oup-shift-banner,
+.oup-period-occupied,
 .oup-log-notice {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 20px;
+    justify-content: flex-start;
+    gap: 12px;
     padding: 14px 16px;
-    border: 1px solid var(--admin-yellow);
+    border: 1px solid var(--admin-red);
     border-left-width: 5px;
     border-radius: 7px;
-    background: var(--admin-yellow-soft);
+    background: var(--admin-red-soft);
     box-shadow: var(--admin-shadow);
 }
 
-.oup-shift-banner > div,
-.oup-log-notice {
-    display: flex;
-    align-items: center;
-    gap: 12px;
+.oup-period-occupied > div {
+    min-width: 0;
 }
 
-.oup-shift-banner strong,
+.oup-period-occupied strong,
 .oup-log-notice strong {
     color: var(--admin-ink);
     font-size: 16px;
 }
 
-.oup-shift-banner p,
+.oup-period-occupied p,
 .oup-log-notice p {
     margin: 3px 0 0;
     color: var(--admin-muted);
@@ -135,8 +167,8 @@
     height: 12px;
     flex: 0 0 auto;
     border-radius: 50%;
-    background: var(--admin-yellow);
-    box-shadow: 0 0 0 5px color-mix(in srgb, var(--admin-yellow) 18%, transparent);
+    background: var(--admin-red);
+    box-shadow: 0 0 0 5px color-mix(in srgb, var(--admin-red) 18%, transparent);
 }
 
 .oup-log-notice {
@@ -1111,7 +1143,8 @@
     }
 
     .oup-console-actions .oup-shift-state,
-    .oup-console-actions form {
+    .oup-console-actions form,
+    .oup-console-actions > .oup-shift-button {
         grid-column: 1 / -1;
         width: 100%;
     }
@@ -1126,18 +1159,15 @@
     .oup-shift-state strong,
     .oup-shift-button { font-size: 9px; }
 
+    .oup-shift-state strong,
+    .oup-shift-state small { white-space: normal; }
+
     .oup-page {
         width: min(100% - 20px, 1600px);
         padding-top: 10px;
     }
 
-    .oup-shift-banner {
-        align-items: stretch;
-        flex-direction: column;
-    }
-
-    .oup-shift-banner form,
-    .oup-shift-banner button { width: 100%; }
+    .oup-period-occupied { align-items: flex-start; }
 
     .oup-metrics { grid-template-columns: 1fr 1fr; gap: 8px; }
     .oup-metric { min-height: 90px; padding: 12px 12px 11px 17px; }

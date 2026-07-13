@@ -4,7 +4,8 @@
 {% block title %}{{ title }} — ОУП{% endblock %}
 {% block body_class %}oup-workplace-screen oup-employee-screen{% endblock %}
 {% block extra_head %}
-<link rel="stylesheet" href="{% static 'css/oup-workplace-v1.css' %}?v=1">
+<link rel="stylesheet" href="{% static 'css/oup-workplace-v1.css' %}?v=20260713-1">
+<link rel="stylesheet" href="{% static 'css/oup-work-period-v1.css' %}">
 {% endblock %}
 
 {% block body %}
@@ -31,7 +32,11 @@
         {% if not open_oup_shift and not is_dismissed %}
             <section class="oup-readonly-notice">
                 <strong>Режим просмотра</strong>
-                <span>Начните дневную смену ОУП, чтобы изменять карточку.</span>
+                {% if oup_period_is_occupied %}
+                    <span>Рабочий период занят: {{ active_oup_period.employee.full_name }}, с {{ active_oup_period.opened_at|date:"d.m.Y H:i" }}. Изменения недоступны.</span>
+                {% else %}
+                    <span>Начните работу, чтобы изменять карточку.</span>
+                {% endif %}
             </section>
         {% endif %}
 
@@ -162,7 +167,7 @@
                                 {% if page_mode == 'create' %}Добавить сотрудника{% else %}Сохранить изменения{% endif %}
                             </button>
                         {% else %}
-                            <span class="admin-button admin-button-disabled">Сначала начните смену</span>
+                            <span class="admin-button admin-button-disabled">{% if oup_period_is_occupied %}Рабочий период занят{% else %}Начните работу{% endif %}</span>
                         {% endif %}
                     </div>
                 {% endif %}
@@ -198,7 +203,7 @@
                         {% if can_change_employees %}
                             <a class="admin-button admin-button-danger" href="{% url 'oup_employee_dismiss' employee.id %}">Оформить увольнение</a>
                         {% else %}
-                            <span class="admin-button admin-button-disabled">Сначала начните смену</span>
+                            <span class="admin-button admin-button-disabled">{% if oup_period_is_occupied %}Рабочий период занят{% else %}Начните работу{% endif %}</span>
                         {% endif %}
                     </section>
                 {% endif %}
@@ -226,5 +231,6 @@
         </div>
     </main>
 </div>
-<script src="{% static 'js/oup-workplace.js' %}?v=1"></script>
+<script src="{% static 'js/oup-workplace.js' %}?v=20260713-1"></script>
+<script src="{% static 'js/oup-work-period-v1.js' %}"></script>
 {% endblock %}

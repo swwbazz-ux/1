@@ -3,7 +3,10 @@
 
 {% block title %}Журнал действий ОУП{% endblock %}
 {% block body_class %}oup-workplace-screen oup-logs-screen{% endblock %}
-{% block extra_head %}<link rel="stylesheet" href="{% static 'css/oup-workplace-v1.css' %}?v=1">{% endblock %}
+{% block extra_head %}
+<link rel="stylesheet" href="{% static 'css/oup-workplace-v1.css' %}?v=20260713-1">
+<link rel="stylesheet" href="{% static 'css/oup-work-period-v1.css' %}">
+{% endblock %}
 
 {% block body %}
 <div class="admin-shell admin-exports-shell admin-day oup-shell" data-admin-theme>
@@ -31,7 +34,7 @@
                     <select id="oup-log-action" name="action">
                         <option value="">Все действия</option>
                         {% for item in actions %}
-                            <option value="{{ item.action }}" {% if selected_action == item.action %}selected{% endif %}>{{ item.action|cut:"ОУП: " }} · {{ item.total }}</option>
+                            <option value="{{ item.value }}" {% if selected_action == item.value %}selected{% endif %}>{{ item.label }} · {{ item.total }}</option>
                         {% endfor %}
                     </select>
                 </div>
@@ -49,7 +52,7 @@
                             <span>{{ log.created_at|date:"d.m.Y" }}</span>
                         </time>
                         <div class="oup-log-main">
-                            <div><span class="oup-log-type">{{ log.action|cut:"ОУП: " }}</span><strong>{{ log.object_repr|default:"Рабочая смена" }}</strong></div>
+                            <div><span class="oup-log-type">{{ log.display_action }}</span><strong>{{ log.display_object_repr|default:"Рабочий период" }}</strong></div>
                             {% if log.old_value and log.old_value != 'Данные без изменений' %}<p><b>Было / изменение:</b> {{ log.old_value }}</p>{% endif %}
                             {% if log.new_value %}<p><b>Результат:</b> {{ log.new_value }}</p>{% endif %}
                             {% if log.comment %}<p><b>Комментарий:</b> {{ log.comment }}</p>{% endif %}
@@ -57,7 +60,7 @@
                         <span class="oup-log-lock" title="Запись только для чтения" aria-label="Запись только для чтения">●</span>
                     </article>
                 {% empty %}
-                    <div class="oup-empty-state"><strong>Записей пока нет</strong><p>Журнал заполнится автоматически после начала смены и работы с сотрудниками.</p></div>
+                    <div class="oup-empty-state"><strong>Записей пока нет</strong><p>Журнал заполнится автоматически после начала работы с сотрудниками.</p></div>
                 {% endfor %}
             </div>
             {% if page_obj.paginator.num_pages > 1 %}
@@ -74,5 +77,6 @@
         </section>
     </main>
 </div>
-<script src="{% static 'js/oup-workplace.js' %}?v=1"></script>
+<script src="{% static 'js/oup-workplace.js' %}?v=20260713-1"></script>
+<script src="{% static 'js/oup-work-period-v1.js' %}"></script>
 {% endblock %}

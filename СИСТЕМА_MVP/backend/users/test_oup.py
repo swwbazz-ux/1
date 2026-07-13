@@ -154,7 +154,27 @@ class OupWorkplaceTests(TestCase):
         response = self.client.get(reverse('oup_employees'))
         self.assertRedirects(response, reverse('role_home'), fetch_redirect_response=False)
 
-    def test_oup_shift_is_always_day_and_only_one_specialist_can_open_it(self):
+    def test_free_oup_period_has_one_start_action_without_day_or_night_wording(self):
+        response = self.client.get(reverse('oup_employees'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Рабочий период')
+        self.assertContains(response, 'Начать работу', count=1)
+        self.assertNotContains(response, 'Дневная смена')
+        self.assertNotContains(response, 'Начать дневную смену')
+
+    def test_owned_oup_period_has_one_finish_action(self):
+        self.start_shift()
+
+        response = self.client.get(reverse('oup_employees'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context['owns_oup_period'])
+        self.assertContains(response, 'Вы · с')
+        self.assertContains(response, 'Завершить работу', count=1)
+        self.assertNotContains(response, 'Начать работу')
+
+    def test_oup_period_uses_internal_day_value_and_only_one_specialist_can_open_it(self):
         shift = self.start_shift()
         self.assertEqual(shift.shift_type, ShiftType.DAY)
         self.assertEqual(shift.workplace_code, 'oup')
@@ -174,9 +194,79 @@ class OupWorkplaceTests(TestCase):
         session = self.client.session
         session['employee_access_id'] = second_access.id
         session.save()
-        response = self.client.post(reverse('oup_shift_start'))
-        self.assertRedirects(response, reverse('oup_employees'), fetch_redirect_response=False)
+
+        occupied_response = self.client.get(reverse('oup_employees'))
+        self.assertEqual(occupied_response.status_code, 200)
+        self.assertFalse(occupied_response.context['can_change_employees'])
+        self.assertTrue(occupied_response.context['oup_period_is_occupied'])
+        self.assertContains(occupied_response, 'Рабочий период занят')
+        self.assertContains(occupied_response, self.oup_employee.full_name)
+        self.assertContains(occupied_response, 'Начать работу', count=1)
+        self.assertContains(occupied_response, 'disabled')
+        self.assertNotContains(
+            occupied_response,
+            f'action="{reverse("oup_shift_start")}"',
+            html=False,
+        )
+
+        response = self.client.post(reverse('oup_shift_start'), follow=True)
+        self.assertContains(response, 'Рабочий период ОУП уже занят')
+        self.assertContains(response, self.oup_employee.full_name)
         self.assertFalse(EmployeeShift.objects.filter(employee=second_employee, closed_at__isnull=True).exists())
+
+    def test_oup_period_remains_open_beyond_one_calendar_day(self):
+        shift = self.start_shift()
+        opened_at = timezone.now() - timedelta(days=31)
+        EmployeeShift.objects.filter(pk=shift.pk).update(opened_at=opened_at)
+
+        same_shift, created = open_oup_shift(employee=self.oup_employee)
+
+        self.assertFalse(created)
+        self.assertEqual(same_shift.pk, shift.pk)
+        self.assertEqual(
+            EmployeeShift.objects.filter(workplace_code='oup', closed_at__isnull=True).count(),
+            1,
+        )
+
+    def test_oup_activation_does_not_show_pin_confirmation_banner(self):
+        employee = Employee.objects.create(
+            full_name='Новый специалист ОУП',
+            phone='+79000000010',
+            status=Employee.Status.NOT_ACTIVATED,
+            is_active=True,
+        )
+        access = EmployeeAccess.objects.create(
+            employee=employee,
+            role=self.oup_role,
+            access_code='246824',
+            status=EmployeeAccess.Status.NOT_ACTIVATED,
+            primary_code_issued_at=timezone.now(),
+            is_active=True,
+        )
+        session = self.client.session
+        session.pop('employee_access_id', None)
+        session['pending_activation_access_id'] = access.id
+        session.save()
+
+        response = self.client.post(
+            reverse('activate_access'),
+            {
+                'phone': '+7 900 000-00-10',
+                'new_access_code': '864286',
+                'confirm_access_code': '864286',
+            },
+            follow=True,
+        )
+
+        access.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.request['PATH_INFO'], reverse('oup_employees'))
+        self.assertEqual(access.status, EmployeeAccess.Status.ACTIVATED)
+        self.assertContains(response, 'Сотрудники')
+        self.assertNotContains(
+            response,
+            'Постоянный пинкод создан. Первичный пинкод больше не действует.',
+        )
 
     def test_oup_shift_lookup_uses_postgresql_safe_row_lock_without_distinct(self):
         with patch.object(
@@ -288,7 +378,7 @@ class OupWorkplaceTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertFalse(Employee.objects.filter(personnel_number='CR-1001').exists())
-        self.assertContains(response, 'Сначала начните дневную смену ОУП.')
+        self.assertContains(response, 'Сначала начните рабочий период ОУП.')
 
     def test_employee_card_fields_are_disabled_without_oup_shift(self):
         employee = Employee.objects.create(
@@ -395,7 +485,7 @@ class OupWorkplaceTests(TestCase):
         self.assertEqual(response.status_code, 200)
         employee.refresh_from_db()
         self.assertEqual(employee.full_name, 'Исходное Имя Сотрудника')
-        self.assertContains(response, 'Сначала начните дневную смену ОУП.')
+        self.assertContains(response, 'Сначала начните рабочий период ОУП.')
 
     def test_photo_remove_rechecks_shift_inside_write_transaction(self):
         self.start_shift()
@@ -568,7 +658,7 @@ class OupWorkplaceTests(TestCase):
         employee.refresh_from_db()
         self.assertEqual(employee.status, Employee.Status.ACTIVE)
         self.assertTrue(employee.is_active)
-        self.assertContains(response, 'Сначала начните дневную смену ОУП.')
+        self.assertContains(response, 'Сначала начните рабочий период ОУП.')
 
     def test_successful_dismissal_deactivates_access_and_closes_assignment(self):
         self.start_shift()
@@ -724,9 +814,18 @@ class OupWorkplaceTests(TestCase):
 
     def test_oup_log_contains_only_current_specialist_actions(self):
         self.start_shift()
+        AdminActionLog.objects.create(
+            actor=self.oup_employee,
+            action='ОУП: начата дневная смена',
+            object_type='EmployeeShift',
+            object_repr='Иванова Анна Сергеевна / Дневная / 01.07.2026',
+        )
         AdminActionLog.objects.create(actor=None, action='ОУП: чужое действие', object_repr='Другой сотрудник')
         response = self.client.get(reverse('oup_logs'))
-        self.assertContains(response, 'начата дневная смена')
+        self.assertContains(response, 'начат рабочий период')
+        self.assertContains(response, 'начат рабочий период · 2')
+        self.assertNotContains(response, 'начата дневная смена')
+        self.assertNotContains(response, 'Иванова Анна Сергеевна / Дневная')
         self.assertNotContains(response, 'чужое действие')
 
     def test_oup_log_is_paginated_without_hiding_older_actions(self):

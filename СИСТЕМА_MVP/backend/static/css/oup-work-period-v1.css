@@ -1,0 +1,98 @@
+.oup-shell {
+    overflow-y: visible;
+}
+
+.oup-shift-state {
+    min-width: 0;
+    min-height: 46px;
+}
+
+.oup-shift-state.is-occupied {
+    border-left-color: var(--admin-red);
+    background: var(--admin-red-soft);
+}
+
+.oup-shift-state strong,
+.oup-shift-state small {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.oup-shift-state small {
+    color: var(--admin-muted);
+    font-size: 9px;
+    font-weight: 800;
+    line-height: 1;
+}
+
+.oup-shift-button.is-occupied,
+.oup-shift-button:disabled {
+    border-color: var(--admin-red);
+    background: var(--admin-red-soft);
+    color: var(--admin-red);
+    cursor: not-allowed;
+    opacity: 1;
+}
+
+.oup-page {
+    grid-template-rows: none;
+    grid-auto-rows: auto;
+    height: auto;
+    min-height: 0;
+    overflow: visible;
+}
+
+.oup-period-occupied {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 12px;
+    padding: 14px 16px;
+    border: 1px solid var(--admin-red);
+    border-left-width: 5px;
+    border-radius: 7px;
+    background: var(--admin-red-soft);
+    box-shadow: var(--admin-shadow);
+}
+
+.oup-period-occupied > div {
+    min-width: 0;
+}
+
+.oup-period-occupied strong {
+    color: var(--admin-ink);
+    font-size: 16px;
+}
+
+.oup-period-occupied p {
+    margin: 3px 0 0;
+    color: var(--admin-muted);
+    font-size: 13px;
+}
+
+.oup-period-occupied .oup-status-dot {
+    width: 12px;
+    height: 12px;
+    flex: 0 0 auto;
+    border-radius: 50%;
+    background: var(--admin-red);
+    box-shadow: 0 0 0 5px color-mix(in srgb, var(--admin-red) 18%, transparent);
+}
+
+@media (max-width: 640px) {
+    .oup-console-actions > .oup-shift-button {
+        grid-column: 1 / -1;
+        width: 100%;
+    }
+
+    .oup-shift-state strong,
+    .oup-shift-state small {
+        white-space: normal;
+    }
+
+    .oup-period-occupied {
+        align-items: flex-start;
+    }
+}

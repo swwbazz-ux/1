@@ -4,7 +4,8 @@
 {% block title %}{% if scope == 'dismissed' %}Уволенные сотрудники{% else %}Сотрудники ОУП{% endif %}{% endblock %}
 {% block body_class %}oup-workplace-screen{% endblock %}
 {% block extra_head %}
-<link rel="stylesheet" href="{% static 'css/oup-workplace-v1.css' %}?v=1">
+<link rel="stylesheet" href="{% static 'css/oup-workplace-v1.css' %}?v=20260713-1">
+<link rel="stylesheet" href="{% static 'css/oup-work-period-v1.css' %}">
 {% endblock %}
 
 {% block body %}
@@ -16,20 +17,13 @@
             <div class="message {{ message.tags|default:'success' }}" role="status">{{ message }}</div>
         {% endfor %}
 
-        {% if not open_oup_shift %}
-            <section class="oup-shift-banner" aria-labelledby="oup-shift-banner-title">
+        {% if oup_period_is_occupied %}
+            <section class="oup-period-occupied" aria-labelledby="oup-period-occupied-title" role="status">
+                <span class="oup-status-dot" aria-hidden="true"></span>
                 <div>
-                    <span class="oup-status-dot" aria-hidden="true"></span>
-                    <div>
-                        <strong id="oup-shift-banner-title">Дневная смена ОУП не начата</strong>
-                        <p>Справочник и журнал доступны для просмотра. Начните смену, чтобы создавать, редактировать и увольнять сотрудников.</p>
-                    </div>
+                    <strong id="oup-period-occupied-title">Рабочий период занят</strong>
+                    <p><b>{{ active_oup_period.employee.full_name }}</b> работает с {{ active_oup_period.opened_at|date:"d.m.Y H:i" }}. Вам доступен только просмотр.</p>
                 </div>
-                <form method="post" action="{% url 'oup_shift_start' %}">
-                    {% csrf_token %}
-                    <input type="hidden" name="next" value="{{ request.get_full_path }}">
-                    <button type="submit" class="admin-button admin-button-primary">Начать дневную смену</button>
-                </form>
             </section>
         {% endif %}
 
@@ -67,7 +61,7 @@
                         {% if can_change_employees %}
                             <a class="admin-button admin-button-primary" href="{% url 'oup_employee_create' %}">+ Добавить сотрудника</a>
                         {% else %}
-                            <span class="admin-button admin-button-disabled" title="Сначала начните смену">+ Добавить сотрудника</span>
+                            <span class="admin-button admin-button-disabled" title="{% if oup_period_is_occupied %}Рабочий период занят другим специалистом{% else %}Сначала начните работу{% endif %}">+ Добавить сотрудника</span>
                         {% endif %}
                     {% endif %}
                 </div>
@@ -154,7 +148,7 @@
                             <p>Измените фильтры или вернитесь к справочнику действующих сотрудников.</p>
                         {% else %}
                             <strong>Сотрудники не найдены</strong>
-                            <p>Измените фильтры или добавьте нового сотрудника после начала смены.</p>
+                            <p>Измените фильтры или добавьте нового сотрудника после начала работы.</p>
                         {% endif %}
                     </div>
                 {% endfor %}
@@ -162,5 +156,6 @@
         </section>
     </main>
 </div>
-<script src="{% static 'js/oup-workplace.js' %}?v=1"></script>
+<script src="{% static 'js/oup-workplace.js' %}?v=20260713-1"></script>
+<script src="{% static 'js/oup-work-period-v1.js' %}"></script>
 {% endblock %}

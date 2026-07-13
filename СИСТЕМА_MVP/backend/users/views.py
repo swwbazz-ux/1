@@ -434,7 +434,11 @@ def activate_access_view(request):
             request.session.pop('pending_activation_access_id', None)
             request.session['employee_access_id'] = access.id
             mark_session_device_kind(request)
-            messages.success(request, 'Постоянный пинкод создан. Первичный пинкод больше не действует.')
+            if access.role.code != 'oup':
+                messages.success(
+                    request,
+                    'Постоянный пинкод создан. Первичный пинкод больше не действует.',
+                )
             return redirect('role_home')
     else:
         form = AccessActivationForm(access=access)
