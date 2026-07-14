@@ -97,18 +97,22 @@
             return (value || "").toLocaleLowerCase("ru-RU").replace(/ё/g, "е").trim();
         }
 
-        function compact(value) {
-            return normalize(value).replace(/[\s()+\-]/g, "");
+        function digits(value) {
+            return (value || "").replace(/\D/g, "");
         }
 
         function applySearch() {
             var query = normalize(search.value);
-            var compactQuery = compact(query);
+            var numericQuery = digits(query);
+            var isNumericQuery = Boolean(numericQuery) && !query.replace(/[\d\s()+\-]/g, "");
             var visible = 0;
 
             rows.forEach(function (row) {
                 var value = normalize(row.dataset.employeeSearch);
-                var matches = !query || value.indexOf(query) !== -1 || compact(value).indexOf(compactQuery) !== -1;
+                var matches = !query || value.indexOf(query) !== -1;
+                if (!matches && isNumericQuery) {
+                    matches = digits(value).indexOf(numericQuery) !== -1;
+                }
                 row.hidden = !matches;
                 if (matches) visible += 1;
             });
