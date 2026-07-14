@@ -497,7 +497,13 @@
     color: var(--admin-muted);
 }
 
-.oup-employee-layout,
+.oup-employee-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) clamp(440px, 34vw, 720px);
+    gap: 16px;
+    align-items: start;
+}
+
 .oup-dismiss-layout {
     display: grid;
     grid-template-columns: minmax(0, 1.8fr) minmax(310px, .62fr);
@@ -856,8 +862,10 @@
     color: var(--admin-muted);
 }
 
-.oup-access-credentials {
+.oup-access-list article > .oup-access-credentials {
     display: grid;
+    align-items: stretch;
+    justify-content: stretch;
     gap: 6px;
     margin-top: 4px;
     padding-top: 8px;
@@ -865,15 +873,18 @@
 }
 
 .oup-copy-row {
-    display: flex;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
-    justify-content: space-between;
     gap: 10px;
+    min-width: 0;
+    padding: 4px 0;
 }
 
 .oup-copy-row span {
     display: grid;
     min-width: 0;
+    overflow: hidden;
 }
 
 .oup-copy-row small {
@@ -884,9 +895,11 @@
 }
 
 .oup-copy-row b {
-    overflow-wrap: anywhere;
+    overflow: hidden;
     color: var(--admin-ink);
     font-size: 12px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .oup-copy-button {
@@ -916,8 +929,8 @@
 
 @media (max-width: 430px) {
     .oup-copy-row {
+        grid-template-columns: 1fr;
         align-items: stretch;
-        flex-direction: column;
     }
 
     .oup-copy-button {
