@@ -228,7 +228,20 @@
                                         <span class="oup-status-chip status-{{ item.status }}">{{ item.get_status_display }}</span>
                                     </div>
                                     {% if item.status == 'not_activated' and item.primary_code_issued_at %}
-                                        <small>Первичный PIN: <b>{{ item.access_code }}</b></small>
+                                        <div class="oup-access-credentials" aria-label="Данные для первого входа">
+                                            <div class="oup-copy-row">
+                                                <span><small>Ссылка на вход</small><b>{{ request.scheme }}://{{ request.get_host }}/</b></span>
+                                                <button type="button" class="oup-copy-button" data-copy-value="{{ request.scheme }}://{{ request.get_host }}/">Копировать</button>
+                                            </div>
+                                            <div class="oup-copy-row">
+                                                <span><small>Номер телефона</small><b>{{ employee.phone|default:"Не указан" }}</b></span>
+                                                {% if employee.phone %}<button type="button" class="oup-copy-button" data-copy-value="{{ employee.phone }}">Копировать</button>{% endif %}
+                                            </div>
+                                            <div class="oup-copy-row">
+                                                <span><small>Первичный PIN</small><b>{{ item.access_code }}</b></span>
+                                                <button type="button" class="oup-copy-button" data-copy-value="{{ item.access_code }}">Копировать</button>
+                                            </div>
+                                        </div>
                                     {% endif %}
                                     {% if can_change_employees and item.is_active %}
                                         <form method="post" action="{% url 'oup_employee_access_deactivate' item.id %}" data-confirm="Отключить доступ {{ item.role.name }}?">
@@ -291,7 +304,7 @@
         </div>
     </main>
 </div>
-<script src="{% static 'js/oup-workplace.js' %}?v=20260713-1"></script>
+<script src="{% static 'js/oup-workplace.js' %}?v=20260714-2"></script>
 <script src="{% static 'js/oup-work-period-v1.js' %}"></script>
 <script>
 document.addEventListener('DOMContentLoaded', function () {

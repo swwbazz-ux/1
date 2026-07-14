@@ -49,8 +49,43 @@
         });
     }
 
+    function copyText(value) {
+        if (navigator.clipboard && window.isSecureContext) {
+            return navigator.clipboard.writeText(value);
+        }
+        var input = document.createElement("textarea");
+        input.value = value;
+        input.setAttribute("readonly", "");
+        input.style.position = "fixed";
+        input.style.opacity = "0";
+        document.body.appendChild(input);
+        input.select();
+        var copied = document.execCommand("copy");
+        input.remove();
+        return copied ? Promise.resolve() : Promise.reject(new Error("copy_failed"));
+    }
+
+    function initCopyButtons() {
+        document.querySelectorAll("[data-copy-value]").forEach(function (button) {
+            button.addEventListener("click", function () {
+                var originalLabel = button.textContent;
+                copyText(button.dataset.copyValue || "").then(function () {
+                    button.textContent = "Скопировано";
+                    button.classList.add("is-copied");
+                    window.setTimeout(function () {
+                        button.textContent = originalLabel;
+                        button.classList.remove("is-copied");
+                    }, 1600);
+                }).catch(function () {
+                    button.textContent = "Не скопировано";
+                });
+            });
+        });
+    }
+
     document.addEventListener("DOMContentLoaded", function () {
         initTheme();
         initPhotoPreview();
+        initCopyButtons();
     });
 })();

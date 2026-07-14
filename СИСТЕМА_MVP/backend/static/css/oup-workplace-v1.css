@@ -856,6 +856,75 @@
     color: var(--admin-muted);
 }
 
+.oup-access-credentials {
+    display: grid;
+    gap: 6px;
+    margin-top: 4px;
+    padding-top: 8px;
+    border-top: 1px solid var(--admin-line);
+}
+
+.oup-copy-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.oup-copy-row span {
+    display: grid;
+    min-width: 0;
+}
+
+.oup-copy-row small {
+    color: var(--admin-muted);
+    font-size: 10px;
+    font-weight: 800;
+    text-transform: uppercase;
+}
+
+.oup-copy-row b {
+    overflow-wrap: anywhere;
+    color: var(--admin-ink);
+    font-size: 12px;
+}
+
+.oup-copy-button {
+    flex: 0 0 auto;
+    min-height: 32px;
+    padding: 6px 9px;
+    border: 1px solid var(--admin-line);
+    border-radius: 5px;
+    background: var(--admin-panel);
+    color: var(--admin-green);
+    cursor: pointer;
+    font: inherit;
+    font-size: 10px;
+    font-weight: 900;
+    text-transform: uppercase;
+}
+
+.oup-copy-button:hover,
+.oup-copy-button:focus-visible {
+    border-color: var(--admin-green);
+}
+
+.oup-copy-button.is-copied {
+    border-color: var(--admin-green);
+    background: color-mix(in srgb, var(--admin-green) 10%, var(--admin-panel));
+}
+
+@media (max-width: 430px) {
+    .oup-copy-row {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .oup-copy-button {
+        width: 100%;
+    }
+}
+
 .oup-protected-access {
     margin-top: 12px;
     border-left: 4px solid var(--admin-yellow);
