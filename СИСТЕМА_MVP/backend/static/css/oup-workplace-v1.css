@@ -720,6 +720,7 @@
 
 .oup-shell .employee-detail-field {
     display: grid;
+    align-content: start;
     gap: 6px;
 }
 
