@@ -11,6 +11,32 @@
     color: #0f7898;
 }
 
+.admin-logs-shell .log-action-messages {
+    display: grid;
+    gap: 8px;
+}
+
+.admin-logs-shell .log-action-message {
+    padding: 10px 12px;
+    border: 1px solid var(--admin-line);
+    border-radius: 6px;
+    background: var(--admin-panel);
+    color: var(--admin-ink);
+    font-size: 13px;
+    font-weight: 800;
+    line-height: 1.35;
+}
+
+.admin-logs-shell .log-action-message.is-success {
+    border-color: color-mix(in srgb, var(--admin-green) 52%, var(--admin-line));
+    background: color-mix(in srgb, var(--admin-green) 10%, var(--admin-panel));
+}
+
+.admin-logs-shell .log-action-message.is-error {
+    border-color: color-mix(in srgb, var(--admin-red) 52%, var(--admin-line));
+    background: color-mix(in srgb, var(--admin-red) 9%, var(--admin-panel));
+}
+
 .admin-logs-shell .admin-log-row.log-state-info {
     border-left-color: #168aad;
     background: color-mix(in srgb, #168aad 5%, var(--admin-panel));

@@ -339,7 +339,7 @@
                     </div>
                 </div>
                 <div class="employee-danger-actions">
-                    {% if latest_oup_dismissal_log and latest_oup_dismissal_log.undo_state.available %}
+                    {% if employee.status == "dismissed" and latest_oup_dismissal_log and latest_oup_dismissal_log.undo_state.available %}
                         <form method="post" action="{% url 'system_admin_undo_oup_action' latest_oup_dismissal_log.id %}" data-confirm="{{ latest_oup_dismissal_log.undo_state.confirmation }}">
                             {% csrf_token %}
                             <input type="hidden" name="next" value="{% url 'system_admin_employee_detail' employee.id %}">
@@ -359,7 +359,7 @@
                         <button type="submit" class="button-danger">Удалить полностью</button>
                     </form>
                 </div>
-                {% if latest_oup_dismissal_log and not latest_oup_dismissal_log.undo_state.available %}
+                {% if employee.status == "dismissed" and latest_oup_dismissal_log and not latest_oup_dismissal_log.undo_state.available %}
                     <p class="muted employee-danger-note">Восстановление после увольнения ОУП недоступно: {{ latest_oup_dismissal_log.undo_state.reason }}</p>
                 {% endif %}
                 <p class="muted employee-danger-note">Если у сотрудника есть производственная история, система заблокирует полное удаление и предложит архив.</p>

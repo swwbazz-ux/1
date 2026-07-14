@@ -15,6 +15,10 @@ from users.oup_services import (
     format_employee_changes,
     log_oup_action,
 )
+from users.oup_undo import (
+    OUP_ACTION_BULK_EMPLOYEE_CREATED,
+    OUP_ACTION_BULK_EMPLOYEE_UPDATED,
+)
 
 
 REQUIRED_COLUMNS = {
@@ -206,6 +210,7 @@ class Command(BaseCommand):
                 None,
                 'создан сотрудник массовым импортом',
                 employee,
+                action_code=OUP_ACTION_BULK_EMPLOYEE_CREATED,
                 new_value='; '.join(f'{label}: {value}' for label, value in snapshot.values()),
                 comment=source_label,
             )
@@ -235,6 +240,7 @@ class Command(BaseCommand):
             None,
             'обновлена карточка массовым импортом',
             employee,
+            action_code=OUP_ACTION_BULK_EMPLOYEE_UPDATED,
             old_value=changes,
             new_value='Изменения сохранены',
             comment=source_label,

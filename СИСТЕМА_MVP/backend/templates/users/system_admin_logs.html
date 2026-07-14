@@ -42,6 +42,14 @@
     </header>
 
     <main class="admin-console-page logs-page">
+        {% if messages %}
+            <section class="log-action-messages" aria-live="polite">
+                {% for message in messages %}
+                    <div class="log-action-message is-{{ message.tags|default:'info' }}" role="status">{{ message }}</div>
+                {% endfor %}
+            </section>
+        {% endif %}
+
         <section class="log-metrics">
             <a class="log-metric metric-neutral" href="{% url 'system_admin_logs' %}">
                 <span>Всего действий</span>

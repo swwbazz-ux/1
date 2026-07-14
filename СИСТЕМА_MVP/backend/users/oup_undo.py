@@ -23,6 +23,8 @@ OUP_ACTION_ACCESS_REISSUED = 'oup_access_reissued'
 OUP_ACTION_ACCESS_DEACTIVATED = 'oup_access_deactivated'
 OUP_ACTION_PERIOD_STARTED = 'oup_period_started'
 OUP_ACTION_PERIOD_FINISHED = 'oup_period_finished'
+OUP_ACTION_BULK_EMPLOYEE_CREATED = 'oup_bulk_employee_created'
+OUP_ACTION_BULK_EMPLOYEE_UPDATED = 'oup_bulk_employee_updated'
 ADMIN_ACTION_OUP_REVERSED = 'admin_oup_action_reversed'
 
 LEGACY_ACTION_CODES = {
@@ -37,6 +39,8 @@ LEGACY_ACTION_CODES = {
     'ОУП: начат рабочий период': OUP_ACTION_PERIOD_STARTED,
     'ОУП: завершена дневная смена': OUP_ACTION_PERIOD_FINISHED,
     'ОУП: завершён рабочий период': OUP_ACTION_PERIOD_FINISHED,
+    'ОУП: создан сотрудник массовым импортом': OUP_ACTION_BULK_EMPLOYEE_CREATED,
+    'ОУП: обновлена карточка массовым импортом': OUP_ACTION_BULK_EMPLOYEE_UPDATED,
 }
 
 EMPLOYEE_CARD_UNDO_FIELDS = (
