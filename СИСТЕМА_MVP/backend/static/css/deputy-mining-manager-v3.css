@@ -3,19 +3,98 @@
     background: #dce4e7;
 }
 
+.deputy-shell {
+    --admin-console-header-height: 82px;
+}
+
+.deputy-shell .deputy-console-header {
+    grid-template-columns: minmax(210px, 260px) minmax(0, 1fr) minmax(150px, 210px);
+    height: var(--admin-console-header-height);
+    min-height: var(--admin-console-header-height);
+    max-height: var(--admin-console-header-height);
+}
+
+.deputy-shell .admin-console-identity,
+.deputy-shell .admin-console-main,
 .deputy-shell .admin-console-actions {
-    grid-template-columns: 44px minmax(112px, 1fr);
+    padding: 10px 14px;
+}
+
+.deputy-shell .admin-console-identity {
+    grid-template-columns: 44px minmax(0, 1fr);
+    gap: 10px;
+}
+
+.deputy-shell .admin-console-avatar {
+    width: 44px;
+    height: 44px;
+    font-size: 20px;
+}
+
+.deputy-shell .admin-console-identity strong {
+    font-size: 14px;
+}
+
+.deputy-shell .admin-console-identity em {
+    margin-top: 3px;
+    font-size: 10px;
+}
+
+.deputy-shell .admin-console-actions {
+    grid-template-columns: 38px minmax(96px, 1fr);
+    gap: 8px;
 }
 
 .deputy-shell .admin-console-main {
-    grid-template-rows: auto auto;
+    display: flex;
+    gap: 16px;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.deputy-shell .admin-console-title {
+    min-width: 0;
+}
+
+.deputy-shell .admin-console-title span {
+    font-size: 10px;
 }
 
 .deputy-shell .admin-console-title h1 {
     max-width: 100%;
     overflow: hidden;
+    font-size: 27px;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.deputy-shell .admin-console-nav {
+    flex: 0 0 auto;
+    flex-wrap: nowrap;
+    gap: 6px;
+}
+
+.deputy-shell .admin-console-nav a,
+.deputy-shell .admin-utility-link,
+.deputy-shell .admin-theme-button {
+    min-height: 36px;
+    font-size: 11px;
+}
+
+.deputy-shell .admin-console-nav a {
+    min-width: 98px;
+    padding: 0 10px;
+}
+
+.deputy-shell .admin-theme-button {
+    width: 38px;
+    min-width: 38px;
+}
+
+.deputy-shell .admin-console-page {
+    height: calc(100dvh - var(--admin-console-header-height));
+    gap: 8px;
+    padding: 8px 0 12px;
 }
 
 .deputy-planning-page {
@@ -24,7 +103,7 @@
 
 .deputy-server-messages {
     position: fixed;
-    top: 118px;
+    top: 92px;
     right: 18px;
     z-index: 40;
     width: min(420px, calc(100vw - 36px));
@@ -44,22 +123,23 @@
 .deputy-planning-toolbar {
     display: grid;
     grid-template-columns: minmax(220px, 1fr) minmax(240px, 340px) auto;
-    gap: 12px;
-    align-items: end;
-    padding: 10px 12px;
+    gap: 10px;
+    align-items: center;
+    padding: 6px 8px;
 }
 
 .deputy-planning-scope {
     display: flex;
     min-width: 0;
     gap: 10px;
-    align-items: end;
+    align-items: center;
 }
 
 .deputy-work-date {
-    display: grid;
+    display: flex;
     flex: 0 0 auto;
-    gap: 4px;
+    gap: 7px;
+    align-items: center;
 }
 
 .deputy-work-date span {
@@ -71,7 +151,7 @@
 
 .deputy-work-date strong {
     color: var(--admin-ink);
-    font-size: 16px;
+    font-size: 14px;
     font-weight: 900;
     line-height: 1;
 }
@@ -95,8 +175,8 @@
     flex: 0 0 auto;
     align-items: center;
     justify-content: center;
-    min-height: 38px;
-    padding: 0 12px;
+    min-height: 34px;
+    padding: 0 10px;
     border: 1px solid var(--admin-line);
     border-radius: 6px;
     background: var(--admin-panel-soft);
@@ -116,21 +196,25 @@
 }
 
 .deputy-search-field {
-    display: grid;
+    position: relative;
+    display: block;
     min-width: 0;
-    gap: 5px;
 }
 
 .deputy-search-field span {
-    color: var(--admin-muted);
-    font-size: 11px;
-    font-weight: 900;
-    text-transform: uppercase;
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
 }
 
 .deputy-search-field input {
     width: 100%;
-    min-height: 38px;
+    min-height: 34px;
     padding: 0 11px;
     border: 1px solid var(--admin-line);
     border-radius: 6px;
@@ -149,14 +233,14 @@
 
 .deputy-toolbar-actions {
     display: flex;
-    gap: 10px;
+    gap: 8px;
     align-items: center;
     justify-content: flex-end;
 }
 
 .deputy-autosave-state {
     display: inline-flex;
-    min-width: 152px;
+    min-width: 132px;
     gap: 7px;
     align-items: center;
     justify-content: flex-end;
@@ -192,14 +276,16 @@
 }
 
 .deputy-publish-button {
-    min-width: 138px;
+    width: auto;
+    min-width: 126px;
+    min-height: 36px;
 }
 
 .deputy-filter-counts {
     display: flex;
     min-width: 0;
     gap: 6px;
-    padding: 6px;
+    padding: 4px;
     overflow-x: auto;
     scrollbar-width: thin;
 }
@@ -209,7 +295,7 @@
     width: auto;
     flex: 1 1 0;
     min-width: 130px;
-    min-height: 38px;
+    min-height: 34px;
     gap: 9px;
     align-items: center;
     justify-content: space-between;
@@ -241,7 +327,7 @@
 .deputy-filter-counts strong {
     display: inline-grid;
     min-width: 28px;
-    height: 24px;
+    height: 22px;
     place-items: center;
     padding: 0 6px;
     border-radius: 5px;
@@ -253,7 +339,7 @@
 .deputy-planning-workspace {
     display: grid;
     grid-template-columns: minmax(250px, 300px) minmax(0, 1fr);
-    gap: 12px;
+    gap: 8px;
     min-height: 0;
     overflow: hidden;
 }
@@ -1178,28 +1264,105 @@ button.deputy-avatar {
 
 @media (max-width: 1180px) {
     .deputy-mining-manager-screen {
-        overflow: auto;
+        overflow: hidden;
     }
 
     .deputy-planning-toolbar {
-        grid-template-columns: minmax(0, 1fr) minmax(240px, 320px);
+        grid-template-columns: minmax(220px, 1fr) minmax(220px, 300px) auto;
+    }
+
+    .deputy-work-date span {
+        display: none;
     }
 
     .deputy-toolbar-actions {
-        grid-column: 1 / -1;
+        grid-column: auto;
     }
 
     .deputy-planning-workspace {
         grid-template-columns: 260px minmax(0, 1fr);
-        height: clamp(520px, calc(100dvh - 430px), 720px);
-        min-height: 520px;
+        height: auto;
+        min-height: 0;
         overflow: hidden;
     }
 }
 
 @media (max-width: 720px) {
+    .deputy-mining-manager-screen {
+        overflow: auto;
+    }
+
+    .deputy-shell .deputy-console-header {
+        grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-rows: 58px 54px;
+        height: auto;
+        min-height: 112px;
+        max-height: none;
+    }
+
+    .deputy-shell .admin-console-identity {
+        grid-column: 1;
+        grid-row: 1;
+        grid-template-columns: 38px minmax(0, 1fr);
+        gap: 8px;
+        padding: 8px 10px;
+        border-bottom: 1px solid var(--admin-line-soft);
+    }
+
+    .deputy-shell .admin-console-avatar {
+        width: 38px;
+        height: 38px;
+        font-size: 18px;
+    }
+
+    .deputy-shell .admin-console-main {
+        grid-column: 1 / -1;
+        grid-row: 2;
+        gap: 10px;
+        padding: 8px 10px;
+        border-bottom: 1px solid var(--admin-line-soft);
+    }
+
+    .deputy-shell .admin-console-title span {
+        display: none;
+    }
+
+    .deputy-shell .admin-console-title {
+        display: none;
+    }
+
+    .deputy-shell .admin-console-nav {
+        flex: 1 1 auto;
+        width: 100%;
+        justify-content: stretch;
+    }
+
+    .deputy-shell .admin-console-nav a {
+        flex: 1 1 0;
+        min-width: 0;
+        min-height: 34px;
+        padding: 0 8px;
+        font-size: 10px;
+    }
+
     .deputy-shell .admin-console-actions {
-        grid-template-columns: 44px minmax(0, 1fr);
+        grid-column: 2;
+        grid-row: 1;
+        grid-template-columns: 36px minmax(72px, 82px);
+        gap: 6px;
+        padding: 8px 10px 8px 0;
+        border-bottom: 1px solid var(--admin-line-soft);
+    }
+
+    .deputy-shell .admin-theme-button {
+        width: 36px;
+        min-width: 36px;
+    }
+
+    .deputy-shell .admin-console-page {
+        height: auto;
+        min-height: calc(100dvh - 112px);
+        overflow: visible;
     }
 
     .deputy-planning-page {
@@ -1208,7 +1371,8 @@ button.deputy-avatar {
 
     .deputy-planning-toolbar {
         grid-template-columns: minmax(0, 1fr);
-        padding: 9px;
+        gap: 6px;
+        padding: 6px;
     }
 
     .deputy-category-nav,
@@ -1218,7 +1382,11 @@ button.deputy-avatar {
     }
 
     .deputy-planning-scope {
-        align-items: end;
+        align-items: center;
+    }
+
+    .deputy-work-date span {
+        display: none;
     }
 
     .deputy-toolbar-actions {
@@ -1229,6 +1397,12 @@ button.deputy-avatar {
         min-width: 0;
         flex: 1 1 auto;
         justify-content: flex-start;
+        overflow: hidden;
+    }
+
+    .deputy-autosave-state [data-autosave-text] {
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
 
     .deputy-publish-button {
