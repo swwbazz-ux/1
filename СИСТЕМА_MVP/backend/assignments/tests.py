@@ -21,7 +21,12 @@ from .views import build_excavator_tile, build_truck_tile
 class MiningMasterAssignmentsViewTests(TestCase):
     def setUp(self):
         self.master_role = Role.objects.create(code='mining_master', name='Горный мастер')
-        self.master = Employee.objects.create(full_name='Горный мастер Тест', phone='79000000400', is_active=True)
+        self.master = Employee.objects.create(
+            full_name='Горный мастер Тест',
+            phone='79000000400',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
         self.access = EmployeeAccess.objects.create(
             employee=self.master,
             role=self.master_role,
@@ -1114,6 +1119,28 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertRedirects(response, reverse('mining_master_assignments'))
         self.assertFalse(EmployeeShift.objects.filter(employee=self.master, closed_at__isnull=True).exists())
 
+    def test_mining_master_cannot_restart_shift_after_employee_is_dismissed(self):
+        self.shift.closed_at = timezone.now()
+        self.shift.closed_by = self.master
+        self.shift.save(update_fields=['closed_at', 'closed_by'])
+        Employee.objects.filter(pk=self.master.pk).update(
+            status=Employee.Status.DISMISSED,
+            is_active=False,
+        )
+        session = self.client.session
+        session['device_kind'] = 'personal'
+        session.save()
+
+        response = self.client.post(
+            reverse('mining_master_assignments'),
+            {'action': 'start_shift'},
+        )
+
+        self.assertRedirects(response, reverse('mining_master_assignments'))
+        self.assertFalse(
+            EmployeeShift.objects.filter(employee=self.master, closed_at__isnull=True).exists()
+        )
+
     def test_shared_desktop_requires_credentials_to_start_shift(self):
         self.shift.closed_at = timezone.now()
         self.shift.closed_by = self.master
@@ -1172,6 +1199,7 @@ class MiningMasterAssignmentsViewTests(TestCase):
         next_master = Employee.objects.create(
             full_name='Сменный горный мастер',
             phone='79000000044',
+            status=Employee.Status.ACTIVE,
             is_active=True,
         )
         next_access = EmployeeAccess.objects.create(

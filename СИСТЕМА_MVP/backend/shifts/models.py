@@ -92,6 +92,7 @@ class WatchPeriod(models.Model):
 class EmployeeShift(models.Model):
     employee = models.ForeignKey('users.Employee', verbose_name='Сотрудник', on_delete=models.PROTECT)
     shift_type = models.CharField('Смена', max_length=16, choices=ShiftType.choices)
+    workplace_code = models.CharField('Рабочий контур', max_length=32, blank=True, db_index=True)
     watch_period = models.ForeignKey(WatchPeriod, verbose_name='Вахта', on_delete=models.PROTECT, null=True, blank=True)
     equipment = models.ForeignKey('references.Equipment', verbose_name='Техника', on_delete=models.PROTECT, null=True, blank=True)
     start_fuel = models.DecimalField('Топливо на начало', max_digits=10, decimal_places=2, null=True, blank=True)

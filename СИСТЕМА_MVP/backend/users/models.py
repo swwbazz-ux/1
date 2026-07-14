@@ -2,6 +2,11 @@ from django.db import models
 
 
 class Employee(models.Model):
+    class WorkCategory(models.TextChoices):
+        DRIVER = 'driver', 'Водитель самосвала'
+        EXCAVATOR_OPERATOR = 'excavator_operator', 'Машинист экскаватора'
+        OTHER = 'other', 'Без привязки к технике'
+
     class Status(models.TextChoices):
         ACTIVE = 'active', 'Активен'
         NOT_ACTIVATED = 'not_activated', 'Не активирован'
@@ -11,7 +16,15 @@ class Employee(models.Model):
         DELETED = 'deleted', 'Удален'
 
     full_name = models.CharField('ФИО', max_length=255)
+    birth_date = models.DateField('Дата рождения', null=True, blank=True)
     position = models.CharField('Должность', max_length=128, blank=True)
+    department = models.CharField('Подразделение', max_length=160, blank=True)
+    work_category = models.CharField(
+        'Рабочая категория',
+        max_length=32,
+        choices=WorkCategory.choices,
+        default=WorkCategory.OTHER,
+    )
     personnel_number = models.CharField('Табельный номер', max_length=64, blank=True)
     phone = models.CharField('Телефон', max_length=32, blank=True)
     status = models.CharField('Статус', max_length=32, choices=Status.choices, default=Status.NOT_ACTIVATED)
@@ -107,6 +120,7 @@ class AdminActionLog(models.Model):
     actor = models.ForeignKey(Employee, verbose_name='Кто выполнил', on_delete=models.SET_NULL, null=True, blank=True, related_name='admin_actions')
     action = models.CharField('Действие', max_length=128)
     object_type = models.CharField('Тип объекта', max_length=128, blank=True)
+    object_id = models.CharField('ID объекта', max_length=64, blank=True)
     object_repr = models.CharField('Объект', max_length=255, blank=True)
     old_value = models.TextField('Старое значение', blank=True)
     new_value = models.TextField('Новое значение', blank=True)

@@ -1,5 +1,15 @@
 from django.urls import path
 
+from .oup_views import (
+    oup_employee_create_view,
+    oup_employee_detail_view,
+    oup_employee_dismiss_view,
+    oup_employees_view,
+    oup_home_view,
+    oup_logs_view,
+    oup_shift_close_view,
+    oup_shift_start_view,
+)
 from .views import (
     activate_access_view,
     driver_accept_assignment_view,
@@ -39,6 +49,15 @@ urlpatterns = [
     path('activate-access/', activate_access_view, name='activate_access'),
     path('interfaces/', interface_map_view, name='interface_map'),
     path('home/', role_home_view, name='role_home'),
+    path('oup/', oup_home_view, name='oup_home'),
+    path('oup/employees/', oup_employees_view, name='oup_employees'),
+    path('oup/employees/new/', oup_employee_create_view, name='oup_employee_create'),
+    path('oup/employees/<int:employee_id>/', oup_employee_detail_view, name='oup_employee_detail'),
+    path('oup/employees/<int:employee_id>/dismiss/', oup_employee_dismiss_view, name='oup_employee_dismiss'),
+    path('oup/dismissed/', oup_employees_view, {'scope': 'dismissed'}, name='oup_dismissed_employees'),
+    path('oup/log/', oup_logs_view, name='oup_logs'),
+    path('oup/shift/start/', oup_shift_start_view, name='oup_shift_start'),
+    path('oup/shift/close/', oup_shift_close_view, name='oup_shift_close'),
     path('driver.webmanifest', driver_manifest_view, name='driver_manifest'),
     path('driver-sw.js', driver_service_worker_view, name='driver_service_worker'),
     path('driver/', driver_shift_view, name='driver_work'),

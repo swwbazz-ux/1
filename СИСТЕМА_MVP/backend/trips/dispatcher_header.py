@@ -1,6 +1,8 @@
+from django.db import transaction
 from django.utils import timezone
 
 from shifts.models import EmployeeShift, ShiftType
+from shifts.services import lock_active_employee_for_shift
 from users.models import EmployeeAccess
 from users.session_device import get_session_device_kind
 
@@ -78,13 +80,17 @@ def build_dispatcher_header_context(access, request=None):
     }
 
 
+@transaction.atomic
 def open_dispatcher_shift(access):
+    employee = lock_active_employee_for_shift(access.employee, role_code='dispatcher')
+    if get_active_dispatcher_shift(access):
+        return None
     now = timezone.now()
     return EmployeeShift.objects.create(
-        employee=access.employee,
+        employee=employee,
         shift_type=get_dispatcher_shift_type_for_now(now),
         opened_at=now,
-        opened_by=access.employee,
+        opened_by=employee,
     )
 
 

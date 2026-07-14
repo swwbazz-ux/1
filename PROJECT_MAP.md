@@ -46,7 +46,7 @@ Backend является основным рабочим приложением.
 - Маршрут: `/excavator/work/`.
 - Manifest: `/excavator.webmanifest`.
 - Service worker: `/excavator-sw.js`.
-- Shell: `excavator-mobile-shell-v111`.
+- Shell: `excavator-mobile-shell-v112`.
 
 ### Горный мастер
 
@@ -63,6 +63,19 @@ Backend является основным рабочим приложением.
 - Маршрут: `/dispatcher/control/`.
 - Service worker: `/dispatcher-sw.js`.
 - Shell: `dispatcher-desktop-shell-v29`.
+
+### Отдел управления персоналом
+
+- Views: `СИСТЕМА_MVP/backend/users/oup_views.py`.
+- Forms: `СИСТЕМА_MVP/backend/users/oup_forms.py`.
+- Domain services: `СИСТЕМА_MVP/backend/users/oup_services.py`.
+- Templates: `СИСТЕМА_MVP/backend/templates/users/oup_*.html`.
+- Header include: `СИСТЕМА_MVP/backend/templates/includes/oup_header.html`.
+- CSS: `СИСТЕМА_MVP/backend/static/css/oup-workplace-v1.css`.
+- JavaScript: `СИСТЕМА_MVP/backend/static/js/oup-workplace.js`.
+- Маршруты: `/oup/`, `/oup/employees/`, `/oup/dismissed/`, `/oup/log/`.
+- Рабочий период ОУП: один активный период на всю 30-дневную вахту, без деления на дневную и ночную смены и без техники; технически хранится в `EmployeeShift`.
+- Границы: создание, редактирование, фото и увольнение сотрудников; без PIN, проживания, табеля, охраны труда и назначения техники.
 
 ## Правило локализации задачи
 

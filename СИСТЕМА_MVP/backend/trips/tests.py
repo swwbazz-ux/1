@@ -2,6 +2,7 @@
 from datetime import timedelta
 from pathlib import Path
 
+from django.core.exceptions import ValidationError
 from django.test import Client, TestCase
 from django.urls import reverse
 from django.utils import timezone
@@ -30,6 +31,7 @@ from shifts.models import (
     ShiftReadingCorrection,
 )
 from shifts.services import assign_shift_plan_snapshot, progress_cycle_visual_context
+from trips.dispatcher_header import open_dispatcher_shift
 from trips.models import Trip, TripClientAction, TripStatus
 from trips.views import build_dispatcher_dashboard_context, finalize_trip_unloaded
 from users.models import DriverPrimaryRegistration, Employee, EmployeeAccess, Role
@@ -41,6 +43,7 @@ class DispatcherSharedShiftStartTests(TestCase):
         self.current_dispatcher = Employee.objects.create(
             full_name='Дежурный диспетчер',
             phone='79000000500',
+            status=Employee.Status.ACTIVE,
             is_active=True,
         )
         self.current_access = EmployeeAccess.objects.create(
@@ -211,10 +214,25 @@ class DispatcherSharedShiftStartTests(TestCase):
             .exists()
         )
 
+    def test_open_dispatcher_shift_reloads_access_employee_and_rejects_dismissed_stale_object(self):
+        self.assertTrue(self.current_access.employee.is_active)
+        Employee.objects.filter(pk=self.current_dispatcher.pk).update(
+            status=Employee.Status.DISMISSED,
+            is_active=False,
+        )
+
+        with self.assertRaisesMessage(ValidationError, 'Сотрудник неактивен или уволен'):
+            open_dispatcher_shift(self.current_access)
+
+        self.assertFalse(
+            EmployeeShift.objects.filter(employee_id=self.current_dispatcher.pk).exists()
+        )
+
     def test_shared_desktop_can_start_shift_with_dispatcher_credentials(self):
         next_dispatcher = Employee.objects.create(
             full_name='Сменный диспетчер',
             phone='79000000544',
+            status=Employee.Status.ACTIVE,
             is_active=True,
         )
         next_access = EmployeeAccess.objects.create(
@@ -585,7 +603,10 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
     def setUp(self):
         upsert_default_equipment_states()
         self.role = Role.objects.create(code='excavator_operator', name='Машинист экскаватора')
-        self.operator = Employee.objects.create(full_name='Машинист ЭКГ')
+        self.operator = Employee.objects.create(
+            full_name='Машинист ЭКГ',
+            status=Employee.Status.ACTIVE,
+        )
         self.access = EmployeeAccess.objects.create(
             employee=self.operator,
             role=self.role,
@@ -660,8 +681,15 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/static/css/excavator-work-v55-shift.css')
         self.assertContains(response, '/excavator-sw.js')
         self.assertContains(response, 'scope: "/excavator/"')
-        self.assertContains(response, 'excavator-mobile-shell-v111')
-        self.assertContains(response, 'class="eo-current-app-version" aria-label="Текущая версия приложения">Версия 111</span>')
+        self.assertContains(response, 'excavator-mobile-shell-v112')
+        self.assertContains(response, 'class="eo-current-app-version" aria-label="Текущая версия приложения">Версия 112</span>')
+        self.assertContains(response, 'data-eo-shift-scroll')
+        self.assertContains(response, 'data-eo-shift-inputs')
+        self.assertContains(response, 'data-eo-shift-review hidden')
+        self.assertContains(response, 'shiftScreen.dataset.eoShiftDirty === "true"')
+        self.assertContains(response, 'shiftScreen.classList.contains("is-reviewed")')
+        self.assertContains(response, 'firstErrorField.scrollIntoView')
+        self.assertContains(response, 'var hasReadings = validation.fuel !== null')
         self.assertNotContains(response, 'class="eo-pin-icon"')
         self.assertContains(response, 'class="eo-face-coordinates"')
         self.assertContains(response, 'class="eo-face-rock"')
@@ -1579,7 +1607,10 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertTrue(OperationalStateEvent.objects.filter(event_type='excavator_shift_closed', object_id=str(opened.json()['shift_id'])).exists())
 
     def test_second_operator_cannot_open_shift_on_busy_excavator(self):
-        second_operator = Employee.objects.create(full_name='Второй машинист')
+        second_operator = Employee.objects.create(
+            full_name='Второй машинист',
+            status=Employee.Status.ACTIVE,
+        )
         second_access = EmployeeAccess.objects.create(
             employee=second_operator,
             role=self.role,
@@ -1811,7 +1842,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/excavator/')
-        self.assertIn('excavator-mobile-shell-v111', script)
+        self.assertIn('excavator-mobile-shell-v112', script)
         self.assertIn(reverse('excavator_work'), script)
         self.assertIn(reverse('excavator_manifest'), script)
         self.assertIn('/static/js/realtime-client.js', script)

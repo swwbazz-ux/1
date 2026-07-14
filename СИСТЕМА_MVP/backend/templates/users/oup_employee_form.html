@@ -1,0 +1,237 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}{{ title }} — ОУП{% endblock %}
+{% block body_class %}oup-workplace-screen oup-employee-screen{% endblock %}
+{% block extra_head %}
+<link rel="stylesheet" href="{% static 'css/oup-workplace-v1.css' %}?v=20260713-2">
+<link rel="stylesheet" href="{% static 'css/oup-work-period-v1.css' %}">
+    <link rel="stylesheet" href="{% static 'css/oup-responsive-layout-v2.css' %}">
+{% endblock %}
+
+{% block body %}
+<div class="admin-shell admin-exports-shell admin-day oup-shell" data-admin-theme>
+    {% include "includes/oup_header.html" with screen_title=title screen_subtitle="Кадровая карточка без PIN-кодов, проживания и назначения техники." %}
+
+    <main class="admin-console-page oup-page oup-form-page">
+        {% for message in messages %}
+            <div class="message {{ message.tags|default:'success' }}" role="status">{{ message }}</div>
+        {% endfor %}
+
+        {% if form.errors %}
+            <section class="oup-error-summary" role="alert" aria-labelledby="oup-error-title">
+                <strong id="oup-error-title">Проверьте заполнение карточки</strong>
+                <ul>
+                    {% for field in form %}
+                        {% for error in field.errors %}<li><a href="#{{ field.id_for_label }}">{{ field.label }}: {{ error }}</a></li>{% endfor %}
+                    {% endfor %}
+                    {% for error in form.non_field_errors %}<li>{{ error }}</li>{% endfor %}
+                </ul>
+            </section>
+        {% endif %}
+
+        {% if not open_oup_shift and not is_dismissed %}
+            <section class="oup-readonly-notice">
+                <strong>Режим просмотра</strong>
+                {% if oup_period_is_occupied %}
+                    <span>Рабочий период занят: {{ active_oup_period.employee.full_name }}, с {{ active_oup_period.opened_at|date:"d.m.Y H:i" }}. Изменения недоступны.</span>
+                {% else %}
+                    <span>Начните работу, чтобы изменять карточку.</span>
+                {% endif %}
+            </section>
+        {% endif %}
+
+        <div class="oup-employee-layout">
+            <form class="card employee-detail-card employee-profile-form oup-employee-form" method="post" enctype="multipart/form-data">
+                {% csrf_token %}
+                <div class="oup-form-heading">
+                    <div>
+                        <span class="oup-eyebrow">{% if page_mode == 'create' %}Новая запись{% else %}Карточка сотрудника{% endif %}</span>
+                        <h2>{% if page_mode == 'create' %}Добавление в рабочую базу{% else %}Основные сведения{% endif %}</h2>
+                        <p>Только данные, необходимые подразделениям для ежедневной работы.</p>
+                    </div>
+                    {% if employee %}
+                        <span class="oup-status-chip status-{{ employee.status }}">{{ employee.get_status_display }}</span>
+                    {% endif %}
+                </div>
+
+                <section class="oup-photo-and-name">
+                    <div class="oup-photo-editor">
+                        <label class="oup-photo-surface{% if not can_change_employees %} is-readonly{% endif %}"
+                               for="{{ form.photo.id_for_label }}"
+                               data-oup-photo-surface
+                               {% if not can_change_employees %}aria-disabled="true"{% endif %}>
+                            {% if employee and employee.photo %}
+                                <img src="{{ employee.photo.url }}" alt="Фото {{ employee.full_name }}" data-oup-photo-preview>
+                            {% else %}
+                                <span class="oup-photo-placeholder" data-oup-photo-placeholder aria-hidden="true">
+                                    <span class="oup-photo-placeholder-head"></span>
+                                    <span class="oup-photo-placeholder-body"></span>
+                                </span>
+                                <img src="" alt="Предпросмотр фото" data-oup-photo-preview hidden>
+                            {% endif %}
+                            <span class="oup-photo-overlay">{% if can_change_employees %}Выбрать фото{% else %}Фото сотрудника{% endif %}</span>
+                            {{ form.photo }}
+                        </label>
+                        <div class="oup-photo-actions">
+                            {% if can_change_employees %}
+                                <label class="admin-button admin-button-secondary" for="{{ form.photo.id_for_label }}">{% if employee.photo %}Заменить{% else %}Добавить фото{% endif %}</label>
+                            {% else %}
+                                <span class="oup-photo-readonly-label">Только просмотр</span>
+                            {% endif %}
+                            {% if employee.photo and not is_dismissed and can_change_employees %}
+                                <button type="submit" name="remove_photo" value="1" class="oup-link-danger" data-confirm="Удалить фото сотрудника?">Удалить</button>
+                            {% endif %}
+                        </div>
+                        <small>{{ form.photo.help_text }}</small>
+                        {{ form.photo.errors }}
+                    </div>
+
+                    <div class="oup-name-fields">
+                        <div class="employee-detail-field field-wide">
+                            <label for="{{ form.full_name.id_for_label }}">{{ form.full_name.label }} <b>*</b></label>
+                            {{ form.full_name }}
+                            {{ form.full_name.errors }}
+                        </div>
+                        <div class="oup-two-column-fields">
+                            <div class="employee-detail-field">
+                                <label for="{{ form.birth_date.id_for_label }}">{{ form.birth_date.label }}</label>
+                                {{ form.birth_date }}
+                                {{ form.birth_date.errors }}
+                            </div>
+                            <div class="employee-detail-field">
+                                <label for="{{ form.personnel_number.id_for_label }}">{{ form.personnel_number.label }} <b>*</b></label>
+                                {{ form.personnel_number }}
+                                {{ form.personnel_number.errors }}
+                            </div>
+                            <div class="employee-detail-field field-wide">
+                                <label for="{{ form.phone.id_for_label }}">{{ form.phone.label }} <b>*</b></label>
+                                {{ form.phone }}
+                                {{ form.phone.errors }}
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="oup-form-section">
+                    <div class="oup-section-heading">
+                        <span>01</span>
+                        <div><h3>Работа</h3><p>Формальная должность и принадлежность сотрудника.</p></div>
+                    </div>
+                    <div class="oup-form-grid">
+                        <div class="employee-detail-field">
+                            <label for="{{ form.position.id_for_label }}">{{ form.position.label }} <b>*</b></label>
+                            {{ form.position }}
+                            {{ form.position.errors }}
+                        </div>
+                        <div class="employee-detail-field">
+                            <label for="{{ form.department.id_for_label }}">{{ form.department.label }} <b>*</b></label>
+                            {{ form.department }}
+                            {{ form.department.errors }}
+                        </div>
+                        <div class="employee-detail-field">
+                            <label for="{{ form.work_category.id_for_label }}">{{ form.work_category.label }} <b>*</b></label>
+                            {{ form.work_category }}
+                            <small>{{ form.work_category.help_text }}</small>
+                            {{ form.work_category.errors }}
+                        </div>
+                        <div class="employee-detail-field">
+                            <label for="{{ form.hired_at.id_for_label }}">{{ form.hired_at.label }} <b>*</b></label>
+                            {{ form.hired_at }}
+                            {{ form.hired_at.errors }}
+                        </div>
+                        <div class="employee-detail-field field-wide">
+                            <label for="{{ form.rotation.id_for_label }}">{{ form.rotation.label }} <b>*</b></label>
+                            {{ form.rotation }}
+                            {{ form.rotation.errors }}
+                        </div>
+                    </div>
+                </section>
+
+                <section class="oup-form-section">
+                    <div class="oup-section-heading">
+                        <span>02</span>
+                        <div><h3>Рабочее примечание</h3><p>Без паспортных данных, адресов и документов из 1С.</p></div>
+                    </div>
+                    <div class="employee-detail-field field-wide">
+                        <label for="{{ form.comment.id_for_label }}">{{ form.comment.label }}</label>
+                        {{ form.comment }}
+                        {{ form.comment.errors }}
+                    </div>
+                </section>
+
+                {% if not is_dismissed %}
+                    <div class="oup-form-actions">
+                        <a class="admin-button admin-button-secondary" href="{% url 'oup_employees' %}">Отмена</a>
+                        {% if can_change_employees %}
+                            <button class="admin-button admin-button-primary" type="submit">
+                                {% if page_mode == 'create' %}Добавить сотрудника{% else %}Сохранить изменения{% endif %}
+                            </button>
+                        {% else %}
+                            <span class="admin-button admin-button-disabled">{% if oup_period_is_occupied %}Рабочий период занят{% else %}Начните работу{% endif %}</span>
+                        {% endif %}
+                    </div>
+                {% endif %}
+            </form>
+
+            <aside class="oup-employee-side">
+                <section class="oup-side-card">
+                    <span class="oup-eyebrow">Состояние</span>
+                    {% if page_mode == 'create' %}
+                        <h3>После добавления</h3>
+                        <ul class="oup-check-list">
+                            <li>сотрудник станет действующим;</li>
+                            <li>появится у связанных подразделений;</li>
+                            <li>PIN и доступ не создаются;</li>
+                            <li>назначение техники не создаётся.</li>
+                        </ul>
+                    {% else %}
+                        <h3>{{ employee.get_status_display }}</h3>
+                        <dl class="oup-employee-facts">
+                            <div><dt>Табельный номер</dt><dd>{{ employee.personnel_number|default:"—" }}</dd></div>
+                            <div><dt>Принят</dt><dd>{{ employee.hired_at|date:"d.m.Y"|default:"—" }}</dd></div>
+                            {% if employee.dismissed_at %}<div><dt>Уволен</dt><dd>{{ employee.dismissed_at|date:"d.m.Y" }}</dd></div>{% endif %}
+                            <div><dt>Обновлено</dt><dd>{{ employee.updated_at|date:"d.m.Y H:i" }}</dd></div>
+                        </dl>
+                    {% endif %}
+                </section>
+
+                {% if employee and not is_dismissed %}
+                    <section class="oup-side-card oup-danger-card">
+                        <span class="oup-eyebrow">Опасное действие</span>
+                        <h3>Увольнение</h3>
+                        <p>Сотрудник исчезнет из текущих рабочих списков, но останется в истории.</p>
+                        {% if can_change_employees %}
+                            <a class="admin-button admin-button-danger" href="{% url 'oup_employee_dismiss' employee.id %}">Оформить увольнение</a>
+                        {% else %}
+                            <span class="admin-button admin-button-disabled">{% if oup_period_is_occupied %}Рабочий период занят{% else %}Начните работу{% endif %}</span>
+                        {% endif %}
+                    </section>
+                {% endif %}
+
+                {% if employee %}
+                    <section class="oup-side-card oup-history-card">
+                        <div class="oup-side-card-heading">
+                            <div><span class="oup-eyebrow">Аудит</span><h3>История карточки</h3></div>
+                            <a href="{% url 'oup_logs' %}?q={{ employee.full_name|urlencode }}">Все действия</a>
+                        </div>
+                        <div class="oup-history-list">
+                            {% for log in employee_logs %}
+                                <article>
+                                    <time datetime="{{ log.created_at|date:'c' }}">{{ log.created_at|date:"d.m.Y H:i" }}</time>
+                                    <strong>{{ log.action|cut:"ОУП: " }}</strong>
+                                    <span>{{ log.actor|default:"Система" }}</span>
+                                </article>
+                            {% empty %}
+                                <p class="muted">Действий по карточке пока нет.</p>
+                            {% endfor %}
+                        </div>
+                    </section>
+                {% endif %}
+            </aside>
+        </div>
+    </main>
+</div>
+<script src="{% static 'js/oup-workplace.js' %}?v=20260713-1"></script>
+<script src="{% static 'js/oup-work-period-v1.js' %}"></script>
+{% endblock %}

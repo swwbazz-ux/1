@@ -1,0 +1,162 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}{% if scope == 'dismissed' %}Уволенные сотрудники{% else %}Сотрудники ОУП{% endif %}{% endblock %}
+{% block body_class %}oup-workplace-screen{% endblock %}
+{% block extra_head %}
+<link rel="stylesheet" href="{% static 'css/oup-workplace-v1.css' %}?v=20260713-2">
+<link rel="stylesheet" href="{% static 'css/oup-work-period-v1.css' %}">
+    <link rel="stylesheet" href="{% static 'css/oup-responsive-layout-v2.css' %}">
+{% endblock %}
+
+{% block body %}
+<div class="admin-shell admin-exports-shell admin-day oup-shell" data-admin-theme>
+    {% include "includes/oup_header.html" with screen_title=screen_title screen_subtitle=screen_subtitle %}
+
+    <main class="admin-console-page oup-page">
+        {% for message in messages %}
+            <div class="message {{ message.tags|default:'success' }}" role="status">{{ message }}</div>
+        {% endfor %}
+
+        {% if oup_period_is_occupied %}
+            <section class="oup-period-occupied" aria-labelledby="oup-period-occupied-title" role="status">
+                <span class="oup-status-dot" aria-hidden="true"></span>
+                <div>
+                    <strong id="oup-period-occupied-title">Рабочий период занят</strong>
+                    <p><b>{{ active_oup_period.employee.full_name }}</b> работает с {{ active_oup_period.opened_at|date:"d.m.Y H:i" }}. Вам доступен только просмотр.</p>
+                </div>
+            </section>
+        {% endif %}
+
+        <section class="oup-metrics" aria-label="Сводка по сотрудникам">
+            <article class="oup-metric is-primary">
+                <span>Работают</span>
+                <strong>{{ active_total }}</strong>
+                <small>доступны подразделениям</small>
+            </article>
+            <article class="oup-metric is-success">
+                <span>Приняты в этом месяце</span>
+                <strong>{{ new_this_month_total }}</strong>
+                <small>с {{ current_month|default:"начала месяца" }}</small>
+            </article>
+            <article class="oup-metric is-warning">
+                <span>Требуют внимания</span>
+                <strong>{{ missing_data_total }}</strong>
+                <small>нет фото или табельного номера</small>
+            </article>
+            <article class="oup-metric is-neutral">
+                <span>Уволены</span>
+                <strong>{{ dismissed_total }}</strong>
+                <small>доступны только в истории</small>
+            </article>
+        </section>
+
+        <section class="oup-register-card">
+            <div class="admin-section-title employee-list-toolbar oup-register-toolbar">
+                <div>
+                    <h2>{% if scope == 'dismissed' %}Архив сотрудников{% else %}Справочник сотрудников{% endif %}</h2>
+                    <p>{% if scope == 'dismissed' %}Уволенные не участвуют в текущих сменах и назначениях.{% else %}Одна строка — один сотрудник. Нажмите строку, чтобы открыть карточку.{% endif %}</p>
+                </div>
+                <div class="employee-list-actions">
+                    {% if scope != 'dismissed' %}
+                        {% if can_change_employees %}
+                            <a class="admin-button admin-button-primary" href="{% url 'oup_employee_create' %}">+ Добавить сотрудника</a>
+                        {% else %}
+                            <span class="admin-button admin-button-disabled" title="{% if oup_period_is_occupied %}Рабочий период занят другим специалистом{% else %}Сначала начните работу{% endif %}">+ Добавить сотрудника</span>
+                        {% endif %}
+                    {% endif %}
+                </div>
+            </div>
+
+            <form method="get" class="employee-list-filters oup-filter-bar">
+                <div class="field admin-search-field">
+                    <label for="oup-search">Поиск</label>
+                    <input id="oup-search" name="q" value="{{ query }}" placeholder="ФИО, табельный номер, телефон" autocomplete="off">
+                </div>
+                <div class="field select-field">
+                    <label for="oup-category">Рабочая категория</label>
+                    <select id="oup-category" name="category">
+                        <option value="">Все категории</option>
+                        {% for value, label in work_categories %}
+                            <option value="{{ value }}" {% if selected_category == value %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="field select-field">
+                    <label for="oup-department">Подразделение</label>
+                    <select id="oup-department" name="department">
+                        <option value="">Все подразделения</option>
+                        {% for value in departments %}
+                            <option value="{{ value }}" {% if selected_department == value %}selected{% endif %}>{{ value }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="field select-field">
+                    <label for="oup-rotation">Вахта / график</label>
+                    <select id="oup-rotation" name="rotation">
+                        <option value="">Все графики</option>
+                        {% for value in rotations %}
+                            <option value="{{ value }}" {% if selected_rotation == value %}selected{% endif %}>{{ value }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="field field-submit oup-filter-actions">
+                    <button class="admin-button admin-button-primary" type="submit">Применить</button>
+                    <a class="admin-button admin-button-secondary filter-reset-link" href="{% if scope == 'dismissed' %}{% url 'oup_dismissed_employees' %}{% else %}{% url 'oup_employees' %}{% endif %}">Сбросить</a>
+                </div>
+            </form>
+
+            <div class="oup-register-head" aria-hidden="true">
+                <span>Сотрудник</span>
+                <span>Работа</span>
+                <span>Контакты</span>
+                <span>Состояние</span>
+            </div>
+            <div class="oup-register-list">
+                {% for employee in employees %}
+                    <a class="oup-employee-row status-{{ employee.status }}" href="{% url 'oup_employee_detail' employee.id %}">
+                        <span class="oup-person-cell">
+                            <span class="oup-person-avatar" aria-hidden="true">
+                                {% if employee.photo %}
+                                    <img src="{{ employee.photo.url }}" alt="">
+                                {% else %}
+                                    {{ employee.full_name|first }}
+                                {% endif %}
+                            </span>
+                            <span>
+                                <strong>{{ employee.full_name }}</strong>
+                                <small>Таб. № {{ employee.personnel_number|default:"не указан" }}</small>
+                            </span>
+                        </span>
+                        <span class="oup-work-cell">
+                            <strong>{{ employee.position|default:"Должность не указана" }}</strong>
+                            <small>{{ employee.department|default:"Подразделение не указано" }} · {{ employee.rotation|default:"График не указан" }}</small>
+                        </span>
+                        <span class="oup-contact-cell">
+                            <strong>{{ employee.phone|default:"Телефон не указан" }}</strong>
+                            <small>Принят {{ employee.hired_at|date:"d.m.Y"|default:"—" }}</small>
+                        </span>
+                        <span class="oup-state-cell">
+                            <span class="oup-status-chip status-{{ employee.status }}">{{ employee.get_status_display }}</span>
+                            <small>{{ employee.get_work_category_display }}</small>
+                        </span>
+                        <span class="oup-row-arrow" aria-hidden="true">›</span>
+                    </a>
+                {% empty %}
+                    <div class="oup-empty-state">
+                        {% if scope == 'dismissed' %}
+                            <strong>В архиве нет сотрудников</strong>
+                            <p>Измените фильтры или вернитесь к справочнику действующих сотрудников.</p>
+                        {% else %}
+                            <strong>Сотрудники не найдены</strong>
+                            <p>Измените фильтры или добавьте нового сотрудника после начала работы.</p>
+                        {% endif %}
+                    </div>
+                {% endfor %}
+            </div>
+        </section>
+    </main>
+</div>
+<script src="{% static 'js/oup-workplace.js' %}?v=20260713-1"></script>
+<script src="{% static 'js/oup-work-period-v1.js' %}"></script>
+{% endblock %}

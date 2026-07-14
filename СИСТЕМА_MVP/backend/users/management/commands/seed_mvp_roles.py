@@ -9,6 +9,7 @@ ROLES = [
     ('excavator_operator', 'Машинист экскаватора'),
     ('mining_master', 'Горный мастер'),
     ('deputy_mining_manager', 'Заместитель начальника горного участка'),
+    ('oup', 'Специалист ОУП'),
     ('dispatcher', 'Диспетчер'),
     ('mechanic', 'Механик'),
     ('manager', 'Руководство'),
@@ -23,6 +24,7 @@ DEMO_USERS = [
     ('Диспетчер MVP', 'dispatcher', '500000', '+79000000005'),
     ('Руководство MVP', 'manager', '600000', '+79000000006'),
     ('Механик MVP', 'mechanic', '700000', '+79000000007'),
+    ('Специалист ОУП MVP', 'oup', '800000', '+79000000008'),
 ]
 
 
@@ -45,7 +47,11 @@ class Command(BaseCommand):
             for full_name, role_code, access_code, phone in DEMO_USERS:
                 employee, _ = Employee.objects.update_or_create(
                     full_name=full_name,
-                    defaults={'is_active': True, 'phone': phone},
+                    defaults={
+                        'is_active': True,
+                        'status': Employee.Status.ACTIVE,
+                        'phone': phone,
+                    },
                 )
                 role = Role.objects.get(code=role_code)
                 EmployeeAccess.objects.update_or_create(
@@ -57,6 +63,6 @@ class Command(BaseCommand):
                         'status': EmployeeAccess.Status.ACTIVATED,
                     },
                 )
-            self.stdout.write('Демо-доступы созданы: 100000, 200000, 300000, 400000, 500000, 600000, 700000')
+            self.stdout.write('Демо-доступы созданы: 100000, 200000, 300000, 400000, 500000, 600000, 700000, 800000')
 
         self.stdout.write(self.style.SUCCESS('Готово.'))

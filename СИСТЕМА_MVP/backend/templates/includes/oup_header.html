@@ -1,0 +1,69 @@
+<header class="admin-console-header oup-console-header" aria-label="Рабочая шапка отдела управления персоналом">
+    <section class="admin-console-identity">
+        <span class="admin-console-avatar" aria-hidden="true">{{ access.employee.full_name|default:"О"|first }}</span>
+        <span>
+            <strong>{{ access.employee.full_name|default:"Специалист ОУП" }}</strong>
+            <em>Отдел управления персоналом</em>
+        </span>
+    </section>
+
+    <section class="admin-console-main">
+        <div class="admin-console-title">
+            <span>Кадровый контур</span>
+            <h1>{{ screen_title|default:"Сотрудники" }}</h1>
+            <p>{{ screen_subtitle|default:"Единая рабочая база действующих и уволенных сотрудников." }}</p>
+        </div>
+        <nav class="admin-console-nav" aria-label="Разделы ОУП">
+            <a class="{% if active_nav == 'employees' %}is-active{% endif %}"
+               href="{% url 'oup_employees' %}"
+               {% if active_nav == 'employees' %}aria-current="page"{% endif %}>Сотрудники</a>
+            <a class="{% if active_nav == 'dismissed' %}is-active{% endif %}"
+               href="{% url 'oup_dismissed_employees' %}"
+               {% if active_nav == 'dismissed' %}aria-current="page"{% endif %}>Уволенные</a>
+            <a class="{% if active_nav == 'logs' %}is-active{% endif %}"
+               href="{% url 'oup_logs' %}"
+               {% if active_nav == 'logs' %}aria-current="page"{% endif %}>Журнал действий</a>
+        </nav>
+    </section>
+
+    <section class="admin-console-actions oup-console-actions" aria-label="Рабочий период, тема и выход">
+        <div class="oup-shift-state {% if owns_oup_period %}is-open{% elif oup_period_is_occupied %}is-occupied{% else %}is-closed{% endif %}"
+             {% if active_oup_period %}title="{{ active_oup_period.employee.full_name }} · с {{ active_oup_period.opened_at|date:'d.m.Y H:i' }}"{% endif %}>
+            <span>Рабочий период</span>
+            {% if owns_oup_period %}
+                <strong>Вы · с {{ open_oup_shift.opened_at|date:"d.m.Y H:i" }}</strong>
+            {% elif oup_period_is_occupied %}
+                <strong>Занят · {{ active_oup_period.employee.full_name }}</strong>
+                <small>с {{ active_oup_period.opened_at|date:"d.m.Y H:i" }}</small>
+            {% else %}
+                <strong>не начат</strong>
+            {% endif %}
+        </div>
+        {% if owns_oup_period %}
+            <form method="post" action="{% url 'oup_shift_close' %}" data-confirm="Завершить рабочий период ОУП? После завершения редактирование сотрудников будет недоступно.">
+                {% csrf_token %}
+                <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                <button class="oup-shift-button is-close" type="submit">Завершить работу</button>
+            </form>
+        {% elif oup_period_is_occupied %}
+            <button class="oup-shift-button is-occupied"
+                    type="button"
+                    disabled
+                    aria-disabled="true"
+                    title="Рабочий период уже занят другим специалистом">Начать работу</button>
+        {% else %}
+            <form method="post" action="{% url 'oup_shift_start' %}">
+                {% csrf_token %}
+                <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                <button class="oup-shift-button is-start" type="submit">Начать работу</button>
+            </form>
+        {% endif %}
+        <button type="button"
+                class="admin-theme-button"
+                data-admin-theme-toggle
+                data-theme-icon="sun"
+                aria-label="Включить тёмную тему"
+                title="Тема интерфейса">Тема</button>
+        <a class="admin-utility-link" href="{% url 'logout' %}">Выйти</a>
+    </section>
+</header>

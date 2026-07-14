@@ -95,20 +95,27 @@ def _crew_plan_employee(employee):
         raise ValidationError('Сотрудник не найден.', code='employee_not_found') from error
 
 
-def _validate_crew_employee(employee, role):
-    if not employee.is_active or employee.status != Employee.Status.ACTIVE:
-        raise ValidationError('Сотрудник неактивен.', code='inactive_employee')
-    has_activated_access = EmployeeAccess.objects.filter(
+def employee_matches_work_role(employee, role):
+    if employee.work_category == role.code:
+        return True
+    if employee.work_category != Employee.WorkCategory.OTHER:
+        return False
+    return EmployeeAccess.objects.filter(
         employee=employee,
         role=role,
         role__is_active=True,
         is_active=True,
         status=EmployeeAccess.Status.ACTIVATED,
     ).exists()
-    if not has_activated_access:
+
+
+def _validate_crew_employee(employee, role):
+    if not employee.is_active or employee.status != Employee.Status.ACTIVE:
+        raise ValidationError('Сотрудник неактивен.', code='inactive_employee')
+    if not employee_matches_work_role(employee, role):
         raise ValidationError(
-            'У сотрудника нет активированного доступа для выбранной рабочей роли.',
-            code='inactive_access',
+            'Рабочая категория сотрудника не соответствует выбранной роли.',
+            code='invalid_work_category',
         )
     has_other_role_assignment = (
         EquipmentAssignment.objects
@@ -246,6 +253,7 @@ def update_crew_draft_slot(
 
     employee = _crew_plan_employee(employee)
     if employee:
+        employee = Employee.objects.select_for_update().get(pk=employee.pk)
         _validate_crew_employee(employee, role)
     if target_slot.employee_id == getattr(employee, 'id', None):
         return locked_plan
@@ -321,6 +329,18 @@ def publish_crew_plan(*, plan, expected_version, actor=None):
                     code='duplicate_employee',
                 )
             target_employee_ids.add(slot.employee_id)
+
+    if target_employee_ids:
+        list(
+            Employee.objects.select_for_update()
+            .filter(id__in=target_employee_ids)
+            .order_by('id')
+        )
+        refreshed_employees = Employee.objects.in_bulk(target_employee_ids)
+        for slot in slots:
+            if slot.employee_id:
+                slot.employee = refreshed_employees[slot.employee_id]
+                _validate_crew_employee(slot.employee, role)
 
     current_role_assignments = list(
         EquipmentAssignment.objects.select_for_update()
@@ -540,19 +560,17 @@ def get_active_equipment_assignment(employee, role_code=None):
 
 
 def validate_work_assignment(*, employee, role, equipment, shift_type, exclude_assignment=None):
-    from users.models import EmployeeAccess
-
     if role.code not in WORK_ASSIGNMENT_ROLE_EQUIPMENT_TYPES:
         raise ValidationError('Для этой роли назначение техники не поддерживается.')
     if shift_type not in WorkShiftType.values:
         raise ValidationError('Выберите смену 1 или смену 2.')
-    has_role_access = EmployeeAccess.objects.filter(
-        employee=employee,
-        role=role,
-        is_active=True,
-    ).exclude(status=EmployeeAccess.Status.DEACTIVATED).exists()
-    if not has_role_access:
-        raise ValidationError('Сначала выдайте сотруднику активный доступ для выбранной роли.')
+    if not employee.is_active or employee.status not in {
+        Employee.Status.ACTIVE,
+        Employee.Status.NOT_ACTIVATED,
+    }:
+        raise ValidationError('Сотрудник неактивен.')
+    if not employee_matches_work_role(employee, role):
+        raise ValidationError('Рабочая категория сотрудника не соответствует выбранной роли.')
     if not equipment_queryset_for_work_role(role.code).filter(id=equipment.id).exists():
         raise ValidationError('Выбранная техника не соответствует рабочей роли или неактивна.')
 
@@ -609,7 +627,7 @@ def _emit_work_assignment_changed(assignment, action):
 @transaction.atomic
 def set_active_equipment_assignment(*, employee, role, equipment, shift_type, assigned_by=None, now=None):
     now = now or timezone.now()
-    employee.__class__.objects.select_for_update().get(pk=employee.pk)
+    employee = employee.__class__.objects.select_for_update().get(pk=employee.pk)
     equipment = Equipment.objects.select_for_update().get(pk=equipment.pk)
     current = (
         EquipmentAssignment.objects.select_for_update()
