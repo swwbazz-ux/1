@@ -279,7 +279,7 @@ class DeputyPlanningViewTests(TestCase):
         self.assertEqual(response['Service-Worker-Allowed'], '/deputy-mining-manager/')
         self.assertEqual(response['X-Content-Type-Options'], 'nosniff')
         self.assertIn('deputy-mining-manager-desktop-shell-', script)
-        self.assertIn('`${CACHE_PREFIX}v1`', script)
+        self.assertIn('`${CACHE_PREFIX}v2`', script)
         self.assertIn('key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME', script)
         self.assertIn('removeCachedPlanningDocuments()', script)
         self.assertIn('LEGACY_ROOT_FALLBACK_URL', script)
@@ -352,6 +352,55 @@ class DeputyPlanningViewTests(TestCase):
         self.assertEqual(payload['summary']['unfilled_count'], 3)
         self.assertEqual(len(payload['rows']), 2)
         self.assertTrue(all(len(row['slots']) == 2 for row in payload['rows']))
+
+    def test_board_payload_exposes_brigade_and_record_details_without_new_schema(self):
+        self.driver.rotation = 'Бригада № 1'
+        self.driver.position = 'Водитель самосвала'
+        self.driver.personnel_number = 'Т-001'
+        self.driver.save(update_fields=['rotation', 'position', 'personnel_number'])
+        second_driver, _second_access = self.create_employee_with_access(
+            'Петров Алексей Иванович',
+            self.driver_role,
+            phone='+79000000002',
+            access_code='210002',
+        )
+        second_driver.rotation = 'Вахта 2'
+        second_driver.save(update_fields=['rotation'])
+        unclassified_driver, _unclassified_access = self.create_employee_with_access(
+            'Сидоров Николай Петрович',
+            self.driver_role,
+            phone='+79000000003',
+            access_code='210003',
+        )
+        unclassified_driver.rotation = 'Вахта 15/15'
+        unclassified_driver.save(update_fields=['rotation'])
+
+        response = self.client.get(
+            reverse('deputy_mining_manager_placement'),
+            HTTP_HOST='localhost',
+        )
+
+        payload = response.context['planning_payload']
+        assigned_employee = next(
+            slot['employee']
+            for row in payload['rows']
+            for slot in row['slots']
+            if slot['employee'] and slot['employee']['id'] == self.driver.id
+        )
+        free_employee = next(item for item in payload['employees'] if item['id'] == second_driver.id)
+        unclassified_employee = next(item for item in payload['employees'] if item['id'] == unclassified_driver.id)
+        equipment = payload['rows'][0]['equipment']
+        self.assertEqual(assigned_employee['brigade_code'], '1')
+        self.assertEqual(assigned_employee['brigade_label'], 'Бригада 1')
+        self.assertEqual(assigned_employee['phone'], '+79000000001')
+        self.assertEqual(free_employee['brigade_code'], '2')
+        self.assertEqual(unclassified_employee['brigade_code'], '')
+        self.assertEqual(equipment['type_label'], 'Самосвал')
+        self.assertEqual(equipment['ownership_label'], 'Собственная')
+        self.assertEqual(equipment['status_label'], '')
+        self.assertContains(response, 'data-brigade-filter="1"')
+        self.assertContains(response, 'data-brigade-filter="2"')
+        self.assertContains(response, 'data-record-dialog')
 
     def test_autosave_changes_draft_but_not_equipment_assignment(self):
         plan = self.create_draft()

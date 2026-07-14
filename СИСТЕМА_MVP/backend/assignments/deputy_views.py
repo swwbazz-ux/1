@@ -1,4 +1,5 @@
 import json
+import re
 from datetime import date
 from urllib.parse import urlencode
 
@@ -89,7 +90,7 @@ DEPUTY_MANIFEST = {
 
 DEPUTY_SERVICE_WORKER_JS = r"""
 const CACHE_PREFIX = "deputy-mining-manager-desktop-shell-";
-const CACHE_NAME = `${CACHE_PREFIX}v1`;
+const CACHE_NAME = `${CACHE_PREFIX}v2`;
 const APP_SCOPE = "/deputy-mining-manager/";
 const MANIFEST_URL = "/deputy-mining-manager.webmanifest";
 const LEGACY_ROOT_FALLBACK_URL = "/mining-master/assignments/";
@@ -296,6 +297,43 @@ def _employee_short_name(employee):
     return f'{parts[0]} {initials}'.strip()
 
 
+def _employee_brigade_code(employee):
+    rotation = (employee.rotation or '').strip().casefold()
+    if not rotation:
+        return ''
+    compact = re.sub(r'\s+', ' ', rotation.replace('№', ' ')).strip(' .,-')
+    aliases = {
+        '1': '1',
+        '1-я': '1',
+        '1 я': '1',
+        'первая': '1',
+        'первая бригада': '1',
+        'бригада 1': '1',
+        '1 бригада': '1',
+        'вахта 1': '1',
+        '1 вахта': '1',
+        '2': '2',
+        '2-я': '2',
+        '2 я': '2',
+        'вторая': '2',
+        'вторая бригада': '2',
+        'бригада 2': '2',
+        '2 бригада': '2',
+        'вахта 2': '2',
+        '2 вахта': '2',
+    }
+    if compact in aliases:
+        return aliases[compact]
+    brigade_match = re.search(
+        r'(?:бригада|вахта)\s*[-:]?\s*([12])(?:-?я)?(?=$|[\s,;.(])',
+        compact,
+    ) or re.search(
+        r'^([12])(?:-?я)?\s*(?:бригада|вахта)(?=$|[\s,;.(])',
+        compact,
+    )
+    return brigade_match.group(1) if brigade_match else ''
+
+
 def _employee_payload(employee):
     if not employee:
         return None
@@ -306,14 +344,20 @@ def _employee_payload(employee):
         except ValueError:
             photo_url = ''
     initials = ''.join(part[0] for part in (employee.full_name or '').split()[:2]).upper() or '—'
+    brigade_code = _employee_brigade_code(employee)
     return {
         'id': employee.id,
         'full_name': employee.full_name or '',
         'short_name': _employee_short_name(employee),
         'position_label': employee.position or '',
         'personnel_number': employee.personnel_number or '',
+        'phone': employee.phone or '',
         'photo_url': photo_url,
         'initials': initials,
+        'status_label': employee.get_status_display(),
+        'rotation_label': employee.rotation or '',
+        'brigade_code': brigade_code,
+        'brigade_label': f'Бригада {brigade_code}' if brigade_code else 'Не указана',
         'search': f'{employee.full_name} {employee.personnel_number}'.strip().lower(),
     }
 
@@ -466,10 +510,13 @@ def build_crew_plan_payload(plan, *, request=None):
             'equipment': {
                 'id': equipment.id,
                 'label': equipment.garage_number or str(equipment),
+                'type_label': equipment.equipment_type.name,
                 'model_label': equipment.model.name if equipment.model_id else '',
                 'icon_url': static(f'img/equipment/{icon_prefix}-{"green" if equipment.is_active else "gray"}.png'),
                 'is_active': equipment.is_active,
                 'status_label': status_label,
+                'serial_number': equipment.vin or '',
+                'ownership_label': 'Собственная' if equipment.is_own else 'Подрядная',
             },
             'attention': row_attention,
             'conflict': row_conflict,

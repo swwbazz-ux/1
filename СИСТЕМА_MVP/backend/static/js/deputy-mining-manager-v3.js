@@ -66,6 +66,7 @@
     var board = root.querySelector("[data-assignment-board]");
     var boardEmpty = root.querySelector("[data-board-empty]");
     var filterButtons = Array.prototype.slice.call(root.querySelectorAll("[data-row-filter]"));
+    var brigadeButtons = Array.prototype.slice.call(root.querySelectorAll("[data-brigade-filter]"));
     var summaryCounts = Array.prototype.slice.call(root.querySelectorAll("[data-summary-count]"));
     var autosaveState = root.querySelector("[data-autosave-state]");
     var autosaveText = root.querySelector("[data-autosave-text]");
@@ -77,6 +78,12 @@
     var photoDialog = document.querySelector("[data-photo-dialog]");
     var photoImage = document.querySelector("[data-photo-image]");
     var photoCaption = document.querySelector("[data-photo-caption]");
+    var recordDialog = document.querySelector("[data-record-dialog]");
+    var recordKicker = document.querySelector("[data-record-kicker]");
+    var recordTitle = document.querySelector("[data-record-title]");
+    var recordSubtitle = document.querySelector("[data-record-subtitle]");
+    var recordVisual = document.querySelector("[data-record-visual]");
+    var recordFields = document.querySelector("[data-record-fields]");
     var publishDialog = document.querySelector("[data-publish-dialog]");
     var publishSummary = document.querySelector("[data-publish-summary]");
     var publishConfirm = document.querySelector("[data-publish-confirm]");
@@ -87,6 +94,7 @@
     var noticeAction = notice && notice.querySelector("[data-notice-action]");
     var noticeClose = notice && notice.querySelector("[data-notice-close]");
     var currentFilter = "all";
+    var currentBrigade = "all";
     var currentSlot = null;
     var saving = false;
     var toastTimer = null;
@@ -124,6 +132,11 @@
     function employeeSearchText(employee) {
         return [employeeName(employee), employeeMeta(employee), employee && employee.personnel_number]
             .map(textValue).join(" ").toLocaleLowerCase("ru");
+    }
+
+    function employeeMatchesBrigade(employee) {
+        if (currentBrigade === "all") return true;
+        return textValue(employee && employee.brigade_code) === currentBrigade;
     }
 
     function rowSearchText(row) {
@@ -259,6 +272,64 @@
         return avatar;
     }
 
+    function appendRecordField(label, value) {
+        value = textValue(value).trim();
+        if (!recordFields || !value) return;
+        var item = createElement("div", "deputy-record-field");
+        item.appendChild(createElement("dt", "", label));
+        item.appendChild(createElement("dd", "", value));
+        recordFields.appendChild(item);
+    }
+
+    function prepareRecordDialog(kicker, title, subtitle) {
+        if (!recordDialog || !recordFields || !recordVisual) return false;
+        closeDialog(candidateDialog);
+        closeDialog(photoDialog);
+        recordVisual.replaceChildren();
+        recordFields.replaceChildren();
+        if (recordKicker) recordKicker.textContent = kicker;
+        if (recordTitle) recordTitle.textContent = title;
+        if (recordSubtitle) recordSubtitle.textContent = subtitle || "";
+        return true;
+    }
+
+    function openEmployeeRecord(employee, assignmentLabel) {
+        if (!employee || !prepareRecordDialog("Карточка сотрудника", employeeName(employee), employeeMeta(employee))) return;
+        recordVisual.appendChild(createAvatar(employee, false));
+        appendRecordField("Табельный номер", employee.personnel_number || "Не указан");
+        appendRecordField("Телефон", employee.phone || "Не указан");
+        appendRecordField("Бригада", employee.brigade_label || "Не указана");
+        var rotation = textValue(employee.rotation_label).trim();
+        if (rotation && rotation.toLocaleLowerCase("ru") !== textValue(employee.brigade_label).toLocaleLowerCase("ru")) {
+            appendRecordField("Вахта", rotation);
+        }
+        appendRecordField("Назначение", assignmentLabel || "Свободен");
+        appendRecordField("Статус", employee.status_label || "Активен");
+        openDialog(recordDialog);
+    }
+
+    function openEquipmentRecord(row) {
+        var equipment = row && row.equipment || {};
+        if (!prepareRecordDialog("Карточка техники", equipment.label || "Техника", equipment.model_label || equipment.type_label)) return;
+        if (equipment.icon_url) {
+            var image = document.createElement("img");
+            image.src = equipment.icon_url;
+            image.alt = "";
+            recordVisual.appendChild(image);
+        } else {
+            recordVisual.textContent = "Т";
+        }
+        appendRecordField("Вид техники", equipment.type_label || "Не указан");
+        appendRecordField("Модель", equipment.model_label || "Не указана");
+        appendRecordField("Статус", equipment.status_label || (equipment.is_active ? "Активна в справочнике" : "Неактивна"));
+        appendRecordField("Серийный номер", equipment.serial_number || "Не указан");
+        appendRecordField("Принадлежность", equipment.ownership_label || "Не указана");
+        (row.slots || []).forEach(function (slot) {
+            appendRecordField(slot.label || "Смена", slot.employee ? employeeName(slot.employee) : "Не назначен");
+        });
+        openDialog(recordDialog);
+    }
+
     function renderCategories() {
         if (!categoryNav) return;
         categoryNav.replaceChildren();
@@ -285,13 +356,12 @@
     }
 
     function moveDragPreview(event) {
-        if (!dragPreview || !event || !event.clientX || !event.clientY) return;
+        if (!dragPreview || !event || typeof event.clientX !== "number" || typeof event.clientY !== "number") return;
         var padding = 8;
-        var offset = 14;
         var width = dragPreview.offsetWidth || 280;
         var height = dragPreview.offsetHeight || 56;
-        var left = Math.min(event.clientX + offset, window.innerWidth - width - padding);
-        var top = Math.min(event.clientY + offset, window.innerHeight - height - padding);
+        var left = Math.min(event.clientX - width / 2, window.innerWidth - width - padding);
+        var top = Math.min(event.clientY - height / 2, window.innerHeight - height - padding);
         dragPreview.style.left = Math.max(padding, left) + "px";
         dragPreview.style.top = Math.max(padding, top) + "px";
     }
@@ -384,6 +454,8 @@
     function createEmployeeCard(employee) {
         var card = createElement("article", "deputy-employee-card");
         card.setAttribute("role", "listitem");
+        card.tabIndex = 0;
+        card.title = "Двойной клик — открыть карточку сотрудника";
         card.appendChild(createAvatar(employee));
         var main = createElement("span", "deputy-employee-main");
         main.appendChild(createElement("strong", "", employeeName(employee)));
@@ -391,13 +463,23 @@
         card.appendChild(main);
         card.appendChild(createElement("span", "deputy-drag-mark", "⠿"));
         bindDragSource(card, employee);
+        card.addEventListener("dblclick", function (event) {
+            event.preventDefault();
+            openEmployeeRecord(employee, "Свободен");
+        });
+        card.addEventListener("keydown", function (event) {
+            if (event.key !== "Enter") return;
+            event.preventDefault();
+            openEmployeeRecord(employee, "Свободен");
+        });
         return card;
     }
 
     function renderEmployees() {
         if (!employeeList) return;
         var query = currentQuery();
-        var visible = state.employees.filter(function (employee) {
+        var brigadeEmployees = state.employees.filter(employeeMatchesBrigade);
+        var visible = brigadeEmployees.filter(function (employee) {
             return !query || employeeSearchText(employee).indexOf(query) !== -1;
         });
         employeeList.replaceChildren();
@@ -406,9 +488,14 @@
         });
         employeeList.hidden = visible.length === 0;
         if (availableCount) {
-            availableCount.textContent = query ? visible.length + " из " + state.employees.length : textValue(state.employees.length);
+            availableCount.textContent = query ? visible.length + " из " + brigadeEmployees.length : textValue(brigadeEmployees.length);
         }
-        if (employeeEmpty) employeeEmpty.hidden = visible.length !== 0;
+        if (employeeEmpty) {
+            employeeEmpty.hidden = visible.length !== 0;
+            employeeEmpty.textContent = query
+                ? "Поиск не дал результатов."
+                : (currentBrigade === "all" ? "Свободных сотрудников нет." : "В бригаде " + currentBrigade + " свободных сотрудников нет.");
+        }
     }
 
     function rowHasConflict(row) {
@@ -449,6 +536,10 @@
     function createEquipmentCell(row) {
         var equipment = row.equipment || {};
         var wrapper = createElement("div", "deputy-equipment-cell");
+        wrapper.tabIndex = 0;
+        wrapper.setAttribute("role", "button");
+        wrapper.setAttribute("aria-label", "Открыть карточку техники " + textValue(equipment.label));
+        wrapper.title = "Двойной клик — открыть карточку техники";
         var iconWrap = createElement("span", "deputy-equipment-icon");
         if (equipment.icon_url) {
             var icon = document.createElement("img");
@@ -468,6 +559,15 @@
             main.appendChild(noteNode);
         }
         wrapper.appendChild(main);
+        wrapper.addEventListener("dblclick", function (event) {
+            event.preventDefault();
+            openEquipmentRecord(row);
+        });
+        wrapper.addEventListener("keydown", function (event) {
+            if (event.key !== "Enter") return;
+            event.preventDefault();
+            openEquipmentRecord(row);
+        });
         return wrapper;
     }
 
@@ -495,7 +595,7 @@
                 candidatesById.set(textValue(assignedEmployee.id), assignedEmployee);
             });
         });
-        var candidates = Array.from(candidatesById.values()).sort(function (left, right) {
+        var candidates = Array.from(candidatesById.values()).filter(employeeMatchesBrigade).sort(function (left, right) {
             return employeeName(left).localeCompare(employeeName(right), "ru");
         });
         candidates.forEach(function (employee) {
@@ -515,7 +615,11 @@
             candidateList.appendChild(button);
         });
         if (!candidates.length) {
-            candidateList.appendChild(createElement("p", "deputy-empty-state", "Свободных сотрудников нет."));
+            candidateList.appendChild(createElement(
+                "p",
+                "deputy-empty-state",
+                currentBrigade === "all" ? "Свободных сотрудников нет." : "В бригаде " + currentBrigade + " подходящих сотрудников нет."
+            ));
         }
         if (clearSlotButton) clearSlotButton.hidden = !slot.employee;
         openDialog(candidateDialog);
@@ -559,11 +663,11 @@
         button.classList.toggle("has-conflict", Boolean(slot.conflict));
 
         if (slot.employee) {
+            button.title = "Двойной клик — открыть карточку сотрудника";
             button.appendChild(createAvatar(slot.employee));
             var person = createElement("button", "deputy-slot-person");
             person.type = "button";
-            person.disabled = !planEditable();
-            person.setAttribute("aria-label", "Изменить назначение: " + textValue(slot.label));
+            person.setAttribute("aria-label", "Открыть карточку сотрудника: " + employeeName(slot.employee));
             var main = createElement("span", "deputy-employee-main");
             main.appendChild(createElement("strong", "", employeeName(slot.employee)));
             main.appendChild(createElement("small", "", employeeMeta(slot.employee) || slot.label || "Назначен"));
@@ -577,8 +681,31 @@
                 source_equipment_id: row.equipment && row.equipment.id,
                 source_shift_type: slot.shift_type
             }), button);
-            person.addEventListener("click", function () {
-                openCandidatePicker(row, slot);
+            person.title = "Двойной клик — открыть карточку сотрудника";
+            person.addEventListener("click", function (event) {
+                if (event.detail === 0) {
+                    openEmployeeRecord(slot.employee, [row.equipment && row.equipment.label, slot.label].filter(Boolean).join(" · "));
+                }
+            });
+            person.addEventListener("dblclick", function (event) {
+                event.preventDefault();
+                event.stopPropagation();
+                openEmployeeRecord(slot.employee, [row.equipment && row.equipment.label, slot.label].filter(Boolean).join(" · "));
+            });
+            if (planEditable()) {
+                var editButton = createElement("button", "deputy-slot-edit", "Сменить");
+                editButton.type = "button";
+                editButton.setAttribute("aria-label", "Изменить назначение: " + textValue(slot.label));
+                editButton.addEventListener("click", function (event) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    openCandidatePicker(row, slot);
+                });
+                button.appendChild(editButton);
+            }
+            button.addEventListener("dblclick", function (event) {
+                event.preventDefault();
+                openEmployeeRecord(slot.employee, [row.equipment && row.equipment.label, slot.label].filter(Boolean).join(" · "));
             });
         } else {
             var emptyAction = createElement("button", "deputy-slot-empty", "Назначить");
@@ -820,6 +947,19 @@
         });
     });
 
+    brigadeButtons.forEach(function (button) {
+        button.addEventListener("click", function () {
+            currentBrigade = button.getAttribute("data-brigade-filter") || "all";
+            brigadeButtons.forEach(function (item) {
+                var active = item === button;
+                item.classList.toggle("is-active", active);
+                item.setAttribute("aria-pressed", active ? "true" : "false");
+            });
+            closeDialog(candidateDialog);
+            renderEmployees();
+        });
+    });
+
     if (searchInput) {
         searchInput.addEventListener("input", function () {
             renderEmployees();
@@ -872,6 +1012,9 @@
     Array.prototype.slice.call(document.querySelectorAll("[data-photo-close]")).forEach(function (button) {
         button.addEventListener("click", function () { closeDialog(photoDialog); });
     });
+    Array.prototype.slice.call(document.querySelectorAll("[data-record-close]")).forEach(function (button) {
+        button.addEventListener("click", function () { closeDialog(recordDialog); });
+    });
     Array.prototype.slice.call(document.querySelectorAll("[data-publish-cancel]")).forEach(function (button) {
         button.addEventListener("click", function () { closeDialog(publishDialog); });
     });
@@ -897,6 +1040,11 @@
     if (photoDialog) {
         photoDialog.addEventListener("click", function (event) {
             if (event.target === photoDialog) closeDialog(photoDialog);
+        });
+    }
+    if (recordDialog) {
+        recordDialog.addEventListener("click", function (event) {
+            if (event.target === recordDialog) closeDialog(recordDialog);
         });
     }
     if (candidateDialog) {
