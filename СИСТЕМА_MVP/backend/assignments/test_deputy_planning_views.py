@@ -1,5 +1,6 @@
 import json
 import re
+from io import BytesIO
 from pathlib import Path
 from unittest.mock import patch
 
@@ -7,6 +8,7 @@ from django.contrib.staticfiles import finders
 from django.test import Client, TestCase
 from django.urls import reverse
 from django.utils import timezone
+from openpyxl import load_workbook
 from PIL import Image
 
 from references.models import (
@@ -279,7 +281,7 @@ class DeputyPlanningViewTests(TestCase):
         self.assertEqual(response['Service-Worker-Allowed'], '/deputy-mining-manager/')
         self.assertEqual(response['X-Content-Type-Options'], 'nosniff')
         self.assertIn('deputy-mining-manager-desktop-shell-', script)
-        self.assertIn('`${CACHE_PREFIX}v2`', script)
+        self.assertIn('`${CACHE_PREFIX}v3`', script)
         self.assertIn('key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME', script)
         self.assertIn('removeCachedPlanningDocuments()', script)
         self.assertIn('LEGACY_ROOT_FALLBACK_URL', script)
@@ -337,6 +339,32 @@ class DeputyPlanningViewTests(TestCase):
         self.assertNotIn('controllerchange', registration_script)
         self.assertNotIn('location.reload', registration_script)
 
+    def test_deputy_layout_uses_full_scaled_viewport_and_balanced_columns(self):
+        stylesheet = (
+            Path(__file__).resolve().parents[1]
+            / 'static'
+            / 'css'
+            / 'deputy-mining-manager-v3.css'
+        ).read_text(encoding='utf-8')
+
+        self.assertIn('--admin-console-header-height: 76px;', stylesheet)
+        self.assertIn(
+            'height: calc((100dvh / var(--admin-interface-scale)) - var(--admin-console-header-height));',
+            stylesheet,
+        )
+        self.assertIn(
+            'grid-template-columns: clamp(360px, 21vw, 400px) minmax(0, 1fr);',
+            stylesheet,
+        )
+        self.assertRegex(
+            stylesheet,
+            r'\.deputy-assignment-table th:first-child\s*\{\s*width:\s*24%;',
+        )
+        self.assertRegex(
+            stylesheet,
+            r'\.deputy-assignment-table th:not\(:first-child\)\s*\{\s*width:\s*38%;',
+        )
+
     def test_get_board_builds_driver_plan_with_day_and_night_slots(self):
         response = self.client.get(
             reverse('deputy_mining_manager_placement'),
@@ -352,6 +380,125 @@ class DeputyPlanningViewTests(TestCase):
         self.assertEqual(payload['summary']['unfilled_count'], 3)
         self.assertEqual(len(payload['rows']), 2)
         self.assertTrue(all(len(row['slots']) == 2 for row in payload['rows']))
+        self.assertEqual(
+            payload['endpoints']['export'],
+            reverse('deputy_mining_manager_export', args=[payload['plan']['id']]),
+        )
+        self.assertContains(response, 'data-export-excel', count=1)
+
+    def test_board_and_excel_use_natural_equipment_number_order(self):
+        self.truck_1.garage_number = '10'
+        self.truck_1.save(update_fields=['garage_number'])
+        self.truck_2.garage_number = '2'
+        self.truck_2.save(update_fields=['garage_number'])
+
+        response = self.client.get(
+            reverse('deputy_mining_manager_placement'),
+            HTTP_HOST='localhost',
+        )
+        payload = response.context['planning_payload']
+        self.assertEqual(
+            [row['equipment']['label'] for row in payload['rows']],
+            ['2', '10'],
+        )
+
+        export_response = self.client.get(
+            payload['endpoints']['export'],
+            HTTP_HOST='localhost',
+        )
+        sheet = load_workbook(BytesIO(export_response.content))['Расстановка']
+        self.assertEqual(
+            [sheet.cell(row_index, 1).value for row_index in range(8, sheet.max_row + 1)],
+            ['2', '10'],
+        )
+
+    def test_excel_export_contains_current_draft_and_is_ready_for_print(self):
+        self.driver.personnel_number = 'Т-001'
+        self.driver.rotation = 'Бригада 1'
+        self.driver.save(update_fields=['personnel_number', 'rotation'])
+        plan = self.create_draft()
+        _response, plan = self.autosave_slot(
+            plan,
+            equipment=self.truck_2,
+            shift_type=WorkShiftType.SHIFT_2,
+            employee=self.driver,
+        )
+
+        response = self.client.get(
+            reverse('deputy_mining_manager_export', args=[plan.id]),
+            HTTP_HOST='localhost',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response['Content-Type'],
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+        self.assertIn('attachment; filename="crew_plan_driver_', response['Content-Disposition'])
+        self.assertIn("filename*=UTF-8''", response['Content-Disposition'])
+        self.assertEqual(response['Cache-Control'], 'private, no-store, max-age=0')
+        workbook = load_workbook(BytesIO(response.content))
+        sheet = workbook['Расстановка']
+        self.assertEqual(sheet['A1'].value, 'COPPER RESOURCES · РАССТАНОВКА ПО ТЕХНИКЕ')
+        self.assertIn('Статус: Черновик', sheet['C3'].value)
+        rows_by_equipment = {
+            sheet.cell(row_index, 1).value: row_index
+            for row_index in range(8, sheet.max_row + 1)
+        }
+        truck_2_row = rows_by_equipment['Т-02']
+        self.assertEqual(sheet.cell(truck_2_row, 3).value, 'Не назначен')
+        self.assertIn('Иванов Сергей Петрович', sheet.cell(truck_2_row, 4).value)
+        self.assertIn('Таб. № Т-001', sheet.cell(truck_2_row, 4).value)
+        self.assertIn('Бригада 1', sheet.cell(truck_2_row, 4).value)
+        self.assertEqual(sheet.page_setup.orientation, 'landscape')
+        self.assertEqual(sheet.page_setup.paperSize, 9)
+        self.assertEqual(sheet.page_setup.fitToWidth, 1)
+        self.assertEqual(sheet.page_setup.fitToHeight, 0)
+        self.assertEqual(sheet.freeze_panes, 'C8')
+        self.assertEqual(sheet.print_title_rows, '$7:$7')
+        self.assertIn('$A$1:$E$', str(sheet.print_area))
+        self.assertEqual(sheet.oddFooter.center.text, 'Страница &P из &N')
+
+    def test_excel_export_never_turns_employee_text_into_formula(self):
+        self.driver.full_name = '=HYPERLINK("https://example.invalid";"Открыть")'
+        self.driver.save(update_fields=['full_name'])
+        plan = self.create_draft()
+
+        response = self.client.get(
+            reverse('deputy_mining_manager_export', args=[plan.id]),
+            HTTP_HOST='localhost',
+        )
+
+        workbook = load_workbook(BytesIO(response.content), data_only=False)
+        sheet = workbook['Расстановка']
+        employee_cell = next(
+            sheet.cell(row_index, 3)
+            for row_index in range(8, sheet.max_row + 1)
+            if sheet.cell(row_index, 1).value == 'Т-01'
+        )
+        self.assertTrue(employee_cell.value.startswith("'="))
+        self.assertEqual(employee_cell.data_type, 's')
+
+    def test_excel_export_is_restricted_to_deputy_and_known_plan(self):
+        plan = self.create_draft()
+        driver_client = Client()
+        self.authenticate(driver_client, self.driver_access)
+
+        forbidden_response = driver_client.get(
+            reverse('deputy_mining_manager_export', args=[plan.id]),
+            HTTP_HOST='localhost',
+        )
+        missing_response = self.client.get(
+            reverse('deputy_mining_manager_export', args=[plan.id + 9999]),
+            HTTP_HOST='localhost',
+        )
+
+        self.assertRedirects(
+            forbidden_response,
+            reverse('role_home'),
+            fetch_redirect_response=False,
+        )
+        self.assertEqual(missing_response.status_code, 404)
 
     def test_board_payload_exposes_brigade_and_record_details_without_new_schema(self):
         self.driver.rotation = 'Бригада № 1'
@@ -504,6 +651,16 @@ class DeputyPlanningViewTests(TestCase):
         self.assertTrue(response.json()['published'])
         plan.refresh_from_db()
         self.assertEqual(plan.status, CrewPlanStatus.PUBLISHED)
+        published_export_url = response.json()['payload']['endpoints']['export']
+        self.assertEqual(
+            published_export_url,
+            reverse('deputy_mining_manager_export', args=[plan.id]),
+        )
+        exported_sheet = load_workbook(BytesIO(self.client.get(
+            published_export_url,
+            HTTP_HOST='localhost',
+        ).content))['Расстановка']
+        self.assertIn('Статус: Опубликован', exported_sheet['C3'].value)
         self.original_assignment.refresh_from_db()
         self.assertIsNotNone(self.original_assignment.ended_at)
         self.assertEqual(self.original_assignment.ended_by, self.deputy)

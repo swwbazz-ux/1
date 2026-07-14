@@ -4,7 +4,7 @@
 }
 
 .deputy-shell {
-    --admin-console-header-height: 64px;
+    --admin-console-header-height: 76px;
 }
 
 .deputy-shell .deputy-console-header {
@@ -17,31 +17,31 @@
 .deputy-shell .admin-console-identity,
 .deputy-shell .admin-console-main,
 .deputy-shell .admin-console-actions {
-    padding: 7px 12px;
+    padding: 8px 14px;
 }
 
 .deputy-shell .admin-console-identity {
-    grid-template-columns: 38px minmax(0, 1fr);
-    gap: 9px;
+    grid-template-columns: 42px minmax(0, 1fr);
+    gap: 10px;
 }
 
 .deputy-shell .admin-console-avatar {
-    width: 38px;
-    height: 38px;
-    font-size: 18px;
+    width: 42px;
+    height: 42px;
+    font-size: 20px;
 }
 
 .deputy-shell .admin-console-identity strong {
-    font-size: 13px;
+    font-size: 14px;
 }
 
 .deputy-shell .admin-console-identity em {
     margin-top: 2px;
-    font-size: 9px;
+    font-size: 10px;
 }
 
 .deputy-shell .admin-console-actions {
-    grid-template-columns: 38px minmax(96px, 1fr);
+    grid-template-columns: 40px minmax(96px, 1fr);
     gap: 8px;
 }
 
@@ -77,8 +77,8 @@
 .deputy-shell .admin-console-nav a,
 .deputy-shell .admin-utility-link,
 .deputy-shell .admin-theme-button {
-    min-height: 34px;
-    font-size: 11px;
+    min-height: 36px;
+    font-size: 12px;
 }
 
 .deputy-shell .admin-console-nav a {
@@ -87,12 +87,12 @@
 }
 
 .deputy-shell .admin-theme-button {
-    width: 36px;
-    min-width: 36px;
+    width: 40px;
+    min-width: 40px;
 }
 
 .deputy-shell .admin-console-page {
-    height: calc(100dvh - var(--admin-console-header-height));
+    height: calc((100dvh / var(--admin-interface-scale)) - var(--admin-console-header-height));
     gap: 8px;
     padding: 8px 0 12px;
 }
@@ -326,6 +326,29 @@
     min-height: 34px;
 }
 
+.deputy-export-button {
+    width: auto;
+    min-width: 82px;
+    min-height: 34px;
+    padding: 0 11px;
+    border-color: color-mix(in srgb, var(--admin-green) 42%, var(--admin-line));
+    color: var(--admin-green);
+    white-space: nowrap;
+}
+
+.deputy-export-button::before {
+    content: "↓";
+    margin-right: 6px;
+    font-size: 14px;
+    line-height: 1;
+}
+
+.deputy-export-button.is-disabled,
+.deputy-export-button[aria-disabled="true"] {
+    pointer-events: none;
+    opacity: .5;
+}
+
 .deputy-filter-counts {
     display: flex;
     min-width: 0;
@@ -383,7 +406,7 @@
 
 .deputy-planning-workspace {
     display: grid;
-    grid-template-columns: minmax(250px, 300px) minmax(0, 1fr);
+    grid-template-columns: clamp(360px, 21vw, 400px) minmax(0, 1fr);
     gap: 8px;
     min-height: 0;
     overflow: hidden;
@@ -668,11 +691,11 @@ button.deputy-avatar {
 }
 
 .deputy-assignment-table th:first-child {
-    width: 30%;
+    width: 24%;
 }
 
 .deputy-assignment-table th:not(:first-child) {
-    width: 35%;
+    width: 38%;
 }
 
 .deputy-assignment-table td {
@@ -1477,7 +1500,7 @@ button.deputy-avatar {
     }
 
     .deputy-planning-workspace {
-        grid-template-columns: 260px minmax(0, 1fr);
+        grid-template-columns: minmax(300px, 330px) minmax(0, 1fr);
         height: auto;
         min-height: 0;
         overflow: hidden;
@@ -1595,6 +1618,7 @@ button.deputy-avatar {
     }
 
     .deputy-toolbar-actions {
+        gap: 6px;
         justify-content: stretch;
     }
 
@@ -1611,7 +1635,12 @@ button.deputy-avatar {
     }
 
     .deputy-publish-button {
-        min-width: 126px;
+        min-width: 116px;
+    }
+
+    .deputy-export-button {
+        min-width: 72px;
+        padding: 0 8px;
     }
 
     .deputy-filter-counts button {

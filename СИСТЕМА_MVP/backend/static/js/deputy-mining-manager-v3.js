@@ -70,6 +70,7 @@
     var summaryCounts = Array.prototype.slice.call(root.querySelectorAll("[data-summary-count]"));
     var autosaveState = root.querySelector("[data-autosave-state]");
     var autosaveText = root.querySelector("[data-autosave-text]");
+    var exportButton = root.querySelector("[data-export-excel]");
     var publishButton = root.querySelector("[data-publish-button]");
     var candidateDialog = document.querySelector("[data-candidate-dialog]");
     var candidateContext = document.querySelector("[data-candidate-context]");
@@ -795,6 +796,16 @@
     }
 
     function updatePublishButton() {
+        if (exportButton) {
+            var canExport = Boolean(state.plan.id && state.endpoints.export && !saving);
+            exportButton.href = canExport ? state.endpoints.export : "#";
+            exportButton.classList.toggle("is-disabled", !canExport);
+            exportButton.setAttribute("aria-disabled", canExport ? "false" : "true");
+            exportButton.tabIndex = canExport ? 0 : -1;
+            exportButton.title = canExport
+                ? "Скачать Excel для печати"
+                : (saving ? "Дождитесь завершения сохранения" : "Экспорт недоступен");
+        }
         if (!publishButton) return;
         var conflicts = Number(state.summary.conflict_count || 0);
         var canPublish = Boolean(state.plan.editable && state.endpoints.publish && !saving && conflicts === 0);
@@ -1027,6 +1038,13 @@
         });
     }
     if (publishButton) publishButton.addEventListener("click", openPublishConfirmation);
+    if (exportButton) {
+        exportButton.addEventListener("click", function (event) {
+            if (!saving && state.plan.id && state.endpoints.export) return;
+            event.preventDefault();
+            if (saving) showToast("Дождитесь завершения сохранения.", false);
+        });
+    }
     if (publishConfirm) publishConfirm.addEventListener("click", publishPlan);
     if (noticeClose) noticeClose.addEventListener("click", hideNotice);
     if (noticeAction) {
