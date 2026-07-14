@@ -1,0 +1,80 @@
+.oup-page {
+    width: calc(100% - clamp(20px, 2vw, 56px));
+    max-width: none;
+}
+
+.oup-console-header .admin-console-identity strong {
+    overflow-wrap: anywhere;
+    line-height: 1.08;
+    white-space: normal;
+}
+
+.oup-person-cell > span:last-child {
+    min-width: 0;
+}
+
+.oup-person-cell strong,
+.oup-person-cell small {
+    overflow-wrap: anywhere;
+}
+
+@media (min-width: 1221px) {
+    .oup-console-header {
+        grid-template-columns: clamp(260px, 22vw, 460px) minmax(480px, 1fr) clamp(420px, 30vw, 680px);
+    }
+}
+
+@media (min-width: 641px) and (max-width: 1023px) {
+    .oup-filter-bar {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .oup-filter-bar .admin-search-field,
+    .oup-filter-bar .field-submit {
+        grid-column: 1 / -1;
+    }
+
+    .oup-register-card {
+        overflow-x: visible;
+    }
+
+    .oup-register-head {
+        display: none;
+    }
+
+    .oup-register-list {
+        min-width: 0;
+    }
+
+    .oup-employee-row {
+        grid-template-columns: minmax(0, 1fr) 24px;
+        gap: 9px;
+        min-width: 0;
+        padding: 12px;
+    }
+
+    .oup-person-cell,
+    .oup-work-cell,
+    .oup-contact-cell,
+    .oup-state-cell {
+        grid-column: 1;
+    }
+
+    .oup-work-cell,
+    .oup-contact-cell,
+    .oup-state-cell {
+        padding-left: 56px;
+    }
+
+    .oup-state-cell {
+        align-items: center;
+        flex-direction: row;
+        flex-wrap: wrap;
+    }
+
+    .oup-row-arrow {
+        grid-column: 2;
+        grid-row: 1 / 5;
+        align-self: center;
+    }
+}
