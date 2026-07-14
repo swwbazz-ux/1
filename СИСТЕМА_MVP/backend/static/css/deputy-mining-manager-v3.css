@@ -431,7 +431,7 @@
 
 .deputy-employee-drop-hint {
     position: absolute;
-    inset: 54px 8px 8px;
+    inset: 50px 8px 8px;
     z-index: 8;
     display: grid;
     align-content: center;
@@ -480,15 +480,20 @@
 
 .deputy-employee-pool > header {
     display: flex;
-    min-height: 46px;
+    height: 42px;
+    min-height: 42px;
     gap: 10px;
     align-items: center;
     justify-content: space-between;
-    padding: 9px 11px;
-    border-bottom: 1px solid var(--admin-line-soft);
+    padding: 0 10px;
+    border-bottom: 1px solid var(--admin-line);
+    background: var(--admin-panel-soft);
 }
 
-.deputy-employee-pool h2,
+.deputy-employee-pool h2 {
+    margin: 0;
+}
+
 .deputy-publications-card h2 {
     margin: 0;
     color: var(--admin-ink);
@@ -501,6 +506,7 @@
     color: var(--admin-muted);
     font-size: 12px;
     font-weight: 900;
+    line-height: 1;
 }
 
 .deputy-employee-list {
@@ -675,6 +681,17 @@ button.deputy-avatar {
     table-layout: fixed;
 }
 
+.deputy-employee-pool h2,
+.deputy-assignment-table th {
+    color: var(--admin-ink);
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 900;
+    line-height: 1;
+    letter-spacing: .035em;
+    text-transform: uppercase;
+}
+
 .deputy-assignment-table th {
     position: sticky;
     top: 0;
@@ -683,11 +700,8 @@ button.deputy-avatar {
     padding: 0 10px;
     border-bottom: 1px solid var(--admin-line);
     background: var(--admin-panel-soft);
-    color: var(--admin-muted);
-    font-size: 11px;
-    font-weight: 900;
     text-align: left;
-    text-transform: uppercase;
+    vertical-align: middle;
 }
 
 .deputy-assignment-table th:first-child {
