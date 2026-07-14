@@ -4,6 +4,7 @@
 {% block title %}Расстановка{% endblock %}
 {% block body_class %}deputy-mining-manager-screen deputy-placement-screen{% endblock %}
 {% block extra_head %}
+{% include "includes/deputy_mining_manager_pwa_head.html" %}
 <link rel="stylesheet" href="{% static 'css/deputy-mining-manager-v3.css' %}">
 {% endblock %}
 
@@ -19,6 +20,12 @@
                     <strong data-work-date>{{ selected_date|date:"d.m.Y" }}</strong>
                 </div>
                 <nav class="deputy-category-nav" data-category-nav aria-label="Категории техники" hidden></nav>
+                <div class="deputy-brigade-switch" role="group" aria-label="Фильтр сотрудников по бригаде">
+                    <span>Бригада</span>
+                    <button type="button" class="is-active" data-brigade-filter="all" aria-pressed="true">Все</button>
+                    <button type="button" data-brigade-filter="1" aria-pressed="false">1</button>
+                    <button type="button" data-brigade-filter="2" aria-pressed="false">2</button>
+                </div>
             </div>
 
             <label class="deputy-search-field" for="deputy-planning-search">
@@ -35,6 +42,12 @@
                     <span class="deputy-autosave-dot" aria-hidden="true"></span>
                     <span data-autosave-text>Все изменения сохранены</span>
                 </span>
+                <a class="admin-button admin-button-secondary deputy-export-button"
+                   href="#"
+                   data-export-excel
+                   aria-label="Скачать текущую расстановку в Excel для печати"
+                   aria-disabled="true"
+                   title="Скачать Excel для печати">Excel</a>
                 <button class="admin-button admin-button-primary deputy-publish-button"
                         type="button"
                         data-publish-button>Опубликовать</button>
@@ -121,6 +134,22 @@
     </figure>
 </dialog>
 
+<dialog class="deputy-dialog deputy-record-dialog" data-record-dialog aria-labelledby="deputy-record-title">
+    <button type="button" class="deputy-dialog-close deputy-record-close" data-record-close aria-label="Закрыть">×</button>
+    <div class="deputy-record-head">
+        <div class="deputy-record-visual" data-record-visual aria-hidden="true"></div>
+        <div>
+            <span data-record-kicker>Карточка</span>
+            <h2 id="deputy-record-title" data-record-title></h2>
+            <p data-record-subtitle></p>
+        </div>
+    </div>
+    <dl class="deputy-record-fields" data-record-fields></dl>
+    <div class="deputy-dialog-actions">
+        <button type="button" class="admin-button admin-button-secondary" data-record-close>Закрыть</button>
+    </div>
+</dialog>
+
 <dialog class="deputy-dialog deputy-publish-dialog" data-publish-dialog aria-labelledby="deputy-publish-title">
     <div class="deputy-dialog-head">
         <div>
@@ -161,4 +190,5 @@
     {{ planning_payload|json_script:"deputy-planning-data" }}
 {% endif %}
 <script src="{% static 'js/deputy-mining-manager-v3.js' %}" defer></script>
+<script src="{% static 'js/deputy-mining-manager-pwa-v1.js' %}" defer></script>
 {% endblock %}

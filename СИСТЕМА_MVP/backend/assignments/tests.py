@@ -390,7 +390,11 @@ class MiningMasterAssignmentsViewTests(TestCase):
         script = response.content.decode('utf-8')
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'mining-master-mobile-shell-v107')
+        self.assertIn('`${CACHE_PREFIX}v107`', script)
+        self.assertIn('const CACHE_PREFIX = "mining-master-mobile-shell-";', script)
+        self.assertIn('key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME', script)
+        self.assertIn('EXCLUDED_NAVIGATION_PREFIXES = ["/deputy-mining-manager/"]', script)
+        self.assertIn('EXCLUDED_NAVIGATION_PREFIXES.some(prefix => url.pathname.startsWith(prefix))', script)
         self.assertIn(reverse('mining_master_manifest'), script)
         self.assertIn('/static/js/realtime-client.js', script)
         self.assertIn('ignoreSearch: true', script)

@@ -3,19 +3,98 @@
     background: #dce4e7;
 }
 
+.deputy-shell {
+    --admin-console-header-height: 76px;
+}
+
+.deputy-shell .deputy-console-header {
+    grid-template-columns: minmax(210px, 260px) minmax(0, 1fr) minmax(150px, 190px);
+    height: var(--admin-console-header-height);
+    min-height: var(--admin-console-header-height);
+    max-height: var(--admin-console-header-height);
+}
+
+.deputy-shell .admin-console-identity,
+.deputy-shell .admin-console-main,
 .deputy-shell .admin-console-actions {
-    grid-template-columns: 44px minmax(112px, 1fr);
+    padding: 8px 14px;
+}
+
+.deputy-shell .admin-console-identity {
+    grid-template-columns: 42px minmax(0, 1fr);
+    gap: 10px;
+}
+
+.deputy-shell .admin-console-avatar {
+    width: 42px;
+    height: 42px;
+    font-size: 20px;
+}
+
+.deputy-shell .admin-console-identity strong {
+    font-size: 14px;
+}
+
+.deputy-shell .admin-console-identity em {
+    margin-top: 2px;
+    font-size: 10px;
+}
+
+.deputy-shell .admin-console-actions {
+    grid-template-columns: 40px minmax(96px, 1fr);
+    gap: 8px;
 }
 
 .deputy-shell .admin-console-main {
-    grid-template-rows: auto auto;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    justify-content: flex-start;
+}
+
+.deputy-shell .admin-console-title {
+    display: none;
+}
+
+.deputy-shell .admin-console-title span {
+    font-size: 10px;
 }
 
 .deputy-shell .admin-console-title h1 {
     max-width: 100%;
     overflow: hidden;
+    font-size: 27px;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.deputy-shell .admin-console-nav {
+    flex: 0 0 auto;
+    flex-wrap: nowrap;
+    gap: 6px;
+}
+
+.deputy-shell .admin-console-nav a,
+.deputy-shell .admin-utility-link,
+.deputy-shell .admin-theme-button {
+    min-height: 36px;
+    font-size: 12px;
+}
+
+.deputy-shell .admin-console-nav a {
+    min-width: 94px;
+    padding: 0 10px;
+}
+
+.deputy-shell .admin-theme-button {
+    width: 40px;
+    min-width: 40px;
+}
+
+.deputy-shell .admin-console-page {
+    height: calc((100dvh / var(--admin-interface-scale)) - var(--admin-console-header-height));
+    gap: 8px;
+    padding: 8px 0 12px;
 }
 
 .deputy-planning-page {
@@ -24,7 +103,7 @@
 
 .deputy-server-messages {
     position: fixed;
-    top: 118px;
+    top: 92px;
     right: 18px;
     z-index: 40;
     width: min(420px, calc(100vw - 36px));
@@ -43,35 +122,38 @@
 
 .deputy-planning-toolbar {
     display: grid;
-    grid-template-columns: minmax(220px, 1fr) minmax(240px, 340px) auto;
-    gap: 12px;
-    align-items: end;
-    padding: 10px 12px;
+    grid-template-columns: minmax(500px, 1fr) minmax(250px, 340px) auto;
+    gap: 8px;
+    align-items: center;
+    padding: 4px 6px;
 }
 
 .deputy-planning-scope {
     display: flex;
     min-width: 0;
-    gap: 10px;
-    align-items: end;
+    gap: 8px;
+    align-items: center;
 }
 
 .deputy-work-date {
-    display: grid;
+    display: flex;
     flex: 0 0 auto;
-    gap: 4px;
+    gap: 0;
+    align-items: center;
 }
 
 .deputy-work-date span {
-    color: var(--admin-muted);
-    font-size: 10px;
-    font-weight: 900;
-    text-transform: uppercase;
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
 }
 
 .deputy-work-date strong {
     color: var(--admin-ink);
-    font-size: 16px;
+    min-width: 82px;
+    font-size: 13px;
     font-weight: 900;
     line-height: 1;
 }
@@ -95,8 +177,8 @@
     flex: 0 0 auto;
     align-items: center;
     justify-content: center;
-    min-height: 38px;
-    padding: 0 12px;
+    min-height: 32px;
+    padding: 0 9px;
     border: 1px solid var(--admin-line);
     border-radius: 6px;
     background: var(--admin-panel-soft);
@@ -115,22 +197,69 @@
     color: var(--admin-green);
 }
 
+.deputy-brigade-switch {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    overflow: hidden;
+    border: 1px solid var(--admin-line);
+    border-radius: 6px;
+    background: var(--admin-panel-soft);
+}
+
+.deputy-brigade-switch > span {
+    padding: 0 8px;
+    color: var(--admin-muted);
+    font-size: 10px;
+    font-weight: 900;
+    text-transform: uppercase;
+}
+
+.deputy-brigade-switch button {
+    min-width: 34px;
+    min-height: 32px;
+    padding: 0 8px;
+    border: 0;
+    border-left: 1px solid var(--admin-line-soft);
+    background: transparent;
+    color: var(--admin-muted);
+    font-family: inherit;
+    font-size: 11px;
+    font-weight: 900;
+    cursor: pointer;
+}
+
+.deputy-brigade-switch button:hover,
+.deputy-brigade-switch button:focus-visible {
+    outline: 0;
+    background: var(--admin-panel);
+    color: var(--admin-ink);
+}
+
+.deputy-brigade-switch button.is-active {
+    background: var(--admin-green-soft);
+    color: var(--admin-green);
+}
+
 .deputy-search-field {
+    position: relative;
     display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 7px;
+    align-items: center;
     min-width: 0;
-    gap: 5px;
 }
 
 .deputy-search-field span {
     color: var(--admin-muted);
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 900;
     text-transform: uppercase;
 }
 
 .deputy-search-field input {
     width: 100%;
-    min-height: 38px;
+    min-height: 32px;
     padding: 0 11px;
     border: 1px solid var(--admin-line);
     border-radius: 6px;
@@ -149,14 +278,14 @@
 
 .deputy-toolbar-actions {
     display: flex;
-    gap: 10px;
+    gap: 8px;
     align-items: center;
     justify-content: flex-end;
 }
 
 .deputy-autosave-state {
     display: inline-flex;
-    min-width: 152px;
+    min-width: 132px;
     gap: 7px;
     align-items: center;
     justify-content: flex-end;
@@ -192,14 +321,39 @@
 }
 
 .deputy-publish-button {
-    min-width: 138px;
+    width: auto;
+    min-width: 126px;
+    min-height: 34px;
+}
+
+.deputy-export-button {
+    width: auto;
+    min-width: 82px;
+    min-height: 34px;
+    padding: 0 11px;
+    border-color: color-mix(in srgb, var(--admin-green) 42%, var(--admin-line));
+    color: var(--admin-green);
+    white-space: nowrap;
+}
+
+.deputy-export-button::before {
+    content: "↓";
+    margin-right: 6px;
+    font-size: 14px;
+    line-height: 1;
+}
+
+.deputy-export-button.is-disabled,
+.deputy-export-button[aria-disabled="true"] {
+    pointer-events: none;
+    opacity: .5;
 }
 
 .deputy-filter-counts {
     display: flex;
     min-width: 0;
     gap: 6px;
-    padding: 6px;
+    padding: 3px;
     overflow-x: auto;
     scrollbar-width: thin;
 }
@@ -209,7 +363,7 @@
     width: auto;
     flex: 1 1 0;
     min-width: 130px;
-    min-height: 38px;
+    min-height: 32px;
     gap: 9px;
     align-items: center;
     justify-content: space-between;
@@ -241,7 +395,7 @@
 .deputy-filter-counts strong {
     display: inline-grid;
     min-width: 28px;
-    height: 24px;
+    height: 22px;
     place-items: center;
     padding: 0 6px;
     border-radius: 5px;
@@ -252,8 +406,8 @@
 
 .deputy-planning-workspace {
     display: grid;
-    grid-template-columns: minmax(250px, 300px) minmax(0, 1fr);
-    gap: 12px;
+    grid-template-columns: clamp(360px, 21vw, 400px) minmax(0, 1fr);
+    gap: 8px;
     min-height: 0;
     overflow: hidden;
 }
@@ -537,11 +691,11 @@ button.deputy-avatar {
 }
 
 .deputy-assignment-table th:first-child {
-    width: 30%;
+    width: 24%;
 }
 
 .deputy-assignment-table th:not(:first-child) {
-    width: 35%;
+    width: 38%;
 }
 
 .deputy-assignment-table td {
@@ -575,6 +729,16 @@ button.deputy-avatar {
     gap: 9px;
     align-items: center;
     min-width: 0;
+    padding: 2px;
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+.deputy-equipment-cell:hover,
+.deputy-equipment-cell:focus-visible {
+    outline: 0;
+    background: color-mix(in srgb, var(--admin-green) 7%, transparent);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--admin-green) 15%, transparent);
 }
 
 .deputy-equipment-icon {
@@ -662,7 +826,7 @@ button.deputy-avatar {
 }
 
 .deputy-slot.has-employee {
-    grid-template-columns: 38px minmax(0, 1fr);
+    grid-template-columns: 38px minmax(0, 1fr) auto;
     column-gap: 8px;
     border-style: solid;
     background: var(--admin-panel);
@@ -740,6 +904,26 @@ button.deputy-avatar {
 .deputy-slot-person:disabled,
 .deputy-slot-empty:disabled {
     cursor: default;
+}
+
+.deputy-slot-edit {
+    min-height: 28px;
+    padding: 0 8px;
+    border: 1px solid var(--admin-line);
+    border-radius: 5px;
+    background: var(--admin-panel-soft);
+    color: var(--admin-muted);
+    font-family: inherit;
+    font-size: 10px;
+    font-weight: 900;
+    cursor: pointer;
+}
+
+.deputy-slot-edit:hover,
+.deputy-slot-edit:focus-visible {
+    border-color: var(--admin-green);
+    outline: 0;
+    color: var(--admin-green);
 }
 
 .deputy-slot-person .deputy-employee-main strong {
@@ -944,6 +1128,124 @@ button.deputy-avatar {
     font-size: 14px;
     font-weight: 900;
     text-align: center;
+}
+
+.deputy-record-dialog {
+    position: relative;
+    width: min(560px, calc(100vw - 28px));
+}
+
+.deputy-record-close {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    z-index: 2;
+}
+
+.deputy-record-head {
+    display: grid;
+    grid-template-columns: 72px minmax(0, 1fr);
+    gap: 14px;
+    align-items: center;
+    padding: 16px 58px 14px 16px;
+    border-bottom: 1px solid var(--admin-line-soft);
+}
+
+.deputy-record-head > div:last-child {
+    min-width: 0;
+}
+
+.deputy-record-head span {
+    color: var(--admin-green);
+    font-size: 10px;
+    font-weight: 900;
+    text-transform: uppercase;
+}
+
+.deputy-record-head h2,
+.deputy-record-head p {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.deputy-record-head h2 {
+    margin: 3px 0 0;
+    font-size: 22px;
+}
+
+.deputy-record-head p {
+    margin: 4px 0 0;
+    color: var(--admin-muted);
+    font-size: 12px;
+    font-weight: 800;
+}
+
+.deputy-record-visual {
+    display: grid;
+    width: 72px;
+    height: 72px;
+    place-items: center;
+    overflow: hidden;
+    border: 1px solid var(--admin-line);
+    border-radius: 8px;
+    background: var(--admin-green-soft);
+    color: var(--admin-green);
+    font-size: 22px;
+    font-weight: 900;
+}
+
+.deputy-record-visual .deputy-avatar {
+    width: 100%;
+    height: 100%;
+    border: 0;
+    border-radius: 0;
+}
+
+.deputy-record-visual img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+}
+
+.deputy-record-visual .deputy-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.deputy-record-fields {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1px;
+    max-height: min(420px, 50dvh);
+    margin: 0;
+    padding: 1px;
+    overflow-y: auto;
+    background: var(--admin-line-soft);
+}
+
+.deputy-record-field {
+    min-width: 0;
+    padding: 10px 12px;
+    background: var(--admin-panel);
+}
+
+.deputy-record-field dt {
+    color: var(--admin-muted);
+    font-size: 10px;
+    font-weight: 900;
+    text-transform: uppercase;
+}
+
+.deputy-record-field dd {
+    margin: 4px 0 0;
+    overflow: hidden;
+    color: var(--admin-ink);
+    font-size: 13px;
+    font-weight: 900;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .deputy-toast {
@@ -1178,28 +1480,109 @@ button.deputy-avatar {
 
 @media (max-width: 1180px) {
     .deputy-mining-manager-screen {
-        overflow: auto;
+        overflow: hidden;
     }
 
     .deputy-planning-toolbar {
-        grid-template-columns: minmax(0, 1fr) minmax(240px, 320px);
+        grid-template-columns: minmax(0, 1fr) auto;
     }
 
-    .deputy-toolbar-actions {
+    .deputy-planning-scope {
         grid-column: 1 / -1;
     }
 
+    .deputy-work-date span {
+        display: none;
+    }
+
+    .deputy-toolbar-actions {
+        grid-column: auto;
+    }
+
     .deputy-planning-workspace {
-        grid-template-columns: 260px minmax(0, 1fr);
-        height: clamp(520px, calc(100dvh - 430px), 720px);
-        min-height: 520px;
+        grid-template-columns: minmax(300px, 330px) minmax(0, 1fr);
+        height: auto;
+        min-height: 0;
         overflow: hidden;
     }
 }
 
 @media (max-width: 720px) {
+    .deputy-mining-manager-screen {
+        overflow: auto;
+    }
+
+    .deputy-shell .deputy-console-header {
+        grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-rows: 50px 42px;
+        height: auto;
+        min-height: 92px;
+        max-height: none;
+    }
+
+    .deputy-shell .admin-console-identity {
+        grid-column: 1;
+        grid-row: 1;
+        grid-template-columns: 34px minmax(0, 1fr);
+        gap: 8px;
+        padding: 6px 10px;
+        border-bottom: 1px solid var(--admin-line-soft);
+    }
+
+    .deputy-shell .admin-console-avatar {
+        width: 34px;
+        height: 34px;
+        font-size: 16px;
+    }
+
+    .deputy-shell .admin-console-main {
+        grid-column: 1 / -1;
+        grid-row: 2;
+        gap: 10px;
+        padding: 4px 10px;
+        border-bottom: 1px solid var(--admin-line-soft);
+    }
+
+    .deputy-shell .admin-console-title span {
+        display: none;
+    }
+
+    .deputy-shell .admin-console-title {
+        display: none;
+    }
+
+    .deputy-shell .admin-console-nav {
+        flex: 1 1 auto;
+        width: 100%;
+        justify-content: stretch;
+    }
+
+    .deputy-shell .admin-console-nav a {
+        flex: 1 1 0;
+        min-width: 0;
+        min-height: 34px;
+        padding: 0 8px;
+        font-size: 10px;
+    }
+
     .deputy-shell .admin-console-actions {
-        grid-template-columns: 44px minmax(0, 1fr);
+        grid-column: 2;
+        grid-row: 1;
+        grid-template-columns: 36px minmax(72px, 82px);
+        gap: 6px;
+        padding: 6px 10px 6px 0;
+        border-bottom: 1px solid var(--admin-line-soft);
+    }
+
+    .deputy-shell .admin-theme-button {
+        width: 36px;
+        min-width: 36px;
+    }
+
+    .deputy-shell .admin-console-page {
+        height: auto;
+        min-height: calc(100dvh - 92px);
+        overflow: visible;
     }
 
     .deputy-planning-page {
@@ -1208,7 +1591,8 @@ button.deputy-avatar {
 
     .deputy-planning-toolbar {
         grid-template-columns: minmax(0, 1fr);
-        padding: 9px;
+        gap: 6px;
+        padding: 6px;
     }
 
     .deputy-category-nav,
@@ -1218,10 +1602,23 @@ button.deputy-avatar {
     }
 
     .deputy-planning-scope {
-        align-items: end;
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr);
+        gap: 6px;
+        align-items: center;
+    }
+
+    .deputy-brigade-switch {
+        grid-column: 1 / -1;
+        width: max-content;
+    }
+
+    .deputy-work-date span {
+        display: none;
     }
 
     .deputy-toolbar-actions {
+        gap: 6px;
         justify-content: stretch;
     }
 
@@ -1229,10 +1626,21 @@ button.deputy-avatar {
         min-width: 0;
         flex: 1 1 auto;
         justify-content: flex-start;
+        overflow: hidden;
+    }
+
+    .deputy-autosave-state [data-autosave-text] {
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
 
     .deputy-publish-button {
-        min-width: 126px;
+        min-width: 116px;
+    }
+
+    .deputy-export-button {
+        min-width: 72px;
+        padding: 0 8px;
     }
 
     .deputy-filter-counts button {
@@ -1284,6 +1692,20 @@ button.deputy-avatar {
     .deputy-dialog-actions [data-clear-slot] {
         flex-basis: 100%;
         margin-right: 0;
+    }
+
+    .deputy-record-head {
+        grid-template-columns: 58px minmax(0, 1fr);
+        padding: 12px 52px 12px 12px;
+    }
+
+    .deputy-record-visual {
+        width: 58px;
+        height: 58px;
+    }
+
+    .deputy-record-fields {
+        grid-template-columns: minmax(0, 1fr);
     }
 
     .deputy-notice {
