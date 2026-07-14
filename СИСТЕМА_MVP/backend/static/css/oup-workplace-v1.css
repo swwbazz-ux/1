@@ -815,6 +815,82 @@
     padding: 16px;
 }
 
+.oup-access-toggle {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 14px;
+    font-weight: 900;
+}
+
+.oup-access-toggle input {
+    width: 20px;
+    height: 20px;
+    accent-color: var(--admin-green);
+}
+
+.oup-access-list {
+    display: grid;
+    gap: 8px;
+    margin-top: 12px;
+}
+
+.oup-access-list article {
+    display: grid;
+    gap: 7px;
+    padding: 10px;
+    border: 1px solid var(--admin-line-soft);
+    border-radius: 6px;
+    background: var(--admin-panel-soft);
+}
+
+.oup-access-list article > div {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.oup-access-list small,
+.oup-access-list .muted {
+    color: var(--admin-muted);
+}
+
+.oup-protected-access {
+    margin-top: 12px;
+    border-left: 4px solid var(--admin-yellow);
+    padding: 9px 10px;
+    background: var(--admin-yellow-soft);
+    color: var(--admin-ink);
+    font-size: 11px;
+    font-weight: 800;
+}
+
+.oup-access-issue-form {
+    display: grid;
+    gap: 8px;
+    margin-top: 14px;
+    padding-top: 14px;
+    border-top: 1px solid var(--admin-line);
+}
+
+.oup-access-issue-form label {
+    color: var(--admin-muted);
+    font-size: 11px;
+    font-weight: 900;
+    text-transform: uppercase;
+}
+
+.oup-access-issue-form select {
+    width: 100%;
+    min-height: 40px;
+    border: 1px solid var(--admin-line);
+    border-radius: 5px;
+    padding: 8px 10px;
+    background: var(--admin-panel);
+    color: var(--admin-ink);
+}
+
 .oup-check-list {
     display: grid;
     gap: 8px;

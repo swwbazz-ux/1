@@ -59,6 +59,11 @@ from .forms import (
     normalize_phone,
 )
 from .models import AdminActionLog, AdminConflict, DriverPrimaryRegistration, Employee, EmployeeAccess, Role
+from .oup_undo import (
+    OUP_ACTION_EMPLOYEE_DISMISSED,
+    get_oup_action_undo_state,
+    undo_oup_action,
+)
 from .session_device import detect_session_device_kind, mark_session_device_kind, set_session_device_kind
 
 
@@ -1150,7 +1155,7 @@ def system_admin_logs_view(request):
 
     query = request.GET.get('q', '').strip()
     log_type = request.GET.get('type', '').strip()
-    logs = AdminActionLog.objects.select_related('actor').order_by('-created_at')
+    logs = AdminActionLog.objects.select_related('actor', 'reversal_of').order_by('-created_at')
     if query:
         logs = logs.filter(
             Q(action__icontains=query)
@@ -1168,15 +1173,26 @@ def system_admin_logs_view(request):
             logs = logs.filter(Q(action__icontains='конфликт') | Q(object_type__icontains='AdminConflict'))
         elif log_type == 'reference':
             logs = logs.filter(Q(action__icontains='Справочник') | Q(object_type__icontains='references'))
+        elif log_type == 'oup':
+            logs = logs.filter(Q(action__startswith='ОУП:') | Q(action_code='admin_oup_action_reversed'))
 
     total_logs = AdminActionLog.objects.count()
     access_total = AdminActionLog.objects.filter(Q(action__icontains='доступ') | Q(action__icontains='пинкод') | Q(object_type__icontains='Access')).count()
     employee_total = AdminActionLog.objects.filter(Q(action__icontains='сотрудник') | Q(object_type__icontains='Employee')).count()
     conflict_total = AdminActionLog.objects.filter(Q(action__icontains='конфликт') | Q(object_type__icontains='AdminConflict')).count()
+    oup_total = AdminActionLog.objects.filter(action__startswith='ОУП:').count()
     logs = list(logs[:200])
     for log in logs:
         action_text = f'{log.action} {log.object_type}'.lower()
-        if 'конфликт' in action_text or 'adminconflict' in action_text:
+        if log.action.startswith('ОУП:'):
+            log.type_label = 'ОУП'
+            log.type_class = 'info'
+            log.undo_state = get_oup_action_undo_state(log)
+        elif log.action_code == 'admin_oup_action_reversed':
+            log.type_label = 'Отмена ОУП'
+            log.type_class = 'ok'
+            log.undo_state = None
+        elif 'конфликт' in action_text or 'adminconflict' in action_text:
             log.type_label = 'Конфликт'
             log.type_class = 'danger'
         elif 'доступ' in action_text or 'пинкод' in action_text or 'access' in action_text:
@@ -1191,6 +1207,7 @@ def system_admin_logs_view(request):
         else:
             log.type_label = 'Действие'
             log.type_class = 'neutral'
+            log.undo_state = None
 
     return render(
         request,
@@ -1204,8 +1221,28 @@ def system_admin_logs_view(request):
             'access_log_total': access_total,
             'employee_log_total': employee_total,
             'conflict_log_total': conflict_total,
+            'oup_log_total': oup_total,
+            'return_url': request.get_full_path(),
         },
     )
+
+
+@require_POST
+def system_admin_undo_oup_action_view(request, log_id):
+    access = require_admin_access(request)
+    if not access:
+        return redirect('role_home')
+    try:
+        result, _reversal = undo_oup_action(
+            log_id=log_id,
+            actor=access.employee,
+            comment=request.POST.get('comment', '').strip(),
+        )
+    except ValidationError as error:
+        messages.error(request, '; '.join(error.messages))
+    else:
+        messages.success(request, result)
+    return redirect_after_admin_action(request, 'system_admin_logs')
 
 
 def system_admin_exports_view(request):
@@ -1484,6 +1521,24 @@ def system_admin_employee_detail_view(request, employee_id):
     if not work_assignment_role and current_role_access:
         work_assignment_role = current_role_access.role
 
+    latest_oup_dismissal_log = (
+        AdminActionLog.objects
+        .filter(
+            object_type='Employee',
+            object_id=str(employee.id),
+        )
+        .filter(
+            Q(action_code=OUP_ACTION_EMPLOYEE_DISMISSED)
+            | Q(action='ОУП: уволен сотрудник')
+        )
+        .order_by('-created_at')
+        .first()
+    )
+    if latest_oup_dismissal_log:
+        latest_oup_dismissal_log.undo_state = get_oup_action_undo_state(
+            latest_oup_dismissal_log
+        )
+
     return render(
         request,
         'users/system_admin_employee_detail.html',
@@ -1501,6 +1556,7 @@ def system_admin_employee_detail_view(request, employee_id):
                 work_assignment_role
                 and work_assignment_role.code in WORK_ASSIGNMENT_ROLE_EQUIPMENT_TYPES
             ),
+            'latest_oup_dismissal_log': latest_oup_dismissal_log,
             'logs': AdminActionLog.objects.filter(
                 Q(object_type='Employee', object_id=str(employee.id))
                 | Q(object_id='', object_repr=str(employee))
@@ -1786,9 +1842,30 @@ def system_admin_log_export_view(request):
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = 'Журнал действий'
-    sheet.append(['Дата', 'Кто', 'Действие', 'Тип объекта', 'Объект', 'Комментарий'])
-    for log in AdminActionLog.objects.select_related('actor').order_by('-created_at'):
-        sheet.append([excel_value(log.created_at), log.actor.full_name if log.actor else '', log.action, log.object_type, log.object_repr, log.comment])
+    sheet.append([
+        'Дата', 'Кто', 'Действие', 'Код действия', 'Тип объекта', 'Объект',
+        'Комментарий', 'Отменяет запись', 'Дата отмены', 'Кто отменил',
+    ])
+    logs = AdminActionLog.objects.select_related('actor', 'reversal_of').order_by('-created_at')
+    reversals = {
+        item.reversal_of_id: item
+        for item in logs
+        if item.reversal_of_id
+    }
+    for log in logs:
+        reversal = reversals.get(log.id)
+        sheet.append([
+            excel_value(log.created_at),
+            log.actor.full_name if log.actor else '',
+            log.action,
+            log.action_code,
+            log.object_type,
+            log.object_repr,
+            log.comment,
+            log.reversal_of_id or '',
+            excel_value(reversal.created_at) if reversal else '',
+            reversal.actor.full_name if reversal and reversal.actor else '',
+        ])
     return build_workbook_response(workbook, 'admin_action_log.xlsx')
 
 

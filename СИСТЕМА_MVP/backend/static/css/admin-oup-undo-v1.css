@@ -1,0 +1,95 @@
+.admin-logs-shell .log-metrics {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.admin-logs-shell .metric-info {
+    border-top-color: #168aad;
+}
+
+.admin-logs-shell .metric-info strong,
+.admin-logs-shell .row-info strong {
+    color: #0f7898;
+}
+
+.admin-logs-shell .admin-log-row.log-state-info {
+    border-left-color: #168aad;
+    background: color-mix(in srgb, #168aad 5%, var(--admin-panel));
+}
+
+.admin-logs-shell .log-undo-panel {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-top: 9px;
+    padding-top: 9px;
+    border-top: 1px solid var(--admin-line);
+}
+
+.admin-logs-shell .log-undo-panel small {
+    min-width: 0;
+    color: var(--admin-muted);
+    font-size: 11px;
+    font-weight: 800;
+    line-height: 1.35;
+    text-align: right;
+}
+
+.admin-logs-shell .log-undo-form {
+    margin: 0;
+}
+
+.admin-logs-shell .log-undo-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    min-height: 34px;
+    padding: 7px 12px;
+}
+
+.admin-logs-shell .log-undo-button span {
+    font-size: 18px;
+    line-height: 1;
+}
+
+.admin-logs-shell .log-undo-status {
+    flex: 0 0 auto;
+    color: var(--admin-muted);
+    font-size: 10px;
+    font-weight: 900;
+    text-transform: uppercase;
+}
+
+.admin-logs-shell .log-undo-panel.is-available .log-undo-status {
+    color: var(--admin-green);
+}
+
+.admin-logs-shell .log-undo-panel.is-reversed .log-undo-status {
+    color: #0f7898;
+}
+
+@media (max-width: 1380px) {
+    .admin-logs-shell .log-metrics {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 760px) {
+    .admin-logs-shell .log-metrics {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .admin-logs-shell .log-undo-panel {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .admin-logs-shell .log-undo-panel small {
+        text-align: left;
+    }
+
+    .admin-logs-shell .log-undo-button {
+        justify-content: center;
+        width: 100%;
+    }
+}

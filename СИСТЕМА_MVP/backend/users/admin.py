@@ -33,12 +33,12 @@ class DriverPrimaryRegistrationAdmin(admin.ModelAdmin):
 
 @admin.register(AdminActionLog)
 class AdminActionLogAdmin(admin.ModelAdmin):
-    list_display = ('created_at', 'actor', 'action', 'object_type', 'object_repr')
+    list_display = ('created_at', 'actor', 'action', 'action_code', 'object_type', 'object_repr', 'reversal_of')
     search_fields = ('actor__full_name', 'action', 'object_repr', 'comment')
-    list_filter = ('action', 'object_type')
+    list_filter = ('action', 'action_code', 'object_type')
     readonly_fields = (
-        'created_at', 'actor', 'action', 'object_type', 'object_id', 'object_repr',
-        'old_value', 'new_value', 'comment',
+        'created_at', 'actor', 'action', 'action_code', 'object_type', 'object_id', 'object_repr',
+        'old_value', 'new_value', 'comment', 'undo_payload', 'reversal_of',
     )
 
     def has_add_permission(self, request):

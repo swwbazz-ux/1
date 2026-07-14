@@ -1,7 +1,11 @@
 {% extends "base.html" %}
+{% load static %}
 
 {% block title %}Журнал действий админки{% endblock %}
 {% block body_class %}system-admin-logs-screen{% endblock %}
+{% block extra_head %}
+<link rel="stylesheet" href="{% static 'css/admin-oup-undo-v1.css' %}">
+{% endblock %}
 
 {% block body %}
 <div class="admin-shell admin-exports-shell admin-logs-shell admin-day" data-admin-theme>
@@ -59,13 +63,18 @@
                 <strong>{{ conflict_log_total }}</strong>
                 <small>разборы</small>
             </a>
+            <a class="log-metric metric-info" href="{% url 'system_admin_logs' %}?type=oup">
+                <span>Действия ОУП</span>
+                <strong>{{ oup_log_total }}</strong>
+                <small>с контролем отмены</small>
+            </a>
         </section>
 
         <section class="logs-control-card">
             <div class="admin-section-title">
                 <div>
                     <h2>Поиск и фильтр</h2>
-                    <p>Фильтры работают сразу. Журнал доступен только для просмотра и выгрузки.</p>
+                    <p>Записи неизменяемы. Допустимая отмена создаёт отдельное компенсирующее событие.</p>
                 </div>
                 <span class="admin-chip admin-chip-info">{{ logs|length }} видно</span>
             </div>
@@ -82,6 +91,7 @@
                         <option value="employee" {% if selected_log_type == 'employee' %}selected{% endif %}>Сотрудники</option>
                         <option value="conflict" {% if selected_log_type == 'conflict' %}selected{% endif %}>Конфликты</option>
                         <option value="reference" {% if selected_log_type == 'reference' %}selected{% endif %}>Справочники</option>
+                        <option value="oup" {% if selected_log_type == 'oup' %}selected{% endif %}>Действия ОУП</option>
                     </select>
                 </div>
                 <a class="admin-button admin-button-secondary" href="{% url 'system_admin_logs' %}">Сбросить</a>
@@ -100,7 +110,7 @@
 
                 <div class="admin-log-list">
                     {% for log in logs %}
-                        <article class="admin-log-row log-state-{{ log.type_class }}" data-log-row data-type="{% if log.type_label == 'Доступ' %}access{% elif log.type_label == 'Сотрудник' %}employee{% elif log.type_label == 'Конфликт' %}conflict{% elif log.type_label == 'Справочник' %}reference{% else %}other{% endif %}" data-text="{{ log.actor.full_name }} {{ log.action }} {{ log.object_type }} {{ log.object_repr }} {{ log.comment }} {{ log.old_value }} {{ log.new_value }}">
+                        <article class="admin-log-row log-state-{{ log.type_class }}" data-log-row data-type="{% if log.type_label == 'Доступ' %}access{% elif log.type_label == 'Сотрудник' %}employee{% elif log.type_label == 'Конфликт' %}conflict{% elif log.type_label == 'Справочник' %}reference{% elif log.type_label == 'ОУП' or log.type_label == 'Отмена ОУП' %}oup{% else %}other{% endif %}" data-text="{{ log.actor.full_name }} {{ log.action }} {{ log.object_type }} {{ log.object_repr }} {{ log.comment }} {{ log.old_value }} {{ log.new_value }}">
                             <span class="log-row-accent" aria-hidden="true"></span>
                             <div class="log-main">
                                 <div class="log-row-head">
@@ -120,6 +130,21 @@
                                     <div class="log-row-diff">
                                         {% if log.old_value %}<span><b>Было:</b> {{ log.old_value }}</span>{% endif %}
                                         {% if log.new_value %}<span><b>Стало:</b> {{ log.new_value }}</span>{% endif %}
+                                    </div>
+                                {% endif %}
+                                {% if log.undo_state %}
+                                    <div class="log-undo-panel {% if log.undo_state.available %}is-available{% elif log.undo_state.is_reversed %}is-reversed{% else %}is-blocked{% endif %}">
+                                        {% if log.undo_state.available %}
+                                            <form class="log-undo-form" method="post" action="{% url 'system_admin_undo_oup_action' log.id %}" data-confirm="{{ log.undo_state.confirmation }}">
+                                                {% csrf_token %}
+                                                <input type="hidden" name="next" value="{{ return_url }}">
+                                                <button class="admin-button admin-button-secondary log-undo-button" type="submit"><span aria-hidden="true">↶</span>{{ log.undo_state.label }}</button>
+                                            </form>
+                                            <span class="log-undo-status">Можно отменить</span>
+                                        {% else %}
+                                            <span class="log-undo-status">{% if log.undo_state.is_reversed %}Отменено{% else %}Не отменяется{% endif %}</span>
+                                            <small>{{ log.undo_state.reason }}</small>
+                                        {% endif %}
                                     </div>
                                 {% endif %}
                             </div>
@@ -153,6 +178,10 @@
                         <div class="admin-status-row row-danger">
                             <span>Конфликты</span>
                             <strong>{{ conflict_log_total }}</strong>
+                        </div>
+                        <div class="admin-status-row row-info">
+                            <span>ОУП</span>
+                            <strong>{{ oup_log_total }}</strong>
                         </div>
                     </div>
                 </section>

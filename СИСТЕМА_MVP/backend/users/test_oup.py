@@ -93,6 +93,64 @@ class OupWorkplaceTests(TestCase):
         ).update(closed_at=timezone.now(), closed_by=self.oup_employee)
         return True
 
+    def test_create_employee_can_issue_non_admin_primary_pin(self):
+        self.start_shift()
+        response = self.client.post(
+            reverse('oup_employee_create'),
+            self.employee_payload(issue_access='on', access_role=str(self.driver_role.id)),
+        )
+        employee = Employee.objects.get(personnel_number='CR-1001')
+        issued_access = EmployeeAccess.objects.get(employee=employee, role=self.driver_role)
+        self.assertRedirects(
+            response,
+            reverse('oup_employee_detail', args=[employee.id]),
+            fetch_redirect_response=False,
+        )
+        self.assertEqual(issued_access.status, EmployeeAccess.Status.NOT_ACTIVATED)
+        self.assertEqual(len(issued_access.access_code), 6)
+        self.assertTrue(issued_access.primary_code_issued_at)
+
+    def test_oup_access_form_and_server_reject_admin_role(self):
+        admin_role = Role.objects.create(code='admin', name='Администратор')
+        employee = Employee.objects.create(
+            full_name='Защищенный Администратор',
+            phone='+79000000009',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        self.start_shift()
+        response = self.client.get(reverse('oup_employee_detail', args=[employee.id]))
+        self.assertNotContains(response, f'value="{admin_role.id}"', html=False)
+        response = self.client.post(
+            reverse('oup_employee_access_issue', args=[employee.id]),
+            {'role': str(admin_role.id)},
+        )
+        self.assertFalse(EmployeeAccess.objects.filter(employee=employee, role=admin_role).exists())
+        self.assertRedirects(
+            response,
+            reverse('oup_employee_detail', args=[employee.id]),
+            fetch_redirect_response=False,
+        )
+
+    def test_oup_can_issue_and_deactivate_working_access_with_audit(self):
+        employee = Employee.objects.create(
+            full_name='Новый Водитель',
+            phone='+79000000010',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        self.start_shift()
+        self.client.post(
+            reverse('oup_employee_access_issue', args=[employee.id]),
+            {'role': str(self.driver_role.id)},
+        )
+        issued_access = EmployeeAccess.objects.get(employee=employee, role=self.driver_role)
+        self.assertTrue(AdminActionLog.objects.filter(actor=self.oup_employee, action__contains='PIN').exists())
+        self.client.post(reverse('oup_employee_access_deactivate', args=[issued_access.id]))
+        issued_access.refresh_from_db()
+        self.assertFalse(issued_access.is_active)
+        self.assertEqual(issued_access.status, EmployeeAccess.Status.DEACTIVATED)
+
     def test_role_home_routes_oup_to_workplace(self):
         response = self.client.get(reverse('role_home'))
         self.assertRedirects(response, reverse('oup_home'), fetch_redirect_response=False)

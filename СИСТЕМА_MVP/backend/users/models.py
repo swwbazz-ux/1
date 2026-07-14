@@ -119,12 +119,22 @@ class AdminActionLog(models.Model):
     created_at = models.DateTimeField('Дата и время', auto_now_add=True)
     actor = models.ForeignKey(Employee, verbose_name='Кто выполнил', on_delete=models.SET_NULL, null=True, blank=True, related_name='admin_actions')
     action = models.CharField('Действие', max_length=128)
+    action_code = models.CharField('Код действия', max_length=64, blank=True, db_index=True)
     object_type = models.CharField('Тип объекта', max_length=128, blank=True)
     object_id = models.CharField('ID объекта', max_length=64, blank=True)
     object_repr = models.CharField('Объект', max_length=255, blank=True)
     old_value = models.TextField('Старое значение', blank=True)
     new_value = models.TextField('Новое значение', blank=True)
     comment = models.TextField('Комментарий', blank=True)
+    undo_payload = models.JSONField('Снимок для отмены', default=dict, blank=True)
+    reversal_of = models.OneToOneField(
+        'self',
+        verbose_name='Отмененное действие',
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name='reversal',
+    )
 
     class Meta:
         verbose_name = 'Журнал действия администратора'

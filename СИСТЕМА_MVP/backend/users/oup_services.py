@@ -1,3 +1,5 @@
+import secrets
+
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import F, Q
@@ -16,9 +18,22 @@ from shifts.models import EmployeeShift, ShiftType
 from trips.models import OPEN_TRIP_STATUSES, Trip
 
 from .models import AdminActionLog, Employee, EmployeeAccess, Role
+from .oup_undo import (
+    OUP_ACTION_ACCESS_DEACTIVATED,
+    OUP_ACTION_ACCESS_ISSUED,
+    OUP_ACTION_ACCESS_REISSUED,
+    OUP_ACTION_EMPLOYEE_DISMISSED,
+    OUP_ACTION_PERIOD_FINISHED,
+    OUP_ACTION_PERIOD_STARTED,
+    access_undo_state,
+    assignment_undo_state,
+    dismissal_undo_payload,
+    employee_status_undo_state,
+)
 
 
 OUP_ROLE_CODE = 'oup'
+PROTECTED_OUP_ROLE_CODE = 'admin'
 OUP_AUDIT_FIELDS = (
     ('full_name', 'ФИО'),
     ('birth_date', 'Дата рождения'),
@@ -76,20 +91,24 @@ def log_oup_action(
     action,
     obj=None,
     *,
+    action_code='',
     old_value='',
     new_value='',
     comment='',
     object_repr=None,
+    undo_payload=None,
 ):
     return AdminActionLog.objects.create(
         actor=actor,
         action=f'ОУП: {action}',
+        action_code=action_code,
         object_type=obj.__class__.__name__ if obj else '',
         object_id=str(obj.pk) if obj and obj.pk else '',
         object_repr=(str(obj) if obj else '') if object_repr is None else object_repr,
         old_value=old_value,
         new_value=new_value,
         comment=comment,
+        undo_payload=undo_payload or {},
     )
 
 
@@ -139,6 +158,93 @@ def get_active_oup_period():
         .order_by('id')
         .first()
     )
+
+
+def generate_unique_access_code():
+    while True:
+        code = ''.join(str(secrets.randbelow(10)) for _ in range(6))
+        if not EmployeeAccess.objects.filter(access_code=code).exists():
+            return code
+
+
+def issue_employee_access(*, employee, role, actor):
+    if role.code == PROTECTED_OUP_ROLE_CODE:
+        raise ValidationError(
+            'Специалист ОУП не может выдавать или изменять роль администратора.',
+            code='admin_role_forbidden',
+        )
+    if not employee.is_active or employee.status in {
+        Employee.Status.DISMISSED,
+        Employee.Status.ARCHIVED,
+        Employee.Status.DELETED,
+    }:
+        raise ValidationError('Нельзя выдать доступ неактивному или уволенному сотруднику.')
+    previous_access = (
+        EmployeeAccess.objects.select_for_update()
+        .filter(employee=employee, role=role)
+        .order_by('id')
+        .first()
+    )
+    previous_state = access_undo_state(previous_access) if previous_access else None
+    code = generate_unique_access_code()
+    employee_access, created = EmployeeAccess.objects.update_or_create(
+        employee=employee,
+        role=role,
+        defaults={
+            'access_code': code,
+            'status': EmployeeAccess.Status.NOT_ACTIVATED,
+            'is_active': True,
+            'primary_code_issued_at': timezone.now(),
+            'activated_at': None,
+            'deactivated_at': None,
+            'blocked_at': None,
+            'block_reason': '',
+        },
+    )
+    log_oup_action(
+        actor,
+        'выдан первичный PIN' if created else 'перевыпущен первичный PIN',
+        employee_access,
+        action_code=OUP_ACTION_ACCESS_ISSUED if created else OUP_ACTION_ACCESS_REISSUED,
+        new_value=f'Сотрудник: {employee.full_name}; роль: {role.name}; первичный PIN: {code}',
+        object_repr=f'{employee.full_name} — {role.name}',
+        undo_payload={
+            'version': 1,
+            'before': previous_state,
+            'after': access_undo_state(employee_access),
+        },
+    )
+    return employee_access, code, created
+
+
+def deactivate_employee_access(*, employee_access, actor):
+    if employee_access.role.code == PROTECTED_OUP_ROLE_CODE:
+        raise ValidationError(
+            'Специалист ОУП не может изменять роль администратора.',
+            code='admin_role_forbidden',
+        )
+    if EmployeeShift.objects.filter(employee=employee_access.employee, closed_at__isnull=True).exists():
+        raise ValidationError('Сначала завершите открытую рабочую смену сотрудника.')
+    previous_state = access_undo_state(employee_access)
+    employee_access.status = EmployeeAccess.Status.DEACTIVATED
+    employee_access.is_active = False
+    employee_access.deactivated_at = timezone.now()
+    employee_access.save(update_fields=['status', 'is_active', 'deactivated_at'])
+    log_oup_action(
+        actor,
+        'отключён доступ сотрудника',
+        employee_access,
+        action_code=OUP_ACTION_ACCESS_DEACTIVATED,
+        old_value=f'Роль: {employee_access.role.name}',
+        new_value='Доступ отключён',
+        object_repr=f'{employee_access.employee.full_name} — {employee_access.role.name}',
+        undo_payload={
+            'version': 1,
+            'before': previous_state,
+            'after': access_undo_state(employee_access),
+        },
+    )
+    return employee_access
 
 
 def get_open_oup_shift(employee):
@@ -244,6 +350,7 @@ def open_oup_shift(*, employee):
         employee,
         'начат рабочий период',
         shift,
+        action_code=OUP_ACTION_PERIOD_STARTED,
         new_value=f'Начало: {timezone.localtime(now):%d.%m.%Y %H:%M}',
         object_repr='Рабочий период ОУП',
     )
@@ -261,6 +368,7 @@ def close_oup_shift(*, employee):
         employee,
         'завершён рабочий период',
         shift,
+        action_code=OUP_ACTION_PERIOD_FINISHED,
         old_value=f'Начало: {timezone.localtime(shift.opened_at):%d.%m.%Y %H:%M}',
         new_value=f'Завершение: {timezone.localtime(now):%d.%m.%Y %H:%M}',
         object_repr='Рабочий период ОУП',
@@ -331,12 +439,43 @@ def dismiss_employee(*, employee, actor, dismissed_at, reason=''):
         raise ValidationError([item['detail'] for item in blockers])
 
     before = employee_audit_snapshot(employee)
-    clear_active_equipment_assignment(employee=employee, assigned_by=actor)
-    EmployeeAccess.objects.filter(employee=employee).update(
-        status=EmployeeAccess.Status.DEACTIVATED,
-        is_active=False,
-        deactivated_at=timezone.now(),
+    employee_before_state = employee_status_undo_state(employee)
+    employee_accesses = list(
+        EmployeeAccess.objects.select_for_update()
+        .filter(employee=employee)
+        .order_by('id')
     )
+    access_states = {
+        item.id: access_undo_state(item)
+        for item in employee_accesses
+    }
+    active_assignments = list(
+        EquipmentAssignment.objects.select_for_update()
+        .filter(
+            employee=employee,
+            status__in=[AssignmentStatus.PENDING, AssignmentStatus.ACCEPTED],
+            ended_at__isnull=True,
+            shift__isnull=True,
+            role__isnull=False,
+            shift_type__isnull=False,
+        )
+        .order_by('id')
+    )
+    assignment_states = {
+        item.id: assignment_undo_state(item)
+        for item in active_assignments
+    }
+    clear_active_equipment_assignment(employee=employee, assigned_by=actor)
+    deactivated_at = timezone.now()
+    for employee_access in employee_accesses:
+        employee_access.status = EmployeeAccess.Status.DEACTIVATED
+        employee_access.is_active = False
+        employee_access.deactivated_at = deactivated_at
+    if employee_accesses:
+        EmployeeAccess.objects.bulk_update(
+            employee_accesses,
+            ['status', 'is_active', 'deactivated_at'],
+        )
 
     affected_plan_ids = list(
         CrewPlanSlot.objects.filter(plan_id__in=draft_plan_ids)
@@ -359,14 +498,39 @@ def dismiss_employee(*, employee, actor, dismissed_at, reason=''):
     employee.is_active = False
     employee.dismissed_at = dismissed_at
     employee.save(update_fields=['status', 'is_active', 'dismissed_at', 'updated_at'])
+    for employee_access in employee_accesses:
+        employee_access.refresh_from_db()
+    for assignment in active_assignments:
+        assignment.refresh_from_db()
     after = employee_audit_snapshot(employee)
     log_oup_action(
         actor,
         'уволен сотрудник',
         employee,
+        action_code=OUP_ACTION_EMPLOYEE_DISMISSED,
         old_value=f'Статус: Работает; {format_employee_changes(before, after)}',
         new_value=f'Уволен с {dismissed_at:%d.%m.%Y}; исключен из рабочих списков',
         comment=reason,
+        undo_payload=dismissal_undo_payload(
+            employee_before=employee_before_state,
+            employee_after=employee_status_undo_state(employee),
+            accesses=[
+                {
+                    'id': item.id,
+                    'before': access_states[item.id],
+                    'after': access_undo_state(item),
+                }
+                for item in employee_accesses
+            ],
+            assignments=[
+                {
+                    'id': item.id,
+                    'before': assignment_states[item.id],
+                    'after': assignment_undo_state(item),
+                }
+                for item in active_assignments
+            ],
+        ),
     )
     emit_employee_changed(employee, 'dismissed')
     return employee

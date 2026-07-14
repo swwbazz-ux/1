@@ -3,10 +3,36 @@ from django.core.exceptions import ValidationError
 from django.utils import timezone
 
 from .forms import is_valid_russian_mobile_phone, normalize_phone, optimize_employee_photo
-from .models import Employee
+from .models import Employee, Role
+
+
+class OupAccessRoleForm(forms.Form):
+    role = forms.ModelChoiceField(
+        label='Рабочая роль',
+        queryset=Role.objects.none(),
+        empty_label='Выберите роль',
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['role'].queryset = (
+            Role.objects.filter(is_active=True)
+            .exclude(code='admin')
+            .order_by('name')
+        )
 
 
 class OupEmployeeForm(forms.ModelForm):
+    issue_access = forms.BooleanField(
+        label='Выдать доступ в систему после создания',
+        required=False,
+    )
+    access_role = forms.ModelChoiceField(
+        label='Роль доступа',
+        required=False,
+        queryset=Role.objects.none(),
+        empty_label='Выберите роль',
+    )
     class Meta:
         model = Employee
         fields = [
@@ -52,6 +78,11 @@ class OupEmployeeForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.fields['access_role'].queryset = (
+            Role.objects.filter(is_active=True)
+            .exclude(code='admin')
+            .order_by('name')
+        )
         required_fields = (
             'full_name',
             'personnel_number',
@@ -102,6 +133,8 @@ class OupEmployeeForm(forms.ModelForm):
 
     def clean(self):
         cleaned_data = super().clean()
+        if cleaned_data.get('issue_access') and not cleaned_data.get('access_role'):
+            self.add_error('access_role', 'Выберите роль, для которой нужно выдать доступ.')
         if not self.instance.pk:
             return cleaned_data
 

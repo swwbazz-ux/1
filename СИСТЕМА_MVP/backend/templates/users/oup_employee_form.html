@@ -148,9 +148,28 @@
                     </div>
                 </section>
 
+                {% if page_mode == 'create' %}
+                    <section class="oup-form-section oup-access-create-section">
+                        <div class="oup-section-heading">
+                            <span>02</span>
+                            <div><h3>Доступ в систему</h3><p>Первичный PIN сотрудник заменит на постоянный при первом входе.</p></div>
+                        </div>
+                        <label class="oup-access-toggle" for="{{ form.issue_access.id_for_label }}">
+                            {{ form.issue_access }}
+                            <span>{{ form.issue_access.label }}</span>
+                        </label>
+                        <div class="employee-detail-field" data-oup-access-role>
+                            <label for="{{ form.access_role.id_for_label }}">{{ form.access_role.label }}</label>
+                            {{ form.access_role }}
+                            {{ form.access_role.errors }}
+                            <small>Роль администратора недоступна специалисту ОУП.</small>
+                        </div>
+                    </section>
+                {% endif %}
+
                 <section class="oup-form-section">
                     <div class="oup-section-heading">
-                        <span>02</span>
+                        <span>{% if page_mode == 'create' %}03{% else %}02{% endif %}</span>
                         <div><h3>Рабочее примечание</h3><p>Без паспортных данных, адресов и документов из 1С.</p></div>
                     </div>
                     <div class="employee-detail-field field-wide">
@@ -182,7 +201,7 @@
                         <ul class="oup-check-list">
                             <li>сотрудник станет действующим;</li>
                             <li>появится у связанных подразделений;</li>
-                            <li>PIN и доступ не создаются;</li>
+                            <li>доступ создаётся только при выбранной роли;</li>
                             <li>назначение техники не создаётся.</li>
                         </ul>
                     {% else %}
@@ -195,6 +214,46 @@
                         </dl>
                     {% endif %}
                 </section>
+
+                {% if employee and not is_dismissed %}
+                    <section class="oup-side-card oup-access-card">
+                        <span class="oup-eyebrow">Доступы</span>
+                        <h3>Рабочие роли</h3>
+                        <p>ОУП управляет рабочими ролями. Администратор контролирует действия в общем журнале.</p>
+                        <div class="oup-access-list">
+                            {% for item in employee_accesses %}
+                                <article>
+                                    <div>
+                                        <strong>{{ item.role.name }}</strong>
+                                        <span class="oup-status-chip status-{{ item.status }}">{{ item.get_status_display }}</span>
+                                    </div>
+                                    {% if item.status == 'not_activated' and item.primary_code_issued_at %}
+                                        <small>Первичный PIN: <b>{{ item.access_code }}</b></small>
+                                    {% endif %}
+                                    {% if can_change_employees and item.is_active %}
+                                        <form method="post" action="{% url 'oup_employee_access_deactivate' item.id %}" data-confirm="Отключить доступ {{ item.role.name }}?">
+                                            {% csrf_token %}
+                                            <button type="submit" class="oup-link-danger">Отключить</button>
+                                        </form>
+                                    {% endif %}
+                                </article>
+                            {% empty %}
+                                <span class="muted">Рабочие доступы ещё не выдавались.</span>
+                            {% endfor %}
+                        </div>
+                        {% if has_protected_admin_access %}
+                            <div class="oup-protected-access">Административный доступ защищён и управляется только администратором.</div>
+                        {% endif %}
+                        {% if can_change_employees %}
+                            <form class="oup-access-issue-form" method="post" action="{% url 'oup_employee_access_issue' employee.id %}">
+                                {% csrf_token %}
+                                <label for="{{ access_form.role.id_for_label }}">Выдать или перевыпустить PIN</label>
+                                {{ access_form.role }}
+                                <button class="admin-button admin-button-primary" type="submit">Выдать доступ</button>
+                            </form>
+                        {% endif %}
+                    </section>
+                {% endif %}
 
                 {% if employee and not is_dismissed %}
                     <section class="oup-side-card oup-danger-card">
@@ -234,4 +293,20 @@
 </div>
 <script src="{% static 'js/oup-workplace.js' %}?v=20260713-1"></script>
 <script src="{% static 'js/oup-work-period-v1.js' %}"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    var toggle = document.getElementById('{{ form.issue_access.id_for_label }}');
+    var roleWrap = document.querySelector('[data-oup-access-role]');
+    var roleSelect = document.getElementById('{{ form.access_role.id_for_label }}');
+    function syncAccessRole() {
+        if (!toggle || !roleWrap || !roleSelect) return;
+        roleWrap.hidden = !toggle.checked;
+        roleSelect.disabled = !toggle.checked;
+    }
+    if (toggle) {
+        syncAccessRole();
+        toggle.addEventListener('change', syncAccessRole);
+    }
+});
+</script>
 {% endblock %}

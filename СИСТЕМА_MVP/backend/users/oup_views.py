@@ -9,11 +9,12 @@ from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_POST
 
-from .models import AdminActionLog, Employee
-from .oup_forms import OupDismissEmployeeForm, OupEmployeeForm
+from .models import AdminActionLog, Employee, EmployeeAccess
+from .oup_forms import OupAccessRoleForm, OupDismissEmployeeForm, OupEmployeeForm
 from .oup_services import (
     close_oup_shift,
     dismiss_employee,
+    deactivate_employee_access,
     employee_audit_snapshot,
     employee_dismissal_blockers,
     employee_work_category_blockers,
@@ -21,10 +22,19 @@ from .oup_services import (
     format_employee_changes,
     get_active_oup_period,
     get_open_oup_shift,
+    issue_employee_access,
     log_oup_action,
     lock_current_crew_drafts,
     lock_oup_write_context,
     open_oup_shift,
+)
+from .oup_undo import (
+    OUP_ACTION_EMPLOYEE_CREATED,
+    OUP_ACTION_EMPLOYEE_PHOTO_REMOVED,
+    OUP_ACTION_EMPLOYEE_UPDATED,
+    employee_card_undo_state,
+    employee_created_undo_payload,
+    state_change_payload,
 )
 from .views import get_current_access
 
@@ -208,12 +218,23 @@ def oup_employee_create_view(request):
                     employee.is_active = True
                     employee.dismissed_at = None
                     employee.save()
+                    primary_code = ''
+                    issued_role = None
+                    if form.cleaned_data.get('issue_access'):
+                        issued_role = form.cleaned_data['access_role']
+                        _employee_access, primary_code, _created = issue_employee_access(
+                            employee=employee,
+                            role=issued_role,
+                            actor=actor,
+                        )
                     snapshot = employee_audit_snapshot(employee)
                     log_oup_action(
                         actor,
                         'создан сотрудник',
                         employee,
+                        action_code=OUP_ACTION_EMPLOYEE_CREATED,
                         new_value='; '.join(f'{label}: {value}' for label, value in snapshot.values()),
+                        undo_payload=employee_created_undo_payload(employee),
                     )
                     emit_employee_changed(employee, 'created')
             except ValidationError as error:
@@ -222,7 +243,13 @@ def oup_employee_create_view(request):
                     error,
                 )
             else:
-                messages.success(request, f'Сотрудник {employee.full_name} добавлен в рабочую базу.')
+                if primary_code:
+                    messages.success(
+                        request,
+                        f'Сотрудник добавлен. Роль: {issued_role.name}. Первичный PIN: {primary_code}',
+                    )
+                else:
+                    messages.success(request, f'Сотрудник {employee.full_name} добавлен в рабочую базу.')
                 return redirect('oup_employee_detail', employee_id=employee.id)
     else:
         form = OupEmployeeForm(initial={'hired_at': timezone.localdate()})
@@ -247,7 +274,6 @@ def oup_employee_detail_view(request, employee_id):
             return redirect('oup_employee_detail', employee_id=employee.id)
         if request.POST.get('remove_photo') == '1':
             old_photo_name = ''
-            photo_storage = None
             try:
                 with transaction.atomic():
                     actor, _shift = lock_oup_write_context(employee=access.employee)
@@ -259,20 +285,20 @@ def oup_employee_detail_view(request, employee_id):
                         )
                     old_photo_name = locked_employee.photo.name if locked_employee.photo else ''
                     if old_photo_name:
-                        photo_storage = locked_employee.photo.storage
+                        before_state = employee_card_undo_state(locked_employee)
                         locked_employee.photo = ''
                         locked_employee.save(update_fields=['photo', 'updated_at'])
+                        after_state = employee_card_undo_state(locked_employee)
                         log_oup_action(
                             actor,
                             'удалено фото сотрудника',
                             locked_employee,
+                            action_code=OUP_ACTION_EMPLOYEE_PHOTO_REMOVED,
                             old_value='Фото: Добавлено',
                             new_value='Фото: Нет',
+                            undo_payload=state_change_payload(before_state, after_state),
                         )
                         emit_employee_changed(locked_employee, 'updated')
-                        transaction.on_commit(
-                            lambda storage=photo_storage, name=old_photo_name: storage.delete(name)
-                        )
             except ValidationError as error:
                 messages.error(request, '; '.join(error.messages))
             else:
@@ -280,7 +306,6 @@ def oup_employee_detail_view(request, employee_id):
                     messages.success(request, 'Фото сотрудника удалено.')
             return redirect('oup_employee_detail', employee_id=employee.id)
 
-        old_photo_name = employee.photo.name if employee.photo else ''
         form = OupEmployeeForm(request.POST, request.FILES, instance=employee)
         if form.is_valid():
             new_category = form.cleaned_data['work_category']
@@ -294,7 +319,6 @@ def oup_employee_detail_view(request, employee_id):
                             'Карточка уволенного сотрудника доступна только для просмотра.',
                             code='employee_read_only',
                         )
-                    old_photo_name = locked_employee.photo.name if locked_employee.photo else ''
                     category_changed = locked_employee.work_category != new_category
                     if category_changed:
                         blockers = employee_work_category_blockers(locked_employee)
@@ -313,6 +337,7 @@ def oup_employee_detail_view(request, employee_id):
                             code='duplicate_personnel_number',
                         )
                     before = employee_audit_snapshot(locked_employee)
+                    before_state = employee_card_undo_state(locked_employee)
                     form.instance = construct_instance(
                         form,
                         locked_employee,
@@ -321,23 +346,18 @@ def oup_employee_detail_view(request, employee_id):
                     )
                     saved_employee = form.save()
                     after = employee_audit_snapshot(saved_employee)
+                    after_state = employee_card_undo_state(saved_employee)
                     changes = format_employee_changes(before, after)
                     log_oup_action(
                         actor,
                         'изменена карточка сотрудника',
                         saved_employee,
+                        action_code=OUP_ACTION_EMPLOYEE_UPDATED,
                         old_value=changes,
                         new_value='Изменения сохранены',
+                        undo_payload=state_change_payload(before_state, after_state),
                     )
                     emit_employee_changed(saved_employee, 'updated')
-                    if (
-                        request.FILES.get('photo')
-                        and old_photo_name
-                        and old_photo_name != saved_employee.photo.name
-                    ):
-                        transaction.on_commit(
-                            lambda storage=saved_employee.photo.storage, name=old_photo_name: storage.delete(name)
-                        )
             except ValidationError as error:
                 error_code = getattr(error, 'code', '')
                 field_name = {
@@ -364,8 +384,69 @@ def oup_employee_detail_view(request, employee_id):
         'page_mode': 'detail',
         'title': employee.full_name,
         'employee_logs': _employee_history(employee)[:20],
+        'access_form': OupAccessRoleForm(),
+        'employee_accesses': employee.accesses.select_related('role').exclude(role__code='admin'),
+        'has_protected_admin_access': employee.accesses.filter(role__code='admin').exists(),
     })
     return render(request, 'users/oup_employee_form.html', context)
+
+
+@require_POST
+def oup_employee_access_issue_view(request, employee_id):
+    access = require_oup_access(request)
+    if not access:
+        return redirect('role_home')
+    employee = get_object_or_404(Employee, id=employee_id)
+    if not _require_open_shift(request, access):
+        return redirect('oup_employee_detail', employee_id=employee.id)
+    form = OupAccessRoleForm(request.POST)
+    if form.is_valid():
+        try:
+            with transaction.atomic():
+                actor, _shift = lock_oup_write_context(employee=access.employee)
+                employee = Employee.objects.select_for_update().get(pk=employee.pk)
+                employee_access, code, created = issue_employee_access(
+                    employee=employee,
+                    role=form.cleaned_data['role'],
+                    actor=actor,
+                )
+        except ValidationError as error:
+            messages.error(request, '; '.join(error.messages))
+        else:
+            action = 'выдан' if created else 'перевыпущен'
+            messages.success(
+                request,
+                f'Первичный PIN {action}. {employee_access.role.name}: {code}',
+            )
+    else:
+        messages.error(request, 'Выберите рабочую роль.')
+    return redirect('oup_employee_detail', employee_id=employee.id)
+
+
+@require_POST
+def oup_employee_access_deactivate_view(request, access_id):
+    access = require_oup_access(request)
+    if not access:
+        return redirect('role_home')
+    employee_access = get_object_or_404(
+        EmployeeAccess.objects.select_related('employee', 'role'),
+        id=access_id,
+    )
+    employee_id = employee_access.employee_id
+    if not _require_open_shift(request, access):
+        return redirect('oup_employee_detail', employee_id=employee_id)
+    try:
+        with transaction.atomic():
+            actor, _shift = lock_oup_write_context(employee=access.employee)
+            employee_access = EmployeeAccess.objects.select_for_update().select_related(
+                'employee', 'role'
+            ).get(pk=employee_access.pk)
+            deactivate_employee_access(employee_access=employee_access, actor=actor)
+    except ValidationError as error:
+        messages.error(request, '; '.join(error.messages))
+    else:
+        messages.success(request, 'Доступ сотрудника отключён.')
+    return redirect('oup_employee_detail', employee_id=employee_id)
 
 
 def oup_employee_dismiss_view(request, employee_id):

@@ -2,6 +2,8 @@ from django.urls import path
 
 from .oup_views import (
     oup_employee_create_view,
+    oup_employee_access_deactivate_view,
+    oup_employee_access_issue_view,
     oup_employee_detail_view,
     oup_employee_dismiss_view,
     oup_employees_view,
@@ -38,6 +40,7 @@ from .views import (
     system_admin_exports_view,
     system_admin_generate_access_view,
     system_admin_logs_view,
+    system_admin_undo_oup_action_view,
     system_admin_log_export_view,
     system_admin_reference_detail_view,
     system_admin_references_view,
@@ -53,6 +56,8 @@ urlpatterns = [
     path('oup/employees/', oup_employees_view, name='oup_employees'),
     path('oup/employees/new/', oup_employee_create_view, name='oup_employee_create'),
     path('oup/employees/<int:employee_id>/', oup_employee_detail_view, name='oup_employee_detail'),
+    path('oup/employees/<int:employee_id>/access/issue/', oup_employee_access_issue_view, name='oup_employee_access_issue'),
+    path('oup/accesses/<int:access_id>/deactivate/', oup_employee_access_deactivate_view, name='oup_employee_access_deactivate'),
     path('oup/employees/<int:employee_id>/dismiss/', oup_employee_dismiss_view, name='oup_employee_dismiss'),
     path('oup/dismissed/', oup_employees_view, {'scope': 'dismissed'}, name='oup_dismissed_employees'),
     path('oup/log/', oup_logs_view, name='oup_logs'),
@@ -74,6 +79,7 @@ urlpatterns = [
     path('system-admin/conflicts/', system_admin_conflicts_view, name='system_admin_conflicts'),
     path('system-admin/conflicts/<int:conflict_id>/<str:action>/', system_admin_conflict_action_view, name='system_admin_conflict_action'),
     path('system-admin/logs/', system_admin_logs_view, name='system_admin_logs'),
+    path('system-admin/logs/<int:log_id>/undo-oup/', system_admin_undo_oup_action_view, name='system_admin_undo_oup_action'),
     path('system-admin/exports/', system_admin_exports_view, name='system_admin_exports'),
     path('system-admin/employees/create/', system_admin_employee_create_view, name='system_admin_employee_create'),
     path('system-admin/employees/<int:employee_id>/', system_admin_employee_detail_view, name='system_admin_employee_detail'),
