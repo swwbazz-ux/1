@@ -58,6 +58,7 @@
                     <p>{% if scope == 'dismissed' %}Уволенные не участвуют в текущих сменах и назначениях.{% else %}Одна строка — один сотрудник. Нажмите строку, чтобы открыть карточку.{% endif %}</p>
                 </div>
                 <div class="employee-list-actions">
+                    <span class="admin-chip" data-oup-visible-count>{{ employees|length }} найдено</span>
                     {% if scope != 'dismissed' %}
                         {% if can_change_employees %}
                             <a class="admin-button admin-button-primary" href="{% url 'oup_employee_create' %}">+ Добавить сотрудника</a>
@@ -68,10 +69,10 @@
                 </div>
             </div>
 
-            <form method="get" class="employee-list-filters oup-filter-bar">
+            <form method="get" class="employee-list-filters oup-filter-bar" data-oup-employee-filter-form>
                 <div class="field admin-search-field">
                     <label for="oup-search">Поиск</label>
-                    <input id="oup-search" name="q" value="{{ query }}" placeholder="ФИО, табельный номер, телефон" autocomplete="off">
+                    <input id="oup-search" name="q" value="{{ query }}" placeholder="ФИО, табельный номер, телефон" autocomplete="off" data-oup-employee-search>
                 </div>
                 <div class="field select-field">
                     <label for="oup-category">Рабочая категория</label>
@@ -101,7 +102,7 @@
                     </select>
                 </div>
                 <div class="field field-submit oup-filter-actions">
-                    <button class="admin-button admin-button-primary" type="submit">Применить</button>
+                    <button class="admin-button admin-button-primary" type="submit" data-oup-filter-submit>Применить</button>
                     <a class="admin-button admin-button-secondary filter-reset-link" href="{% if scope == 'dismissed' %}{% url 'oup_dismissed_employees' %}{% else %}{% url 'oup_employees' %}{% endif %}">Сбросить</a>
                 </div>
             </form>
@@ -114,7 +115,7 @@
             </div>
             <div class="oup-register-list">
                 {% for employee in employees %}
-                    <a class="oup-employee-row status-{{ employee.status }}" href="{% url 'oup_employee_detail' employee.id %}">
+                    <a class="oup-employee-row status-{{ employee.status }}" href="{% url 'oup_employee_detail' employee.id %}" data-oup-employee-row data-employee-search="{{ employee.full_name }} {{ employee.personnel_number }} {{ employee.phone }} {{ employee.position }} {{ employee.department }}">
                         <span class="oup-person-cell">
                             <span class="oup-person-avatar" aria-hidden="true">
                                 {% if employee.photo %}
@@ -153,10 +154,16 @@
                         {% endif %}
                     </div>
                 {% endfor %}
+                {% if employees %}
+                    <div class="oup-empty-state" data-oup-live-empty hidden>
+                        <strong>Сотрудники не найдены</strong>
+                        <p>Измените поисковый запрос или сбросьте фильтры.</p>
+                    </div>
+                {% endif %}
             </div>
         </section>
     </main>
 </div>
-<script src="{% static 'js/oup-workplace.js' %}?v=20260713-1"></script>
+<script src="{% static 'js/oup-workplace.js' %}?v=20260714-4"></script>
 <script src="{% static 'js/oup-work-period-v1.js' %}"></script>
 {% endblock %}

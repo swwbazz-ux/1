@@ -83,9 +83,63 @@
         });
     }
 
+    function initEmployeeLiveFilter() {
+        var form = document.querySelector("[data-oup-employee-filter-form]");
+        var search = document.querySelector("[data-oup-employee-search]");
+        if (!form || !search) return;
+
+        var rows = Array.prototype.slice.call(document.querySelectorAll("[data-oup-employee-row]"));
+        var count = document.querySelector("[data-oup-visible-count]");
+        var empty = document.querySelector("[data-oup-live-empty]");
+        var submit = form.querySelector("[data-oup-filter-submit]");
+
+        function normalize(value) {
+            return (value || "").toLocaleLowerCase("ru-RU").replace(/ё/g, "е").trim();
+        }
+
+        function compact(value) {
+            return normalize(value).replace(/[\s()+\-]/g, "");
+        }
+
+        function applySearch() {
+            var query = normalize(search.value);
+            var compactQuery = compact(query);
+            var visible = 0;
+
+            rows.forEach(function (row) {
+                var value = normalize(row.dataset.employeeSearch);
+                var matches = !query || value.indexOf(query) !== -1 || compact(value).indexOf(compactQuery) !== -1;
+                row.hidden = !matches;
+                if (matches) visible += 1;
+            });
+
+            if (count) count.textContent = visible + " найдено";
+            if (empty) empty.hidden = visible !== 0;
+        }
+
+        function submitFilters() {
+            if (form.requestSubmit) form.requestSubmit();
+            else form.submit();
+        }
+
+        if (submit) submit.hidden = true;
+        form.querySelectorAll("select").forEach(function (select) {
+            select.addEventListener("change", submitFilters);
+        });
+        search.addEventListener("input", applySearch);
+        search.addEventListener("keydown", function (event) {
+            if (event.key === "Enter") {
+                event.preventDefault();
+                applySearch();
+            }
+        });
+        applySearch();
+    }
+
     document.addEventListener("DOMContentLoaded", function () {
         initTheme();
         initPhotoPreview();
         initCopyButtons();
+        initEmployeeLiveFilter();
     });
 })();
