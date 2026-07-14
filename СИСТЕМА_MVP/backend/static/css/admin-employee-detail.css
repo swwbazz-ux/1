@@ -512,6 +512,10 @@ body.employee-detail-screen {
     grid-column: 1 / -1;
 }
 
+.admin-employee-detail-shell .employee-danger-actions .employee-restore-form {
+    grid-column: 1 / -1;
+}
+
 .admin-employee-detail-shell .employee-danger-actions button {
     width: 100%;
     padding: 0 12px;
@@ -730,6 +734,12 @@ body.employee-detail-screen {
     .admin-employee-detail-shell .employee-login-share {
         padding: 8px;
     }
+}
+
+.admin-employee-detail-shell .employee-danger-actions .button-primary {
+    border: 1px solid var(--admin-green);
+    background: var(--admin-green);
+    color: #ffffff;
 }
 
 @container employee-profile (max-width: 980px) {

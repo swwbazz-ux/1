@@ -339,30 +339,31 @@
                     </div>
                 </div>
                 <div class="employee-danger-actions">
-                    {% if employee.status == "dismissed" and latest_oup_dismissal_log and latest_oup_dismissal_log.undo_state.available %}
-                        <form method="post" action="{% url 'system_admin_undo_oup_action' latest_oup_dismissal_log.id %}" data-confirm="{{ latest_oup_dismissal_log.undo_state.confirmation }}">
+                    {% if can_restore_employee %}
+                        <form class="employee-restore-form" method="post" action="{% url 'system_admin_employee_status_action' employee.id 'restore' %}" data-confirm="Вернуть сотрудника в рабочие списки? Дата увольнения будет очищена, существующий PIN/пароль сохранится. Смена и техника автоматически не назначаются.">
                             {% csrf_token %}
-                            <input type="hidden" name="next" value="{% url 'system_admin_employee_detail' employee.id %}">
+                            {% if current_role_access %}<input type="hidden" name="access_id" value="{{ current_role_access.id }}">{% endif %}
                             <button type="submit" class="button-primary">Восстановить сотрудника</button>
                         </form>
+                    {% else %}
+                        <form method="post" action="{% url 'system_admin_employee_status_action' employee.id 'deactivate' %}" data-confirm="Деактивировать сотрудника? Его доступы будут отключены.">
+                            {% csrf_token %}
+                            <button type="submit" class="button-warning">Деактивировать</button>
+                        </form>
+                        <form method="post" action="{% url 'system_admin_employee_status_action' employee.id 'archive' %}" data-confirm="Отправить сотрудника в архив? Его доступы будут отключены.">
+                            {% csrf_token %}
+                            <button type="submit" class="button-muted">В архив</button>
+                        </form>
                     {% endif %}
-                    <form method="post" action="{% url 'system_admin_employee_status_action' employee.id 'deactivate' %}" data-confirm="Деактивировать сотрудника? Его доступы будут отключены.">
-                        {% csrf_token %}
-                        <button type="submit" class="button-warning">Деактивировать</button>
-                    </form>
-                    <form method="post" action="{% url 'system_admin_employee_status_action' employee.id 'archive' %}" data-confirm="Отправить сотрудника в архив? Его доступы будут отключены.">
-                        {% csrf_token %}
-                        <button type="submit" class="button-muted">В архив</button>
-                    </form>
                     <form method="post" action="{% url 'system_admin_employee_status_action' employee.id 'delete' %}" data-confirm="Полностью удалить сотрудника? Это действие нельзя будет отменить.">
                         {% csrf_token %}
                         <button type="submit" class="button-danger">Удалить полностью</button>
                     </form>
                 </div>
-                {% if employee.status == "dismissed" and latest_oup_dismissal_log and not latest_oup_dismissal_log.undo_state.available %}
-                    <p class="muted employee-danger-note">Восстановление после увольнения ОУП недоступно: {{ latest_oup_dismissal_log.undo_state.reason }}</p>
+                {% if can_restore_employee %}
+                    <p class="muted employee-danger-note">Восстановление вернет карточку и выбранный доступ без смены PIN/пароля. Смена и техника назначаются отдельно.</p>
                 {% endif %}
-                <p class="muted employee-danger-note">Если у сотрудника есть производственная история, система заблокирует полное удаление и предложит архив.</p>
+                <p class="muted employee-danger-note">Полностью удаленную запись восстановить нельзя. При наличии производственной истории система заблокирует полное удаление и предложит архив.</p>
             </section>
 
             <section class="card employee-detail-card employee-log-card" hidden>

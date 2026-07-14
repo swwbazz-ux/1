@@ -60,7 +60,6 @@ from .forms import (
 )
 from .models import AdminActionLog, AdminConflict, DriverPrimaryRegistration, Employee, EmployeeAccess, Role
 from .oup_undo import (
-    OUP_ACTION_EMPLOYEE_DISMISSED,
     get_oup_action_undo_state,
     undo_oup_action,
 )
@@ -77,6 +76,14 @@ ROLE_INTERFACE_NAMES = {
     'dispatcher': 'Диспетчерский экран',
     'mechanic': 'Интерфейс механика',
     'manager': 'Витрина руководства',
+}
+
+
+ADMIN_RESTORABLE_EMPLOYEE_STATUSES = {
+    Employee.Status.DEACTIVATED,
+    Employee.Status.ARCHIVED,
+    Employee.Status.DISMISSED,
+    Employee.Status.DELETED,
 }
 
 
@@ -1521,24 +1528,6 @@ def system_admin_employee_detail_view(request, employee_id):
     if not work_assignment_role and current_role_access:
         work_assignment_role = current_role_access.role
 
-    latest_oup_dismissal_log = (
-        AdminActionLog.objects
-        .filter(
-            object_type='Employee',
-            object_id=str(employee.id),
-        )
-        .filter(
-            Q(action_code=OUP_ACTION_EMPLOYEE_DISMISSED)
-            | Q(action='ОУП: уволен сотрудник')
-        )
-        .order_by('-created_at')
-        .first()
-    )
-    if latest_oup_dismissal_log:
-        latest_oup_dismissal_log.undo_state = get_oup_action_undo_state(
-            latest_oup_dismissal_log
-        )
-
     return render(
         request,
         'users/system_admin_employee_detail.html',
@@ -1556,7 +1545,10 @@ def system_admin_employee_detail_view(request, employee_id):
                 work_assignment_role
                 and work_assignment_role.code in WORK_ASSIGNMENT_ROLE_EQUIPMENT_TYPES
             ),
-            'latest_oup_dismissal_log': latest_oup_dismissal_log,
+            'can_restore_employee': (
+                employee.status in ADMIN_RESTORABLE_EMPLOYEE_STATUSES
+                or not employee.is_active
+            ),
             'logs': AdminActionLog.objects.filter(
                 Q(object_type='Employee', object_id=str(employee.id))
                 | Q(object_id='', object_repr=str(employee))
@@ -1739,6 +1731,70 @@ def system_admin_access_action_view(request, access_id, action):
     return redirect_after_admin_action(request, 'system_admin_employee_detail', employee_id=employee_access.employee.id)
 
 
+def restore_employee_access(employee, requested_access_id=None):
+    accesses = (
+        EmployeeAccess.objects.select_for_update()
+        .select_related('role')
+        .filter(employee=employee)
+    )
+    employee_access = None
+    if requested_access_id and str(requested_access_id).isdigit():
+        employee_access = accesses.filter(id=int(requested_access_id)).first()
+    if not employee_access:
+        employee_access = (
+            accesses.filter(status=EmployeeAccess.Status.DEACTIVATED)
+            .order_by('-created_at', '-id')
+            .first()
+            or accesses.order_by('-is_active', '-created_at', '-id').first()
+        )
+    if not employee_access:
+        return None, 'missing'
+
+    if (
+        employee_access.status == EmployeeAccess.Status.BLOCKED
+        or employee_access.blocked_at
+        or employee_access.block_reason
+    ):
+        if (
+            employee_access.status != EmployeeAccess.Status.BLOCKED
+            or employee_access.is_active
+            or employee_access.deactivated_at
+        ):
+            employee_access.status = EmployeeAccess.Status.BLOCKED
+            employee_access.is_active = False
+            employee_access.deactivated_at = None
+            employee_access.save(
+                update_fields=['status', 'is_active', 'deactivated_at']
+            )
+        return employee_access, 'blocked'
+
+    if employee_access.is_active and employee_access.status != EmployeeAccess.Status.DEACTIVATED:
+        return employee_access, 'already_active'
+
+    if employee_access.activated_at:
+        employee_access.status = EmployeeAccess.Status.ACTIVATED
+    elif employee_access.primary_code_issued_at:
+        employee_access.status = EmployeeAccess.Status.NOT_ACTIVATED
+    elif employee_access.access_code and employee_access.last_login_at:
+        employee_access.status = EmployeeAccess.Status.ACTIVATED
+    else:
+        employee_access.status = EmployeeAccess.Status.NOT_ACTIVATED
+    employee_access.is_active = True
+    employee_access.deactivated_at = None
+    employee_access.blocked_at = None
+    employee_access.block_reason = ''
+    employee_access.save(
+        update_fields=[
+            'status',
+            'is_active',
+            'deactivated_at',
+            'blocked_at',
+            'block_reason',
+        ]
+    )
+    return employee_access, 'restored'
+
+
 def system_admin_employee_status_action_view(request, employee_id, action):
     access = require_admin_access(request)
     if not access:
@@ -1747,6 +1803,95 @@ def system_admin_employee_status_action_view(request, employee_id, action):
     if request.method == 'POST':
         with transaction.atomic():
             employee = Employee.objects.select_for_update().get(pk=employee.pk)
+            if action == 'restore':
+                if (
+                    employee.status not in ADMIN_RESTORABLE_EMPLOYEE_STATUSES
+                    and employee.is_active
+                ):
+                    messages.info(request, 'Сотрудник уже находится в рабочем состоянии.')
+                    return redirect_after_admin_action(
+                        request,
+                        'system_admin_employee_detail',
+                        employee_id=employee.id,
+                    )
+
+                old_status = employee.get_status_display()
+                employee.status = Employee.Status.ACTIVE
+                employee.is_active = True
+                employee.dismissed_at = None
+                employee.save(
+                    update_fields=['status', 'is_active', 'dismissed_at', 'updated_at']
+                )
+                employee_access, access_result = restore_employee_access(
+                    employee,
+                    request.POST.get('access_id'),
+                )
+
+                if access_result == 'restored':
+                    if employee_access.status == EmployeeAccess.Status.ACTIVATED:
+                        access_note = (
+                            f' Доступ «{employee_access.role.name}» включен; '
+                            'действующий PIN/пароль сохранен.'
+                        )
+                    elif employee_access.access_code:
+                        access_note = (
+                            f' Доступ «{employee_access.role.name}» возвращен в ожидание '
+                            'первого входа; первичный PIN сохранен.'
+                        )
+                    else:
+                        access_note = (
+                            f' Доступ «{employee_access.role.name}» включен, но PIN еще '
+                            'не выдан.'
+                        )
+                elif access_result == 'blocked':
+                    access_note = (
+                        f' Доступ «{employee_access.role.name}» остался заблокированным; '
+                        'разблокируйте его отдельно.'
+                    )
+                elif access_result == 'already_active':
+                    access_note = (
+                        f' Доступ «{employee_access.role.name}» уже был активен; '
+                        'PIN/пароль не изменялся.'
+                    )
+                else:
+                    access_note = ' Доступ не найден; назначьте роль и выдайте PIN отдельно.'
+
+                log_admin_action(
+                    access.employee,
+                    'Сотрудник восстановлен администратором',
+                    employee,
+                    old_value=old_status,
+                    new_value=employee.get_status_display(),
+                    comment=(
+                        access_note.strip()
+                        + ' Смена и техника автоматически не восстанавливались.'
+                    ),
+                )
+                bump_operational_state(
+                    'Employee:admin_restored',
+                    event_type='personnel_changed',
+                    object_type='Employee',
+                    object_id=employee.id,
+                    payload={
+                        'action': 'admin_restored',
+                        'employee_ids': [employee.id],
+                        'status': employee.status,
+                        'is_active': employee.is_active,
+                        'access_id': employee_access.id if employee_access else None,
+                        'access_result': access_result,
+                    },
+                )
+                messages.success(
+                    request,
+                    'Сотрудник восстановлен.' + access_note
+                    + ' Смена и техника не назначались автоматически.',
+                )
+                return redirect_after_admin_action(
+                    request,
+                    'system_admin_employee_detail',
+                    employee_id=employee.id,
+                )
+
             if employee.id == access.employee.id and action in {'deactivate', 'archive', 'delete'}:
                 messages.error(request, 'Нельзя деактивировать, архивировать или удалить собственную учетную запись администратора.')
                 return redirect_after_admin_action(request, 'system_admin_employee_detail', employee_id=employee.id)
