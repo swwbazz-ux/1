@@ -1,6 +1,9 @@
 import hashlib
 import json
+import os
 from pathlib import Path
+import subprocess
+import sys
 
 from django.conf import settings
 from django.test import Client, SimpleTestCase, TestCase, override_settings
@@ -12,6 +15,68 @@ from .role_apps import ROLE_APPS, get_role_app_for_host
 
 
 ROLE_HOST_SETTINGS = override_settings(ALLOWED_HOSTS=['localhost', '.localhost'])
+SECURITY_ENV_NAMES = (
+    'DJANGO_SECURE_PROXY_SSL_HEADER',
+    'DJANGO_SECURE_SSL_REDIRECT',
+    'DJANGO_SESSION_COOKIE_SECURE',
+    'DJANGO_CSRF_COOKIE_SECURE',
+)
+
+
+class ProductionSecuritySettingsTests(SimpleTestCase):
+    probe_script = (
+        'import json; from config import settings as s; '
+        'print(json.dumps({'
+        '"proxy": s.SECURE_PROXY_SSL_HEADER, '
+        '"redirect": s.SECURE_SSL_REDIRECT, '
+        '"session": s.SESSION_COOKIE_SECURE, '
+        '"csrf": s.CSRF_COOKIE_SECURE'
+        '}))'
+    )
+
+    def run_probe(self, **overrides):
+        environment = os.environ.copy()
+        for name in SECURITY_ENV_NAMES:
+            environment.pop(name, None)
+        environment.update({name: 'False' for name in SECURITY_ENV_NAMES})
+        environment.update(overrides)
+        return subprocess.run(
+            [sys.executable, '-c', self.probe_script],
+            cwd=settings.BASE_DIR,
+            env=environment,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    def test_https_security_settings_can_be_enabled_for_reverse_proxy(self):
+        result = self.run_probe(**{name: 'True' for name in SECURITY_ENV_NAMES})
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            json.loads(result.stdout),
+            {
+                'proxy': ['HTTP_X_FORWARDED_PROTO', 'https'],
+                'redirect': True,
+                'session': True,
+                'csrf': True,
+            },
+        )
+
+    def test_https_security_settings_can_stay_disabled_for_local_http(self):
+        result = self.run_probe()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            json.loads(result.stdout),
+            {'proxy': None, 'redirect': False, 'session': False, 'csrf': False},
+        )
+
+    def test_invalid_https_security_flag_fails_fast(self):
+        result = self.run_probe(DJANGO_SESSION_COOKIE_SECURE='sometimes')
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('DJANGO_SESSION_COOKIE_SECURE must be a boolean value', result.stderr)
 
 
 class RoleAppRegistryTests(SimpleTestCase):

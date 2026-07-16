@@ -15,6 +15,24 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+
+_TRUE_ENV_VALUES = {'1', 'true', 'yes', 'on'}
+_FALSE_ENV_VALUES = {'0', 'false', 'no', 'off'}
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+
+    normalized = value.strip().lower()
+    if normalized in _TRUE_ENV_VALUES:
+        return True
+    if normalized in _FALSE_ENV_VALUES:
+        return False
+    raise ValueError(f'{name} must be a boolean value, got {value!r}')
+
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / '.env')
@@ -39,6 +57,17 @@ CSRF_TRUSTED_ORIGINS = [
     for origin in os.getenv('DJANGO_CSRF_TRUSTED_ORIGINS', '').split(',')
     if origin.strip()
 ]
+
+# These settings stay disabled for local HTTP. Production enables them only
+# when nginx is the trusted TLS-terminating proxy in front of Django.
+SECURE_PROXY_SSL_HEADER = (
+    ('HTTP_X_FORWARDED_PROTO', 'https')
+    if _env_bool('DJANGO_SECURE_PROXY_SSL_HEADER')
+    else None
+)
+SECURE_SSL_REDIRECT = _env_bool('DJANGO_SECURE_SSL_REDIRECT')
+SESSION_COOKIE_SECURE = _env_bool('DJANGO_SESSION_COOKIE_SECURE')
+CSRF_COOKIE_SECURE = _env_bool('DJANGO_CSRF_COOKIE_SECURE')
 
 
 # Application definition
