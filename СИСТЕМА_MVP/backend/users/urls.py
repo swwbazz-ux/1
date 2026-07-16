@@ -1,5 +1,15 @@
 from django.urls import path
 
+from .pwa_views import (
+    management_manifest_view,
+    management_service_worker_view,
+    mechanic_manifest_view,
+    mechanic_service_worker_view,
+    oup_manifest_view,
+    oup_service_worker_view,
+    system_admin_manifest_view,
+    system_admin_service_worker_view,
+)
 from .oup_views import (
     oup_employee_create_view,
     oup_employee_access_deactivate_view,
@@ -63,6 +73,14 @@ urlpatterns = [
     path('oup/log/', oup_logs_view, name='oup_logs'),
     path('oup/shift/start/', oup_shift_start_view, name='oup_shift_start'),
     path('oup/shift/close/', oup_shift_close_view, name='oup_shift_close'),
+    path('oup.webmanifest', oup_manifest_view, name='oup_manifest'),
+    path('oup-sw.js', oup_service_worker_view, name='oup_service_worker'),
+    path('mechanic.webmanifest', mechanic_manifest_view, name='mechanic_manifest'),
+    path('mechanic-sw.js', mechanic_service_worker_view, name='mechanic_service_worker'),
+    path('management.webmanifest', management_manifest_view, name='management_manifest'),
+    path('management-sw.js', management_service_worker_view, name='management_service_worker'),
+    path('system-admin.webmanifest', system_admin_manifest_view, name='system_admin_manifest'),
+    path('system-admin-sw.js', system_admin_service_worker_view, name='system_admin_service_worker'),
     path('driver.webmanifest', driver_manifest_view, name='driver_manifest'),
     path('driver-sw.js', driver_service_worker_view, name='driver_service_worker'),
     path('driver/', driver_shift_view, name='driver_work'),

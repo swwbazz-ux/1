@@ -5,12 +5,13 @@
 {% block body_class %}excavator-operator-screen{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v112">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v112">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v112">
-<meta name="theme-color" content="#030708">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v113">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v113">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v113">
+<meta name="theme-color" content="#D58B14">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Погрузка">
+<link rel="apple-touch-icon" href="{% static 'img/pwa/excavator-180.png' %}">
 {% endblock %}
 
 {% block body %}
@@ -65,7 +66,7 @@
             <div class="eo-shift-titlebar">
                 <h1>Смена</h1>
                 <div class="eo-shift-update-group">
-                    <span class="eo-current-app-version" aria-label="Текущая версия приложения">Версия 112</span>
+                    <span class="eo-current-app-version" aria-label="Текущая версия приложения">Версия 113</span>
                     <button class="eo-shift-update-button" type="button" data-eo-pwa-update-check aria-label="Проверить обновление приложения">
                         <span aria-hidden="true"></span>
                         <b data-eo-pwa-update-check-label>Обновить</b>
@@ -454,7 +455,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v112";
+var excavatorShellVersion = "excavator-mobile-shell-v113";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var excavatorRelevantEvents = {
     assignment_changed: true,
@@ -2771,7 +2772,7 @@ function initExcavatorPwaUpdates() {
     }
 
     function getCurrentVersion() {
-        var registrationPromise = registrationRef ? Promise.resolve(registrationRef) : navigator.serviceWorker.getRegistration("/excavator/");
+        var registrationPromise = registrationRef ? Promise.resolve(registrationRef) : navigator.serviceWorker.getRegistration("{% if role_app.role_code == 'excavator_operator' %}/{% else %}/excavator/{% endif %}");
         return registrationPromise.then(function (registration) {
             if (registration) registrationRef = registration;
             return requestExcavatorWorkerVersion(registration && registration.active);
@@ -2848,7 +2849,7 @@ function initExcavatorPwaUpdates() {
         checkButton.classList.remove("is-current");
         checkButton.disabled = true;
         if (checkLabel) checkLabel.textContent = "Проверка...";
-        var registrationPromise = registrationRef ? Promise.resolve(registrationRef) : navigator.serviceWorker.getRegistration("/excavator/");
+        var registrationPromise = registrationRef ? Promise.resolve(registrationRef) : navigator.serviceWorker.getRegistration("{% if role_app.role_code == 'excavator_operator' %}/{% else %}/excavator/{% endif %}");
         registrationPromise.then(function (registration) {
             if (registration) registrationRef = registration;
             var updatePromise = registration ? registration.update().catch(function () { return registration; }) : Promise.resolve(null);
@@ -2957,7 +2958,7 @@ function initExcavatorPwaUpdates() {
         });
     }
 
-    navigator.serviceWorker.register("/excavator-sw.js", { scope: "/excavator/" }).then(function (registration) {
+    navigator.serviceWorker.register("/excavator-sw.js", { scope: "{% if role_app.role_code == 'excavator_operator' %}/{% else %}/excavator/{% endif %}" }).then(function (registration) {
         registrationRef = registration;
         watchRegistration(registration);
         registration.update().catch(function () {});

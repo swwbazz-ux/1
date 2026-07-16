@@ -7,11 +7,11 @@
 {% block realtime_mode %}custom{% endblock %}
 {% block realtime_role %}driver{% endblock %}
 {% block extra_head %}
-<meta name="theme-color" content="#030708">
+<meta name="theme-color" content="#147D7E">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Самосвал">
 <link rel="manifest" href="{% url 'driver_manifest' %}">
-<link rel="apple-touch-icon" href="{% static 'img/pwa/mining-master-180.png' %}">
+<link rel="apple-touch-icon" href="{% static 'img/pwa/driver-180.png' %}">
 <style>
 body.driver-mobile-screen {
     --driver-safe-top: env(safe-area-inset-top, 0px);
@@ -2918,7 +2918,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
 {% endblock %}
 
 {% block body %}
-<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v98' }}">
+<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v99' }}">
     {% if messages %}
         <div class="driver-messages">
             {% for message in messages %}
@@ -3553,7 +3553,7 @@ window.bindDriverMobileShell = function () {
                 updateButton.disabled = true;
                 updateButton.textContent = "Проверка";
                 var updateRequest = navigator.serviceWorker
-                    ? navigator.serviceWorker.getRegistration("/driver/").then(function (registration) {
+                    ? navigator.serviceWorker.getRegistration("{% if role_app.role_code == 'driver' %}/{% else %}/driver/{% endif %}").then(function (registration) {
                         return registration ? registration.update() : null;
                     })
                     : Promise.resolve();
@@ -4267,7 +4267,7 @@ window.bindDriverMobileShell = function () {
         if (!("serviceWorker" in navigator)) {
             return;
         }
-        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v98' }}";
+        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v99' }}";
         var updateModal = document.querySelector("[data-driver-pwa-update-modal]");
         var updateBadge = document.querySelector("[data-driver-pwa-update-badge]");
         var updateTarget = document.querySelector("[data-driver-pwa-update-nav-target]");
@@ -4370,7 +4370,7 @@ window.bindDriverMobileShell = function () {
             }
         });
 
-        navigator.serviceWorker.register("/driver-sw.js", { scope: "/driver/" }).then(function (registration) {
+        navigator.serviceWorker.register("/driver-sw.js", { scope: "{% if role_app.role_code == 'driver' %}/{% else %}/driver/{% endif %}" }).then(function (registration) {
             if (registration.waiting) {
                 requestWorkerVersion(registration.waiting).then(function (version) {
                     if (version && version !== currentShellVersion) {

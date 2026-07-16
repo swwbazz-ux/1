@@ -31,7 +31,7 @@ DEBUG = os.getenv('DJANGO_DEBUG', 'True') == 'True'
 
 ALLOWED_HOSTS = [
     host.strip()
-    for host in os.getenv('DJANGO_ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
+    for host in os.getenv('DJANGO_ALLOWED_HOSTS', 'localhost,127.0.0.1,.localhost').split(',')
     if host.strip()
 ]
 CSRF_TRUSTED_ORIGINS = [
@@ -63,6 +63,7 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
+    'users.middleware.PersonalSessionRenewalMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
@@ -82,10 +83,24 @@ TEMPLATES = [
                 'django.template.context_processors.request',
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
+                'users.context_processors.role_app',
             ],
         },
     },
 ]
+
+# Role applications deliberately use host-only cookies. Never widen these
+# domains to .driverform.ru: sibling role subdomains must not share a session.
+SESSION_COOKIE_DOMAIN = None
+CSRF_COOKIE_DOMAIN = None
+ROLE_APP_BASE_DOMAINS = tuple(
+    domain.strip()
+    for domain in os.getenv('DJANGO_ROLE_APP_BASE_DOMAINS', 'driverform.ru,localhost').split(',')
+    if domain.strip()
+)
+ROLE_APP_PERSONAL_SESSION_AGE = int(
+    os.getenv('DJANGO_ROLE_APP_PERSONAL_SESSION_AGE', str(60 * 60 * 24 * 365))
+)
 
 WSGI_APPLICATION = 'config.wsgi.application'
 

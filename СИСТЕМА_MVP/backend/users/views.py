@@ -63,7 +63,16 @@ from .oup_undo import (
     get_oup_action_undo_state,
     undo_oup_action,
 )
-from .session_device import detect_session_device_kind, mark_session_device_kind, set_session_device_kind
+from .role_apps import (
+    get_role_app_for_request,
+    role_app_manifest_response,
+    role_app_service_worker_response,
+)
+from .session_device import (
+    detect_session_device_kind,
+    get_session_device_kind,
+    set_session_device_kind,
+)
 
 
 ROLE_INTERFACE_NAMES = {
@@ -142,7 +151,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v98'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v99'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -159,22 +168,22 @@ DRIVER_MANIFEST = {
     'categories': ['business', 'productivity'],
     'icons': [
         {
-            'src': '/static/img/pwa/mining-master-180.png',
+            'src': '/static/img/pwa/driver-180.png',
             'sizes': '180x180',
             'type': 'image/png',
         },
         {
-            'src': '/static/img/pwa/mining-master-192.png',
+            'src': '/static/img/pwa/driver-192.png',
             'sizes': '192x192',
             'type': 'image/png',
         },
         {
-            'src': '/static/img/pwa/mining-master-512.png',
+            'src': '/static/img/pwa/driver-512.png',
             'sizes': '512x512',
             'type': 'image/png',
         },
         {
-            'src': '/static/img/pwa/mining-master-maskable-512.png',
+            'src': '/static/img/pwa/driver-maskable-512.png',
             'sizes': '512x512',
             'type': 'image/png',
             'purpose': 'maskable',
@@ -197,10 +206,10 @@ const CORE_ASSETS = [
     "/static/favicon.ico",
     "/static/img/equipment/truck-green.png",
     "/static/img/equipment/excavator-green.png",
-    "/static/img/pwa/mining-master-180.png",
-    "/static/img/pwa/mining-master-192.png",
-    "/static/img/pwa/mining-master-512.png",
-    "/static/img/pwa/mining-master-maskable-512.png"
+    "/static/img/pwa/driver-180.png",
+    "/static/img/pwa/driver-192.png",
+    "/static/img/pwa/driver-512.png",
+    "/static/img/pwa/driver-maskable-512.png"
 ];
 
 self.addEventListener("install", (event) => {{
@@ -291,7 +300,7 @@ def get_current_access(request):
     access_id = request.session.get('employee_access_id')
     if not access_id:
         return None
-    return (
+    access_queryset = (
         EmployeeAccess.objects
         .select_related('employee', 'role')
         .filter(
@@ -302,8 +311,11 @@ def get_current_access(request):
             employee__status=Employee.Status.ACTIVE,
             role__is_active=True,
         )
-        .first()
     )
+    role_app = get_role_app_for_request(request)
+    if role_app:
+        access_queryset = access_queryset.filter(role__code=role_app.role_code)
+    return access_queryset.first()
 
 
 def require_admin_access(request):
@@ -364,17 +376,11 @@ def excel_value(value):
 
 
 def driver_manifest_view(request):
-    response = JsonResponse(DRIVER_MANIFEST, json_dumps_params={'ensure_ascii': False})
-    response['Content-Type'] = 'application/manifest+json; charset=utf-8'
-    response['Cache-Control'] = 'no-cache'
-    return response
+    return role_app_manifest_response(request, 'driver')
 
 
 def driver_service_worker_view(request):
-    response = HttpResponse(DRIVER_SERVICE_WORKER_JS, content_type='application/javascript; charset=utf-8')
-    response['Cache-Control'] = 'no-cache'
-    response['Service-Worker-Allowed'] = '/driver/'
-    return response
+    return role_app_service_worker_response(request, 'driver', DRIVER_SERVICE_WORKER_JS)
 
 
 def interface_map_view(request):
@@ -389,18 +395,30 @@ def interface_map_view(request):
 
 
 def login_view(request):
+    role_app = get_role_app_for_request(request)
+    if request.method == 'GET' and role_app:
+        if get_current_access(request):
+            return redirect('role_home')
+        if request.session.get('employee_access_id'):
+            request.session.flush()
     selected_device_kind = request.POST.get('device_kind') if request.method == 'POST' else detect_session_device_kind(request)
     if selected_device_kind not in {'personal', 'shared'}:
         selected_device_kind = detect_session_device_kind(request)
     if request.method == 'POST':
         phone = request.POST.get('phone', '').strip()
         access_code = request.POST.get('access_code', '').strip()
-        access = find_employee_access_by_credentials(phone, access_code)
+        access = find_employee_access_by_credentials(
+            phone,
+            access_code,
+            role_code=role_app.role_code if role_app else None,
+        )
         if access:
+            request.session.cycle_key()
             access.last_login_at = timezone.now()
             if access.status == EmployeeAccess.Status.NOT_ACTIVATED:
                 if access.primary_code_issued_at:
                     request.session['pending_activation_access_id'] = access.id
+                    set_session_device_kind(request, selected_device_kind)
                     access.save(update_fields=['last_login_at'])
                     return redirect('activate_access')
                 access.status = EmployeeAccess.Status.ACTIVATED
@@ -413,7 +431,13 @@ def login_view(request):
             set_session_device_kind(request, selected_device_kind)
             access.save(update_fields=['last_login_at', 'status', 'activated_at'])
             return redirect('role_home')
-        messages.error(request, 'Телефон или пинкод указаны неверно.')
+        if role_app:
+            messages.error(
+                request,
+                f'Телефон или пинкод указаны неверно для приложения «{role_app.short_name}».',
+            )
+        else:
+            messages.error(request, 'Телефон или пинкод указаны неверно.')
     return render(request, 'users/login.html', {'selected_device_kind': selected_device_kind})
 
 
@@ -421,12 +445,15 @@ def activate_access_view(request):
     access_id = request.session.get('pending_activation_access_id')
     if not access_id:
         return redirect('login')
-    access = (
+    access_queryset = (
         EmployeeAccess.objects
         .select_related('employee', 'role')
         .filter(id=access_id, is_active=True, status=EmployeeAccess.Status.NOT_ACTIVATED)
-        .first()
     )
+    role_app = get_role_app_for_request(request)
+    if role_app:
+        access_queryset = access_queryset.filter(role__code=role_app.role_code)
+    access = access_queryset.first()
     if not access:
         request.session.pop('pending_activation_access_id', None)
         return redirect('login')
@@ -444,8 +471,9 @@ def activate_access_view(request):
                 access.employee.is_active = True
                 access.employee.save(update_fields=['status', 'is_active', 'updated_at'])
             request.session.pop('pending_activation_access_id', None)
+            request.session.cycle_key()
             request.session['employee_access_id'] = access.id
-            mark_session_device_kind(request)
+            set_session_device_kind(request, get_session_device_kind(request))
             if access.role.code != 'oup':
                 messages.success(
                     request,

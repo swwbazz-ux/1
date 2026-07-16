@@ -2,6 +2,9 @@
 
 {% block title %}Админка MVP{% endblock %}
 {% block body_class %}system-admin-dashboard-screen{% endblock %}
+{% block extra_head %}
+{% include "includes/role_app_pwa_head.html" with role_code="admin" manifest_url="/system-admin.webmanifest" service_worker_url="/system-admin-sw.js" legacy_scope="/system-admin/" theme_color="#53616F" apple_title="Админка" icon_180="img/pwa/admin-180.png" %}
+{% endblock %}
 
 {% block body %}
 <div class="admin-shell admin-exports-shell admin-dashboard-shell admin-day" data-admin-theme>

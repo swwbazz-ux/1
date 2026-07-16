@@ -44,6 +44,7 @@ from shifts.services import (
 )
 from users.access_auth import find_employee_access_by_credentials
 from users.models import EmployeeAccess
+from users.role_apps import role_app_manifest_response, role_app_service_worker_response
 from users.session_device import get_session_device_kind, set_session_device_kind
 
 from .forms import TripCreateForm
@@ -403,19 +404,19 @@ DISPATCHER_MANIFEST = {
     'categories': ['business', 'productivity'],
     'icons': [
         {
-            'src': '/static/img/pwa/mining-master-192.png',
+            'src': '/static/img/pwa/dispatcher-192.png',
             'sizes': '192x192',
             'type': 'image/png',
             'purpose': 'any',
         },
         {
-            'src': '/static/img/pwa/mining-master-512.png',
+            'src': '/static/img/pwa/dispatcher-512.png',
             'sizes': '512x512',
             'type': 'image/png',
             'purpose': 'any',
         },
         {
-            'src': '/static/img/pwa/mining-master-maskable-512.png',
+            'src': '/static/img/pwa/dispatcher-maskable-512.png',
             'sizes': '512x512',
             'type': 'image/png',
             'purpose': 'maskable',
@@ -432,7 +433,8 @@ DISPATCHER_MANIFEST = {
 }
 
 DISPATCHER_SERVICE_WORKER_JS = r"""
-const CACHE_NAME = "dispatcher-desktop-shell-v32";
+const CACHE_PREFIX = "dispatcher-desktop-shell-";
+const CACHE_NAME = "dispatcher-desktop-shell-v33";
 const APP_SHELL_URL = "/dispatcher/control/";
 const MANIFEST_URL = "/dispatcher.webmanifest";
 const CORE_ASSETS = [
@@ -441,10 +443,10 @@ const CORE_ASSETS = [
   "/static/js/realtime-client.js",
   "/static/css/app.css",
   "/static/favicon.ico",
-  "/static/img/pwa/mining-master-180.png",
-  "/static/img/pwa/mining-master-192.png",
-  "/static/img/pwa/mining-master-512.png",
-  "/static/img/pwa/mining-master-maskable-512.png",
+  "/static/img/pwa/dispatcher-180.png",
+  "/static/img/pwa/dispatcher-192.png",
+  "/static/img/pwa/dispatcher-512.png",
+  "/static/img/pwa/dispatcher-maskable-512.png",
   "/static/img/equipment/excavator-gray.png",
   "/static/img/equipment/excavator-green.png",
   "/static/img/equipment/excavator-yellow.png",
@@ -468,7 +470,10 @@ self.addEventListener("install", event => {
 self.addEventListener("activate", event => {
   event.waitUntil(
     caches.keys()
-      .then(keys => Promise.all(keys.filter(key => key !== CACHE_NAME).map(key => caches.delete(key))))
+      .then(keys => Promise.all(
+        keys.filter(key => key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME)
+          .map(key => caches.delete(key))
+      ))
       .then(() => self.clients.claim())
   );
 });
@@ -479,7 +484,7 @@ async function networkFirst(request, fallbackUrl) {
     const response = await fetch(request);
     if (response && response.ok) {
       cache.put(request, response.clone()).catch(() => undefined);
-      if (fallbackUrl) {
+      if (fallbackUrl && new URL(request.url).pathname === fallbackUrl) {
         cache.put(fallbackUrl, response.clone()).catch(() => undefined);
       }
     }
@@ -568,19 +573,19 @@ EXCAVATOR_MANIFEST = {
     'categories': ['business', 'productivity'],
     'icons': [
         {
-            'src': '/static/img/pwa/mining-master-192.png',
+            'src': '/static/img/pwa/excavator-192.png',
             'sizes': '192x192',
             'type': 'image/png',
             'purpose': 'any',
         },
         {
-            'src': '/static/img/pwa/mining-master-512.png',
+            'src': '/static/img/pwa/excavator-512.png',
             'sizes': '512x512',
             'type': 'image/png',
             'purpose': 'any',
         },
         {
-            'src': '/static/img/pwa/mining-master-maskable-512.png',
+            'src': '/static/img/pwa/excavator-maskable-512.png',
             'sizes': '512x512',
             'type': 'image/png',
             'purpose': 'maskable',
@@ -597,7 +602,8 @@ EXCAVATOR_MANIFEST = {
 }
 
 EXCAVATOR_SERVICE_WORKER_JS = r"""
-const CACHE_NAME = "excavator-mobile-shell-v112";
+const CACHE_PREFIX = "excavator-mobile-shell-";
+const CACHE_NAME = "excavator-mobile-shell-v113";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const CORE_ASSETS = [
@@ -609,10 +615,10 @@ const CORE_ASSETS = [
   "/static/css/excavator-work-v55-final.css",
   "/static/css/excavator-work-v55-shift.css",
   "/static/favicon.ico",
-  "/static/img/pwa/mining-master-180.png",
-  "/static/img/pwa/mining-master-192.png",
-  "/static/img/pwa/mining-master-512.png",
-  "/static/img/pwa/mining-master-maskable-512.png",
+  "/static/img/pwa/excavator-180.png",
+  "/static/img/pwa/excavator-192.png",
+  "/static/img/pwa/excavator-512.png",
+  "/static/img/pwa/excavator-maskable-512.png",
   "/static/img/equipment/excavator-gray.png",
   "/static/img/equipment/excavator-green.png",
   "/static/img/equipment/excavator-yellow.png",
@@ -633,7 +639,10 @@ self.addEventListener("install", event => {
 self.addEventListener("activate", event => {
   event.waitUntil(
     caches.keys()
-      .then(keys => Promise.all(keys.filter(key => key !== CACHE_NAME).map(key => caches.delete(key))))
+      .then(keys => Promise.all(
+        keys.filter(key => key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME)
+          .map(key => caches.delete(key))
+      ))
       .then(() => self.clients.claim())
   );
 });
@@ -644,7 +653,7 @@ async function networkFirst(request, fallbackUrl) {
     const response = await fetch(request);
     if (response && response.ok) {
       cache.put(request, response.clone()).catch(() => undefined);
-      if (fallbackUrl) {
+      if (fallbackUrl && new URL(request.url).pathname === fallbackUrl) {
         cache.put(fallbackUrl, response.clone()).catch(() => undefined);
       }
     }
@@ -743,31 +752,19 @@ def format_dispatcher_decimal(value):
 
 
 def dispatcher_manifest_view(request):
-    response = JsonResponse(DISPATCHER_MANIFEST, json_dumps_params={'ensure_ascii': False})
-    response['Content-Type'] = 'application/manifest+json; charset=utf-8'
-    response['Cache-Control'] = 'no-cache'
-    return response
+    return role_app_manifest_response(request, 'dispatcher')
 
 
 def dispatcher_service_worker_view(request):
-    response = HttpResponse(DISPATCHER_SERVICE_WORKER_JS, content_type='application/javascript; charset=utf-8')
-    response['Cache-Control'] = 'no-cache'
-    response['Service-Worker-Allowed'] = '/dispatcher/'
-    return response
+    return role_app_service_worker_response(request, 'dispatcher', DISPATCHER_SERVICE_WORKER_JS)
 
 
 def excavator_manifest_view(request):
-    response = JsonResponse(EXCAVATOR_MANIFEST, json_dumps_params={'ensure_ascii': False})
-    response['Content-Type'] = 'application/manifest+json; charset=utf-8'
-    response['Cache-Control'] = 'no-cache'
-    return response
+    return role_app_manifest_response(request, 'excavator_operator')
 
 
 def excavator_service_worker_view(request):
-    response = HttpResponse(EXCAVATOR_SERVICE_WORKER_JS, content_type='application/javascript; charset=utf-8')
-    response['Cache-Control'] = 'no-cache'
-    response['Service-Worker-Allowed'] = '/excavator/'
-    return response
+    return role_app_service_worker_response(request, 'excavator_operator', EXCAVATOR_SERVICE_WORKER_JS)
 
 
 def equipment_short_name(equipment):

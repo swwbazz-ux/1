@@ -1,3 +1,6 @@
+from django.conf import settings
+
+
 MOBILE_USER_AGENT_TOKENS = (
     'android',
     'iphone',
@@ -20,14 +23,17 @@ def detect_session_device_kind(request):
 
 
 def mark_session_device_kind(request):
-    request.session['device_kind'] = detect_session_device_kind(request)
-    return request.session['device_kind']
+    return set_session_device_kind(request, detect_session_device_kind(request))
 
 
 def set_session_device_kind(request, device_kind):
     if device_kind not in {'personal', 'shared'}:
         device_kind = detect_session_device_kind(request)
     request.session['device_kind'] = device_kind
+    if device_kind == 'personal':
+        request.session.set_expiry(settings.ROLE_APP_PERSONAL_SESSION_AGE)
+    else:
+        request.session.set_expiry(0)
     return request.session['device_kind']
 
 

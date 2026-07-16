@@ -1,15 +1,17 @@
 {% extends "base.html" %}
 {% load static %}
 
-{% block title %}Вход в систему{% endblock %}
+{% block title %}{% if role_app %}Вход · {{ role_app.short_name }}{% else %}Вход в систему{% endif %}{% endblock %}
 {% block extra_head %}
-    <link rel="manifest" href="{% url 'mining_master_manifest' %}">
-    <meta name="theme-color" content="#041017">
+    {% if role_app %}
+    <link rel="manifest" href="{{ role_app.manifest_url }}">
+    <meta name="theme-color" content="{{ role_app.theme_color }}">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="apple-mobile-web-app-title" content="Горный мастер">
-    <link rel="apple-touch-icon" href="{% static 'img/pwa/mining-master-180.png' %}">
+    <meta name="apple-mobile-web-app-title" content="{{ role_app.short_name }}">
+    <link rel="apple-touch-icon" href="{{ role_app.icon_180_url }}">
+    {% endif %}
 {% endblock %}
 {% block body_class %}login-page dispatcher-shell dispatcher-night unified-login-screen{% endblock %}
 
@@ -18,7 +20,13 @@
     <div class="shared-shift-accent" aria-hidden="true"></div>
     <form method="post" data-validated-login class="app-confirm-content unified-login-form">
         {% csrf_token %}
-        <h2>Единый вход</h2>
+        {% if role_app %}
+        <div class="unified-login-role-identity">
+            <img src="{{ role_app.icon_180_url }}" width="72" height="72" alt="">
+            <span>Copper Resources</span>
+        </div>
+        {% endif %}
+        <h2>{% if role_app %}{{ role_app.name }}{% else %}Единый вход{% endif %}</h2>
         <p>Телефон и пинкод сотрудника.</p>
         <label class="shared-shift-login-field" for="login-phone">
             <span>Телефон</span>
@@ -173,7 +181,18 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
     if ("serviceWorker" in navigator) {
-        navigator.serviceWorker.register("/mining-master-sw.js", { scope: "/" }).catch(function () {});
+        {% if role_app %}
+        navigator.serviceWorker.register("{{ role_app.service_worker_url }}", { scope: "/" }).catch(function () {});
+        {% else %}
+        navigator.serviceWorker.getRegistrations().then(function (registrations) {
+            registrations.forEach(function (registration) {
+                var worker = registration.active || registration.waiting || registration.installing;
+                if (registration.scope === window.location.origin + "/" && worker && /\/mining-master-sw\.js(?:\?|$)/.test(worker.scriptURL)) {
+                    registration.unregister().catch(function () {});
+                }
+            });
+        }).catch(function () {});
+        {% endif %}
     }
 });
 </script>
