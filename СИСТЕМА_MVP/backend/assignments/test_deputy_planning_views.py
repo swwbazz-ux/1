@@ -206,7 +206,7 @@ class DeputyPlanningViewTests(TestCase):
             self.assertEqual(response.status_code, 200)
             self.assertContains(response, reverse('deputy_mining_manager_manifest'))
             self.assertContains(response, 'rel="manifest"')
-            self.assertContains(response, 'name="theme-color" content="#198e55"')
+            self.assertContains(response, 'name="theme-color" content="#2E7D52"')
             self.assertContains(response, 'name="apple-mobile-web-app-capable" content="yes"')
             self.assertContains(response, 'deputy-mining-manager-180.png')
             self.assertContains(response, 'deputy-mining-manager-pwa-v1.js')
@@ -281,7 +281,7 @@ class DeputyPlanningViewTests(TestCase):
         self.assertEqual(response['Service-Worker-Allowed'], '/deputy-mining-manager/')
         self.assertEqual(response['X-Content-Type-Options'], 'nosniff')
         self.assertIn('deputy-mining-manager-desktop-shell-', script)
-        self.assertIn('`${CACHE_PREFIX}v4`', script)
+        self.assertIn('`${CACHE_PREFIX}v5`', script)
         self.assertIn('key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME', script)
         self.assertIn('removeCachedPlanningDocuments()', script)
         self.assertIn('LEGACY_ROOT_FALLBACK_URL', script)
@@ -326,9 +326,10 @@ class DeputyPlanningViewTests(TestCase):
             registration_script,
         )
         self.assertIn(
-            f'var PWA_SCOPE = "{reverse("deputy_mining_manager_placement")}";',
+            f'var APP_PATH_PREFIX = "{reverse("deputy_mining_manager_placement")}";',
             registration_script,
         )
+        self.assertIn('meta[name="role-app-scope"]', registration_script)
         self.assertIn('registrationRef.update()', registration_script)
         self.assertIn('visibilitychange', registration_script)
         self.assertIn('window.addEventListener("focus"', registration_script)

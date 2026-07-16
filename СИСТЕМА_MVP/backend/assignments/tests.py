@@ -1,7 +1,7 @@
 import json
 from datetime import timedelta
 
-from django.test import TestCase
+from django.test import Client, TestCase
 
 from django.urls import reverse
 from django.utils import timezone
@@ -351,23 +351,26 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertContains(response, 'miningMasterUpdateCheckIntervalMs')
         self.assertContains(response, 'checkMiningMasterPwaUpdateSilently')
         self.assertContains(response, 'Установлена последняя версия приложения')
-        self.assertContains(response, 'mining-master-mobile-shell-v107')
+        self.assertContains(response, 'mining-master-mobile-shell-v108')
         self.assertContains(response, '"trip_changed"')
         self.assertContains(
             response,
             'querySelectorAll("[data-mm-mobile-panel=\'trucks\'] .mm-mobile-truck-card[data-equipment-card-id]").forEach(bindEquipmentCardTrigger)'
         )
 
-    def test_login_screen_includes_mining_master_pwa_install_metadata(self):
-        response = self.client.get('/')
+    def test_shared_login_has_no_role_manifest_and_mining_master_host_has_its_pwa(self):
+        response = Client().get('/')
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, reverse('mining_master_manifest'))
-        self.assertContains(response, 'rel="manifest"')
-        self.assertContains(response, 'name="theme-color"')
-        self.assertContains(response, 'apple-mobile-web-app-capable')
-        self.assertContains(response, 'apple-touch-icon')
-        self.assertContains(response, '/mining-master-sw.js')
+        self.assertNotContains(response, 'rel="manifest"')
+        self.assertNotContains(response, 'navigator.serviceWorker.register("/mining-master-sw.js"')
+
+        role_response = Client().get('/', HTTP_HOST='mining-master.localhost')
+        self.assertEqual(role_response.status_code, 200)
+        self.assertContains(role_response, reverse('mining_master_manifest'))
+        self.assertContains(role_response, 'rel="manifest"')
+        self.assertContains(role_response, 'apple-touch-icon')
+        self.assertContains(role_response, '/mining-master-sw.js')
 
     def test_mining_master_manifest_is_installable_pwa_manifest(self):
         response = self.client.get(reverse('mining_master_manifest'))
@@ -377,7 +380,7 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertEqual(response['Content-Type'], 'application/manifest+json; charset=utf-8')
         self.assertEqual(manifest['name'], 'Горный мастер')
         self.assertEqual(manifest['start_url'], reverse('mining_master_assignments'))
-        self.assertEqual(manifest['scope'], '/')
+        self.assertEqual(manifest['scope'], '/mining-master/')
         self.assertEqual(manifest['display'], 'standalone')
         self.assertEqual(manifest['orientation'], 'portrait')
         self.assertIn('icons', manifest)
@@ -390,7 +393,8 @@ class MiningMasterAssignmentsViewTests(TestCase):
         script = response.content.decode('utf-8')
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn('`${CACHE_PREFIX}v107`', script)
+        self.assertIn('`${CACHE_PREFIX}v108`', script)
+        self.assertEqual(response['Service-Worker-Allowed'], '/mining-master/')
         self.assertIn('const CACHE_PREFIX = "mining-master-mobile-shell-";', script)
         self.assertIn('key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME', script)
         self.assertIn('EXCLUDED_NAVIGATION_PREFIXES = ["/deputy-mining-manager/"]', script)

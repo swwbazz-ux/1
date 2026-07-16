@@ -35,6 +35,9 @@ jobs:
       - name: Install dependencies
         run: python -m pip install -r requirements.txt
 
+      - name: Prepare media directories
+        run: mkdir -p media/employee_photos
+
       - name: Django system check
         run: python manage.py check
 

@@ -4,7 +4,9 @@
     if (!("serviceWorker" in navigator)) return;
 
     var WORKER_URL = "/deputy-mining-manager-sw.js";
-    var PWA_SCOPE = "/deputy-mining-manager/";
+    var APP_PATH_PREFIX = "/deputy-mining-manager/";
+    var scopeMeta = document.querySelector('meta[name="role-app-scope"]');
+    var PWA_SCOPE = scopeMeta && scopeMeta.content ? scopeMeta.content : APP_PATH_PREFIX;
     var registrationRef = null;
 
     function removeCachedPlanningDocuments() {
@@ -16,7 +18,7 @@
                         return Promise.all(requests.filter(function (request) {
                             var url = new URL(request.url);
                             return url.origin === window.location.origin &&
-                                url.pathname.indexOf(PWA_SCOPE) === 0;
+                                url.pathname.indexOf(APP_PATH_PREFIX) === 0;
                         }).map(function (request) {
                             return cache.delete(request);
                         }));

@@ -17,6 +17,7 @@ from openpyxl.worksheet.page import PageMargins
 
 from references.models import Equipment
 from users.models import Employee, EmployeeAccess, Role
+from users.role_apps import role_app_manifest_response, role_app_service_worker_response
 
 from .models import (
     AssignmentStatus,
@@ -93,7 +94,7 @@ DEPUTY_MANIFEST = {
 
 DEPUTY_SERVICE_WORKER_JS = r"""
 const CACHE_PREFIX = "deputy-mining-manager-desktop-shell-";
-const CACHE_NAME = `${CACHE_PREFIX}v4`;
+const CACHE_NAME = `${CACHE_PREFIX}v5`;
 const APP_SCOPE = "/deputy-mining-manager/";
 const MANIFEST_URL = "/deputy-mining-manager.webmanifest";
 const LEGACY_ROOT_FALLBACK_URL = "/mining-master/assignments/";
@@ -901,22 +902,15 @@ def deputy_mining_manager_export_view(request, plan_id):
 
 
 def deputy_mining_manager_manifest_view(request):
-    response = JsonResponse(DEPUTY_MANIFEST, json_dumps_params={'ensure_ascii': False})
-    response['Content-Type'] = 'application/manifest+json; charset=utf-8'
-    response['Cache-Control'] = 'no-cache'
-    response['X-Content-Type-Options'] = 'nosniff'
-    return response
+    return role_app_manifest_response(request, 'deputy_mining_manager')
 
 
 def deputy_mining_manager_service_worker_view(request):
-    response = HttpResponse(
+    return role_app_service_worker_response(
+        request,
+        'deputy_mining_manager',
         DEPUTY_SERVICE_WORKER_JS,
-        content_type='application/javascript; charset=utf-8',
     )
-    response['Cache-Control'] = 'no-cache'
-    response['Service-Worker-Allowed'] = '/deputy-mining-manager/'
-    response['X-Content-Type-Options'] = 'nosniff'
-    return response
 
 
 def _json_payload(request):

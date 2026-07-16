@@ -2,6 +2,9 @@
 
 {% block title %}Витрина руководства{% endblock %}
 {% block body_class %}dispatcher-control-screen{% endblock %}
+{% block extra_head %}
+{% include "includes/role_app_pwa_head.html" with role_code="manager" manifest_url="/management.webmanifest" service_worker_url="/management-sw.js" legacy_scope="/reports/management/" theme_color="#5058A4" apple_title="Руководство" icon_180="img/pwa/management-180.png" %}
+{% endblock %}
 
 {% block body %}
 <main class="dispatcher-shell dispatcher-analytics-shell" data-dispatcher-theme>

@@ -17,6 +17,7 @@ from shifts.services import lock_active_employee_for_shift
 from trips.views import dispatcher_control_view as render_dispatcher_control_view
 from users.access_auth import find_employee_access_by_credentials
 from users.models import EmployeeAccess
+from users.role_apps import role_app_manifest_response, role_app_service_worker_response
 from users.session_device import get_session_device_kind, set_session_device_kind
 
 from .models import AssignmentStatus, ExcavatorPlacement, HaulAssignment
@@ -29,7 +30,7 @@ MINING_MASTER_MANIFEST = {
     'short_name': 'Горный мастер',
     'description': 'Мобильный пульт Горного мастера для управления активной сменой.',
     'start_url': '/mining-master/assignments/',
-    'scope': '/',
+    'scope': '/mining-master/',
     'display': 'standalone',
     'display_override': ['standalone', 'fullscreen'],
     'orientation': 'portrait',
@@ -69,7 +70,7 @@ MINING_MASTER_MANIFEST = {
 
 MINING_MASTER_SERVICE_WORKER_JS = r"""
 const CACHE_PREFIX = "mining-master-mobile-shell-";
-const CACHE_NAME = `${CACHE_PREFIX}v107`;
+const CACHE_NAME = `${CACHE_PREFIX}v108`;
 const APP_SHELL_URL = "/mining-master/assignments/";
 const LOGIN_URL = "/";
 const MANIFEST_URL = "/mining-master-manifest.webmanifest";
@@ -129,7 +130,7 @@ async function networkFirst(request, fallbackUrl, event) {
     .then(response => {
       if (response && response.ok) {
         cache.put(request, response.clone()).catch(() => undefined);
-        if (fallbackUrl) {
+        if (fallbackUrl && new URL(request.url).pathname === fallbackUrl) {
           cache.put(fallbackUrl, response.clone()).catch(() => undefined);
         }
       }
@@ -309,17 +310,11 @@ def get_shift_type_for_now(now):
 
 
 def mining_master_service_worker_view(request):
-    response = HttpResponse(MINING_MASTER_SERVICE_WORKER_JS, content_type='application/javascript; charset=utf-8')
-    response['Cache-Control'] = 'no-cache'
-    response['Service-Worker-Allowed'] = '/'
-    return response
+    return role_app_service_worker_response(request, 'mining_master', MINING_MASTER_SERVICE_WORKER_JS)
 
 
 def mining_master_manifest_view(request):
-    response = JsonResponse(MINING_MASTER_MANIFEST, json_dumps_params={'ensure_ascii': False})
-    response['Content-Type'] = 'application/manifest+json; charset=utf-8'
-    response['Cache-Control'] = 'no-cache'
-    return response
+    return role_app_manifest_response(request, 'mining_master')
 
 
 def build_truck_tile(equipment, status_key, status_label, assignment=None, active_trip=None):

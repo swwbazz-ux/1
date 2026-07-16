@@ -5,7 +5,7 @@
 {% block extra_head %}
     {% if mining_master_mobile_enabled %}
         <link rel="manifest" href="{% url 'mining_master_manifest' %}">
-        <meta name="theme-color" content="#041017">
+        <meta name="theme-color" content="#2366A8">
         <meta name="mobile-web-app-capable" content="yes">
         <meta name="apple-mobile-web-app-capable" content="yes">
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -13,12 +13,12 @@
         <link rel="apple-touch-icon" href="{% static 'img/pwa/mining-master-180.png' %}">
     {% else %}
         <link rel="manifest" href="{% url 'dispatcher_manifest' %}">
-        <meta name="theme-color" content="#07131f">
+        <meta name="theme-color" content="#B33A4C">
         <meta name="mobile-web-app-capable" content="yes">
         <meta name="apple-mobile-web-app-capable" content="yes">
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
         <meta name="apple-mobile-web-app-title" content="Горный диспетчер">
-        <link rel="apple-touch-icon" href="{% static 'img/pwa/mining-master-180.png' %}">
+        <link rel="apple-touch-icon" href="{% static 'img/pwa/dispatcher-180.png' %}">
     {% endif %}
 {% endblock %}
 {% block body_class %}dispatcher-control-screen{% if mining_master_mobile_enabled %} mining-master-mobile-screen{% endif %}{% endblock %}
@@ -879,7 +879,7 @@ document.addEventListener("DOMContentLoaded", function () {
     var dispatcherRealtimeConnected = true;
     var dispatcherRealtimeLastSuccessAt = 0;
     var dispatcherRealtimeLastReason = "";
-    var miningMasterShellVersion = "mining-master-mobile-shell-v107";
+    var miningMasterShellVersion = "mining-master-mobile-shell-v108";
     function readDispatcherSyncQueue() {
         try {
             return JSON.parse(window.localStorage.getItem(dispatcherSyncQueueKey) || "[]");
@@ -1904,7 +1904,7 @@ document.addEventListener("DOMContentLoaded", function () {
         }
         var registrationPromise = miningMasterServiceWorkerRegistration
             ? Promise.resolve(miningMasterServiceWorkerRegistration)
-            : navigator.serviceWorker.getRegistration("/");
+            : navigator.serviceWorker.getRegistration("{% if role_app.role_code == 'mining_master' %}/{% else %}/mining-master/{% endif %}");
         return registrationPromise.then(function (registration) {
             if (registration) {
                 miningMasterServiceWorkerRegistration = registration;
@@ -1967,7 +1967,7 @@ document.addEventListener("DOMContentLoaded", function () {
         }
         var registrationPromise = miningMasterServiceWorkerRegistration
             ? Promise.resolve(miningMasterServiceWorkerRegistration)
-            : navigator.serviceWorker.getRegistration("/");
+            : navigator.serviceWorker.getRegistration("{% if role_app.role_code == 'mining_master' %}/{% else %}/mining-master/{% endif %}");
         var checkedRegistration = null;
         var currentVersion = "";
         var serverVersion = "";
@@ -5001,7 +5001,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 });
             });
         }
-        navigator.serviceWorker.register("/mining-master-sw.js", { scope: "/" }).then(function (registration) {
+        navigator.serviceWorker.register("/mining-master-sw.js", { scope: "{% if role_app.role_code == 'mining_master' %}/{% else %}/mining-master/{% endif %}" }).then(function (registration) {
             miningMasterServiceWorkerRegistration = registration;
             watchMiningMasterRegistration(registration);
             requestMiningMasterWorkerVersion(registration.active || navigator.serviceWorker.controller).then(setMiningMasterVisibleVersion);
@@ -5018,7 +5018,7 @@ document.addEventListener("DOMContentLoaded", function () {
             window.addEventListener("focus", checkMiningMasterPwaUpdateSilently);
         }).catch(function () {});
         {% else %}
-        navigator.serviceWorker.register("/dispatcher-sw.js", { scope: "/dispatcher/" }).then(function (registration) {
+        navigator.serviceWorker.register("/dispatcher-sw.js", { scope: "{% if role_app.role_code == 'dispatcher' %}/{% else %}/dispatcher/{% endif %}" }).then(function (registration) {
             registration.update().catch(function () {});
             if (registration.waiting) {
                 registration.waiting.postMessage({type: "SKIP_WAITING"});
