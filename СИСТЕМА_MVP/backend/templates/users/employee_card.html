@@ -9,7 +9,7 @@
 <link rel="stylesheet" href="{% static 'css/oup-workplace-v1.css' %}?v=20260717-1">
 <link rel="stylesheet" href="{% static 'css/oup-work-period-v1.css' %}?v=20260717-1">
 {% endif %}
-<link rel="stylesheet" href="{% static 'css/employee-card-unified.css' %}?v=20260717-3">
+<link rel="stylesheet" href="{% static 'css/employee-card-unified.css' %}?v=20260717-4">
 {% endblock %}
 
 {% block body %}
@@ -230,9 +230,16 @@
                                 {{ form.assignment_role }}{{ form.assignment_role.errors }}
                             </div>
                         {% else %}
-                            <div class="employee-card-field" data-card-field data-copy-label="Производственная специализация">
-                                <div class="employee-card-label-row"><label for="employee-assignment-role-readonly">Производственная специализация</label><button type="button" class="employee-copy-icon" data-copy-target="#employee-assignment-role-readonly" aria-label="Скопировать специализацию" title="Скопировать специализацию"></button></div>
-                                <input id="employee-assignment-role-readonly" value="{{ effective_specialization|default:'Не выбрана' }}" readonly>
+                            <div class="employee-card-field" data-card-field data-copy-label="Доступ в приложение" data-employee-assignment-role>
+                                {% if page_mode == "create" %}
+                                    <div class="employee-card-label-row"><label for="{{ form.access_role.id_for_label }}">{{ form.access_role.label }}</label><button type="button" class="employee-copy-icon" data-copy-target="#{{ form.access_role.id_for_label }}" aria-label="Скопировать доступ в приложение" title="Скопировать доступ в приложение"></button></div>
+                                    {{ form.access_role }}{{ form.access_role.errors }}
+                                {% else %}
+                                    {% with current_access=employee_accesses|first %}
+                                        <div class="employee-card-label-row"><label for="employee-assignment-role-readonly">Доступ в приложение</label><button type="button" class="employee-copy-icon" data-copy-target="#employee-assignment-role-readonly" aria-label="Скопировать доступ в приложение" title="Скопировать доступ в приложение"></button></div>
+                                        <input id="employee-assignment-role-readonly" value="{% if current_access %}{{ current_access.role.name }}{% else %}Доступ не выдан{% endif %}" readonly>
+                                    {% endwith %}
+                                {% endif %}
                             </div>
                         {% endif %}
 
@@ -286,14 +293,6 @@
                     </div>
                 </section>
 
-                <div class="employee-card-submit-row">
-                    {% if employee_card_context == "oup" %}<a class="employee-card-button is-secondary" href="{% url 'oup_employees' %}">Отмена</a>{% else %}<a class="employee-card-button is-secondary" href="{% url 'system_admin_employees' %}">Отмена</a>{% endif %}
-                    {% if can_submit_employee_card %}
-                        <button class="employee-card-button is-primary" type="submit">{% if page_mode == 'create' %}{% if employee_card_context == 'oup' %}Добавить сотрудника{% else %}Создать сотрудника{% endif %}{% else %}Сохранить карточку{% endif %}</button>
-                    {% else %}
-                        <button class="employee-card-button is-disabled" type="button" disabled>Редактирование недоступно</button>
-                    {% endif %}
-                </div>
             </form>
 
             <aside class="employee-card-side">
@@ -308,12 +307,8 @@
                         {% else %}
                             <label class="employee-card-checkline" for="{{ form.issue_access.id_for_label }}">
                                 {{ form.issue_access }}
-                                <span><strong>{{ form.issue_access.label }}</strong><small>Первичный PIN будет показан после сохранения.</small></span>
+                                <span><strong>{{ form.issue_access.label }}</strong><small>Подходящее приложение определяется по специализации.</small></span>
                             </label>
-                            <div class="employee-card-field" data-access-role-wrap>
-                                <label for="{{ form.access_role.id_for_label }}">{{ form.access_role.label }}</label>
-                                {{ form.access_role }}{{ form.access_role.errors }}
-                            </div>
                         {% endif %}
                     </section>
                     <section class="employee-card-side-panel">

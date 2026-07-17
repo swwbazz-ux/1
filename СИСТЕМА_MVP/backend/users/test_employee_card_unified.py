@@ -58,7 +58,9 @@ class UnifiedEmployeeCardTests(TestCase):
         self.assertTemplateUsed(edit_response, 'users/employee_card.html')
         self.assertContains(create_response, 'data-copy-card')
         self.assertContains(create_response, 'data-print-card')
-        self.assertContains(create_response, 'type="submit">Создать сотрудника</button>', html=False)
+        self.assertContains(create_response, 'form="employee-card-form"', html=False)
+        self.assertEqual(create_response.content.decode().count('>Создать сотрудника</button>'), 1)
+        self.assertNotContains(create_response, 'employee-card-submit-row')
         self.assertContains(edit_response, 'data-copy-target="#id_phone"', html=False)
 
     def test_oup_create_and_edit_use_the_same_template_as_admin(self):
@@ -82,8 +84,11 @@ class UnifiedEmployeeCardTests(TestCase):
         self.assertTemplateUsed(create_response, 'users/employee_card.html')
         self.assertTemplateUsed(edit_response, 'users/employee_card.html')
         self.assertContains(create_response, 'employee-card-unified.css')
-        self.assertContains(create_response, 'type="submit">Добавить сотрудника</button>', html=False)
+        self.assertContains(create_response, 'form="employee-card-form"', html=False)
+        self.assertEqual(create_response.content.decode().count('>Добавить сотрудника</button>'), 1)
+        self.assertNotContains(create_response, 'employee-card-submit-row')
         self.assertNotContains(create_response, 'Создать сотрудника')
+        self.assertContains(create_response, 'data-copy-target="#id_access_role"', html=False)
         self.assertContains(edit_response, 'employee-card-unified.js')
 
     def test_personnel_number_is_not_a_visible_card_field(self):

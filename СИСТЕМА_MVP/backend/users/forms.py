@@ -388,7 +388,7 @@ class AdminEmployeeForm(EmployeeCardForm):
         empty_label='Нет назначения',
         widget=WorkAssignmentEquipmentSelect,
     )
-    generate_access = forms.BooleanField(label='Сгенерировать первичный пинкод', required=False, initial=True)
+    generate_access = forms.BooleanField(label='Выдать доступ после создания', required=False, initial=True)
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

@@ -24,7 +24,7 @@ class OupAccessRoleForm(forms.Form):
 
 class OupEmployeeForm(EmployeeCardForm):
     issue_access = forms.BooleanField(
-        label='Выдать доступ в систему после создания',
+        label='Выдать доступ после создания',
         required=False,
         initial=True,
     )
