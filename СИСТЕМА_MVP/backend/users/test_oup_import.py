@@ -6,7 +6,7 @@ from pathlib import Path
 from django.core.management import call_command
 from django.test import TestCase
 
-from users.models import AdminActionLog, Employee
+from users.models import AdminActionLog, Employee, PersonnelDepartment, WorkSchedule
 
 
 class OupEmployeeImportCommandTests(TestCase):
@@ -33,7 +33,7 @@ class OupEmployeeImportCommandTests(TestCase):
             'personnel_number': '101',
             'position': 'Водитель автомобиля грузового',
             'hired_at': '01.07.2026',
-            'rotation': 'Вахта 30 дней, бригада №1',
+            'rotation': 'График сменности №12 (2-х сменный, 4-х бригадный)(30 дней, 30 ночей) Бригада №1',
             'birth_date': '02.03.1980',
             'department': 'Горный участок №2',
             'phone': '+7 900 000-00-01',
@@ -94,5 +94,8 @@ class OupEmployeeImportCommandTests(TestCase):
         self.assertEqual(summary['skipped'], 2)
         self.assertEqual(existing.personnel_number, '102')
         self.assertEqual(existing.phone, '+79000000002')
-        self.assertTrue(Employee.objects.filter(personnel_number='101').exists())
+        created = Employee.objects.get(personnel_number='101')
+        self.assertEqual(created.personnel_department, PersonnelDepartment.objects.get(code='department_001'))
+        self.assertEqual(created.work_schedule, WorkSchedule.objects.get(code='schedule_12'))
+        self.assertEqual(created.brigade_number, 1)
         self.assertEqual(AdminActionLog.objects.filter(action__contains='массовым импортом').count(), 2)

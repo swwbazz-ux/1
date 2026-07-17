@@ -41,9 +41,10 @@ OUP_AUDIT_FIELDS = (
     ('phone', 'Телефон'),
     ('personnel_position', 'Кадровая должность'),
     ('base_specialization', 'Производственная специализация'),
-    ('department', 'Подразделение'),
+    ('personnel_department', 'Подразделение'),
     ('hired_at', 'Дата приема'),
-    ('rotation', 'Вахта / график'),
+    ('work_schedule', 'График работы'),
+    ('brigade_number', 'Бригада'),
     ('comment', 'Комментарий'),
 )
 
@@ -134,6 +135,8 @@ def employee_audit_snapshot(employee):
     snapshot = {}
     for field_name, label in OUP_AUDIT_FIELDS:
         value = getattr(employee, field_name, '')
+        if field_name == 'brigade_number' and value:
+            value = employee.get_brigade_number_display()
         if hasattr(value, 'strftime'):
             value = value.strftime('%d.%m.%Y')
         snapshot[field_name] = (label, str(value or '—'))

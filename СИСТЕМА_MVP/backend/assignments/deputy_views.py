@@ -308,6 +308,8 @@ def _employee_short_name(employee):
 
 
 def _employee_brigade_code(employee):
+    if getattr(employee, 'brigade_number', None):
+        return str(employee.brigade_number)
     rotation = (employee.rotation or '').strip().casefold()
     if not rotation:
         return ''
@@ -331,14 +333,34 @@ def _employee_brigade_code(employee):
         '2 бригада': '2',
         'вахта 2': '2',
         '2 вахта': '2',
+        '3': '3',
+        '3-я': '3',
+        '3 я': '3',
+        'третья': '3',
+        'третья бригада': '3',
+        'бригада 3': '3',
+        '3 бригада': '3',
+        'вахта 3': '3',
+        '3 вахта': '3',
+        '4': '4',
+        '4-я': '4',
+        '4 я': '4',
+        'четвертая': '4',
+        'четвёртая': '4',
+        'четвертая бригада': '4',
+        'четвёртая бригада': '4',
+        'бригада 4': '4',
+        '4 бригада': '4',
+        'вахта 4': '4',
+        '4 вахта': '4',
     }
     if compact in aliases:
         return aliases[compact]
     brigade_match = re.search(
-        r'(?:бригада|вахта)\s*[-:]?\s*([12])(?:-?я)?(?=$|[\s,;.(])',
+        r'(?:бригада|вахта)\s*[-:]?\s*([1-4])(?:-?я)?(?=$|[\s,;.(])',
         compact,
     ) or re.search(
-        r'^([12])(?:-?я)?\s*(?:бригада|вахта)(?=$|[\s,;.(])',
+        r'^([1-4])(?:-?я)?\s*(?:бригада|вахта)(?=$|[\s,;.(])',
         compact,
     )
     return brigade_match.group(1) if brigade_match else ''
@@ -369,7 +391,11 @@ def _employee_payload(employee):
         'photo_url': photo_url,
         'initials': initials,
         'status_label': employee.get_status_display(),
-        'rotation_label': employee.rotation or '',
+        'rotation_label': (
+            employee.work_schedule.name
+            if getattr(employee, 'work_schedule_id', None)
+            else employee.rotation or ''
+        ),
         'brigade_code': brigade_code,
         'brigade_label': f'Бригада {brigade_code}' if brigade_code else 'Не указана',
         'search': f'{employee.full_name} {employee.personnel_number}'.strip().lower(),
@@ -444,8 +470,10 @@ def build_crew_plan_payload(plan, *, request=None):
             'equipment__model',
             'employee',
             'employee__personnel_position',
+            'employee__work_schedule',
             'baseline_employee',
             'baseline_employee__personnel_position',
+            'baseline_employee__work_schedule',
         )
         .order_by('equipment__garage_number', 'shift_type')
     )
@@ -472,7 +500,7 @@ def build_crew_plan_payload(plan, *, request=None):
     if editable:
         eligible_employees = list(
             Employee.objects.filter(id__in=eligible_employee_ids)
-            .select_related('personnel_position')
+            .select_related('personnel_position', 'work_schedule')
             .exclude(id__in=assigned_employee_ids)
             .exclude(id__in=other_role_assignment_employee_ids)
             .order_by('full_name')
@@ -488,7 +516,7 @@ def build_crew_plan_payload(plan, *, request=None):
             Employee.objects.filter(is_active=True, status=Employee.Status.ACTIVE)
             .exclude(id__in=eligible_employee_ids)
             .exclude(id__in=transfer_pending_employee_ids)
-            .select_related('personnel_position')
+            .select_related('personnel_position', 'work_schedule')
             .order_by('full_name')
         )
         transfer_specializations = list(
@@ -1062,7 +1090,7 @@ def deputy_mining_manager_temporary_transfer_request_view(request):
         if plan.status != CrewPlanStatus.DRAFT or plan.work_date != production_work_date():
             raise ValidationError('Запрос можно оформить только из текущего черновика расстановки.')
         employee = get_object_or_404(
-            Employee.objects.select_related('personnel_position', 'base_specialization'),
+            Employee.objects.select_related('personnel_position', 'base_specialization', 'work_schedule'),
             id=payload.get('employee_id'),
         )
         specialization = get_object_or_404(

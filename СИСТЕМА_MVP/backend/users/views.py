@@ -65,10 +65,12 @@ from .models import (
     DriverPrimaryRegistration,
     Employee,
     EmployeeAccess,
+    PersonnelDepartment,
     PersonnelPosition,
     ProductionSpecialization,
     Role,
     TemporaryWorkTransfer,
+    WorkSchedule,
 )
 from .oup_undo import (
     get_oup_action_undo_state,
@@ -582,6 +584,8 @@ def system_admin_dashboard_view(request):
         for item in EmployeeAccess.objects.values('status').annotate(total=Count('id'))
     }
     reference_counts = [
+        ('Подразделения', PersonnelDepartment.objects.count(), '/system-admin/references/personnel-departments/'),
+        ('Графики работы', WorkSchedule.objects.count(), '/system-admin/references/work-schedules/'),
         ('Кадровые должности', PersonnelPosition.objects.count(), '/system-admin/references/personnel-positions/'),
         ('Производственные специализации', ProductionSpecialization.objects.count(), '/system-admin/references/production-specializations/'),
         ('Виды техники', EquipmentType.objects.count(), '/admin/references/equipmenttype/'),
@@ -664,6 +668,8 @@ def system_admin_references_view(request):
             'title': 'Сотрудники и доступы',
             'items': [
                 {'name': 'Сотрудники', 'count': Employee.objects.count(), 'url': 'system_admin_employees', 'external_url': ''},
+                {'name': 'Подразделения', 'count': PersonnelDepartment.objects.count(), 'url': '', 'external_url': '/admin/users/personneldepartment/', 'detail_code': 'personnel-departments'},
+                {'name': 'Графики работы', 'count': WorkSchedule.objects.count(), 'url': '', 'external_url': '/admin/users/workschedule/', 'detail_code': 'work-schedules'},
                 {'name': 'Кадровые должности', 'count': PersonnelPosition.objects.count(), 'url': '', 'external_url': '/admin/users/personnelposition/', 'detail_code': 'personnel-positions'},
                 {'name': 'Производственные специализации', 'count': ProductionSpecialization.objects.count(), 'url': '', 'external_url': '/admin/users/productionspecialization/', 'detail_code': 'production-specializations'},
                 {'name': 'Роли', 'count': Role.objects.count(), 'url': '', 'external_url': '/admin/users/role/'},
@@ -747,6 +753,28 @@ def system_admin_references_view(request):
 
 def get_system_admin_reference_configs():
     return {
+        'personnel-departments': {
+            'title': 'Подразделения',
+            'section': 'Сотрудники и доступы',
+            'model': PersonnelDepartment,
+            'description': 'Официальные подразделения компании из 1С. В карточке сотрудника выбирается готовое значение без ручного ввода.',
+            'fields': ['name', 'code', 'is_active'],
+            'search_fields': ['name', 'code'],
+            'preview_fields': ['code', 'is_active'],
+            'initial': {'is_active': True},
+            'admin_url': '/admin/users/personneldepartment/',
+        },
+        'work-schedules': {
+            'title': 'Графики работы',
+            'section': 'Сотрудники и доступы',
+            'model': WorkSchedule,
+            'description': 'Стандартные кадровые графики из 1С. Номер бригады выбирается отдельно и ограничивается количеством бригад в графике.',
+            'fields': ['name', 'code', 'brigade_count', 'is_active'],
+            'search_fields': ['name', 'code'],
+            'preview_fields': ['code', 'brigade_count', 'is_active'],
+            'initial': {'is_active': True, 'brigade_count': 2},
+            'admin_url': '/admin/users/workschedule/',
+        },
         'personnel-positions': {
             'title': 'Кадровые должности',
             'section': 'Сотрудники и доступы',
@@ -2166,16 +2194,24 @@ def system_admin_employee_export_view(request):
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = 'Сотрудники'
-    sheet.append(['ФИО', 'Табельный номер', 'Телефон', 'Статус', 'Дата приема', 'Дата увольнения', 'Вахта', 'Место проживания'])
-    for employee in Employee.objects.order_by('full_name'):
+    sheet.append([
+        'ФИО', 'Табельный номер', 'Телефон', 'Статус', 'Подразделение',
+        'Дата приема', 'Дата увольнения', 'График работы', 'Бригада', 'Место проживания',
+    ])
+    for employee in Employee.objects.select_related(
+        'personnel_department',
+        'work_schedule',
+    ).order_by('full_name'):
         sheet.append([
             employee.full_name,
             employee.personnel_number,
             employee.phone,
             employee.get_status_display(),
+            employee.department_label,
             excel_value(employee.hired_at),
             excel_value(employee.dismissed_at),
-            employee.rotation,
+            employee.work_schedule_label,
+            employee.get_brigade_number_display() if employee.brigade_number else '',
             employee.residence_text,
         ])
     return build_workbook_response(workbook, 'admin_employees.xlsx')

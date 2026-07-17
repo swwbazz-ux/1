@@ -269,6 +269,35 @@
         position.addEventListener("change", syncSpecializationOptions);
     }
 
+    function initWorkSchedule() {
+        var schedule = document.querySelector("[data-work-schedule]");
+        var brigade = document.querySelector("[data-work-brigade]");
+        if (!schedule || !brigade) return;
+
+        function syncBrigades() {
+            var selectedSchedule = schedule.options[schedule.selectedIndex];
+            var brigadeCount = selectedSchedule
+                ? Number(selectedSchedule.dataset.brigadeCount || 0)
+                : 0;
+            var selectedAllowed = false;
+
+            Array.prototype.forEach.call(brigade.options, function (option) {
+                if (!option.value) return;
+                var allowed = brigadeCount > 0 && Number(option.value) <= brigadeCount;
+                option.hidden = !allowed;
+                option.disabled = !allowed;
+                if (option.selected && allowed) selectedAllowed = true;
+            });
+
+            brigade.disabled = brigadeCount < 1;
+            if (!selectedAllowed) brigade.value = "";
+            if (brigadeCount === 1 && !brigade.value) brigade.value = "1";
+        }
+
+        syncBrigades();
+        schedule.addEventListener("change", syncBrigades);
+    }
+
     function initAssignment() {
         var roleWrap = document.querySelector("[data-employee-assignment-role]");
         var equipmentWrap = document.querySelector("[data-employee-assignment-equipment]");
@@ -363,6 +392,7 @@
         initPhoto();
         initAccessToggle();
         initSpecialization();
+        initWorkSchedule();
         initAssignment();
         initLoginShare();
     });

@@ -28,6 +28,7 @@ from users.models import (
     ProductionSpecialization,
     Role,
     TemporaryWorkTransfer,
+    WorkSchedule,
 )
 
 from .models import AssignmentStatus, CrewPlanSlot, CrewPlanStatus, EquipmentAssignment, WorkShiftType
@@ -580,6 +581,26 @@ class DeputyPlanningViewTests(TestCase):
         )
         unclassified_driver.rotation = 'Вахта 15/15'
         unclassified_driver.save(update_fields=['rotation'])
+        schedule = WorkSchedule.objects.get(code='schedule_12')
+        third_brigade_driver, _third_access = self.create_employee_with_access(
+            'Кузнецов Андрей Сергеевич',
+            self.driver_role,
+            phone='+79000000004',
+            access_code='210004',
+        )
+        third_brigade_driver.work_schedule = schedule
+        third_brigade_driver.brigade_number = 3
+        third_brigade_driver.rotation = 'устаревшее значение'
+        third_brigade_driver.save(update_fields=['work_schedule', 'brigade_number', 'rotation'])
+        fourth_brigade_driver, _fourth_access = self.create_employee_with_access(
+            'Орлов Михаил Андреевич',
+            self.driver_role,
+            phone='+79000000005',
+            access_code='210005',
+        )
+        fourth_brigade_driver.work_schedule = schedule
+        fourth_brigade_driver.brigade_number = 4
+        fourth_brigade_driver.save(update_fields=['work_schedule', 'brigade_number'])
 
         response = self.client.get(
             reverse('deputy_mining_manager_placement'),
@@ -595,17 +616,24 @@ class DeputyPlanningViewTests(TestCase):
         )
         free_employee = next(item for item in payload['employees'] if item['id'] == second_driver.id)
         unclassified_employee = next(item for item in payload['employees'] if item['id'] == unclassified_driver.id)
+        third_brigade_employee = next(item for item in payload['employees'] if item['id'] == third_brigade_driver.id)
+        fourth_brigade_employee = next(item for item in payload['employees'] if item['id'] == fourth_brigade_driver.id)
         equipment = payload['rows'][0]['equipment']
         self.assertEqual(assigned_employee['brigade_code'], '1')
         self.assertEqual(assigned_employee['brigade_label'], 'Бригада 1')
         self.assertEqual(assigned_employee['phone'], '+79000000001')
         self.assertEqual(free_employee['brigade_code'], '2')
         self.assertEqual(unclassified_employee['brigade_code'], '')
+        self.assertEqual(third_brigade_employee['brigade_code'], '3')
+        self.assertEqual(third_brigade_employee['rotation_label'], schedule.name)
+        self.assertEqual(fourth_brigade_employee['brigade_code'], '4')
         self.assertEqual(equipment['type_label'], 'Самосвал')
         self.assertEqual(equipment['ownership_label'], 'Собственная')
         self.assertEqual(equipment['status_label'], '')
         self.assertContains(response, 'data-brigade-filter="1"')
         self.assertContains(response, 'data-brigade-filter="2"')
+        self.assertContains(response, 'data-brigade-filter="3"')
+        self.assertContains(response, 'data-brigade-filter="4"')
         self.assertContains(response, 'data-record-dialog')
 
     def test_autosave_changes_draft_but_not_equipment_assignment(self):

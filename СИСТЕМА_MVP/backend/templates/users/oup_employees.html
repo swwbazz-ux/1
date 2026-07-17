@@ -89,16 +89,16 @@
                     <select id="oup-department" name="department">
                         <option value="">Все подразделения</option>
                         {% for value in departments %}
-                            <option value="{{ value }}" {% if selected_department == value %}selected{% endif %}>{{ value }}</option>
+                            <option value="{{ value.id }}" {% if selected_department == value.id|stringformat:"s" %}selected{% endif %}>{{ value.name }}</option>
                         {% endfor %}
                     </select>
                 </div>
                 <div class="field select-field">
-                    <label for="oup-rotation">Вахта / график</label>
+                    <label for="oup-rotation">График работы</label>
                     <select id="oup-rotation" name="rotation">
                         <option value="">Все графики</option>
                         {% for value in rotations %}
-                            <option value="{{ value }}" {% if selected_rotation == value %}selected{% endif %}>{{ value }}</option>
+                            <option value="{{ value.id }}" {% if selected_rotation == value.id|stringformat:"s" %}selected{% endif %}>{{ value.name }}</option>
                         {% endfor %}
                     </select>
                 </div>
@@ -116,7 +116,7 @@
             </div>
             <div class="oup-register-list">
                 {% for employee in employees %}
-                    <a class="oup-employee-row status-{{ employee.status }}" href="{% url 'oup_employee_detail' employee.id %}" data-oup-employee-row data-employee-search="{{ employee.full_name }} {{ employee.phone }} {{ employee.position }} {{ employee.department }}">
+                    <a class="oup-employee-row status-{{ employee.status }}" href="{% url 'oup_employee_detail' employee.id %}" data-oup-employee-row data-employee-search="{{ employee.full_name }} {{ employee.phone }} {{ employee.position }} {{ employee.department_label }}">
                         <span class="oup-person-cell">
                             <span class="oup-person-avatar" aria-hidden="true">
                                 {% if employee.photo %}
@@ -132,7 +132,7 @@
                         </span>
                         <span class="oup-work-cell">
                             <strong>{{ employee.position|default:"Должность не указана" }}</strong>
-                            <small>{{ employee.department|default:"Подразделение не указано" }} · {{ employee.rotation|default:"График не указан" }}</small>
+                            <small>{{ employee.department_label|default:"Подразделение не указано" }} · {{ employee.work_schedule_label|default:"График не указан" }}{% if employee.brigade_number %} · {{ employee.get_brigade_number_display }}{% endif %}</small>
                         </span>
                         <span class="oup-contact-cell">
                             <strong>{{ employee.phone|default:"Телефон не указан" }}</strong>

@@ -25,9 +25,11 @@ from .models import (
     DriverPrimaryRegistration,
     Employee,
     EmployeeAccess,
+    PersonnelDepartment,
     PersonnelPosition,
     ProductionSpecialization,
     Role,
+    WorkSchedule,
 )
 from .work_profiles import legacy_work_category_for_specialization, validate_base_specialization
 
@@ -76,6 +78,15 @@ class ProductionSpecializationSelect(forms.Select):
         instance = getattr(value, 'instance', None)
         if instance:
             option['attrs']['data-access-role-id'] = str(instance.access_role_id or '')
+        return option
+
+
+class WorkScheduleSelect(forms.Select):
+    def create_option(self, name, value, label, selected, index, subindex=None, attrs=None):
+        option = super().create_option(name, value, label, selected, index, subindex, attrs)
+        instance = getattr(value, 'instance', None)
+        if instance:
+            option['attrs']['data-brigade-count'] = str(instance.brigade_count)
         return option
 
 
@@ -137,12 +148,13 @@ class EmployeeCardForm(forms.ModelForm):
             'personnel_position',
             'base_specialization',
             'position',
-            'department',
+            'personnel_department',
             'work_category',
             'status',
             'hired_at',
             'dismissed_at',
-            'rotation',
+            'work_schedule',
+            'brigade_number',
             'residence_text',
             'comment',
             'hr_data',
@@ -155,12 +167,13 @@ class EmployeeCardForm(forms.ModelForm):
             'personnel_position': 'Кадровая должность',
             'base_specialization': 'Производственная специализация',
             'position': 'Должность (архивное поле)',
-            'department': 'Подразделение',
+            'personnel_department': 'Подразделение',
             'work_category': 'Рабочая категория',
             'status': 'Статус сотрудника',
             'hired_at': 'Дата приема',
             'dismissed_at': 'Дата увольнения',
-            'rotation': 'Вахта / график',
+            'work_schedule': 'График работы',
+            'brigade_number': 'Бригада',
             'residence_text': 'Место проживания',
             'comment': 'Комментарий',
             'hr_data': 'Паспортные / кадровые данные',
@@ -171,6 +184,7 @@ class EmployeeCardForm(forms.ModelForm):
             'position': forms.HiddenInput(),
             'work_category': forms.HiddenInput(),
             'base_specialization': ProductionSpecializationSelect,
+            'work_schedule': WorkScheduleSelect,
             'phone': forms.TextInput(attrs={
                 'type': 'tel',
                 'inputmode': 'tel',
@@ -204,6 +218,9 @@ class EmployeeCardForm(forms.ModelForm):
         self.fields['position'].required = False
         self.fields['personnel_position'].required = False
         self.fields['base_specialization'].required = False
+        self.fields['personnel_department'].required = False
+        self.fields['work_schedule'].required = False
+        self.fields['brigade_number'].required = False
         # The employee lifecycle is changed only by dedicated actions. A new
         # card always begins as active; PIN/access activation is independent.
         if not is_existing_employee:
@@ -215,6 +232,10 @@ class EmployeeCardForm(forms.ModelForm):
 
         current_position_id = getattr(self.instance, 'personnel_position_id', None)
         current_specialization_id = getattr(self.instance, 'base_specialization_id', None)
+        current_department_id = getattr(self.instance, 'personnel_department_id', None)
+        current_schedule_id = getattr(self.instance, 'work_schedule_id', None)
+        self._initial_personnel_department_id = current_department_id
+        self._initial_work_schedule_id = current_schedule_id
         self.fields['personnel_position'].queryset = (
             PersonnelPosition.objects.filter(Q(is_active=True) | Q(pk=current_position_id))
             .prefetch_related('allowed_specializations')
@@ -225,6 +246,28 @@ class EmployeeCardForm(forms.ModelForm):
             .select_related('access_role')
             .order_by('name')
         )
+        self.fields['personnel_department'].queryset = (
+            PersonnelDepartment.objects.filter(Q(is_active=True) | Q(pk=current_department_id))
+            .order_by('name')
+        )
+        self.fields['work_schedule'].queryset = (
+            WorkSchedule.objects.filter(Q(is_active=True) | Q(pk=current_schedule_id))
+            .order_by('name')
+        )
+        self.fields['personnel_department'].empty_label = 'Не указано'
+        self.fields['work_schedule'].empty_label = 'Не указано'
+        self.fields['brigade_number'].choices = [('', 'Не указана'), *Employee.BrigadeNumber.choices]
+        self.fields['work_schedule'].widget.attrs['data-work-schedule'] = '1'
+        self.fields['brigade_number'].widget.attrs['data-work-brigade'] = '1'
+        if self.instance and self.instance.pk:
+            if not current_department_id and (self.instance.department or '').strip():
+                self.fields['personnel_department'].help_text = (
+                    f'Старое значение: «{self.instance.department}». Выберите официальное подразделение.'
+                )
+            if not current_schedule_id and (self.instance.rotation or '').strip():
+                self.fields['work_schedule'].help_text = (
+                    f'Старое значение: «{self.instance.rotation}». Выберите стандартный график и бригаду.'
+                )
         position_catalog = {}
         for position in self.fields['personnel_position'].queryset:
             position_catalog[str(position.id)] = {
@@ -309,6 +352,18 @@ class EmployeeCardForm(forms.ModelForm):
         if hired_at and dismissed_at and dismissed_at < hired_at:
             self.add_error('dismissed_at', 'Дата увольнения не может быть раньше даты приема.')
 
+        work_schedule = cleaned_data.get('work_schedule')
+        brigade_number = cleaned_data.get('brigade_number')
+        if work_schedule and not brigade_number:
+            self.add_error('brigade_number', 'Выберите бригаду для указанного графика работы.')
+        elif brigade_number and not work_schedule:
+            self.add_error('work_schedule', 'Сначала выберите график работы.')
+        elif work_schedule and brigade_number and brigade_number > work_schedule.brigade_count:
+            self.add_error(
+                'brigade_number',
+                f'Для графика «{work_schedule}» доступны бригады с 1 по {work_schedule.brigade_count}.',
+            )
+
         personnel_position = cleaned_data.get('personnel_position')
         specialization = cleaned_data.get('base_specialization')
         legacy_position = (cleaned_data.get('position') or '').strip()
@@ -365,9 +420,20 @@ class EmployeeCardForm(forms.ModelForm):
         employee = super().save(commit=False)
         personnel_position = self.cleaned_data.get('personnel_position')
         specialization = self.cleaned_data.get('base_specialization')
+        personnel_department = self.cleaned_data.get('personnel_department')
+        work_schedule = self.cleaned_data.get('work_schedule')
+        brigade_number = self.cleaned_data.get('brigade_number')
         if personnel_position:
             employee.position = personnel_position.name
             employee.work_category = legacy_work_category_for_specialization(specialization)
+        if personnel_department:
+            employee.department = personnel_department.name
+        elif self._initial_personnel_department_id:
+            employee.department = ''
+        if work_schedule and brigade_number:
+            employee.rotation = f'{work_schedule.name} Бригада №{brigade_number}'
+        elif self._initial_work_schedule_id:
+            employee.rotation = ''
         if commit:
             employee.save()
             self.save_m2m()

@@ -52,9 +52,12 @@ EMPLOYEE_CARD_UNDO_FIELDS = (
     'base_specialization_id',
     'position',
     'department',
+    'personnel_department_id',
     'work_category',
     'hired_at',
     'rotation',
+    'work_schedule_id',
+    'brigade_number',
     'comment',
     'photo',
 )

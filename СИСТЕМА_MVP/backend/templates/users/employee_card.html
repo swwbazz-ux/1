@@ -157,10 +157,11 @@
                         </div>
                         <div class="employee-card-field" data-card-field data-copy-label="Подразделение">
                             <div class="employee-card-label-row">
-                                <label for="{{ form.department.id_for_label }}">{{ form.department.label }}</label>
-                                <button type="button" class="employee-copy-icon" data-copy-target="#{{ form.department.id_for_label }}" aria-label="Скопировать подразделение" title="Скопировать подразделение"></button>
+                                <label for="{{ form.personnel_department.id_for_label }}">{{ form.personnel_department.label }}</label>
+                                <button type="button" class="employee-copy-icon" data-copy-target="#{{ form.personnel_department.id_for_label }}" aria-label="Скопировать подразделение" title="Скопировать подразделение"></button>
                             </div>
-                            {{ form.department }}{{ form.department.errors }}
+                            {{ form.personnel_department }}{{ form.personnel_department.errors }}
+                            {% if form.personnel_department.help_text %}<small class="employee-card-field-help">{{ form.personnel_department.help_text }}</small>{% endif %}
                         </div>
                     </div>
                 </div>
@@ -199,12 +200,20 @@
                             </div>
                             {{ form.dismissed_at }}{{ form.dismissed_at.errors }}
                         </div>
-                        <div class="employee-card-field" data-card-field data-copy-label="Вахта или график">
+                        <div class="employee-card-field" data-card-field data-copy-label="График работы">
                             <div class="employee-card-label-row">
-                                <label for="{{ form.rotation.id_for_label }}">{{ form.rotation.label }}</label>
-                                <button type="button" class="employee-copy-icon" data-copy-target="#{{ form.rotation.id_for_label }}" aria-label="Скопировать вахту" title="Скопировать вахту"></button>
+                                <label for="{{ form.work_schedule.id_for_label }}">{{ form.work_schedule.label }}</label>
+                                <button type="button" class="employee-copy-icon" data-copy-target="#{{ form.work_schedule.id_for_label }}" aria-label="Скопировать график работы" title="Скопировать график работы"></button>
                             </div>
-                            {{ form.rotation }}{{ form.rotation.errors }}
+                            {{ form.work_schedule }}{{ form.work_schedule.errors }}
+                            {% if form.work_schedule.help_text %}<small class="employee-card-field-help">{{ form.work_schedule.help_text }}</small>{% endif %}
+                        </div>
+                        <div class="employee-card-field" data-card-field data-copy-label="Бригада">
+                            <div class="employee-card-label-row">
+                                <label for="{{ form.brigade_number.id_for_label }}">{{ form.brigade_number.label }}</label>
+                                <button type="button" class="employee-copy-icon" data-copy-target="#{{ form.brigade_number.id_for_label }}" aria-label="Скопировать бригаду" title="Скопировать бригаду"></button>
+                            </div>
+                            {{ form.brigade_number }}{{ form.brigade_number.errors }}
                         </div>
                         <div class="employee-card-field span-2" data-card-field data-copy-label="Место проживания">
                             <div class="employee-card-label-row">
@@ -464,5 +473,5 @@
 </div>
 {% endif %}
 
-<script src="{% static 'js/employee-card-unified.js' %}?v=20260717-3"></script>
+<script src="{% static 'js/employee-card-unified.js' %}?v=20260718-4"></script>
 {% endblock %}

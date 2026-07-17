@@ -1,7 +1,57 @@
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
 
+class PersonnelDepartment(models.Model):
+    """Official organizational unit imported from 1C."""
+
+    code = models.SlugField('Код подразделения', max_length=64, unique=True)
+    name = models.CharField('Подразделение', max_length=255, unique=True)
+    is_active = models.BooleanField('Активно', default=True)
+
+    class Meta:
+        verbose_name = 'Подразделение'
+        verbose_name_plural = 'Подразделения'
+        ordering = ['name']
+
+    def __str__(self):
+        return self.name
+
+
+class WorkSchedule(models.Model):
+    """Standard personnel work schedule; the brigade is stored on Employee."""
+
+    code = models.SlugField('Код графика', max_length=64, unique=True)
+    name = models.CharField('График работы', max_length=255, unique=True)
+    brigade_count = models.PositiveSmallIntegerField(
+        'Количество бригад',
+        default=2,
+        validators=[MinValueValidator(1), MaxValueValidator(4)],
+    )
+    is_active = models.BooleanField('Активен', default=True)
+
+    class Meta:
+        verbose_name = 'График работы'
+        verbose_name_plural = 'Графики работы'
+        ordering = ['name']
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(brigade_count__gte=1, brigade_count__lte=4),
+                name='work_schedule_brigade_count_1_4',
+            ),
+        ]
+
+    def __str__(self):
+        return self.name
+
+
 class Employee(models.Model):
+    class BrigadeNumber(models.IntegerChoices):
+        BRIGADE_1 = 1, 'Бригада №1'
+        BRIGADE_2 = 2, 'Бригада №2'
+        BRIGADE_3 = 3, 'Бригада №3'
+        BRIGADE_4 = 4, 'Бригада №4'
+
     class WorkCategory(models.TextChoices):
         DRIVER = 'driver', 'Водитель самосвала'
         EXCAVATOR_OPERATOR = 'excavator_operator', 'Машинист экскаватора'
@@ -35,6 +85,14 @@ class Employee(models.Model):
     )
     position = models.CharField('Должность', max_length=128, blank=True)
     department = models.CharField('Подразделение', max_length=160, blank=True)
+    personnel_department = models.ForeignKey(
+        PersonnelDepartment,
+        verbose_name='Подразделение',
+        on_delete=models.PROTECT,
+        related_name='employees',
+        null=True,
+        blank=True,
+    )
     work_category = models.CharField(
         'Рабочая категория',
         max_length=32,
@@ -48,6 +106,20 @@ class Employee(models.Model):
     hired_at = models.DateField('Дата приема', null=True, blank=True)
     dismissed_at = models.DateField('Дата увольнения', null=True, blank=True)
     rotation = models.CharField('Вахта', max_length=128, blank=True)
+    work_schedule = models.ForeignKey(
+        WorkSchedule,
+        verbose_name='График работы',
+        on_delete=models.PROTECT,
+        related_name='employees',
+        null=True,
+        blank=True,
+    )
+    brigade_number = models.PositiveSmallIntegerField(
+        'Бригада',
+        choices=BrigadeNumber.choices,
+        null=True,
+        blank=True,
+    )
     residence_text = models.CharField('Место проживания', max_length=255, blank=True)
     hr_data = models.TextField('Паспортные/кадровые данные', blank=True)
     photo = models.FileField('Фото сотрудника', upload_to='employee_photos/', blank=True)
@@ -59,9 +131,26 @@ class Employee(models.Model):
         verbose_name = 'Сотрудник'
         verbose_name_plural = 'Сотрудники'
         ordering = ['full_name']
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(brigade_number__isnull=True)
+                    | models.Q(brigade_number__gte=1, brigade_number__lte=4)
+                ),
+                name='employee_brigade_number_1_4',
+            ),
+        ]
 
     def __str__(self):
         return self.full_name
+
+    @property
+    def department_label(self):
+        return self.personnel_department.name if self.personnel_department_id else self.department
+
+    @property
+    def work_schedule_label(self):
+        return self.work_schedule.name if self.work_schedule_id else self.rotation
 
     def has_production_history(self):
         from assignments.models import CrewPlan, CrewPlanSlot, EquipmentAssignment, HaulAssignment

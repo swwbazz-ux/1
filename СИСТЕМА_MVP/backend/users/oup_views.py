@@ -11,7 +11,14 @@ from django.views.decorators.http import require_POST
 
 from assignments.services import WORK_ASSIGNMENT_ROLE_EQUIPMENT_TYPES, get_active_equipment_assignment
 
-from .models import AdminActionLog, Employee, EmployeeAccess, TemporaryWorkTransfer
+from .models import (
+    AdminActionLog,
+    Employee,
+    EmployeeAccess,
+    PersonnelDepartment,
+    TemporaryWorkTransfer,
+    WorkSchedule,
+)
 from .oup_forms import (
     OupAccessRoleForm,
     OupDismissEmployeeForm,
@@ -130,7 +137,12 @@ def _employee_history(employee):
 
 
 def _employees_queryset(scope):
-    queryset = Employee.objects.order_by('full_name')
+    queryset = Employee.objects.select_related(
+        'personnel_department',
+        'work_schedule',
+        'personnel_position',
+        'base_specialization',
+    ).order_by('full_name')
     if scope == 'dismissed':
         return queryset.filter(status__in=[Employee.Status.DISMISSED, Employee.Status.ARCHIVED])
     return queryset.exclude(
@@ -160,13 +172,23 @@ def oup_employees_view(request, scope='active'):
             Q(full_name__icontains=query)
             | Q(phone__icontains=query)
             | Q(position__icontains=query)
+            | Q(personnel_department__name__icontains=query)
+            | Q(work_schedule__name__icontains=query)
         )
     if category:
         employees = employees.filter(work_category=category)
     if department:
-        employees = employees.filter(department=department)
+        employees = (
+            employees.filter(personnel_department_id=int(department))
+            if department.isdigit()
+            else employees.filter(department=department)
+        )
     if rotation:
-        employees = employees.filter(rotation=rotation)
+        employees = (
+            employees.filter(work_schedule_id=int(rotation))
+            if rotation.isdigit()
+            else employees.filter(rotation=rotation)
+        )
 
     active_queryset = _employees_queryset('active')
     today = timezone.localdate()
@@ -190,12 +212,12 @@ def oup_employees_view(request, scope='active'):
         'selected_rotation': rotation,
         'work_categories': Employee.WorkCategory.choices,
         'departments': (
-            Employee.objects.exclude(department='')
-            .values_list('department', flat=True).distinct().order_by('department')
+            PersonnelDepartment.objects.filter(employees__isnull=False)
+            .distinct().order_by('name')
         ),
         'rotations': (
-            Employee.objects.exclude(rotation='')
-            .values_list('rotation', flat=True).distinct().order_by('rotation')
+            WorkSchedule.objects.filter(employees__isnull=False)
+            .distinct().order_by('name')
         ),
         'active_total': active_queryset.count(),
         'new_this_month_total': active_queryset.filter(hired_at__gte=month_start).count(),

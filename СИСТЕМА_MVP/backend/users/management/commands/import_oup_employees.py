@@ -8,7 +8,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
 from core.models import bump_operational_state
-from users.models import Employee
+from users.models import Employee, PersonnelDepartment, WorkSchedule
 from users.oup_services import (
     employee_audit_snapshot,
     employee_work_category_blockers,
@@ -33,6 +33,10 @@ REQUIRED_COLUMNS = {
     'work_category',
 }
 VALID_CATEGORIES = {choice for choice, _label in Employee.WorkCategory.choices}
+SCHEDULE_WITH_BRIGADE_PATTERN = re.compile(
+    r'^(?P<name>.+?)\s+бригада\s*№?\s*(?P<brigade>[1-4])$',
+    re.IGNORECASE,
+)
 
 
 def normalize_phone(value):
@@ -49,6 +53,14 @@ def parse_date(value, field_name):
         return datetime.strptime((value or '').strip(), '%d.%m.%Y').date()
     except ValueError as error:
         raise ValueError(f'{field_name}: ожидается дата ДД.ММ.ГГГГ') from error
+
+
+def normalized_catalogue_name(value):
+    return re.sub(r'\s+', ' ', (value or '').strip()).casefold()
+
+
+def catalogue_index(queryset):
+    return {normalized_catalogue_name(record.name): record for record in queryset}
 
 
 class Command(BaseCommand):
@@ -70,6 +82,9 @@ class Command(BaseCommand):
             if missing_columns:
                 raise CommandError('Не хватает колонок: ' + ', '.join(sorted(missing_columns)))
             source_rows = list(reader)
+
+        self.departments_by_name = catalogue_index(PersonnelDepartment.objects.all())
+        self.schedules_by_name = catalogue_index(WorkSchedule.objects.all())
 
         prepared = []
         skipped = []
@@ -148,15 +163,31 @@ class Command(BaseCommand):
             raise ValueError('некорректный или отсутствующий телефон')
         if values['work_category'] not in VALID_CATEGORIES:
             raise ValueError('неизвестная рабочая категория')
+        personnel_department = self.departments_by_name.get(normalized_catalogue_name(values['department']))
+        work_schedule = None
+        brigade_number = None
+        schedule_match = SCHEDULE_WITH_BRIGADE_PATTERN.match(
+            re.sub(r'\s+', ' ', values['rotation']),
+        )
+        if schedule_match:
+            work_schedule = self.schedules_by_name.get(normalized_catalogue_name(schedule_match.group('name')))
+            candidate_brigade = int(schedule_match.group('brigade'))
+            if work_schedule and candidate_brigade <= work_schedule.brigade_count:
+                brigade_number = candidate_brigade
+            else:
+                work_schedule = None
         return {
             'full_name': ' '.join(values['full_name'].split()),
             'personnel_number': values['personnel_number'],
             'position': values['position'],
             'department': values['department'],
+            'personnel_department': personnel_department,
             'work_category': values['work_category'],
             'hired_at': parse_date(values['hired_at'], 'дата приёма'),
             'birth_date': parse_date(values['birth_date'], 'дата рождения'),
             'rotation': values['rotation'],
+            'work_schedule': work_schedule,
+            'brigade_number': brigade_number,
             'phone': phone,
         }
 
@@ -233,8 +264,9 @@ class Command(BaseCommand):
         if not commit:
             return 'updated', None, 'category_preserved' if category_preserved else ''
         employee.save(update_fields=[
-            'full_name', 'personnel_number', 'position', 'department', 'work_category',
-            'hired_at', 'birth_date', 'rotation', 'phone', 'updated_at',
+            'full_name', 'personnel_number', 'position', 'department', 'personnel_department',
+            'work_category', 'hired_at', 'birth_date', 'rotation', 'work_schedule',
+            'brigade_number', 'phone', 'updated_at',
         ])
         log_oup_action(
             None,

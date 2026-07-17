@@ -6,10 +6,12 @@ from .models import (
     DriverPrimaryRegistration,
     Employee,
     EmployeeAccess,
+    PersonnelDepartment,
     PersonnelPosition,
     ProductionSpecialization,
     Role,
     TemporaryWorkTransfer,
+    WorkSchedule,
 )
 
 
@@ -17,14 +19,30 @@ from .models import (
 class EmployeeAdmin(admin.ModelAdmin):
     list_display = (
         'full_name',
-        'department',
+        'personnel_department',
         'personnel_position',
         'base_specialization',
+        'work_schedule',
+        'brigade_number',
         'status',
         'is_active',
     )
-    search_fields = ('full_name', 'phone', 'department', 'position')
-    list_filter = ('status', 'is_active', 'work_category', 'department')
+    search_fields = ('full_name', 'phone', 'personnel_department__name', 'department', 'position')
+    list_filter = ('status', 'is_active', 'work_category', 'personnel_department', 'work_schedule', 'brigade_number')
+
+
+@admin.register(PersonnelDepartment)
+class PersonnelDepartmentAdmin(admin.ModelAdmin):
+    list_display = ('name', 'code', 'is_active')
+    search_fields = ('name', 'code')
+    list_filter = ('is_active',)
+
+
+@admin.register(WorkSchedule)
+class WorkScheduleAdmin(admin.ModelAdmin):
+    list_display = ('name', 'code', 'brigade_count', 'is_active')
+    search_fields = ('name', 'code')
+    list_filter = ('brigade_count', 'is_active')
 
 
 @admin.register(Role)

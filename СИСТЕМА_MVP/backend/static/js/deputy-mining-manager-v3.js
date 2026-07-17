@@ -490,7 +490,7 @@
         appendRecordField("Бригада", employee.brigade_label || "Не указана");
         var rotation = textValue(employee.rotation_label).trim();
         if (rotation && rotation.toLocaleLowerCase("ru") !== textValue(employee.brigade_label).toLocaleLowerCase("ru")) {
-            appendRecordField("Вахта", rotation);
+            appendRecordField("График работы", rotation);
         }
         appendRecordField("Назначение", assignmentLabel || "Свободен");
         appendRecordField("Статус", employee.status_label || "Активен");

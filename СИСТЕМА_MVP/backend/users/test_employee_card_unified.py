@@ -2,7 +2,15 @@ from django.test import TestCase
 from django.urls import reverse
 
 from .forms import AdminEmployeeForm, PersonnelPositionReferenceForm
-from .models import Employee, EmployeeAccess, PersonnelPosition, ProductionSpecialization, Role
+from .models import (
+    Employee,
+    EmployeeAccess,
+    PersonnelDepartment,
+    PersonnelPosition,
+    ProductionSpecialization,
+    Role,
+    WorkSchedule,
+)
 from .oup_forms import OupEmployeeForm
 
 
@@ -17,6 +25,8 @@ class UnifiedEmployeeCardTests(TestCase):
         self.truck_position = PersonnelPosition.objects.get(
             name='Водитель автомобиля, занятый на транспортировании горной массы в технологическом процессе',
         )
+        self.department = PersonnelDepartment.objects.get(code='department_001')
+        self.schedule = WorkSchedule.objects.get(code='schedule_12')
         self.admin_employee = Employee.objects.create(
             full_name='Администратор Системы',
             phone='+79000000001',
@@ -34,7 +44,11 @@ class UnifiedEmployeeCardTests(TestCase):
             personnel_position=self.truck_position,
             base_specialization=self.truck_specialization,
             position=self.truck_position.name,
-            department='Горный участок',
+            department=self.department.name,
+            personnel_department=self.department,
+            work_schedule=self.schedule,
+            brigade_number=1,
+            rotation=f'{self.schedule.name} Бригада №1',
             status=Employee.Status.ACTIVE,
         )
         EmployeeAccess.objects.create(
@@ -61,6 +75,9 @@ class UnifiedEmployeeCardTests(TestCase):
         self.assertContains(create_response, 'form="employee-card-form"', html=False)
         self.assertEqual(create_response.content.decode().count('>Создать сотрудника</button>'), 1)
         self.assertContains(create_response, 'id="employee-status-readonly"', html=False)
+        self.assertContains(create_response, 'name="personnel_department"', html=False)
+        self.assertContains(create_response, 'name="work_schedule"', html=False)
+        self.assertContains(create_response, 'name="brigade_number"', html=False)
         self.assertContains(create_response, 'value="Активен"', html=False)
         self.assertNotContains(create_response, 'id="id_status"', html=False)
         self.assertNotContains(create_response, 'employee-card-submit-row')
@@ -158,6 +175,8 @@ class UnifiedEmployeeCardTests(TestCase):
 
         self.assertContains(registry, 'Кадровые должности')
         self.assertContains(registry, 'Производственные специализации')
+        self.assertContains(registry, 'Подразделения')
+        self.assertContains(registry, 'Графики работы')
         self.assertContains(detail, 'Официальные должности из 1С')
         self.assertContains(detail, 'Разрешенные производственные специализации')
 
@@ -180,8 +199,8 @@ class UnifiedEmployeeCardTests(TestCase):
 
     def test_shared_employee_card_shells_use_new_cache_versions(self):
         expected_versions = {
-            'system_admin_service_worker': 'system-admin-shell-v8',
-            'oup_service_worker': 'oup-shell-v8',
+            'system_admin_service_worker': 'system-admin-shell-v9',
+            'oup_service_worker': 'oup-shell-v9',
         }
 
         for view_name, expected_version in expected_versions.items():
@@ -236,6 +255,83 @@ class UnifiedEmployeeCardTests(TestCase):
         self.assertTrue(oup_form.is_valid(), oup_form.errors)
         self.assertEqual(admin_form.cleaned_data['status'], Employee.Status.ACTIVE)
         self.assertEqual(oup_form.cleaned_data['status'], Employee.Status.ACTIVE)
+
+    def test_schedule_and_department_are_shared_structured_fields(self):
+        common = {
+            'full_name': 'Смирнов Семен',
+            'phone': '+79005554433',
+            'status': Employee.Status.ACTIVE,
+            'personnel_position': self.truck_position.id,
+            'base_specialization': self.truck_specialization.id,
+            'personnel_department': self.department.id,
+            'work_schedule': self.schedule.id,
+            'brigade_number': 4,
+        }
+        admin_form = AdminEmployeeForm(data={**common, 'role': self.driver_role.id})
+        oup_form = OupEmployeeForm(data=common)
+
+        self.assertTrue(admin_form.is_valid(), admin_form.errors)
+        self.assertTrue(oup_form.is_valid(), oup_form.errors)
+        employee = admin_form.save()
+        self.assertEqual(employee.personnel_department, self.department)
+        self.assertEqual(employee.work_schedule, self.schedule)
+        self.assertEqual(employee.brigade_number, 4)
+        self.assertEqual(employee.department, self.department.name)
+        self.assertEqual(employee.rotation, f'{self.schedule.name} Бригада №4')
+
+    def test_brigade_must_belong_to_selected_schedule(self):
+        two_brigade_schedule = WorkSchedule.objects.get(code='schedule_11')
+        form = AdminEmployeeForm(data={
+            'full_name': 'Смирнов Семен',
+            'phone': '+79005554433',
+            'status': Employee.Status.ACTIVE,
+            'personnel_position': self.truck_position.id,
+            'base_specialization': self.truck_specialization.id,
+            'personnel_department': self.department.id,
+            'work_schedule': two_brigade_schedule.id,
+            'brigade_number': 3,
+            'role': self.driver_role.id,
+        })
+
+        self.assertFalse(form.is_valid())
+        self.assertEqual(
+            form.errors['brigade_number'],
+            [f'Для графика «{two_brigade_schedule}» доступны бригады с 1 по 2.'],
+        )
+
+    def test_oup_registry_filters_by_department_and_schedule_references(self):
+        oup_employee = Employee.objects.create(
+            full_name='Иванова Анна',
+            phone='+79000000002',
+            status=Employee.Status.ACTIVE,
+        )
+        oup_access = EmployeeAccess.objects.create(
+            employee=oup_employee,
+            role=self.oup_role,
+            access_code='303030',
+            status=EmployeeAccess.Status.ACTIVATED,
+        )
+        other_department = PersonnelDepartment.objects.get(code='department_002')
+        other_schedule = WorkSchedule.objects.get(code='schedule_11')
+        Employee.objects.create(
+            full_name='Сотрудник Другого Подразделения',
+            phone='+79000000003',
+            personnel_department=other_department,
+            work_schedule=other_schedule,
+            brigade_number=1,
+            status=Employee.Status.ACTIVE,
+        )
+        self.login_as(oup_access)
+
+        response = self.client.get(reverse('oup_employees'), {
+            'department': self.department.id,
+            'rotation': self.schedule.id,
+        })
+
+        self.assertContains(response, self.employee.full_name)
+        self.assertNotContains(response, 'Сотрудник Другого Подразделения')
+        self.assertContains(response, f'value="{self.department.id}" selected', html=False)
+        self.assertContains(response, f'value="{self.schedule.id}" selected', html=False)
 
     def test_admin_create_forces_active_employee_lifecycle(self):
         self.login_as(self.admin_access)
