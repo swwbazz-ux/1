@@ -1490,6 +1490,9 @@ def system_admin_employee_create_view(request):
                 with transaction.atomic():
                     role = form.cleaned_data.get('role')
                     employee = form.save(commit=False)
+                    employee.status = Employee.Status.ACTIVE
+                    employee.is_active = True
+                    employee.dismissed_at = None
                     employee.save()
                     code = ''
                     if role and form.cleaned_data['generate_access']:
@@ -1544,7 +1547,10 @@ def system_admin_employee_create_view(request):
                     messages.success(request, 'Сотрудник создан.', extra_tags='employee-card-silent')
                 return redirect_after_admin_action(request, 'system_admin_employee_detail', employee_id=employee.id)
     else:
-        form = AdminEmployeeForm()
+        form = AdminEmployeeForm(initial={
+            'hired_at': timezone.localdate(),
+            'status': Employee.Status.ACTIVE,
+        })
 
     return render(
         request,

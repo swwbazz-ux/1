@@ -60,6 +60,9 @@ class UnifiedEmployeeCardTests(TestCase):
         self.assertContains(create_response, 'data-print-card')
         self.assertContains(create_response, 'form="employee-card-form"', html=False)
         self.assertEqual(create_response.content.decode().count('>Создать сотрудника</button>'), 1)
+        self.assertContains(create_response, 'id="employee-status-readonly"', html=False)
+        self.assertContains(create_response, 'value="Активен"', html=False)
+        self.assertNotContains(create_response, 'id="id_status"', html=False)
         self.assertNotContains(create_response, 'employee-card-submit-row')
         self.assertContains(create_response, '>Выберите доступ</option>', html=False)
         self.assertContains(create_response, '<details class="employee-card-section employee-card-notes"', html=False)
@@ -87,9 +90,11 @@ class UnifiedEmployeeCardTests(TestCase):
         self.assertTemplateUsed(edit_response, 'users/employee_card.html')
         self.assertContains(create_response, 'employee-card-unified.css')
         self.assertContains(create_response, 'form="employee-card-form"', html=False)
-        self.assertEqual(create_response.content.decode().count('>Добавить сотрудника</button>'), 1)
+        self.assertEqual(create_response.content.decode().count('>Создать сотрудника</button>'), 1)
         self.assertNotContains(create_response, 'employee-card-submit-row')
-        self.assertNotContains(create_response, 'Создать сотрудника')
+        self.assertContains(create_response, 'id="employee-status-readonly"', html=False)
+        self.assertContains(create_response, 'value="Активен"', html=False)
+        self.assertNotContains(create_response, 'id="id_status"', html=False)
         self.assertContains(create_response, 'data-copy-target="#id_access_role"', html=False)
         self.assertContains(create_response, '>Выберите доступ</option>', html=False)
         self.assertNotContains(
@@ -175,8 +180,8 @@ class UnifiedEmployeeCardTests(TestCase):
 
     def test_shared_employee_card_shells_use_new_cache_versions(self):
         expected_versions = {
-            'system_admin_service_worker': 'system-admin-shell-v7',
-            'oup_service_worker': 'oup-shell-v7',
+            'system_admin_service_worker': 'system-admin-shell-v8',
+            'oup_service_worker': 'oup-shell-v8',
         }
 
         for view_name, expected_version in expected_versions.items():
@@ -215,3 +220,36 @@ class UnifiedEmployeeCardTests(TestCase):
 
         self.assertTrue(form.is_valid(), form.errors)
         self.assertEqual(form.cleaned_data['phone'], '+79001112233')
+
+    def test_create_forms_force_active_employee_status(self):
+        common = {
+            'full_name': 'Смирнов Семен',
+            'phone': '+79005554433',
+            'status': Employee.Status.DEACTIVATED,
+            'personnel_position': self.truck_position.id,
+            'base_specialization': self.truck_specialization.id,
+        }
+        admin_form = AdminEmployeeForm(data={**common, 'role': self.driver_role.id})
+        oup_form = OupEmployeeForm(data=common)
+
+        self.assertTrue(admin_form.is_valid(), admin_form.errors)
+        self.assertTrue(oup_form.is_valid(), oup_form.errors)
+        self.assertEqual(admin_form.cleaned_data['status'], Employee.Status.ACTIVE)
+        self.assertEqual(oup_form.cleaned_data['status'], Employee.Status.ACTIVE)
+
+    def test_admin_create_forces_active_employee_lifecycle(self):
+        self.login_as(self.admin_access)
+
+        response = self.client.post(reverse('system_admin_employee_create'), {
+            'full_name': 'Смирнов Семен',
+            'phone': '+79005554433',
+            'status': Employee.Status.DEACTIVATED,
+            'personnel_position': self.truck_position.id,
+            'base_specialization': self.truck_specialization.id,
+            'role': self.driver_role.id,
+        })
+
+        self.assertEqual(response.status_code, 302)
+        employee = Employee.objects.get(phone='+79005554433')
+        self.assertEqual(employee.status, Employee.Status.ACTIVE)
+        self.assertTrue(employee.is_active)

@@ -9,7 +9,7 @@
 <link rel="stylesheet" href="{% static 'css/oup-workplace-v1.css' %}?v=20260717-1">
 <link rel="stylesheet" href="{% static 'css/oup-work-period-v1.css' %}?v=20260717-1">
 {% endif %}
-<link rel="stylesheet" href="{% static 'css/employee-card-unified.css' %}?v=20260717-7">
+<link rel="stylesheet" href="{% static 'css/employee-card-unified.css' %}?v=20260717-8">
 {% endblock %}
 
 {% block body %}
@@ -180,10 +180,10 @@
                         </div>
                         <div class="employee-card-field" data-card-field data-copy-label="Статус">
                             <div class="employee-card-label-row">
-                                <label for="{% if employee %}employee-status-readonly{% else %}{{ form.status.id_for_label }}{% endif %}">{{ form.status.label }}</label>
-                                <button type="button" class="employee-copy-icon" data-copy-target="#{% if employee %}employee-status-readonly{% else %}{{ form.status.id_for_label }}{% endif %}" aria-label="Скопировать статус" title="Скопировать статус"></button>
+                                <label for="employee-status-readonly">{{ form.status.label }}</label>
+                                <button type="button" class="employee-copy-icon" data-copy-target="#employee-status-readonly" aria-label="Скопировать статус" title="Скопировать статус"></button>
                             </div>
-                            {% if employee %}<input id="employee-status-readonly" value="{{ employee.get_status_display }}" readonly>{% else %}{{ form.status }}{{ form.status.errors }}{% endif %}
+                            <input id="employee-status-readonly" value="{% if employee %}{{ employee.get_status_display }}{% else %}Активен{% endif %}" readonly>
                         </div>
                         <div class="employee-card-field" data-card-field data-copy-label="Дата приема">
                             <div class="employee-card-label-row">
@@ -272,6 +272,9 @@
                         {% elif work_assignment_role and not work_assignment_supports_equipment %}
                             <strong>{{ work_assignment_role.name }}</strong>
                             <span>Для этой роли постоянное назначение на смену и технику не требуется. Рабочая смена открывается в профильном приложении.</span>
+                        {% elif employee_card_context == "oup" %}
+                            <strong>Рабочее назначение выполняет заместитель начальника участка</strong>
+                            <span>Смена и техника появятся здесь после расстановки.</span>
                         {% else %}
                             <strong data-employee-assignment-status-title>Рабочее назначение не задано</strong>
                             <span data-employee-assignment-status-text>Смена и техника могут быть назначены позднее.</span>
@@ -319,7 +322,7 @@
                             <div><strong>Действие</strong><span>запишется в журнал</span></div>
                         </div>
                     </section>
-                    <button class="employee-card-button is-primary side-submit" type="submit" form="employee-card-form">{% if employee_card_context == 'oup' %}Добавить сотрудника{% else %}Создать сотрудника{% endif %}</button>
+                    <button class="employee-card-button is-primary side-submit" type="submit" form="employee-card-form">Создать сотрудника</button>
                 {% else %}
                     <section class="employee-card-side-panel employee-card-access-panel">
                         <div class="employee-card-side-heading"><span>Доступ</span><h2>Приложение и вход</h2></div>

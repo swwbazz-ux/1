@@ -157,7 +157,7 @@ class EmployeeCardForm(forms.ModelForm):
             'position': 'Должность (архивное поле)',
             'department': 'Подразделение',
             'work_category': 'Рабочая категория',
-            'status': 'Статус',
+            'status': 'Статус сотрудника',
             'hired_at': 'Дата приема',
             'dismissed_at': 'Дата увольнения',
             'rotation': 'Вахта / график',
@@ -204,7 +204,12 @@ class EmployeeCardForm(forms.ModelForm):
         self.fields['position'].required = False
         self.fields['personnel_position'].required = False
         self.fields['base_specialization'].required = False
-        self.fields['status'].disabled = is_existing_employee
+        # The employee lifecycle is changed only by dedicated actions. A new
+        # card always begins as active; PIN/access activation is independent.
+        if not is_existing_employee:
+            self.initial['status'] = Employee.Status.ACTIVE
+            self.fields['status'].initial = Employee.Status.ACTIVE
+        self.fields['status'].disabled = True
         self.fields['phone'].widget.attrs['maxlength'] = '18'
         self.fields['photo'].help_text = 'JPG, PNG или WEBP до 5 МБ.'
 

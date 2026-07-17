@@ -1498,7 +1498,7 @@ class AccessLoginTests(TestCase):
             'name="personnel_position"',
             'name="department"',
             'name="base_specialization"',
-            'name="status"',
+            'id="employee-status-readonly"',
             'name="hired_at"',
             'name="dismissed_at"',
             'name="rotation"',

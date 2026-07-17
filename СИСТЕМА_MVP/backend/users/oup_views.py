@@ -277,7 +277,7 @@ def oup_employee_create_view(request):
     context.update({
         'form': form,
         'page_mode': 'create',
-        'title': 'Добавить сотрудника',
+        'title': 'Создать сотрудника',
         'employee_card_context': 'oup',
         'can_submit_employee_card': True,
     })

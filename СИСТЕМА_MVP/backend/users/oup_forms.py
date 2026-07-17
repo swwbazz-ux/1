@@ -41,7 +41,6 @@ class OupEmployeeForm(EmployeeCardForm):
             .exclude(code='admin')
             .order_by('name')
         )
-        self.fields['status'].disabled = True
         self.fields['dismissed_at'].disabled = True
         self.fields['issue_access'].widget.attrs['form'] = 'employee-card-form'
         self.fields['access_role'].widget.attrs['form'] = 'employee-card-form'
