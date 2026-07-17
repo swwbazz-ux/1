@@ -43,7 +43,7 @@
             <article class="oup-metric is-warning">
                 <span>Требуют внимания</span>
                 <strong>{{ missing_data_total }}</strong>
-                <small>нет фото или табельного номера</small>
+                <small>нет фото или телефона</small>
             </article>
             <article class="oup-metric is-neutral">
                 <span>Уволены</span>
@@ -116,7 +116,7 @@
             </div>
             <div class="oup-register-list">
                 {% for employee in employees %}
-                    <a class="oup-employee-row status-{{ employee.status }}" href="{% url 'oup_employee_detail' employee.id %}" data-oup-employee-row data-employee-search="{{ employee.full_name }} {{ employee.personnel_number }} {{ employee.phone }} {{ employee.position }} {{ employee.department }}">
+                    <a class="oup-employee-row status-{{ employee.status }}" href="{% url 'oup_employee_detail' employee.id %}" data-oup-employee-row data-employee-search="{{ employee.full_name }} {{ employee.phone }} {{ employee.position }} {{ employee.department }}">
                         <span class="oup-person-cell">
                             <span class="oup-person-avatar" aria-hidden="true">
                                 {% if employee.photo %}
@@ -127,7 +127,7 @@
                             </span>
                             <span>
                                 <strong>{{ employee.full_name }}</strong>
-                                <small>Таб. № {{ employee.personnel_number|default:"не указан" }}</small>
+                                <small>{{ employee.get_work_category_display }}</small>
                             </span>
                         </span>
                         <span class="oup-work-cell">

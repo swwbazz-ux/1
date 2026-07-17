@@ -551,10 +551,9 @@ class AccessLoginTests(TestCase):
         response = self.client.get(f'/system-admin/employees/{employee.id}/', HTTP_HOST='localhost')
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'employee-profile-head')
-        self.assertContains(response, 'employee-photo-card')
-        self.assertContains(response, 'employee-photo-plus')
-        self.assertContains(response, 'employee-photo-controls')
+        self.assertContains(response, 'employee-card-profile')
+        self.assertContains(response, 'employee-card-photo')
+        self.assertContains(response, 'employee-card-photo-actions')
         self.assertContains(response, 'name="position"')
         self.assertContains(response, 'Должность')
         self.assertContains(response, 'type="file"')
@@ -917,14 +916,14 @@ class AccessLoginTests(TestCase):
                 response = self.client.get(f'/system-admin/employees/{employee.id}/', HTTP_HOST='localhost')
 
                 self.assertEqual(response.status_code, 200)
-                self.assertContains(response, 'employee-photo-control add')
-                self.assertContains(response, 'employee-photo-control remove')
+                self.assertContains(response, 'employee-card-photo-action is-add')
+                self.assertContains(response, 'employee-card-photo-action is-remove')
                 self.assertContains(response, 'data-confirm="Удалить фото сотрудника?"')
                 self.assertContains(response, 'app-confirm-modal')
                 self.assertContains(response, 'data-confirm-accept')
                 self.assertContains(response, 'data-confirm-cancel')
                 self.assertNotContains(response, 'onclick="return window.confirm')
-                self.assertContains(response, 'employee-photo-modal')
+                self.assertContains(response, 'employee-card-photo-modal')
 
     def test_employee_photo_rejects_non_image_file(self):
         employee = Employee.objects.create(full_name='Employee Photo Validation')
@@ -1417,7 +1416,7 @@ class AccessLoginTests(TestCase):
         self.assertTrue(access.access_code.isdigit())
         self.assertTrue(AdminActionLog.objects.filter(action='Создан сотрудник и выдан первичный пинкод').exists())
         self.assertNotContains(create_response, 'Сотрудник создан.')
-        self.assertContains(create_response, 'Первичный пинкод:')
+        self.assertContains(create_response, 'Пин код:')
 
         save_response = self.client.post(
             f'/system-admin/employees/{employee.id}/',
@@ -1493,15 +1492,17 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, 'employee-work-assignment-meta')
         html = response.content.decode('utf-8')
         expected_order = [
+            'name="full_name"',
+            'name="birth_date"',
+            'name="phone"',
             'name="position"',
-            'name="rotation"',
+            'name="department"',
+            'name="work_category"',
             'name="status"',
             'name="hired_at"',
             'name="dismissed_at"',
-            'id="employee-residence-general"',
-            'id="employee-dormitory"',
-            'id="employee-room"',
-            'id="employee-bed"',
+            'name="rotation"',
+            'name="residence_text"',
             'name="role"',
             'name="assignment_shift_type"',
             'name="assignment_equipment"',

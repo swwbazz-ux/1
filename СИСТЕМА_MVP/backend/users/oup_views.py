@@ -9,6 +9,8 @@ from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_POST
 
+from assignments.services import WORK_ASSIGNMENT_ROLE_EQUIPMENT_TYPES, get_active_equipment_assignment
+
 from .models import AdminActionLog, Employee, EmployeeAccess
 from .oup_forms import OupAccessRoleForm, OupDismissEmployeeForm, OupEmployeeForm
 from .oup_services import (
@@ -146,7 +148,6 @@ def oup_employees_view(request, scope='active'):
     if query:
         employees = employees.filter(
             Q(full_name__icontains=query)
-            | Q(personnel_number__icontains=query)
             | Q(phone__icontains=query)
             | Q(position__icontains=query)
         )
@@ -188,7 +189,7 @@ def oup_employees_view(request, scope='active'):
         ),
         'active_total': active_queryset.count(),
         'new_this_month_total': active_queryset.filter(hired_at__gte=month_start).count(),
-        'missing_data_total': active_queryset.filter(Q(photo='') | Q(personnel_number='')).count(),
+        'missing_data_total': active_queryset.filter(Q(photo='') | Q(phone='')).count(),
         'dismissed_total': _employees_queryset('dismissed').count(),
     })
     return render(request, 'users/oup_employees.html', context)
@@ -207,8 +208,8 @@ def oup_employee_create_view(request):
             try:
                 with transaction.atomic():
                     actor, _shift = lock_oup_write_context(employee=access.employee)
-                    personnel_number = form.cleaned_data['personnel_number']
-                    if Employee.objects.filter(personnel_number__iexact=personnel_number).exists():
+                    personnel_number = form.cleaned_data.get('personnel_number', '')
+                    if personnel_number and Employee.objects.filter(personnel_number__iexact=personnel_number).exists():
                         raise ValidationError(
                             'Сотрудник с таким табельным номером уже существует.',
                             code='duplicate_personnel_number',
@@ -247,16 +248,30 @@ def oup_employee_create_view(request):
                     messages.success(
                         request,
                         f'Сотрудник добавлен. Роль: {issued_role.name}. Первичный PIN: {primary_code}',
+                        extra_tags='employee-card-silent',
                     )
                 else:
-                    messages.success(request, f'Сотрудник {employee.full_name} добавлен в рабочую базу.')
+                    messages.success(
+                        request,
+                        f'Сотрудник {employee.full_name} добавлен в рабочую базу.',
+                        extra_tags='employee-card-silent',
+                    )
                 return redirect('oup_employee_detail', employee_id=employee.id)
     else:
-        form = OupEmployeeForm(initial={'hired_at': timezone.localdate()})
+        form = OupEmployeeForm(initial={
+            'hired_at': timezone.localdate(),
+            'status': Employee.Status.ACTIVE,
+        })
 
     context = _oup_base_context(access, active_nav='employees')
-    context.update({'form': form, 'page_mode': 'create', 'title': 'Новый сотрудник'})
-    return render(request, 'users/oup_employee_form.html', context)
+    context.update({
+        'form': form,
+        'page_mode': 'create',
+        'title': 'Создать сотрудника',
+        'employee_card_context': 'oup',
+        'can_submit_employee_card': True,
+    })
+    return render(request, 'users/employee_card.html', context)
 
 
 def oup_employee_detail_view(request, employee_id):
@@ -328,8 +343,8 @@ def oup_employee_detail_view(request, employee_id):
                                 + '; '.join(blockers) + '.',
                                 code='work_category_blocked',
                             )
-                    personnel_number = form.cleaned_data['personnel_number']
-                    if Employee.objects.filter(
+                    personnel_number = form.cleaned_data.get('personnel_number', '')
+                    if personnel_number and Employee.objects.filter(
                         personnel_number__iexact=personnel_number,
                     ).exclude(pk=locked_employee.pk).exists():
                         raise ValidationError(
@@ -366,7 +381,11 @@ def oup_employee_detail_view(request, employee_id):
                 }.get(error_code)
                 form.add_error(field_name, error)
             else:
-                messages.success(request, 'Карточка сотрудника сохранена.')
+                messages.success(
+                    request,
+                    'Карточка сотрудника сохранена.',
+                    extra_tags='employee-card-silent',
+                )
                 return redirect('oup_employee_detail', employee_id=employee.id)
     else:
         form = OupEmployeeForm(instance=employee)
@@ -376,6 +395,13 @@ def oup_employee_detail_view(request, employee_id):
         for field in form.fields.values():
             field.disabled = True
 
+    active_equipment_assignment = get_active_equipment_assignment(employee)
+    employee_accesses = employee.accesses.select_related('role').exclude(role__code='admin')
+    work_assignment_role = (
+        active_equipment_assignment.role
+        if active_equipment_assignment
+        else getattr(employee_accesses.first(), 'role', None)
+    )
     context = _oup_base_context(access, active_nav='dismissed' if is_dismissed else 'employees')
     context.update({
         'form': form,
@@ -385,10 +411,18 @@ def oup_employee_detail_view(request, employee_id):
         'title': employee.full_name,
         'employee_logs': _employee_history(employee)[:20],
         'access_form': OupAccessRoleForm(),
-        'employee_accesses': employee.accesses.select_related('role').exclude(role__code='admin'),
+        'employee_accesses': employee_accesses,
         'has_protected_admin_access': employee.accesses.filter(role__code='admin').exists(),
+        'employee_card_context': 'oup',
+        'can_submit_employee_card': bool(open_oup_shift and not is_dismissed),
+        'active_equipment_assignment': active_equipment_assignment,
+        'work_assignment_role': work_assignment_role,
+        'work_assignment_supports_equipment': bool(
+            work_assignment_role
+            and work_assignment_role.code in WORK_ASSIGNMENT_ROLE_EQUIPMENT_TYPES
+        ),
     })
-    return render(request, 'users/oup_employee_form.html', context)
+    return render(request, 'users/employee_card.html', context)
 
 
 @require_POST

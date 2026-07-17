@@ -4,6 +4,7 @@ from pathlib import Path
 from django import forms
 from django.core.files.base import ContentFile
 from django.core.exceptions import ValidationError
+from django.utils import timezone
 from PIL import Image, ImageOps
 
 from assignments.models import AssignmentStatus, EquipmentAssignment, WorkShiftType
@@ -103,7 +104,175 @@ def optimize_employee_photo(uploaded_file):
     return ContentFile(output.read(), name=safe_name)
 
 
-class AdminEmployeeForm(forms.ModelForm):
+class EmployeeCardForm(forms.ModelForm):
+    """Single employee profile contract shared by admin and OUP screens."""
+
+    class Meta:
+        model = Employee
+        fields = [
+            'full_name',
+            'birth_date',
+            'personnel_number',
+            'phone',
+            'photo',
+            'position',
+            'department',
+            'work_category',
+            'status',
+            'hired_at',
+            'dismissed_at',
+            'rotation',
+            'residence_text',
+            'comment',
+            'hr_data',
+        ]
+        labels = {
+            'full_name': 'ФИО',
+            'birth_date': 'Дата рождения',
+            'phone': 'Мобильный телефон',
+            'photo': 'Фото сотрудника',
+            'position': 'Должность',
+            'department': 'Подразделение',
+            'work_category': 'Рабочая категория',
+            'status': 'Статус',
+            'hired_at': 'Дата приема',
+            'dismissed_at': 'Дата увольнения',
+            'rotation': 'Вахта / график',
+            'residence_text': 'Место проживания',
+            'comment': 'Комментарий',
+            'hr_data': 'Паспортные / кадровые данные',
+        }
+        widgets = {
+            'birth_date': forms.DateInput(format='%Y-%m-%d', attrs={'type': 'date'}),
+            'personnel_number': forms.HiddenInput(),
+            'phone': forms.TextInput(attrs={
+                'type': 'tel',
+                'inputmode': 'tel',
+                'autocomplete': 'tel',
+                'placeholder': '+7 900 000-00-00',
+                'maxlength': '18',
+                'data-employee-phone': '1',
+            }),
+            'hired_at': forms.DateInput(format='%Y-%m-%d', attrs={'type': 'date'}),
+            'dismissed_at': forms.DateInput(format='%Y-%m-%d', attrs={'type': 'date'}),
+            'residence_text': forms.TextInput(attrs={
+                'placeholder': 'Город, общежитие, комната или другое место проживания',
+            }),
+            'comment': forms.Textarea(attrs={'rows': 3}),
+            'hr_data': forms.Textarea(attrs={'rows': 3}),
+            'photo': forms.FileInput(attrs={
+                'accept': 'image/jpeg,image/png,image/webp',
+                'class': 'employee-photo-input',
+                'data-employee-photo-input': '1',
+                'aria-label': 'Выбрать фото сотрудника',
+            }),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        is_existing_employee = bool(self.instance and self.instance.pk)
+        self.fields['full_name'].required = True
+        self.fields['phone'].required = not is_existing_employee
+        self.fields['personnel_number'].required = False
+        self.fields['work_category'].required = False
+        self.fields['status'].disabled = is_existing_employee
+        self.fields['phone'].widget.attrs['maxlength'] = '18'
+        self.fields['photo'].help_text = 'JPG, PNG или WEBP до 5 МБ.'
+
+    def clean_full_name(self):
+        value = ' '.join((self.cleaned_data.get('full_name') or '').split())
+        if len(value.split()) < 2:
+            raise ValidationError('Укажите фамилию и имя сотрудника.')
+        return value
+
+    def clean_personnel_number(self):
+        value = (self.cleaned_data.get('personnel_number') or '').strip()
+        if not value:
+            return ''
+        queryset = Employee.objects.filter(personnel_number__iexact=value)
+        if self.instance and self.instance.pk:
+            queryset = queryset.exclude(pk=self.instance.pk)
+        if queryset.exists():
+            raise ValidationError('Сотрудник с таким архивным идентификатором уже существует.')
+        return value
+
+    def clean_phone(self):
+        value = (self.cleaned_data.get('phone') or '').strip()
+        if not value:
+            return ''
+        if not is_valid_russian_mobile_phone(value):
+            raise ValidationError('Укажите российский мобильный номер в формате +7 900 000-00-00.')
+        normalized = normalize_phone(value)
+        previous_normalized = ''
+        if self.instance and self.instance.pk:
+            previous_phone = (
+                Employee.objects.filter(pk=self.instance.pk)
+                .values_list('phone', flat=True)
+                .first()
+            )
+            previous_normalized = normalize_phone(previous_phone)
+
+        if not self.instance.pk or normalized != previous_normalized:
+            candidates = Employee.objects.exclude(phone='')
+            if self.instance and self.instance.pk:
+                candidates = candidates.exclude(pk=self.instance.pk)
+            if any(normalize_phone(phone) == normalized for phone in candidates.values_list('phone', flat=True)):
+                raise ValidationError('Этот мобильный номер уже указан в карточке другого сотрудника.')
+        return f'+{normalized}'
+
+    def clean_birth_date(self):
+        value = self.cleaned_data.get('birth_date')
+        if value and value > timezone.localdate():
+            raise ValidationError('Дата рождения не может быть позже сегодняшней даты.')
+        return value
+
+    def clean_work_category(self):
+        value = self.cleaned_data.get('work_category')
+        if value:
+            return value
+        if self.instance and self.instance.pk:
+            return self.instance.work_category
+        return Employee.WorkCategory.OTHER
+
+    def clean_hired_at(self):
+        value = self.cleaned_data.get('hired_at')
+        if value and value > timezone.localdate():
+            raise ValidationError('Дата приема не может быть позже сегодняшней даты.')
+        return value
+
+    def clean_photo(self):
+        return optimize_employee_photo(self.cleaned_data.get('photo'))
+
+    def clean(self):
+        cleaned_data = super().clean()
+        hired_at = cleaned_data.get('hired_at')
+        dismissed_at = cleaned_data.get('dismissed_at')
+        if hired_at and dismissed_at and dismissed_at < hired_at:
+            self.add_error('dismissed_at', 'Дата увольнения не может быть раньше даты приема.')
+
+        if not self.instance or not self.instance.pk:
+            return cleaned_data
+        work_category = cleaned_data.get('work_category')
+        previous_category = (
+            Employee.objects.filter(pk=self.instance.pk)
+            .values_list('work_category', flat=True)
+            .first()
+        )
+        if not work_category or previous_category == work_category:
+            return cleaned_data
+
+        from .oup_services import employee_work_category_blockers
+
+        blockers = employee_work_category_blockers(self.instance)
+        if blockers:
+            self.add_error(
+                'work_category',
+                'Сначала освободите сотрудника от рабочих операций: ' + '; '.join(blockers) + '.',
+            )
+        return cleaned_data
+
+
+class AdminEmployeeForm(EmployeeCardForm):
     role = forms.ModelChoiceField(
         label='Рабочая роль',
         queryset=Role.objects.filter(is_active=True).order_by('name'),
@@ -124,49 +293,9 @@ class AdminEmployeeForm(forms.ModelForm):
     )
     generate_access = forms.BooleanField(label='Сгенерировать первичный пинкод', required=False, initial=True)
 
-    class Meta:
-        model = Employee
-        fields = [
-            'full_name',
-            'position',
-            'personnel_number',
-            'phone',
-            'status',
-            'comment',
-            'hired_at',
-            'dismissed_at',
-            'rotation',
-            'residence_text',
-            'hr_data',
-            'photo',
-        ]
-        labels = {
-            'full_name': 'ФИО',
-            'position': 'Должность',
-            'personnel_number': 'Табельный номер',
-            'phone': 'Телефон',
-            'status': 'Статус',
-            'comment': 'Комментарий',
-            'hired_at': 'Дата приема',
-            'dismissed_at': 'Дата увольнения',
-            'rotation': 'Вахта',
-            'residence_text': 'Место проживания',
-            'hr_data': 'Паспортные/кадровые данные',
-            'photo': 'Фото сотрудника',
-        }
-        widgets = {
-            'hired_at': forms.DateInput(format='%Y-%m-%d', attrs={'type': 'date'}),
-            'dismissed_at': forms.DateInput(format='%Y-%m-%d', attrs={'type': 'date'}),
-            'comment': forms.Textarea(attrs={'rows': 3}),
-            'hr_data': forms.Textarea(attrs={'rows': 3}),
-            'photo': forms.FileInput(attrs={'accept': 'image/jpeg,image/png,image/webp', 'class': 'employee-photo-input'}),
-        }
-
-    def clean_photo(self):
-        return optimize_employee_photo(self.cleaned_data.get('photo'))
-
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.fields['generate_access'].widget.attrs['form'] = 'employee-card-form'
         equipment_ids = set()
         for role_code in WORK_ASSIGNMENT_ROLE_EQUIPMENT_TYPES:
             equipment_ids.update(equipment_queryset_for_work_role(role_code).values_list('id', flat=True))
@@ -238,7 +367,7 @@ class AdminEmployeeForm(forms.ModelForm):
         return assignment
 
 
-class AdminEmployeeEditForm(forms.ModelForm):
+class AdminEmployeeEditForm(EmployeeCardForm):
     assignment_role = forms.ModelChoiceField(
         label='Рабочая роль',
         queryset=Role.objects.none(),
@@ -257,32 +386,6 @@ class AdminEmployeeEditForm(forms.ModelForm):
         empty_label='Нет назначения',
         widget=WorkAssignmentEquipmentSelect,
     )
-
-    class Meta:
-        model = Employee
-        fields = [
-            'full_name',
-            'position',
-            'personnel_number',
-            'phone',
-            'comment',
-            'hired_at',
-            'dismissed_at',
-            'rotation',
-            'residence_text',
-            'hr_data',
-            'photo',
-        ]
-        widgets = {
-            'hired_at': forms.DateInput(format='%Y-%m-%d', attrs={'type': 'date'}),
-            'dismissed_at': forms.DateInput(format='%Y-%m-%d', attrs={'type': 'date'}),
-            'comment': forms.Textarea(attrs={'rows': 3}),
-            'hr_data': forms.Textarea(attrs={'rows': 3}),
-            'photo': forms.FileInput(attrs={'accept': 'image/jpeg,image/png,image/webp', 'class': 'employee-photo-input'}),
-        }
-
-    def clean_photo(self):
-        return optimize_employee_photo(self.cleaned_data.get('photo'))
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

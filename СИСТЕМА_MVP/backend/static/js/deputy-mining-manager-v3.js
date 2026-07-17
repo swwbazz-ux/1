@@ -114,7 +114,7 @@
 
     function employeeMeta(employee) {
         return textValue(employee && (
-            employee.position_label || employee.role_label || employee.position || employee.meta || employee.personnel_number
+            employee.position_label || employee.role_label || employee.position || employee.meta
         ));
     }
 
@@ -131,7 +131,7 @@
     }
 
     function employeeSearchText(employee) {
-        return [employeeName(employee), employeeMeta(employee), employee && employee.personnel_number]
+        return [employeeName(employee), employeeMeta(employee), employee && employee.phone]
             .map(textValue).join(" ").toLocaleLowerCase("ru");
     }
 
@@ -297,7 +297,6 @@
     function openEmployeeRecord(employee, assignmentLabel) {
         if (!employee || !prepareRecordDialog("Карточка сотрудника", employeeName(employee), employeeMeta(employee))) return;
         recordVisual.appendChild(createAvatar(employee, false));
-        appendRecordField("Табельный номер", employee.personnel_number || "Не указан");
         appendRecordField("Телефон", employee.phone || "Не указан");
         appendRecordField("Бригада", employee.brigade_label || "Не указана");
         var rotation = textValue(employee.rotation_label).trim();

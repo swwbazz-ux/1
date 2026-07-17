@@ -491,7 +491,7 @@ class OupWorkplaceTests(TestCase):
         Employee.objects.create(full_name='Существующий сотрудник', personnel_number='CR-1001')
         response = self.client.post(reverse('oup_employee_create'), self.employee_payload())
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'Сотрудник с таким табельным номером уже существует')
+        self.assertContains(response, 'Сотрудник с таким архивным идентификатором уже существует')
 
     def test_edit_logs_changes_by_stable_employee_id(self):
         self.start_shift()

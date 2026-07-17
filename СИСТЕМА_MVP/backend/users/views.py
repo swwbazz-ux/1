@@ -1467,7 +1467,11 @@ def system_admin_employee_create_view(request):
                         employee,
                         new_value=f'Роль: {role}; назначение: {assignment_label}; пинкод: {code}',
                     )
-                    messages.success(request, f'Сотрудник создан. Первичный пинкод: {code}')
+                    messages.success(
+                        request,
+                        f'Сотрудник создан. Первичный пинкод: {code}',
+                        extra_tags='employee-card-silent',
+                    )
                 else:
                     log_admin_action(
                         access.employee,
@@ -1475,12 +1479,23 @@ def system_admin_employee_create_view(request):
                         employee,
                         new_value=f'Роль: {role}; назначение: {assignment_label}',
                     )
-                    messages.success(request, 'Сотрудник создан.')
+                    messages.success(request, 'Сотрудник создан.', extra_tags='employee-card-silent')
                 return redirect_after_admin_action(request, 'system_admin_employee_detail', employee_id=employee.id)
     else:
         form = AdminEmployeeForm()
 
-    return render(request, 'users/system_admin_employee_form.html', {'access': access, 'form': form, 'title': 'Создать сотрудника'})
+    return render(
+        request,
+        'users/employee_card.html',
+        {
+            'access': access,
+            'form': form,
+            'title': 'Создать сотрудника',
+            'page_mode': 'create',
+            'employee_card_context': 'admin',
+            'can_submit_employee_card': True,
+        },
+    )
 
 
 def system_admin_employee_detail_view(request, employee_id):
@@ -1536,7 +1551,11 @@ def system_admin_employee_detail_view(request, employee_id):
                     saved_employee,
                     new_value=f'Рабочее назначение: {assignment_label}',
                 )
-                messages.success(request, 'Карточка сотрудника и рабочее назначение сохранены.')
+                messages.success(
+                    request,
+                    'Карточка сотрудника и рабочее назначение сохранены.',
+                    extra_tags='employee-card-silent',
+                )
                 return redirect_after_admin_action(request, 'system_admin_employee_detail', employee_id=employee.id)
     else:
         form = AdminEmployeeEditForm(instance=employee)
@@ -1558,11 +1577,15 @@ def system_admin_employee_detail_view(request, employee_id):
 
     return render(
         request,
-        'users/system_admin_employee_detail.html',
+        'users/employee_card.html',
         {
             'access': access,
             'employee': employee,
             'form': form,
+            'title': employee.full_name,
+            'page_mode': 'detail',
+            'employee_card_context': 'admin',
+            'can_submit_employee_card': True,
             'role_form': AdminAccessRoleForm(initial=role_form_initial),
             'block_form': AdminAccessBlockForm(),
             'employee_accesses': employee_accesses,

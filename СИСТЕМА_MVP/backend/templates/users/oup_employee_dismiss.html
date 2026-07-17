@@ -25,7 +25,7 @@
                     <div>
                         <span class="oup-eyebrow">Выбран сотрудник</span>
                         <h2>{{ employee.full_name }}</h2>
-                        <p>Таб. № {{ employee.personnel_number }} · {{ employee.position }} · {{ employee.department }}</p>
+                        <p>{{ employee.position|default:"Должность не указана" }} · {{ employee.department|default:"Подразделение не указано" }}</p>
                     </div>
                 </div>
 

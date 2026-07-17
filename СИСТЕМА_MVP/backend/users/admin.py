@@ -5,8 +5,8 @@ from .models import AdminActionLog, AdminConflict, DriverPrimaryRegistration, Em
 
 @admin.register(Employee)
 class EmployeeAdmin(admin.ModelAdmin):
-    list_display = ('full_name', 'personnel_number', 'department', 'position', 'work_category', 'status', 'is_active')
-    search_fields = ('full_name', 'personnel_number', 'phone', 'department', 'position')
+    list_display = ('full_name', 'department', 'position', 'work_category', 'status', 'is_active')
+    search_fields = ('full_name', 'phone', 'department', 'position')
     list_filter = ('status', 'is_active', 'work_category', 'department')
 
 
