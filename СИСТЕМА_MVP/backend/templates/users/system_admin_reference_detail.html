@@ -200,9 +200,9 @@
 
                     <div class="reference-editor-fields">
                         {% for field in form.visible_fields %}
-                            <div class="employee-detail-field {% if field.name == 'equipment' %}field-checkbox-list{% elif field.field.widget.input_type == 'checkbox' %}field-checkbox{% endif %}">
+                            <div class="employee-detail-field {% if field.name == 'equipment' or field.name == 'allowed_specializations' %}field-checkbox-list{% elif field.field.widget.input_type == 'checkbox' %}field-checkbox{% endif %}">
                                 <label for="{{ field.id_for_label }}">{{ field.label }}</label>
-                                {% if field.field.widget.input_type == 'checkbox' and field.name == 'equipment' %}
+                                {% if field.name == 'equipment' or field.name == 'allowed_specializations' %}
                                     <div class="reference-checkbox-panel">
                                         {{ field }}
                                     </div>

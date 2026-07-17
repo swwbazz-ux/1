@@ -48,9 +48,19 @@
         payload.role = payload.role || {};
         payload.endpoints = payload.endpoints || {};
         payload.summary = payload.summary || {};
+        payload.temporary_transfer = payload.temporary_transfer || {};
         payload.categories = Array.isArray(payload.categories) ? payload.categories : [];
         payload.employees = Array.isArray(payload.employees) ? payload.employees : [];
         payload.rows = Array.isArray(payload.rows) ? payload.rows : [];
+        payload.temporary_transfer.candidates = Array.isArray(payload.temporary_transfer.candidates)
+            ? payload.temporary_transfer.candidates
+            : [];
+        payload.temporary_transfer.target_specializations = Array.isArray(payload.temporary_transfer.target_specializations)
+            ? payload.temporary_transfer.target_specializations
+            : [];
+        payload.temporary_transfer.watch_periods = Array.isArray(payload.temporary_transfer.watch_periods)
+            ? payload.temporary_transfer.watch_periods
+            : [];
         return payload;
     }
 
@@ -72,6 +82,7 @@
     var autosaveText = root.querySelector("[data-autosave-text]");
     var exportButton = root.querySelector("[data-export-excel]");
     var publishButton = root.querySelector("[data-publish-button]");
+    var temporaryTransferOpenButton = root.querySelector("[data-temporary-transfer-open]");
     var candidateDialog = document.querySelector("[data-candidate-dialog]");
     var candidateContext = document.querySelector("[data-candidate-context]");
     var candidateList = document.querySelector("[data-candidate-list]");
@@ -88,6 +99,13 @@
     var publishDialog = document.querySelector("[data-publish-dialog]");
     var publishSummary = document.querySelector("[data-publish-summary]");
     var publishConfirm = document.querySelector("[data-publish-confirm]");
+    var temporaryTransferDialog = document.querySelector("[data-temporary-transfer-dialog]");
+    var temporaryTransferForm = document.querySelector("[data-temporary-transfer-form]");
+    var temporaryTransferEmployee = document.querySelector("[data-temporary-transfer-employee]");
+    var temporaryTransferSpecialization = document.querySelector("[data-temporary-transfer-specialization]");
+    var temporaryTransferWatchPeriod = document.querySelector("[data-temporary-transfer-watch-period]");
+    var temporaryTransferReason = document.querySelector("[data-temporary-transfer-reason]");
+    var temporaryTransferSubmit = document.querySelector("[data-temporary-transfer-submit]");
     var toast = document.querySelector("[data-deputy-toast]");
     var notice = document.querySelector("[data-deputy-notice]");
     var noticeTitle = notice && notice.querySelector("[data-notice-title]");
@@ -262,6 +280,87 @@
         } else {
             dialog.removeAttribute("open");
         }
+    }
+
+    function temporaryTransferData() {
+        return state.temporary_transfer || {};
+    }
+
+    function canRequestTemporaryTransfer() {
+        var transfer = temporaryTransferData();
+        return Boolean(
+            state.plan.editable
+            && state.endpoints.temporary_transfer_request
+            && transfer.available
+            && transfer.candidates.length
+            && transfer.target_specializations.length
+            && transfer.watch_periods.length
+        );
+    }
+
+    function appendSelectOption(select, value, label) {
+        if (!select) return;
+        var option = document.createElement("option");
+        option.value = value;
+        option.textContent = label;
+        select.appendChild(option);
+    }
+
+    function populateTemporaryTransferForm() {
+        var transfer = temporaryTransferData();
+        if (!temporaryTransferEmployee || !temporaryTransferSpecialization || !temporaryTransferWatchPeriod) return;
+
+        temporaryTransferEmployee.innerHTML = "";
+        appendSelectOption(temporaryTransferEmployee, "", "Выберите сотрудника");
+        transfer.candidates.forEach(function (employee) {
+            var label = employeeName(employee);
+            var meta = employeeMeta(employee);
+            appendSelectOption(
+                temporaryTransferEmployee,
+                textValue(employee.id),
+                meta ? label + " · " + meta : label
+            );
+        });
+
+        temporaryTransferSpecialization.innerHTML = "";
+        appendSelectOption(temporaryTransferSpecialization, "", "Выберите специализацию");
+        transfer.target_specializations.forEach(function (specialization) {
+            appendSelectOption(
+                temporaryTransferSpecialization,
+                textValue(specialization.id),
+                textValue(specialization.name)
+            );
+        });
+
+        temporaryTransferWatchPeriod.innerHTML = "";
+        appendSelectOption(temporaryTransferWatchPeriod, "", "Выберите вахту");
+        transfer.watch_periods.forEach(function (period) {
+            appendSelectOption(
+                temporaryTransferWatchPeriod,
+                textValue(period.id),
+                textValue(period.label) + " · до " + textValue(period.ends_on_label)
+            );
+        });
+        if (temporaryTransferReason) temporaryTransferReason.value = "";
+    }
+
+    function updateTemporaryTransferButton() {
+        if (!temporaryTransferOpenButton) return;
+        var enabled = canRequestTemporaryTransfer() && !saving;
+        temporaryTransferOpenButton.disabled = !enabled;
+        temporaryTransferOpenButton.classList.toggle("is-disabled", !enabled);
+        temporaryTransferOpenButton.title = enabled
+            ? "Запросить ОУП временный перевод сотрудника на эту вахту"
+            : "Запрос доступен для текущего черновика, если есть подходящие сотрудники и действующая вахта";
+    }
+
+    function openTemporaryTransferDialog() {
+        if (!canRequestTemporaryTransfer()) {
+            showToast("Запрос временного перевода сейчас недоступен.", true);
+            return;
+        }
+        populateTemporaryTransferForm();
+        openDialog(temporaryTransferDialog);
     }
 
     function showToast(message, isError) {
@@ -922,6 +1021,7 @@
         renderEmployees();
         renderBoard();
         updatePublishButton();
+        updateTemporaryTransferButton();
     }
 
     function csrfToken() {
@@ -1042,6 +1142,39 @@
         }
     }
 
+    async function submitTemporaryTransferRequest(event) {
+        event.preventDefault();
+        if (saving || !canRequestTemporaryTransfer()) return;
+        var employeeId = temporaryTransferEmployee && temporaryTransferEmployee.value;
+        var specializationId = temporaryTransferSpecialization && temporaryTransferSpecialization.value;
+        var watchPeriodId = temporaryTransferWatchPeriod && temporaryTransferWatchPeriod.value;
+        if (!employeeId || !specializationId || !watchPeriodId) {
+            showToast("Выберите сотрудника, специализацию и вахту.", true);
+            return;
+        }
+        saving = true;
+        if (temporaryTransferSubmit) temporaryTransferSubmit.disabled = true;
+        updateTemporaryTransferButton();
+        try {
+            var payload = await postJson(state.endpoints.temporary_transfer_request, {
+                plan_id: state.plan.id,
+                employee_id: Number(employeeId),
+                target_specialization_id: Number(specializationId),
+                watch_period_id: Number(watchPeriodId),
+                reason: temporaryTransferReason ? temporaryTransferReason.value.trim() : ""
+            });
+            applyPayload(payload);
+            closeDialog(temporaryTransferDialog);
+            showToast("Запрос передан в ОУП. После одобрения сотрудник появится в списке для расстановки.", false);
+        } catch (error) {
+            showToast(error.message || "Не удалось отправить запрос в ОУП.", true);
+        } finally {
+            saving = false;
+            if (temporaryTransferSubmit) temporaryTransferSubmit.disabled = false;
+            updateTemporaryTransferButton();
+        }
+    }
+
     filterButtons.forEach(function (button) {
         button.addEventListener("click", function () {
             currentFilter = button.getAttribute("data-row-filter") || "all";
@@ -1125,6 +1258,9 @@
     Array.prototype.slice.call(document.querySelectorAll("[data-publish-cancel]")).forEach(function (button) {
         button.addEventListener("click", function () { closeDialog(publishDialog); });
     });
+    Array.prototype.slice.call(document.querySelectorAll("[data-temporary-transfer-cancel]")).forEach(function (button) {
+        button.addEventListener("click", function () { closeDialog(temporaryTransferDialog); });
+    });
 
     if (clearSlotButton) {
         clearSlotButton.addEventListener("click", function () {
@@ -1134,6 +1270,12 @@
         });
     }
     if (publishButton) publishButton.addEventListener("click", openPublishConfirmation);
+    if (temporaryTransferOpenButton) {
+        temporaryTransferOpenButton.addEventListener("click", openTemporaryTransferDialog);
+    }
+    if (temporaryTransferForm) {
+        temporaryTransferForm.addEventListener("submit", submitTemporaryTransferRequest);
+    }
     if (exportButton) {
         exportButton.addEventListener("click", function (event) {
             if (!saving && state.plan.id && state.endpoints.export) return;
@@ -1169,6 +1311,11 @@
     if (publishDialog) {
         publishDialog.addEventListener("click", function (event) {
             if (event.target === publishDialog) closeDialog(publishDialog);
+        });
+    }
+    if (temporaryTransferDialog) {
+        temporaryTransferDialog.addEventListener("click", function (event) {
+            if (event.target === temporaryTransferDialog) closeDialog(temporaryTransferDialog);
         });
     }
     document.addEventListener("keydown", function (event) {

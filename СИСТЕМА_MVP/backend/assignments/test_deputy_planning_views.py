@@ -19,8 +19,16 @@ from references.models import (
     EquipmentModel,
     EquipmentType,
 )
-from shifts.models import EmployeeShift
-from users.models import DriverPrimaryRegistration, Employee, EmployeeAccess, Role
+from shifts.models import EmployeeShift, WatchPeriod
+from users.models import (
+    DriverPrimaryRegistration,
+    Employee,
+    EmployeeAccess,
+    PersonnelPosition,
+    ProductionSpecialization,
+    Role,
+    TemporaryWorkTransfer,
+)
 
 from .models import AssignmentStatus, CrewPlanSlot, CrewPlanStatus, EquipmentAssignment, WorkShiftType
 from .services import get_active_equipment_assignment, get_or_create_crew_draft, set_active_equipment_assignment
@@ -211,6 +219,56 @@ class DeputyPlanningViewTests(TestCase):
             self.assertContains(response, 'deputy-mining-manager-180.png')
             self.assertContains(response, 'deputy-mining-manager-pwa-v1.js')
 
+    def test_deputy_can_submit_bounded_transfer_request_for_oup_review(self):
+        haul_specialization = ProductionSpecialization.objects.get(code='haul_truck_driver')
+        haul_specialization.access_role = self.driver_role
+        haul_specialization.save(update_fields=['access_role'])
+        kdm_specialization = ProductionSpecialization.objects.get(code='cargo_kdm_driver')
+        generic_driver_position = PersonnelPosition.objects.get(name='Водитель автомобиля грузового')
+        candidate = Employee.objects.create(
+            full_name='Петров Водитель КДМ',
+            phone='+79000000020',
+            status=Employee.Status.ACTIVE,
+            personnel_position=generic_driver_position,
+            base_specialization=kdm_specialization,
+            position=generic_driver_position.name,
+        )
+        watch_period = WatchPeriod.objects.create(
+            name='Текущая вахта',
+            starts_on=timezone.localdate(),
+            ends_on=timezone.localdate(),
+            is_active=True,
+        )
+        plan = self.create_draft()
+
+        screen_response = self.client.get(
+            f'{reverse("deputy_mining_manager_placement")}?role=driver',
+            HTTP_HOST='localhost',
+        )
+        self.assertContains(screen_response, 'data-temporary-transfer-open', html=False)
+        self.assertContains(screen_response, 'data-temporary-transfer-dialog', html=False)
+        self.assertContains(screen_response, 'Действует только до конца выбранной текущей вахты.')
+
+        response = self.client.post(
+            reverse('deputy_mining_manager_temporary_transfer_request'),
+            data=json.dumps({
+                'plan_id': plan.id,
+                'employee_id': candidate.id,
+                'target_specialization_id': haul_specialization.id,
+                'watch_period_id': watch_period.id,
+                'reason': 'Подмена на самосвале',
+            }),
+            content_type='application/json',
+            HTTP_HOST='localhost',
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        transfer = TemporaryWorkTransfer.objects.get(employee=candidate)
+        self.assertEqual(transfer.status, TemporaryWorkTransfer.Status.REQUESTED)
+        self.assertEqual(transfer.target_specialization, haul_specialization)
+        self.assertEqual(transfer.requested_by, self.deputy)
+        self.assertEqual(transfer.effective_to, watch_period.ends_on)
+
     def test_deputy_manifest_is_installable_landscape_pwa(self):
         response = Client().get(
             reverse('deputy_mining_manager_manifest'),
@@ -281,7 +339,7 @@ class DeputyPlanningViewTests(TestCase):
         self.assertEqual(response['Service-Worker-Allowed'], '/deputy-mining-manager/')
         self.assertEqual(response['X-Content-Type-Options'], 'nosniff')
         self.assertIn('deputy-mining-manager-desktop-shell-', script)
-        self.assertIn('`${CACHE_PREFIX}v6`', script)
+        self.assertIn('`${CACHE_PREFIX}v7`', script)
         self.assertIn('key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME', script)
         self.assertIn('removeCachedPlanningDocuments()', script)
         self.assertIn('LEGACY_ROOT_FALLBACK_URL', script)

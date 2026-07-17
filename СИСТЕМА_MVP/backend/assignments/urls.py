@@ -15,6 +15,7 @@ from .deputy_views import (
     deputy_mining_manager_reports_view,
     deputy_mining_manager_service_worker_view,
     deputy_mining_manager_slot_view,
+    deputy_mining_manager_temporary_transfer_request_view,
 )
 
 urlpatterns = [
@@ -23,6 +24,11 @@ urlpatterns = [
     path('deputy-mining-manager/', deputy_mining_manager_placement_view, name='deputy_mining_manager_placement'),
     path('deputy-mining-manager/plans/<int:plan_id>/excel/', deputy_mining_manager_export_view, name='deputy_mining_manager_export'),
     path('deputy-mining-manager/slot/', deputy_mining_manager_slot_view, name='deputy_mining_manager_slot'),
+    path(
+        'deputy-mining-manager/temporary-transfer/request/',
+        deputy_mining_manager_temporary_transfer_request_view,
+        name='deputy_mining_manager_temporary_transfer_request',
+    ),
     path('deputy-mining-manager/publish/', deputy_mining_manager_publish_view, name='deputy_mining_manager_publish'),
     path('deputy-mining-manager/reports/', deputy_mining_manager_reports_view, name='deputy_mining_manager_reports'),
     path('mining-master-manifest.webmanifest', mining_master_manifest_view, name='mining_master_manifest'),

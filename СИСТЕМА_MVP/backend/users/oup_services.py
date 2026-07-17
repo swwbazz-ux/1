@@ -18,6 +18,7 @@ from shifts.models import EmployeeShift, ShiftType
 from trips.models import OPEN_TRIP_STATUSES, Trip
 
 from .models import AdminActionLog, Employee, EmployeeAccess, Role
+from .work_profiles import PRODUCTION_APP_ROLE_CODES, employee_has_effective_access_role
 from .oup_undo import (
     OUP_ACTION_ACCESS_DEACTIVATED,
     OUP_ACTION_ACCESS_ISSUED,
@@ -37,11 +38,10 @@ PROTECTED_OUP_ROLE_CODE = 'admin'
 OUP_AUDIT_FIELDS = (
     ('full_name', 'ФИО'),
     ('birth_date', 'Дата рождения'),
-    ('personnel_number', 'Табельный номер'),
     ('phone', 'Телефон'),
-    ('position', 'Должность'),
+    ('personnel_position', 'Кадровая должность'),
+    ('base_specialization', 'Производственная специализация'),
     ('department', 'Подразделение'),
-    ('work_category', 'Рабочая категория'),
     ('hired_at', 'Дата приема'),
     ('rotation', 'Вахта / график'),
     ('comment', 'Комментарий'),
@@ -122,6 +122,8 @@ def emit_employee_changed(employee, action):
             'action': action,
             'employee_ids': [employee.id],
             'work_category': employee.work_category,
+            'personnel_position_id': employee.personnel_position_id,
+            'base_specialization_id': employee.base_specialization_id,
             'status': employee.status,
             'is_active': employee.is_active,
         },
@@ -132,8 +134,6 @@ def employee_audit_snapshot(employee):
     snapshot = {}
     for field_name, label in OUP_AUDIT_FIELDS:
         value = getattr(employee, field_name, '')
-        if field_name == 'work_category':
-            value = employee.get_work_category_display()
         if hasattr(value, 'strftime'):
             value = value.strftime('%d.%m.%Y')
         snapshot[field_name] = (label, str(value or '—'))
@@ -179,6 +179,15 @@ def issue_employee_access(*, employee, role, actor):
         Employee.Status.DELETED,
     }:
         raise ValidationError('Нельзя выдать доступ неактивному или уволенному сотруднику.')
+    if (
+        role.code in PRODUCTION_APP_ROLE_CODES
+        and employee.personnel_position_id
+        and not employee_has_effective_access_role(employee, role.code)
+    ):
+        raise ValidationError(
+            'Это приложение не соответствует действующей производственной специализации сотрудника.',
+            code='invalid_work_specialization',
+        )
     previous_access = (
         EmployeeAccess.objects.select_for_update()
         .filter(employee=employee, role=role)

@@ -1,8 +1,8 @@
 from django.test import TestCase
 from django.urls import reverse
 
-from .forms import AdminEmployeeForm
-from .models import Employee, EmployeeAccess, Role
+from .forms import AdminEmployeeForm, PersonnelPositionReferenceForm
+from .models import Employee, EmployeeAccess, PersonnelPosition, ProductionSpecialization, Role
 from .oup_forms import OupEmployeeForm
 
 
@@ -11,6 +11,12 @@ class UnifiedEmployeeCardTests(TestCase):
         self.admin_role, _ = Role.objects.update_or_create(code='admin', defaults={'name': 'Администратор'})
         self.oup_role, _ = Role.objects.update_or_create(code='oup', defaults={'name': 'Специалист ОУП'})
         self.driver_role, _ = Role.objects.update_or_create(code='driver', defaults={'name': 'Водитель самосвала'})
+        self.truck_specialization = ProductionSpecialization.objects.get(code='haul_truck_driver')
+        self.truck_specialization.access_role = self.driver_role
+        self.truck_specialization.save(update_fields=['access_role'])
+        self.truck_position = PersonnelPosition.objects.get(
+            name='Водитель автомобиля, занятый на транспортировании горной массы в технологическом процессе',
+        )
         self.admin_employee = Employee.objects.create(
             full_name='Администратор Системы',
             phone='+79000000001',
@@ -25,7 +31,9 @@ class UnifiedEmployeeCardTests(TestCase):
         self.employee = Employee.objects.create(
             full_name='Петров Петр',
             phone='+79001112233',
-            position='Водитель',
+            personnel_position=self.truck_position,
+            base_specialization=self.truck_specialization,
+            position=self.truck_position.name,
             department='Горный участок',
             status=Employee.Status.ACTIVE,
         )
@@ -74,8 +82,8 @@ class UnifiedEmployeeCardTests(TestCase):
         self.assertTemplateUsed(create_response, 'users/employee_card.html')
         self.assertTemplateUsed(edit_response, 'users/employee_card.html')
         self.assertContains(create_response, 'employee-card-unified.css')
-        self.assertContains(create_response, 'type="submit">Создать сотрудника</button>', html=False)
-        self.assertNotContains(create_response, 'Добавить сотрудника')
+        self.assertContains(create_response, 'type="submit">Добавить сотрудника</button>', html=False)
+        self.assertNotContains(create_response, 'Создать сотрудника')
         self.assertContains(edit_response, 'employee-card-unified.js')
 
     def test_personnel_number_is_not_a_visible_card_field(self):
@@ -90,6 +98,8 @@ class UnifiedEmployeeCardTests(TestCase):
             'full_name': 'Сидоров Сидор',
             'phone': '+7 800 111-22-33',
             'status': Employee.Status.ACTIVE,
+            'personnel_position': self.truck_position.id,
+            'base_specialization': self.truck_specialization.id,
         }
         admin_form = AdminEmployeeForm(data={**common, 'role': self.driver_role.id})
         oup_form = OupEmployeeForm(data=common)
@@ -103,17 +113,63 @@ class UnifiedEmployeeCardTests(TestCase):
             'full_name': 'Смирнов Семен',
             'phone': '8 (900) 555-44-33',
             'status': Employee.Status.ACTIVE,
+            'personnel_position': self.truck_position.id,
+            'base_specialization': self.truck_specialization.id,
             'role': self.driver_role.id,
         })
 
         self.assertTrue(form.is_valid(), form.errors)
         self.assertEqual(form.cleaned_data['phone'], '+79005554433')
 
+    def test_personnel_catalogue_is_available_from_admin_references(self):
+        self.login_as(self.admin_access)
+
+        registry = self.client.get(reverse('system_admin_references'))
+        detail = self.client.get(
+            reverse('system_admin_reference_detail', args=['personnel-positions']),
+        )
+
+        self.assertContains(registry, 'Кадровые должности')
+        self.assertContains(registry, 'Производственные специализации')
+        self.assertContains(detail, 'Официальные должности из 1С')
+        self.assertContains(detail, 'Разрешенные производственные специализации')
+
+    def test_personnel_position_reference_rejects_default_outside_allowed_list(self):
+        excavator_specialization = ProductionSpecialization.objects.get(code='excavator_operator')
+        form = PersonnelPositionReferenceForm(data={
+            'name': 'Тестовая кадровая должность',
+            'code': 'test-personnel-position',
+            'requires_specialization': 'on',
+            'allowed_specializations': [self.truck_specialization.id],
+            'default_specialization': excavator_specialization.id,
+            'is_active': 'on',
+        })
+
+        self.assertFalse(form.is_valid())
+        self.assertEqual(
+            form.errors['default_specialization'],
+            ['Специализация по умолчанию должна входить в разрешенный список.'],
+        )
+
+    def test_shared_employee_card_shells_use_new_cache_versions(self):
+        expected_versions = {
+            'system_admin_service_worker': 'system-admin-shell-v3',
+            'oup_service_worker': 'oup-shell-v3',
+        }
+
+        for view_name, expected_version in expected_versions.items():
+            response = self.client.get(reverse(view_name))
+
+            self.assertEqual(response.status_code, 200)
+            self.assertContains(response, expected_version)
+
     def test_new_employee_cannot_reuse_an_existing_phone(self):
         form = AdminEmployeeForm(data={
             'full_name': 'Смирнов Семен',
             'phone': '8 (900) 111-22-33',
             'status': Employee.Status.ACTIVE,
+            'personnel_position': self.truck_position.id,
+            'base_specialization': self.truck_specialization.id,
             'role': self.driver_role.id,
         })
 

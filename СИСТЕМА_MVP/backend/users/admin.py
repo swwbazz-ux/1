@@ -1,11 +1,28 @@
 from django.contrib import admin
 
-from .models import AdminActionLog, AdminConflict, DriverPrimaryRegistration, Employee, EmployeeAccess, Role
+from .models import (
+    AdminActionLog,
+    AdminConflict,
+    DriverPrimaryRegistration,
+    Employee,
+    EmployeeAccess,
+    PersonnelPosition,
+    ProductionSpecialization,
+    Role,
+    TemporaryWorkTransfer,
+)
 
 
 @admin.register(Employee)
 class EmployeeAdmin(admin.ModelAdmin):
-    list_display = ('full_name', 'department', 'position', 'work_category', 'status', 'is_active')
+    list_display = (
+        'full_name',
+        'department',
+        'personnel_position',
+        'base_specialization',
+        'status',
+        'is_active',
+    )
     search_fields = ('full_name', 'phone', 'department', 'position')
     list_filter = ('status', 'is_active', 'work_category', 'department')
 
@@ -15,6 +32,38 @@ class RoleAdmin(admin.ModelAdmin):
     list_display = ('name', 'code', 'is_active')
     search_fields = ('name', 'code')
     list_filter = ('is_active',)
+
+
+@admin.register(ProductionSpecialization)
+class ProductionSpecializationAdmin(admin.ModelAdmin):
+    list_display = ('name', 'code', 'equipment_type', 'access_role', 'is_active')
+    search_fields = ('name', 'code')
+    list_filter = ('is_active', 'equipment_type', 'access_role')
+
+
+@admin.register(PersonnelPosition)
+class PersonnelPositionAdmin(admin.ModelAdmin):
+    list_display = ('name', 'code', 'requires_specialization', 'default_specialization', 'is_active')
+    search_fields = ('name', 'code')
+    list_filter = ('requires_specialization', 'is_active')
+    filter_horizontal = ('allowed_specializations',)
+
+
+@admin.register(TemporaryWorkTransfer)
+class TemporaryWorkTransferAdmin(admin.ModelAdmin):
+    list_display = (
+        'employee',
+        'target_specialization',
+        'watch_period',
+        'effective_from',
+        'effective_to',
+        'status',
+        'requested_by',
+        'reviewed_by',
+    )
+    search_fields = ('employee__full_name', 'target_specialization__name', 'reason')
+    list_filter = ('status', 'watch_period', 'target_specialization')
+    readonly_fields = ('requested_at', 'reviewed_at', 'closed_at')
 
 
 @admin.register(EmployeeAccess)

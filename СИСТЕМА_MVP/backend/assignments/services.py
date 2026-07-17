@@ -8,7 +8,8 @@ from django.utils import timezone
 from core.models import bump_operational_state
 from references.models import Equipment
 from shifts.models import EmployeeShift
-from users.models import Employee, EmployeeAccess, Role
+from users.models import Employee, Role
+from users.work_profiles import employee_has_effective_access_role
 
 from .models import (
     AssignmentStatus,
@@ -96,17 +97,7 @@ def _crew_plan_employee(employee):
 
 
 def employee_matches_work_role(employee, role):
-    if employee.work_category == role.code:
-        return True
-    if employee.work_category != Employee.WorkCategory.OTHER:
-        return False
-    return EmployeeAccess.objects.filter(
-        employee=employee,
-        role=role,
-        role__is_active=True,
-        is_active=True,
-        status=EmployeeAccess.Status.ACTIVATED,
-    ).exists()
+    return employee_has_effective_access_role(employee, role.code)
 
 
 def _validate_crew_employee(employee, role):
@@ -114,7 +105,7 @@ def _validate_crew_employee(employee, role):
         raise ValidationError('Сотрудник неактивен.', code='inactive_employee')
     if not employee_matches_work_role(employee, role):
         raise ValidationError(
-            'Рабочая категория сотрудника не соответствует выбранной роли.',
+            'Производственная специализация сотрудника не соответствует выбранной роли.',
             code='invalid_work_category',
         )
     has_other_role_assignment = (
@@ -570,7 +561,7 @@ def validate_work_assignment(*, employee, role, equipment, shift_type, exclude_a
     }:
         raise ValidationError('Сотрудник неактивен.')
     if not employee_matches_work_role(employee, role):
-        raise ValidationError('Рабочая категория сотрудника не соответствует выбранной роли.')
+        raise ValidationError('Производственная специализация сотрудника не соответствует выбранной роли.')
     if not equipment_queryset_for_work_role(role.code).filter(id=equipment.id).exists():
         raise ValidationError('Выбранная техника не соответствует рабочей роли или неактивна.')
 

@@ -1,9 +1,11 @@
+import json
 from io import BytesIO
 from pathlib import Path
 
 from django import forms
 from django.core.files.base import ContentFile
 from django.core.exceptions import ValidationError
+from django.db.models import Q
 from django.utils import timezone
 from PIL import Image, ImageOps
 
@@ -19,7 +21,15 @@ from assignments.services import (
 from references.models import DormitorySection, Equipment
 from shifts.models import EmployeeShift
 
-from .models import DriverPrimaryRegistration, Employee, EmployeeAccess, Role
+from .models import (
+    DriverPrimaryRegistration,
+    Employee,
+    EmployeeAccess,
+    PersonnelPosition,
+    ProductionSpecialization,
+    Role,
+)
+from .work_profiles import legacy_work_category_for_specialization, validate_base_specialization
 
 
 MAX_EMPLOYEE_PHOTO_UPLOAD_SIZE = 5 * 1024 * 1024
@@ -57,6 +67,15 @@ class WorkAssignmentEquipmentSelect(forms.Select):
                     break
             for shift_type, employee_name in (self.busy_assignments or {}).get(instance.id, {}).items():
                 option['attrs'][f'data-busy-{shift_type}'] = employee_name
+        return option
+
+
+class ProductionSpecializationSelect(forms.Select):
+    def create_option(self, name, value, label, selected, index, subindex=None, attrs=None):
+        option = super().create_option(name, value, label, selected, index, subindex, attrs)
+        instance = getattr(value, 'instance', None)
+        if instance:
+            option['attrs']['data-access-role-id'] = str(instance.access_role_id or '')
         return option
 
 
@@ -115,6 +134,8 @@ class EmployeeCardForm(forms.ModelForm):
             'personnel_number',
             'phone',
             'photo',
+            'personnel_position',
+            'base_specialization',
             'position',
             'department',
             'work_category',
@@ -131,7 +152,9 @@ class EmployeeCardForm(forms.ModelForm):
             'birth_date': 'Дата рождения',
             'phone': 'Мобильный телефон',
             'photo': 'Фото сотрудника',
-            'position': 'Должность',
+            'personnel_position': 'Кадровая должность',
+            'base_specialization': 'Производственная специализация',
+            'position': 'Должность (архивное поле)',
             'department': 'Подразделение',
             'work_category': 'Рабочая категория',
             'status': 'Статус',
@@ -145,6 +168,9 @@ class EmployeeCardForm(forms.ModelForm):
         widgets = {
             'birth_date': forms.DateInput(format='%Y-%m-%d', attrs={'type': 'date'}),
             'personnel_number': forms.HiddenInput(),
+            'position': forms.HiddenInput(),
+            'work_category': forms.HiddenInput(),
+            'base_specialization': ProductionSpecializationSelect,
             'phone': forms.TextInput(attrs={
                 'type': 'tel',
                 'inputmode': 'tel',
@@ -175,9 +201,37 @@ class EmployeeCardForm(forms.ModelForm):
         self.fields['phone'].required = not is_existing_employee
         self.fields['personnel_number'].required = False
         self.fields['work_category'].required = False
+        self.fields['position'].required = False
+        self.fields['personnel_position'].required = False
+        self.fields['base_specialization'].required = False
         self.fields['status'].disabled = is_existing_employee
         self.fields['phone'].widget.attrs['maxlength'] = '18'
         self.fields['photo'].help_text = 'JPG, PNG или WEBP до 5 МБ.'
+
+        current_position_id = getattr(self.instance, 'personnel_position_id', None)
+        current_specialization_id = getattr(self.instance, 'base_specialization_id', None)
+        self.fields['personnel_position'].queryset = (
+            PersonnelPosition.objects.filter(Q(is_active=True) | Q(pk=current_position_id))
+            .prefetch_related('allowed_specializations')
+            .order_by('name')
+        )
+        self.fields['base_specialization'].queryset = (
+            ProductionSpecialization.objects.filter(Q(is_active=True) | Q(pk=current_specialization_id))
+            .select_related('access_role')
+            .order_by('name')
+        )
+        position_catalog = {}
+        for position in self.fields['personnel_position'].queryset:
+            position_catalog[str(position.id)] = {
+                'allowed': list(position.allowed_specializations.values_list('id', flat=True)),
+                'default': position.default_specialization_id,
+                'required': position.requires_specialization,
+            }
+        self.fields['base_specialization'].widget.attrs.update({
+            'data-specialization-catalog': json.dumps(position_catalog),
+            'data-base-specialization': '1',
+        })
+        self.fields['personnel_position'].widget.attrs['data-personnel-position'] = '1'
 
     def clean_full_name(self):
         value = ' '.join((self.cleaned_data.get('full_name') or '').split())
@@ -250,15 +304,46 @@ class EmployeeCardForm(forms.ModelForm):
         if hired_at and dismissed_at and dismissed_at < hired_at:
             self.add_error('dismissed_at', 'Дата увольнения не может быть раньше даты приема.')
 
+        personnel_position = cleaned_data.get('personnel_position')
+        specialization = cleaned_data.get('base_specialization')
+        legacy_position = (cleaned_data.get('position') or '').strip()
+        if (
+            not personnel_position
+            and not (self.instance and self.instance.pk)
+            and self.add_prefix('personnel_position') in self.data
+            and not legacy_position
+            and 'personnel_position' not in self.errors
+        ):
+            self.add_error('personnel_position', 'Выберите кадровую должность.')
+        if personnel_position and not specialization and personnel_position.default_specialization_id:
+            specialization = personnel_position.default_specialization
+            cleaned_data['base_specialization'] = specialization
+        if personnel_position:
+            try:
+                validate_base_specialization(
+                    personnel_position=personnel_position,
+                    specialization=specialization,
+                )
+            except ValidationError as error:
+                self.add_error('base_specialization', error)
+            else:
+                cleaned_data['position'] = personnel_position.name
+                cleaned_data['work_category'] = legacy_work_category_for_specialization(specialization)
+
         if not self.instance or not self.instance.pk:
             return cleaned_data
-        work_category = cleaned_data.get('work_category')
-        previous_category = (
+        previous_values = (
             Employee.objects.filter(pk=self.instance.pk)
-            .values_list('work_category', flat=True)
+            .values_list('personnel_position_id', 'base_specialization_id', 'work_category')
             .first()
         )
-        if not work_category or previous_category == work_category:
+        if not previous_values:
+            return cleaned_data
+        previous_position_id, previous_specialization_id, previous_category = previous_values
+        work_category = cleaned_data.get('work_category')
+        specialization_changed = previous_specialization_id != getattr(specialization, 'id', None)
+        position_changed = previous_position_id != getattr(personnel_position, 'id', None)
+        if not specialization_changed and not position_changed and previous_category == work_category:
             return cleaned_data
 
         from .oup_services import employee_work_category_blockers
@@ -266,17 +351,29 @@ class EmployeeCardForm(forms.ModelForm):
         blockers = employee_work_category_blockers(self.instance)
         if blockers:
             self.add_error(
-                'work_category',
+                'base_specialization',
                 'Сначала освободите сотрудника от рабочих операций: ' + '; '.join(blockers) + '.',
             )
         return cleaned_data
 
+    def save(self, commit=True):
+        employee = super().save(commit=False)
+        personnel_position = self.cleaned_data.get('personnel_position')
+        specialization = self.cleaned_data.get('base_specialization')
+        if personnel_position:
+            employee.position = personnel_position.name
+            employee.work_category = legacy_work_category_for_specialization(specialization)
+        if commit:
+            employee.save()
+            self.save_m2m()
+        return employee
+
 
 class AdminEmployeeForm(EmployeeCardForm):
     role = forms.ModelChoiceField(
-        label='Рабочая роль',
+        label='Доступ в приложение',
         queryset=Role.objects.filter(is_active=True).order_by('name'),
-        required=True,
+        required=False,
         widget=WorkAssignmentRoleSelect,
     )
     assignment_shift_type = forms.ChoiceField(
@@ -328,8 +425,33 @@ class AdminEmployeeForm(EmployeeCardForm):
     def clean(self):
         cleaned_data = super().clean()
         role = cleaned_data.get('role')
+        specialization = cleaned_data.get('base_specialization')
+        expected_role = (
+            specialization.access_role
+            if specialization and specialization.access_role_id
+            else None
+        )
+        if expected_role:
+            if role and role.pk != expected_role.pk:
+                self.add_error(
+                    'role',
+                    f'Для специализации «{specialization}» используется приложение «{expected_role}».',
+                )
+            role = expected_role
+            cleaned_data['role'] = role
+        elif (
+            not cleaned_data.get('personnel_position')
+            and role
+            and role.code in WORK_ASSIGNMENT_ROLE_EQUIPMENT_TYPES
+        ):
+            cleaned_data['work_category'] = role.code
         shift_type = cleaned_data.get('assignment_shift_type')
         equipment = cleaned_data.get('assignment_equipment')
+        if cleaned_data.get('generate_access') and not role:
+            self.add_error(
+                'generate_access',
+                'Для выдачи PIN выберите доступ в приложение.',
+            )
         if not shift_type and not equipment:
             return cleaned_data
         if not shift_type:
@@ -401,9 +523,20 @@ class AdminEmployeeEditForm(EmployeeCardForm):
             .select_related('role')
             .order_by('role__name')
         )
-        available_roles = Role.objects.filter(
-            id__in=available_accesses.values_list('role_id', flat=True),
-        ).order_by('name')
+        selected_specialization = employee.base_specialization
+        if self.is_bound:
+            specialization_id = self.data.get(self.add_prefix('base_specialization'))
+            if specialization_id and str(specialization_id).isdigit():
+                selected_specialization = (
+                    ProductionSpecialization.objects
+                    .select_related('access_role')
+                    .filter(pk=int(specialization_id))
+                    .first()
+                )
+        available_role_ids = set(available_accesses.values_list('role_id', flat=True))
+        if selected_specialization and selected_specialization.access_role_id:
+            available_role_ids.add(selected_specialization.access_role_id)
+        available_roles = Role.objects.filter(id__in=available_role_ids).order_by('name')
         self.fields['assignment_role'].queryset = available_roles
 
         selected_role_id = self.data.get(self.add_prefix('assignment_role')) if self.is_bound else None
@@ -459,6 +592,18 @@ class AdminEmployeeEditForm(EmployeeCardForm):
         role = cleaned_data.get('assignment_role')
         shift_type = cleaned_data.get('assignment_shift_type')
         equipment = cleaned_data.get('assignment_equipment')
+        specialization = cleaned_data.get('base_specialization')
+        expected_role = (
+            specialization.access_role
+            if specialization and specialization.access_role_id
+            else None
+        )
+        if equipment and expected_role and role and role.pk != expected_role.pk:
+            self.add_error(
+                'assignment_role',
+                f'Для специализации «{specialization}» доступно назначение только по роли «{expected_role}».',
+            )
+            return cleaned_data
         if not equipment:
             return cleaned_data
         if not role:
@@ -491,6 +636,67 @@ class AdminEmployeeEditForm(EmployeeCardForm):
             assigned_by=assigned_by,
         )
         return assignment
+
+
+class PersonnelPositionReferenceForm(forms.ModelForm):
+    """Maintain the official-position catalogue without allowing invalid links."""
+
+    class Meta:
+        model = PersonnelPosition
+        fields = (
+            'name',
+            'code',
+            'requires_specialization',
+            'allowed_specializations',
+            'default_specialization',
+            'is_active',
+        )
+        widgets = {
+            'allowed_specializations': forms.CheckboxSelectMultiple,
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        current_default_id = getattr(self.instance, 'default_specialization_id', None)
+        current_allowed_ids = (
+            self.instance.allowed_specializations.values_list('id', flat=True)
+            if self.instance and self.instance.pk
+            else []
+        )
+        visible_specializations = ProductionSpecialization.objects.filter(
+            Q(is_active=True)
+            | Q(pk=current_default_id)
+            | Q(pk__in=current_allowed_ids)
+        ).select_related('equipment_type', 'access_role').order_by('name')
+        self.fields['allowed_specializations'].queryset = visible_specializations
+        self.fields['default_specialization'].queryset = visible_specializations
+        self.fields['allowed_specializations'].help_text = (
+            'Определяют, какие базовые специализации можно выбрать для этой кадровой должности.'
+        )
+        self.fields['default_specialization'].help_text = (
+            'Подставляется автоматически при создании сотрудника, если не выбрано другое допустимое значение.'
+        )
+
+    def clean(self):
+        cleaned_data = super().clean()
+        allowed_specializations = cleaned_data.get('allowed_specializations')
+        default_specialization = cleaned_data.get('default_specialization')
+        requires_specialization = cleaned_data.get('requires_specialization')
+        if requires_specialization and not allowed_specializations:
+            self.add_error(
+                'allowed_specializations',
+                'Для этой кадровой должности выберите хотя бы одну производственную специализацию.',
+            )
+        if (
+            default_specialization
+            and allowed_specializations is not None
+            and default_specialization not in allowed_specializations
+        ):
+            self.add_error(
+                'default_specialization',
+                'Специализация по умолчанию должна входить в разрешенный список.',
+            )
+        return cleaned_data
 
 
 class AdminAccessRoleForm(forms.Form):

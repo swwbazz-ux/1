@@ -123,6 +123,7 @@ class ShiftAnalyticsReportTests(TestCase):
             loading_block='53',
             status=TripStatus.LOADED_WAITING_UNLOAD,
         )
+        Trip.objects.filter(pk__in=[self.completed_trip.pk, self.open_trip.pk]).update(created_at=opened_at)
         self.downtime_reason = DowntimeReason.objects.create(name='Тестовая зачистка забоя', show_for_excavator_operator=True)
         DowntimeEvent.objects.create(
             equipment=self.excavator,

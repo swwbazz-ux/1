@@ -9,7 +9,7 @@
 <link rel="stylesheet" href="{% static 'css/oup-workplace-v1.css' %}?v=20260717-1">
 <link rel="stylesheet" href="{% static 'css/oup-work-period-v1.css' %}?v=20260717-1">
 {% endif %}
-<link rel="stylesheet" href="{% static 'css/employee-card-unified.css' %}?v=20260717-2">
+<link rel="stylesheet" href="{% static 'css/employee-card-unified.css' %}?v=20260717-3">
 {% endblock %}
 
 {% block body %}
@@ -81,6 +81,8 @@
             <form id="employee-card-form" class="employee-card-main" method="post" enctype="multipart/form-data">
                 {% csrf_token %}
                 {{ form.personnel_number }}
+                {{ form.position }}
+                {{ form.work_category }}
 
                 <div class="employee-card-heading">
                     <div>
@@ -146,12 +148,12 @@
                             </div>
                             {{ form.phone }}{{ form.phone.errors }}
                         </div>
-                        <div class="employee-card-field" data-card-field data-copy-label="Должность">
+                        <div class="employee-card-field" data-card-field data-copy-label="Кадровая должность">
                             <div class="employee-card-label-row">
-                                <label for="{{ form.position.id_for_label }}">{{ form.position.label }}</label>
-                                <button type="button" class="employee-copy-icon" data-copy-target="#{{ form.position.id_for_label }}" aria-label="Скопировать должность" title="Скопировать должность"></button>
+                                <label for="{{ form.personnel_position.id_for_label }}">{{ form.personnel_position.label }}{% if form.personnel_position.field.required %}<b>*</b>{% endif %}</label>
+                                <button type="button" class="employee-copy-icon" data-copy-target="#{{ form.personnel_position.id_for_label }}" aria-label="Скопировать кадровую должность" title="Скопировать кадровую должность"></button>
                             </div>
-                            {{ form.position }}{{ form.position.errors }}
+                            {{ form.personnel_position }}{{ form.personnel_position.errors }}
                         </div>
                         <div class="employee-card-field" data-card-field data-copy-label="Подразделение">
                             <div class="employee-card-label-row">
@@ -168,12 +170,13 @@
                         <h3 id="employee-work-title">Работа и учет</h3>
                     </div>
                     <div class="employee-card-field-grid">
-                        <div class="employee-card-field" data-card-field data-copy-label="Рабочая категория">
+                        <div class="employee-card-field" data-card-field data-copy-label="Производственная специализация">
                             <div class="employee-card-label-row">
-                                <label for="{{ form.work_category.id_for_label }}">{{ form.work_category.label }}</label>
-                                <button type="button" class="employee-copy-icon" data-copy-target="#{{ form.work_category.id_for_label }}" aria-label="Скопировать рабочую категорию" title="Скопировать рабочую категорию"></button>
+                                <label for="{{ form.base_specialization.id_for_label }}">{{ form.base_specialization.label }}</label>
+                                <button type="button" class="employee-copy-icon" data-copy-target="#{{ form.base_specialization.id_for_label }}" aria-label="Скопировать производственную специализацию" title="Скопировать производственную специализацию"></button>
                             </div>
-                            {{ form.work_category }}{{ form.work_category.errors }}
+                            {{ form.base_specialization }}{{ form.base_specialization.errors }}
+                            {% if form.base_specialization.help_text %}<small class="employee-card-field-help">{{ form.base_specialization.help_text }}</small>{% endif %}
                         </div>
                         <div class="employee-card-field" data-card-field data-copy-label="Статус">
                             <div class="employee-card-label-row">
@@ -214,22 +217,22 @@
                 </section>
 
                 <section class="employee-card-section" aria-labelledby="employee-assignment-title">
-                    <div class="employee-card-section-heading"><h3 id="employee-assignment-title">Роль, смена и техника</h3></div>
+                    <div class="employee-card-section-heading"><h3 id="employee-assignment-title">Смена и техника</h3></div>
                     <div class="employee-card-assignment-grid">
                         {% if employee_card_context == "admin" and page_mode == "create" %}
-                            <div class="employee-card-field" data-card-field data-copy-label="Рабочая роль" data-employee-assignment-role>
+                            <div class="employee-card-field" data-card-field data-copy-label="Доступ в приложение" data-employee-assignment-role>
                                 <div class="employee-card-label-row"><label for="{{ form.role.id_for_label }}">{{ form.role.label }}</label><button type="button" class="employee-copy-icon" data-copy-target="#{{ form.role.id_for_label }}" aria-label="Скопировать роль" title="Скопировать роль"></button></div>
                                 {{ form.role }}{{ form.role.errors }}
                             </div>
                         {% elif employee_card_context == "admin" %}
-                            <div class="employee-card-field" data-card-field data-copy-label="Рабочая роль" data-employee-assignment-role>
+                            <div class="employee-card-field" data-card-field data-copy-label="Доступ в приложение" data-employee-assignment-role>
                                 <div class="employee-card-label-row"><label for="{{ form.assignment_role.id_for_label }}">{{ form.assignment_role.label }}</label><button type="button" class="employee-copy-icon" data-copy-target="#{{ form.assignment_role.id_for_label }}" aria-label="Скопировать роль" title="Скопировать роль"></button></div>
                                 {{ form.assignment_role }}{{ form.assignment_role.errors }}
                             </div>
                         {% else %}
-                            <div class="employee-card-field" data-card-field data-copy-label="Рабочая роль">
-                                <div class="employee-card-label-row"><label for="employee-assignment-role-readonly">Рабочая роль</label><button type="button" class="employee-copy-icon" data-copy-target="#employee-assignment-role-readonly" aria-label="Скопировать роль" title="Скопировать роль"></button></div>
-                                <input id="employee-assignment-role-readonly" value="{% if employee_accesses.0 %}{{ employee_accesses.0.role.name }}{% else %}Нет назначения{% endif %}" readonly>
+                            <div class="employee-card-field" data-card-field data-copy-label="Производственная специализация">
+                                <div class="employee-card-label-row"><label for="employee-assignment-role-readonly">Производственная специализация</label><button type="button" class="employee-copy-icon" data-copy-target="#employee-assignment-role-readonly" aria-label="Скопировать специализацию" title="Скопировать специализацию"></button></div>
+                                <input id="employee-assignment-role-readonly" value="{{ effective_specialization|default:'Не выбрана' }}" readonly>
                             </div>
                         {% endif %}
 
@@ -286,7 +289,7 @@
                 <div class="employee-card-submit-row">
                     {% if employee_card_context == "oup" %}<a class="employee-card-button is-secondary" href="{% url 'oup_employees' %}">Отмена</a>{% else %}<a class="employee-card-button is-secondary" href="{% url 'system_admin_employees' %}">Отмена</a>{% endif %}
                     {% if can_submit_employee_card %}
-                        <button class="employee-card-button is-primary" type="submit">{% if page_mode == 'create' %}Создать сотрудника{% else %}Сохранить карточку{% endif %}</button>
+                        <button class="employee-card-button is-primary" type="submit">{% if page_mode == 'create' %}{% if employee_card_context == 'oup' %}Добавить сотрудника{% else %}Создать сотрудника{% endif %}{% else %}Сохранить карточку{% endif %}</button>
                     {% else %}
                         <button class="employee-card-button is-disabled" type="button" disabled>Редактирование недоступно</button>
                     {% endif %}
@@ -300,7 +303,7 @@
                         {% if employee_card_context == "admin" %}
                             <label class="employee-card-checkline" for="{{ form.generate_access.id_for_label }}">
                                 {{ form.generate_access }}
-                                <span><strong>{{ form.generate_access.label }}</strong><small>Роль выбрана в блоке назначения.</small></span>
+                                <span><strong>{{ form.generate_access.label }}</strong><small>Подходящее приложение определяется по специализации.</small></span>
                             </label>
                         {% else %}
                             <label class="employee-card-checkline" for="{{ form.issue_access.id_for_label }}">
@@ -321,10 +324,10 @@
                             <div><strong>Действие</strong><span>запишется в журнал</span></div>
                         </div>
                     </section>
-                    <button class="employee-card-button is-primary side-submit" type="submit" form="employee-card-form">Создать сотрудника</button>
+                    <button class="employee-card-button is-primary side-submit" type="submit" form="employee-card-form">{% if employee_card_context == 'oup' %}Добавить сотрудника{% else %}Создать сотрудника{% endif %}</button>
                 {% else %}
                     <section class="employee-card-side-panel employee-card-access-panel">
-                        <div class="employee-card-side-heading"><span>Доступ</span><h2>Роли и вход</h2></div>
+                        <div class="employee-card-side-heading"><span>Доступ</span><h2>Приложение и вход</h2></div>
 
                         {% if employee_card_context == "admin" %}
                             {% if current_role_access %}
@@ -386,6 +389,40 @@
                         {% if has_protected_admin_access %}<p class="employee-card-side-note">Административный доступ управляется только администратором.</p>{% endif %}
                     </section>
 
+                    <section class="employee-card-side-panel employee-card-transfer-panel">
+                        <div class="employee-card-side-heading"><span>Расстановка</span><h2>Временные переводы</h2></div>
+                        <div class="employee-card-transfer-list">
+                            {% for transfer in temporary_work_transfers %}
+                                <article class="employee-card-transfer status-{{ transfer.status }}">
+                                    <div><strong>{{ transfer.target_specialization }}</strong><span>{{ transfer.get_status_display }}</span></div>
+                                    <p>До {{ transfer.effective_to|date:"d.m.Y" }} · {{ transfer.watch_period }}</p>
+                                    {% if transfer.reason %}<small>Запрос: {{ transfer.reason }}</small>{% endif %}
+                                    {% if transfer.review_comment %}<small>ОУП: {{ transfer.review_comment }}</small>{% endif %}
+                                    {% if employee_card_context == "oup" and can_review_temporary_transfers and transfer.status == "requested" %}
+                                        <form method="post" action="{% url 'oup_temporary_work_transfer_review' transfer.id 'approve' %}">
+                                            {% csrf_token %}
+                                            <label>Комментарий ОУП<textarea name="review_comment" rows="2"></textarea></label>
+                                            <button class="employee-card-button is-primary full" type="submit">Подтвердить перевод</button>
+                                        </form>
+                                        <form method="post" action="{% url 'oup_temporary_work_transfer_review' transfer.id 'reject' %}">
+                                            {% csrf_token %}
+                                            <input type="hidden" name="review_comment" value="">
+                                            <button class="employee-card-button is-secondary full" type="submit">Отклонить</button>
+                                        </form>
+                                    {% endif %}
+                                    {% if employee_card_context == "admin" and transfer.status == "approved" %}
+                                        <form method="post" action="{% url 'system_admin_temporary_work_transfer_cancel' transfer.id %}" data-confirm="Отменить временный перевод? Сотрудник сразу вернется на базовую специализацию и в исходное приложение.">
+                                            {% csrf_token %}
+                                            <button class="employee-card-button is-warning full" type="submit">Отменить перевод</button>
+                                        </form>
+                                    {% endif %}
+                                </article>
+                            {% empty %}
+                                <p class="employee-card-empty">Временных переводов нет.</p>
+                            {% endfor %}
+                        </div>
+                    </section>
+
                     <section class="employee-card-side-panel employee-card-management-panel">
                         <div class="employee-card-side-heading"><span>Управление</span><h2>Состояние сотрудника</h2></div>
                         {% if employee_card_context == "admin" %}
@@ -429,5 +466,5 @@
 </div>
 {% endif %}
 
-<script src="{% static 'js/employee-card-unified.js' %}?v=20260717-2"></script>
+<script src="{% static 'js/employee-card-unified.js' %}?v=20260717-3"></script>
 {% endblock %}

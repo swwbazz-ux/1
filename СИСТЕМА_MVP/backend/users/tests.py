@@ -555,7 +555,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, 'employee-card-photo')
         self.assertContains(response, 'employee-card-photo-actions')
         self.assertContains(response, 'name="position"')
-        self.assertContains(response, 'Должность')
+        self.assertContains(response, 'Кадровая должность')
         self.assertContains(response, 'type="file"')
 
     def test_admin_employee_card_keeps_selected_role_and_primary_pin_status(self):
@@ -1495,9 +1495,9 @@ class AccessLoginTests(TestCase):
             'name="full_name"',
             'name="birth_date"',
             'name="phone"',
-            'name="position"',
+            'name="personnel_position"',
             'name="department"',
-            'name="work_category"',
+            'name="base_specialization"',
             'name="status"',
             'name="hired_at"',
             'name="dismissed_at"',

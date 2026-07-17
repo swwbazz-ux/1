@@ -120,7 +120,11 @@ class OupWorkplaceTests(TestCase):
         )
         self.start_shift()
         response = self.client.get(reverse('oup_employee_detail', args=[employee.id]))
-        self.assertNotContains(response, f'value="{admin_role.id}"', html=False)
+        self.assertNotContains(
+            response,
+            f'<option value="{admin_role.id}">{admin_role.name}</option>',
+            html=False,
+        )
         response = self.client.post(
             reverse('oup_employee_access_issue', args=[employee.id]),
             {'role': str(admin_role.id)},

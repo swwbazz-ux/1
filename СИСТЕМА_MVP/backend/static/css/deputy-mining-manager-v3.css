@@ -336,6 +336,18 @@
     white-space: nowrap;
 }
 
+.deputy-transfer-button {
+    width: auto;
+    min-width: 148px;
+    min-height: 34px;
+    white-space: nowrap;
+}
+
+.deputy-transfer-button.is-disabled {
+    cursor: not-allowed;
+    opacity: .55;
+}
+
 .deputy-export-button::before {
     content: "↓";
     margin-right: 6px;
@@ -1105,6 +1117,59 @@ button.deputy-avatar {
     color: var(--admin-red);
 }
 
+.deputy-transfer-dialog {
+    width: min(580px, calc(100vw - 28px));
+}
+
+.deputy-transfer-fields {
+    display: grid;
+    gap: 12px;
+    padding: 16px;
+}
+
+.deputy-transfer-fields label {
+    display: grid;
+    gap: 5px;
+    min-width: 0;
+}
+
+.deputy-transfer-fields label > span {
+    color: var(--admin-muted);
+    font-size: 11px;
+    font-weight: 900;
+    text-transform: uppercase;
+}
+
+.deputy-transfer-fields select,
+.deputy-transfer-fields textarea {
+    width: 100%;
+    border: 1px solid var(--admin-line);
+    border-radius: 6px;
+    outline: 0;
+    background: var(--admin-panel-soft);
+    color: var(--admin-ink);
+    font: inherit;
+    font-size: 14px;
+    font-weight: 800;
+}
+
+.deputy-transfer-fields select {
+    min-height: 40px;
+    padding: 0 11px;
+}
+
+.deputy-transfer-fields textarea {
+    min-height: 76px;
+    padding: 9px 11px;
+    resize: vertical;
+}
+
+.deputy-transfer-fields select:focus,
+.deputy-transfer-fields textarea:focus {
+    border-color: var(--admin-green);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--admin-green) 18%, transparent);
+}
+
 .deputy-photo-dialog {
     width: min(820px, calc(100vw - 28px));
     background: #0b1217;
@@ -1650,6 +1715,10 @@ button.deputy-avatar {
 
     .deputy-publish-button {
         min-width: 116px;
+    }
+
+    .deputy-transfer-button {
+        min-width: 0;
     }
 
     .deputy-export-button {

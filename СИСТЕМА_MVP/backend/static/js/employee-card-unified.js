@@ -213,6 +213,62 @@
         toggle.addEventListener("change", sync);
     }
 
+    function initSpecialization() {
+        var position = document.querySelector("[data-personnel-position]");
+        var specialization = document.querySelector("[data-base-specialization]");
+        if (!position || !specialization) return;
+        var accessRole = document.querySelector("select[name='role'], select[name='access_role']");
+        var issueAccess = document.querySelector("input[name='generate_access'], input[name='issue_access']");
+
+        var catalog = {};
+        try {
+            catalog = JSON.parse(specialization.dataset.specializationCatalog || "{}");
+        } catch (error) {}
+
+        function syncSpecializationOptions() {
+            var config = catalog[position.value] || null;
+            var allowed = config && Array.isArray(config.allowed) ? config.allowed.map(String) : [];
+            var hasOptions = allowed.length > 0;
+            var selectedAllowed = false;
+
+            Array.prototype.forEach.call(specialization.options, function (option) {
+                if (!option.value) return;
+                var isAllowed = allowed.indexOf(option.value) !== -1;
+                option.hidden = Boolean(position.value) && !isAllowed;
+                option.disabled = Boolean(position.value) && !isAllowed;
+                if (option.selected && isAllowed) selectedAllowed = true;
+            });
+
+            if (!position.value || !hasOptions) {
+                specialization.value = "";
+                specialization.disabled = true;
+                if (issueAccess) {
+                    issueAccess.checked = false;
+                    issueAccess.dispatchEvent(new Event("change"));
+                }
+                return;
+            }
+
+            specialization.disabled = false;
+            if (!selectedAllowed) {
+                specialization.value = config.default ? String(config.default) : "";
+            }
+            var selectedOption = specialization.options[specialization.selectedIndex];
+            var accessRoleId = selectedOption ? selectedOption.dataset.accessRoleId || "" : "";
+            if (accessRole && accessRoleId) {
+                accessRole.value = accessRoleId;
+                accessRole.dispatchEvent(new Event("change"));
+            }
+            if (issueAccess && !accessRoleId) {
+                issueAccess.checked = false;
+                issueAccess.dispatchEvent(new Event("change"));
+            }
+        }
+
+        syncSpecializationOptions();
+        position.addEventListener("change", syncSpecializationOptions);
+    }
+
     function initAssignment() {
         var roleWrap = document.querySelector("[data-employee-assignment-role]");
         var equipmentWrap = document.querySelector("[data-employee-assignment-equipment]");
@@ -306,6 +362,7 @@
         initPrint();
         initPhoto();
         initAccessToggle();
+        initSpecialization();
         initAssignment();
         initLoginShare();
     });

@@ -17,6 +17,22 @@ class Employee(models.Model):
 
     full_name = models.CharField('ФИО', max_length=255)
     birth_date = models.DateField('Дата рождения', null=True, blank=True)
+    personnel_position = models.ForeignKey(
+        'PersonnelPosition',
+        verbose_name='Кадровая должность',
+        on_delete=models.PROTECT,
+        related_name='employees',
+        null=True,
+        blank=True,
+    )
+    base_specialization = models.ForeignKey(
+        'ProductionSpecialization',
+        verbose_name='Базовая производственная специализация',
+        on_delete=models.PROTECT,
+        related_name='base_employees',
+        null=True,
+        blank=True,
+    )
     position = models.CharField('Должность', max_length=128, blank=True)
     department = models.CharField('Подразделение', max_length=160, blank=True)
     work_category = models.CharField(
@@ -84,6 +100,158 @@ class Role(models.Model):
 
     def __str__(self):
         return self.name
+
+
+class ProductionSpecialization(models.Model):
+    """Operational specialization used for equipment eligibility and app access."""
+
+    code = models.SlugField('Код специализации', max_length=64, unique=True)
+    name = models.CharField('Производственная специализация', max_length=160, unique=True)
+    equipment_type = models.ForeignKey(
+        'references.EquipmentType',
+        verbose_name='Тип техники',
+        on_delete=models.PROTECT,
+        related_name='production_specializations',
+        null=True,
+        blank=True,
+    )
+    access_role = models.ForeignKey(
+        Role,
+        verbose_name='Роль приложения',
+        on_delete=models.PROTECT,
+        related_name='production_specializations',
+        null=True,
+        blank=True,
+    )
+    is_active = models.BooleanField('Активна', default=True)
+
+    class Meta:
+        verbose_name = 'Производственная специализация'
+        verbose_name_plural = 'Производственные специализации'
+        ordering = ['name']
+
+    def __str__(self):
+        return self.name
+
+
+class PersonnelPosition(models.Model):
+    """Official personnel position imported from 1C or selected in the employee card."""
+
+    code = models.SlugField('Код должности', max_length=96, unique=True)
+    name = models.CharField('Кадровая должность', max_length=255, unique=True)
+    requires_specialization = models.BooleanField(
+        'Требует производственную специализацию',
+        default=False,
+    )
+    allowed_specializations = models.ManyToManyField(
+        ProductionSpecialization,
+        verbose_name='Разрешенные производственные специализации',
+        related_name='personnel_positions',
+        blank=True,
+    )
+    default_specialization = models.ForeignKey(
+        ProductionSpecialization,
+        verbose_name='Специализация по умолчанию',
+        on_delete=models.SET_NULL,
+        related_name='default_for_personnel_positions',
+        null=True,
+        blank=True,
+    )
+    is_active = models.BooleanField('Активна', default=True)
+
+    class Meta:
+        verbose_name = 'Кадровая должность'
+        verbose_name_plural = 'Кадровые должности'
+        ordering = ['name']
+
+    def __str__(self):
+        return self.name
+
+
+class TemporaryWorkTransfer(models.Model):
+    """OUP-approved temporary specialization change, bounded by a watch period."""
+
+    class Status(models.TextChoices):
+        REQUESTED = 'requested', 'Запрошен'
+        APPROVED = 'approved', 'Одобрен'
+        REJECTED = 'rejected', 'Отклонен'
+        CANCELLED = 'cancelled', 'Отменен'
+        EXPIRED = 'expired', 'Завершен по окончании вахты'
+
+    employee = models.ForeignKey(
+        Employee,
+        verbose_name='Сотрудник',
+        on_delete=models.PROTECT,
+        related_name='temporary_work_transfers',
+    )
+    source_specialization = models.ForeignKey(
+        ProductionSpecialization,
+        verbose_name='Исходная специализация',
+        on_delete=models.PROTECT,
+        related_name='outgoing_temporary_transfers',
+        null=True,
+        blank=True,
+    )
+    target_specialization = models.ForeignKey(
+        ProductionSpecialization,
+        verbose_name='Целевая специализация',
+        on_delete=models.PROTECT,
+        related_name='incoming_temporary_transfers',
+    )
+    watch_period = models.ForeignKey(
+        'shifts.WatchPeriod',
+        verbose_name='Вахта',
+        on_delete=models.PROTECT,
+        related_name='temporary_work_transfers',
+    )
+    effective_from = models.DateField('Действует с')
+    effective_to = models.DateField('Действует по')
+    status = models.CharField(
+        'Статус',
+        max_length=16,
+        choices=Status.choices,
+        default=Status.REQUESTED,
+        db_index=True,
+    )
+    reason = models.TextField('Причина запроса', blank=True)
+    review_comment = models.TextField('Комментарий ОУП', blank=True)
+    requested_by = models.ForeignKey(
+        Employee,
+        verbose_name='Кто запросил',
+        on_delete=models.SET_NULL,
+        related_name='requested_temporary_work_transfers',
+        null=True,
+        blank=True,
+    )
+    requested_at = models.DateTimeField('Запрошен', auto_now_add=True)
+    reviewed_by = models.ForeignKey(
+        Employee,
+        verbose_name='Кто рассмотрел',
+        on_delete=models.SET_NULL,
+        related_name='reviewed_temporary_work_transfers',
+        null=True,
+        blank=True,
+    )
+    reviewed_at = models.DateTimeField('Рассмотрен', null=True, blank=True)
+    closed_at = models.DateTimeField('Завершен', null=True, blank=True)
+
+    class Meta:
+        verbose_name = 'Временный производственный перевод'
+        verbose_name_plural = 'Временные производственные переводы'
+        ordering = ['-requested_at']
+        indexes = [
+            models.Index(fields=['employee', 'status'], name='tmp_transfer_emp_status_idx'),
+            models.Index(fields=['status', 'effective_to'], name='temp_transfer_status_end_idx'),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(effective_to__gte=models.F('effective_from')),
+                name='temp_transfer_dates_valid',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.employee}: {self.target_specialization}'
 
 
 class EmployeeAccess(models.Model):

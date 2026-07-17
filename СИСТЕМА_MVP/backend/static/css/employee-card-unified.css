@@ -500,6 +500,14 @@
     list-style: none;
 }
 
+.employee-card-field-help {
+    display: block;
+    margin-top: 5px;
+    color: var(--employee-muted);
+    font-size: 11px;
+    line-height: 1.3;
+}
+
 .employee-card-section {
     padding-top: 10px;
     border-top: 1px solid var(--employee-border);
@@ -715,6 +723,86 @@
     display: grid;
     gap: 10px;
     margin-top: 12px;
+}
+
+.employee-card-transfer-list {
+    display: grid;
+    gap: 10px;
+}
+
+.employee-card-transfer {
+    display: grid;
+    gap: 6px;
+    padding: 10px 0 0 10px;
+    border-top: 1px solid var(--employee-border);
+    border-left: 3px solid var(--employee-border-strong);
+}
+
+.employee-card-transfer.status-requested {
+    border-left-color: var(--employee-warning);
+}
+
+.employee-card-transfer.status-approved {
+    border-left-color: var(--employee-primary);
+}
+
+.employee-card-transfer.status-rejected,
+.employee-card-transfer.status-cancelled,
+.employee-card-transfer.status-expired {
+    border-left-color: var(--employee-muted);
+}
+
+.employee-card-transfer > div {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.employee-card-transfer > div span {
+    color: var(--employee-muted);
+    font-size: 11px;
+    font-weight: 800;
+    text-transform: uppercase;
+}
+
+.employee-card-transfer p,
+.employee-card-transfer small {
+    margin: 0;
+    color: var(--employee-muted);
+    font-size: 12px;
+    line-height: 1.35;
+}
+
+.employee-card-transfer form {
+    display: grid;
+    gap: 7px;
+}
+
+.employee-card-transfer label,
+.employee-card-transfer textarea {
+    min-width: 0;
+}
+
+.employee-card-transfer label {
+    display: grid;
+    gap: 4px;
+    color: var(--employee-muted);
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.employee-card-transfer textarea {
+    width: 100%;
+    min-height: 54px;
+    padding: 8px 9px;
+    border: 1px solid var(--employee-border);
+    border-radius: 5px;
+    background: var(--employee-surface-muted);
+    color: var(--employee-text);
+    font: inherit;
+    font-size: 12px;
+    resize: vertical;
 }
 
 .employee-card-access {

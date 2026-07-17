@@ -48,6 +48,8 @@ EMPLOYEE_CARD_UNDO_FIELDS = (
     'birth_date',
     'personnel_number',
     'phone',
+    'personnel_position_id',
+    'base_specialization_id',
     'position',
     'department',
     'work_category',
@@ -366,13 +368,19 @@ def _undo_employee_change(log, action_code):
     if not _state_matches(employee, after):
         raise ValidationError('Карточка уже изменена после этого события. Обновите журнал.')
 
-    if before.get('work_category') and before['work_category'] != after.get('work_category'):
+    specialization_changed = (
+        'base_specialization_id' in before
+        and before.get('base_specialization_id') != after.get('base_specialization_id')
+    )
+    if specialization_changed or (
+        before.get('work_category') and before['work_category'] != after.get('work_category')
+    ):
         from .oup_services import employee_work_category_blockers
 
         blockers = employee_work_category_blockers(employee)
         if blockers:
             raise ValidationError(
-                'Нельзя вернуть рабочую категорию: ' + '; '.join(blockers) + '.'
+                'Нельзя вернуть производственную специализацию: ' + '; '.join(blockers) + '.'
             )
 
     previous_number = before.get('personnel_number')
@@ -386,6 +394,10 @@ def _undo_employee_change(log, action_code):
         raise ValidationError('Исходный файл фотографии больше не найден в хранилище.')
 
     _apply_state(employee, before, include_updated_at=True)
+    if specialization_changed:
+        from .work_profiles import sync_employee_production_access
+
+        sync_employee_production_access(employee=employee)
     _notify_employee_changed(employee, 'admin_undo')
     return (
         'Фотография сотрудника восстановлена.'

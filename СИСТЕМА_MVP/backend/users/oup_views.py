@@ -11,8 +11,13 @@ from django.views.decorators.http import require_POST
 
 from assignments.services import WORK_ASSIGNMENT_ROLE_EQUIPMENT_TYPES, get_active_equipment_assignment
 
-from .models import AdminActionLog, Employee, EmployeeAccess
-from .oup_forms import OupAccessRoleForm, OupDismissEmployeeForm, OupEmployeeForm
+from .models import AdminActionLog, Employee, EmployeeAccess, TemporaryWorkTransfer
+from .oup_forms import (
+    OupAccessRoleForm,
+    OupDismissEmployeeForm,
+    OupEmployeeForm,
+    TemporaryWorkTransferReviewForm,
+)
 from .oup_services import (
     close_oup_shift,
     dismiss_employee,
@@ -39,6 +44,11 @@ from .oup_undo import (
     state_change_payload,
 )
 from .views import get_current_access
+from .work_profiles import (
+    effective_specialization,
+    resolve_temporary_work_transfer,
+    sync_employee_production_access,
+)
 
 
 OUP_PERIOD_ACTIONS = {
@@ -267,7 +277,7 @@ def oup_employee_create_view(request):
     context.update({
         'form': form,
         'page_mode': 'create',
-        'title': 'Создать сотрудника',
+        'title': 'Добавить сотрудника',
         'employee_card_context': 'oup',
         'can_submit_employee_card': True,
     })
@@ -323,7 +333,7 @@ def oup_employee_detail_view(request, employee_id):
 
         form = OupEmployeeForm(request.POST, request.FILES, instance=employee)
         if form.is_valid():
-            new_category = form.cleaned_data['work_category']
+            new_specialization = form.cleaned_data.get('base_specialization')
             try:
                 with transaction.atomic():
                     actor, _shift = lock_oup_write_context(employee=access.employee)
@@ -334,14 +344,17 @@ def oup_employee_detail_view(request, employee_id):
                             'Карточка уволенного сотрудника доступна только для просмотра.',
                             code='employee_read_only',
                         )
-                    category_changed = locked_employee.work_category != new_category
-                    if category_changed:
+                    specialization_changed = (
+                        locked_employee.base_specialization_id
+                        != getattr(new_specialization, 'id', None)
+                    )
+                    if specialization_changed:
                         blockers = employee_work_category_blockers(locked_employee)
                         if blockers:
                             raise ValidationError(
                                 'Сначала освободите сотрудника от рабочих операций: '
                                 + '; '.join(blockers) + '.',
-                                code='work_category_blocked',
+                                code='work_specialization_blocked',
                             )
                     personnel_number = form.cleaned_data.get('personnel_number', '')
                     if personnel_number and Employee.objects.filter(
@@ -360,6 +373,8 @@ def oup_employee_detail_view(request, employee_id):
                         form._meta.exclude,
                     )
                     saved_employee = form.save()
+                    if specialization_changed:
+                        sync_employee_production_access(employee=saved_employee)
                     after = employee_audit_snapshot(saved_employee)
                     after_state = employee_card_undo_state(saved_employee)
                     changes = format_employee_changes(before, after)
@@ -376,7 +391,7 @@ def oup_employee_detail_view(request, employee_id):
             except ValidationError as error:
                 error_code = getattr(error, 'code', '')
                 field_name = {
-                    'work_category_blocked': 'work_category',
+                    'work_specialization_blocked': 'base_specialization',
                     'duplicate_personnel_number': 'personnel_number',
                 }.get(error_code)
                 form.add_error(field_name, error)
@@ -396,6 +411,7 @@ def oup_employee_detail_view(request, employee_id):
             field.disabled = True
 
     active_equipment_assignment = get_active_equipment_assignment(employee)
+    effective_employee_specialization = effective_specialization(employee)
     employee_accesses = employee.accesses.select_related('role').exclude(role__code='admin')
     work_assignment_role = (
         active_equipment_assignment.role
@@ -421,8 +437,98 @@ def oup_employee_detail_view(request, employee_id):
             work_assignment_role
             and work_assignment_role.code in WORK_ASSIGNMENT_ROLE_EQUIPMENT_TYPES
         ),
+        'effective_specialization': effective_employee_specialization,
+        'temporary_work_transfers': (
+            employee.temporary_work_transfers
+            .select_related(
+                'source_specialization',
+                'target_specialization',
+                'watch_period',
+                'requested_by',
+                'reviewed_by',
+            )
+            .order_by('-requested_at')[:8]
+        ),
+        'transfer_review_form': TemporaryWorkTransferReviewForm(),
+        'can_review_temporary_transfers': bool(open_oup_shift and not is_dismissed),
     })
     return render(request, 'users/employee_card.html', context)
+
+
+@require_POST
+def oup_temporary_work_transfer_review_view(request, transfer_id, action):
+    access = require_oup_access(request)
+    if not access:
+        return redirect('role_home')
+    transfer = get_object_or_404(
+        TemporaryWorkTransfer.objects.select_related('employee'),
+        id=transfer_id,
+    )
+    employee_id = transfer.employee_id
+    if action not in {'approve', 'reject'}:
+        messages.error(request, 'Неизвестное действие по временному переводу.')
+        return redirect('oup_employee_detail', employee_id=employee_id)
+    if not _require_open_shift(request, access):
+        return redirect('oup_employee_detail', employee_id=employee_id)
+
+    form = TemporaryWorkTransferReviewForm(request.POST)
+    if not form.is_valid():
+        messages.error(request, 'Проверьте комментарий по временному переводу.')
+        return redirect('oup_employee_detail', employee_id=employee_id)
+
+    try:
+        with transaction.atomic():
+            actor, _shift = lock_oup_write_context(employee=access.employee)
+            lock_current_crew_drafts()
+            transfer, target_access = resolve_temporary_work_transfer(
+                transfer=transfer,
+                reviewed_by=actor,
+                approved=action == 'approve',
+                review_comment=form.cleaned_data['review_comment'],
+            )
+            primary_code = ''
+            if target_access and not target_access.access_code:
+                _access, primary_code, _created = issue_employee_access(
+                    employee=transfer.employee,
+                    role=target_access.role,
+                    actor=actor,
+                )
+            log_oup_action(
+                actor,
+                'подтвержден временный производственный перевод'
+                if action == 'approve'
+                else 'отклонен временный производственный перевод',
+                transfer,
+                action_code=(
+                    'oup_temporary_transfer_approved'
+                    if action == 'approve'
+                    else 'oup_temporary_transfer_rejected'
+                ),
+                old_value=(
+                    f'Специализация: {transfer.source_specialization or "не выбрана"}; '
+                    f'статус: Запрошен'
+                ),
+                new_value=(
+                    f'Специализация: {transfer.target_specialization}; '
+                    f'статус: {transfer.get_status_display()}; '
+                    f'вахта: {transfer.watch_period}'
+                ),
+                comment=transfer.review_comment,
+                object_repr=f'{transfer.employee.full_name} — {transfer.target_specialization}',
+            )
+            emit_employee_changed(transfer.employee, 'temporary_transfer_reviewed')
+    except ValidationError as error:
+        messages.error(request, '; '.join(error.messages))
+    else:
+        if action == 'approve':
+            suffix = f' Первичный PIN: {primary_code}' if primary_code else ''
+            messages.success(
+                request,
+                f'Временный перевод одобрен до {transfer.effective_to:%d.%m.%Y}.{suffix}',
+            )
+        else:
+            messages.success(request, 'Заявка на временный перевод отклонена.')
+    return redirect('oup_employee_detail', employee_id=employee_id)
 
 
 @require_POST

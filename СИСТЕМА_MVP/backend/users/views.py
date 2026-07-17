@@ -57,8 +57,19 @@ from .forms import (
     DriverPrimaryRegistrationForm,
     is_valid_russian_mobile_phone,
     normalize_phone,
+    PersonnelPositionReferenceForm,
 )
-from .models import AdminActionLog, AdminConflict, DriverPrimaryRegistration, Employee, EmployeeAccess, Role
+from .models import (
+    AdminActionLog,
+    AdminConflict,
+    DriverPrimaryRegistration,
+    Employee,
+    EmployeeAccess,
+    PersonnelPosition,
+    ProductionSpecialization,
+    Role,
+    TemporaryWorkTransfer,
+)
 from .oup_undo import (
     get_oup_action_undo_state,
     undo_oup_action,
@@ -72,6 +83,13 @@ from .session_device import (
     detect_session_device_kind,
     get_session_device_kind,
     set_session_device_kind,
+)
+from .work_profiles import (
+    cancel_temporary_work_transfer,
+    effective_specialization,
+    employee_has_effective_access_role,
+    expire_due_temporary_work_transfers,
+    sync_employee_production_access,
 )
 
 
@@ -300,6 +318,7 @@ def get_current_access(request):
     access_id = request.session.get('employee_access_id')
     if not access_id:
         return None
+    expire_due_temporary_work_transfers()
     access_queryset = (
         EmployeeAccess.objects
         .select_related('employee', 'role')
@@ -315,7 +334,10 @@ def get_current_access(request):
     role_app = get_role_app_for_request(request)
     if role_app:
         access_queryset = access_queryset.filter(role__code=role_app.role_code)
-    return access_queryset.first()
+    access = access_queryset.first()
+    if access and not employee_has_effective_access_role(access.employee, access.role.code):
+        return None
+    return access
 
 
 def require_admin_access(request):
@@ -412,6 +434,12 @@ def login_view(request):
             access_code,
             role_code=role_app.role_code if role_app else None,
         )
+        if access and not employee_has_effective_access_role(
+            access.employee,
+            access.role.code,
+            allow_pending_access=True,
+        ):
+            access = None
         if access:
             request.session.cycle_key()
             access.last_login_at = timezone.now()
@@ -454,6 +482,12 @@ def activate_access_view(request):
     if role_app:
         access_queryset = access_queryset.filter(role__code=role_app.role_code)
     access = access_queryset.first()
+    if access and not employee_has_effective_access_role(
+        access.employee,
+        access.role.code,
+        allow_pending_access=True,
+    ):
+        access = None
     if not access:
         request.session.pop('pending_activation_access_id', None)
         return redirect('login')
@@ -548,6 +582,8 @@ def system_admin_dashboard_view(request):
         for item in EmployeeAccess.objects.values('status').annotate(total=Count('id'))
     }
     reference_counts = [
+        ('Кадровые должности', PersonnelPosition.objects.count(), '/system-admin/references/personnel-positions/'),
+        ('Производственные специализации', ProductionSpecialization.objects.count(), '/system-admin/references/production-specializations/'),
         ('Виды техники', EquipmentType.objects.count(), '/admin/references/equipmenttype/'),
         ('Техника', Equipment.objects.count(), '/admin/references/equipment/'),
         ('Состояния техники', EquipmentState.objects.count(), '/admin/references/equipmentstate/'),
@@ -628,6 +664,8 @@ def system_admin_references_view(request):
             'title': 'Сотрудники и доступы',
             'items': [
                 {'name': 'Сотрудники', 'count': Employee.objects.count(), 'url': 'system_admin_employees', 'external_url': ''},
+                {'name': 'Кадровые должности', 'count': PersonnelPosition.objects.count(), 'url': '', 'external_url': '/admin/users/personnelposition/', 'detail_code': 'personnel-positions'},
+                {'name': 'Производственные специализации', 'count': ProductionSpecialization.objects.count(), 'url': '', 'external_url': '/admin/users/productionspecialization/', 'detail_code': 'production-specializations'},
                 {'name': 'Роли', 'count': Role.objects.count(), 'url': '', 'external_url': '/admin/users/role/'},
                 {'name': 'Доступы', 'count': EmployeeAccess.objects.count(), 'url': '', 'external_url': '/admin/users/employeeaccess/'},
             ],
@@ -709,6 +747,32 @@ def system_admin_references_view(request):
 
 def get_system_admin_reference_configs():
     return {
+        'personnel-positions': {
+            'title': 'Кадровые должности',
+            'section': 'Сотрудники и доступы',
+            'model': PersonnelPosition,
+            'form_class': PersonnelPositionReferenceForm,
+            'description': 'Официальные должности из 1С. Одна должность действует у сотрудника одновременно; она определяет допустимые базовые специализации.',
+            'fields': ['name', 'code', 'requires_specialization', 'allowed_specializations', 'default_specialization', 'is_active'],
+            'search_fields': ['name', 'code', 'allowed_specializations__name', 'default_specialization__name'],
+            'preview_fields': ['code', 'requires_specialization', 'allowed_specializations', 'default_specialization', 'is_active'],
+            'prefetch_related': ['allowed_specializations'],
+            'select_related': ['default_specialization'],
+            'initial': {'is_active': True},
+            'admin_url': '/admin/users/personnelposition/',
+        },
+        'production-specializations': {
+            'title': 'Производственные специализации',
+            'section': 'Сотрудники и доступы',
+            'model': ProductionSpecialization,
+            'description': 'Определяют доступность сотрудника для расстановки и соответствующее приложение. Базовая специализация может быть временно заменена переводом до конца вахты.',
+            'fields': ['name', 'code', 'equipment_type', 'access_role', 'is_active'],
+            'search_fields': ['name', 'code', 'equipment_type__name', 'access_role__name'],
+            'preview_fields': ['code', 'equipment_type', 'access_role', 'is_active'],
+            'select_related': ['equipment_type', 'access_role'],
+            'initial': {'is_active': True},
+            'admin_url': '/admin/users/productionspecialization/',
+        },
         'equipment-types': {
             'title': 'Виды техники',
             'section': 'Техника',
@@ -1424,16 +1488,11 @@ def system_admin_employee_create_view(request):
         if form.is_valid():
             try:
                 with transaction.atomic():
-                    role = form.cleaned_data['role']
+                    role = form.cleaned_data.get('role')
                     employee = form.save(commit=False)
-                    if role.code in {
-                        Employee.WorkCategory.DRIVER,
-                        Employee.WorkCategory.EXCAVATOR_OPERATOR,
-                    }:
-                        employee.work_category = role.code
                     employee.save()
                     code = ''
-                    if form.cleaned_data['generate_access']:
+                    if role and form.cleaned_data['generate_access']:
                         code = generate_unique_access_code()
                         EmployeeAccess.objects.create(
                             employee=employee,
@@ -1442,7 +1501,7 @@ def system_admin_employee_create_view(request):
                             status=EmployeeAccess.Status.NOT_ACTIVATED,
                             primary_code_issued_at=timezone.now(),
                         )
-                    else:
+                    elif role:
                         EmployeeAccess.objects.create(
                             employee=employee,
                             role=role,
@@ -1465,7 +1524,10 @@ def system_admin_employee_create_view(request):
                         access.employee,
                         'Создан сотрудник и выдан первичный пинкод',
                         employee,
-                        new_value=f'Роль: {role}; назначение: {assignment_label}; пинкод: {code}',
+                        new_value=(
+                            f'Доступ: {role or "не требуется"}; '
+                            f'назначение: {assignment_label}; пинкод: {code}'
+                        ),
                     )
                     messages.success(
                         request,
@@ -1477,7 +1539,7 @@ def system_admin_employee_create_view(request):
                         access.employee,
                         'Создан сотрудник без пинкода',
                         employee,
-                        new_value=f'Роль: {role}; назначение: {assignment_label}',
+                        new_value=f'Доступ: {role or "не требуется"}; назначение: {assignment_label}',
                     )
                     messages.success(request, 'Сотрудник создан.', extra_tags='employee-card-silent')
                 return redirect_after_admin_action(request, 'system_admin_employee_detail', employee_id=employee.id)
@@ -1531,7 +1593,10 @@ def system_admin_employee_detail_view(request, employee_id):
                         form._meta.fields,
                         form._meta.exclude,
                     )
+                    previous_specialization_id = locked_employee.base_specialization_id
                     saved_employee = form.save()
+                    if previous_specialization_id != saved_employee.base_specialization_id:
+                        sync_employee_production_access(employee=saved_employee)
                     work_assignment = form.save_work_assignment(assigned_by=access.employee)
             except ValidationError as error:
                 form.add_error(
@@ -1571,7 +1636,10 @@ def system_admin_employee_detail_view(request, employee_id):
     )
     role_form_initial = {'role': current_role_access.role_id} if current_role_access else None
     active_equipment_assignment = get_active_equipment_assignment(employee)
+    effective_employee_specialization = effective_specialization(employee)
     work_assignment_role = active_equipment_assignment.role if active_equipment_assignment else None
+    if not work_assignment_role and effective_employee_specialization:
+        work_assignment_role = effective_employee_specialization.access_role
     if not work_assignment_role and current_role_access:
         work_assignment_role = current_role_access.role
 
@@ -1595,6 +1663,18 @@ def system_admin_employee_detail_view(request, employee_id):
             'work_assignment_supports_equipment': bool(
                 work_assignment_role
                 and work_assignment_role.code in WORK_ASSIGNMENT_ROLE_EQUIPMENT_TYPES
+            ),
+            'effective_specialization': effective_employee_specialization,
+            'temporary_work_transfers': (
+                employee.temporary_work_transfers
+                .select_related(
+                    'source_specialization',
+                    'target_specialization',
+                    'watch_period',
+                    'requested_by',
+                    'reviewed_by',
+                )
+                .order_by('-requested_at')[:8]
             ),
             'can_restore_employee': (
                 employee.status in ADMIN_RESTORABLE_EMPLOYEE_STATUSES
@@ -1626,6 +1706,20 @@ def system_admin_generate_access_view(request, employee_id):
                         employee_id=employee.id,
                     )
                 role = form.cleaned_data['role']
+                if (
+                    employee.personnel_position_id
+                    and role.code in {'driver', 'excavator_operator'}
+                    and not employee_has_effective_access_role(employee, role.code)
+                ):
+                    messages.error(
+                        request,
+                        'Сначала назначьте сотруднику подходящую производственную специализацию.',
+                    )
+                    return redirect_after_admin_action(
+                        request,
+                        'system_admin_employee_detail',
+                        employee_id=employee.id,
+                    )
                 code = generate_unique_access_code()
                 employee_access, _created = EmployeeAccess.objects.update_or_create(
                     employee=employee,
@@ -1682,6 +1776,21 @@ def system_admin_change_access_role_view(request, access_id):
             messages.error(request, 'Сначала закройте текущую смену сотрудника, затем измените его роль.')
             return redirect_after_admin_action(request, 'system_admin_employee_detail', employee_id=employee_id)
         if (
+            locked_employee.personnel_position_id
+            and (
+                employee_access.role.code in {'driver', 'excavator_operator'}
+                or new_role.code in {'driver', 'excavator_operator'}
+            )
+        ):
+            expected_specialization = effective_specialization(locked_employee)
+            expected_role_id = getattr(expected_specialization, 'access_role_id', None)
+            if expected_role_id != new_role.id:
+                messages.error(
+                    request,
+                    'Производственное приложение меняется через кадровую должность и специализацию, а не вручную.',
+                )
+                return redirect_after_admin_action(request, 'system_admin_employee_detail', employee_id=employee_id)
+        if (
             EmployeeAccess.objects
             .filter(employee_id=employee_id, role=new_role)
             .exclude(id=employee_access.id)
@@ -1712,6 +1821,61 @@ def system_admin_change_access_role_view(request, access_id):
         request,
         f'Роль изменена: {old_role.name} → {new_role.name}. PIN и пароль сохранены.{assignment_note}',
     )
+    return redirect_after_admin_action(request, 'system_admin_employee_detail', employee_id=employee_id)
+
+
+@require_POST
+def system_admin_cancel_temporary_work_transfer_view(request, transfer_id):
+    admin_access = require_admin_access(request)
+    if not admin_access:
+        return redirect('role_home')
+
+    transfer = get_object_or_404(
+        TemporaryWorkTransfer.objects.select_related(
+            'employee',
+            'source_specialization',
+            'target_specialization',
+        ),
+        id=transfer_id,
+    )
+    employee_id = transfer.employee_id
+    try:
+        with transaction.atomic():
+            previous_specialization = transfer.target_specialization
+            transfer, restored_access = cancel_temporary_work_transfer(
+                transfer=transfer,
+                cancelled_by=admin_access.employee,
+                comment=request.POST.get('comment', ''),
+            )
+            AdminActionLog.objects.create(
+                actor=admin_access.employee,
+                action='Администратор: отменен временный производственный перевод',
+                action_code='admin_temporary_transfer_cancelled',
+                object_type='TemporaryWorkTransfer',
+                object_id=str(transfer.id),
+                object_repr=f'{transfer.employee.full_name} — {previous_specialization}',
+                old_value=f'Специализация: {previous_specialization}; статус: Одобрен',
+                new_value=(
+                    f'Специализация: {transfer.source_specialization or "не выбрана"}; '
+                    'статус: Отменен'
+                ),
+                comment=transfer.review_comment,
+            )
+            bump_operational_state(
+                'Employee:admin_temporary_transfer_cancelled',
+                event_type='personnel_changed',
+                object_type='Employee',
+                object_id=employee_id,
+                payload={
+                    'action': 'admin_temporary_transfer_cancelled',
+                    'employee_ids': [employee_id],
+                    'access_id': restored_access.id if restored_access else None,
+                },
+            )
+    except ValidationError as error:
+        messages.error(request, '; '.join(error.messages))
+    else:
+        messages.success(request, 'Временный перевод отменен. Сотрудник возвращен на базовую специализацию.')
     return redirect_after_admin_action(request, 'system_admin_employee_detail', employee_id=employee_id)
 
 

@@ -21,6 +21,7 @@ from .oup_views import (
     oup_logs_view,
     oup_shift_close_view,
     oup_shift_start_view,
+    oup_temporary_work_transfer_review_view,
 )
 from .views import (
     activate_access_view,
@@ -37,6 +38,7 @@ from .views import (
     role_home_view,
     system_admin_access_action_view,
     system_admin_change_access_role_view,
+    system_admin_cancel_temporary_work_transfer_view,
     system_admin_access_export_view,
     system_admin_conflict_action_view,
     system_admin_conflicts_view,
@@ -69,6 +71,7 @@ urlpatterns = [
     path('oup/employees/<int:employee_id>/access/issue/', oup_employee_access_issue_view, name='oup_employee_access_issue'),
     path('oup/accesses/<int:access_id>/deactivate/', oup_employee_access_deactivate_view, name='oup_employee_access_deactivate'),
     path('oup/employees/<int:employee_id>/dismiss/', oup_employee_dismiss_view, name='oup_employee_dismiss'),
+    path('oup/transfers/<int:transfer_id>/<str:action>/', oup_temporary_work_transfer_review_view, name='oup_temporary_work_transfer_review'),
     path('oup/dismissed/', oup_employees_view, {'scope': 'dismissed'}, name='oup_dismissed_employees'),
     path('oup/log/', oup_logs_view, name='oup_logs'),
     path('oup/shift/start/', oup_shift_start_view, name='oup_shift_start'),
@@ -103,6 +106,11 @@ urlpatterns = [
     path('system-admin/employees/<int:employee_id>/', system_admin_employee_detail_view, name='system_admin_employee_detail'),
     path('system-admin/employees/<int:employee_id>/generate-access/', system_admin_generate_access_view, name='system_admin_generate_access'),
     path('system-admin/accesses/<int:access_id>/change-role/', system_admin_change_access_role_view, name='system_admin_change_access_role'),
+    path(
+        'system-admin/transfers/<int:transfer_id>/cancel/',
+        system_admin_cancel_temporary_work_transfer_view,
+        name='system_admin_temporary_work_transfer_cancel',
+    ),
     path('system-admin/employees/<int:employee_id>/<str:action>/', system_admin_employee_status_action_view, name='system_admin_employee_status_action'),
     path('system-admin/accesses/<int:access_id>/<str:action>/', system_admin_access_action_view, name='system_admin_access_action'),
     path('system-admin/export/employees/', system_admin_employee_export_view, name='system_admin_employee_export'),

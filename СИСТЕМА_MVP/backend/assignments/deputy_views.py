@@ -16,8 +16,14 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.worksheet.page import PageMargins
 
 from references.models import Equipment
-from users.models import Employee, EmployeeAccess, Role
+from shifts.models import WatchPeriod
+from users.models import AdminActionLog, Employee, EmployeeAccess, ProductionSpecialization, Role, TemporaryWorkTransfer
 from users.role_apps import role_app_manifest_response, role_app_service_worker_response
+from users.work_profiles import (
+    eligible_employee_ids_for_work_role,
+    expire_due_temporary_work_transfers,
+    request_temporary_work_transfer,
+)
 
 from .models import (
     AssignmentStatus,
@@ -94,7 +100,7 @@ DEPUTY_MANIFEST = {
 
 DEPUTY_SERVICE_WORKER_JS = r"""
 const CACHE_PREFIX = "deputy-mining-manager-desktop-shell-";
-const CACHE_NAME = `${CACHE_PREFIX}v6`;
+const CACHE_NAME = `${CACHE_PREFIX}v7`;
 const APP_SCOPE = "/deputy-mining-manager/";
 const MANIFEST_URL = "/deputy-mining-manager.webmanifest";
 const LEGACY_ROOT_FALLBACK_URL = "/mining-master/assignments/";
@@ -353,7 +359,11 @@ def _employee_payload(employee):
         'id': employee.id,
         'full_name': employee.full_name or '',
         'short_name': _employee_short_name(employee),
-        'position_label': employee.position or '',
+        'position_label': (
+            employee.personnel_position.name
+            if getattr(employee, 'personnel_position_id', None)
+            else employee.position or ''
+        ),
         'personnel_number': employee.personnel_number or '',
         'phone': employee.phone or '',
         'photo_url': photo_url,
@@ -392,7 +402,7 @@ def _slot_issue(slot, eligible_employee_ids, other_role_assignment_employee_ids)
     if not employee.is_active or employee.status != Employee.Status.ACTIVE:
         return 'Сотрудник неактивен'
     if employee.id not in eligible_employee_ids:
-        return 'Не соответствует рабочей категории'
+        return 'Не соответствует производственной специализации'
     if employee.id in other_role_assignment_employee_ids:
         return 'Назначен по другой роли'
     if not slot.equipment.is_active:
@@ -428,27 +438,20 @@ def build_crew_plan_payload(plan, *, request=None):
 
     slots = list(
         plan.slots
-        .select_related('equipment', 'equipment__equipment_type', 'equipment__model', 'employee', 'baseline_employee')
+        .select_related(
+            'equipment',
+            'equipment__equipment_type',
+            'equipment__model',
+            'employee',
+            'employee__personnel_position',
+            'baseline_employee',
+            'baseline_employee__personnel_position',
+        )
         .order_by('equipment__garage_number', 'shift_type')
     )
     assigned_employee_ids = {slot.employee_id for slot in slots if slot.employee_id}
-    activated_employee_ids = set(
-        EmployeeAccess.objects.filter(
-            role=plan.role,
-            is_active=True,
-            status=EmployeeAccess.Status.ACTIVATED,
-            employee__is_active=True,
-            employee__status=Employee.Status.ACTIVE,
-        ).values_list('employee_id', flat=True)
-    )
-    eligible_employee_ids = set(
-        Employee.objects.filter(
-            Q(work_category=plan.role.code)
-            | Q(work_category=Employee.WorkCategory.OTHER, id__in=activated_employee_ids),
-            is_active=True,
-            status=Employee.Status.ACTIVE,
-        ).values_list('id', flat=True)
-    )
+    expire_due_temporary_work_transfers()
+    eligible_employee_ids = eligible_employee_ids_for_work_role(plan.role.code)
     other_role_assignment_employee_ids = set(
         EquipmentAssignment.objects.filter(
             employee_id__in=eligible_employee_ids,
@@ -463,12 +466,43 @@ def build_crew_plan_payload(plan, *, request=None):
     )
     editable = plan.status == CrewPlanStatus.DRAFT and plan.work_date == production_work_date()
     eligible_employees = []
+    transfer_candidates = []
+    transfer_specializations = []
+    current_watch_periods = []
     if editable:
         eligible_employees = list(
             Employee.objects.filter(id__in=eligible_employee_ids)
+            .select_related('personnel_position')
             .exclude(id__in=assigned_employee_ids)
             .exclude(id__in=other_role_assignment_employee_ids)
             .order_by('full_name')
+        )
+        transfer_pending_employee_ids = TemporaryWorkTransfer.objects.filter(
+            status__in=[
+                TemporaryWorkTransfer.Status.REQUESTED,
+                TemporaryWorkTransfer.Status.APPROVED,
+            ],
+            effective_to__gte=timezone.localdate(),
+        ).values_list('employee_id', flat=True)
+        transfer_candidates = list(
+            Employee.objects.filter(is_active=True, status=Employee.Status.ACTIVE)
+            .exclude(id__in=eligible_employee_ids)
+            .exclude(id__in=transfer_pending_employee_ids)
+            .select_related('personnel_position')
+            .order_by('full_name')
+        )
+        transfer_specializations = list(
+            ProductionSpecialization.objects.filter(
+                is_active=True,
+                access_role=plan.role,
+            ).order_by('name')
+        )
+        current_watch_periods = list(
+            WatchPeriod.objects.filter(
+                is_active=True,
+                starts_on__lte=timezone.localdate(),
+                ends_on__gte=timezone.localdate(),
+            ).order_by('ends_on', 'name')
         )
 
     slot_map = {}
@@ -580,6 +614,7 @@ def build_crew_plan_payload(plan, *, request=None):
             'slot': reverse('deputy_mining_manager_slot'),
             'publish': reverse('deputy_mining_manager_publish'),
             'export': reverse('deputy_mining_manager_export', args=[plan.id]),
+            'temporary_transfer_request': reverse('deputy_mining_manager_temporary_transfer_request'),
         },
         'summary': {
             'equipment_total': len(rows),
@@ -589,6 +624,29 @@ def build_crew_plan_payload(plan, *, request=None):
             'changed_count': changed_count,
         },
         'employees': [_employee_payload(employee) for employee in eligible_employees],
+        'temporary_transfer': {
+            'available': bool(
+                editable
+                and transfer_candidates
+                and transfer_specializations
+                and current_watch_periods
+            ),
+            'candidates': [_employee_payload(employee) for employee in transfer_candidates],
+            'target_specializations': [
+                {'id': specialization.id, 'name': specialization.name}
+                for specialization in transfer_specializations
+            ],
+            'watch_periods': [
+                {
+                    'id': period.id,
+                    'label': period.name,
+                    'starts_on': period.starts_on.isoformat(),
+                    'ends_on': period.ends_on.isoformat(),
+                    'ends_on_label': period.ends_on.strftime('%d.%m.%Y'),
+                }
+                for period in current_watch_periods
+            ],
+        },
         'rows': rows,
     }
 
@@ -986,6 +1044,70 @@ def deputy_mining_manager_publish_view(request):
         'ok': True,
         'published': True,
         'payload': next_payload,
+    })
+
+
+@require_POST
+def deputy_mining_manager_temporary_transfer_request_view(request):
+    """Submit a bounded transfer request for OUP approval from the placement screen."""
+    access = deputy_access_from_request(request)
+    if not access:
+        return JsonResponse({'ok': False, 'error': 'Недостаточно прав.'}, status=403)
+    try:
+        payload = _json_payload(request)
+        plan = get_object_or_404(
+            CrewPlan.objects.select_related('role'),
+            id=payload.get('plan_id'),
+        )
+        if plan.status != CrewPlanStatus.DRAFT or plan.work_date != production_work_date():
+            raise ValidationError('Запрос можно оформить только из текущего черновика расстановки.')
+        employee = get_object_or_404(
+            Employee.objects.select_related('personnel_position', 'base_specialization'),
+            id=payload.get('employee_id'),
+        )
+        specialization = get_object_or_404(
+            ProductionSpecialization.objects.select_related('access_role'),
+            id=payload.get('target_specialization_id'),
+            is_active=True,
+        )
+        if specialization.access_role_id != plan.role_id:
+            raise ValidationError('Выберите специализацию для текущей группы техники.')
+        watch_period = get_object_or_404(
+            WatchPeriod,
+            id=payload.get('watch_period_id'),
+            is_active=True,
+        )
+        transfer = request_temporary_work_transfer(
+            employee=employee,
+            target_specialization=specialization,
+            watch_period=watch_period,
+            requested_by=access.employee,
+            reason=(payload.get('reason') or '').strip(),
+        )
+        AdminActionLog.objects.create(
+            actor=access.employee,
+            action='Заместитель начальника: запрошен временный производственный перевод',
+            action_code='deputy_temporary_transfer_requested',
+            object_type='TemporaryWorkTransfer',
+            object_id=str(transfer.id),
+            object_repr=f'{employee.full_name} — {specialization.name}',
+            old_value=(
+                f'Специализация: {transfer.source_specialization or "не выбрана"}; '
+                'статус: без временного перевода'
+            ),
+            new_value=(
+                f'Специализация: {specialization.name}; '
+                f'запрошен до: {transfer.effective_to:%d.%m.%Y}'
+            ),
+            comment=transfer.reason,
+        )
+    except (TypeError, ValueError, ValidationError) as error:
+        if isinstance(error, ValidationError):
+            return _validation_response(error)
+        return JsonResponse({'ok': False, 'error': 'Проверьте выбранные данные и повторите запрос.'}, status=400)
+    return JsonResponse({
+        'ok': True,
+        'payload': build_crew_plan_payload(plan, request=request),
     })
 
 

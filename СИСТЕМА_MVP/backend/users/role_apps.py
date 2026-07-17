@@ -136,7 +136,7 @@ ROLE_APPS = (
         icon_slug='oup',
         manifest_url='/oup.webmanifest',
         service_worker_url='/oup-sw.js',
-        shell_version='oup-shell-v2',
+        shell_version='oup-shell-v3',
     ),
     RoleApp(
         role_code='mechanic',
@@ -184,7 +184,7 @@ ROLE_APPS = (
         icon_slug='admin',
         manifest_url='/system-admin.webmanifest',
         service_worker_url='/system-admin-sw.js',
-        shell_version='system-admin-shell-v2',
+        shell_version='system-admin-shell-v3',
     ),
 )
 

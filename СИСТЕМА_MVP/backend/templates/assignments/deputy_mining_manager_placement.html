@@ -42,6 +42,12 @@
                     <span class="deputy-autosave-dot" aria-hidden="true"></span>
                     <span data-autosave-text>Все изменения сохранены</span>
                 </span>
+                <button class="admin-button admin-button-secondary deputy-transfer-button"
+                        type="button"
+                        data-temporary-transfer-open
+                        title="Запросить ОУП временный перевод сотрудника на эту вахту">
+                    Запросить перевод
+                </button>
                 <a class="admin-button admin-button-secondary deputy-export-button"
                    href="#"
                    data-export-excel
@@ -163,6 +169,41 @@
         <button type="button" class="admin-button admin-button-secondary" data-publish-cancel>Отмена</button>
         <button type="button" class="admin-button admin-button-primary" data-publish-confirm>Опубликовать</button>
     </div>
+</dialog>
+
+<dialog class="deputy-dialog deputy-transfer-dialog" data-temporary-transfer-dialog aria-labelledby="deputy-transfer-title">
+    <form data-temporary-transfer-form>
+        <div class="deputy-dialog-head">
+            <div>
+                <span>Временный перевод</span>
+                <h2 id="deputy-transfer-title">Запрос в ОУП</h2>
+                <p>Действует только до конца выбранной текущей вахты.</p>
+            </div>
+            <button type="button" class="deputy-dialog-close" data-temporary-transfer-cancel aria-label="Закрыть">×</button>
+        </div>
+        <div class="deputy-transfer-fields">
+            <label>
+                <span>Сотрудник</span>
+                <select data-temporary-transfer-employee required></select>
+            </label>
+            <label>
+                <span>Производственная специализация</span>
+                <select data-temporary-transfer-specialization required></select>
+            </label>
+            <label>
+                <span>Вахта</span>
+                <select data-temporary-transfer-watch-period required></select>
+            </label>
+            <label class="deputy-transfer-reason-field">
+                <span>Причина</span>
+                <textarea data-temporary-transfer-reason rows="3" placeholder="Например: требуется подмена на период вахты"></textarea>
+            </label>
+        </div>
+        <div class="deputy-dialog-actions">
+            <button type="button" class="admin-button admin-button-secondary" data-temporary-transfer-cancel>Отмена</button>
+            <button type="submit" class="admin-button admin-button-primary" data-temporary-transfer-submit>Отправить в ОУП</button>
+        </div>
+    </form>
 </dialog>
 
 <div class="deputy-toast" data-deputy-toast role="status" aria-live="polite" hidden></div>
