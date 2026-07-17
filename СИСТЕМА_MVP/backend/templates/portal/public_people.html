@@ -1,0 +1,28 @@
+{% extends 'portal/base_public.html' %}
+{% block title %}Люди компании — Коппер Рисорсез{% endblock %}
+{% block content %}
+<section class="page-hero page-hero--people">
+    <div class="page-container"><span class="eyebrow">Наша команда</span><h1>Люди Коппер Рисорсез</h1><p>Истории тех, кто каждую вахту делает общее дело.</p></div>
+</section>
+<section class="public-section">
+    <div class="page-container">
+        {% if publications %}
+        <div class="people-stories-grid">
+            {% for publication in publications %}
+            <article class="person-story-card">
+                <a href="{% url 'portal:public_publication_detail' publication.pk %}">
+                    <div class="person-story-card__media">
+                        {% if publication.cover_image %}<img src="{% url 'portal:publication_cover' publication.pk %}" alt="">{% else %}<span class="publication-placeholder"><span>КР</span></span>{% endif %}
+                    </div>
+                    <div class="person-story-card__body"><span>{{ publication.published_at|date:'d.m.Y' }}</span><h2>{{ publication.title }}</h2><p>{{ publication.summary|default:publication.body|striptags|truncatewords:24 }}</p><strong>Читать историю →</strong></div>
+                </a>
+            </article>
+            {% endfor %}
+        </div>
+        {% include 'portal/_pagination.html' %}
+        {% else %}
+            {% include 'portal/_empty_state.html' with empty_title='Первые истории уже готовятся' empty_text='Интервью публикуются только с согласия сотрудника.' %}
+        {% endif %}
+    </div>
+</section>
+{% endblock %}

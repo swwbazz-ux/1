@@ -1,0 +1,21 @@
+{% extends 'portal/base_public.html' %}
+{% block title %}Вакансии — Коппер Рисорсез{% endblock %}
+{% block content %}
+<section class="page-hero page-hero--compact">
+    <div class="page-container"><span class="eyebrow">Работа в компании</span><h1>Вакансии</h1><p>Мы работаем в производственной команде, где важны опыт, ответственность и внимание к безопасности.</p></div>
+</section>
+<section class="public-section">
+    <div class="page-container vacancies-layout">
+        <div class="vacancies-callout">
+            <span class="eyebrow">Актуальные предложения</span>
+            <h2>Найдите подходящую работу</h2>
+            <p>Полный список вакансий, условия и способ отклика доступны на официальной странице работодателя.</p>
+            <a class="button button--primary" href="{{ company.vacancies_url|default:'https://khabarovsk.hh.ru/employer/11278306' }}" target="_blank" rel="noopener">Открыть вакансии <span aria-hidden="true">↗</span></a>
+        </div>
+        <div class="work-principles">
+            <h2>Что важно в нашей работе</h2>
+            <ul class="check-list"><li>Безопасность людей и производства</li><li>Профессионализм и ответственность</li><li>Командная работа</li><li>Улучшение производственных процессов</li></ul>
+        </div>
+    </div>
+</section>
+{% endblock %}

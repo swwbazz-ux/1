@@ -1,0 +1,30 @@
+{% extends 'portal/base_public.html' %}
+{% block title %}Новости — ООО «Коппер Рисорсез»{% endblock %}
+{% block content %}
+<section class="page-hero page-hero--compact">
+    <div class="page-container"><span class="eyebrow">Жизнь компании</span><h1>Новости и истории</h1><p>События, достижения и люди ООО «Коппер Рисорсез».</p></div>
+</section>
+<section class="public-section">
+    <div class="page-container">
+        {% if publications %}
+        <div class="publications-grid">
+            {% for publication in publications %}
+            <article class="publication-card">
+                <a class="publication-card__media" href="{% url 'portal:public_publication_detail' publication.pk %}" tabindex="-1" aria-hidden="true">
+                    {% if publication.cover_image %}<img src="{% url 'portal:publication_cover' publication.pk %}" alt="">{% else %}<span class="publication-placeholder"><span>КР</span></span>{% endif %}
+                </a>
+                <div class="publication-card__body">
+                    <div class="meta-row"><span>{{ publication.get_publication_type_display|default:'Новости' }}</span><time datetime="{{ publication.published_at|date:'c' }}">{{ publication.published_at|date:'d.m.Y' }}</time></div>
+                    <h2><a href="{% url 'portal:public_publication_detail' publication.pk %}">{{ publication.title }}</a></h2>
+                    <p>{{ publication.summary|default:publication.body|striptags|truncatewords:28 }}</p>
+                </div>
+            </article>
+            {% endfor %}
+        </div>
+        {% include 'portal/_pagination.html' %}
+        {% else %}
+            {% include 'portal/_empty_state.html' with empty_title='Пока нет опубликованных новостей' empty_text='Мы готовим первые материалы о жизни компании.' %}
+        {% endif %}
+    </div>
+</section>
+{% endblock %}

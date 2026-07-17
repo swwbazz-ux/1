@@ -1,0 +1,24 @@
+{% extends 'portal/base_public.html' %}
+{% block title %}Контакты — Коппер Рисорсез{% endblock %}
+{% block content %}
+<section class="page-hero page-hero--compact">
+    <div class="page-container"><span class="eyebrow">Контакты</span><h1>Как с нами связаться</h1><p>Реквизиты и открытые каналы связи ООО «Коппер Рисорсез».</p></div>
+</section>
+<section class="public-section">
+    <div class="page-container contacts-grid">
+        <div class="contact-panel">
+            <span class="eyebrow">Юридический адрес</span>
+            <h2>ООО «Коппер Рисорсез»</h2>
+            <address>454090, Челябинская область,<br>г. Челябинск, ул. Труда, д. 64А</address>
+            {% if contact_email %}<p><strong>Электронная почта</strong><a href="mailto:{{ contact_email }}">{{ contact_email }}</a></p>{% endif %}
+            {% if contact_phone %}<p><strong>Телефон</strong><a href="tel:{{ contact_phone_link|default:contact_phone }}">{{ contact_phone }}</a></p>{% endif %}
+        </div>
+        <div class="requisites-panel">
+            <h2>Реквизиты</h2>
+            <dl class="definition-list"><div><dt>ИНН</dt><dd>6685213657</dd></div><div><dt>ОГРН</dt><dd>1236600056945</dd></div><div><dt>КПП</dt><dd>745301001</dd></div></dl>
+            <p class="muted-note">Для трудоустройства используйте раздел «Вакансии». Действующие сотрудники могут обратиться к руководству через закрытый портал.</p>
+            <div class="button-row"><a class="button button--secondary" href="{% url 'portal:public_vacancies' %}">Вакансии</a><a class="button button--ghost" href="{% url 'portal:login' %}">Вход для сотрудников</a></div>
+        </div>
+    </div>
+</section>
+{% endblock %}

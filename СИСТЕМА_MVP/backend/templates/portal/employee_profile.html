@@ -1,0 +1,27 @@
+{% extends 'portal/base_internal.html' %}
+{% block title %}{{ employee.full_name }}{% endblock %}
+{% block content %}
+<a class="back-link" href="{% url 'portal:people' %}">← Ко всем коллегам</a>
+<section class="employee-profile">
+    <header class="employee-profile__header">
+        {% if employee.photo %}<img src="{% url 'portal:employee_photo' employee.pk %}" alt="">{% else %}<span class="avatar-fallback avatar-fallback--profile">{{ employee.full_name|first }}</span>{% endif %}
+        <div><span class="screen-kicker">Сотрудник участка № 2</span><h1>{{ employee.full_name }}</h1><p>{{ position|default:'Сотрудник' }}</p></div>
+    </header>
+    <div class="employee-profile__facts">
+        <div><span>В компании</span><strong>{{ tenure|default:'Данные уточняются' }}</strong></div>
+        {% if employee.hired_at %}<div><span>Дата начала работы</span><strong>{{ employee.hired_at|date:'d.m.Y' }}</strong></div>{% endif %}
+        {% if equipment %}<div><span>Текущая техника</span><strong>{{ equipment }}</strong></div>{% endif %}
+    </div>
+</section>
+
+<div class="profile-content-grid">
+    <section class="content-panel">
+        <div class="section-title-row"><h2>Награды и достижения</h2></div>
+        {% if awards %}<div class="achievement-list">{% for item in awards %}<div><span class="achievement-list__mark" aria-hidden="true">★</span><span><strong>{{ item.title|default:item.premium_level }}</strong><small>{{ item.date|date:'d.m.Y' }}{% if item.description %} · {{ item.description }}{% endif %}</small></span></div>{% endfor %}</div>{% else %}<div class="inline-empty"><strong>Пока нет записей</strong><span>Здесь появится проверенная история наград.</span></div>{% endif %}
+    </section>
+    <section class="content-panel">
+        <div class="section-title-row"><h2>Истории и интервью</h2></div>
+        {% if publications %}<div class="profile-story-list">{% for publication in publications %}<a href="{% url 'portal:publication_detail' publication.pk %}"><span><small>{{ publication.published_at|date:'d.m.Y' }}</small><strong>{{ publication.title }}</strong></span><b aria-hidden="true">→</b></a>{% endfor %}</div>{% else %}<div class="inline-empty"><strong>Историй пока нет</strong><span>Интервью появится только с согласия сотрудника.</span></div>{% endif %}
+    </section>
+</div>
+{% endblock %}

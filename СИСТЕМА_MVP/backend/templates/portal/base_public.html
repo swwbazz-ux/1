@@ -1,0 +1,69 @@
+{% load static %}
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#1e1e1e">
+    <meta name="description" content="{% block meta_description %}ООО «Коппер Рисорсез» — горнотранспортная компания.{% endblock %}">
+    <title>{% block title %}ООО «Коппер Рисорсез»{% endblock %}</title>
+    <link rel="stylesheet" href="{% static 'portal/css/portal.css' %}?v=2">
+    {% block extra_head %}{% endblock %}
+</head>
+<body class="public-shell {% block body_class %}{% endblock %}">
+    <a class="skip-link" href="#main-content">К содержанию</a>
+    <header class="public-header" data-site-header>
+        <div class="page-container public-header__inner">
+            <a class="brand" href="{% url 'portal:public_home' %}" aria-label="Коппер Рисорсез — главная">
+                <span class="brand__mark" aria-hidden="true"><span>КР</span></span>
+                <span class="brand__name">
+                    <strong>Коппер Рисорсез</strong>
+                    <small>Горнотранспортная компания</small>
+                </span>
+            </a>
+            <button class="nav-toggle js-menu-toggle" type="button" aria-expanded="false" aria-controls="public-navigation">
+                <span class="sr-only">Открыть меню</span>
+                <span></span><span></span><span></span>
+            </button>
+            <nav class="public-nav js-menu" id="public-navigation" aria-label="Основная навигация">
+                <a href="{% url 'portal:public_home' %}#about">О компании</a>
+                <a href="{% url 'portal:public_news' %}">Новости</a>
+                <a href="{% url 'portal:public_people' %}">Люди</a>
+                <a href="{% url 'portal:public_vacancies' %}">Вакансии</a>
+                <a href="{% url 'portal:public_contacts' %}">Контакты</a>
+                <a class="button button--small button--outline-light" href="{% url 'portal:login' %}">Вход для сотрудников</a>
+            </nav>
+        </div>
+    </header>
+
+    {% include 'portal/_messages.html' %}
+
+    <main id="main-content">
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer class="public-footer">
+        <div class="page-container public-footer__grid">
+            <div>
+                <div class="brand brand--footer">
+                    <span class="brand__mark" aria-hidden="true"><span>КР</span></span>
+                    <span class="brand__name"><strong>ООО «Коппер Рисорсез»</strong></span>
+                </div>
+                <p class="public-footer__note">Горные работы и транспортировка горной массы.</p>
+            </div>
+            <nav class="public-footer__links" aria-label="Навигация в подвале">
+                <a href="{% url 'portal:public_news' %}">Новости</a>
+                <a href="{% url 'portal:public_vacancies' %}">Работа в компании</a>
+                <a href="{% url 'portal:public_contacts' %}">Контакты</a>
+                <a href="{% url 'portal:login' %}">Портал сотрудника</a>
+            </nav>
+        </div>
+        <div class="page-container public-footer__bottom">
+            <span>© {% now "Y" %} ООО «Коппер Рисорсез»</span>
+            <span>Официальный информационный портал</span>
+        </div>
+    </footer>
+    <script src="{% static 'portal/js/portal.js' %}?v=2" defer></script>
+    {% block extra_js %}{% endblock %}
+</body>
+</html>

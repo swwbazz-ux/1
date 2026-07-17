@@ -1,0 +1,6 @@
+<div class="empty-state">
+    <span class="empty-state__icon" aria-hidden="true">{{ empty_icon|default:'КР' }}</span>
+    <h2>{{ empty_title|default:'Пока здесь нет материалов' }}</h2>
+    {% if empty_text %}<p>{{ empty_text }}</p>{% endif %}
+    {% if empty_url and empty_action %}<a class="button button--secondary" href="{{ empty_url }}">{{ empty_action }}</a>{% endif %}
+</div>

@@ -1,0 +1,15 @@
+{% extends 'portal/base_internal.html' %}
+{% block title %}Обращение от {{ feedback_item.created_at|date:'d.m.Y' }}{% endblock %}
+{% block content %}
+<a class="back-link" href="{% url 'portal:feedback' %}">← Мои обращения</a>
+<article class="feedback-detail">
+    <header><div><span class="screen-kicker">Обращение от {{ feedback_item.created_at|date:'d.m.Y H:i' }}</span><h1>Обращение к руководству</h1></div><span class="status-chip status-chip--{{ feedback_item.status }}">{{ feedback_item.get_status_display }}</span></header>
+    <div class="feedback-detail__privacy"><strong>{% if feedback_item.is_anonymous %}Отправлено без имени{% else %}Отправлено от вашего имени{% endif %}</strong><span>{% if feedback_item.is_anonymous %}Получатель не видит автора обращения.{% else %}Получатель может ответить вам лично.{% endif %}</span></div>
+    <div class="feedback-message prose">{{ feedback_item.text|linebreaks }}</div>
+    {% if feedback_item.photo %}<a class="attachment-link" href="{% url 'portal:feedback_photo' feedback_item.pk %}" target="_blank" rel="noopener"><span aria-hidden="true">▣</span><span><strong>Приложенное фото</strong><small>Открыть</small></span></a>{% endif %}
+    <section class="feedback-response">
+        <h2>Ответ руководства</h2>
+        {% if feedback_item.response %}<div class="feedback-response__message prose">{{ feedback_item.response|linebreaks }}{% if feedback_item.responded_at %}<small>{{ feedback_item.responded_at|date:'d.m.Y H:i' }}</small>{% endif %}</div>{% else %}<div class="inline-empty"><strong>Ответа пока нет</strong><span>Статус обращения изменится, когда его возьмут в работу.</span></div>{% endif %}
+    </section>
+</article>
+{% endblock %}

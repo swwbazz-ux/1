@@ -1,0 +1,10 @@
+{% extends 'portal/base_internal.html' %}
+{% block title %}Права на портал{% endblock %}
+{% block content %}
+<header class="screen-heading"><div><span class="screen-kicker">Доступ</span><h1>Права на портал</h1><p>Назначьте, кто может готовить, редактировать и публиковать материалы, а также получать обращения.</p></div></header>
+{% include 'portal/_manage_nav.html' %}
+<div class="permissions-layout">
+    <form class="portal-form form-panel" method="post" novalidate><h2>Назначить права</h2>{% include 'portal/_form_fields.html' %}<button class="button button--primary" type="submit">Сохранить права</button></form>
+    <section class="content-panel"><h2>Текущие назначения</h2>{% if permissions %}<div class="permission-list">{% for item in permissions %}<div><span>{% if item.employee.photo %}<img src="{% url 'portal:employee_photo' item.employee.pk %}" alt="">{% else %}<span class="avatar-fallback">{{ item.employee.full_name|first }}</span>{% endif %}<span><strong>{{ item.employee.full_name }}</strong><small>{{ item.employee.personnel_position.name|default:item.employee.position }}</small></span></span><ul>{% if item.can_author %}<li>Автор</li>{% endif %}{% if item.can_edit %}<li>Редактор</li>{% endif %}{% if item.can_publish %}<li>Публикатор</li>{% endif %}{% if item.receives_feedback %}<li>Получатель обращений</li>{% endif %}</ul><a class="text-link" href="?edit={{ item.pk }}">Изменить</a></div>{% endfor %}</div>{% else %}<div class="inline-empty"><strong>Права пока никому не назначены</strong><span>Добавьте первого ответственного сотрудника.</span></div>{% endif %}</section>
+</div>
+{% endblock %}

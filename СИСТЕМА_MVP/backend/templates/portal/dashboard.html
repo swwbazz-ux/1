@@ -1,0 +1,92 @@
+{% extends 'portal/base_internal.html' %}
+{% block title %}Главная{% endblock %}
+{% block content %}
+<header class="screen-heading dashboard-heading">
+    <div><span class="screen-kicker">Портал сотрудника</span><h1>Здравствуйте{% if current_employee.first_name %}, {{ current_employee.first_name }}{% endif %}</h1><p>{{ today|date:'l, d E'|default:'Участок № 2' }}</p></div>
+    <a class="button button--secondary button--compact" href="{% url 'portal:suggestion_create' %}">Предложить историю</a>
+</header>
+
+{% if mandatory_publications %}
+<section class="dashboard-section" aria-labelledby="mandatory-title">
+    <div class="section-title-row"><h2 id="mandatory-title">Важно ознакомиться</h2><span class="count-badge">{{ mandatory_publications|length }}</span></div>
+    <div class="mandatory-list">
+        {% for publication in mandatory_publications %}
+        <a class="mandatory-card" href="{% url 'portal:publication_detail' publication.pk %}">
+            <span class="mandatory-card__icon" aria-hidden="true">!</span>
+            <span><small>{{ publication.published_at|date:'d.m.Y H:i' }}</small><strong>{{ publication.title }}</strong><span>{{ publication.summary|default:publication.body|striptags|truncatewords:18 }}</span></span>
+            <span class="mandatory-card__action">Прочитать →</span>
+        </a>
+        {% endfor %}
+    </div>
+</section>
+{% endif %}
+
+<section class="dashboard-grid dashboard-grid--status">
+    <article class="status-panel status-panel--rank">
+        <div class="status-panel__heading"><div><span class="screen-kicker">Личный рейтинг</span><h2>Моё место</h2></div><a href="{% url 'portal:rating' %}">Весь рейтинг →</a></div>
+        {% if my_rank %}
+            <div class="my-rank">
+                <span class="my-rank__number">{{ my_rank.place }}</span>
+                <span><strong>{{ my_rank.premium_level|default:'Текущее место' }}</strong><small>{{ ranking.period_label|default:'Текущий период' }}</small></span>
+            </div>
+            <p class="data-note">{{ ranking.status }}</p>
+        {% else %}
+            <div class="inline-empty"><strong>Место ещё не определено</strong><span>{{ ranking.status }}</span></div>
+        {% endif %}
+    </article>
+    <article class="status-panel status-panel--shift">
+        <div class="status-panel__heading"><div><span class="screen-kicker">Последняя смена</span><h2>День и ночь</h2></div></div>
+        {% if shift_result.available %}
+            <div class="shift-versus">
+                <div{% if shift_result.winner == 'day' %} class="is-winner"{% endif %}><span>День</span><strong>{{ shift_result.day_result }}</strong></div>
+                <span class="shift-versus__separator">:</span>
+                <div{% if shift_result.winner == 'night' %} class="is-winner"{% endif %}><span>Ночь</span><strong>{{ shift_result.night_result }}</strong></div>
+            </div>
+            <p class="data-note">{{ shift_result.period_label }}{% if shift_result.updated_at %} · {{ shift_result.updated_at|date:'d.m.Y H:i' }}{% endif %}</p>
+        {% else %}
+            <div class="inline-empty"><strong>Итог смены ещё не опубликован</strong><span>{{ shift_result.status }}</span></div>
+        {% endif %}
+    </article>
+</section>
+
+<section class="dashboard-section">
+    <div class="section-title-row"><h2>Пятёрка лидеров</h2><a href="{% url 'portal:rating' %}">Показать всех</a></div>
+    {% if top_five %}
+    <ol class="compact-ranking">
+        {% for item in top_five %}
+        <li class="rank-tier rank-tier--{{ item.place }}">
+            <span class="compact-ranking__place">{{ item.place }}</span>
+            {% if item.photo_url %}<img src="{{ item.photo_url }}" alt="">{% else %}<span class="avatar-fallback">{{ item.full_name|first }}</span>{% endif %}
+            <span class="compact-ranking__person"><strong>{{ item.full_name }}</strong><small>{{ item.premium_level }}{% if item.equipment_name %} · {{ item.equipment_name }}{% endif %}</small></span>
+        </li>
+        {% endfor %}
+    </ol>
+    {% else %}
+        <div class="inline-empty inline-empty--panel"><strong>Рейтинг пока не получен</strong><span>{{ ranking.status }}</span></div>
+    {% endif %}
+</section>
+
+<div class="dashboard-grid">
+    <section class="dashboard-section dashboard-section--plain">
+        <div class="section-title-row"><h2>Свежие новости</h2><a href="{% url 'portal:publications' %}">Все новости</a></div>
+        {% if recent_publications %}
+            <div class="internal-publication-list">
+            {% for publication in recent_publications %}<a href="{% url 'portal:publication_detail' publication.pk %}"><span><small>{{ publication.published_at|date:'d.m.Y' }}{% if publication.is_mandatory %} · Важно{% endif %}</small><strong>{{ publication.title }}</strong><span>{{ publication.summary|default:publication.body|striptags|truncatewords:15 }}</span></span><b aria-hidden="true">→</b></a>{% endfor %}
+            </div>
+        {% else %}<div class="inline-empty"><strong>Новых публикаций нет</strong><span>Всё важное появится здесь.</span></div>{% endif %}
+    </section>
+    <aside class="dashboard-side-stack">
+        {% if active_poll %}
+        <section class="action-panel action-panel--poll"><span class="screen-kicker">Опрос</span><h2>{{ active_poll.title }}</h2><p>{{ active_poll.description|truncatewords:20 }}</p><span class="privacy-label">{% if active_poll.is_anonymous %}Анонимный{% else %}Именной{% endif %} опрос</span><a class="button button--primary button--block" href="{% url 'portal:poll_detail' active_poll.pk %}">{% if active_poll.user_has_voted %}Мой ответ{% else %}Ответить{% endif %}</a></section>
+        {% endif %}
+        <section class="action-panel"><span class="screen-kicker">Обратная связь</span><h2>Есть вопрос или проблема?</h2><p>Напишите руководству от своего имени или анонимно.</p><a class="button button--secondary button--block" href="{% url 'portal:feedback_create' %}">Написать</a></section>
+        {% if birthdays %}<section class="birthday-panel"><span class="screen-kicker">Дни рождения</span><h2>Поздравляем!</h2>{% for person in birthdays %}<div class="birthday-person">{% if person.photo %}<img src="{% url 'portal:employee_photo' person.pk %}" alt="">{% else %}<span class="avatar-fallback">{{ person.full_name|first }}</span>{% endif %}<span><strong>{{ person.full_name }}</strong><small>День рождения сегодня</small></span></div>{% endfor %}</section>{% endif %}
+    </aside>
+</div>
+
+<section class="quick-actions" aria-label="Быстрые действия">
+    <a href="{% url 'portal:apps' %}"><span aria-hidden="true">↗</span><strong>Мои приложения</strong><small>Вход в рабочие сервисы</small></a>
+    <a href="{% url 'portal:people' %}"><span aria-hidden="true">Л</span><strong>Коллеги</strong><small>Сотрудники участка № 2</small></a>
+    <a href="{% url 'portal:suggestion_create' %}"><span aria-hidden="true">+</span><strong>Предложить историю</strong><small>Фото, новость или идея</small></a>
+</section>
+{% endblock %}

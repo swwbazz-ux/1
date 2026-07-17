@@ -1,0 +1,16 @@
+{% csrf_token %}
+{% if form.non_field_errors %}
+    <div class="form-errors" role="alert">{{ form.non_field_errors }}</div>
+{% endif %}
+{% for field in form %}
+    <div class="form-field{% if field.errors %} form-field--error{% endif %}{% if field.field.widget.input_type == 'checkbox' %} form-field--checkbox{% endif %}">
+        {% if field.field.widget.input_type == 'checkbox' %}
+            <label class="toggle-control" for="{{ field.id_for_label }}">{{ field }}<span><strong>{{ field.label }}</strong>{% if field.help_text %}<small>{{ field.help_text }}</small>{% endif %}</span></label>
+        {% else %}
+            <label for="{{ field.id_for_label }}">{{ field.label }}{% if field.field.required %}<span class="required-mark" aria-label="обязательное поле">*</span>{% endif %}</label>
+            {{ field }}
+            {% if field.help_text %}<small class="form-help">{{ field.help_text }}</small>{% endif %}
+        {% endif %}
+        {% for error in field.errors %}<span class="field-error" role="alert">{{ error }}</span>{% endfor %}
+    </div>
+{% endfor %}

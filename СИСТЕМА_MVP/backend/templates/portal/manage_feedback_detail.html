@@ -1,0 +1,12 @@
+{% extends 'portal/base_internal.html' %}
+{% block title %}Обращение в работе{% endblock %}
+{% block content %}
+<a class="back-link" href="{% url 'portal:manage' %}">← К управлению</a>
+<article class="feedback-detail feedback-detail--manage">
+    <header><div><span class="screen-kicker">{{ feedback_item.created_at|date:'d.m.Y H:i' }}</span><h1>Обращение сотрудника</h1></div><span class="status-chip status-chip--{{ feedback_item.status }}">{{ feedback_item.get_status_display }}</span></header>
+    <div class="feedback-sender">{% if feedback_item.is_anonymous %}<span class="avatar-fallback">?</span><span><strong>{{ recipient_author_label|default:'Анонимный сотрудник' }}</strong><small>Личность автора не показывается получателю</small></span>{% else %}{% if feedback_item.employee.photo %}<img src="{% url 'portal:employee_photo' feedback_item.employee.pk %}" alt="">{% else %}<span class="avatar-fallback">{{ feedback_item.employee.full_name|first }}</span>{% endif %}<span><strong>{{ feedback_item.employee.full_name }}</strong><small>{{ feedback_item.employee.personnel_position.name|default:feedback_item.employee.position }}</small></span>{% endif %}</div>
+    <div class="feedback-message prose">{{ feedback_item.text|linebreaks }}</div>
+    {% if feedback_item.photo %}<a class="attachment-link" href="{% url 'portal:feedback_photo' feedback_item.pk %}" target="_blank" rel="noopener"><span aria-hidden="true">▣</span><span><strong>Приложенное фото</strong><small>Открыть</small></span></a>{% endif %}
+    <section class="feedback-response feedback-response--editor"><h2>Статус и ответ</h2><form class="portal-form" method="post" novalidate>{% include 'portal/_form_fields.html' %}<button class="button button--primary" type="submit">Сохранить ответ</button></form></section>
+</article>
+{% endblock %}

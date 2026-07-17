@@ -1,0 +1,23 @@
+{% extends 'portal/base_public.html' %}
+{% block title %}{{ publication.title }} — Коппер Рисорсез{% endblock %}
+{% block meta_description %}{{ publication.summary|default:publication.body|striptags|truncatewords:28 }}{% endblock %}
+{% block content %}
+<article class="public-article">
+    <header class="public-article__header">
+        <div class="article-container">
+            <a class="back-link" href="{% url 'portal:public_news' %}">← Все новости</a>
+            <div class="meta-row"><span>{{ publication.get_publication_type_display|default:'Новости' }}</span>{% if publication.published_at %}<time datetime="{{ publication.published_at|date:'c' }}">{{ publication.published_at|date:'d.m.Y' }}</time>{% endif %}</div>
+            <h1>{{ publication.title }}</h1>
+            {% if publication.summary %}<p class="public-article__lead">{{ publication.summary }}</p>{% endif %}
+        </div>
+    </header>
+    {% if publication.cover_image %}<div class="article-container public-article__cover"><img src="{% url 'portal:publication_cover' publication.pk %}" alt="{{ publication.title }}"></div>{% endif %}
+    <div class="article-container public-article__body prose">{{ publication.body|linebreaks }}</div>
+    {% if publication.subject_employee %}
+    <aside class="article-container story-person">
+        <span class="avatar-fallback">{{ publication.subject_employee.full_name|first }}</span>
+        <div><span>Герой истории</span><strong>{{ publication.subject_employee.full_name }}</strong><small>{{ publication.subject_employee.personnel_position.name|default:publication.subject_employee.position }}</small></div>
+    </aside>
+    {% endif %}
+</article>
+{% endblock %}

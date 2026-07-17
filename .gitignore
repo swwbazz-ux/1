@@ -33,6 +33,7 @@ driver-work-v*.png
 
 # Uploaded local media
 СИСТЕМА_MVP/backend/media/
+СИСТЕМА_MVP/backend/private_media/
 СИСТЕМА_MVP/backend/employee_photos/
 
 # Local server logs

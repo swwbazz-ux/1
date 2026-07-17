@@ -1,0 +1,10 @@
+{% extends 'portal/base_internal.html' %}
+{% block title %}Предложить историю{% endblock %}
+{% block content %}
+<a class="back-link" href="{% url 'portal:dashboard' %}">← На главную</a>
+<div class="form-page">
+    <header class="screen-heading"><div><span class="screen-kicker">Жизнь участка</span><h1>Предложить историю</h1><p>Присылайте идею, фото или событие, о котором стоит рассказать коллегам.</p></div></header>
+    <form class="portal-form form-panel" method="post" enctype="multipart/form-data" novalidate>{% include 'portal/_form_fields.html' %}<div class="form-submit"><button class="button button--primary button--block-mobile" type="submit">Отправить идею</button><a class="button button--ghost" href="{% url 'portal:dashboard' %}">Отмена</a></div></form>
+    <aside class="form-note"><strong>Что будет дальше</strong><p>Идея попадёт в черновики. Редактор свяжется с вами, если понадобятся подробности. Ничего не будет опубликовано автоматически.</p></aside>
+</div>
+{% endblock %}

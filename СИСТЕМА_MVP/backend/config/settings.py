@@ -87,6 +87,7 @@ INSTALLED_APPS = [
     'trips',
     'downtimes',
     'reports',
+    'portal.apps.PortalConfig',
 ]
 
 MIDDLEWARE = [
@@ -113,6 +114,7 @@ TEMPLATES = [
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
                 'users.context_processors.role_app',
+                'portal.context_processors.portal_context',
             ],
         },
     },
@@ -201,3 +203,10 @@ STATIC_ROOT = BASE_DIR / 'staticfiles'
 MEDIA_URL = 'media/'
 
 MEDIA_ROOT = BASE_DIR / 'media'
+PORTAL_PRIVATE_MEDIA_ROOT = BASE_DIR / 'private_media'
+PORTAL_SITE_CODE = 'section_2'
+PORTAL_PRODUCTION_DATA_PROVIDER = ''
+# До появления других участков весь действующий кадровый состав относится к участку № 2.
+# Перед подключением второго участка здесь должен быть указан серверный провайдер
+# членства, возвращающий строго ограниченный Employee QuerySet.
+PORTAL_EMPLOYEE_SCOPE_PROVIDER = ''

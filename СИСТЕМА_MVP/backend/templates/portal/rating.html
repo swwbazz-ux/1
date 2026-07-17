@@ -1,0 +1,46 @@
+{% extends 'portal/base_internal.html' %}
+{% block title %}Рейтинг водителей{% endblock %}
+{% block content %}
+<header class="screen-heading rating-heading"><div><span class="screen-kicker">Соревнование водителей</span><h1>Рейтинг</h1><p>{{ ranking.period_label|default:'Текущий период' }}</p></div>{% if ranking.updated_at %}<span class="updated-label">Обновлено<br><strong>{{ ranking.updated_at|date:'d.m.Y H:i' }}</strong></span>{% endif %}</header>
+
+{% if ranking.available %}<div class="attention-strip attention-strip--neutral"><strong>{{ ranking.status }}</strong><span>Окончательная пятёрка публикуется после проверки и закрытия конкурса.</span></div>{% endif %}
+
+{% if my_rank %}
+<section class="personal-rank-card rank-tier rank-tier--{{ my_rank.place }}">
+    <span class="personal-rank-card__label">Моё место</span><strong class="personal-rank-card__place">{{ my_rank.place }}</strong><span><b>{{ my_rank.premium_level|default:'Текущая позиция' }}</b>{% if my_rank.equipment_name %}<small>{{ my_rank.equipment_name }}</small>{% endif %}</span>
+</section>
+{% endif %}
+
+<section class="prize-legend" aria-label="Премируемые места">
+    <h2>Пять премируемых мест</h2>
+    <div><span class="tier-dot tier-dot--diamond">1</span><span>Бриллиант</span><span class="tier-dot tier-dot--platinum">2</span><span>Платина</span><span class="tier-dot tier-dot--gold">3</span><span>Золото</span><span class="tier-dot tier-dot--silver">4</span><span>Серебро</span><span class="tier-dot tier-dot--bronze">5</span><span>Бронза</span></div>
+</section>
+
+{% if entries %}
+<ol class="full-ranking">
+    {% for item in entries %}
+    <li class="rank-tier rank-tier--{{ item.place }}{% if item.employee_id == current_employee.pk %} is-current-employee{% endif %}">
+        <span class="full-ranking__place">{{ item.place }}</span>
+        {% if item.photo_url %}<img src="{{ item.photo_url }}" alt="">{% else %}<span class="avatar-fallback avatar-fallback--rank">{{ item.full_name|first }}</span>{% endif %}
+        <span class="full-ranking__person"><strong>{{ item.full_name }}</strong><small>{% if item.equipment_name %}{{ item.equipment_name }}{% else %}Техника не указана{% endif %}</small></span>
+        {% if item.premium_level %}<span class="full-ranking__tier">{{ item.premium_level }}</span>{% endif %}
+        {% if item.employee_id == current_employee.pk %}<span class="you-label">Это вы</span>{% endif %}
+    </li>
+    {% endfor %}
+</ol>
+{% else %}
+    {% include 'portal/_empty_state.html' with empty_icon='—' empty_title='Рейтинг ещё не получен' empty_text=ranking.status %}
+{% endif %}
+<p class="rating-footnote">В общем рейтинге показываются только место, сотрудник и текущая техника. Личные показатели коллег не раскрываются.</p>
+
+<section class="personal-kpi" aria-labelledby="personal-kpi-title">
+    <div class="section-title-row"><div><span class="screen-kicker">Только для вас</span><h2 id="personal-kpi-title">Мои показатели</h2></div>{% if kpis.watch_label %}<span class="updated-label">{{ kpis.watch_label }}</span>{% endif %}</div>
+    {% if kpis.available %}
+        {% if kpis.metrics %}<h3>За текущую вахту</h3><div class="metric-grid">{% for metric in kpis.metrics %}<article><span>{{ metric.label }}</span><strong>{{ metric.value }}{% if metric.unit %} <small>{{ metric.unit }}</small>{% endif %}</strong></article>{% endfor %}</div>{% endif %}
+        {% if kpis.career_metrics %}<h3>С начала работы</h3><div class="metric-grid">{% for metric in kpis.career_metrics %}<article><span>{{ metric.label }}</span><strong>{{ metric.value }}{% if metric.unit %} <small>{{ metric.unit }}</small>{% endif %}</strong></article>{% endfor %}</div>{% endif %}
+        {% if not kpis.metrics and not kpis.career_metrics %}<div class="inline-empty"><strong>Показатели пока не переданы</strong><span>{{ kpis.status }}</span></div>{% endif %}
+    {% else %}
+        <div class="inline-empty inline-empty--panel"><strong>Личные показатели ещё не подключены</strong><span>{{ kpis.status }}</span></div>
+    {% endif %}
+</section>
+{% endblock %}

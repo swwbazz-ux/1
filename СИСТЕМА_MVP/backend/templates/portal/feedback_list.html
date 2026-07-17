@@ -1,0 +1,20 @@
+{% extends 'portal/base_internal.html' %}
+{% block title %}Мои обращения{% endblock %}
+{% block content %}
+<header class="screen-heading"><div><span class="screen-kicker">Связь с руководством</span><h1>Мои обращения</h1><p>Вопросы, предложения и сообщения о проблемах.</p></div><a class="button button--primary" href="{% url 'portal:feedback_create' %}">Новое обращение</a></header>
+<div class="privacy-explanation privacy-explanation--compact"><strong>Можно отправить без имени</strong><span>Получатель не увидит ваше имя. Само обращение никогда не публикуется как новость.</span></div>
+{% if feedback_items %}
+<div class="feedback-list">
+    {% for item in feedback_items %}
+    <a class="feedback-card" href="{% url 'portal:feedback_detail' item.pk %}">
+        <span class="feedback-card__icon" aria-hidden="true">{{ forloop.revcounter }}</span>
+        <span class="feedback-card__body"><small>{{ item.created_at|date:'d.m.Y H:i' }} · {% if item.is_anonymous %}Без имени{% else %}От моего имени{% endif %}</small><strong>Обращение к руководству</strong><span>{{ item.text|truncatewords:18 }}</span></span>
+        <span class="status-chip status-chip--{{ item.status }}">{{ item.get_status_display }}</span><b aria-hidden="true">→</b>
+    </a>
+    {% endfor %}
+</div>
+{% include 'portal/_pagination.html' %}
+{% else %}
+    {% url 'portal:feedback_create' as feedback_create_url %}{% include 'portal/_empty_state.html' with empty_title='У вас пока нет обращений' empty_text='Если есть вопрос, идея или проблема, напишите об этом руководству.' empty_url=feedback_create_url empty_action='Написать' %}
+{% endif %}
+{% endblock %}

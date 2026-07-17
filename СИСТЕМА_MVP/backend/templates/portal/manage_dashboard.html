@@ -1,0 +1,38 @@
+{% extends 'portal/base_internal.html' %}
+{% block title %}Управление порталом{% endblock %}
+{% block content %}
+<header class="screen-heading"><div><span class="screen-kicker">Управление</span><h1>Управление порталом</h1><p>{% if portal_capabilities.can_manage_editorial %}Публикации, опросы, обращения и права доступа.{% else %}Обращения сотрудников, доступные вашей роли.{% endif %}</p></div>{% if portal_capabilities.can_author %}<a class="button button--primary" href="{% url 'portal:manage_publication_create' %}">Новая публикация</a>{% endif %}</header>
+{% include 'portal/_manage_nav.html' %}
+
+<section class="management-stats" aria-label="Состояние портала">
+    {% if portal_capabilities.can_manage_editorial %}
+    <div><span>Материалы</span><strong>{{ publications|length }}</strong></div>
+    <div><span>Опросы</span><strong>{{ polls|length }}</strong></div>
+    <div><span>Предложения</span><strong>{{ suggestions|length }}</strong></div>
+    {% endif %}
+    {% if portal_capabilities.receives_feedback %}<div class="{% if feedback_items %}has-attention{% endif %}"><span>Обращения</span><strong>{{ feedback_items|length }}</strong></div>{% endif %}
+</section>
+
+<div class="management-grid">
+    {% if portal_capabilities.can_manage_editorial %}
+    <section class="content-panel">
+        <div class="section-title-row"><h2>Публикации</h2>{% if portal_capabilities.can_author %}<a href="{% url 'portal:manage_publication_create' %}">Создать</a>{% endif %}</div>
+        {% if publications %}<div class="management-list">{% for publication in publications %}<a href="{% url 'portal:manage_publication_edit' publication.pk %}"><span><small>{{ publication.updated_at|date:'d.m.Y H:i' }} · {{ publication.get_status_display }}</small><strong>{{ publication.title }}</strong><em>{{ publication.get_visibility_display }}</em></span><b aria-hidden="true">→</b></a>{% endfor %}</div>{% else %}<div class="inline-empty"><strong>Публикаций пока нет</strong><span>Создайте первую новость или объявление.</span></div>{% endif %}
+    </section>
+    <section class="content-panel">
+        <div class="section-title-row"><h2>Опросы</h2>{% if portal_capabilities.can_author %}<a href="{% url 'portal:manage_poll_create' %}">Создать</a>{% endif %}</div>
+        {% if polls %}<div class="management-list">{% for poll in polls %}<a href="{% url 'portal:manage_poll_edit' poll.pk %}"><span><small>{{ poll.get_status_display }} · {% if poll.is_anonymous %}Анонимный{% else %}Именной{% endif %}</small><strong>{{ poll.title }}</strong><em>{{ poll.vote_count|default:0 }} ответов</em></span><b aria-hidden="true">→</b></a>{% endfor %}</div>{% else %}<div class="inline-empty"><strong>Опросов пока нет</strong><span>Создайте опрос, когда понадобится мнение сотрудников.</span></div>{% endif %}
+    </section>
+    <section class="content-panel">
+        <div class="section-title-row"><h2>Предложения сотрудников</h2></div>
+        {% if suggestions %}<div class="management-list">{% for item in suggestions %}<div class="management-list__static"><span><small>{{ item.created_at|date:'d.m.Y H:i' }} · {{ item.employee.full_name }}</small><strong>{{ item.title }}</strong><em>{{ item.text|truncatewords:12 }} · {{ item.get_status_display }}</em></span></div>{% endfor %}</div>{% else %}<div class="inline-empty"><strong>Новых идей нет</strong><span>Присланные истории и фото будут ожидать редакции здесь.</span></div>{% endif %}
+    </section>
+    {% endif %}
+    {% if portal_capabilities.receives_feedback %}
+    <section class="content-panel">
+        <div class="section-title-row"><h2>Обращения</h2></div>
+        {% if feedback_items %}<div class="management-list">{% for item in feedback_items %}<a href="{% url 'portal:manage_feedback_detail' item.pk %}"><span><small>{{ item.created_at|date:'d.m.Y H:i' }} · {% if item.is_anonymous %}Без имени{% else %}{{ item.employee.full_name }}{% endif %}</small><strong>{{ item.text|truncatewords:9 }}</strong><em>{{ item.get_status_display }}</em></span><b aria-hidden="true">→</b></a>{% endfor %}</div>{% else %}<div class="inline-empty"><strong>Новых обращений нет</strong><span>Здесь появятся сообщения, адресованные вашей группе.</span></div>{% endif %}
+    </section>
+    {% endif %}
+</div>
+{% endblock %}

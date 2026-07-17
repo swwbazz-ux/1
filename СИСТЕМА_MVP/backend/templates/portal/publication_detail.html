@@ -1,0 +1,31 @@
+{% extends 'portal/base_internal.html' %}
+{% block title %}{{ publication.title }}{% endblock %}
+{% block content %}
+<article class="internal-article">
+    <a class="back-link" href="{% url 'portal:publications' %}">← Ко всем новостям</a>
+    <header class="internal-article__header">
+        <div class="meta-row"><span>{{ publication.get_publication_type_display|default:'Новость' }}</span><time datetime="{{ publication.published_at|date:'c' }}">{{ publication.published_at|date:'d.m.Y H:i' }}</time></div>
+        {% if publication.is_mandatory %}<span class="status-chip status-chip--warning">Обязательно к ознакомлению</span>{% endif %}
+        <h1>{{ publication.title }}</h1>
+        {% if publication.summary %}<p>{{ publication.summary }}</p>{% endif %}
+    </header>
+    {% if publication.cover_image %}<div class="internal-article__cover"><img src="{% url 'portal:publication_cover' publication.pk %}" alt="{{ publication.title }}"></div>{% endif %}
+    <div class="internal-article__body prose">{{ publication.body|linebreaks }}</div>
+
+    {% if publication.is_mandatory %}
+    <section class="acknowledge-panel">
+        {% if acknowledged %}
+            <span class="acknowledge-panel__check" aria-hidden="true">✓</span><div><strong>Вы ознакомились</strong><small>{% if acknowledgement.acknowledged_at %}{{ acknowledgement.acknowledged_at|date:'d.m.Y H:i' }}{% endif %}</small></div>
+        {% else %}
+            <div><strong>Подтвердите, что прочитали объявление</strong><small>Отметка нужна, чтобы руководитель видел, кто ознакомился.</small></div>
+            <form method="post" action="{% url 'portal:acknowledge_publication' publication.pk %}">{% csrf_token %}<button class="button button--primary" type="submit">Ознакомился</button></form>
+        {% endif %}
+    </section>
+    {% endif %}
+
+    <section class="reaction-panel" aria-label="Реакция на публикацию">
+        <div><strong>Понравилась публикация?</strong><span>Без комментариев — только простая добрая реакция.</span></div>
+        <form method="post" action="{% url 'portal:react_publication' publication.pk %}">{% csrf_token %}<button class="reaction-button{% if reacted %} is-active{% endif %}" type="submit" aria-pressed="{% if reacted %}true{% else %}false{% endif %}"><span aria-hidden="true">♥</span> {{ reaction_count|default:0 }}</button></form>
+    </section>
+</article>
+{% endblock %}

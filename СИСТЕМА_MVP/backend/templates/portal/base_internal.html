@@ -1,0 +1,75 @@
+{% load static %}
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#1e1e1e">
+    <meta name="robots" content="noindex,nofollow">
+    <title>{% block title %}Портал сотрудника{% endblock %} — Коппер Рисорсез</title>
+    <link rel="stylesheet" href="{% static 'portal/css/portal.css' %}?v=2">
+    {% block extra_head %}{% endblock %}
+</head>
+<body class="internal-shell {% block body_class %}{% endblock %}">
+    <a class="skip-link" href="#main-content">К содержанию</a>
+    <header class="internal-header">
+        <div class="internal-container internal-header__inner">
+            <a class="internal-brand" href="{% url 'portal:dashboard' %}">
+                <span class="brand__mark brand__mark--small" aria-hidden="true"><span>КР</span></span>
+                <span>
+                    <strong>Коппер Рисорсез</strong>
+                    <small>Участок № 2</small>
+                </span>
+            </a>
+            <button class="nav-toggle nav-toggle--internal js-menu-toggle" type="button" aria-expanded="false" aria-controls="internal-navigation">
+                <span class="sr-only">Открыть меню</span>
+                <span></span><span></span><span></span>
+            </button>
+            <nav class="internal-nav js-menu" id="internal-navigation" aria-label="Разделы портала">
+                <a href="{% url 'portal:dashboard' %}">Главная</a>
+                <a href="{% url 'portal:publications' %}">Новости</a>
+                <a href="{% url 'portal:rating' %}">Рейтинг</a>
+                <a href="{% url 'portal:people' %}">Коллеги</a>
+                <a href="{% url 'portal:polls' %}">Опросы</a>
+                <a href="{% url 'portal:apps' %}">Мои приложения</a>
+                <a href="{% url 'portal:feedback' %}">Написать руководству</a>
+                {% if portal_capabilities.is_staff %}<a href="{% url 'portal:manage' %}">Управление</a>{% endif %}
+                <form class="internal-nav__logout-form" method="post" action="{% url 'portal:logout' %}">{% csrf_token %}<button type="submit">Выйти</button></form>
+            </nav>
+            <div class="employee-mini">
+                {% if current_employee.photo %}
+                    <img src="{% url 'portal:employee_photo' current_employee.pk %}" alt="">
+                {% else %}
+                    <span class="avatar-fallback" aria-hidden="true">{{ current_employee.full_name|default:'С'|first }}</span>
+                {% endif %}
+                <span><strong>{{ current_employee.full_name|default:'Сотрудник' }}</strong><small>{{ current_employee.position_name|default:current_employee.position|default:'' }}</small></span>
+            </div>
+        </div>
+    </header>
+
+    {% include 'portal/_messages.html' %}
+
+    <main class="internal-main" id="main-content">
+        <div class="internal-container">
+            {% block content %}{% endblock %}
+        </div>
+    </main>
+
+    <nav class="mobile-tabbar" aria-label="Быстрая навигация">
+        <a href="{% url 'portal:dashboard' %}"{% if request.resolver_match.url_name == 'dashboard' %} class="is-active" aria-current="page"{% endif %}>
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M3 11.5 12 4l9 7.5V21h-6v-6H9v6H3z"/></svg><span>Главная</span>
+        </a>
+        <a href="{% url 'portal:rating' %}"{% if request.resolver_match.url_name == 'rating' %} class="is-active" aria-current="page"{% endif %}>
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 3h14v4c0 3.5-2.4 6.4-5.7 7.2V17H17v4H7v-4h3.7v-2.8C7.4 13.4 5 10.5 5 7zm-3 2h3v2a7 7 0 0 0 .6 2.9C3.6 9.4 2 7.4 2 5m20 0c0 2.4-1.6 4.4-3.6 4.9A7 7 0 0 0 19 7V5z"/></svg><span>Рейтинг</span>
+        </a>
+        <a href="{% url 'portal:publications' %}"{% if request.resolver_match.url_name == 'publications' %} class="is-active" aria-current="page"{% endif %}>
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 3h16v18H4zm4 4v2h8V7zm0 4v2h8v-2zm0 4v2h6v-2z"/></svg><span>Новости</span>
+        </a>
+        <a href="{% url 'portal:feedback' %}"{% if 'feedback' in request.resolver_match.url_name %} class="is-active" aria-current="page"{% endif %}>
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M3 4h18v14H8l-5 4zm4 5v2h10V9zm0 4v2h7v-2z"/></svg><span>Обратиться</span>
+        </a>
+    </nav>
+    <script src="{% static 'portal/js/portal.js' %}?v=2" defer></script>
+    {% block extra_js %}{% endblock %}
+</body>
+</html>

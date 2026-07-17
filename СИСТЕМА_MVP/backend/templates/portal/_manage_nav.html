@@ -1,0 +1,6 @@
+<nav class="manage-nav" aria-label="Управление порталом">
+    <a href="{% url 'portal:manage' %}"{% if request.resolver_match.url_name == 'manage' %} class="is-active"{% endif %}>Обзор</a>
+    {% if portal_capabilities.can_manage_editorial %}<a href="{% url 'portal:manage_publication_create' %}"{% if 'manage_publication' in request.resolver_match.url_name %} class="is-active"{% endif %}>Публикации</a>
+    <a href="{% url 'portal:manage_poll_create' %}"{% if 'manage_poll' in request.resolver_match.url_name %} class="is-active"{% endif %}>Опросы</a>{% endif %}
+    {% if portal_can_assign_permissions %}<a href="{% url 'portal:manage_permissions' %}"{% if request.resolver_match.url_name == 'manage_permissions' %} class="is-active"{% endif %}>Права</a>{% endif %}
+</nav>

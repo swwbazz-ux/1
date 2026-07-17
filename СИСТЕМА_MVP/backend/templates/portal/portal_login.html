@@ -1,0 +1,18 @@
+{% extends 'portal/base_public.html' %}
+{% block title %}Вход для сотрудников — Коппер Рисорсез{% endblock %}
+{% block body_class %}login-page{% endblock %}
+{% block content %}
+<section class="login-section">
+    <div class="login-card">
+        <div class="login-card__brand"><span class="brand__mark" aria-hidden="true"><span>КР</span></span><div><strong>Портал сотрудника</strong><small>Участок № 2</small></div></div>
+        <div class="login-card__heading"><h1>Вход</h1><p>Используйте тот же номер телефона и код, что в рабочем приложении.</p></div>
+        <form class="portal-form" method="post" novalidate>
+            {% include 'portal/_form_fields.html' %}
+            {% if next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
+            <button class="button button--primary button--block" type="submit">Войти в портал</button>
+        </form>
+        <p class="login-help">Если код не подходит, обратитесь к своему руководителю или администратору системы.</p>
+        <a class="back-link" href="{% url 'portal:public_home' %}">← Вернуться на сайт компании</a>
+    </div>
+</section>
+{% endblock %}

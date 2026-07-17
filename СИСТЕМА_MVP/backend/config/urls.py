@@ -27,6 +27,7 @@ urlpatterns = [
     path('', include('downtimes.urls')),
     path('', include('reports.urls')),
     path('', include('trips.urls')),
+    path('', include('portal.urls')),
     path('', include('users.urls')),
     path('admin/', admin.site.urls),
 ]

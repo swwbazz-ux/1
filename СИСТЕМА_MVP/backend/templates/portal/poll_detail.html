@@ -1,0 +1,19 @@
+{% extends 'portal/base_internal.html' %}
+{% block title %}{{ poll.title }}{% endblock %}
+{% block content %}
+<a class="back-link" href="{% url 'portal:polls' %}">← Ко всем опросам</a>
+<section class="poll-detail">
+    <header><div class="poll-card__meta"><span class="privacy-label">{% if poll.is_anonymous %}Анонимный опрос{% else %}Именной опрос{% endif %}</span><span class="status-chip {% if poll.status == 'closed' %}status-chip--neutral{% else %}status-chip--active{% endif %}">{{ poll.get_status_display }}</span></div><h1>{{ poll.title }}</h1>{% if poll.description %}<p>{{ poll.description }}</p>{% endif %}</header>
+    <div class="privacy-explanation"><strong>{% if poll.is_anonymous %}Ваше имя не будет показано получателю{% else %}Ответ будет связан с вашим именем{% endif %}</strong><span>Промежуточные итоги до завершения опроса не показываются.</span></div>
+
+    {% if poll.status == 'closed' %}
+        {% if show_results %}
+        <section class="poll-results"><h2>Итоги</h2><p class="muted-note">Всего ответов: {{ total_votes }}</p>{% for option in options %}<div class="poll-result"><div><span>{{ option.text }}</span><strong>{{ option.vote_count }} гол.</strong></div></div>{% endfor %}</section>
+        {% else %}<div class="inline-empty inline-empty--panel"><strong>Опрос завершён</strong><span>Руководство ещё не приняло решение о публикации итогов.</span></div>{% endif %}
+    {% elif vote %}
+        <div class="vote-complete"><span aria-hidden="true">✓</span><div><strong>Ваш ответ принят</strong><p>Вы выбрали: «{{ vote.option.text }}». До завершения опроса итоги скрыты.</p></div></div>
+    {% else %}
+        <form class="vote-form" method="post" action="{% url 'portal:poll_vote' poll.pk %}">{% csrf_token %}{% if form.non_field_errors %}<div class="form-errors">{{ form.non_field_errors }}</div>{% endif %}<fieldset><legend>Выберите один вариант</legend>{% for option in options %}<label class="vote-option"><input type="radio" name="option" value="{{ option.pk }}" required><span>{{ option.text }}</span></label>{% empty %}<div class="inline-empty"><strong>Варианты ответа не добавлены</strong></div>{% endfor %}</fieldset>{% if options %}<button class="button button--primary button--block" type="submit">Отправить ответ</button>{% endif %}</form>
+    {% endif %}
+</section>
+{% endblock %}

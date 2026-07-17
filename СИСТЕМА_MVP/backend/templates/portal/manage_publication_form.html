@@ -1,0 +1,16 @@
+{% extends 'portal/base_internal.html' %}
+{% block title %}{% if publication %}Редактирование{% else %}Новая публикация{% endif %}{% endblock %}
+{% block content %}
+<header class="screen-heading"><div><span class="screen-kicker">Редакция</span><h1>{% if publication.status == 'published' %}Новая редакция публикации{% elif publication %}Редактирование публикации{% else %}Новая публикация{% endif %}</h1><p>{% if publication.status == 'published' %}После сохранения появится новый черновик, а опубликованная версия останется без изменений.{% else %}Укажите, кто увидит материал. По умолчанию публикация остаётся внутри портала.{% endif %}</p></div>{% if publication %}<span class="status-chip status-chip--{{ publication.status }}">{{ publication.get_status_display }}</span>{% endif %}</header>
+{% include 'portal/_manage_nav.html' %}
+<div class="editor-layout">
+    <form class="portal-form form-panel" method="post" enctype="multipart/form-data" novalidate>{% include 'portal/_form_fields.html' %}<div class="form-submit"><button class="button button--secondary" type="submit">{% if publication.status == 'published' %}Создать новую редакцию{% else %}Сохранить черновик{% endif %}</button><a class="button button--ghost" href="{% url 'portal:manage' %}">Отмена</a></div></form>
+    <aside class="editor-side">
+        {% if publication.cover_image %}<div class="editor-cover"><span>Обложка</span><img src="{% url 'portal:publication_cover' publication.pk %}" alt=""></div>{% endif %}
+        <div class="form-note"><strong>Перед публикацией</strong><ul><li>Проверьте заголовок и текст.</li><li>Убедитесь, что выбрана нужная аудитория.</li><li>Для открытого сайта используйте только согласованные фото.</li></ul></div>
+        {% if publication %}<dl class="audit-list"><div><dt>Создал</dt><dd>{{ publication.author.full_name|default:'—' }}<small>{{ publication.created_at|date:'d.m.Y H:i' }}</small></dd></div><div><dt>Изменил</dt><dd>{{ publication.editor.full_name|default:'—' }}<small>{{ publication.updated_at|date:'d.m.Y H:i' }}</small></dd></div>{% if publication.published_at %}<div><dt>Опубликовал</dt><dd>{{ publication.publisher.full_name|default:'—' }}<small>{{ publication.published_at|date:'d.m.Y H:i' }}</small></dd></div>{% endif %}</dl>{% endif %}
+        {% if publication.is_mandatory %}<div class="form-note"><strong>Ознакомление: {{ acknowledgements|length }} / {{ recipient_count }}</strong>{% if acknowledgements %}<p>Ознакомились:</p><ul>{% for item in acknowledgements|slice:':100' %}<li>{{ item.employee.full_name }} · {{ item.acknowledged_at|date:'d.m.Y H:i' }}</li>{% endfor %}</ul>{% endif %}{% if pending_recipients %}<p>Ещё не ознакомились:</p><ul>{% for employee in pending_recipients|slice:':100' %}<li>{{ employee.full_name }}</li>{% endfor %}</ul>{% endif %}</div>{% endif %}
+        {% if publication and portal_capabilities.can_publish and publication.status != 'published' %}<form method="post" action="{% url 'portal:manage_publication_publish' publication.pk %}" data-confirm="Опубликовать материал для выбранной аудитории?">{% csrf_token %}<input type="hidden" name="action" value="publish"><button class="button button--primary button--block" type="submit">Опубликовать</button></form>{% endif %}
+    </aside>
+</div>
+{% endblock %}

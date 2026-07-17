@@ -1,0 +1,19 @@
+{% extends 'portal/base_internal.html' %}
+{% block title %}Опросы{% endblock %}
+{% block content %}
+<header class="screen-heading"><div><span class="screen-kicker">Ваше мнение</span><h1>Опросы</h1><p>Здесь можно влиять на решения и изменения на участке.</p></div></header>
+{% if polls %}
+<div class="poll-list">
+    {% for poll in polls %}
+    <a class="poll-card{% if poll.status == 'closed' %} poll-card--closed{% endif %}" href="{% url 'portal:poll_detail' poll.pk %}">
+        <div class="poll-card__meta"><span class="privacy-label">{% if poll.is_anonymous %}Анонимный{% else %}Именной{% endif %}</span><span class="status-chip {% if poll.status == 'closed' %}status-chip--neutral{% elif poll.employee_voted %}status-chip--success{% else %}status-chip--active{% endif %}">{% if poll.status == 'closed' %}Завершён{% elif poll.employee_voted %}Вы ответили{% else %}Нужен ответ{% endif %}</span></div>
+        <h2>{{ poll.title }}</h2><p>{{ poll.description|truncatewords:24 }}</p>
+        <div class="poll-card__footer"><span>{% if poll.closes_at %}До {{ poll.closes_at|date:'d.m.Y H:i' }}{% endif %}</span><strong>{% if poll.status == 'closed' %}Посмотреть{% elif poll.employee_voted %}Мой ответ{% else %}Ответить{% endif %} →</strong></div>
+    </a>
+    {% endfor %}
+</div>
+{% include 'portal/_pagination.html' %}
+{% else %}
+    {% include 'portal/_empty_state.html' with empty_title='Активных опросов пока нет' empty_text='Когда понадобится ваше мнение, новый опрос появится здесь.' %}
+{% endif %}
+{% endblock %}

@@ -1,0 +1,24 @@
+{% extends 'portal/base_internal.html' %}
+{% block title %}Коллеги{% endblock %}
+{% block content %}
+<header class="screen-heading"><div><span class="screen-kicker">Участок № 2</span><h1>Коллеги</h1><p>Сотрудники, с которыми мы работаем на одном участке.</p></div></header>
+<form class="search-bar" method="get" role="search">
+    <label class="sr-only" for="employee-search">Найти сотрудника</label>
+    <input id="employee-search" type="search" name="q" value="{{ request.GET.q }}" placeholder="Фамилия, имя или должность">
+    <button class="button button--secondary" type="submit">Найти</button>
+</form>
+{% if employees %}
+<div class="employee-grid">
+    {% for employee in employees %}
+    <a class="employee-card" href="{% url 'portal:employee_profile' employee.pk %}">
+        {% if employee.photo %}<img src="{% url 'portal:employee_photo' employee.pk %}" alt="">{% else %}<span class="avatar-fallback avatar-fallback--large">{{ employee.full_name|first }}</span>{% endif %}
+        <span><strong>{{ employee.full_name }}</strong><small>{{ employee.personnel_position.name|default:employee.position|default:'Сотрудник' }}</small></span>
+        <b aria-hidden="true">→</b>
+    </a>
+    {% endfor %}
+</div>
+{% include 'portal/_pagination.html' %}
+{% else %}
+    {% if request.GET.q %}{% include 'portal/_empty_state.html' with empty_title='Никого не нашли' empty_text='Проверьте написание имени или должности.' %}{% else %}{% include 'portal/_empty_state.html' with empty_title='Список сотрудников пока пуст' empty_text='Портал покажет только действующих сотрудников.' %}{% endif %}
+{% endif %}
+{% endblock %}

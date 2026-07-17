@@ -1,0 +1,7 @@
+{% if page_obj.has_other_pages %}
+<nav class="pagination" aria-label="Постраничная навигация">
+    {% if page_obj.has_previous %}<a href="?page={{ page_obj.previous_page_number }}">← Назад</a>{% else %}<span></span>{% endif %}
+    <span>Страница {{ page_obj.number }} из {{ page_obj.paginator.num_pages }}</span>
+    {% if page_obj.has_next %}<a href="?page={{ page_obj.next_page_number }}">Дальше →</a>{% else %}<span></span>{% endif %}
+</nav>
+{% endif %}

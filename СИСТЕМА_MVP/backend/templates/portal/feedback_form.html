@@ -1,0 +1,13 @@
+{% extends 'portal/base_internal.html' %}
+{% block title %}Написать руководству{% endblock %}
+{% block content %}
+<a class="back-link" href="{% url 'portal:feedback' %}">← Мои обращения</a>
+<div class="form-page">
+    <header class="screen-heading"><div><span class="screen-kicker">Обратная связь</span><h1>Написать руководству</h1><p>Опишите вопрос, предложение или проблему своими словами.</p></div></header>
+    <form class="portal-form form-panel" method="post" enctype="multipart/form-data" novalidate>
+        {% include 'portal/_form_fields.html' %}
+        <div class="form-submit"><button class="button button--primary button--block-mobile" type="submit">Отправить обращение</button><a class="button button--ghost" href="{% url 'portal:feedback' %}">Отмена</a></div>
+    </form>
+    <aside class="form-note"><strong>Как работает анонимная отправка</strong><p>Включите «Отправить без имени». Получатель увидит текст и фото, но не увидит ваше имя.</p></aside>
+</div>
+{% endblock %}

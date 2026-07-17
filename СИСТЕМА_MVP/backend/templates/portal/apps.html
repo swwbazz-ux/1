@@ -1,0 +1,18 @@
+{% extends 'portal/base_internal.html' %}
+{% block title %}Мои приложения{% endblock %}
+{% block content %}
+<header class="screen-heading"><div><span class="screen-kicker">Рабочие сервисы</span><h1>Мои приложения</h1><p>Быстрый вход в приложения, доступные по вашей работе.</p></div></header>
+{% if applications %}
+<div class="application-grid">
+    {% for application in applications %}
+    <a class="application-card" href="{{ application.url }}">
+        <span class="application-card__icon" aria-hidden="true">{% if application.icon_url %}<img src="{{ application.icon_url }}" alt="">{% else %}{{ application.role_code|default:'КР'|slice:':3'|upper }}{% endif %}</span>
+        <span><strong>{{ application.name }}</strong><small>{{ application.description }}</small>{% if application.notice %}<em>{{ application.notice }}</em>{% endif %}</span>
+        <b aria-hidden="true">→</b>
+    </a>
+    {% endfor %}
+</div>
+{% else %}
+    {% include 'portal/_empty_state.html' with empty_title='Для вашей учётной записи пока нет приложений' empty_text='Когда администратор назначит рабочее приложение, оно появится здесь.' %}
+{% endif %}
+{% endblock %}
