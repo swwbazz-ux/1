@@ -286,7 +286,7 @@
                 <div class="employee-card-submit-row">
                     {% if employee_card_context == "oup" %}<a class="employee-card-button is-secondary" href="{% url 'oup_employees' %}">Отмена</a>{% else %}<a class="employee-card-button is-secondary" href="{% url 'system_admin_employees' %}">Отмена</a>{% endif %}
                     {% if can_submit_employee_card %}
-                        <button class="employee-card-button is-primary" type="submit">{% if page_mode == 'create' %}Создать сотрудника{% else %}Сохранить карточку{% endif %}</button>
+                        <button class="employee-card-button is-primary" type="submit">{% if page_mode == 'create' %}{% if employee_card_context == 'oup' %}Добавить сотрудника{% else %}Создать сотрудника{% endif %}{% else %}Сохранить карточку{% endif %}</button>
                     {% else %}
                         <button class="employee-card-button is-disabled" type="button" disabled>Редактирование недоступно</button>
                     {% endif %}
@@ -321,7 +321,7 @@
                             <div><strong>Действие</strong><span>запишется в журнал</span></div>
                         </div>
                     </section>
-                    <button class="employee-card-button is-primary side-submit" type="submit" form="employee-card-form">Создать сотрудника</button>
+                    <button class="employee-card-button is-primary side-submit" type="submit" form="employee-card-form">{% if employee_card_context == 'oup' %}Добавить сотрудника{% else %}Создать сотрудника{% endif %}</button>
                 {% else %}
                     <section class="employee-card-side-panel employee-card-access-panel">
                         <div class="employee-card-side-heading"><span>Доступ</span><h2>Роли и вход</h2></div>
