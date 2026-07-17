@@ -9,7 +9,7 @@
 <link rel="stylesheet" href="{% static 'css/oup-workplace-v1.css' %}?v=20260717-1">
 <link rel="stylesheet" href="{% static 'css/oup-work-period-v1.css' %}?v=20260717-1">
 {% endif %}
-<link rel="stylesheet" href="{% static 'css/employee-card-unified.css' %}?v=20260717-4">
+<link rel="stylesheet" href="{% static 'css/employee-card-unified.css' %}?v=20260717-5">
 {% endblock %}
 
 {% block body %}
@@ -255,11 +255,11 @@
                         {% else %}
                             <div class="employee-card-field" data-card-field data-copy-label="Назначенная смена">
                                 <div class="employee-card-label-row"><label for="employee-assignment-shift-readonly">Назначенная смена</label><button type="button" class="employee-copy-icon" data-copy-target="#employee-assignment-shift-readonly" aria-label="Скопировать смену" title="Скопировать смену"></button></div>
-                                <input id="employee-assignment-shift-readonly" value="{{ active_equipment_assignment.work_shift_label|default:'Нет назначения' }}" readonly>
+                                <select id="employee-assignment-shift-readonly" disabled aria-label="Назначенная смена"><option>{{ active_equipment_assignment.work_shift_label|default:'Нет назначения' }}</option></select>
                             </div>
                             <div class="employee-card-field" data-card-field data-copy-label="Назначенная техника">
                                 <div class="employee-card-label-row"><label for="employee-assignment-equipment-readonly">Назначенная техника</label><button type="button" class="employee-copy-icon" data-copy-target="#employee-assignment-equipment-readonly" aria-label="Скопировать технику" title="Скопировать технику"></button></div>
-                                <input id="employee-assignment-equipment-readonly" value="{{ active_equipment_assignment.equipment|default:'Нет назначения' }}" readonly>
+                                <select id="employee-assignment-equipment-readonly" disabled aria-label="Назначенная техника"><option>{{ active_equipment_assignment.equipment|default:'Нет назначения' }}</option></select>
                             </div>
                         {% endif %}
                     </div>
@@ -279,8 +279,8 @@
                     </div>
                 </section>
 
-                <section class="employee-card-section employee-card-notes" aria-labelledby="employee-notes-title">
-                    <div class="employee-card-section-heading"><h3 id="employee-notes-title">Дополнительные сведения</h3></div>
+                <details class="employee-card-section employee-card-notes" aria-labelledby="employee-notes-title"{% if form.comment.errors or form.hr_data.errors %} open{% endif %}>
+                    <summary class="employee-card-section-heading" id="employee-notes-title">Дополнительные сведения</summary>
                     <div class="employee-card-notes-grid">
                         <div class="employee-card-field" data-card-field data-copy-label="Комментарий">
                             <div class="employee-card-label-row"><label for="{{ form.comment.id_for_label }}">{{ form.comment.label }}</label><button type="button" class="employee-copy-icon" data-copy-target="#{{ form.comment.id_for_label }}" aria-label="Скопировать комментарий" title="Скопировать комментарий"></button></div>
@@ -291,7 +291,7 @@
                             {{ form.hr_data }}{{ form.hr_data.errors }}
                         </div>
                     </div>
-                </section>
+                </details>
 
             </form>
 

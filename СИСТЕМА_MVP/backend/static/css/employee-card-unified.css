@@ -80,7 +80,8 @@
     min-width: 0;
     min-height: 0;
     padding: 16px 18px;
-    overflow: auto;
+    overflow-x: hidden;
+    overflow-y: auto;
     scrollbar-gutter: stable;
 }
 
@@ -519,6 +520,42 @@
 
 .employee-card-section-heading h3 {
     font-size: 14px;
+}
+
+summary.employee-card-section-heading {
+    color: var(--employee-text);
+    font-size: 14px;
+    font-weight: 800;
+    line-height: 1.1;
+}
+
+.employee-card-notes > summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 24px;
+    cursor: pointer;
+    list-style: none;
+    margin-bottom: 0;
+}
+
+.employee-card-notes > summary::-webkit-details-marker {
+    display: none;
+}
+
+.employee-card-notes > summary::after {
+    color: var(--employee-muted);
+    content: "+";
+    font-size: 18px;
+    line-height: 1;
+}
+
+.employee-card-notes[open] > summary {
+    margin-bottom: 8px;
+}
+
+.employee-card-notes[open] > summary::after {
+    content: "-";
 }
 
 .employee-work-assignment-meta {
@@ -1050,7 +1087,8 @@
     }
 
     .employee-card-main {
-        padding: 10px 14px;
+        gap: 6px;
+        padding: 8px 12px;
     }
 
     .employee-card-heading {
@@ -1063,25 +1101,25 @@
     }
 
     .employee-card-profile {
-        grid-template-columns: 126px minmax(0, 1fr);
-        gap: 12px;
+        grid-template-columns: 112px minmax(0, 1fr);
+        gap: 10px;
     }
 
     .employee-card-photo-frame {
-        width: 126px;
-        height: 132px;
+        width: 112px;
+        height: 116px;
     }
 
     .employee-card-photo-placeholder span {
-        top: 27px;
-        width: 42px;
-        height: 42px;
+        top: 22px;
+        width: 38px;
+        height: 38px;
     }
 
     .employee-card-photo-placeholder i {
-        bottom: 18px;
-        width: 72px;
-        height: 44px;
+        bottom: 15px;
+        width: 64px;
+        height: 38px;
     }
 
     .employee-card-identity-grid,
@@ -1092,35 +1130,47 @@
     }
 
     .employee-card-label-row {
-        min-height: 20px;
+        min-height: 18px;
     }
 
     .employee-card-field input,
     .employee-card-field select,
     .employee-card-inline-form select {
-        height: 34px;
+        height: 32px;
         font-size: 13px;
     }
 
     .employee-card-field textarea {
-        min-height: 54px;
-        max-height: 70px;
+        min-height: 48px;
+        max-height: 64px;
         padding: 7px 10px;
         font-size: 13px;
     }
 
     .employee-card-section {
-        padding-top: 7px;
+        padding-top: 6px;
     }
 
     .employee-card-section-heading {
-        margin-bottom: 5px;
+        margin-bottom: 4px;
     }
 
     .employee-work-assignment-meta {
-        min-height: 30px;
-        margin-top: 5px;
+        min-height: 28px;
+        margin-top: 4px;
         padding: 4px 8px;
+    }
+
+    .employee-card-notes > summary {
+        min-height: 20px;
+    }
+
+    .employee-card-notes[open] > summary {
+        margin-bottom: 4px;
+    }
+
+    .employee-card-notes .employee-card-notes-grid {
+        gap: 5px 10px;
     }
 
     .employee-card-submit-row {
@@ -1339,6 +1389,14 @@
 
     .employee-card-main {
         gap: 8px;
+    }
+
+    .employee-card-notes:not([open]) > :not(summary) {
+        display: block;
+    }
+
+    .employee-card-notes > summary::after {
+        display: none;
     }
 
     .employee-card-field input,

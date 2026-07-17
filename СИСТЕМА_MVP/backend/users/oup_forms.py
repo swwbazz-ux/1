@@ -10,7 +10,7 @@ class OupAccessRoleForm(forms.Form):
     role = forms.ModelChoiceField(
         label='Доступ в приложение',
         queryset=Role.objects.none(),
-        empty_label='Выберите роль',
+        empty_label='Выберите доступ',
     )
 
     def __init__(self, *args, **kwargs):
@@ -32,7 +32,7 @@ class OupEmployeeForm(EmployeeCardForm):
         label='Доступ в приложение',
         required=False,
         queryset=Role.objects.none(),
-        empty_label='Выберите роль',
+        empty_label='Выберите доступ',
     )
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -45,9 +45,7 @@ class OupEmployeeForm(EmployeeCardForm):
         self.fields['dismissed_at'].disabled = True
         self.fields['issue_access'].widget.attrs['form'] = 'employee-card-form'
         self.fields['access_role'].widget.attrs['form'] = 'employee-card-form'
-        self.fields['base_specialization'].help_text = (
-            'Именно специализация определяет доступность для расстановки и подходящее приложение.'
-        )
+        self.fields['base_specialization'].help_text = ''
         self.fields['comment'].widget.attrs['placeholder'] = 'Рабочее примечание по сотруднику'
 
     def clean(self):

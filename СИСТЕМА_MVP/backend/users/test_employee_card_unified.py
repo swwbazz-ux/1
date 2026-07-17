@@ -61,6 +61,8 @@ class UnifiedEmployeeCardTests(TestCase):
         self.assertContains(create_response, 'form="employee-card-form"', html=False)
         self.assertEqual(create_response.content.decode().count('>Создать сотрудника</button>'), 1)
         self.assertNotContains(create_response, 'employee-card-submit-row')
+        self.assertContains(create_response, '>Выберите доступ</option>', html=False)
+        self.assertContains(create_response, '<details class="employee-card-section employee-card-notes"', html=False)
         self.assertContains(edit_response, 'data-copy-target="#id_phone"', html=False)
 
     def test_oup_create_and_edit_use_the_same_template_as_admin(self):
@@ -89,6 +91,21 @@ class UnifiedEmployeeCardTests(TestCase):
         self.assertNotContains(create_response, 'employee-card-submit-row')
         self.assertNotContains(create_response, 'Создать сотрудника')
         self.assertContains(create_response, 'data-copy-target="#id_access_role"', html=False)
+        self.assertContains(create_response, '>Выберите доступ</option>', html=False)
+        self.assertNotContains(
+            create_response,
+            'Именно специализация определяет доступность для расстановки и подходящее приложение.',
+        )
+        self.assertContains(
+            create_response,
+            '<select id="employee-assignment-shift-readonly" disabled',
+            html=False,
+        )
+        self.assertContains(
+            create_response,
+            '<select id="employee-assignment-equipment-readonly" disabled',
+            html=False,
+        )
         self.assertContains(edit_response, 'employee-card-unified.js')
 
     def test_personnel_number_is_not_a_visible_card_field(self):
@@ -158,8 +175,8 @@ class UnifiedEmployeeCardTests(TestCase):
 
     def test_shared_employee_card_shells_use_new_cache_versions(self):
         expected_versions = {
-            'system_admin_service_worker': 'system-admin-shell-v4',
-            'oup_service_worker': 'oup-shell-v4',
+            'system_admin_service_worker': 'system-admin-shell-v5',
+            'oup_service_worker': 'oup-shell-v5',
         }
 
         for view_name, expected_version in expected_versions.items():

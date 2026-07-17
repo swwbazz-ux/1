@@ -374,6 +374,7 @@ class AdminEmployeeForm(EmployeeCardForm):
         label='Доступ в приложение',
         queryset=Role.objects.filter(is_active=True).order_by('name'),
         required=False,
+        empty_label='Выберите доступ',
         widget=WorkAssignmentRoleSelect,
     )
     assignment_shift_type = forms.ChoiceField(
