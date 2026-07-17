@@ -74,8 +74,8 @@ class UnifiedEmployeeCardTests(TestCase):
         self.assertTemplateUsed(create_response, 'users/employee_card.html')
         self.assertTemplateUsed(edit_response, 'users/employee_card.html')
         self.assertContains(create_response, 'employee-card-unified.css')
-        self.assertContains(create_response, 'type="submit">Добавить сотрудника</button>', html=False)
-        self.assertNotContains(create_response, 'type="submit">Создать сотрудника</button>', html=False)
+        self.assertContains(create_response, 'type="submit">Создать сотрудника</button>', html=False)
+        self.assertNotContains(create_response, 'Добавить сотрудника')
         self.assertContains(edit_response, 'employee-card-unified.js')
 
     def test_personnel_number_is_not_a_visible_card_field(self):

@@ -62,9 +62,9 @@
                     <span class="admin-chip" data-oup-visible-count>{{ employees|length }} найдено</span>
                     {% if scope != 'dismissed' %}
                         {% if can_change_employees %}
-                            <a class="admin-button admin-button-primary" href="{% url 'oup_employee_create' %}">+ Добавить сотрудника</a>
+                            <a class="admin-button admin-button-primary" href="{% url 'oup_employee_create' %}">Создать сотрудника</a>
                         {% else %}
-                            <span class="admin-button admin-button-disabled" title="{% if oup_period_is_occupied %}Рабочий период занят другим специалистом{% else %}Сначала начните работу{% endif %}">+ Добавить сотрудника</span>
+                            <span class="admin-button admin-button-disabled" title="{% if oup_period_is_occupied %}Рабочий период занят другим специалистом{% else %}Сначала начните работу{% endif %}">Создать сотрудника</span>
                         {% endif %}
                     {% endif %}
                 </div>

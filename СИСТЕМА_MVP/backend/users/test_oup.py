@@ -907,7 +907,13 @@ class OupWorkplaceTests(TestCase):
     def test_dismissed_registry_does_not_offer_employee_creation(self):
         self.start_shift()
         response = self.client.get(reverse('oup_dismissed_employees'))
-        self.assertNotContains(response, '+ Добавить сотрудника')
+        self.assertNotContains(response, 'Создать сотрудника')
+
+    def test_employee_registry_uses_shared_creation_label(self):
+        self.start_shift()
+        response = self.client.get(reverse('oup_employees'))
+        self.assertContains(response, '>Создать сотрудника<', html=False)
+        self.assertNotContains(response, 'Добавить сотрудника')
 
 
 class OupSeedCommandTests(TestCase):
