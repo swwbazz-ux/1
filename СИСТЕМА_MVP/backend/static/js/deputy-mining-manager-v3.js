@@ -130,9 +130,50 @@
         }).join("").toUpperCase() || "??";
     }
 
-    function employeeSearchText(employee) {
-        return [employeeName(employee), employeeMeta(employee), employee && employee.phone]
-            .map(textValue).join(" ").toLocaleLowerCase("ru");
+    function normalizeSearch(value) {
+        return textValue(value).normalize("NFKC").trim().replace(/\s+/g, " ")
+            .toLocaleLowerCase("ru").replace(/ё/g, "е");
+    }
+
+    function employeeSearchRank(employee, rawQuery) {
+        var query = normalizeSearch(rawQuery);
+        if (!query) return 0;
+
+        var name = normalizeSearch(employeeName(employee));
+        var nameParts = name.split(" ").filter(Boolean);
+        var surname = nameParts[0] || "";
+        if (surname === query || name === query) return 0;
+        if (surname.indexOf(query) === 0 || name.indexOf(query) === 0) return 1;
+
+        for (var exactIndex = 1; exactIndex < nameParts.length; exactIndex += 1) {
+            if (nameParts[exactIndex] === query) return 2 + exactIndex;
+        }
+        for (var prefixIndex = 1; prefixIndex < nameParts.length; prefixIndex += 1) {
+            if (nameParts[prefixIndex].indexOf(query) === 0) return 5 + prefixIndex;
+        }
+
+        var queryParts = query.split(" ").filter(Boolean);
+        if (queryParts.length > 1 && queryParts.every(function (queryPart) {
+            return nameParts.some(function (namePart) { return namePart.indexOf(queryPart) === 0; });
+        })) {
+            return 10;
+        }
+        if (name.indexOf(query) !== -1) return 12;
+
+        var details = normalizeSearch([employeeMeta(employee), employee && employee.phone].map(textValue).join(" "));
+        return details.indexOf(query) !== -1 ? 20 : null;
+    }
+
+    function rankedEmployeeMatches(employees, query) {
+        return employees.map(function (employee, index) {
+            return { employee: employee, rank: employeeSearchRank(employee, query), index: index };
+        }).filter(function (match) {
+            return match.rank !== null;
+        }).sort(function (left, right) {
+            return left.rank - right.rank
+                || employeeName(left.employee).localeCompare(employeeName(right.employee), "ru", { sensitivity: "base" })
+                || left.index - right.index;
+        });
     }
 
     function employeeMatchesBrigade(employee) {
@@ -140,13 +181,62 @@
         return textValue(employee && employee.brigade_code) === currentBrigade;
     }
 
-    function rowSearchText(row) {
+    function equipmentSearchRank(row, rawQuery) {
+        var query = normalizeSearch(rawQuery);
+        if (!query) return 0;
         var equipment = row.equipment || {};
-        var slotEmployees = (row.slots || []).map(function (slot) {
-            return employeeName(slot.employee);
+        var label = normalizeSearch(equipment.label);
+        if (label === query) return 0;
+        if (label.indexOf(query) === 0) return 1;
+        if (label.indexOf(query) !== -1) return 2;
+
+        var details = normalizeSearch([equipment.model_label, equipment.status_label, row.attention]
+            .map(textValue).join(" "));
+        if (details.indexOf(query) !== -1) return 3;
+
+        var equipmentParts = normalizeSearch([equipment.label, equipment.model_label, equipment.status_label, row.attention]
+            .map(textValue).join(" ")).split(" ").filter(Boolean);
+        var queryParts = query.split(" ").filter(Boolean);
+        return queryParts.length > 1 && queryParts.every(function (queryPart) {
+            return equipmentParts.some(function (equipmentPart) {
+                return equipmentPart.indexOf(queryPart) === 0;
+            });
+        }) ? 4 : null;
+    }
+
+    function rowSearchRank(row, query) {
+        var ranks = [equipmentSearchRank(row, query)];
+        (row.slots || []).forEach(function (slot) {
+            if (slot.employee) ranks.push(employeeSearchRank(slot.employee, query));
         });
-        return [equipment.label, equipment.model_label, equipment.status_label, row.attention]
-            .concat(slotEmployees).map(textValue).join(" ").toLocaleLowerCase("ru");
+        ranks = ranks.filter(function (rank) { return rank !== null; });
+        return ranks.length ? Math.min.apply(Math, ranks) : null;
+    }
+
+    function searchContext() {
+        var query = currentQuery();
+        var brigadeEmployees = state.employees.filter(employeeMatchesBrigade);
+        var employeeMatches = query ? rankedEmployeeMatches(brigadeEmployees, query) : [];
+        var rowMatches = query ? state.rows.filter(rowMatchesFilter).map(function (row) {
+            return { row: row, rank: rowSearchRank(row, query) };
+        }).filter(function (match) {
+            return match.rank !== null;
+        }) : [];
+        var bestRowRank = rowMatches.length
+            ? Math.min.apply(Math, rowMatches.map(function (match) { return match.rank; }))
+            : null;
+        var employeeMode = Boolean(
+            query
+            && employeeMatches.length
+            && (bestRowRank === null || employeeMatches[0].rank <= bestRowRank)
+        );
+        return {
+            query: query,
+            brigadeEmployees: brigadeEmployees,
+            employeeMatches: employeeMatches,
+            rowMatches: rowMatches,
+            employeeMode: employeeMode
+        };
     }
 
     function createElement(tag, className, content) {
@@ -219,7 +309,7 @@
     }
 
     function currentQuery() {
-        return textValue(searchInput && searchInput.value).trim().toLocaleLowerCase("ru");
+        return normalizeSearch(searchInput && searchInput.value);
     }
 
     function planEditable() {
@@ -477,22 +567,28 @@
 
     function renderEmployees() {
         if (!employeeList) return;
-        var query = currentQuery();
-        var brigadeEmployees = state.employees.filter(employeeMatchesBrigade);
-        var visible = brigadeEmployees.filter(function (employee) {
-            return !query || employeeSearchText(employee).indexOf(query) !== -1;
-        });
+        var context = searchContext();
+        var visible = context.brigadeEmployees;
+        if (context.query && context.employeeMode) {
+            visible = context.employeeMatches.map(function (match) { return match.employee; });
+        } else if (context.query && !context.rowMatches.length) {
+            visible = [];
+        }
         employeeList.replaceChildren();
         visible.forEach(function (employee) {
             employeeList.appendChild(createEmployeeCard(employee));
         });
         employeeList.hidden = visible.length === 0;
         if (availableCount) {
-            availableCount.textContent = query ? visible.length + " из " + brigadeEmployees.length : textValue(brigadeEmployees.length);
+            availableCount.textContent = context.query && context.employeeMode
+                ? visible.length + " из " + context.brigadeEmployees.length
+                : (context.query && !context.rowMatches.length
+                    ? "0 из " + context.brigadeEmployees.length
+                    : textValue(context.brigadeEmployees.length));
         }
         if (employeeEmpty) {
             employeeEmpty.hidden = visible.length !== 0;
-            employeeEmpty.textContent = query
+            employeeEmpty.textContent = context.query
                 ? "Поиск не дал результатов."
                 : (currentBrigade === "all" ? "Свободных сотрудников нет." : "В бригаде " + currentBrigade + " свободных сотрудников нет.");
         }
@@ -749,10 +845,11 @@
 
     function renderBoard() {
         if (!board) return;
-        var query = currentQuery();
-        var rows = state.rows.filter(function (row) {
-            return rowMatchesFilter(row) && (!query || rowSearchText(row).indexOf(query) !== -1);
-        });
+        var context = searchContext();
+        var rows = state.rows.filter(rowMatchesFilter);
+        if (context.query && !context.employeeMode) {
+            rows = rows.filter(function (row) { return rowSearchRank(row, context.query) !== null; });
+        }
         board.replaceChildren();
         if (!rows.length) {
             if (boardEmpty) boardEmpty.hidden = false;

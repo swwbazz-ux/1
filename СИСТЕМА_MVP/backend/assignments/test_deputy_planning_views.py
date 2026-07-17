@@ -281,7 +281,7 @@ class DeputyPlanningViewTests(TestCase):
         self.assertEqual(response['Service-Worker-Allowed'], '/deputy-mining-manager/')
         self.assertEqual(response['X-Content-Type-Options'], 'nosniff')
         self.assertIn('deputy-mining-manager-desktop-shell-', script)
-        self.assertIn('`${CACHE_PREFIX}v5`', script)
+        self.assertIn('`${CACHE_PREFIX}v6`', script)
         self.assertIn('key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME', script)
         self.assertIn('removeCachedPlanningDocuments()', script)
         self.assertIn('LEGACY_ROOT_FALLBACK_URL', script)

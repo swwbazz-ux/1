@@ -94,7 +94,7 @@ DEPUTY_MANIFEST = {
 
 DEPUTY_SERVICE_WORKER_JS = r"""
 const CACHE_PREFIX = "deputy-mining-manager-desktop-shell-";
-const CACHE_NAME = `${CACHE_PREFIX}v5`;
+const CACHE_NAME = `${CACHE_PREFIX}v6`;
 const APP_SCOPE = "/deputy-mining-manager/";
 const MANIFEST_URL = "/deputy-mining-manager.webmanifest";
 const LEGACY_ROOT_FALLBACK_URL = "/mining-master/assignments/";
