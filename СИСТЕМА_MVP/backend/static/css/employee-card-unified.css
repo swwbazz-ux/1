@@ -50,6 +50,8 @@
 }
 
 .employee-card-page {
+    display: flex;
+    flex-direction: column;
     width: 100%;
     height: calc((100dvh / var(--admin-interface-scale, 1)) - var(--employee-header-height));
     min-height: 0;
@@ -60,6 +62,8 @@
 .employee-card-workspace {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(350px, 430px);
+    flex: 1 1 auto;
+    align-items: stretch;
     gap: 12px;
     height: 100%;
     min-height: 0;
@@ -83,6 +87,11 @@
     overflow-x: hidden;
     overflow-y: auto;
     scrollbar-gutter: stable;
+}
+
+.employee-card-main,
+.employee-card-side {
+    height: 100%;
 }
 
 .employee-card-heading,
@@ -652,6 +661,10 @@ summary.employee-card-section-heading {
     width: 100%;
 }
 
+.employee-card-side > .side-submit {
+    margin-top: auto;
+}
+
 .employee-card-side {
     display: flex;
     flex-direction: column;
@@ -1087,90 +1100,91 @@ summary.employee-card-section-heading {
     }
 
     .employee-card-main {
-        gap: 6px;
-        padding: 8px 12px;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 14px 16px;
     }
 
     .employee-card-heading {
-        min-height: 38px;
-        padding-bottom: 7px;
+        min-height: 42px;
+        padding-bottom: 8px;
     }
 
     .employee-card-heading h2 {
-        font-size: 20px;
+        font-size: 22px;
     }
 
     .employee-card-profile {
-        grid-template-columns: 112px minmax(0, 1fr);
-        gap: 10px;
+        grid-template-columns: 140px minmax(0, 1fr);
+        gap: 14px;
     }
 
     .employee-card-photo-frame {
-        width: 112px;
-        height: 116px;
+        width: 140px;
+        height: 148px;
     }
 
     .employee-card-photo-placeholder span {
-        top: 22px;
-        width: 38px;
-        height: 38px;
+        top: 30px;
+        width: 46px;
+        height: 46px;
     }
 
     .employee-card-photo-placeholder i {
-        bottom: 15px;
-        width: 64px;
-        height: 38px;
+        bottom: 20px;
+        width: 78px;
+        height: 48px;
     }
 
     .employee-card-identity-grid,
     .employee-card-field-grid,
     .employee-card-assignment-grid,
     .employee-card-notes-grid {
-        gap: 6px 10px;
+        gap: 8px 12px;
     }
 
     .employee-card-label-row {
-        min-height: 18px;
+        min-height: 20px;
     }
 
     .employee-card-field input,
     .employee-card-field select,
     .employee-card-inline-form select {
-        height: 32px;
-        font-size: 13px;
+        height: 38px;
+        font-size: 14px;
     }
 
     .employee-card-field textarea {
-        min-height: 48px;
-        max-height: 64px;
-        padding: 7px 10px;
-        font-size: 13px;
+        min-height: 64px;
+        max-height: 86px;
+        padding: 8px 11px;
+        font-size: 14px;
     }
 
     .employee-card-section {
-        padding-top: 6px;
+        padding-top: 8px;
     }
 
     .employee-card-section-heading {
-        margin-bottom: 4px;
+        margin-bottom: 6px;
     }
 
     .employee-work-assignment-meta {
-        min-height: 28px;
-        margin-top: 4px;
-        padding: 4px 8px;
+        min-height: 32px;
+        margin-top: 6px;
+        padding: 5px 10px;
     }
 
     .employee-card-notes > summary {
-        min-height: 20px;
+        min-height: 24px;
     }
 
     .employee-card-notes[open] > summary {
-        margin-bottom: 4px;
+        margin-bottom: 6px;
     }
 
     .employee-card-notes .employee-card-notes-grid {
-        gap: 5px 10px;
+        gap: 8px 12px;
     }
 
     .employee-card-submit-row {
@@ -1182,7 +1196,7 @@ summary.employee-card-section-heading {
     }
 
     .employee-card-side-panel {
-        padding: 11px;
+        padding: 13px;
     }
 
     .employee-card-side-heading {
