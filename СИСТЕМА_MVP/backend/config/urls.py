@@ -26,6 +26,7 @@ urlpatterns = [
     path('', include('assignments.urls')),
     path('', include('downtimes.urls')),
     path('', include('reports.urls')),
+    path('', include('rotations.urls')),
     path('', include('trips.urls')),
     path('', include('users.urls')),
     path('admin/', admin.site.urls),

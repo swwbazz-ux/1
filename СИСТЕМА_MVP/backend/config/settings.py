@@ -87,6 +87,7 @@ INSTALLED_APPS = [
     'trips',
     'downtimes',
     'reports',
+    'rotations.apps.RotationsConfig',
 ]
 
 MIDDLEWARE = [

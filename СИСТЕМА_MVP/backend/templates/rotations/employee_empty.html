@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Перевахта — сотрудник{% endblock %}
+{% block body_class %}rotation-workplace-screen{% endblock %}
+{% block extra_head %}
+<link rel="stylesheet" href="{% static 'css/rotation-workplace-v2.css' %}?v=1">
+{% endblock %}
+
+{% block body %}
+<main class="rotation-employee-shell">
+    <section class="rotation-form-card rotation-empty-state">
+        <span class="rotation-eyebrow">Личный запрос</span>
+        <h1>Сейчас нет открытого сбора</h1>
+        <p>{{ access.employee.full_name }}, табельщик пока не направил вам новый запрос по перевахте.</p>
+        <a class="admin-button admin-button-secondary" href="{% url 'role_home' %}">Вернуться в рабочий интерфейс</a>
+    </section>
+</main>
+{% endblock %}

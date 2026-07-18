@@ -102,6 +102,9 @@ ROLE_INTERFACE_NAMES = {
     'mining_master': 'Интерфейс горного мастера',
     'deputy_mining_manager': 'Планирование смены зам. начальника горного участка',
     'oup': 'Рабочее место ОУП',
+    'timekeeper': 'Рабочее место табельщика',
+    'site_manager': 'Согласование продлений начальником участка',
+    'employee_portal': 'Личные запросы сотрудника',
     'dispatcher': 'Диспетчерский экран',
     'mechanic': 'Интерфейс механика',
     'manager': 'Витрина руководства',
@@ -139,6 +142,9 @@ INTERFACE_MAP = [
             {'title': 'Горный мастер', 'url': '/mining-master/assignments/', 'code': '4000', 'note': 'Назначение самосвалов под экскаваторы'},
             {'title': 'Зам. начальника горного участка', 'url': '/deputy-mining-manager/', 'code': 'роль зам. начальника', 'note': 'Расстановка сотрудников по технике на две смены'},
             {'title': 'Отдел управления персоналом', 'url': '/oup/', 'code': '800000 / роль ОУП', 'note': 'Создание, ведение и увольнение сотрудников'},
+            {'title': 'Табельщик', 'url': '/timekeeper/', 'code': '900000 / роль табельщика', 'note': 'Сбор данных перевахты, Excel и оформление одобренных продлений'},
+            {'title': 'Начальник участка', 'url': '/site-manager/extensions/', 'code': '910000 / роль начальника участка', 'note': 'Согласование заявок на продление вахты'},
+            {'title': 'Ответ сотрудника по перевахте', 'url': '/my/rotation/', 'code': '920000 / любой активный доступ', 'note': 'Маршрут, даты, смена или запрос на продление'},
             {'title': 'Диспетчерский пульт', 'url': '/dispatcher/control/', 'code': '5000', 'note': 'Контроль активных рейсов и назначений'},
             {'title': 'Механическая служба', 'url': '/mechanic/downtimes/', 'code': '7000 / роль механика', 'note': 'Открытие и закрытие механических простоев по технике'},
         ],
@@ -168,6 +174,10 @@ DEMO_ACCESS_CODES = [
     ('+79000000005', '500000', 'Диспетчер'),
     ('+79000000007', '700000', 'Механик'),
     ('+79000000006', '600000', 'Руководство'),
+    ('+79000000008', '800000', 'Специалист ОУП'),
+    ('+79000000009', '900000', 'Табельщик'),
+    ('+79000000010', '910000', 'Начальник участка'),
+    ('+79000000011', '920000', 'Сотрудник'),
 ]
 
 
@@ -382,6 +392,17 @@ def redirect_after_admin_action(request, fallback_view, **kwargs):
         return redirect(next_url)
     return redirect(fallback_view, **kwargs)
 
+
+def _validated_next_url(request, value):
+    value = (value or '').strip()
+    if value and url_has_allowed_host_and_scheme(
+        value,
+        allowed_hosts={request.get_host()},
+        require_https=request.is_secure(),
+    ):
+        return value
+    return ''
+
 def build_workbook_response(workbook, filename):
     output = BytesIO()
     workbook.save(output)
@@ -420,11 +441,14 @@ def interface_map_view(request):
 
 def login_view(request):
     role_app = get_role_app_for_request(request)
-    if request.method == 'GET' and role_app:
-        if get_current_access(request):
-            return redirect('role_home')
-        if request.session.get('employee_access_id'):
-            request.session.flush()
+    next_url = _validated_next_url(
+        request,
+        request.POST.get('next') if request.method == 'POST' else request.GET.get('next'),
+    )
+    if request.method == 'GET' and get_current_access(request):
+        return redirect(next_url or 'role_home')
+    if request.method == 'GET' and role_app and request.session.get('employee_access_id'):
+        request.session.flush()
     selected_device_kind = request.POST.get('device_kind') if request.method == 'POST' else detect_session_device_kind(request)
     if selected_device_kind not in {'personal', 'shared'}:
         selected_device_kind = detect_session_device_kind(request)
@@ -448,6 +472,8 @@ def login_view(request):
             if access.status == EmployeeAccess.Status.NOT_ACTIVATED:
                 if access.primary_code_issued_at:
                     request.session['pending_activation_access_id'] = access.id
+                    if next_url:
+                        request.session['post_activation_next'] = next_url
                     set_session_device_kind(request, selected_device_kind)
                     access.save(update_fields=['last_login_at'])
                     return redirect('activate_access')
@@ -460,7 +486,7 @@ def login_view(request):
             request.session['employee_access_id'] = access.id
             set_session_device_kind(request, selected_device_kind)
             access.save(update_fields=['last_login_at', 'status', 'activated_at'])
-            return redirect('role_home')
+            return redirect(next_url or 'role_home')
         if role_app:
             messages.error(
                 request,
@@ -468,7 +494,11 @@ def login_view(request):
             )
         else:
             messages.error(request, 'Телефон или пинкод указаны неверно.')
-    return render(request, 'users/login.html', {'selected_device_kind': selected_device_kind})
+    return render(
+        request,
+        'users/login.html',
+        {'selected_device_kind': selected_device_kind, 'next_url': next_url},
+    )
 
 
 def activate_access_view(request):
@@ -515,7 +545,8 @@ def activate_access_view(request):
                     request,
                     'Постоянный пинкод создан. Первичный пинкод больше не действует.',
                 )
-            return redirect('role_home')
+            next_url = _validated_next_url(request, request.session.pop('post_activation_next', ''))
+            return redirect(next_url or 'role_home')
     else:
         form = AccessActivationForm(access=access)
 
@@ -549,6 +580,12 @@ def role_home_view(request):
         return redirect('deputy_mining_manager_placement')
     if access.role.code == 'oup':
         return redirect('oup_home')
+    if access.role.code == 'timekeeper':
+        return redirect('rotation_timekeeper_dashboard')
+    if access.role.code == 'site_manager':
+        return redirect('rotation_site_manager_queue')
+    if access.role.code == 'employee_portal':
+        return redirect('rotation_employee_home')
     if access.role.code == 'excavator_operator':
         return redirect('excavator_work')
     if access.role.code == 'dispatcher':
@@ -2171,9 +2208,9 @@ def system_admin_employee_status_action_view(request, employee_id, action):
                         role=employee.accesses.select_related('role').first().role if employee.accesses.exists() else None,
                         conflict_type='Попытка удаления сотрудника с историей',
                         process='Админка MVP',
-                        description='Полное удаление заблокировано: у сотрудника есть смены, рейсы, простои, назначения или диспетчерские действия.',
+                        description='Полное удаление заблокировано: у сотрудника есть смены, рейсы, простои, назначения, перевахта или другие учетные действия.',
                     )
-                    messages.error(request, 'Удаление запрещено: у сотрудника есть производственная история. Используйте архив.')
+                    messages.error(request, 'Удаление запрещено: у сотрудника есть учетная история. Используйте архив.')
                     log_admin_action(access.employee, 'Удаление сотрудника заблокировано', employee)
                     return redirect_after_admin_action(request, 'system_admin_employee_detail', employee_id=employee.id)
                 employee_name = employee.full_name

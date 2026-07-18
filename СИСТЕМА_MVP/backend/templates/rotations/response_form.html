@@ -1,0 +1,232 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}{% if is_timekeeper %}Ответ сотрудника{% else %}Моя перевахта{% endif %}{% endblock %}
+{% block body_class %}rotation-workplace-screen rotation-response-screen{% endblock %}
+{% block extra_head %}
+{% if is_timekeeper %}{% include "includes/role_app_pwa_head.html" with role_code="timekeeper" manifest_url="/timekeeper.webmanifest" service_worker_url="/timekeeper-sw.js" legacy_scope="/timekeeper/" theme_color="#176B73" apple_title="Табельщик" icon_180="img/pwa/timekeeper-180.png" %}{% endif %}
+<link rel="stylesheet" href="{% static 'css/rotation-workplace-v2.css' %}?v=1">
+{% endblock %}
+
+{% block body %}
+<div class="admin-shell admin-exports-shell admin-day rotation-shell rotation-response-shell" data-admin-theme>
+    <header class="admin-console-header rotation-console-header" aria-label="Рабочая шапка перевахты">
+        <section class="admin-console-identity">
+            <span class="admin-console-avatar" aria-hidden="true">{{ access.employee.full_name|default:"С"|first }}</span>
+            <span>
+                <strong>{{ access.employee.full_name|default:"Сотрудник" }}</strong>
+                <em>{% if is_timekeeper %}Табельщик{% else %}Сотрудник{% endif %}</em>
+            </span>
+        </section>
+
+        <section class="admin-console-main">
+            <div class="admin-console-title">
+                <span>Вахтовый контур</span>
+                <h1>{% if is_timekeeper %}Ответ сотрудника{% else %}Моя перевахта{% endif %}</h1>
+                <p>{% if is_timekeeper %}Проверка и уточнение данных по запросу табельщика.{% else %}Маршрут, даты или заявка на продление в следующую вахту.{% endif %}</p>
+            </div>
+            <nav class="admin-console-nav" aria-label="Разделы перевахты">
+                {% if is_timekeeper %}
+                    <a href="{% url 'rotation_timekeeper_dashboard' %}">Сборы</a>
+                    <a class="is-active" href="{% url 'rotation_timekeeper_response_edit' response.cycle.id response.id %}" aria-current="page">Ответ сотрудника</a>
+                {% else %}
+                    <a class="is-active" href="{% url 'rotation_employee_response' response.id %}" aria-current="page">Мой ответ</a>
+                {% endif %}
+            </nav>
+        </section>
+
+        <section class="admin-console-actions rotation-console-actions" aria-label="Тема и выход">
+            <button type="button"
+                    class="admin-theme-button"
+                    data-admin-theme-toggle
+                    data-theme-icon="sun"
+                    aria-label="Включить тёмную тему"
+                    title="Тема интерфейса">Тема</button>
+            <a class="admin-utility-link" href="{% url 'logout' %}">Выйти</a>
+        </section>
+    </header>
+
+    <main class="admin-console-page rotation-page rotation-response-page">
+        {% for message in messages %}
+            <div class="message {{ message.tags|default:'success' }}" role="status">{{ message }}</div>
+        {% endfor %}
+
+        <section class="rotation-response-summary" aria-labelledby="rotation-response-title">
+            <div class="rotation-person-cell">
+                <span class="rotation-person-avatar" aria-hidden="true">{{ response.employee.full_name|default:"С"|first }}</span>
+                <span>
+                    <span class="rotation-eyebrow">{{ response.cycle.name|default:"Сбор перевахты" }}</span>
+                    <h2 id="rotation-response-title">{{ response.employee.full_name|default:"Данные сотрудника" }}</h2>
+                    <p>
+                        {% if response.cycle.target_watch_period %}Вахта: {{ response.cycle.target_watch_period }}.{% endif %}
+                        {% if response.cycle.response_deadline %} Ответить до {{ response.cycle.response_deadline|date:"d.m.Y H:i" }}.{% endif %}
+                    </p>
+                </span>
+            </div>
+            <span class="rotation-status-chip status-{{ response.state|default:'pending' }}">
+                {{ response.get_state_display|default:"Ожидает ответа" }}
+            </span>
+        </section>
+
+        <div class="rotation-response-layout">
+            <section class="rotation-form-card" aria-labelledby="rotation-form-title">
+                <div class="rotation-form-card__header">
+                    <div>
+                        <span class="rotation-eyebrow">Шаг 1 из 1</span>
+                        <h2 id="rotation-form-title">Укажите план на перевахту</h2>
+                        <p>Сначала выберите вариант ответа. Поля ниже изменятся автоматически.</p>
+                    </div>
+                </div>
+
+                <form method="post" novalidate data-rotation-response-form>
+                    {% csrf_token %}
+                    {% for hidden in form.hidden_fields %}{{ hidden }}{% endfor %}
+                    {% if form.shift_source %}{{ form.shift_source.as_hidden }}{% endif %}
+
+                    {% if form.non_field_errors %}
+                        <div class="rotation-form-alert" role="alert">
+                            {% for error in form.non_field_errors %}<p>{{ error }}</p>{% endfor %}
+                        </div>
+                    {% endif %}
+
+                    <div class="rotation-field is-prominent">
+                        <label for="{{ form.intent.id_for_label }}">{{ form.intent.label|default:"Что вы планируете?" }}</label>
+                        {{ form.intent }}
+                        {% if form.intent.help_text %}<small>{{ form.intent.help_text }}</small>{% endif %}
+                        {% for error in form.intent.errors %}<span class="rotation-field-error">{{ error }}</span>{% endfor %}
+                    </div>
+
+                    <section class="rotation-intent-section" data-intent-section data-intents="arrival departure" hidden>
+                        <div class="rotation-section-heading">
+                            <span class="rotation-section-number" aria-hidden="true">1</span>
+                            <div>
+                                <h3>Дата и маршрут</h3>
+                                <p>Укажите фактический план поездки до места сбора или обратно.</p>
+                            </div>
+                        </div>
+
+                        <div class="rotation-form-grid">
+                            <div class="rotation-field">
+                                <label for="{{ form.departure_on.id_for_label }}">{{ form.departure_on.label|default:"Дата начала поездки" }}</label>
+                                {{ form.departure_on }}
+                                {% for error in form.departure_on.errors %}<span class="rotation-field-error">{{ error }}</span>{% endfor %}
+                            </div>
+                            <div class="rotation-field">
+                                <label for="{{ form.arrival_on.id_for_label }}">{{ form.arrival_on.label|default:"Дата прибытия" }}</label>
+                                {{ form.arrival_on }}
+                                {% for error in form.arrival_on.errors %}<span class="rotation-field-error">{{ error }}</span>{% endfor %}
+                            </div>
+                            <div class="rotation-field is-wide">
+                                <label for="{{ form.route_text.id_for_label }}">{{ form.route_text.label|default:"Маршрут" }}</label>
+                                {{ form.route_text }}
+                                {% if form.route_text.help_text %}<small>{{ form.route_text.help_text }}</small>{% endif %}
+                                {% for error in form.route_text.errors %}<span class="rotation-field-error">{{ error }}</span>{% endfor %}
+                            </div>
+                            <div class="rotation-field">
+                                <label for="{{ form.travel_mode.id_for_label }}">{{ form.travel_mode.label|default:"Вид транспорта" }}</label>
+                                {{ form.travel_mode }}
+                                {% for error in form.travel_mode.errors %}<span class="rotation-field-error">{{ error }}</span>{% endfor %}
+                            </div>
+                            <div class="rotation-field">
+                                <label for="{{ form.transfer_mode.id_for_label }}">{{ form.transfer_mode.label|default:"Как добираетесь" }}</label>
+                                {{ form.transfer_mode }}
+                                {% for error in form.transfer_mode.errors %}<span class="rotation-field-error">{{ error }}</span>{% endfor %}
+                            </div>
+                            <div class="rotation-field is-wide">
+                                <label for="{{ form.transport_details.id_for_label }}">{{ form.transport_details.label|default:"Рейс, поезд или автомобиль" }}</label>
+                                {{ form.transport_details }}
+                                {% if form.transport_details.help_text %}<small>{{ form.transport_details.help_text }}</small>{% endif %}
+                                {% for error in form.transport_details.errors %}<span class="rotation-field-error">{{ error }}</span>{% endfor %}
+                            </div>
+                        </div>
+                    </section>
+
+                    <section class="rotation-intent-section" data-intent-section data-intents="extension" hidden>
+                        <div class="rotation-section-heading">
+                            <span class="rotation-section-number" aria-hidden="true">1</span>
+                            <div>
+                                <h3>Запрос на продление</h3>
+                                <p>Заявка сначала поступит начальнику участка. Одобрение не является приказом.</p>
+                            </div>
+                        </div>
+
+                        <div class="rotation-form-grid">
+                            <div class="rotation-field">
+                                <label for="{{ form.extension_start.id_for_label }}">{{ form.extension_start.label|default:"Начало продления" }}</label>
+                                {{ form.extension_start }}
+                                {% for error in form.extension_start.errors %}<span class="rotation-field-error">{{ error }}</span>{% endfor %}
+                            </div>
+                            <div class="rotation-field">
+                                <label for="{{ form.extension_end.id_for_label }}">{{ form.extension_end.label|default:"Окончание продления" }}</label>
+                                {{ form.extension_end }}
+                                {% for error in form.extension_end.errors %}<span class="rotation-field-error">{{ error }}</span>{% endfor %}
+                            </div>
+                        </div>
+                    </section>
+
+                    <section class="rotation-intent-section rotation-not-travelling-note" data-intent-section data-intents="not_travelling" hidden>
+                        <div class="rotation-section-heading">
+                            <span class="rotation-section-number" aria-hidden="true">✓</span>
+                            <div>
+                                <h3>Поездка не планируется</h3>
+                                <p>Маршрут и транспорт указывать не нужно. При необходимости поясните ответ в комментарии.</p>
+                            </div>
+                        </div>
+                    </section>
+
+                    <section class="rotation-common-fields" data-response-details hidden>
+                        <div class="rotation-section-heading">
+                            <span class="rotation-section-number" aria-hidden="true">2</span>
+                            <div>
+                                <h3>Смена и комментарий</h3>
+                                <p>Смена нужна для подготовки расстановки по самосвалам на следующую вахту.</p>
+                            </div>
+                        </div>
+
+                        <div class="rotation-form-grid">
+                            <div class="rotation-field">
+                                <label for="{{ form.next_shift_type.id_for_label }}">{{ form.next_shift_type.label|default:"Смена на следующую вахту" }}</label>
+                                {{ form.next_shift_type }}
+                                {% for error in form.next_shift_type.errors %}<span class="rotation-field-error">{{ error }}</span>{% endfor %}
+                            </div>
+                            <div class="rotation-field is-wide">
+                                <label for="{{ form.comment.id_for_label }}">{{ form.comment.label|default:"Комментарий" }}</label>
+                                {{ form.comment }}
+                                <small>Для заявки на продление укажите причину. В остальных случаях поле необязательное.</small>
+                                {% for error in form.comment.errors %}<span class="rotation-field-error">{{ error }}</span>{% endfor %}
+                            </div>
+                        </div>
+                    </section>
+
+                    <div class="rotation-form-actions">
+                        {% if is_timekeeper %}
+                            <a class="admin-button admin-button-secondary" href="{% url 'rotation_timekeeper_cycle' response.cycle.id %}">Отмена</a>
+                        {% endif %}
+                        <button class="admin-button admin-button-primary" type="submit">
+                            {% if is_timekeeper %}Сохранить уточнения{% else %}Отправить ответ{% endif %}
+                        </button>
+                    </div>
+                </form>
+            </section>
+
+            <aside class="rotation-help-card" aria-label="Подсказка по заполнению">
+                <span class="rotation-help-card__mark" aria-hidden="true">i</span>
+                <div>
+                    <h2>Перед отправкой</h2>
+                    <ul>
+                        <li>Проверьте дату и маршрут.</li>
+                        <li>Укажите смену: день или ночь.</li>
+                        <li>Для продления кратко напишите причину.</li>
+                    </ul>
+                    {% if is_timekeeper %}
+                        <p>Изменения сохранятся как уточнение табельщика и останутся в истории ответа.</p>
+                    {% else %}
+                        <p>После отправки табельщик увидит данные в общем рабочем списке.</p>
+                    {% endif %}
+                </div>
+            </aside>
+        </div>
+    </main>
+</div>
+<script src="{% static 'js/rotation-workplace-v1.js' %}?v=1" defer></script>
+{% endblock %}

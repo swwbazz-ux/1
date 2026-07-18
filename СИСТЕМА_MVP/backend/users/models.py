@@ -155,6 +155,12 @@ class Employee(models.Model):
     def has_production_history(self):
         from assignments.models import CrewPlan, CrewPlanSlot, EquipmentAssignment, HaulAssignment
         from downtimes.models import DowntimeEvent
+        from rotations.models import (
+            RotationActionLog,
+            RotationCollectionCycle,
+            RotationResponse,
+            WatchExtensionCase,
+        )
         from shifts.models import EmployeeShift
         from trips.models import DispatcherActionLog, Trip
 
@@ -173,6 +179,14 @@ class Employee(models.Model):
             CrewPlan.objects.filter(published_by=self).exists(),
             HaulAssignment.objects.filter(assigned_by=self).exists(),
             DispatcherActionLog.objects.filter(actor=self).exists(),
+            RotationCollectionCycle.objects.filter(created_by=self).exists(),
+            RotationCollectionCycle.objects.filter(opened_by=self).exists(),
+            RotationCollectionCycle.objects.filter(closed_by=self).exists(),
+            RotationResponse.objects.filter(employee=self).exists(),
+            RotationResponse.objects.filter(submitted_by=self).exists(),
+            WatchExtensionCase.objects.filter(decision_by=self).exists(),
+            WatchExtensionCase.objects.filter(documentation_by=self).exists(),
+            RotationActionLog.objects.filter(actor=self).exists(),
         ])
 
 

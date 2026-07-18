@@ -20,6 +20,7 @@
     <div class="shared-shift-accent" aria-hidden="true"></div>
     <form method="post" data-validated-login class="app-confirm-content unified-login-form">
         {% csrf_token %}
+        {% if next_url %}<input type="hidden" name="next" value="{{ next_url }}">{% endif %}
         {% if role_app %}
         <div class="unified-login-role-identity">
             <img src="{{ role_app.icon_180_url }}" width="72" height="72" alt="">

@@ -1,0 +1,169 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Продления — начальник участка{% endblock %}
+{% block body_class %}rotation-workplace-screen rotation-manager-screen{% endblock %}
+{% block extra_head %}
+{% include "includes/role_app_pwa_head.html" with role_code="site_manager" manifest_url="/site-manager.webmanifest" service_worker_url="/site-manager-sw.js" legacy_scope="/site-manager/" theme_color="#8A5A23" apple_title="Начальник участка" icon_180="img/pwa/site-manager-180.png" %}
+<link rel="stylesheet" href="{% static 'css/rotation-workplace-v2.css' %}?v=1">
+{% endblock %}
+
+{% block body %}
+<div class="admin-shell admin-exports-shell admin-day rotation-shell rotation-manager-shell" data-admin-theme>
+    <header class="admin-console-header rotation-console-header" aria-label="Рабочая шапка начальника участка">
+        <section class="admin-console-identity">
+            <span class="admin-console-avatar" aria-hidden="true">{{ access.employee.full_name|default:"Н"|first }}</span>
+            <span>
+                <strong>{{ access.employee.full_name|default:"Начальник участка" }}</strong>
+                <em>Начальник участка</em>
+            </span>
+        </section>
+
+        <section class="admin-console-main">
+            <div class="admin-console-title">
+                <span>Вахтовый контур</span>
+                <h1>Согласование продлений</h1>
+                <p>Решения по сотрудникам, запросившим работу в следующую вахту.</p>
+            </div>
+            <nav class="admin-console-nav" aria-label="Разделы начальника участка">
+                <a class="is-active" href="{% url 'rotation_site_manager_queue' %}" aria-current="page">Продления</a>
+            </nav>
+        </section>
+
+        <section class="admin-console-actions rotation-console-actions" aria-label="Тема и выход">
+            <button type="button"
+                    class="admin-theme-button"
+                    data-admin-theme-toggle
+                    data-theme-icon="sun"
+                    aria-label="Включить тёмную тему"
+                    title="Тема интерфейса">Тема</button>
+            <a class="admin-utility-link" href="{% url 'logout' %}">Выйти</a>
+        </section>
+    </header>
+
+    <main class="admin-console-page rotation-page rotation-manager-page">
+        {% for message in messages %}
+            <div class="message {{ message.tags|default:'success' }}" role="status">{{ message }}</div>
+        {% endfor %}
+
+        <section class="rotation-page-heading" aria-labelledby="rotation-manager-title">
+            <div>
+                <span class="rotation-eyebrow">Очередь решений</span>
+                <h2 id="rotation-manager-title">Заявки на продление</h2>
+                <p>Проверьте срок и причину. Одобренные кандидаты вернутся табельщику для документального оформления.</p>
+            </div>
+            <span class="rotation-status-chip status-pending">{{ metrics.pending|default:0 }} ожидают решения</span>
+        </section>
+
+        <section class="rotation-metrics rotation-manager-metrics" aria-label="Сводка по продлениям">
+            <article class="rotation-metric is-warning">
+                <span>Ожидают решения</span>
+                <strong>{{ metrics.pending|default:0 }}</strong>
+                <small>нужно рассмотреть</small>
+            </article>
+            <article class="rotation-metric is-success">
+                <span>Одобрены</span>
+                <strong>{{ metrics.approved|default:0 }}</strong>
+                <small>возвращены табельщику</small>
+            </article>
+            <article class="rotation-metric is-danger">
+                <span>Отклонены</span>
+                <strong>{{ metrics.rejected|default:0 }}</strong>
+                <small>с указанием причины</small>
+            </article>
+        </section>
+
+        <section class="rotation-manager-queue" aria-label="Кандидаты на продление">
+            {% for item in cases %}
+                {% with case=item.case|default:item %}
+                    {% with response=case.response employee=case.employee|default:case.response.employee %}
+                        <article class="rotation-extension-card status-{{ case.decision_status|default:'pending' }}">
+                            <header class="rotation-extension-card__header">
+                                <div class="rotation-person-cell">
+                                    <span class="rotation-person-avatar" aria-hidden="true">{{ response.snapshot_full_name|default:employee.full_name|default:"С"|first }}</span>
+                                    <span>
+                                        <strong>{{ response.snapshot_full_name|default:employee.full_name|default:"Сотрудник не указан" }}</strong>
+                                        <small>
+                                            {% if response.snapshot_personnel_number %}№ {{ response.snapshot_personnel_number }}{% endif %}
+                                            {% if response.snapshot_position %} · {{ response.snapshot_position }}{% endif %}
+                                        </small>
+                                    </span>
+                                </div>
+                                <span class="rotation-status-chip status-{{ case.decision_status|default:'pending' }}">
+                                    {{ case.get_decision_status_display|default:"Ожидает решения" }}
+                                </span>
+                            </header>
+
+                            <dl class="rotation-extension-details">
+                                <div>
+                                    <dt>Срок продления</dt>
+                                    <dd>{{ case.extension_start|date:"d.m.Y"|default:"—" }} — {{ case.extension_end|date:"d.m.Y"|default:"—" }}</dd>
+                                </div>
+                                <div>
+                                    <dt>Следующая смена</dt>
+                                    <dd>
+                                        <span class="rotation-shift-badge shift-{{ response.next_shift_type|default:'unknown' }}">
+                                            {{ response.get_next_shift_type_display|default:"Не указана" }}
+                                        </span>
+                                    </dd>
+                                </div>
+                                <div>
+                                    <dt>Сбор перевахты</dt>
+                                    <dd>{{ response.cycle.name|default:"—" }}</dd>
+                                </div>
+                                <div class="is-wide">
+                                    <dt>Причина сотрудника</dt>
+                                    <dd>{{ response.comment|default:"Причина не указана" }}</dd>
+                                </div>
+                            </dl>
+
+                            {% if case.decision_status == 'pending' or not case.decision_status %}
+                                <div class="rotation-decision-grid">
+                                    <form method="post"
+                                          action="{% url 'rotation_site_manager_decision' case.id 'approved' %}"
+                                          class="rotation-decision-form is-approve">
+                                        {% csrf_token %}
+                                        <label for="approve-comment-{{ case.id }}">Комментарий к одобрению <span>необязательно</span></label>
+                                        <textarea id="approve-comment-{{ case.id }}"
+                                                  name="comment"
+                                                  rows="3"
+                                                  placeholder="Например: согласовано по производственной необходимости"></textarea>
+                                        <button class="admin-button rotation-approve-button" type="submit">Одобрить продление</button>
+                                    </form>
+
+                                    <form method="post"
+                                          action="{% url 'rotation_site_manager_decision' case.id 'rejected' %}"
+                                          class="rotation-decision-form is-reject">
+                                        {% csrf_token %}
+                                        <label for="reject-comment-{{ case.id }}">Причина отказа <span>обязательно</span></label>
+                                        <textarea id="reject-comment-{{ case.id }}"
+                                                  name="comment"
+                                                  rows="3"
+                                                  required
+                                                  aria-required="true"
+                                                  placeholder="Кратко укажите причину отказа"></textarea>
+                                        <button class="admin-button rotation-reject-button" type="submit">Отклонить</button>
+                                    </form>
+                                </div>
+                            {% else %}
+                                <div class="rotation-decision-result">
+                                    <strong>Решение принято</strong>
+                                    {% if case.decision_comment %}<p>{{ case.decision_comment }}</p>{% endif %}
+                                    {% if case.decision_at %}<small>{{ case.decision_at|date:"d.m.Y H:i" }}</small>{% endif %}
+                                </div>
+                            {% endif %}
+                        </article>
+                    {% endwith %}
+                {% endwith %}
+            {% empty %}
+                <div class="rotation-empty-state rotation-manager-empty">
+                    <span class="rotation-empty-state__icon" aria-hidden="true">✓</span>
+                    <strong>Новых заявок нет</strong>
+                    <p>Все запросы на продление рассмотрены. Новые кандидаты появятся здесь после ответа сотрудника.</p>
+                </div>
+            {% endfor %}
+        </section>
+    </main>
+</div>
+<script src="{% static 'js/rotation-workplace-v1.js' %}?v=1" defer></script>
+{% endblock %}
