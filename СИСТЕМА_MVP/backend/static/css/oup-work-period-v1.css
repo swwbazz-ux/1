@@ -4,7 +4,7 @@
 
 .oup-shift-state {
     min-width: 0;
-    min-height: 46px;
+    min-height: var(--oup-header-control-height);
 }
 
 .oup-shift-state.is-occupied {

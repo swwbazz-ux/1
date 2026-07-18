@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 from django.test import TestCase
@@ -202,8 +203,8 @@ class UnifiedEmployeeCardTests(TestCase):
 
     def test_shared_employee_card_shells_use_new_cache_versions(self):
         expected_versions = {
-            'system_admin_service_worker': 'system-admin-shell-v12',
-            'oup_service_worker': 'oup-shell-v13',
+            'system_admin_service_worker': 'system-admin-shell-v13',
+            'oup_service_worker': 'oup-shell-v14',
         }
 
         for view_name, expected_version in expected_versions.items():
@@ -218,16 +219,68 @@ class UnifiedEmployeeCardTests(TestCase):
         static_css = Path(__file__).resolve().parents[1] / 'static' / 'css'
         app_stylesheet = (static_css / 'app.css').read_text(encoding='utf-8')
         oup_stylesheet = (static_css / 'oup-workplace-v1.css').read_text(encoding='utf-8')
+        oup_period_stylesheet = (static_css / 'oup-work-period-v1.css').read_text(encoding='utf-8')
+        oup_responsive_stylesheet = (static_css / 'oup-responsive-layout-v2.css').read_text(
+            encoding='utf-8',
+        )
 
         self.assertIn('--admin-console-header-height: 112px;', app_stylesheet)
         self.assertIn('--admin-header-control-height: 40px;', app_stylesheet)
         self.assertIn('--admin-header-icon-size: 40px;', app_stylesheet)
+        self.assertIn('--admin-header-identity-column: minmax(210px, 260px);', app_stylesheet)
+        self.assertIn('--admin-header-actions-column: minmax(230px, 300px);', app_stylesheet)
+        self.assertIn('--admin-header-title-column: clamp(220px, 18vw, 360px);', app_stylesheet)
+        self.assertIn('--admin-header-utility-width: 96px;', app_stylesheet)
         self.assertIn('grid-template-columns: 52px minmax(0, 1fr);', app_stylesheet)
+        self.assertIn(
+            'grid-template-columns: var(--admin-header-title-column) minmax(0, 1fr);',
+            app_stylesheet,
+        )
         self.assertIn('font-size: 32px;', app_stylesheet)
         self.assertIn('--oup-header-control-height: 40px;', oup_stylesheet)
         self.assertIn('--oup-header-control-font-size: 13px;', oup_stylesheet)
+        self.assertNotIn('clamp(260px, 22vw, 460px)', oup_stylesheet)
+        self.assertNotIn('clamp(260px, 22vw, 460px)', oup_responsive_stylesheet)
+        self.assertIn(
+            'grid-template-columns: minmax(0, 1fr) var(--oup-header-theme-size) var(--admin-header-utility-width);',
+            oup_stylesheet,
+        )
         self.assertIn('height: var(--oup-header-control-height);', oup_stylesheet)
         self.assertIn('padding: 0 14px;', oup_stylesheet)
+        self.assertIn('min-height: var(--oup-header-control-height);', oup_period_stylesheet)
+        self.assertNotIn('min-height: 46px;', oup_period_stylesheet)
+        self.assertIn(
+            'grid-template-columns: minmax(180px, 300px) 44px var(--admin-header-utility-width);',
+            oup_stylesheet,
+        )
+        self.assertIn('--oup-header-control-height: 44px;', oup_stylesheet)
+
+        template_root = Path(__file__).resolve().parents[1] / 'templates' / 'users'
+        for template_name in ('oup_employees.html', 'oup_employee_dismiss.html', 'oup_logs.html'):
+            template = (template_root / template_name).read_text(encoding='utf-8')
+            self.assertIn('oup-work-period-v1.css\' %}?v=20260718-2', template)
+            self.assertIn('oup-responsive-layout-v2.css\' %}?v=20260718-2', template)
+
+    def test_standard_header_theme_buttons_are_icon_only(self):
+        backend_root = Path(__file__).resolve().parents[1]
+        user_templates = backend_root / 'templates' / 'users'
+        templates = list(user_templates.glob('system_admin_*.html')) + [
+            user_templates / 'employee_card.html',
+            backend_root / 'templates' / 'includes' / 'oup_header.html',
+        ]
+
+        for template_path in templates:
+            template = template_path.read_text(encoding='utf-8')
+            matches = re.findall(
+                r'(<button\b[^>]*data-admin-theme-toggle[^>]*>)(.*?)</button>',
+                template,
+                flags=re.DOTALL,
+            )
+            self.assertTrue(matches, template_path.name)
+            for opening_tag, body in matches:
+                self.assertIn('data-theme-icon="sun"', opening_tag)
+                self.assertIn('aria-label=', opening_tag)
+                self.assertEqual(body.strip(), '')
 
     def test_new_employee_cannot_reuse_an_existing_phone(self):
         form = AdminEmployeeForm(data={

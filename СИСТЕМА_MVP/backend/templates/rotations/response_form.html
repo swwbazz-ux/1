@@ -5,7 +5,7 @@
 {% block body_class %}rotation-workplace-screen rotation-response-screen{% endblock %}
 {% block extra_head %}
 {% if is_timekeeper %}{% include "includes/role_app_pwa_head.html" with role_code="timekeeper" manifest_url="/timekeeper.webmanifest" service_worker_url="/timekeeper-sw.js" legacy_scope="/timekeeper/" theme_color="#176B73" apple_title="Табельщик" icon_180="img/pwa/timekeeper-180.png" %}{% endif %}
-<link rel="stylesheet" href="{% static 'css/rotation-workplace-v2.css' %}?v=2">
+<link rel="stylesheet" href="{% static 'css/rotation-workplace-v2.css' %}?v=3">
 {% endblock %}
 
 {% block body %}
@@ -40,8 +40,8 @@
                     class="admin-theme-button"
                     data-admin-theme-toggle
                     data-theme-icon="sun"
-                    aria-label="Включить тёмную тему"
-                    title="Тема интерфейса">Тема</button>
+                    aria-label="Переключить дневной и ночной режим"
+                    title="Переключить дневной и ночной режим"></button>
             <a class="admin-utility-link" href="{% url 'logout' %}">Выйти</a>
         </section>
     </header>

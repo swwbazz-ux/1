@@ -1,4 +1,5 @@
 from datetime import datetime, time, timedelta
+from pathlib import Path
 
 from django.test import Client, TestCase, override_settings
 from django.utils import timezone
@@ -367,8 +368,8 @@ class RotationWorkflowTests(TestCase):
 
     def test_rotation_role_service_workers_use_updated_header_shells(self):
         expected_versions = {
-            'timekeeper': 'timekeeper-shell-v4',
-            'site-manager': 'site-manager-shell-v4',
+            'timekeeper': 'timekeeper-shell-v5',
+            'site-manager': 'site-manager-shell-v5',
         }
 
         for slug, expected_version in expected_versions.items():
@@ -378,6 +379,45 @@ class RotationWorkflowTests(TestCase):
                 self.assertContains(response, expected_version)
                 self.assertContains(response, 'new Request(url, { cache: "reload" })')
                 self.assertContains(response, 'fetch(request, { cache: "reload" })')
+
+    def test_rotation_header_uses_shared_compact_action_grid(self):
+        backend_root = Path(__file__).resolve().parents[1]
+        stylesheet = (backend_root / 'static' / 'css' / 'rotation-workplace-v2.css').read_text(
+            encoding='utf-8',
+        )
+
+        self.assertIn(
+            'grid-template-columns: var(--admin-header-icon-size) var(--admin-header-utility-width);',
+            stylesheet,
+        )
+        self.assertIn('.rotation-shell .rotation-console-actions .admin-theme-button', stylesheet)
+        self.assertNotIn('display: flex;\n    grid-template-columns: none;', stylesheet)
+        self.assertIn(
+            '.rotation-console-header .admin-console-actions {\n'
+            '        grid-row: 3;',
+            stylesheet,
+        )
+        self.assertIn(
+            '.rotation-console-header .admin-console-main {\n'
+            '        grid-row: 2;',
+            stylesheet,
+        )
+
+        for template_name in (
+            'cycle_create.html',
+            'response_form.html',
+            'site_manager_queue.html',
+            'timekeeper_cycle.html',
+            'timekeeper_dashboard.html',
+        ):
+            template = (
+                backend_root / 'templates' / 'rotations' / template_name
+            ).read_text(encoding='utf-8')
+            self.assertIn('data-theme-icon="sun"', template)
+            self.assertNotRegex(
+                template,
+                r'<button\b[^>]*data-admin-theme-toggle[^>]*>\s*\S+.*?</button>',
+            )
 
     def test_admin_delete_is_blocked_when_employee_has_rotation_history(self):
         admin_role, _created = Role.objects.get_or_create(

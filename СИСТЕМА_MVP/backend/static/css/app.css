@@ -12437,6 +12437,11 @@ body.employees-admin-screen {
     --admin-console-header-height: 112px;
     --admin-header-control-height: 40px;
     --admin-header-icon-size: 40px;
+    --admin-header-identity-column: minmax(210px, 260px);
+    --admin-header-actions-column: minmax(230px, 300px);
+    --admin-header-title-column: clamp(220px, 18vw, 360px);
+    --admin-header-utility-width: 96px;
+    --admin-header-gap: 8px;
     --admin-bg: #dce4e7;
     --admin-top: #eef3f4;
     --admin-panel: #f7faf9;
@@ -12508,7 +12513,10 @@ body.employees-admin-screen {
 
 .admin-console-header {
     display: grid;
-    grid-template-columns: minmax(210px, 260px) minmax(0, 1fr) minmax(230px, 300px);
+    grid-template-columns:
+        var(--admin-header-identity-column)
+        minmax(0, 1fr)
+        var(--admin-header-actions-column);
     min-height: var(--admin-console-header-height);
     border-bottom: 1px solid var(--admin-line);
     background: var(--admin-top);
@@ -12567,8 +12575,8 @@ body.employees-admin-screen {
 
 .admin-console-main {
     display: grid;
-    grid-template-columns: minmax(200px, 310px) minmax(0, 1fr);
-    gap: 12px;
+    grid-template-columns: var(--admin-header-title-column) minmax(0, 1fr);
+    gap: var(--admin-header-gap);
     align-items: center;
     border-right: 1px solid var(--admin-line-soft);
 }
@@ -12653,10 +12661,17 @@ body.employees-admin-screen {
 
 .admin-console-actions {
     display: grid;
-    grid-template-columns: var(--admin-header-icon-size) repeat(2, minmax(0, 1fr));
-    gap: 10px;
+    grid-template-columns: var(--admin-header-icon-size) repeat(2, var(--admin-header-utility-width));
+    gap: var(--admin-header-gap);
     align-content: center;
     align-items: center;
+    justify-content: end;
+}
+
+.admin-console-actions .admin-utility-link {
+    width: 100%;
+    min-width: 0;
+    padding: 0 8px;
 }
 
 .admin-theme-button {
@@ -12667,6 +12682,11 @@ body.employees-admin-screen {
     overflow: hidden;
     font-size: 0;
     cursor: pointer;
+}
+
+.admin-exports-shell .admin-console-header .admin-theme-button {
+    font-size: 0;
+    line-height: 0;
 }
 
 .admin-theme-button::before,
@@ -15201,7 +15221,7 @@ body.employees-admin-screen {
     }
 
     .admin-console-actions {
-        grid-template-columns: 44px repeat(2, 120px);
+        grid-template-columns: 44px repeat(2, var(--admin-header-utility-width));
         justify-content: center;
     }
 

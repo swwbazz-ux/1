@@ -3,12 +3,6 @@
     max-width: none;
 }
 
-.oup-console-header .admin-console-identity strong {
-    overflow-wrap: anywhere;
-    line-height: 1.08;
-    white-space: normal;
-}
-
 .oup-person-cell > span:last-child {
     min-width: 0;
 }
@@ -16,12 +10,6 @@
 .oup-person-cell strong,
 .oup-person-cell small {
     overflow-wrap: anywhere;
-}
-
-@media (min-width: 1221px) {
-    .oup-console-header {
-        grid-template-columns: clamp(260px, 22vw, 460px) minmax(480px, 1fr) clamp(420px, 30vw, 680px);
-    }
 }
 
 @media (min-width: 641px) and (max-width: 1023px) {
