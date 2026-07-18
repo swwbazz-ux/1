@@ -439,6 +439,13 @@ def interface_map_view(request):
     )
 
 
+def _masked_activation_phone(value):
+    digits = normalize_phone(value)
+    if len(digits) == 11 and digits.startswith('7'):
+        return f'+7 ••• •••-{digits[-4:-2]}-{digits[-2:]}'
+    return 'Телефон подтвержден'
+
+
 def login_view(request):
     role_app = get_role_app_for_request(request)
     next_url = _validated_next_url(
@@ -555,7 +562,9 @@ def activate_access_view(request):
         'users/activate_access.html',
         {
             'access': access,
+            'activation_phone': _masked_activation_phone(access.employee.phone),
             'form': form,
+            'role_app': role_app,
         },
     )
 

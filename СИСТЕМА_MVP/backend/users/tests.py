@@ -1624,13 +1624,16 @@ class AccessLoginTests(TestCase):
             HTTP_HOST='localhost',
         )
         self.assertRedirects(login_response, '/activate-access/', target_status_code=200)
-        self.assertContains(login_response, 'Активировать доступ')
-        self.assertContains(login_response, 'name="phone"')
+        self.assertContains(login_response, 'Создайте постоянный PIN')
+        self.assertContains(login_response, 'Телефон и временный PIN повторно вводить не нужно.')
+        self.assertContains(login_response, '+7 ••• •••-11-11')
+        self.assertNotContains(login_response, 'name="phone"')
         self.assertContains(login_response, 'name="new_access_code"')
+        self.assertContains(login_response, 'maxlength="6"', count=2)
 
         activation_response = self.client.post(
             '/activate-access/',
-            {'phone': '+7 (900) 000-11-11', 'new_access_code': '864286', 'confirm_access_code': '864286'},
+            {'new_access_code': '864286', 'confirm_access_code': '864286'},
             follow=True,
             HTTP_HOST='localhost',
         )
@@ -1679,7 +1682,7 @@ class AccessLoginTests(TestCase):
         self.client.post('/', {'phone': '+79000002222', 'access_code': '246824'}, follow=True, HTTP_HOST='localhost')
         response = self.client.post(
             '/activate-access/',
-            {'phone': '+7 900 000-22-22', 'new_access_code': '864286', 'confirm_access_code': '864286'},
+            {'new_access_code': '864286', 'confirm_access_code': '864286'},
             follow=True,
             HTTP_HOST='localhost',
         )
@@ -1690,6 +1693,68 @@ class AccessLoginTests(TestCase):
         self.assertNotContains(response, 'Такой пинкод уже используется')
         self.assertEqual(second_access.access_code, '864286')
         self.assertEqual(second_access.status, EmployeeAccess.Status.ACTIVATED)
+
+    def test_activation_rejects_temporary_and_weak_pin(self):
+        employee = Employee.objects.create(full_name='Водитель с временным PIN', phone='+79000003333')
+        access = EmployeeAccess.objects.create(
+            employee=employee,
+            role=self.role,
+            access_code='246824',
+            status=EmployeeAccess.Status.NOT_ACTIVATED,
+            primary_code_issued_at=timezone.now(),
+        )
+
+        self.client.post('/', {'phone': '+79000003333', 'access_code': '246824'}, HTTP_HOST='localhost')
+
+        same_pin_response = self.client.post(
+            '/activate-access/',
+            {'new_access_code': '246824', 'confirm_access_code': '246824'},
+            HTTP_HOST='localhost',
+        )
+        self.assertEqual(same_pin_response.status_code, 200)
+        self.assertContains(same_pin_response, 'Новый PIN не должен совпадать с временным.')
+
+        weak_pin_response = self.client.post(
+            '/activate-access/',
+            {'new_access_code': '111111', 'confirm_access_code': '111111'},
+            HTTP_HOST='localhost',
+        )
+        self.assertEqual(weak_pin_response.status_code, 200)
+        self.assertContains(weak_pin_response, 'Этот PIN слишком простой.')
+
+        access.refresh_from_db()
+        self.assertEqual(access.access_code, '246824')
+        self.assertEqual(access.status, EmployeeAccess.Status.NOT_ACTIVATED)
+
+    def test_activation_rejects_invalid_pin_length_and_mismatch(self):
+        employee = Employee.objects.create(full_name='Водитель с ошибкой PIN', phone='+79000004444')
+        access = EmployeeAccess.objects.create(
+            employee=employee,
+            role=self.role,
+            access_code='246824',
+            status=EmployeeAccess.Status.NOT_ACTIVATED,
+            primary_code_issued_at=timezone.now(),
+        )
+
+        self.client.post('/', {'phone': '+79000004444', 'access_code': '246824'}, HTTP_HOST='localhost')
+        invalid_response = self.client.post(
+            '/activate-access/',
+            {'new_access_code': '8642867', 'confirm_access_code': '864286'},
+            HTTP_HOST='localhost',
+        )
+        self.assertEqual(invalid_response.status_code, 200)
+        self.assertContains(invalid_response, 'Убедитесь, что это значение содержит не более 6 символов')
+
+        mismatch_response = self.client.post(
+            '/activate-access/',
+            {'new_access_code': '864286', 'confirm_access_code': '864287'},
+            HTTP_HOST='localhost',
+        )
+        self.assertEqual(mismatch_response.status_code, 200)
+        self.assertContains(mismatch_response, 'PIN-коды не совпадают.')
+
+        access.refresh_from_db()
+        self.assertEqual(access.status, EmployeeAccess.Status.NOT_ACTIVATED)
 
     def test_admin_can_delete_employee_without_production_history(self):
         admin_role = Role.objects.create(code='admin', name='Администратор')
