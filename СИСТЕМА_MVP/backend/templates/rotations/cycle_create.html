@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Новый сбор перевахты{% endblock %}
+{% block body_class %}rotation-workplace-screen{% endblock %}
+{% block extra_head %}
+{% include "includes/role_app_pwa_head.html" with role_code="timekeeper" manifest_url="/timekeeper.webmanifest" service_worker_url="/timekeeper-sw.js" legacy_scope="/timekeeper/" theme_color="#176B73" apple_title="Табельщик" icon_180="img/pwa/timekeeper-180.png" %}
+<link rel="stylesheet" href="{% static 'css/rotation-workplace-v2.css' %}?v=1">
+{% endblock %}
+
+{% block body %}
+<div class="admin-shell admin-exports-shell admin-day rotation-shell" data-admin-theme>
+    <header class="admin-console-header rotation-console-header" aria-label="Рабочая шапка табельщика">
+        <section class="admin-console-identity">
+            <span class="admin-console-avatar" aria-hidden="true">{{ access.employee.full_name|default:"Т"|first }}</span>
+            <span>
+                <strong>{{ access.employee.full_name|default:"Табельщик" }}</strong>
+                <em>Табельщик</em>
+            </span>
+        </section>
+
+        <section class="admin-console-main">
+            <div class="admin-console-title">
+                <span>Вахтовый контур</span>
+                <h1>Перевахта</h1>
+                <p>Подготовка нового запроса сотрудникам.</p>
+            </div>
+            <nav class="admin-console-nav" aria-label="Разделы перевахты">
+                <a href="{% url 'rotation_timekeeper_dashboard' %}">Сборы</a>
+                <a class="is-active" href="{% url 'rotation_cycle_create' %}" aria-current="page">Новый сбор</a>
+            </nav>
+        </section>
+
+        <section class="admin-console-actions rotation-console-actions" aria-label="Тема и выход">
+            <button type="button"
+                    class="admin-theme-button"
+                    data-admin-theme-toggle
+                    data-theme-icon="sun"
+                    aria-label="Включить тёмную тему"
+                    title="Тема интерфейса">Тема</button>
+            <a class="admin-utility-link" href="{% url 'logout' %}">Выйти</a>
+        </section>
+    </header>
+
+    <main class="admin-console-page rotation-page rotation-create-page">
+        {% for message in messages %}
+            <div class="message {{ message.tags|default:'success' }}" role="status">{{ message }}</div>
+        {% endfor %}
+
+        <section class="rotation-page-heading" aria-labelledby="rotation-create-title">
+            <div>
+                <a class="rotation-back-link" href="{% url 'rotation_timekeeper_dashboard' %}">← Все сборы</a>
+                <h2 id="rotation-create-title">Новый сбор перевахты</h2>
+                <p>Название и период увидят сотрудники в своей форме ответа.</p>
+            </div>
+        </section>
+
+        <div class="rotation-create-layout">
+            <section class="rotation-form-card rotation-create-card" aria-labelledby="rotation-create-form-title">
+                <div class="rotation-form-card__header">
+                    <div>
+                        <span class="rotation-eyebrow">Параметры запроса</span>
+                        <h2 id="rotation-create-form-title">Настройте сбор</h2>
+                        <p>После сохранения сбор останется черновиком. Открыть его для сотрудников можно на следующем экране.</p>
+                    </div>
+                </div>
+
+                <form method="post" novalidate>
+                    {% csrf_token %}
+                    {% for hidden in form.hidden_fields %}{{ hidden }}{% endfor %}
+
+                    {% if form.non_field_errors %}
+                        <div class="rotation-form-alert" role="alert">
+                            {% for error in form.non_field_errors %}<p>{{ error }}</p>{% endfor %}
+                        </div>
+                    {% endif %}
+
+                    <div class="rotation-field">
+                        <label for="{{ form.name.id_for_label }}">{{ form.name.label|default:"Название сбора" }}</label>
+                        {{ form.name }}
+                        {% if form.name.help_text %}<small>{{ form.name.help_text }}</small>{% endif %}
+                        {% for error in form.name.errors %}<span class="rotation-field-error">{{ error }}</span>{% endfor %}
+                    </div>
+
+                    <div class="rotation-form-grid">
+                        <div class="rotation-field">
+                            <label for="{{ form.target_watch_period.id_for_label }}">{{ form.target_watch_period.label|default:"Вахтовый период" }}</label>
+                            {{ form.target_watch_period }}
+                            {% if form.target_watch_period.help_text %}<small>{{ form.target_watch_period.help_text }}</small>{% endif %}
+                            {% for error in form.target_watch_period.errors %}<span class="rotation-field-error">{{ error }}</span>{% endfor %}
+                        </div>
+                        <div class="rotation-field">
+                            <label for="{{ form.response_deadline.id_for_label }}">{{ form.response_deadline.label|default:"Ответить до" }}</label>
+                            {{ form.response_deadline }}
+                            {% if form.response_deadline.help_text %}<small>{{ form.response_deadline.help_text }}</small>{% endif %}
+                            {% for error in form.response_deadline.errors %}<span class="rotation-field-error">{{ error }}</span>{% endfor %}
+                        </div>
+                    </div>
+
+                    <div class="rotation-form-actions">
+                        <a class="admin-button admin-button-secondary" href="{% url 'rotation_timekeeper_dashboard' %}">Отмена</a>
+                        <button class="admin-button admin-button-primary" type="submit">Создать черновик</button>
+                    </div>
+                </form>
+            </section>
+
+            <aside class="rotation-help-card rotation-create-guide" aria-label="Что произойдёт дальше">
+                <span class="rotation-help-card__mark" aria-hidden="true">i</span>
+                <div>
+                    <h2>После создания</h2>
+                    <ul>
+                        <li>Проверьте список приглашённых сотрудников.</li>
+                        <li>Откройте сбор для заполнения.</li>
+                        <li>Следите за ответами и заявками на продление.</li>
+                    </ul>
+                    <p>До открытия черновика сотрудники не увидят новый запрос.</p>
+                </div>
+            </aside>
+        </div>
+    </main>
+</div>
+<script src="{% static 'js/rotation-workplace-v1.js' %}?v=1" defer></script>
+{% endblock %}

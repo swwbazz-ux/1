@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Перевахта — табельщик{% endblock %}
+{% block body_class %}rotation-workplace-screen{% endblock %}
+{% block extra_head %}
+{% include "includes/role_app_pwa_head.html" with role_code="timekeeper" manifest_url="/timekeeper.webmanifest" service_worker_url="/timekeeper-sw.js" legacy_scope="/timekeeper/" theme_color="#176B73" apple_title="Табельщик" icon_180="img/pwa/timekeeper-180.png" %}
+<link rel="stylesheet" href="{% static 'css/rotation-workplace-v2.css' %}?v=1">
+{% endblock %}
+
+{% block body %}
+<div class="admin-shell admin-exports-shell admin-day rotation-shell" data-admin-theme>
+    <header class="admin-console-header rotation-console-header" aria-label="Рабочая шапка табельщика">
+        <section class="admin-console-identity">
+            <span class="admin-console-avatar" aria-hidden="true">{{ access.employee.full_name|default:"Т"|first }}</span>
+            <span>
+                <strong>{{ access.employee.full_name|default:"Табельщик" }}</strong>
+                <em>Табельщик</em>
+            </span>
+        </section>
+
+        <section class="admin-console-main">
+            <div class="admin-console-title">
+                <span>Вахтовый контур</span>
+                <h1>Перевахта</h1>
+                <p>Сбор маршрутов, дат и заявок на продление от сотрудников.</p>
+            </div>
+            <nav class="admin-console-nav" aria-label="Разделы перевахты">
+                <a class="is-active" href="{% url 'rotation_timekeeper_dashboard' %}" aria-current="page">Сбор данных</a>
+            </nav>
+        </section>
+
+        <section class="admin-console-actions rotation-console-actions" aria-label="Тема и выход">
+            <button type="button"
+                    class="admin-theme-button"
+                    data-admin-theme-toggle
+                    data-theme-icon="sun"
+                    aria-label="Включить тёмную тему"
+                    title="Тема интерфейса">Тема</button>
+            <a class="admin-utility-link" href="{% url 'logout' %}">Выйти</a>
+        </section>
+    </header>
+
+    <main class="admin-console-page rotation-page">
+        {% for message in messages %}
+            <div class="message {{ message.tags|default:'success' }}" role="status">{{ message }}</div>
+        {% endfor %}
+
+        <section class="rotation-page-heading" aria-labelledby="rotation-dashboard-title">
+            <div>
+                <span class="rotation-eyebrow">Рабочий список</span>
+                <h2 id="rotation-dashboard-title">Сборы перевахты</h2>
+                <p>Создайте период, отправьте запрос сотрудникам и контролируйте ответы в одном месте.</p>
+            </div>
+            <a class="admin-button admin-button-primary rotation-primary-action" href="{% url 'rotation_cycle_create' %}">Новый сбор</a>
+        </section>
+
+        <section class="rotation-summary-strip" aria-label="Краткая сводка">
+            <article class="rotation-summary-item is-primary">
+                <span>Всего сборов</span>
+                <strong>{{ cycles|length }}</strong>
+                <small>в рабочем списке</small>
+            </article>
+            <div class="rotation-summary-note">
+                <strong>Как работать</strong>
+                <p>Откройте сбор, проверьте ответы по одной строке на сотрудника и выгрузите готовую таблицу.</p>
+            </div>
+        </section>
+
+        <section class="rotation-cycle-list" aria-label="Список сборов перевахты">
+            {% for item in cycles %}
+                {% with cycle=item.cycle|default:item %}
+                    <article class="rotation-cycle-card status-{{ cycle.status|default:'draft' }}">
+                        <div class="rotation-cycle-card__header">
+                            <div>
+                                <span class="rotation-status-chip status-{{ cycle.status|default:'draft' }}">
+                                    {{ cycle.get_status_display|default:cycle.status|default:"Черновик" }}
+                                </span>
+                                <h3>{{ cycle.name|default:"Сбор перевахты" }}</h3>
+                                <p>
+                                    {% if cycle.target_watch_period %}
+                                        Вахта: {{ cycle.target_watch_period }}
+                                    {% else %}
+                                        Период не указан
+                                    {% endif %}
+                                    {% if cycle.response_deadline %} · Ответить до {{ cycle.response_deadline|date:"d.m.Y H:i" }}{% endif %}
+                                </p>
+                            </div>
+                            <a class="admin-button admin-button-secondary" href="{% url 'rotation_timekeeper_cycle' cycle.id %}">Открыть сбор</a>
+                        </div>
+
+                        <div class="rotation-cycle-metrics" aria-label="Состояние ответов">
+                            <span><b>{{ item.invited|default:0 }}</b> приглашены</span>
+                            <span><b>{{ item.submitted|default:0 }}</b> ответили</span>
+                            <span class="is-warning"><b>{{ item.missing|default:0 }}</b> нет ответа</span>
+                            <span><b>{{ item.pending_extensions|default:0 }}</b> на согласовании</span>
+                            <span class="is-success"><b>{{ item.approved_extensions|default:0 }}</b> продление одобрено</span>
+                        </div>
+                    </article>
+                {% endwith %}
+            {% empty %}
+                <div class="rotation-empty-state">
+                    <span class="rotation-empty-state__icon" aria-hidden="true">01</span>
+                    <strong>Сборов пока нет</strong>
+                    <p>Создайте первый сбор перевахты, чтобы сотрудники внесли маршрут, даты или заявку на продление.</p>
+                    <a class="admin-button admin-button-primary" href="{% url 'rotation_cycle_create' %}">Создать сбор</a>
+                </div>
+            {% endfor %}
+        </section>
+    </main>
+</div>
+<script src="{% static 'js/rotation-workplace-v1.js' %}?v=1" defer></script>
+{% endblock %}

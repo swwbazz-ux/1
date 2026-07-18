@@ -88,6 +88,7 @@ INSTALLED_APPS = [
     'downtimes',
     'reports',
     'portal.apps.PortalConfig',
+    'rotations.apps.RotationsConfig',
 ]
 
 MIDDLEWARE = [

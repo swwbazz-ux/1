@@ -1,0 +1,266 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}{{ cycle.name|default:"Сбор перевахты" }} — табельщик{% endblock %}
+{% block body_class %}rotation-workplace-screen{% endblock %}
+{% block extra_head %}
+{% include "includes/role_app_pwa_head.html" with role_code="timekeeper" manifest_url="/timekeeper.webmanifest" service_worker_url="/timekeeper-sw.js" legacy_scope="/timekeeper/" theme_color="#176B73" apple_title="Табельщик" icon_180="img/pwa/timekeeper-180.png" %}
+<link rel="stylesheet" href="{% static 'css/rotation-workplace-v2.css' %}?v=1">
+{% endblock %}
+
+{% block body %}
+<div class="admin-shell admin-exports-shell admin-day rotation-shell" data-admin-theme>
+    <header class="admin-console-header rotation-console-header" aria-label="Рабочая шапка табельщика">
+        <section class="admin-console-identity">
+            <span class="admin-console-avatar" aria-hidden="true">{{ access.employee.full_name|default:"Т"|first }}</span>
+            <span>
+                <strong>{{ access.employee.full_name|default:"Табельщик" }}</strong>
+                <em>Табельщик</em>
+            </span>
+        </section>
+
+        <section class="admin-console-main">
+            <div class="admin-console-title">
+                <span>Вахтовый контур</span>
+                <h1>Перевахта</h1>
+                <p>Контроль ответов сотрудников и подготовка итоговой выгрузки.</p>
+            </div>
+            <nav class="admin-console-nav" aria-label="Разделы перевахты">
+                <a href="{% url 'rotation_timekeeper_dashboard' %}">Сборы</a>
+                <a class="is-active" href="{% url 'rotation_timekeeper_cycle' cycle.id %}" aria-current="page">Текущий сбор</a>
+            </nav>
+        </section>
+
+        <section class="admin-console-actions rotation-console-actions" aria-label="Тема и выход">
+            <button type="button"
+                    class="admin-theme-button"
+                    data-admin-theme-toggle
+                    data-theme-icon="sun"
+                    aria-label="Включить тёмную тему"
+                    title="Тема интерфейса">Тема</button>
+            <a class="admin-utility-link" href="{% url 'logout' %}">Выйти</a>
+        </section>
+    </header>
+
+    <main class="admin-console-page rotation-page rotation-cycle-page">
+        {% for message in messages %}
+            <div class="message {{ message.tags|default:'success' }}" role="status">{{ message }}</div>
+        {% endfor %}
+
+        <section class="rotation-page-heading rotation-cycle-heading" aria-labelledby="rotation-cycle-title">
+            <div>
+                <a class="rotation-back-link" href="{% url 'rotation_timekeeper_dashboard' %}">← Все сборы</a>
+                <div class="rotation-heading-line">
+                    <h2 id="rotation-cycle-title">{{ cycle.name|default:"Сбор перевахты" }}</h2>
+                    <span class="rotation-status-chip status-{{ cycle.status|default:'draft' }}">
+                        {{ cycle.get_status_display|default:cycle.status|default:"Черновик" }}
+                    </span>
+                </div>
+                <p>
+                    {% if cycle.target_watch_period %}Вахта: {{ cycle.target_watch_period }}.{% endif %}
+                    {% if cycle.response_deadline %} Ответить до {{ cycle.response_deadline|date:"d.m.Y H:i" }}.{% endif %}
+                    Одна строка — один сотрудник.
+                </p>
+            </div>
+
+            <div class="rotation-cycle-actions" aria-label="Действия со сбором">
+                <button class="admin-button admin-button-secondary"
+                        type="button"
+                        data-copy-rotation-link="{{ employee_response_url }}">
+                    Скопировать ссылку сотрудникам
+                </button>
+                {% if cycle.status == 'draft' %}
+                    <form method="post" action="{% url 'rotation_cycle_action' cycle.id 'open' %}">
+                        {% csrf_token %}
+                        <button class="admin-button admin-button-primary" type="submit">Открыть сбор</button>
+                    </form>
+                {% elif cycle.status == 'open' %}
+                    <form method="post" action="{% url 'rotation_cycle_action' cycle.id 'close' %}">
+                        {% csrf_token %}
+                        <button class="admin-button admin-button-secondary" type="submit">Закрыть сбор</button>
+                    </form>
+                {% endif %}
+                <a class="admin-button admin-button-primary" href="{% url 'rotation_cycle_export' cycle.id %}">Выгрузить Excel</a>
+                <span class="rotation-doc-action">
+                    <a class="admin-button admin-button-secondary" href="{% url 'rotation_cycle_document_packet' cycle.id %}">Скачать DOCX</a>
+                    <small>Пакет исходных данных, не приказ.</small>
+                </span>
+            </div>
+        </section>
+
+        <section class="rotation-metrics" aria-label="Сводка по ответам">
+            <article class="rotation-metric is-primary">
+                <span>Приглашены</span>
+                <strong>{{ metrics.invited|default:0 }}</strong>
+                <small>сотрудников в сборе</small>
+            </article>
+            <article class="rotation-metric is-success">
+                <span>Ответили</span>
+                <strong>{{ metrics.submitted|default:0 }}</strong>
+                <small>данные получены</small>
+            </article>
+            <article class="rotation-metric is-warning">
+                <span>Нет ответа</span>
+                <strong>{{ metrics.missing|default:0 }}</strong>
+                <small>нужно уточнить</small>
+            </article>
+            <article class="rotation-metric is-neutral">
+                <span>Продления на согласовании</span>
+                <strong>{{ metrics.pending_extensions|default:0 }}</strong>
+                <small>у начальника участка</small>
+            </article>
+            <article class="rotation-metric is-success">
+                <span>Продления одобрены</span>
+                <strong>{{ metrics.approved_extensions|default:0 }}</strong>
+                <small>готовы к оформлению</small>
+            </article>
+        </section>
+
+        <section class="rotation-register-card" aria-labelledby="rotation-register-title">
+            <div class="rotation-register-toolbar">
+                <div>
+                    <h2 id="rotation-register-title">Ответы сотрудников</h2>
+                    <p>Фильтры влияют только на рабочий список; выгрузка формируется по всему сбору.</p>
+                </div>
+                <span class="admin-chip">{{ responses|length }} в списке</span>
+            </div>
+
+            <form method="get" class="rotation-filter-bar" aria-label="Фильтры ответов">
+                <div class="field rotation-search-field">
+                    <label for="rotation-search">Поиск</label>
+                    <input id="rotation-search" name="q" value="{{ query }}" placeholder="ФИО или табельный номер" autocomplete="off">
+                </div>
+                <div class="field">
+                    <label for="rotation-state">Состояние</label>
+                    <select id="rotation-state" name="state">
+                        <option value="">Все</option>
+                        <option value="pending" {% if request.GET.state == 'pending' %}selected{% endif %}>Ожидает ответа</option>
+                        <option value="submitted" {% if request.GET.state == 'submitted' %}selected{% endif %}>Ответ получен</option>
+                    </select>
+                </div>
+                <div class="field">
+                    <label for="rotation-intent">Ответ</label>
+                    <select id="rotation-intent" name="intent">
+                        <option value="">Все варианты</option>
+                        <option value="arrival" {% if request.GET.intent == 'arrival' %}selected{% endif %}>Заезд на вахту</option>
+                        <option value="departure" {% if request.GET.intent == 'departure' %}selected{% endif %}>Выезд с вахты</option>
+                        <option value="not_travelling" {% if request.GET.intent == 'not_travelling' %}selected{% endif %}>Не едет</option>
+                        <option value="extension" {% if request.GET.intent == 'extension' %}selected{% endif %}>Продление</option>
+                    </select>
+                </div>
+                <div class="field">
+                    <label for="rotation-shift">Смена</label>
+                    <select id="rotation-shift" name="shift">
+                        <option value="">Все смены</option>
+                        <option value="day" {% if request.GET.shift == 'day' %}selected{% endif %}>День</option>
+                        <option value="night" {% if request.GET.shift == 'night' %}selected{% endif %}>Ночь</option>
+                        <option value="unknown" {% if request.GET.shift == 'unknown' %}selected{% endif %}>Не указана</option>
+                    </select>
+                </div>
+                <div class="rotation-filter-actions">
+                    <button class="admin-button admin-button-primary" type="submit">Применить</button>
+                    <a class="admin-button admin-button-secondary" href="{% url 'rotation_timekeeper_cycle' cycle.id %}">Сбросить</a>
+                </div>
+            </form>
+
+            <div class="rotation-register-head" aria-hidden="true">
+                <span>Сотрудник</span>
+                <span>Ответ</span>
+                <span>Дата и маршрут</span>
+                <span>Смена</span>
+                <span>Состояние</span>
+                <span>Действие</span>
+            </div>
+
+            <div class="rotation-register-list">
+                {% for item in responses %}
+                    {% with response=item.response|default:item %}
+                    <article class="rotation-response-row status-{{ response.state|default:'pending' }}">
+                            <div class="rotation-person-cell" data-label="Сотрудник">
+                                <span class="rotation-person-avatar" aria-hidden="true">{{ response.snapshot_full_name|default:response.employee.full_name|default:"С"|first }}</span>
+                                <span>
+                                    <strong>{{ response.snapshot_full_name|default:response.employee.full_name|default:"Сотрудник не указан" }}</strong>
+                                    <small>
+                                        {% if response.snapshot_personnel_number %}№ {{ response.snapshot_personnel_number }}{% endif %}
+                                        {% if response.snapshot_position %} · {{ response.snapshot_position }}{% endif %}
+                                    </small>
+                                </span>
+                            </div>
+
+                            <div class="rotation-intent-cell" data-label="Ответ">
+                                <strong>{{ response.get_intent_display|default:"Ответ не выбран" }}</strong>
+                                {% if response.comment %}
+                                    <small>{{ response.comment|truncatechars:72 }}</small>
+                                {% endif %}
+                            </div>
+
+                            <div class="rotation-route-cell" data-label="Дата и маршрут">
+                                {% if response.intent == 'arrival' %}
+                                    <strong>{{ response.departure_on|date:"d.m.Y"|default:"—" }} — {{ response.arrival_on|date:"d.m.Y"|default:"—" }}</strong>
+                                    <small>{{ response.route_text|default:"Маршрут не указан" }}</small>
+                                {% elif response.intent == 'departure' %}
+                                    <strong>{{ response.departure_on|date:"d.m.Y"|default:"—" }} — {{ response.arrival_on|date:"d.m.Y"|default:"—" }}</strong>
+                                    <small>{{ response.route_text|default:"Маршрут не указан" }}</small>
+                                {% elif response.intent == 'extension' %}
+                                    <strong>
+                                        {{ response.extension_case.extension_start|date:"d.m.Y"|default:"—" }} —
+                                        {{ response.extension_case.extension_end|date:"d.m.Y"|default:"—" }}
+                                    </strong>
+                                    <small>Запрос на следующую вахту</small>
+                                {% elif response.intent == 'not_travelling' %}
+                                    <strong>Не едет</strong>
+                                    <small>Маршрут не требуется</small>
+                                {% else %}
+                                    <strong>—</strong>
+                                    <small>Данные не заполнены</small>
+                                {% endif %}
+                            </div>
+
+                            <div class="rotation-shift-cell" data-label="Смена">
+                                <span class="rotation-shift-badge shift-{{ response.next_shift_type|default:'unknown' }}">
+                                    {{ response.get_next_shift_type_display|default:"Не указана" }}
+                                </span>
+                            </div>
+
+                            <div class="rotation-state-cell" data-label="Состояние">
+                                <span class="rotation-status-chip status-{{ response.state|default:'pending' }}">
+                                    {{ response.get_state_display|default:"Ожидает ответа" }}
+                                </span>
+                                {% if response.intent == 'extension' and response.extension_case %}
+                                    <span class="rotation-status-chip status-{{ response.extension_case.decision_status }}">
+                                        {{ response.extension_case.get_decision_status_display }}
+                                    </span>
+                                    {% if response.extension_case.decision_status == 'approved' %}
+                                        <small>{{ response.extension_case.get_documentation_status_display }}</small>
+                                    {% elif response.extension_case.decision_comment %}
+                                        <small>{{ response.extension_case.decision_comment|truncatechars:64 }}</small>
+                                    {% endif %}
+                                {% endif %}
+                                {% if response.submitted_at %}<small>{{ response.submitted_at|date:"d.m.Y H:i" }}</small>{% endif %}
+                            </div>
+
+                            <div class="rotation-row-action" data-label="Действие">
+                                <a class="admin-button admin-button-secondary" href="{% url 'rotation_timekeeper_response_edit' cycle.id response.id %}">
+                                    {% if response.state == 'pending' %}Заполнить{% else %}Открыть{% endif %}
+                                </a>
+                                {% if response.extension_case.decision_status == 'approved' and response.extension_case.documentation_status != 'completed' %}
+                                    <form method="post" action="{% url 'rotation_documentation_complete' response.extension_case.id %}">
+                                        {% csrf_token %}
+                                        <button class="admin-button admin-button-primary" type="submit">Оформление завершено</button>
+                                    </form>
+                                {% endif %}
+                            </div>
+                        </article>
+                    {% endwith %}
+                {% empty %}
+                    <div class="rotation-empty-state is-compact">
+                        <strong>Сотрудники не найдены</strong>
+                        <p>Измените фильтры или проверьте состав участников сбора.</p>
+                    </div>
+                {% endfor %}
+            </div>
+        </section>
+    </main>
+</div>
+<script src="{% static 'js/rotation-workplace-v1.js' %}?v=1" defer></script>
+{% endblock %}
