@@ -619,7 +619,7 @@ class PortalPublicHomeTests(PortalTestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertNotContains(response, 'data-public-news-section')
-        self.assertContains(response, 'Движение,')
+        self.assertContains(response, 'Держим производство')
 
     def test_home_shows_news_section_when_publication_exists(self):
         self.publication(
