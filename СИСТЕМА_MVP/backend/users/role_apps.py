@@ -136,7 +136,7 @@ ROLE_APPS = (
         icon_slug='oup',
         manifest_url='/oup.webmanifest',
         service_worker_url='/oup-sw.js',
-        shell_version='oup-shell-v15',
+        shell_version='oup-shell-v16',
     ),
     RoleApp(
         role_code='timekeeper',

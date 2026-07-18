@@ -26,38 +26,7 @@
         </nav>
     </section>
 
-    <section class="admin-console-actions oup-console-actions" aria-label="Рабочий период, тема и выход">
-        <div class="oup-shift-state {% if owns_oup_period %}is-open{% elif oup_period_is_occupied %}is-occupied{% else %}is-closed{% endif %}"
-             {% if active_oup_period %}title="{{ active_oup_period.employee.full_name }} · с {{ active_oup_period.opened_at|date:'d.m.Y H:i' }}"{% endif %}>
-            <span>Рабочий период</span>
-            {% if owns_oup_period %}
-                <strong>Вы · с {{ open_oup_shift.opened_at|date:"d.m.Y H:i" }}</strong>
-            {% elif oup_period_is_occupied %}
-                <strong>Занят · {{ active_oup_period.employee.full_name }}</strong>
-                <small>с {{ active_oup_period.opened_at|date:"d.m.Y H:i" }}</small>
-            {% else %}
-                <strong>не начат</strong>
-            {% endif %}
-        </div>
-        {% if owns_oup_period %}
-            <form method="post" action="{% url 'oup_shift_close' %}" data-confirm="Завершить рабочий период ОУП? После завершения редактирование сотрудников будет недоступно.">
-                {% csrf_token %}
-                <input type="hidden" name="next" value="{{ request.get_full_path }}">
-                <button class="oup-shift-button is-close" type="submit">Завершить работу</button>
-            </form>
-        {% elif oup_period_is_occupied %}
-            <button class="oup-shift-button is-occupied"
-                    type="button"
-                    disabled
-                    aria-disabled="true"
-                    title="Рабочий период уже занят другим специалистом">Начать работу</button>
-        {% else %}
-            <form method="post" action="{% url 'oup_shift_start' %}">
-                {% csrf_token %}
-                <input type="hidden" name="next" value="{{ request.get_full_path }}">
-                <button class="oup-shift-button is-start" type="submit">Начать работу</button>
-            </form>
-        {% endif %}
+    <section class="admin-console-actions oup-console-actions" aria-label="Тема и выход">
         <button type="button"
                 class="admin-theme-button"
                 data-admin-theme-toggle

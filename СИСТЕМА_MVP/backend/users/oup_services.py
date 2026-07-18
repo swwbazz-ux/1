@@ -277,7 +277,7 @@ def lock_open_oup_shift(*, employee):
     )
     if not shift:
         raise ValidationError(
-            'Сначала начните рабочий период ОУП.',
+            'Сначала включите редактирование кадровых данных.',
             code='oup_shift_required',
         )
     return shift
@@ -345,7 +345,7 @@ def open_oup_shift(*, employee):
     if other_shift:
         opened_at = timezone.localtime(other_shift.opened_at)
         raise ValidationError(
-            'Рабочий период ОУП уже занят: '
+            'Редактирование кадровых данных уже выполняет '
             f'{other_shift.employee.full_name}, с {opened_at:%d.%m.%Y %H:%M}.'
         )
 

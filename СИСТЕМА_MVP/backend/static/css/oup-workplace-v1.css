@@ -26,25 +26,17 @@
 }
 
 .oup-console-actions {
-    grid-template-columns: minmax(0, 1fr) var(--oup-header-theme-size) var(--admin-header-utility-width);
-    grid-template-rows: repeat(2, var(--oup-header-control-height));
-    gap: 6px var(--admin-header-gap);
+    grid-template-columns: var(--oup-header-theme-size) var(--admin-header-utility-width);
+    grid-template-rows: var(--oup-header-control-height);
+    gap: var(--admin-header-gap);
     align-content: center;
     align-items: center;
-    justify-content: stretch;
-}
-
-.oup-console-actions form {
-    grid-column: 1;
-    grid-row: 2;
-    width: 100%;
-    min-width: 0;
-    margin: 0;
+    justify-content: end;
 }
 
 .oup-console-actions .admin-theme-button {
-    grid-column: 2;
-    grid-row: 1 / -1;
+    grid-column: 1;
+    grid-row: 1;
     align-self: center;
     width: var(--oup-header-theme-size);
     min-width: var(--oup-header-theme-size);
@@ -52,102 +44,11 @@
 }
 
 .oup-console-actions .admin-utility-link {
-    grid-column: 3;
-    grid-row: 1 / -1;
+    grid-column: 2;
+    grid-row: 1;
     align-self: center;
     min-height: var(--oup-header-control-height);
     font-size: var(--oup-header-control-font-size);
-}
-
-.oup-shift-state {
-    display: grid;
-    grid-column: 1;
-    grid-row: 1;
-    gap: 0;
-    min-width: 0;
-    min-height: var(--oup-header-control-height);
-    align-content: center;
-    padding: 1px 10px;
-    border: 1px solid var(--admin-line);
-    border-left: 4px solid var(--admin-gray);
-    border-radius: 6px;
-    background: var(--admin-panel-soft);
-}
-
-.oup-shift-state.is-open {
-    border-left-color: var(--admin-green);
-    background: var(--admin-green-soft);
-}
-
-.oup-shift-state.is-occupied {
-    border-left-color: var(--admin-red);
-    background: var(--admin-red-soft);
-}
-
-.oup-shift-state span {
-    color: var(--admin-muted);
-    font-size: 10px;
-    font-weight: 900;
-    letter-spacing: .08em;
-    line-height: 1;
-    text-transform: uppercase;
-}
-
-.oup-shift-state strong {
-    min-width: 0;
-    overflow: hidden;
-    color: var(--admin-ink);
-    font-size: 13px;
-    line-height: 1.1;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.oup-shift-state small {
-    overflow: hidden;
-    color: var(--admin-muted);
-    font-size: 9px;
-    font-weight: 800;
-    line-height: 1;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.oup-shift-button {
-    width: 100%;
-    height: var(--oup-header-control-height);
-    min-height: var(--oup-header-control-height);
-    padding: 0 14px;
-    border: 1px solid var(--admin-green);
-    border-radius: 6px;
-    background: var(--admin-green);
-    color: #fff;
-    font: inherit;
-    font-size: var(--oup-header-control-font-size);
-    font-weight: 900;
-    line-height: 1;
-    text-transform: uppercase;
-    cursor: pointer;
-}
-
-.oup-console-actions > .oup-shift-button {
-    grid-column: 1;
-    grid-row: 2;
-}
-
-.oup-shift-button.is-close {
-    border-color: var(--admin-yellow);
-    background: var(--admin-yellow-soft);
-    color: var(--admin-yellow);
-}
-
-.oup-shift-button.is-occupied,
-.oup-shift-button:disabled {
-    border-color: var(--admin-red);
-    background: var(--admin-red-soft);
-    color: var(--admin-red);
-    cursor: not-allowed;
-    opacity: 1;
 }
 
 .oup-page {
@@ -180,7 +81,6 @@
     background: var(--admin-red-soft);
 }
 
-.oup-period-occupied,
 .oup-log-notice {
     display: flex;
     align-items: center;
@@ -194,30 +94,15 @@
     box-shadow: var(--admin-shadow);
 }
 
-.oup-period-occupied > div {
-    min-width: 0;
-}
-
-.oup-period-occupied strong,
 .oup-log-notice strong {
     color: var(--admin-ink);
     font-size: 16px;
 }
 
-.oup-period-occupied p,
 .oup-log-notice p {
     margin: 3px 0 0;
     color: var(--admin-muted);
     font-size: 13px;
-}
-
-.oup-status-dot {
-    width: 12px;
-    height: 12px;
-    flex: 0 0 auto;
-    border-radius: 50%;
-    background: var(--admin-red);
-    box-shadow: 0 0 0 5px color-mix(in srgb, var(--admin-red) 18%, transparent);
 }
 
 .oup-log-notice {
@@ -1282,8 +1167,8 @@
 
 @media (max-width: 1180px) {
     .oup-console-actions {
-        grid-template-columns: minmax(180px, 300px) var(--oup-header-theme-size) var(--admin-header-utility-width);
-        justify-content: center;
+        grid-template-columns: var(--oup-header-theme-size) var(--admin-header-utility-width);
+        justify-content: end;
     }
 
     .oup-filter-bar {
@@ -1328,7 +1213,7 @@
     }
 
     .oup-console-actions {
-        grid-template-columns: minmax(180px, 300px) 44px var(--admin-header-utility-width);
+        grid-template-columns: 44px var(--admin-header-utility-width);
     }
 
     .oup-console-actions .admin-theme-button {
@@ -1372,54 +1257,32 @@
     }
 
     .oup-console-actions {
-        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-        grid-template-rows: auto auto auto;
-        gap: 6px;
-    }
-
-    .oup-console-actions .oup-shift-state,
-    .oup-console-actions form,
-    .oup-console-actions > .oup-shift-button {
-        grid-column: 1 / -1;
-        grid-row: auto;
-        width: 100%;
+        grid-template-columns: 44px var(--admin-header-utility-width);
+        grid-template-rows: 44px;
+        gap: var(--admin-header-gap);
+        justify-content: end;
     }
 
     .oup-console-actions .admin-theme-button {
         grid-column: 1;
-        grid-row: auto;
+        grid-row: 1;
     }
 
     .oup-console-actions .admin-utility-link {
         grid-column: 2;
-        grid-row: auto;
+        grid-row: 1;
     }
 
     .oup-console-actions .admin-theme-button,
     .oup-console-actions .admin-utility-link {
-        align-self: stretch;
-        width: 100%;
-        min-width: 0;
+        align-self: center;
         min-height: 44px;
     }
-
-    .oup-shift-state span { font-size: 8px; }
-    .oup-shift-state strong { font-size: 11px; }
-
-    .oup-console-actions .oup-shift-state,
-    .oup-console-actions .oup-shift-button {
-        min-height: 44px;
-    }
-
-    .oup-shift-state strong,
-    .oup-shift-state small { white-space: normal; }
 
     .oup-page {
         width: min(100% - 20px, 1600px);
         padding-top: 10px;
     }
-
-    .oup-period-occupied { align-items: flex-start; }
 
     .oup-metrics { grid-template-columns: 1fr 1fr; gap: 8px; }
     .oup-metric { min-height: 90px; padding: 12px 12px 11px 17px; }
