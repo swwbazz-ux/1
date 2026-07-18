@@ -368,8 +368,8 @@ class RotationWorkflowTests(TestCase):
 
     def test_rotation_role_service_workers_use_updated_header_shells(self):
         expected_versions = {
-            'timekeeper': 'timekeeper-shell-v5',
-            'site-manager': 'site-manager-shell-v5',
+            'timekeeper': 'timekeeper-shell-v6',
+            'site-manager': 'site-manager-shell-v6',
         }
 
         for slug, expected_version in expected_versions.items():
