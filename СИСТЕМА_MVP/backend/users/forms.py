@@ -354,10 +354,12 @@ class EmployeeCardForm(forms.ModelForm):
 
         work_schedule = cleaned_data.get('work_schedule')
         brigade_number = cleaned_data.get('brigade_number')
-        if work_schedule and not brigade_number:
+        if work_schedule and work_schedule.brigade_count > 0 and not brigade_number:
             self.add_error('brigade_number', 'Выберите бригаду для указанного графика работы.')
         elif brigade_number and not work_schedule:
             self.add_error('work_schedule', 'Сначала выберите график работы.')
+        elif work_schedule and work_schedule.brigade_count == 0 and brigade_number:
+            self.add_error('brigade_number', 'Для выбранного графика бригада не назначается.')
         elif work_schedule and brigade_number and brigade_number > work_schedule.brigade_count:
             self.add_error(
                 'brigade_number',
@@ -432,6 +434,8 @@ class EmployeeCardForm(forms.ModelForm):
             employee.department = ''
         if work_schedule and brigade_number:
             employee.rotation = f'{work_schedule.name} Бригада №{brigade_number}'
+        elif work_schedule:
+            employee.rotation = work_schedule.name
         elif self._initial_work_schedule_id:
             employee.rotation = ''
         if commit:

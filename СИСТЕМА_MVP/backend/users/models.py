@@ -26,7 +26,7 @@ class WorkSchedule(models.Model):
     brigade_count = models.PositiveSmallIntegerField(
         'Количество бригад',
         default=2,
-        validators=[MinValueValidator(1), MaxValueValidator(4)],
+        validators=[MinValueValidator(0), MaxValueValidator(4)],
     )
     is_active = models.BooleanField('Активен', default=True)
 
@@ -36,8 +36,8 @@ class WorkSchedule(models.Model):
         ordering = ['name']
         constraints = [
             models.CheckConstraint(
-                condition=models.Q(brigade_count__gte=1, brigade_count__lte=4),
-                name='work_schedule_brigade_count_1_4',
+                condition=models.Q(brigade_count__gte=0, brigade_count__lte=4),
+                name='work_schedule_brigade_count_0_4',
             ),
         ]
 
