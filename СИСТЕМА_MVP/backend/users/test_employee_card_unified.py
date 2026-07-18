@@ -230,6 +230,8 @@ class UnifiedEmployeeCardTests(TestCase):
         self.assertIn('--admin-header-identity-column: minmax(210px, 260px);', app_stylesheet)
         self.assertIn('--admin-header-actions-column: minmax(230px, 300px);', app_stylesheet)
         self.assertIn('--admin-header-title-column: clamp(220px, 18vw, 360px);', app_stylesheet)
+        self.assertIn('--admin-header-title-column: 280px;', app_stylesheet)
+        self.assertIn('--admin-header-title-column: 440px;', app_stylesheet)
         self.assertIn('--admin-header-utility-width: 96px;', app_stylesheet)
         self.assertIn('grid-template-columns: 52px minmax(0, 1fr);', app_stylesheet)
         self.assertIn(

@@ -12472,6 +12472,18 @@ body.employees-admin-screen {
     zoom: var(--admin-interface-scale);
 }
 
+@media (min-width: 1280px) and (max-width: 1439px) {
+    .admin-exports-shell {
+        --admin-header-title-column: 280px;
+    }
+}
+
+@media (min-width: 1440px) {
+    .admin-exports-shell {
+        --admin-header-title-column: 440px;
+    }
+}
+
 @supports not (zoom: 1) {
     .admin-exports-shell {
         min-height: calc(100dvh / var(--admin-interface-scale));
