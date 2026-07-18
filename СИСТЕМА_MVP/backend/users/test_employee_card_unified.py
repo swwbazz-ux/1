@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from django.test import TestCase
 from django.urls import reverse
 
@@ -200,8 +202,8 @@ class UnifiedEmployeeCardTests(TestCase):
 
     def test_shared_employee_card_shells_use_new_cache_versions(self):
         expected_versions = {
-            'system_admin_service_worker': 'system-admin-shell-v9',
-            'oup_service_worker': 'oup-shell-v9',
+            'system_admin_service_worker': 'system-admin-shell-v11',
+            'oup_service_worker': 'oup-shell-v11',
         }
 
         for view_name, expected_version in expected_versions.items():
@@ -209,6 +211,20 @@ class UnifiedEmployeeCardTests(TestCase):
 
             self.assertEqual(response.status_code, 200)
             self.assertContains(response, expected_version)
+            self.assertContains(response, 'new Request(url, { cache: "reload" })')
+
+    def test_shared_desktop_header_uses_standard_geometry(self):
+        static_css = Path(__file__).resolve().parents[1] / 'static' / 'css'
+        app_stylesheet = (static_css / 'app.css').read_text(encoding='utf-8')
+        oup_stylesheet = (static_css / 'oup-workplace-v1.css').read_text(encoding='utf-8')
+
+        self.assertIn('--admin-console-header-height: 112px;', app_stylesheet)
+        self.assertIn('--admin-header-control-height: 40px;', app_stylesheet)
+        self.assertIn('--admin-header-icon-size: 40px;', app_stylesheet)
+        self.assertIn('grid-template-columns: 52px minmax(0, 1fr);', app_stylesheet)
+        self.assertIn('font-size: 32px;', app_stylesheet)
+        self.assertIn('--oup-header-control-height: 40px;', oup_stylesheet)
+        self.assertIn('--oup-header-control-font-size: 13px;', oup_stylesheet)
 
     def test_new_employee_cannot_reuse_an_existing_phone(self):
         form = AdminEmployeeForm(data={

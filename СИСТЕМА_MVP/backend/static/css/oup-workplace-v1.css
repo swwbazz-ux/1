@@ -2,6 +2,11 @@
     --oup-accent: var(--admin-green);
     --oup-accent-soft: var(--admin-green-soft);
     --oup-focus: color-mix(in srgb, var(--admin-green) 34%, transparent);
+    --oup-header-avatar-size: 52px;
+    --oup-header-title-size: 32px;
+    --oup-header-control-height: 40px;
+    --oup-header-control-font-size: 13px;
+    --oup-header-theme-size: 40px;
     min-height: calc(100dvh / var(--admin-interface-scale));
     overflow-x: hidden;
     overflow-y: visible;
@@ -11,14 +16,27 @@
     grid-template-columns: clamp(260px, 22vw, 460px) minmax(480px, 1fr) clamp(420px, 30vw, 680px);
 }
 
+.oup-console-header .admin-console-identity {
+    grid-template-columns: var(--oup-header-avatar-size) minmax(0, 1fr);
+}
+
+.oup-console-header .admin-console-avatar {
+    width: var(--oup-header-avatar-size);
+    height: var(--oup-header-avatar-size);
+}
+
 .oup-console-header .admin-console-identity strong {
     overflow-wrap: anywhere;
     line-height: 1.08;
     white-space: normal;
 }
 
+.oup-console-header .admin-console-title h1 {
+    font-size: var(--oup-header-title-size);
+}
+
 .oup-console-actions {
-    grid-template-columns: minmax(118px, 1fr) minmax(122px, auto) 44px 64px;
+    grid-template-columns: minmax(118px, 1fr) minmax(122px, auto) var(--oup-header-theme-size) 64px;
     align-items: center;
 }
 
@@ -26,13 +44,24 @@
     margin: 0;
 }
 
+.oup-console-actions .admin-theme-button {
+    width: var(--oup-header-theme-size);
+    min-width: var(--oup-header-theme-size);
+    min-height: var(--oup-header-control-height);
+}
+
+.oup-console-actions .admin-utility-link {
+    min-height: var(--oup-header-control-height);
+    font-size: var(--oup-header-control-font-size);
+}
+
 .oup-shift-state {
     display: grid;
-    gap: 3px;
+    gap: 0;
     min-width: 0;
-    min-height: 46px;
+    min-height: var(--oup-header-control-height);
     align-content: center;
-    padding: 6px 10px;
+    padding: 1px 10px;
     border: 1px solid var(--admin-line);
     border-left: 4px solid var(--admin-gray);
     border-radius: 6px;
@@ -80,13 +109,13 @@
 
 .oup-shift-button {
     width: 100%;
-    min-height: 40px;
+    min-height: var(--oup-header-control-height);
     border: 1px solid var(--admin-green);
     border-radius: 6px;
     background: var(--admin-green);
     color: #fff;
     font: inherit;
-    font-size: 11px;
+    font-size: var(--oup-header-control-font-size);
     font-weight: 900;
     line-height: 1;
     text-transform: uppercase;
@@ -1238,14 +1267,14 @@
 
 .oup-shell.admin-night .oup-photo-overlay { background: rgba(0, 0, 0, .82); }
 
-@media (max-width: 1220px) {
+@media (max-width: 1180px) {
     .oup-console-header {
         grid-template-columns: minmax(210px, .65fr) minmax(480px, 1.7fr);
     }
 
     .oup-console-actions {
         grid-column: 1 / -1;
-        grid-template-columns: minmax(140px, 1fr) minmax(140px, 1fr) 44px 80px;
+        grid-template-columns: minmax(140px, 1fr) minmax(140px, 1fr) var(--oup-header-theme-size) 80px;
     }
 
     .oup-filter-bar {
@@ -1271,6 +1300,21 @@
     .oup-register-list { min-width: 920px; }
 }
 
+@media (max-width: 720px) {
+    .oup-console-header {
+        grid-template-columns: 1fr;
+    }
+
+    .oup-console-main,
+    .oup-console-actions {
+        grid-column: 1;
+    }
+
+    .oup-console-header .admin-console-title h1 {
+        font-size: 30px;
+    }
+}
+
 @media (max-width: 640px) {
     .admin-exports-shell.oup-shell {
         --admin-interface-scale: 1;
@@ -1283,8 +1327,8 @@
         position: static;
         display: grid;
         grid-template-columns: 1fr;
-        gap: 12px;
-        padding: 12px;
+        gap: 0;
+        padding: 0;
     }
 
     .oup-console-main,
@@ -1300,7 +1344,7 @@
 
     .admin-console-nav a {
         min-width: max-content;
-        min-height: 38px;
+        min-height: 44px;
     }
 
     .oup-console-actions {
@@ -1319,11 +1363,16 @@
     .oup-console-actions .admin-utility-link {
         width: 100%;
         min-width: 0;
+        min-height: 44px;
     }
 
     .oup-shift-state span { font-size: 8px; }
-    .oup-shift-state strong,
-    .oup-shift-button { font-size: 9px; }
+    .oup-shift-state strong { font-size: 11px; }
+
+    .oup-console-actions .oup-shift-state,
+    .oup-console-actions .oup-shift-button {
+        min-height: 44px;
+    }
 
     .oup-shift-state strong,
     .oup-shift-state small { white-space: normal; }

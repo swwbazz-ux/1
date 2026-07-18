@@ -365,6 +365,19 @@ class RotationWorkflowTests(TestCase):
                 self.assertEqual(response.status_code, 200)
                 self.assertEqual(response.json()['scope'], '/')
 
+    def test_rotation_role_service_workers_use_updated_header_shells(self):
+        expected_versions = {
+            'timekeeper': 'timekeeper-shell-v3',
+            'site-manager': 'site-manager-shell-v3',
+        }
+
+        for slug, expected_version in expected_versions.items():
+            with self.subTest(slug=slug):
+                response = self.client.get(f'/{slug}-sw.js', HTTP_HOST='localhost')
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, expected_version)
+                self.assertContains(response, 'new Request(url, { cache: "reload" })')
+
     def test_admin_delete_is_blocked_when_employee_has_rotation_history(self):
         admin_role, _created = Role.objects.get_or_create(
             code='admin',

@@ -4,86 +4,32 @@
 }
 
 .deputy-shell {
-    --admin-console-header-height: 76px;
-}
-
-.deputy-shell .deputy-console-header {
-    grid-template-columns: minmax(210px, 260px) minmax(0, 1fr) minmax(150px, 190px);
-    height: var(--admin-console-header-height);
-    min-height: var(--admin-console-header-height);
-    max-height: var(--admin-console-header-height);
-}
-
-.deputy-shell .admin-console-identity,
-.deputy-shell .admin-console-main,
-.deputy-shell .admin-console-actions {
-    padding: 8px 14px;
-}
-
-.deputy-shell .admin-console-identity {
-    grid-template-columns: 42px minmax(0, 1fr);
-    gap: 10px;
+    --admin-console-header-height: 112px;
 }
 
 .deputy-shell .admin-console-avatar {
-    width: 42px;
-    height: 42px;
-    font-size: 20px;
-}
-
-.deputy-shell .admin-console-identity strong {
-    font-size: 14px;
-}
-
-.deputy-shell .admin-console-identity em {
-    margin-top: 2px;
-    font-size: 10px;
+    width: 52px;
+    height: 52px;
 }
 
 .deputy-shell .admin-console-actions {
-    grid-template-columns: 40px minmax(96px, 1fr);
-    gap: 8px;
-}
-
-.deputy-shell .admin-console-main {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-    justify-content: flex-start;
-}
-
-.deputy-shell .admin-console-title {
-    display: none;
-}
-
-.deputy-shell .admin-console-title span {
-    font-size: 10px;
+    grid-template-columns: 40px minmax(112px, 1fr);
+    gap: 10px;
 }
 
 .deputy-shell .admin-console-title h1 {
     max-width: 100%;
     overflow: hidden;
-    font-size: 27px;
+    font-size: 32px;
     text-overflow: ellipsis;
     white-space: nowrap;
-}
-
-.deputy-shell .admin-console-nav {
-    flex: 0 0 auto;
-    flex-wrap: nowrap;
-    gap: 6px;
 }
 
 .deputy-shell .admin-console-nav a,
 .deputy-shell .admin-utility-link,
 .deputy-shell .admin-theme-button {
-    min-height: 36px;
-    font-size: 12px;
-}
-
-.deputy-shell .admin-console-nav a {
-    min-width: 94px;
-    padding: 0 10px;
+    min-height: 40px;
+    font-size: 13px;
 }
 
 .deputy-shell .admin-theme-button {
@@ -92,9 +38,20 @@
 }
 
 .deputy-shell .admin-console-page {
-    height: calc((100dvh / var(--admin-interface-scale)) - var(--admin-console-header-height));
     gap: 8px;
     padding: 8px 0 12px;
+}
+
+@media (min-width: 1181px) {
+    .deputy-shell .deputy-console-header {
+        height: var(--admin-console-header-height);
+        min-height: var(--admin-console-header-height);
+        max-height: var(--admin-console-header-height);
+    }
+
+    .deputy-shell .admin-console-page {
+        height: calc((100dvh / var(--admin-interface-scale)) - var(--admin-console-header-height));
+    }
 }
 
 .deputy-planning-page {
@@ -103,7 +60,7 @@
 
 .deputy-server-messages {
     position: fixed;
-    top: 92px;
+    top: calc(var(--admin-console-header-height) + 16px);
     right: 18px;
     z-index: 40;
     width: min(420px, calc(100vw - 36px));
@@ -1559,7 +1516,17 @@ button.deputy-avatar {
 
 @media (max-width: 1180px) {
     .deputy-mining-manager-screen {
-        overflow: hidden;
+        overflow: auto;
+    }
+
+    .deputy-shell .deputy-console-header {
+        height: auto;
+        max-height: none;
+    }
+
+    .deputy-server-messages {
+        position: static;
+        width: 100%;
     }
 
     .deputy-planning-toolbar {
@@ -1587,31 +1554,35 @@ button.deputy-avatar {
 }
 
 @media (max-width: 720px) {
+    .deputy-shell {
+        --admin-console-header-height: 108px;
+    }
+
     .deputy-mining-manager-screen {
         overflow: auto;
     }
 
     .deputy-shell .deputy-console-header {
         grid-template-columns: minmax(0, 1fr) auto;
-        grid-template-rows: 50px 42px;
+        grid-template-rows: 56px 52px;
         height: auto;
-        min-height: 92px;
+        min-height: var(--admin-console-header-height);
         max-height: none;
     }
 
     .deputy-shell .admin-console-identity {
         grid-column: 1;
         grid-row: 1;
-        grid-template-columns: 34px minmax(0, 1fr);
+        grid-template-columns: 40px minmax(0, 1fr);
         gap: 8px;
         padding: 6px 10px;
         border-bottom: 1px solid var(--admin-line-soft);
     }
 
     .deputy-shell .admin-console-avatar {
-        width: 34px;
-        height: 34px;
-        font-size: 16px;
+        width: 40px;
+        height: 40px;
+        font-size: 18px;
     }
 
     .deputy-shell .admin-console-main {
@@ -1639,28 +1610,33 @@ button.deputy-avatar {
     .deputy-shell .admin-console-nav a {
         flex: 1 1 0;
         min-width: 0;
-        min-height: 34px;
+        min-height: 44px;
         padding: 0 8px;
-        font-size: 10px;
+        font-size: 11px;
     }
 
     .deputy-shell .admin-console-actions {
         grid-column: 2;
         grid-row: 1;
-        grid-template-columns: 36px minmax(72px, 82px);
+        grid-template-columns: 44px minmax(76px, 88px);
         gap: 6px;
         padding: 6px 10px 6px 0;
         border-bottom: 1px solid var(--admin-line-soft);
     }
 
+    .deputy-shell .admin-theme-button,
+    .deputy-shell .admin-utility-link {
+        min-height: 44px;
+    }
+
     .deputy-shell .admin-theme-button {
-        width: 36px;
-        min-width: 36px;
+        width: 44px;
+        min-width: 44px;
     }
 
     .deputy-shell .admin-console-page {
         height: auto;
-        min-height: calc(100dvh - 92px);
+        min-height: calc(100dvh - var(--admin-console-header-height));
         overflow: visible;
     }
 
