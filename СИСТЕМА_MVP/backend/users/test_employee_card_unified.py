@@ -203,7 +203,7 @@ class UnifiedEmployeeCardTests(TestCase):
     def test_shared_employee_card_shells_use_new_cache_versions(self):
         expected_versions = {
             'system_admin_service_worker': 'system-admin-shell-v11',
-            'oup_service_worker': 'oup-shell-v11',
+            'oup_service_worker': 'oup-shell-v12',
         }
 
         for view_name, expected_version in expected_versions.items():
@@ -225,6 +225,8 @@ class UnifiedEmployeeCardTests(TestCase):
         self.assertIn('font-size: 32px;', app_stylesheet)
         self.assertIn('--oup-header-control-height: 40px;', oup_stylesheet)
         self.assertIn('--oup-header-control-font-size: 13px;', oup_stylesheet)
+        self.assertIn('height: var(--oup-header-control-height);', oup_stylesheet)
+        self.assertIn('padding: 0 14px;', oup_stylesheet)
 
     def test_new_employee_cannot_reuse_an_existing_phone(self):
         form = AdminEmployeeForm(data={
