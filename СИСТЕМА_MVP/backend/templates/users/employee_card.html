@@ -6,8 +6,8 @@
 {% block extra_head %}
 <link rel="stylesheet" href="{% static 'css/admin-employee-detail.css' %}?v=20260717-1">
 {% if employee_card_context == "oup" %}
-<link rel="stylesheet" href="{% static 'css/oup-workplace-v1.css' %}?v=20260718-2">
-<link rel="stylesheet" href="{% static 'css/oup-work-period-v1.css' %}?v=20260717-1">
+<link rel="stylesheet" href="{% static 'css/oup-workplace-v1.css' %}?v=20260718-3">
+<link rel="stylesheet" href="{% static 'css/oup-work-period-v1.css' %}?v=20260718-2">
 {% endif %}
 <link rel="stylesheet" href="{% static 'css/employee-card-unified.css' %}?v=20260717-8">
 {% endblock %}
@@ -41,7 +41,12 @@
                 </nav>
             </section>
             <section class="admin-console-actions">
-                <button type="button" class="admin-theme-button" data-admin-theme-toggle aria-label="Переключить тему" title="Тема интерфейса">Тема</button>
+                <button type="button"
+                        class="admin-theme-button"
+                        data-admin-theme-toggle
+                        data-theme-icon="sun"
+                        aria-label="Переключить дневной и ночной режим"
+                        title="Переключить дневной и ночной режим"></button>
                 <a class="admin-utility-link" href="{% url 'system_admin_employees' %}">Назад</a>
                 <a class="admin-utility-link" href="{% url 'system_admin_dashboard' %}">Админка</a>
             </section>

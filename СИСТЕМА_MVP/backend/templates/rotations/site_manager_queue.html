@@ -5,7 +5,7 @@
 {% block body_class %}rotation-workplace-screen rotation-manager-screen{% endblock %}
 {% block extra_head %}
 {% include "includes/role_app_pwa_head.html" with role_code="site_manager" manifest_url="/site-manager.webmanifest" service_worker_url="/site-manager-sw.js" legacy_scope="/site-manager/" theme_color="#8A5A23" apple_title="Начальник участка" icon_180="img/pwa/site-manager-180.png" %}
-<link rel="stylesheet" href="{% static 'css/rotation-workplace-v2.css' %}?v=2">
+<link rel="stylesheet" href="{% static 'css/rotation-workplace-v2.css' %}?v=3">
 {% endblock %}
 
 {% block body %}
@@ -35,8 +35,8 @@
                     class="admin-theme-button"
                     data-admin-theme-toggle
                     data-theme-icon="sun"
-                    aria-label="Включить тёмную тему"
-                    title="Тема интерфейса">Тема</button>
+                    aria-label="Переключить дневной и ночной режим"
+                    title="Переключить дневной и ночной режим"></button>
             <a class="admin-utility-link" href="{% url 'logout' %}">Выйти</a>
         </section>
     </header>

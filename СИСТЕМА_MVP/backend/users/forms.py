@@ -800,45 +800,35 @@ def is_valid_russian_mobile_phone(value):
 
 
 class AccessActivationForm(forms.Form):
-    phone = forms.CharField(
-        label='Номер телефона',
-        max_length=32,
-        widget=forms.TextInput(attrs={
-            'inputmode': 'numeric',
-            'autocomplete': 'tel',
-            'placeholder': 'Например 79000000000',
-            'maxlength': '11',
-            'pattern': '[0-9]{11}',
-            'data-phone-input': '1',
-            'data-hint': 'Введите 11 цифр российского мобильного номера, например 79000000000.',
-        }),
-    )
     new_access_code = forms.CharField(
-        label='Придумайте постоянный пинкод',
+        label='Новый PIN',
         min_length=6,
         max_length=6,
         widget=forms.PasswordInput(attrs={
             'inputmode': 'numeric',
             'autocomplete': 'new-password',
-            'placeholder': '6 цифр',
+            'placeholder': '000000',
             'maxlength': '6',
             'pattern': '[0-9]{6}',
             'data-pin-input': '1',
-            'data-hint': 'Пинкод должен состоять ровно из 6 цифр.',
+            'data-hint': 'Введите ровно 6 цифр. Не повторяйте временный PIN.',
+            'aria-describedby': 'activation-new-pin-hint',
+            'autofocus': 'autofocus',
         }),
     )
     confirm_access_code = forms.CharField(
-        label='Повторите пинкод',
+        label='Повторите PIN',
         min_length=6,
         max_length=6,
         widget=forms.PasswordInput(attrs={
             'inputmode': 'numeric',
             'autocomplete': 'new-password',
-            'placeholder': 'Повторите 6 цифр',
+            'placeholder': '000000',
             'maxlength': '6',
             'pattern': '[0-9]{6}',
             'data-pin-input': '1',
-            'data-hint': 'Повторите тот же пинкод из 6 цифр.',
+            'data-hint': 'Введите тот же новый PIN еще раз.',
+            'aria-describedby': 'activation-confirm-pin-hint',
         }),
     )
 
@@ -846,17 +836,18 @@ class AccessActivationForm(forms.Form):
         super().__init__(*args, **kwargs)
         self.access = access
 
-    def clean_phone(self):
-        phone = self.cleaned_data['phone'].strip()
-        employee_phone = normalize_phone(getattr(self.access.employee, 'phone', '')) if self.access else ''
-        if not is_valid_russian_mobile_phone(phone) or not employee_phone or normalize_phone(phone) != employee_phone:
-            raise ValidationError('Телефон или пинкод указаны неверно.')
-        return phone
-
     def clean_new_access_code(self):
         code = self.cleaned_data['new_access_code'].strip()
         if not code.isdigit() or len(code) != 6:
-            raise ValidationError('Пинкод должен состоять ровно из 6 цифр.')
+            raise ValidationError('PIN должен состоять ровно из 6 цифр.')
+        if self.access and code == self.access.access_code:
+            raise ValidationError('Новый PIN не должен совпадать с временным.')
+        weak_codes = {
+            '012345', '123456', '234567', '345678', '456789',
+            '987654', '876543', '765432', '654321', '543210',
+        }
+        if len(set(code)) == 1 or code in weak_codes:
+            raise ValidationError('Этот PIN слишком простой. Выберите другую комбинацию.')
         if self.access and EmployeeAccess.objects.filter(
             employee=self.access.employee,
             access_code=code,
@@ -870,7 +861,7 @@ class AccessActivationForm(forms.Form):
         new_code = cleaned_data.get('new_access_code')
         confirm_code = cleaned_data.get('confirm_access_code')
         if new_code and confirm_code and new_code != confirm_code:
-            raise ValidationError('Пинкоды не совпадают.')
+            self.add_error('confirm_access_code', 'PIN-коды не совпадают.')
         return cleaned_data
 
 

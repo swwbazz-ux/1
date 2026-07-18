@@ -13,8 +13,9 @@
 }
 
 .deputy-shell .admin-console-actions {
-    grid-template-columns: 40px minmax(112px, 1fr);
-    gap: 10px;
+    grid-template-columns: 40px var(--admin-header-utility-width);
+    gap: var(--admin-header-gap);
+    justify-content: end;
 }
 
 .deputy-shell .admin-console-title h1 {
@@ -35,6 +36,8 @@
 .deputy-shell .admin-theme-button {
     width: 40px;
     min-width: 40px;
+    font-size: 0;
+    line-height: 0;
 }
 
 .deputy-shell .admin-console-page {
@@ -1618,8 +1621,9 @@ button.deputy-avatar {
     .deputy-shell .admin-console-actions {
         grid-column: 2;
         grid-row: 1;
-        grid-template-columns: 44px minmax(76px, 88px);
+        grid-template-columns: 44px var(--admin-header-utility-width);
         gap: 6px;
+        justify-content: end;
         padding: 6px 10px 6px 0;
         border-bottom: 1px solid var(--admin-line-soft);
     }

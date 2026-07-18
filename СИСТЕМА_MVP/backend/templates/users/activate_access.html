@@ -1,97 +1,255 @@
 {% extends "base.html" %}
+{% load static %}
 
-{% block title %}Активация доступа{% endblock %}
-{% block body_class %}login-page{% endblock %}
+{% block title %}{% if role_app %}Первичный вход · {{ role_app.short_name }}{% else %}Первичный вход{% endif %}{% endblock %}
+{% block extra_head %}
+    {% if role_app %}
+    <link rel="manifest" href="{{ role_app.manifest_url }}">
+    <meta name="theme-color" content="{{ role_app.theme_color }}">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="{{ role_app.short_name }}">
+    <link rel="apple-touch-icon" href="{{ role_app.icon_180_url }}">
+    {% endif %}
+    <style>
+        .dispatcher-shell .unified-activation-dialog .activation-stage {
+            margin: 0 0 5px;
+            color: var(--gd-green);
+            font-size: 11px;
+            font-weight: 900;
+            letter-spacing: 0;
+            text-transform: uppercase;
+        }
+        .dispatcher-shell .unified-activation-dialog .activation-confirmed {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 3px 12px;
+            align-items: center;
+            margin: 1px 0 10px;
+            padding: 9px 11px;
+            border: 1px solid var(--gd-line);
+            border-radius: 6px;
+            background: var(--gd-panel-soft);
+        }
+        .dispatcher-shell .unified-activation-dialog .activation-confirmed strong {
+            min-width: 0;
+            overflow: hidden;
+            color: var(--gd-ink);
+            font-size: 14px;
+            font-weight: 900;
+            line-height: 1.15;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .dispatcher-shell .unified-activation-dialog .activation-confirmed span {
+            color: var(--gd-muted);
+            font-size: 11px;
+            font-weight: 700;
+            line-height: 1.2;
+        }
+        .dispatcher-shell .unified-activation-dialog .activation-confirmed .activation-phone {
+            grid-column: 2;
+            grid-row: 1 / span 2;
+            color: var(--gd-green);
+            font-size: 12px;
+            font-weight: 900;
+            white-space: nowrap;
+        }
+        .dispatcher-shell .unified-activation-dialog .activation-pin-toggle {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            width: fit-content;
+            margin: 0 0 9px;
+            color: var(--gd-muted);
+            font-size: 12px;
+            font-weight: 800;
+            cursor: pointer;
+        }
+        .dispatcher-shell .unified-activation-dialog .activation-pin-toggle input {
+            width: 17px;
+            height: 17px;
+            margin: 0;
+            accent-color: var(--gd-green);
+        }
+        @media (max-width: 430px) {
+            .dispatcher-shell .unified-activation-dialog .activation-confirmed {
+                grid-template-columns: 1fr;
+            }
+            .dispatcher-shell .unified-activation-dialog .activation-confirmed .activation-phone {
+                grid-column: 1;
+                grid-row: auto;
+            }
+        }
+    </style>
+{% endblock %}
+{% block body_class %}login-page dispatcher-shell dispatcher-night unified-login-screen unified-activation-screen{% endblock %}
 
 {% block body %}
-<main class="login-card">
-    <div class="muted">Первичная активация</div>
-    <h1>Активировать доступ</h1>
-    <p>
-        Первичный пинкод принят для сотрудника {{ access.employee.full_name }}.
-        Введите номер телефона из личного дела и придумайте постоянный пинкод.
-        В дальнейшем вход будет выполняться по паре телефон + пинкод.
-    </p>
-    <form method="post" data-validated-activation>
+<main class="shared-shift-dialog unified-login-dialog unified-activation-dialog">
+    <div class="shared-shift-accent" aria-hidden="true"></div>
+    <form method="post" novalidate data-validated-activation class="app-confirm-content unified-login-form">
         {% csrf_token %}
-        {% if form.non_field_errors %}
-            <div class="message error">{{ form.non_field_errors }}</div>
+        {% if role_app %}
+        <div class="unified-login-role-identity">
+            <img src="{{ role_app.icon_180_url }}" width="72" height="72" alt="">
+            <span>Copper Resources</span>
+        </div>
         {% endif %}
-        {% for field in form %}
-            <label for="{{ field.id_for_label }}">{{ field.label }}</label>
-            {{ field }}
-            <small class="input-hint" data-input-hint-for="{{ field.id_for_label }}">
-                {% if field.name == "phone" %}
-                    Только цифры. Формат: 79000000000 или 89000000000.
-                {% elif field.name == "new_access_code" %}
-                    Только цифры, ровно 6 знаков.
-                {% else %}
-                    Повторите тот же пинкод из 6 цифр.
-                {% endif %}
-            </small>
-            {{ field.errors }}
+        <div class="activation-stage">Шаг 2 из 2 · вход подтвержден</div>
+        <h2>Создайте постоянный PIN</h2>
+        <p>Телефон и временный PIN повторно вводить не нужно.</p>
+
+        <div class="activation-confirmed" aria-label="Подтвержденные данные сотрудника">
+            <strong title="{{ access.employee.full_name }}">{{ access.employee.full_name }}</strong>
+            <span>{{ access.role.name }}</span>
+            <span class="activation-phone">{{ activation_phone }}</span>
+        </div>
+
+        {% for error in form.non_field_errors %}
+        <div class="message error" role="alert">{{ error }}</div>
         {% endfor %}
-        <button type="submit">Активировать доступ</button>
+
+        <label class="shared-shift-login-field" for="{{ form.new_access_code.id_for_label }}">
+            <span>{{ form.new_access_code.label }}</span>
+            {{ form.new_access_code }}
+            <small id="activation-new-pin-hint" class="input-hint{% if form.new_access_code.errors %} is-invalid{% endif %}" data-input-hint-for="{{ form.new_access_code.id_for_label }}"{% if form.new_access_code.errors %} data-server-error="1"{% endif %}>
+                {% if form.new_access_code.errors %}{{ form.new_access_code.errors.0 }}{% else %}Ровно 6 цифр. Не повторяйте временный PIN.{% endif %}
+            </small>
+        </label>
+        <label class="shared-shift-login-field" for="{{ form.confirm_access_code.id_for_label }}">
+            <span>{{ form.confirm_access_code.label }}</span>
+            {{ form.confirm_access_code }}
+            <small id="activation-confirm-pin-hint" class="input-hint{% if form.confirm_access_code.errors %} is-invalid{% endif %}" data-input-hint-for="{{ form.confirm_access_code.id_for_label }}"{% if form.confirm_access_code.errors %} data-server-error="1"{% endif %}>
+                {% if form.confirm_access_code.errors %}{{ form.confirm_access_code.errors.0 }}{% else %}Введите тот же новый PIN еще раз.{% endif %}
+            </small>
+        </label>
+
+        <label class="activation-pin-toggle">
+            <input type="checkbox" data-pin-visibility>
+            <span>Показать PIN</span>
+        </label>
+
+        <div class="app-confirm-actions">
+            <a class="secondary" href="{% url 'logout' %}">Отмена</a>
+            <button class="danger" type="submit" disabled>Сохранить и войти</button>
+        </div>
     </form>
 </main>
 <script>
 document.addEventListener('DOMContentLoaded', function () {
     var form = document.querySelector('[data-validated-activation]');
-    var submitButton = form ? form.querySelector('button[type="submit"]') : null;
-    var pinInputs = form ? Array.from(form.querySelectorAll('[data-pin-input]')) : [];
+    if (!form) return;
 
-    function refreshSubmitState() {
-        if (!form || !submitButton) return;
-        var inputs = Array.from(form.querySelectorAll('[data-phone-input], [data-pin-input]'));
-        var pinsMatch = pinInputs.length < 2 || !pinInputs[0].value || !pinInputs[1].value || pinInputs[0].value === pinInputs[1].value;
-        submitButton.disabled = inputs.some(function (input) { return !input.classList.contains('is-valid'); }) || !pinsMatch;
+    var submitButton = form.querySelector('button[type="submit"]');
+    var pinInputs = Array.from(form.querySelectorAll('[data-pin-input]'));
+    var visibilityToggle = form.querySelector('[data-pin-visibility]');
+    var loginPage = document.body;
+    var weakPins = new Set([
+        '012345', '123456', '234567', '345678', '456789',
+        '987654', '876543', '765432', '654321', '543210'
+    ]);
+
+    function isWeakPin(value) {
+        return value.length === 6 && (new Set(value.split('')).size === 1 || weakPins.has(value));
     }
 
-    document.querySelectorAll('[data-phone-input], [data-pin-input]').forEach(function (input) {
-        var hint = document.querySelector('[data-input-hint-for="' + input.id + '"]');
-        var maxLength = Number(input.getAttribute('maxlength') || 0);
-        var isPhone = input.hasAttribute('data-phone-input');
-        var isPin = input.hasAttribute('data-pin-input');
+    function setKeyboardMode(isActive) {
+        loginPage.classList.toggle('is-login-keyboard-active', Boolean(isActive));
+    }
 
-        function validate() {
-            var value = input.value.replace(/\D/g, '').slice(0, maxLength);
-            if (input.value !== value) input.value = value;
+    function keepFieldVisible(input) {
+        window.setTimeout(function () {
+            if (document.activeElement === input) {
+                input.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' });
+            }
+        }, 90);
+    }
 
-            var valid = false;
-            var message = input.dataset.hint || '';
-            if (isPhone) {
-                valid = value.length === 11 && (value.indexOf('79') === 0 || value.indexOf('89') === 0);
-                if (value && value.length < 11) message = 'Нужно 11 цифр. Сейчас введено: ' + value.length + '.';
-                if (value.length === 11 && !valid) message = 'Российский мобильный номер должен начинаться с 79 или 89.';
-            }
-            if (isPin) {
-                valid = value.length === 6;
-                if (value && value.length < 6) message = 'Нужно ровно 6 цифр. Сейчас введено: ' + value.length + '.';
-            }
-            if (isPin && pinInputs.length === 2 && pinInputs[0].value && pinInputs[1].value && pinInputs[0].value !== pinInputs[1].value) {
-                valid = false;
-                message = 'Пинкоды не совпадают.';
-            }
+    function setFieldState(input, valid, message, hasValue) {
+        var hint = form.querySelector('[data-input-hint-for="' + input.id + '"]');
+        input.classList.toggle('is-valid', valid);
+        input.classList.toggle('is-invalid', hasValue && !valid);
+        if (hint) {
+            hint.textContent = message;
+            hint.classList.toggle('is-valid', valid);
+            hint.classList.toggle('is-invalid', hasValue && !valid);
+            hint.removeAttribute('data-server-error');
+        }
+    }
 
-            input.classList.toggle('is-invalid', Boolean(value) && !valid);
-            input.classList.toggle('is-valid', valid);
-            if (hint) {
-                hint.textContent = valid ? 'Введено правильно.' : message;
-                hint.classList.toggle('is-invalid', Boolean(value) && !valid);
-                hint.classList.toggle('is-valid', valid);
-            }
-            refreshSubmitState();
+    function validateAll() {
+        var first = pinInputs[0] ? pinInputs[0].value : '';
+        var second = pinInputs[1] ? pinInputs[1].value : '';
+        var firstValid = first.length === 6 && !isWeakPin(first);
+        var secondValid = second.length === 6 && second === first && firstValid;
+
+        if (pinInputs[0]) {
+            var firstMessage = 'Ровно 6 цифр. Не повторяйте временный PIN.';
+            if (first && first.length < 6) firstMessage = 'Нужно 6 цифр. Сейчас введено: ' + first.length + '.';
+            if (isWeakPin(first)) firstMessage = 'Этот PIN слишком простой. Выберите другую комбинацию.';
+            if (firstValid) firstMessage = 'PIN подходит.';
+            setFieldState(pinInputs[0], firstValid, firstMessage, Boolean(first));
         }
 
+        if (pinInputs[1]) {
+            var secondMessage = 'Введите тот же новый PIN еще раз.';
+            if (second && second.length < 6) secondMessage = 'Нужно 6 цифр. Сейчас введено: ' + second.length + '.';
+            if (second.length === 6 && second !== first) secondMessage = 'PIN-коды не совпадают.';
+            if (secondValid) secondMessage = 'PIN-коды совпадают.';
+            setFieldState(pinInputs[1], secondValid, secondMessage, Boolean(second));
+        }
+
+        submitButton.disabled = !(firstValid && secondValid);
+    }
+
+    pinInputs.forEach(function (input) {
         input.addEventListener('input', function () {
-            validate();
-            pinInputs.forEach(function (pinInput) {
-                if (pinInput !== input) pinInput.dispatchEvent(new Event('blur'));
+            input.value = input.value.replace(/\D/g, '').slice(0, 6);
+            validateAll();
+        });
+        input.addEventListener('focus', function () {
+            setKeyboardMode(true);
+            keepFieldVisible(input);
+        });
+        input.addEventListener('blur', function () {
+            window.setTimeout(function () {
+                if (!form.contains(document.activeElement)) setKeyboardMode(false);
+            }, 120);
+        });
+    });
+
+    if (visibilityToggle) {
+        visibilityToggle.addEventListener('change', function () {
+            pinInputs.forEach(function (input) {
+                input.type = visibilityToggle.checked ? 'text' : 'password';
             });
         });
-        input.addEventListener('blur', validate);
-        validate();
+    }
+
+    form.addEventListener('submit', function (event) {
+        pinInputs.forEach(function (input) {
+            input.value = input.value.replace(/\D/g, '').slice(0, 6);
+        });
+        validateAll();
+        if (submitButton.disabled) event.preventDefault();
     });
+
+    if (window.visualViewport) {
+        window.visualViewport.addEventListener('resize', function () {
+            var keyboardLikelyOpen = window.visualViewport.height < window.innerHeight - 120;
+            setKeyboardMode(keyboardLikelyOpen && form.contains(document.activeElement));
+        });
+    }
+
+    if (pinInputs.some(function (input) { return input.value; })) validateAll();
+
+    if ('serviceWorker' in navigator && {{ role_app|yesno:"true,false" }}) {
+        {% if role_app %}
+        navigator.serviceWorker.register('{{ role_app.service_worker_url }}', { scope: '/' }).catch(function () {});
+        {% endif %}
+    }
 });
 </script>
 {% endblock %}

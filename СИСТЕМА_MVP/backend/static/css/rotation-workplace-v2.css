@@ -53,21 +53,22 @@
 }
 
 .rotation-console-actions {
-    display: flex;
-    grid-template-columns: none;
+    display: grid;
+    grid-template-columns: var(--admin-header-icon-size) var(--admin-header-utility-width);
+    gap: var(--admin-header-gap);
     align-items: center;
-    justify-content: flex-end;
+    justify-content: end;
+}
+
+.rotation-shell .rotation-console-actions .admin-theme-button {
+    font-size: 0;
+    line-height: 0;
 }
 
 .rotation-console-actions .admin-utility-link {
-    min-width: 92px;
-    padding: 0 14px;
-}
-
-@media (min-width: 1181px) {
-    .rotation-console-header .admin-console-main {
-        grid-template-columns: minmax(220px, 360px) minmax(0, 1fr);
-    }
+    width: 100%;
+    min-width: 0;
+    padding: 0 8px;
 }
 
 .rotation-page {
@@ -1116,28 +1117,6 @@
     }
 }
 
-@media (max-width: 1180px) {
-    .rotation-console-header {
-        grid-template-columns: minmax(230px, 1fr) auto;
-    }
-
-    .rotation-console-header .admin-console-identity {
-        grid-column: 1;
-        grid-row: 1;
-    }
-
-    .rotation-console-header .admin-console-actions {
-        grid-column: 2;
-        grid-row: 1;
-    }
-
-    .rotation-console-header .admin-console-main {
-        grid-column: 1 / -1;
-        grid-row: 2;
-        border-top: 1px solid var(--admin-line-soft);
-    }
-}
-
 @media (max-width: 1080px) {
     .rotation-page {
         min-height: calc(100dvh - var(--admin-console-header-height) - var(--admin-console-header-height));
@@ -1255,6 +1234,21 @@
         min-height: 0;
     }
 
+    .rotation-console-header .admin-console-identity {
+        grid-column: 1;
+        grid-row: 1;
+    }
+
+    .rotation-console-header .admin-console-actions {
+        grid-column: 2;
+        grid-row: 1;
+    }
+
+    .rotation-console-header .admin-console-main {
+        grid-column: 1 / -1;
+        grid-row: 2;
+    }
+
     .rotation-console-header .admin-console-identity,
     .rotation-console-header .admin-console-main,
     .rotation-console-header .admin-console-actions {
@@ -1288,6 +1282,10 @@
 
     .rotation-console-actions .admin-theme-button {
         width: 44px;
+    }
+
+    .rotation-console-actions {
+        grid-template-columns: 44px var(--admin-header-utility-width);
     }
 
     .rotation-console-actions .admin-utility-link {
@@ -1359,13 +1357,12 @@
     }
 
     .rotation-console-header .admin-console-actions {
-        grid-row: 2;
-        justify-content: flex-start;
-        border-top: 1px solid var(--admin-line-soft);
+        grid-row: 3;
+        justify-content: end;
     }
 
     .rotation-console-header .admin-console-main {
-        grid-row: 3;
+        grid-row: 2;
     }
 
     .rotation-console-nav {

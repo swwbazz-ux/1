@@ -12,10 +12,6 @@
     overflow-y: visible;
 }
 
-.oup-console-header {
-    grid-template-columns: clamp(260px, 22vw, 460px) minmax(480px, 1fr) clamp(420px, 30vw, 680px);
-}
-
 .oup-console-header .admin-console-identity {
     grid-template-columns: var(--oup-header-avatar-size) minmax(0, 1fr);
 }
@@ -25,38 +21,48 @@
     height: var(--oup-header-avatar-size);
 }
 
-.oup-console-header .admin-console-identity strong {
-    overflow-wrap: anywhere;
-    line-height: 1.08;
-    white-space: normal;
-}
-
 .oup-console-header .admin-console-title h1 {
     font-size: var(--oup-header-title-size);
 }
 
 .oup-console-actions {
-    grid-template-columns: minmax(118px, 1fr) minmax(122px, auto) var(--oup-header-theme-size) 64px;
+    grid-template-columns: minmax(0, 1fr) var(--oup-header-theme-size) var(--admin-header-utility-width);
+    grid-template-rows: repeat(2, var(--oup-header-control-height));
+    gap: 6px var(--admin-header-gap);
+    align-content: center;
     align-items: center;
+    justify-content: stretch;
 }
 
 .oup-console-actions form {
+    grid-column: 1;
+    grid-row: 2;
+    width: 100%;
+    min-width: 0;
     margin: 0;
 }
 
 .oup-console-actions .admin-theme-button {
+    grid-column: 2;
+    grid-row: 1 / -1;
+    align-self: center;
     width: var(--oup-header-theme-size);
     min-width: var(--oup-header-theme-size);
     min-height: var(--oup-header-control-height);
 }
 
 .oup-console-actions .admin-utility-link {
+    grid-column: 3;
+    grid-row: 1 / -1;
+    align-self: center;
     min-height: var(--oup-header-control-height);
     font-size: var(--oup-header-control-font-size);
 }
 
 .oup-shift-state {
     display: grid;
+    grid-column: 1;
+    grid-row: 1;
     gap: 0;
     min-width: 0;
     min-height: var(--oup-header-control-height);
@@ -122,6 +128,11 @@
     line-height: 1;
     text-transform: uppercase;
     cursor: pointer;
+}
+
+.oup-console-actions > .oup-shift-button {
+    grid-column: 1;
+    grid-row: 2;
 }
 
 .oup-shift-button.is-close {
@@ -1270,13 +1281,9 @@
 .oup-shell.admin-night .oup-photo-overlay { background: rgba(0, 0, 0, .82); }
 
 @media (max-width: 1180px) {
-    .oup-console-header {
-        grid-template-columns: minmax(210px, .65fr) minmax(480px, 1.7fr);
-    }
-
     .oup-console-actions {
-        grid-column: 1 / -1;
-        grid-template-columns: minmax(140px, 1fr) minmax(140px, 1fr) var(--oup-header-theme-size) 80px;
+        grid-template-columns: minmax(180px, 300px) var(--oup-header-theme-size) var(--admin-header-utility-width);
+        justify-content: center;
     }
 
     .oup-filter-bar {
@@ -1303,6 +1310,14 @@
 }
 
 @media (max-width: 720px) {
+    .admin-exports-shell.oup-shell {
+        --admin-interface-scale: 1;
+        --oup-header-control-height: 44px;
+        min-height: 100dvh;
+        overflow: visible;
+        zoom: 1;
+    }
+
     .oup-console-header {
         grid-template-columns: 1fr;
     }
@@ -1312,19 +1327,26 @@
         grid-column: 1;
     }
 
+    .oup-console-actions {
+        grid-template-columns: minmax(180px, 300px) 44px var(--admin-header-utility-width);
+    }
+
+    .oup-console-actions .admin-theme-button {
+        width: 44px;
+        min-width: 44px;
+        min-height: 44px;
+    }
+
+    .oup-console-actions .admin-utility-link {
+        min-height: 44px;
+    }
+
     .oup-console-header .admin-console-title h1 {
         font-size: 30px;
     }
 }
 
 @media (max-width: 640px) {
-    .admin-exports-shell.oup-shell {
-        --admin-interface-scale: 1;
-        overflow: visible;
-        min-height: 100dvh;
-        zoom: 1;
-    }
-
     .oup-console-header {
         position: static;
         display: grid;
@@ -1351,6 +1373,7 @@
 
     .oup-console-actions {
         grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        grid-template-rows: auto auto auto;
         gap: 6px;
     }
 
@@ -1358,11 +1381,23 @@
     .oup-console-actions form,
     .oup-console-actions > .oup-shift-button {
         grid-column: 1 / -1;
+        grid-row: auto;
         width: 100%;
+    }
+
+    .oup-console-actions .admin-theme-button {
+        grid-column: 1;
+        grid-row: auto;
+    }
+
+    .oup-console-actions .admin-utility-link {
+        grid-column: 2;
+        grid-row: auto;
     }
 
     .oup-console-actions .admin-theme-button,
     .oup-console-actions .admin-utility-link {
+        align-self: stretch;
         width: 100%;
         min-width: 0;
         min-height: 44px;

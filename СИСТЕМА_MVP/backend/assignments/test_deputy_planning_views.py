@@ -340,7 +340,7 @@ class DeputyPlanningViewTests(TestCase):
         self.assertEqual(response['Service-Worker-Allowed'], '/deputy-mining-manager/')
         self.assertEqual(response['X-Content-Type-Options'], 'nosniff')
         self.assertIn('deputy-mining-manager-desktop-shell-', script)
-        self.assertIn('`${CACHE_PREFIX}v8`', script)
+        self.assertIn('`${CACHE_PREFIX}v9`', script)
         self.assertIn('key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME', script)
         self.assertIn('removeCachedPlanningDocuments()', script)
         self.assertIn('LEGACY_ROOT_FALLBACK_URL', script)
@@ -409,7 +409,18 @@ class DeputyPlanningViewTests(TestCase):
 
         self.assertIn('--admin-console-header-height: 112px;', stylesheet)
         self.assertIn('--admin-console-header-height: 108px;', stylesheet)
-        self.assertIn('grid-template-columns: 40px minmax(112px, 1fr);', stylesheet)
+        self.assertIn(
+            'grid-template-columns: 40px var(--admin-header-utility-width);',
+            stylesheet,
+        )
+        self.assertIn('justify-content: end;', stylesheet)
+        self.assertIn(
+            '.deputy-shell .admin-theme-button {\n'
+            '    width: 40px;\n'
+            '    min-width: 40px;\n'
+            '    font-size: 0;',
+            stylesheet,
+        )
         self.assertIn('font-size: 32px;', stylesheet)
         self.assertIn('min-height: 44px;', stylesheet)
         self.assertIn(
@@ -419,6 +430,18 @@ class DeputyPlanningViewTests(TestCase):
         self.assertIn(
             'height: calc((100dvh / var(--admin-interface-scale)) - var(--admin-console-header-height));',
             stylesheet,
+        )
+
+        header_template = (
+            Path(__file__).resolve().parents[1]
+            / 'templates'
+            / 'includes'
+            / 'deputy_mining_manager_header.html'
+        ).read_text(encoding='utf-8')
+        self.assertIn('data-theme-icon="sun"', header_template)
+        self.assertNotRegex(
+            header_template,
+            r'<button\b[^>]*data-admin-theme-toggle[^>]*>\s*\S+.*?</button>',
         )
         self.assertIn(
             'grid-template-columns: clamp(360px, 21vw, 400px) minmax(0, 1fr);',
