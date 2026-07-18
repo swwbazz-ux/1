@@ -203,6 +203,22 @@ STATIC_ROOT = BASE_DIR / 'staticfiles'
 MEDIA_URL = 'media/'
 
 MEDIA_ROOT = BASE_DIR / 'media'
+
+PORTAL_CACHE_URL = os.getenv('PORTAL_CACHE_URL', '').strip()
+if PORTAL_CACHE_URL:
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+            'LOCATION': PORTAL_CACHE_URL,
+            'KEY_PREFIX': 'accounting-mvp',
+            'TIMEOUT': 300,
+            'OPTIONS': {
+                'socket_connect_timeout': 1,
+                'socket_timeout': 1,
+            },
+        }
+    }
+
 PORTAL_PRIVATE_MEDIA_ROOT = BASE_DIR / 'private_media'
 PORTAL_SITE_CODE = 'section_2'
 PORTAL_PRODUCTION_DATA_PROVIDER = ''
