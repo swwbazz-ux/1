@@ -220,6 +220,23 @@ class DeputyPlanningViewTests(TestCase):
             self.assertContains(response, 'deputy-mining-manager-180.png')
             self.assertContains(response, 'deputy-mining-manager-pwa-v1.js')
 
+    def test_deputy_pages_expose_standard_header_subtitles(self):
+        expected_subtitles = {
+            'deputy_mining_manager_placement': (
+                'Расстановка сотрудников по технике на две смены.'
+            ),
+            'deputy_mining_manager_reports': (
+                'История опубликованных расстановок по технике.'
+            ),
+        }
+
+        for view_name, subtitle in expected_subtitles.items():
+            with self.subTest(view_name=view_name):
+                response = self.client.get(reverse(view_name), HTTP_HOST='localhost')
+
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, f'<p>{subtitle}</p>', html=True)
+
     def test_deputy_can_submit_bounded_transfer_request_for_oup_review(self):
         haul_specialization = ProductionSpecialization.objects.get(code='haul_truck_driver')
         haul_specialization.access_role = self.driver_role
@@ -439,6 +456,7 @@ class DeputyPlanningViewTests(TestCase):
             / 'deputy_mining_manager_header.html'
         ).read_text(encoding='utf-8')
         self.assertIn('data-theme-icon="sun"', header_template)
+        self.assertIn('<p>{{ screen_subtitle|default:', header_template)
         self.assertNotRegex(
             header_template,
             r'<button\b[^>]*data-admin-theme-toggle[^>]*>\s*\S+.*?</button>',
