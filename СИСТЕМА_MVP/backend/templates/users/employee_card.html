@@ -6,8 +6,8 @@
 {% block extra_head %}
 <link rel="stylesheet" href="{% static 'css/admin-employee-detail.css' %}?v=20260717-1">
 {% if employee_card_context == "oup" %}
-<link rel="stylesheet" href="{% static 'css/oup-workplace-v1.css' %}?v=20260718-3">
-<link rel="stylesheet" href="{% static 'css/oup-work-period-v1.css' %}?v=20260718-2">
+<link rel="stylesheet" href="{% static 'css/oup-workplace-v1.css' %}?v=20260718-4">
+<link rel="stylesheet" href="{% static 'css/oup-work-period-v1.css' %}?v=20260718-3">
 {% endif %}
 <link rel="stylesheet" href="{% static 'css/employee-card-unified.css' %}?v=20260717-8">
 {% endblock %}
@@ -60,6 +60,10 @@
             {% endfor %}
         </div>
 
+        {% if employee_card_context == "oup" and not is_dismissed %}
+            {% include "includes/oup_editing_access.html" %}
+        {% endif %}
+
         {% if form.errors %}
             <section class="employee-card-error-summary" role="alert" aria-labelledby="employee-card-error-title">
                 <strong id="employee-card-error-title">Проверьте заполнение карточки</strong>
@@ -72,13 +76,6 @@
                     {% for error in form.non_field_errors %}<li>{{ error }}</li>{% endfor %}
                     {% for error in form.personnel_number.errors %}<li>{{ error }}</li>{% endfor %}
                 </ul>
-            </section>
-        {% endif %}
-
-        {% if employee_card_context == "oup" and not can_submit_employee_card and not is_dismissed %}
-            <section class="employee-card-readonly-note">
-                <strong>Режим просмотра</strong>
-                <span>{% if oup_period_is_occupied %}Рабочий период занят сотрудником {{ active_oup_period.employee.full_name }}.{% else %}Начните рабочий период, чтобы редактировать карточку.{% endif %}</span>
             </section>
         {% endif %}
 

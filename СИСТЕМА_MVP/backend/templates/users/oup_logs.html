@@ -4,8 +4,8 @@
 {% block title %}Журнал действий ОУП{% endblock %}
 {% block body_class %}oup-workplace-screen oup-logs-screen{% endblock %}
 {% block extra_head %}
-<link rel="stylesheet" href="{% static 'css/oup-workplace-v1.css' %}?v=20260718-3">
-<link rel="stylesheet" href="{% static 'css/oup-work-period-v1.css' %}?v=20260718-2">
+<link rel="stylesheet" href="{% static 'css/oup-workplace-v1.css' %}?v=20260718-4">
+<link rel="stylesheet" href="{% static 'css/oup-work-period-v1.css' %}?v=20260718-3">
     <link rel="stylesheet" href="{% static 'css/oup-responsive-layout-v2.css' %}?v=20260718-2">
 {% endblock %}
 
@@ -53,7 +53,7 @@
                             <span>{{ log.created_at|date:"d.m.Y" }}</span>
                         </time>
                         <div class="oup-log-main">
-                            <div><span class="oup-log-type">{{ log.display_action }}</span><strong>{{ log.display_object_repr|default:"Рабочий период" }}</strong></div>
+                            <div><span class="oup-log-type">{{ log.display_action }}</span><strong>{{ log.display_object_repr|default:"Кадровые данные" }}</strong></div>
                             {% if log.old_value and log.old_value != 'Данные без изменений' %}<p><b>Было / изменение:</b> {{ log.old_value }}</p>{% endif %}
                             {% if log.new_value %}<p><b>Результат:</b> {{ log.new_value }}</p>{% endif %}
                             {% if log.comment %}<p><b>Комментарий:</b> {{ log.comment }}</p>{% endif %}

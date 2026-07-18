@@ -59,10 +59,10 @@ from .work_profiles import (
 
 
 OUP_PERIOD_ACTIONS = {
-    'ОУП: начата дневная смена': ('period_started', 'начат рабочий период'),
-    'ОУП: начат рабочий период': ('period_started', 'начат рабочий период'),
-    'ОУП: завершена дневная смена': ('period_finished', 'завершён рабочий период'),
-    'ОУП: завершён рабочий период': ('period_finished', 'завершён рабочий период'),
+    'ОУП: начата дневная смена': ('period_started', 'включено редактирование'),
+    'ОУП: начат рабочий период': ('period_started', 'включено редактирование'),
+    'ОУП: завершена дневная смена': ('period_finished', 'завершено редактирование'),
+    'ОУП: завершён рабочий период': ('period_finished', 'завершено редактирование'),
 }
 
 
@@ -104,7 +104,7 @@ def _oup_base_context(access, *, active_nav):
 def _require_open_shift(request, access):
     if get_open_oup_shift(access.employee):
         return True
-    messages.error(request, 'Сначала начните рабочий период ОУП.')
+    messages.error(request, 'Сначала включите редактирование кадровых данных.')
     return False
 
 
@@ -689,7 +689,7 @@ def oup_logs_view(request):
         action_value, action_label = _oup_action_meta(log.action)
         log.display_action = action_label
         log.display_object_repr = (
-            'Рабочий период ОУП'
+            'Доступ к кадровым изменениям'
             if action_value in {'period_started', 'period_finished'}
             else log.object_repr
         )
@@ -716,7 +716,7 @@ def oup_shift_start_view(request):
     else:
         messages.success(
             request,
-            'Рабочий период ОУП начат.' if created else 'Рабочий период уже открыт вами.',
+            'Редактирование кадровых данных включено.' if created else 'Редактирование уже доступно вам.',
         )
     return redirect(_safe_return_target(request))
 
@@ -731,5 +731,5 @@ def oup_shift_close_view(request):
     except ValidationError as error:
         messages.error(request, '; '.join(error.messages))
     else:
-        messages.success(request, 'Рабочий период ОУП завершён.')
+        messages.success(request, 'Редактирование кадровых данных завершено.')
     return redirect(_safe_return_target(request))

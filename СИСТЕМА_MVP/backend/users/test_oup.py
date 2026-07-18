@@ -216,25 +216,30 @@ class OupWorkplaceTests(TestCase):
         response = self.client.get(reverse('oup_employees'))
         self.assertRedirects(response, reverse('role_home'), fetch_redirect_response=False)
 
-    def test_free_oup_period_has_one_start_action_without_day_or_night_wording(self):
+    def test_free_oup_period_is_presented_as_editing_access_outside_header(self):
         response = self.client.get(reverse('oup_employees'))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'Рабочий период')
-        self.assertContains(response, 'Начать работу', count=1)
+        self.assertContains(response, 'Кадровые изменения')
+        self.assertContains(response, 'Сейчас доступен только просмотр')
+        self.assertContains(response, 'Включить редактирование', count=1)
+        self.assertNotContains(response, 'Рабочий период')
+        self.assertNotContains(response, 'Начать работу')
         self.assertNotContains(response, 'Дневная смена')
         self.assertNotContains(response, 'Начать дневную смену')
 
-    def test_owned_oup_period_has_one_finish_action(self):
+    def test_owned_oup_period_has_one_finish_editing_action(self):
         self.start_shift()
 
         response = self.client.get(reverse('oup_employees'))
 
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.context['owns_oup_period'])
-        self.assertContains(response, 'Вы · с')
-        self.assertContains(response, 'Завершить работу', count=1)
-        self.assertNotContains(response, 'Начать работу')
+        self.assertContains(response, 'Редактирование доступно вам')
+        self.assertContains(response, 'Завершить редактирование')
+        self.assertContains(response, f'action="{reverse("oup_shift_close")}"', count=1, html=False)
+        self.assertNotContains(response, 'Включить редактирование')
+        self.assertNotContains(response, 'Завершить работу')
 
     def test_oup_period_uses_internal_day_value_and_only_one_specialist_can_open_it(self):
         shift = self.start_shift()
@@ -261,10 +266,10 @@ class OupWorkplaceTests(TestCase):
         self.assertEqual(occupied_response.status_code, 200)
         self.assertFalse(occupied_response.context['can_change_employees'])
         self.assertTrue(occupied_response.context['oup_period_is_occupied'])
-        self.assertContains(occupied_response, 'Рабочий период занят')
+        self.assertContains(occupied_response, 'Только просмотр')
         self.assertContains(occupied_response, self.oup_employee.full_name)
-        self.assertContains(occupied_response, 'Начать работу', count=1)
-        self.assertContains(occupied_response, 'disabled')
+        self.assertContains(occupied_response, 'Редактирование занято')
+        self.assertNotContains(occupied_response, 'Включить редактирование')
         self.assertNotContains(
             occupied_response,
             f'action="{reverse("oup_shift_start")}"',
@@ -272,7 +277,7 @@ class OupWorkplaceTests(TestCase):
         )
 
         response = self.client.post(reverse('oup_shift_start'), follow=True)
-        self.assertContains(response, 'Рабочий период ОУП уже занят')
+        self.assertContains(response, 'Редактирование кадровых данных уже выполняет')
         self.assertContains(response, self.oup_employee.full_name)
         self.assertFalse(EmployeeShift.objects.filter(employee=second_employee, closed_at__isnull=True).exists())
 
@@ -440,7 +445,7 @@ class OupWorkplaceTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertFalse(Employee.objects.filter(personnel_number='CR-1001').exists())
-        self.assertContains(response, 'Сначала начните рабочий период ОУП.')
+        self.assertContains(response, 'Сначала включите редактирование кадровых данных.')
 
     def test_employee_card_fields_are_disabled_without_oup_shift(self):
         employee = Employee.objects.create(
@@ -451,7 +456,7 @@ class OupWorkplaceTests(TestCase):
         response = self.client.get(reverse('oup_employee_detail', args=[employee.id]))
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.context['form'].fields['full_name'].disabled)
-        self.assertContains(response, 'Режим просмотра')
+        self.assertContains(response, 'Сейчас доступен только просмотр')
 
     def test_employee_dates_render_in_html_date_format(self):
         employee = Employee.objects.create(
@@ -547,7 +552,7 @@ class OupWorkplaceTests(TestCase):
         self.assertEqual(response.status_code, 200)
         employee.refresh_from_db()
         self.assertEqual(employee.full_name, 'Исходное Имя Сотрудника')
-        self.assertContains(response, 'Сначала начните рабочий период ОУП.')
+        self.assertContains(response, 'Сначала включите редактирование кадровых данных.')
 
     def test_photo_remove_rechecks_shift_inside_write_transaction(self):
         self.start_shift()
@@ -720,7 +725,7 @@ class OupWorkplaceTests(TestCase):
         employee.refresh_from_db()
         self.assertEqual(employee.status, Employee.Status.ACTIVE)
         self.assertTrue(employee.is_active)
-        self.assertContains(response, 'Сначала начните рабочий период ОУП.')
+        self.assertContains(response, 'Сначала включите редактирование кадровых данных.')
 
     def test_successful_dismissal_deactivates_access_and_closes_assignment(self):
         self.start_shift()
@@ -884,8 +889,8 @@ class OupWorkplaceTests(TestCase):
         )
         AdminActionLog.objects.create(actor=None, action='ОУП: чужое действие', object_repr='Другой сотрудник')
         response = self.client.get(reverse('oup_logs'))
-        self.assertContains(response, 'начат рабочий период')
-        self.assertContains(response, 'начат рабочий период · 2')
+        self.assertContains(response, 'включено редактирование')
+        self.assertContains(response, 'включено редактирование · 2')
         self.assertNotContains(response, 'начата дневная смена')
         self.assertNotContains(response, 'Иванова Анна Сергеевна / Дневная')
         self.assertNotContains(response, 'чужое действие')

@@ -2,97 +2,157 @@
     overflow-y: visible;
 }
 
-.oup-shift-state {
+.oup-editing-access {
+    display: grid;
+    grid-template-columns: 12px minmax(0, 1fr) auto;
+    gap: 12px;
+    align-items: center;
     min-width: 0;
-    min-height: var(--oup-header-control-height);
+    min-height: 58px;
+    padding: 10px 12px;
+    border: 1px solid var(--admin-line);
+    border-left: 5px solid var(--admin-gray);
+    border-radius: 7px;
+    background: var(--admin-panel);
+    box-shadow: 0 8px 20px rgba(53, 70, 78, .08);
 }
 
-.oup-shift-state.is-occupied {
+.oup-editing-access.is-enabled {
+    border-left-color: var(--admin-green);
+    background: color-mix(in srgb, var(--admin-green-soft) 46%, var(--admin-panel));
+}
+
+.oup-editing-access.is-occupied {
     border-left-color: var(--admin-red);
-    background: var(--admin-red-soft);
+    background: color-mix(in srgb, var(--admin-red-soft) 58%, var(--admin-panel));
 }
 
-.oup-shift-state strong,
-.oup-shift-state small {
+.oup-editing-access-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--admin-gray);
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--admin-gray) 18%, transparent);
+}
+
+.oup-editing-access.is-enabled .oup-editing-access-dot {
+    background: var(--admin-green);
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--admin-green) 18%, transparent);
+}
+
+.oup-editing-access.is-occupied .oup-editing-access-dot {
+    background: var(--admin-red);
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--admin-red) 18%, transparent);
+}
+
+.oup-editing-access-copy {
+    display: grid;
+    gap: 1px;
     min-width: 0;
+}
+
+.oup-editing-access-copy > span {
+    color: var(--admin-muted);
+    font-size: 9px;
+    font-weight: 900;
+    letter-spacing: .08em;
+    line-height: 1;
+    text-transform: uppercase;
+}
+
+.oup-editing-access-copy strong {
     overflow: hidden;
+    color: var(--admin-ink);
+    font-size: 14px;
+    line-height: 1.15;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
-.oup-shift-state small {
+.oup-editing-access-copy small {
+    overflow: hidden;
     color: var(--admin-muted);
-    font-size: 9px;
-    font-weight: 800;
-    line-height: 1;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1.2;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
-.oup-shift-button.is-occupied,
-.oup-shift-button:disabled {
-    border-color: var(--admin-red);
+.oup-editing-access-action,
+.oup-editing-access-action form {
+    min-width: 0;
+    margin: 0;
+}
+
+.oup-editing-button {
+    min-width: 190px;
+    min-height: var(--oup-header-control-height);
+    padding: 0 16px;
+    white-space: nowrap;
+}
+
+.oup-editing-button.is-finish {
+    border-color: var(--admin-yellow);
+    background: var(--admin-yellow-soft);
+    color: var(--admin-yellow);
+}
+
+.oup-editing-owner {
+    display: grid;
+    min-width: 190px;
+    min-height: var(--oup-header-control-height);
+    place-items: center;
+    padding: 0 14px;
+    border: 1px solid var(--admin-red);
+    border-radius: 6px;
     background: var(--admin-red-soft);
     color: var(--admin-red);
-    cursor: not-allowed;
-    opacity: 1;
+    font-size: 11px;
+    font-weight: 900;
+    text-align: center;
+    text-transform: uppercase;
 }
 
-.oup-page {
-    grid-template-rows: none;
-    grid-auto-rows: auto;
-    height: auto;
-    min-height: 0;
-    overflow: visible;
-}
-
-.oup-period-occupied {
-    display: flex;
-    align-items: center;
-    justify-content: flex-start;
-    gap: 12px;
-    padding: 14px 16px;
-    border: 1px solid var(--admin-red);
-    border-left-width: 5px;
-    border-radius: 7px;
-    background: var(--admin-red-soft);
-    box-shadow: var(--admin-shadow);
-}
-
-.oup-period-occupied > div {
-    min-width: 0;
-}
-
-.oup-period-occupied strong {
-    color: var(--admin-ink);
-    font-size: 16px;
-}
-
-.oup-period-occupied p {
-    margin: 3px 0 0;
-    color: var(--admin-muted);
-    font-size: 13px;
-}
-
-.oup-period-occupied .oup-status-dot {
-    width: 12px;
-    height: 12px;
+.employee-card-page > .oup-editing-access {
     flex: 0 0 auto;
-    border-radius: 50%;
-    background: var(--admin-red);
-    box-shadow: 0 0 0 5px color-mix(in srgb, var(--admin-red) 18%, transparent);
+    margin-bottom: 10px;
+}
+
+@media (max-width: 720px) {
+    .oup-editing-button,
+    .oup-editing-owner {
+        min-height: 44px;
+    }
 }
 
 @media (max-width: 640px) {
-    .oup-console-actions > .oup-shift-button {
-        grid-column: 1 / -1;
-        width: 100%;
+    .oup-editing-access {
+        grid-template-columns: 10px minmax(0, 1fr);
+        gap: 8px 10px;
+        align-items: start;
+        padding: 12px;
     }
 
-    .oup-shift-state strong,
-    .oup-shift-state small {
+    .oup-editing-access-dot {
+        margin-top: 5px;
+    }
+
+    .oup-editing-access-copy strong,
+    .oup-editing-access-copy small {
+        overflow: visible;
+        text-overflow: clip;
         white-space: normal;
     }
 
-    .oup-period-occupied {
-        align-items: flex-start;
+    .oup-editing-access-action {
+        grid-column: 1 / -1;
+    }
+
+    .oup-editing-access-action form,
+    .oup-editing-button,
+    .oup-editing-owner {
+        width: 100%;
+        min-width: 0;
     }
 }

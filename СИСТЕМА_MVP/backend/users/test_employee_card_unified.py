@@ -204,7 +204,7 @@ class UnifiedEmployeeCardTests(TestCase):
     def test_shared_employee_card_shells_use_new_cache_versions(self):
         expected_versions = {
             'system_admin_service_worker': 'system-admin-shell-v14',
-            'oup_service_worker': 'oup-shell-v15',
+            'oup_service_worker': 'oup-shell-v16',
         }
 
         for view_name, expected_version in expected_versions.items():
@@ -244,23 +244,37 @@ class UnifiedEmployeeCardTests(TestCase):
         self.assertNotIn('clamp(260px, 22vw, 460px)', oup_stylesheet)
         self.assertNotIn('clamp(260px, 22vw, 460px)', oup_responsive_stylesheet)
         self.assertIn(
-            'grid-template-columns: minmax(0, 1fr) var(--oup-header-theme-size) var(--admin-header-utility-width);',
+            'grid-template-columns: var(--oup-header-theme-size) var(--admin-header-utility-width);',
             oup_stylesheet,
         )
-        self.assertIn('height: var(--oup-header-control-height);', oup_stylesheet)
-        self.assertIn('padding: 0 14px;', oup_stylesheet)
-        self.assertIn('min-height: var(--oup-header-control-height);', oup_period_stylesheet)
+        self.assertNotIn('.oup-shift-state', oup_stylesheet)
+        self.assertNotIn('.oup-shift-button', oup_stylesheet)
+        self.assertIn('grid-template-columns: 12px minmax(0, 1fr) auto;', oup_period_stylesheet)
+        self.assertIn('min-height: 58px;', oup_period_stylesheet)
         self.assertNotIn('min-height: 46px;', oup_period_stylesheet)
         self.assertIn(
-            'grid-template-columns: minmax(180px, 300px) 44px var(--admin-header-utility-width);',
+            'grid-template-columns: 44px var(--admin-header-utility-width);',
             oup_stylesheet,
         )
         self.assertIn('--oup-header-control-height: 44px;', oup_stylesheet)
 
+        include_root = Path(__file__).resolve().parents[1] / 'templates' / 'includes'
+        header_template = (include_root / 'oup_header.html').read_text(encoding='utf-8')
+        editing_template = (include_root / 'oup_editing_access.html').read_text(encoding='utf-8')
+        self.assertNotIn('Рабочий период', header_template)
+        self.assertNotIn("url 'oup_shift_start'", header_template)
+        self.assertNotIn("url 'oup_shift_close'", header_template)
+        self.assertIn('aria-label="Тема и выход"', header_template)
+        self.assertIn("url 'oup_shift_start'", editing_template)
+        self.assertIn("url 'oup_shift_close'", editing_template)
+        self.assertIn('Включить редактирование', editing_template)
+        self.assertIn('Завершить редактирование', editing_template)
+
         template_root = Path(__file__).resolve().parents[1] / 'templates' / 'users'
         for template_name in ('oup_employees.html', 'oup_employee_dismiss.html', 'oup_logs.html'):
             template = (template_root / template_name).read_text(encoding='utf-8')
-            self.assertIn('oup-work-period-v1.css\' %}?v=20260718-2', template)
+            self.assertIn('oup-workplace-v1.css\' %}?v=20260718-4', template)
+            self.assertIn('oup-work-period-v1.css\' %}?v=20260718-3', template)
             self.assertIn('oup-responsive-layout-v2.css\' %}?v=20260718-2', template)
 
     def test_standard_header_theme_buttons_are_icon_only(self):

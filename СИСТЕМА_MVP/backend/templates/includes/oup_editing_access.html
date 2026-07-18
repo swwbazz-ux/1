@@ -1,0 +1,37 @@
+<section class="oup-editing-access {% if owns_oup_period %}is-enabled{% elif oup_period_is_occupied %}is-occupied{% else %}is-disabled{% endif %}"
+         aria-label="Доступ к кадровым изменениям"
+         role="status">
+    <span class="oup-editing-access-dot" aria-hidden="true"></span>
+    <div class="oup-editing-access-copy">
+        <span>Кадровые изменения</span>
+        {% if owns_oup_period %}
+            <strong>Редактирование доступно вам</strong>
+            <small>Включено {{ open_oup_shift.opened_at|date:"d.m.Y H:i" }}. Остальным специалистам доступен только просмотр.</small>
+        {% elif oup_period_is_occupied %}
+            <strong>Только просмотр</strong>
+            <small>Редактирует {{ active_oup_period.employee.full_name }} с {{ active_oup_period.opened_at|date:"d.m.Y H:i" }}.</small>
+        {% else %}
+            <strong>Сейчас доступен только просмотр</strong>
+            <small>Включите редактирование, чтобы создавать и изменять карточки сотрудников.</small>
+        {% endif %}
+    </div>
+    <div class="oup-editing-access-action">
+        {% if owns_oup_period %}
+            <form method="post"
+                  action="{% url 'oup_shift_close' %}"
+                  data-confirm="Завершить редактирование кадровых данных? После этого изменение карточек будет недоступно.">
+                {% csrf_token %}
+                <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                <button class="admin-button oup-editing-button is-finish" type="submit">Завершить редактирование</button>
+            </form>
+        {% elif oup_period_is_occupied %}
+            <span class="oup-editing-owner">Редактирование занято</span>
+        {% else %}
+            <form method="post" action="{% url 'oup_shift_start' %}">
+                {% csrf_token %}
+                <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                <button class="admin-button admin-button-primary oup-editing-button" type="submit">Включить редактирование</button>
+            </form>
+        {% endif %}
+    </div>
+</section>
