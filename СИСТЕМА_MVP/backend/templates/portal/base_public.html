@@ -7,7 +7,7 @@
     <meta name="theme-color" content="#f3efe8">
     <meta name="description" content="{% block meta_description %}ООО «Коппер Рисорсез» — горнотранспортная компания.{% endblock %}">
     <title>{% block title %}ООО «Коппер Рисорсез»{% endblock %}</title>
-    <link rel="stylesheet" href="{% static 'portal/css/portal.css' %}?v=5">
+    <link rel="stylesheet" href="{% static 'portal/css/portal-shell-v5.css' %}">
     {% block extra_head %}{% endblock %}
 </head>
 <body class="public-shell {% block body_class %}{% endblock %}">
@@ -69,7 +69,7 @@
             <span>Официальный информационный портал</span>
         </div>
     </footer>
-    <script src="{% static 'portal/js/portal.js' %}?v=5" defer></script>
+    <script src="{% static 'portal/js/portal-shell-v5.js' %}" defer></script>
     {% block extra_js %}{% endblock %}
 </body>
 </html>
