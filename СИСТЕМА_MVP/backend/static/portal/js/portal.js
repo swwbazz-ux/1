@@ -3,11 +3,41 @@
 
     document.documentElement.classList.add("js");
 
-    const closeMenu = (button) => {
+    const publicHeader = document.querySelector("[data-public-header]");
+    if (publicHeader) {
+        const syncPublicHeader = () => {
+            publicHeader.classList.toggle("is-scrolled", window.scrollY > 18);
+        };
+        window.addEventListener("scroll", syncPublicHeader, { passive: true });
+        syncPublicHeader();
+    }
+
+    const routeScene = document.querySelector("[data-route-scene]");
+    if (routeScene) {
+        if ("IntersectionObserver" in window) {
+            const routeObserver = new IntersectionObserver((entries, observer) => {
+                if (!entries.some((entry) => entry.isIntersecting)) return;
+                routeScene.classList.add("is-visible");
+                observer.disconnect();
+            }, { threshold: 0.18 });
+            routeObserver.observe(routeScene);
+        } else {
+            routeScene.classList.add("is-visible");
+        }
+    }
+
+    const setMenuButtonText = (button, isOpen) => {
+        const label = button.querySelector(".sr-only");
+        if (label) label.textContent = isOpen ? "Закрыть меню" : "Открыть меню";
+    };
+
+    const closeMenu = (button, restoreFocus = false) => {
         const menuId = button.getAttribute("aria-controls");
         const menu = menuId ? document.getElementById(menuId) : null;
         button.setAttribute("aria-expanded", "false");
+        setMenuButtonText(button, false);
         menu?.classList.remove("is-open");
+        if (restoreFocus) button.focus();
     };
 
     document.querySelectorAll(".js-menu-toggle").forEach((button) => {
@@ -18,6 +48,7 @@
         button.addEventListener("click", () => {
             const willOpen = button.getAttribute("aria-expanded") !== "true";
             button.setAttribute("aria-expanded", String(willOpen));
+            setMenuButtonText(button, willOpen);
             menu.classList.toggle("is-open", willOpen);
         });
 
@@ -28,7 +59,7 @@
 
     document.addEventListener("keydown", (event) => {
         if (event.key !== "Escape") return;
-        document.querySelectorAll(".js-menu-toggle[aria-expanded='true']").forEach(closeMenu);
+        document.querySelectorAll(".js-menu-toggle[aria-expanded='true']").forEach((button) => closeMenu(button, true));
     });
 
     document.addEventListener("click", (event) => {

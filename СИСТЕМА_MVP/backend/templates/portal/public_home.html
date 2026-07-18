@@ -2,96 +2,289 @@
 {% load static %}
 
 {% block title %}ООО «Коппер Рисорсез» — горнотранспортная компания{% endblock %}
-{% block meta_description %}Горные работы, транспортировка горной массы, содержание технологических дорог и отвалообразование.{% endblock %}
+{% block meta_description %}Горные работы, транспортировка горной массы, содержание технологических дорог и отвалообразование. Производственный участок № 2, Малмыж, Хабаровский край.{% endblock %}
+{% block body_class %}public-home{% endblock %}
 
 {% block content %}
-<section class="public-hero">
-    <div class="page-container public-hero__grid">
-        <div class="public-hero__copy">
-            <span class="eyebrow">Горнотранспортная компания</span>
-            <h1>Работаем там, где важны люди, техника и общий результат</h1>
-            <p>Выполняем горно-капитальные, горно-подготовительные и добычные работы. Производственный участок № 2 работает в Малмыже, Хабаровский край.</p>
-            <div class="button-row">
-                <a class="button button--primary" href="#about">Узнать о компании</a>
-                <a class="button button--ghost" href="{% url 'portal:public_vacancies' %}">Вакансии</a>
-            </div>
+<section class="trajectory-hero" aria-labelledby="trajectory-hero-title">
+    <div class="trajectory-hero__map" aria-hidden="true">
+        <svg viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid slice">
+            <defs>
+                <linearGradient id="hero-copper" x1="0" y1="1" x2="1" y2="0">
+                    <stop offset="0" stop-color="#8f4b25" />
+                    <stop offset=".55" stop-color="#c7743a" />
+                    <stop offset="1" stop-color="#e1a16f" />
+                </linearGradient>
+                <linearGradient id="hero-ridge" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0" stop-color="#ded7cc" stop-opacity=".16" />
+                    <stop offset="1" stop-color="#82766a" stop-opacity=".18" />
+                </linearGradient>
+                <pattern id="hero-grid" width="80" height="80" patternUnits="userSpaceOnUse">
+                    <path d="M80 0H0V80" fill="none" stroke="#202727" stroke-opacity=".055" stroke-width="1" />
+                </pattern>
+            </defs>
+
+            <rect width="1600" height="900" fill="url(#hero-grid)" />
+
+            <g class="trajectory-map__contours">
+                <path d="M876 18c108 31 167 96 177 183 9 81 45 127 126 150 111 32 177 99 188 201 9 85 65 146 167 183" />
+                <path d="M930-18c112 42 171 112 177 210 4 70 37 108 108 130 132 39 205 116 213 230 6 78 57 133 151 169" />
+                <path d="M1000-42c111 48 167 119 168 216 1 68 30 104 92 129 139 55 212 138 216 249 3 78 43 126 124 161" />
+                <path d="M812 105c-1 91 42 150 130 178 113 36 167 103 163 200-4 82 35 135 117 159 106 31 165 96 177 193" />
+                <path d="M735 180c-9 88 26 147 106 178 99 38 145 104 137 197-7 79 29 132 110 160 86 30 136 83 151 159" />
+                <path d="M1254 10c-31 61-26 112 16 154 51 50 57 110 18 180-33 60-24 111 28 155 64 55 79 122 44 201" />
+                <path d="M1348-18c-28 68-18 122 29 163 55 48 68 107 38 176-25 59-11 109 42 149 67 51 91 113 72 188" />
+            </g>
+
+            <path class="trajectory-map__ridge" d="M456 900 625 662 762 716 888 511 1016 585 1191 353 1328 474 1600 297v603Z" fill="url(#hero-ridge)" />
+            <path class="trajectory-map__ridge-line" d="m456 900 169-238 137 54 126-205 128 74 175-232 137 121 272-177" />
+            <path class="trajectory-map__ridge-line trajectory-map__ridge-line--soft" d="m600 900 92-130 121 31 134-164 119 53 168-207 122 95 244-151" />
+
+            <path class="trajectory-map__route-shadow" d="M-90 756C214 716 342 787 532 716c207-77 220-263 438-280 205-16 280 105 439 19 90-48 137-126 260-141" />
+            <path class="trajectory-map__route" d="M-90 756C214 716 342 787 532 716c207-77 220-263 438-280 205-16 280 105 439 19 90-48 137-126 260-141" />
+
+            <g class="trajectory-map__node trajectory-map__node--one" transform="translate(532 716)">
+                <circle r="17" />
+                <circle r="4" />
+            </g>
+            <g class="trajectory-map__node trajectory-map__node--two" transform="translate(970 436)">
+                <circle r="22" />
+                <circle r="5" />
+            </g>
+            <g class="trajectory-map__node trajectory-map__node--three" transform="translate(1409 455)">
+                <circle r="17" />
+                <circle r="4" />
+            </g>
+
+            <g class="trajectory-map__truck" transform="translate(1062 342) scale(.82)">
+                <path d="M2 10h108l33 58H34z" />
+                <path d="M27 68h107l13-34h38l21 34h24v29H18z" />
+                <path d="M147 34v34h59M155 43h24l14 18M18 97h212" />
+                <circle cx="61" cy="98" r="26" />
+                <circle cx="184" cy="98" r="26" />
+                <circle cx="61" cy="98" r="8" />
+                <circle cx="184" cy="98" r="8" />
+            </g>
+
+            <g class="trajectory-map__coordinates">
+                <path d="M1130 146h176M1218 58v176" />
+                <circle cx="1218" cy="146" r="54" />
+                <circle cx="1218" cy="146" r="8" />
+            </g>
+        </svg>
+    </div>
+
+    <div class="page-container trajectory-hero__content">
+        <div class="trajectory-hero__copy">
+            <span class="eyebrow">ООО «Коппер Рисорсез»</span>
+            <h1 id="trajectory-hero-title">
+                <span>Движение,</span>
+                <span>которое держит</span>
+                <span>производство</span>
+            </h1>
+            <p>Горные работы и транспортировка горной массы. Производственный участок № 2 — Малмыж, Хабаровский край.</p>
+            <a class="route-link" href="#production">
+                <span>Как устроена работа</span>
+                <svg viewBox="0 0 40 16" aria-hidden="true"><path d="M0 8h36M29 1l7 7-7 7" /></svg>
+            </a>
         </div>
-        <div class="public-hero__visual" aria-label="Фирменный знак Коппер Рисорсез">
-            <div class="copper-frame">
-                <picture>
-                    <source srcset="{% static 'portal/img/kopper_logo.webp' %}" type="image/webp">
-                    <img src="{% static 'portal/img/kopper_logo.png' %}" alt="Коппер Рисорсез. Горнотранспортная компания">
-                </picture>
-            </div>
+
+        <div class="trajectory-hero__site" aria-label="Производственный участок номер 2">
+            <span class="trajectory-hero__site-label">Производственный<br>участок</span>
+            <strong>02</strong>
+            <span class="trajectory-hero__site-place">Малмыж<br>Хабаровский край</span>
+        </div>
+    </div>
+
+    <div class="trajectory-hero__footer" aria-label="Основные принципы работы">
+        <div class="page-container">
+            <span><b>01</b> Горные работы</span>
+            <span><b>02</b> Карьерный транспорт</span>
+            <span><b>03</b> Общий результат</span>
         </div>
     </div>
 </section>
 
-<section class="public-section public-section--about" id="about">
-    <div class="page-container split-section">
-        <div>
-            <span class="eyebrow">О компании</span>
-            <h2>Производство, за которым стоит команда</h2>
-        </div>
-        <div class="prose prose--lead">
-            <p>ООО «Коппер Рисорсез» основано в 2023 году. Компания оказывает услуги при выполнении горных работ.</p>
-            <p>Наш подход — понятная организация процессов, ответственное отношение к безопасности и уважение к людям, которые делают общее дело.</p>
+<section class="editorial-intro" id="about">
+    <div class="page-container editorial-intro__grid">
+        <span class="eyebrow">О компании</span>
+        <h2>Техника задаёт масштаб.<br><em>Люди — результат.</em></h2>
+        <div class="editorial-intro__prose">
+            <p>ООО «Коппер Рисорсез» выполняет комплекс горных работ: от разработки и погрузки горной массы до её транспортировки и формирования отвалов.</p>
+            <p>Экскавация, карьерный транспорт, технологические дороги и отвалообразование работают на одну производственную задачу и общий результат.</p>
         </div>
     </div>
+
+    <dl class="page-container company-coordinates">
+        <div data-verified-company-fact>
+            <dt>2023</dt>
+            <dd>Год регистрации</dd>
+        </div>
+        <div data-verified-company-fact>
+            <dt>Малмыж</dt>
+            <dd>Хабаровский край</dd>
+        </div>
+        <div data-verified-company-fact>
+            <dt>№ 2</dt>
+            <dd>Производственный участок</dd>
+        </div>
+    </dl>
 </section>
 
-<section class="public-section public-section--dark">
+<section class="production-story" id="production" data-route-scene>
     <div class="page-container">
-        <div class="section-heading section-heading--light">
-            <span class="eyebrow">Направления работы</span>
-            <h2>Что мы делаем</h2>
+        <header class="production-story__heading">
+            <div>
+                <span class="eyebrow">Производственный цикл</span>
+                <h2>Один маршрут.<br>Четыре направления.</h2>
+            </div>
+            <p>Направления объединены общей производственной задачей. Результат складывается из точной работы всей системы.</p>
+        </header>
+
+        <div class="production-route">
+            <svg class="production-route__path" viewBox="0 0 1200 260" preserveAspectRatio="none" aria-hidden="true">
+                <path class="production-route__base" d="M24 190C176 191 221 74 375 75c163 1 191 124 350 122 170-2 196-135 451-136" />
+                <path class="production-route__active" pathLength="1" d="M24 190C176 191 221 74 375 75c163 1 191 124 350 122 170-2 196-135 451-136" />
+                <path class="production-route__flow" d="M24 190C176 191 221 74 375 75c163 1 191 124 350 122 170-2 196-135 451-136" />
+            </svg>
+
+            <ol>
+                <li>
+                    <span class="production-route__number">01</span>
+                    <span class="production-route__point" aria-hidden="true"></span>
+                    <h3>Экскавация</h3>
+                    <p>Разработка и погрузка горной массы.</p>
+                </li>
+                <li>
+                    <span class="production-route__number">02</span>
+                    <span class="production-route__point" aria-hidden="true"></span>
+                    <h3>Транспортировка</h3>
+                    <p>Перемещение горной массы карьерным транспортом.</p>
+                </li>
+                <li>
+                    <span class="production-route__number">03</span>
+                    <span class="production-route__point" aria-hidden="true"></span>
+                    <h3>Технологические дороги</h3>
+                    <p>Содержание и пылеподавление дорог.</p>
+                </li>
+                <li>
+                    <span class="production-route__number">04</span>
+                    <span class="production-route__point" aria-hidden="true"></span>
+                    <h3>Отвалообразование</h3>
+                    <p>Формирование отвалов.</p>
+                </li>
+            </ol>
         </div>
-        <div class="service-grid">
-            <article><span>01</span><h3>Экскавация</h3><p>Разработка и погрузка горной массы.</p></article>
-            <article><span>02</span><h3>Транспортировка</h3><p>Перемещение горной массы карьерным транспортом.</p></article>
-            <article><span>03</span><h3>Технологические дороги</h3><p>Содержание и пылеподавление дорог.</p></article>
-            <article><span>04</span><h3>Отвалообразование</h3><p>Формирование и содержание отвалов в рамках производственного процесса.</p></article>
+
+        <p class="production-story__statement"><span>Четыре направления.</span> Один общий результат.</p>
+    </div>
+</section>
+
+<section class="employee-bridge" id="employee-portal">
+    <div class="employee-bridge__terrain" aria-hidden="true">
+        <svg viewBox="0 0 900 760">
+            <path d="M-30 144c166-62 301-55 405 20 87 63 184 67 292 13 107-53 200-47 278 19" />
+            <path d="M-44 214c169-58 305-47 408 32 81 62 173 66 276 12 115-60 215-53 302 21" />
+            <path d="M-55 289c165-51 298-35 400 48 73 60 159 63 257 10 124-67 235-58 330 35" />
+            <path d="M-62 372c158-44 286-24 382 60 67 58 146 59 238 8 132-73 251-61 353 46" />
+            <path d="M-70 463c151-37 272-13 364 71 60 55 133 55 218 6 139-80 266-64 375 59" />
+            <path d="M-75 563c142-31 256-3 342 80 53 51 120 50 199 4 143-84 278-64 391 72" />
+        </svg>
+    </div>
+
+    <div class="page-container employee-bridge__grid">
+        <div class="employee-bridge__copy">
+            <span class="eyebrow">Внутри компании</span>
+            <h2>Вся команда — в одном портале.</h2>
+            <p>Официальные новости, место в рейтинге, итоги смены, опросы и связь с руководством — без слухов, потерянных сообщений и лишних приложений.</p>
+            <a class="button button--light" href="{% url 'portal:login' %}">Войти в портал сотрудника</a>
+        </div>
+
+        <div class="employee-signal-board" aria-label="Возможности портала сотрудника">
+            <header>
+                <span class="employee-signal-board__mark" aria-hidden="true">КР</span>
+                <span><strong>Портал сотрудника</strong><small>Участок № 2</small></span>
+                <span class="employee-signal-board__scope">Закрытая часть</span>
+            </header>
+            <ol>
+                <li><span>01</span><strong>Официальные новости</strong><small>Важное — из первого источника</small></li>
+                <li><span>02</span><strong>Рейтинг водителей</strong><small>Личное место и премиальная пятёрка</small></li>
+                <li><span>03</span><strong>Итоги смены</strong><small>Дневная и ночная смены</small></li>
+                <li><span>04</span><strong>Обратная связь</strong><small>Опросы и обращения руководству</small></li>
+            </ol>
         </div>
     </div>
 </section>
 
-<section class="public-section">
+{% if publications %}
+<section class="editorial-news" id="stories" data-public-news-section>
     <div class="page-container">
-        <div class="section-heading section-heading--row">
-            <div><span class="eyebrow">Жизнь компании</span><h2>Новости и истории</h2></div>
-            <a class="text-link" href="{% url 'portal:public_news' %}">Все новости →</a>
-        </div>
-        {% if publications %}
-            <div class="publications-grid">
-                {% for publication in publications|slice:':3' %}
-                <article class="publication-card">
-                    <a class="publication-card__media" href="{% url 'portal:public_publication_detail' publication.pk %}" tabindex="-1" aria-hidden="true">
-                        {% if publication.cover_image %}<img src="{% url 'portal:publication_cover' publication.pk %}" alt="">{% else %}<span class="publication-placeholder"><span>КР</span></span>{% endif %}
-                    </a>
-                    <div class="publication-card__body">
-                        <div class="meta-row"><span>{{ publication.get_publication_type_display|default:'Новости' }}</span><time datetime="{{ publication.published_at|date:'c' }}">{{ publication.published_at|date:'d.m.Y' }}</time></div>
-                        <h3><a href="{% url 'portal:public_publication_detail' publication.pk %}">{{ publication.title }}</a></h3>
-                        <p>{{ publication.summary|default:publication.body|striptags|truncatewords:24 }}</p>
+        <header class="editorial-news__heading">
+            <div>
+                <span class="eyebrow">Жизнь компании</span>
+                <h2>Люди. События. Истории.</h2>
+            </div>
+            <a class="route-link route-link--compact" href="{% url 'portal:public_news' %}">
+                <span>Все публикации</span>
+                <svg viewBox="0 0 40 16" aria-hidden="true"><path d="M0 8h36M29 1l7 7-7 7" /></svg>
+            </a>
+        </header>
+
+        <div class="editorial-news__grid" data-public-news-grid>
+            {% for publication in publications|slice:':3' %}
+            <article class="editorial-story{% if forloop.first %} editorial-story--lead{% endif %}">
+                <a class="editorial-story__media" href="{% url 'portal:public_publication_detail' publication.pk %}" tabindex="-1" aria-hidden="true">
+                    {% if publication.cover_image %}
+                    <img src="{% url 'portal:publication_cover' publication.pk %}" alt="" width="1280" height="800" loading="lazy" decoding="async">
+                    {% else %}
+                    <span class="editorial-story__placeholder">
+                        <svg viewBox="0 0 640 420" aria-hidden="true">
+                            <path d="M-20 330C100 285 170 350 280 287s151-205 382-177" />
+                            <path d="M358-15c-45 75-38 138 20 189 51 45 62 97 34 157" />
+                            <path d="M432-20c-41 82-30 149 34 202 49 41 65 91 48 150" />
+                        </svg>
+                        <span>КР</span>
+                    </span>
+                    {% endif %}
+                </a>
+                <div class="editorial-story__body">
+                    <div class="meta-row">
+                        <span>{{ publication.get_publication_type_display|default:'Новость' }}</span>
+                        <time datetime="{{ publication.published_at|date:'c' }}">{{ publication.published_at|date:'d.m.Y' }}</time>
                     </div>
-                </article>
-                {% endfor %}
-            </div>
-        {% else %}
-            {% include 'portal/_empty_state.html' with empty_title='Новости готовятся к публикации' empty_text='Здесь появятся события компании и истории сотрудников.' %}
-        {% endif %}
+                    <h3><a href="{% url 'portal:public_publication_detail' publication.pk %}">{{ publication.title }}</a></h3>
+                    <p>{{ publication.summary|default:publication.body|striptags|truncatewords:24 }}</p>
+                </div>
+            </article>
+            {% endfor %}
+        </div>
     </div>
 </section>
+{% endif %}
 
 {% if public_top_five %}
-<section class="public-section public-section--warm">
-    <div class="page-container">
-        <div class="section-heading"><span class="eyebrow">Лучшие в своём деле</span><h2>Первая пятёрка водителей</h2><p>Опубликованный и проверенный результат завершённого конкурса.</p></div>
-        <ol class="public-top-five">
+<section class="leaders-section">
+    <div class="page-container leaders-section__grid">
+        <header>
+            <span class="eyebrow">Лучшие в своём деле</span>
+            <h2>Пять лидеров.<br>Пять премиальных мест.</h2>
+            <p>В карточке показываются место, сотрудник, фотография, техника и премиальный уровень. KPI в общем рейтинге не публикуются.</p>
+        </header>
+
+        <ol class="leaders-track">
             {% for item in public_top_five %}
-            <li class="rank-tier rank-tier--{{ item.tier_code|default:item.place }}">
-                <span class="public-top-five__place">{{ item.place }}</span>
-                {% if item.photo_url %}<img src="{{ item.photo_url }}" alt="">{% else %}<span class="avatar-fallback">{{ item.full_name|first }}</span>{% endif %}
-                <span><strong>{{ item.full_name }}</strong><small>{{ item.tier_name }}</small></span>
+            <li class="leaders-track__item leaders-track__item--{{ item.place }}">
+                <span class="leaders-track__place">{{ item.place }}</span>
+                {% if item.photo_url %}
+                <img src="{{ item.photo_url }}" alt="{{ item.full_name }}" width="124" height="124" loading="lazy" decoding="async">
+                {% else %}
+                <span class="avatar-fallback">{{ item.full_name|first }}</span>
+                {% endif %}
+                <span class="leaders-track__person">
+                    <strong>{{ item.full_name }}</strong>
+                    {% if item.equipment_name %}<small>{{ item.equipment_name }}</small>{% endif %}
+                </span>
+                {% if item.premium_level %}<span class="leaders-track__tier">{{ item.premium_level }}</span>{% endif %}
             </li>
             {% endfor %}
         </ol>
@@ -99,10 +292,16 @@
 </section>
 {% endif %}
 
-<section class="public-cta">
-    <div class="page-container public-cta__inner">
-        <div><span class="eyebrow">Команда Коппер Рисорсез</span><h2>Хотите работать с нами?</h2><p>Актуальные вакансии и условия публикуются на странице работодателя.</p></div>
-        <a class="button button--light" href="{% url 'portal:public_vacancies' %}">Посмотреть вакансии</a>
+<section class="career-rail">
+    <div class="page-container career-rail__inner">
+        <div>
+            <span class="eyebrow">Работа в команде</span>
+            <h2>Следующая вахта может начаться здесь.</h2>
+        </div>
+        <a class="route-link" href="{% url 'portal:public_vacancies' %}">
+            <span>Смотреть вакансии</span>
+            <svg viewBox="0 0 40 16" aria-hidden="true"><path d="M0 8h36M29 1l7 7-7 7" /></svg>
+        </a>
     </div>
 </section>
 {% endblock %}

@@ -29,6 +29,7 @@ from .models import (
 )
 from .services import (
     PersonalKpiSnapshot,
+    RankingEntry,
     RankingSnapshot,
     ShiftResultSnapshot,
     get_personal_kpi_snapshot,
@@ -48,6 +49,22 @@ class FailingProductionDataProvider:
 
     def personal_kpis(self, employee):
         raise RuntimeError('provider unavailable')
+
+
+class PublicRankingDataProvider:
+    def public_ranking(self):
+        return RankingSnapshot(
+            available=True,
+            top_five=(
+                RankingEntry(
+                    place=1,
+                    employee_id=1,
+                    full_name='Алексей Лидер',
+                    equipment_name='БелАЗ № 17',
+                    premium_level='Бриллиант',
+                ),
+            ),
+        )
 
 
 def failing_employee_scope_provider(*, queryset, site_code):
@@ -594,6 +611,56 @@ class PortalProductionBoundaryTests(PortalTestCase):
             self.portal_session()
             self.assertEqual(self.client.get(reverse('portal:dashboard')).status_code, 200)
             self.assertEqual(self.client.get(reverse('portal:rating')).status_code, 200)
+
+
+class PortalPublicHomeTests(PortalTestCase):
+    def test_home_hides_news_section_when_there_are_no_publications(self):
+        response = self.client.get(reverse('portal:public_home'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, 'data-public-news-section')
+        self.assertContains(response, 'Движение,')
+
+    def test_home_shows_news_section_when_publication_exists(self):
+        self.publication(
+            title='Открытая история участка',
+            visibility=Publication.Visibility.PUBLIC,
+            slug='public-home-story',
+        )
+
+        response = self.client.get(reverse('portal:public_home'))
+
+        self.assertContains(response, 'data-public-news-section')
+        self.assertContains(response, 'Открытая история участка')
+
+    def test_home_uses_real_navigation_and_only_verified_company_facts(self):
+        response = self.client.get(reverse('portal:public_home'))
+        content = response.content.decode('utf-8')
+
+        self.assertNotIn('href="#"', content)
+        self.assertContains(response, reverse('portal:public_news'))
+        self.assertContains(response, reverse('portal:public_people'))
+        self.assertContains(response, reverse('portal:public_vacancies'))
+        self.assertContains(response, reverse('portal:public_contacts'))
+        self.assertContains(response, reverse('portal:login'))
+        self.assertEqual(content.count('data-verified-company-fact'), 3)
+        self.assertContains(response, '2023')
+        self.assertContains(response, 'Год регистрации')
+        self.assertNotContains(response, 'Год основания')
+        self.assertContains(response, 'Малмыж')
+        self.assertContains(response, 'Производственный участок')
+        self.assertContains(response, 'Четыре направления')
+        self.assertNotContains(response, 'На связи')
+
+    @override_settings(PORTAL_PRODUCTION_DATA_PROVIDER='portal.tests.PublicRankingDataProvider')
+    def test_home_renders_public_ranking_from_server_contract_without_kpis(self):
+        response = self.client.get(reverse('portal:public_home'))
+
+        self.assertContains(response, 'Алексей Лидер')
+        self.assertContains(response, 'БелАЗ № 17')
+        self.assertContains(response, 'Бриллиант')
+        self.assertContains(response, 'KPI в общем рейтинге не публикуются')
+        self.assertEqual(response.content.decode('utf-8').count('KPI'), 1)
 
 
 class PortalPageRenderTests(PortalTestCase):
