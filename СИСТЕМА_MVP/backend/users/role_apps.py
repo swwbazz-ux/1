@@ -136,7 +136,7 @@ ROLE_APPS = (
         icon_slug='oup',
         manifest_url='/oup.webmanifest',
         service_worker_url='/oup-sw.js',
-        shell_version='oup-shell-v10',
+        shell_version='oup-shell-v11',
     ),
     RoleApp(
         role_code='timekeeper',
@@ -152,7 +152,7 @@ ROLE_APPS = (
         icon_slug='timekeeper',
         manifest_url='/timekeeper.webmanifest',
         service_worker_url='/timekeeper-sw.js',
-        shell_version='timekeeper-shell-v2',
+        shell_version='timekeeper-shell-v3',
     ),
     RoleApp(
         role_code='site_manager',
@@ -168,7 +168,7 @@ ROLE_APPS = (
         icon_slug='site-manager',
         manifest_url='/site-manager.webmanifest',
         service_worker_url='/site-manager-sw.js',
-        shell_version='site-manager-shell-v2',
+        shell_version='site-manager-shell-v3',
     ),
     RoleApp(
         role_code='mechanic',
@@ -216,7 +216,7 @@ ROLE_APPS = (
         icon_slug='admin',
         manifest_url='/system-admin.webmanifest',
         service_worker_url='/system-admin-sw.js',
-        shell_version='system-admin-shell-v10',
+        shell_version='system-admin-shell-v11',
     ),
 )
 
@@ -351,7 +351,9 @@ const MANIFEST_URL = {json.dumps(app.manifest_url)};
 const CORE_ASSETS = {json.dumps(assets)};
 
 self.addEventListener("install", event => {{
-  event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(CORE_ASSETS)));
+  event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(
+    CORE_ASSETS.map(url => new Request(url, {{ cache: "reload" }}))
+  )));
   self.skipWaiting();
 }});
 
