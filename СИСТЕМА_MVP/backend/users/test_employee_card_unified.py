@@ -78,6 +78,7 @@ class UnifiedEmployeeCardTests(TestCase):
         self.assertContains(create_response, 'name="personnel_department"', html=False)
         self.assertContains(create_response, 'name="work_schedule"', html=False)
         self.assertContains(create_response, 'name="brigade_number"', html=False)
+        self.assertContains(create_response, 'data-brigade-count="0"', html=False)
         self.assertContains(create_response, 'value="Активен"', html=False)
         self.assertNotContains(create_response, 'id="id_status"', html=False)
         self.assertNotContains(create_response, 'employee-card-submit-row')
@@ -297,6 +298,48 @@ class UnifiedEmployeeCardTests(TestCase):
         self.assertEqual(
             form.errors['brigade_number'],
             [f'Для графика «{two_brigade_schedule}» доступны бригады с 1 по 2.'],
+        )
+
+    def test_schedule_without_brigades_is_valid(self):
+        schedule = WorkSchedule.objects.get(code='individual_permanent_site')
+        common = {
+            'full_name': 'Смирнов Семен',
+            'phone': '+79005554433',
+            'status': Employee.Status.ACTIVE,
+            'personnel_position': self.truck_position.id,
+            'base_specialization': self.truck_specialization.id,
+            'personnel_department': self.department.id,
+            'work_schedule': schedule.id,
+            'brigade_number': '',
+        }
+        admin_form = AdminEmployeeForm(data={**common, 'role': self.driver_role.id})
+        oup_form = OupEmployeeForm(data=common)
+
+        self.assertTrue(admin_form.is_valid(), admin_form.errors)
+        self.assertTrue(oup_form.is_valid(), oup_form.errors)
+        employee = admin_form.save()
+        self.assertEqual(employee.work_schedule, schedule)
+        self.assertIsNone(employee.brigade_number)
+        self.assertEqual(employee.rotation, schedule.name)
+
+    def test_schedule_without_brigades_rejects_brigade(self):
+        schedule = WorkSchedule.objects.get(code='individual_permanent_site')
+        form = AdminEmployeeForm(data={
+            'full_name': 'Смирнов Семен',
+            'phone': '+79005554433',
+            'status': Employee.Status.ACTIVE,
+            'personnel_position': self.truck_position.id,
+            'base_specialization': self.truck_specialization.id,
+            'personnel_department': self.department.id,
+            'work_schedule': schedule.id,
+            'brigade_number': 1,
+            'role': self.driver_role.id,
+        })
+
+        self.assertFalse(form.is_valid())
+        self.assertEqual(
+            form.errors['brigade_number'],
+            ['Для выбранного графика бригада не назначается.'],
         )
 
     def test_oup_registry_filters_by_department_and_schedule_references(self):
