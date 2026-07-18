@@ -340,7 +340,7 @@ class DeputyPlanningViewTests(TestCase):
         self.assertEqual(response['Service-Worker-Allowed'], '/deputy-mining-manager/')
         self.assertEqual(response['X-Content-Type-Options'], 'nosniff')
         self.assertIn('deputy-mining-manager-desktop-shell-', script)
-        self.assertIn('`${CACHE_PREFIX}v7`', script)
+        self.assertIn('`${CACHE_PREFIX}v8`', script)
         self.assertIn('key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME', script)
         self.assertIn('removeCachedPlanningDocuments()', script)
         self.assertIn('LEGACY_ROOT_FALLBACK_URL', script)
@@ -399,7 +399,7 @@ class DeputyPlanningViewTests(TestCase):
         self.assertNotIn('controllerchange', registration_script)
         self.assertNotIn('location.reload', registration_script)
 
-    def test_deputy_layout_uses_full_scaled_viewport_and_balanced_columns(self):
+    def test_deputy_layout_uses_standard_header_full_scaled_viewport_and_balanced_columns(self):
         stylesheet = (
             Path(__file__).resolve().parents[1]
             / 'static'
@@ -407,7 +407,15 @@ class DeputyPlanningViewTests(TestCase):
             / 'deputy-mining-manager-v3.css'
         ).read_text(encoding='utf-8')
 
-        self.assertIn('--admin-console-header-height: 76px;', stylesheet)
+        self.assertIn('--admin-console-header-height: 112px;', stylesheet)
+        self.assertIn('--admin-console-header-height: 108px;', stylesheet)
+        self.assertIn('grid-template-columns: 40px minmax(112px, 1fr);', stylesheet)
+        self.assertIn('font-size: 32px;', stylesheet)
+        self.assertIn('min-height: 44px;', stylesheet)
+        self.assertIn(
+            'top: calc(var(--admin-console-header-height) + 16px);',
+            stylesheet,
+        )
         self.assertIn(
             'height: calc((100dvh / var(--admin-interface-scale)) - var(--admin-console-header-height));',
             stylesheet,

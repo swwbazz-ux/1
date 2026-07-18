@@ -104,7 +104,7 @@ ROLE_APPS = (
         icon_slug='deputy-mining-manager',
         manifest_url='/deputy-mining-manager.webmanifest',
         service_worker_url='/deputy-mining-manager-sw.js',
-        shell_version='deputy-mining-manager-desktop-shell-v6',
+        shell_version='deputy-mining-manager-desktop-shell-v7',
     ),
     RoleApp(
         role_code='dispatcher',
@@ -136,7 +136,7 @@ ROLE_APPS = (
         icon_slug='oup',
         manifest_url='/oup.webmanifest',
         service_worker_url='/oup-sw.js',
-        shell_version='oup-shell-v9',
+        shell_version='oup-shell-v10',
     ),
     RoleApp(
         role_code='timekeeper',
@@ -152,7 +152,7 @@ ROLE_APPS = (
         icon_slug='timekeeper',
         manifest_url='/timekeeper.webmanifest',
         service_worker_url='/timekeeper-sw.js',
-        shell_version='timekeeper-shell-v1',
+        shell_version='timekeeper-shell-v2',
     ),
     RoleApp(
         role_code='site_manager',
@@ -168,7 +168,7 @@ ROLE_APPS = (
         icon_slug='site-manager',
         manifest_url='/site-manager.webmanifest',
         service_worker_url='/site-manager-sw.js',
-        shell_version='site-manager-shell-v1',
+        shell_version='site-manager-shell-v2',
     ),
     RoleApp(
         role_code='mechanic',
@@ -216,7 +216,7 @@ ROLE_APPS = (
         icon_slug='admin',
         manifest_url='/system-admin.webmanifest',
         service_worker_url='/system-admin-sw.js',
-        shell_version='system-admin-shell-v9',
+        shell_version='system-admin-shell-v10',
     ),
 )
 

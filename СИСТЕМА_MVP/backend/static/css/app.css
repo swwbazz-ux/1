@@ -12434,6 +12434,9 @@ body.employees-admin-screen {
 
 .admin-exports-shell {
     --admin-interface-scale: .90;
+    --admin-console-header-height: 112px;
+    --admin-header-control-height: 40px;
+    --admin-header-icon-size: 40px;
     --admin-bg: #dce4e7;
     --admin-top: #eef3f4;
     --admin-panel: #f7faf9;
@@ -12505,8 +12508,8 @@ body.employees-admin-screen {
 
 .admin-console-header {
     display: grid;
-    grid-template-columns: minmax(230px, 300px) minmax(0, 1fr) minmax(260px, 330px);
-    min-height: 108px;
+    grid-template-columns: minmax(210px, 260px) minmax(0, 1fr) minmax(230px, 300px);
+    min-height: var(--admin-console-header-height);
     border-bottom: 1px solid var(--admin-line);
     background: var(--admin-top);
 }
@@ -12515,12 +12518,12 @@ body.employees-admin-screen {
 .admin-console-main,
 .admin-console-actions {
     min-width: 0;
-    padding: 16px 20px;
+    padding: 10px 16px;
 }
 
 .admin-console-identity {
     display: grid;
-    grid-template-columns: 56px minmax(0, 1fr);
+    grid-template-columns: 52px minmax(0, 1fr);
     gap: 12px;
     align-items: center;
     border-right: 1px solid var(--admin-line-soft);
@@ -12529,13 +12532,13 @@ body.employees-admin-screen {
 .admin-console-avatar {
     display: grid;
     place-items: center;
-    width: 56px;
-    height: 56px;
+    width: 52px;
+    height: 52px;
     border: 1px solid color-mix(in srgb, var(--admin-green) 45%, var(--admin-line));
     border-radius: 8px;
     background: var(--admin-green-soft);
     color: var(--admin-green);
-    font-size: 24px;
+    font-size: 22px;
     font-weight: 900;
     text-transform: uppercase;
 }
@@ -12556,7 +12559,7 @@ body.employees-admin-screen {
 .admin-console-identity em {
     margin-top: 4px;
     color: var(--admin-muted);
-    font-size: 12px;
+    font-size: 11px;
     font-style: normal;
     font-weight: 800;
     text-transform: uppercase;
@@ -12564,26 +12567,31 @@ body.employees-admin-screen {
 
 .admin-console-main {
     display: grid;
-    grid-template-rows: auto auto;
-    gap: 10px;
+    grid-template-columns: minmax(200px, 310px) minmax(0, 1fr);
+    gap: 12px;
+    align-items: center;
     border-right: 1px solid var(--admin-line-soft);
 }
 
 .admin-console-title span {
     display: block;
     color: var(--admin-green);
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 900;
     text-transform: uppercase;
 }
 
 .admin-console-title h1 {
     margin: 2px 0 0;
+    max-width: 100%;
+    overflow: hidden;
     color: var(--admin-ink);
-    font-size: 36px;
+    font-size: 32px;
     font-weight: 900;
     line-height: .96;
+    text-overflow: ellipsis;
     text-transform: uppercase;
+    white-space: nowrap;
 }
 
 .admin-console-title p {
@@ -12591,7 +12599,7 @@ body.employees-admin-screen {
     margin: 5px 0 0;
     overflow: hidden;
     color: var(--admin-muted);
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 800;
     line-height: 1.25;
     text-overflow: ellipsis;
@@ -12612,7 +12620,7 @@ body.employees-admin-screen {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-height: 40px;
+    min-height: var(--admin-header-control-height);
     margin: 0;
     border: 1px solid var(--admin-line);
     border-radius: 6px;
@@ -12629,8 +12637,11 @@ body.employees-admin-screen {
 }
 
 .admin-console-nav a {
-    min-width: 112px;
-    padding: 0 13px;
+    min-width: 0;
+    padding: 0 10px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .admin-console-nav a.is-active {
@@ -12642,15 +12653,16 @@ body.employees-admin-screen {
 
 .admin-console-actions {
     display: grid;
-    grid-template-columns: 44px repeat(2, minmax(0, 1fr));
+    grid-template-columns: var(--admin-header-icon-size) repeat(2, minmax(0, 1fr));
     gap: 10px;
     align-content: center;
+    align-items: center;
 }
 
 .admin-theme-button {
     position: relative;
-    width: 44px;
-    min-width: 44px;
+    width: var(--admin-header-icon-size);
+    min-width: var(--admin-header-icon-size);
     padding: 0;
     overflow: hidden;
     font-size: 0;
@@ -12733,7 +12745,7 @@ body.employees-admin-screen {
     grid-template-rows: auto auto minmax(0, 1fr);
     gap: 12px;
     width: calc(100% - 32px);
-    height: calc(100dvh - 108px);
+    height: calc(100dvh - var(--admin-console-header-height));
     min-height: 0;
     margin: 0 auto;
     padding: 12px 0 16px;
@@ -15172,6 +15184,9 @@ body.employees-admin-screen {
 @media (max-width: 1180px) {
     .admin-console-header {
         grid-template-columns: 1fr;
+        height: auto;
+        min-height: var(--admin-console-header-height);
+        max-height: none;
     }
 
     .admin-console-identity,
@@ -15179,6 +15194,10 @@ body.employees-admin-screen {
     .admin-console-actions {
         border-right: 0;
         border-bottom: 1px solid var(--admin-line-soft);
+    }
+
+    .admin-console-main {
+        grid-template-columns: 1fr;
     }
 
     .admin-console-actions {
@@ -15257,6 +15276,9 @@ body.employees-admin-screen {
 
     .admin-console-title h1 {
         font-size: 30px;
+        overflow: visible;
+        text-overflow: clip;
+        white-space: normal;
     }
 
     .admin-console-title p {
@@ -15270,10 +15292,22 @@ body.employees-admin-screen {
 
     .admin-console-nav a {
         min-width: 0;
+        min-height: 44px;
     }
 
     .admin-console-actions {
         grid-template-columns: 44px repeat(2, minmax(0, 1fr));
+    }
+
+    .admin-console-actions .admin-utility-link,
+    .admin-console-actions .admin-button,
+    .admin-console-actions .admin-theme-button {
+        min-height: 44px;
+    }
+
+    .admin-console-actions .admin-theme-button {
+        width: 44px;
+        min-width: 44px;
     }
 
     .admin-console-page {
@@ -15399,7 +15433,7 @@ body.employees-admin-screen {
     .system-admin-logs-screen .admin-page,
     .system-admin-employees-screen .admin-page,
     .system-admin-exports-screen .admin-page {
-        height: calc(100dvh - 108px);
+        height: calc(100dvh - var(--admin-console-header-height));
         min-height: 0;
         overflow: hidden;
     }
@@ -16239,11 +16273,11 @@ body.system-admin-logs-screen .admin-page {
     .system-admin-reference-detail-screen .admin-page,
     .system-admin-conflicts-screen .admin-page,
     .system-admin-logs-screen .admin-page {
-        height: calc((100dvh - 108px) / var(--admin-interface-scale));
+        height: calc((100dvh - var(--admin-console-header-height)) / var(--admin-interface-scale));
     }
 
     .system-admin-reference-detail-screen .admin-reference-detail-shell .admin-page {
-        height: calc((100dvh - 128px) / var(--admin-interface-scale));
+        height: calc((100dvh - var(--admin-console-header-height) - 20px) / var(--admin-interface-scale));
     }
 }
 
@@ -28372,8 +28406,8 @@ body.mining-master-screen .dispatcher-complex-card .complex-truck-tile {
 
 .admin-employee-detail-shell .employee-detail-page {
     width: 100%;
-    height: calc((100dvh / var(--admin-interface-scale)) - 158px);
-    max-height: calc((100dvh / var(--admin-interface-scale)) - 158px);
+    height: calc((100dvh / var(--admin-interface-scale)) - var(--admin-console-header-height));
+    max-height: calc((100dvh / var(--admin-interface-scale)) - var(--admin-console-header-height));
     grid-template-columns: minmax(720px, 1fr) clamp(520px, 31vw, 650px);
     grid-template-rows: minmax(0, 1fr);
     align-items: stretch;
@@ -28652,8 +28686,8 @@ body.mining-master-screen .dispatcher-complex-card .complex-truck-tile {
 
 body.employee-detail-screen .admin-employee-detail-shell .admin-page {
     width: 100%;
-    height: calc((100dvh / var(--admin-interface-scale)) - 158px);
-    max-height: calc((100dvh / var(--admin-interface-scale)) - 158px);
+    height: calc((100dvh / var(--admin-interface-scale)) - var(--admin-console-header-height));
+    max-height: calc((100dvh / var(--admin-interface-scale)) - var(--admin-console-header-height));
     zoom: 1;
 }
 
@@ -28665,10 +28699,6 @@ body.employee-detail-screen .admin-employee-detail-shell .admin-page {
 
 /* The admin console header is a shared component. Keep one desktop height on every admin page. */
 @media (min-width: 1181px) {
-    .admin-exports-shell {
-        --admin-console-header-height: 158px;
-    }
-
     .admin-exports-shell .admin-console-header {
         height: var(--admin-console-header-height);
         min-height: var(--admin-console-header-height);
@@ -28681,34 +28711,35 @@ body.employee-detail-screen .admin-employee-detail-shell .admin-page {
     }
 
     .admin-employee-detail-shell .admin-console-header {
-        grid-template-columns: minmax(230px, 300px) minmax(0, 1fr) minmax(260px, 330px);
+        grid-template-columns: minmax(210px, 260px) minmax(0, 1fr) minmax(230px, 300px);
     }
 
     .admin-employee-detail-shell .admin-console-identity,
     .admin-employee-detail-shell .admin-console-main,
     .admin-employee-detail-shell .admin-console-actions {
-        padding: 16px 20px;
+        padding: 10px 16px;
     }
 
     .admin-employee-detail-shell .admin-console-identity {
-        grid-template-columns: 56px minmax(0, 1fr);
+        grid-template-columns: 52px minmax(0, 1fr);
         gap: 12px;
     }
 
     .admin-employee-detail-shell .admin-console-avatar {
-        width: 56px;
-        height: 56px;
-        font-size: 24px;
+        width: 52px;
+        height: 52px;
+        font-size: 22px;
     }
 
     .admin-employee-detail-shell .admin-console-main {
-        gap: 10px;
+        grid-template-columns: minmax(200px, 310px) minmax(0, 1fr);
+        gap: 12px;
     }
 
     .admin-employee-detail-shell .admin-console-title h1 {
         max-width: 100%;
         overflow: hidden;
-        font-size: 36px;
+        font-size: 32px;
         line-height: .96;
         text-overflow: ellipsis;
         white-space: nowrap;
@@ -28730,18 +28761,18 @@ body.employee-detail-screen .admin-employee-detail-shell .admin-page {
     }
 
     .admin-employee-detail-shell .admin-console-nav a {
-        min-width: 112px;
-        padding: 0 13px;
+        min-width: 0;
+        padding: 0 10px;
     }
 
     .admin-employee-detail-shell .admin-theme-button {
-        width: 44px;
-        min-width: 44px;
+        width: 40px;
+        min-width: 40px;
         font-size: 0;
     }
 
     .admin-employee-detail-shell .admin-console-actions {
-        grid-template-columns: 44px repeat(2, minmax(0, 1fr));
+        grid-template-columns: 40px repeat(2, minmax(0, 1fr));
         gap: 10px;
     }
 
@@ -29083,8 +29114,8 @@ body.employee-detail-screen .admin-employee-detail-shell .admin-page {
 
 .admin-employee-create-shell .employee-create-page {
     width: 100%;
-    height: calc((100dvh / var(--admin-interface-scale)) - 158px);
-    max-height: calc((100dvh / var(--admin-interface-scale)) - 158px);
+    height: calc((100dvh / var(--admin-interface-scale)) - var(--admin-console-header-height));
+    max-height: calc((100dvh / var(--admin-interface-scale)) - var(--admin-console-header-height));
     grid-template-rows: minmax(0, 1fr);
     margin: 0;
     padding: 12px 0;
@@ -29487,8 +29518,8 @@ body.employee-detail-screen .admin-employee-detail-shell .admin-page {
 
 body.employee-create-screen .admin-employee-create-shell .admin-page {
     width: 100%;
-    height: calc((100dvh / var(--admin-interface-scale)) - 158px);
-    max-height: calc((100dvh / var(--admin-interface-scale)) - 158px);
+    height: calc((100dvh / var(--admin-interface-scale)) - var(--admin-console-header-height));
+    max-height: calc((100dvh / var(--admin-interface-scale)) - var(--admin-console-header-height));
     zoom: 1;
 }
 
