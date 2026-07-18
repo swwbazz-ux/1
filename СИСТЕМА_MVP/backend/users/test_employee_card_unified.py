@@ -202,8 +202,8 @@ class UnifiedEmployeeCardTests(TestCase):
 
     def test_shared_employee_card_shells_use_new_cache_versions(self):
         expected_versions = {
-            'system_admin_service_worker': 'system-admin-shell-v11',
-            'oup_service_worker': 'oup-shell-v12',
+            'system_admin_service_worker': 'system-admin-shell-v12',
+            'oup_service_worker': 'oup-shell-v13',
         }
 
         for view_name, expected_version in expected_versions.items():
@@ -212,6 +212,7 @@ class UnifiedEmployeeCardTests(TestCase):
             self.assertEqual(response.status_code, 200)
             self.assertContains(response, expected_version)
             self.assertContains(response, 'new Request(url, { cache: "reload" })')
+            self.assertContains(response, 'fetch(request, { cache: "reload" })')
 
     def test_shared_desktop_header_uses_standard_geometry(self):
         static_css = Path(__file__).resolve().parents[1] / 'static' / 'css'
