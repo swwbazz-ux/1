@@ -136,7 +136,7 @@ ROLE_APPS = (
         icon_slug='oup',
         manifest_url='/oup.webmanifest',
         service_worker_url='/oup-sw.js',
-        shell_version='oup-shell-v11',
+        shell_version='oup-shell-v13',
     ),
     RoleApp(
         role_code='timekeeper',
@@ -152,7 +152,7 @@ ROLE_APPS = (
         icon_slug='timekeeper',
         manifest_url='/timekeeper.webmanifest',
         service_worker_url='/timekeeper-sw.js',
-        shell_version='timekeeper-shell-v3',
+        shell_version='timekeeper-shell-v4',
     ),
     RoleApp(
         role_code='site_manager',
@@ -168,7 +168,7 @@ ROLE_APPS = (
         icon_slug='site-manager',
         manifest_url='/site-manager.webmanifest',
         service_worker_url='/site-manager-sw.js',
-        shell_version='site-manager-shell-v3',
+        shell_version='site-manager-shell-v4',
     ),
     RoleApp(
         role_code='mechanic',
@@ -216,7 +216,7 @@ ROLE_APPS = (
         icon_slug='admin',
         manifest_url='/system-admin.webmanifest',
         service_worker_url='/system-admin-sw.js',
-        shell_version='system-admin-shell-v11',
+        shell_version='system-admin-shell-v12',
     ),
 )
 
@@ -372,7 +372,7 @@ async function cacheFirst(request) {{
   const cache = await caches.open(CACHE_NAME);
   const cached = await cache.match(request, {{ ignoreSearch: true }});
   if (cached) return cached;
-  const response = await fetch(request);
+  const response = await fetch(request, {{ cache: "reload" }});
   if (response && response.ok) cache.put(request, response.clone());
   return response;
 }}
