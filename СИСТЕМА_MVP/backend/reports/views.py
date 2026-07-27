@@ -3,7 +3,8 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 
 from django.contrib import messages
-from django.db.models import Count, Sum
+from django.db import transaction
+from django.db.models import Count, Q, Sum
 from django.http import HttpResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
@@ -13,12 +14,25 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 from downtimes.models import DowntimeEvent, DowntimeReason
+from core.production_time import (
+    production_day_bounds,
+    production_shift_bounds,
+    production_shift_context,
+    production_work_date,
+)
 from references.models import DumpPoint, Equipment, RockType
-from shifts.models import EmployeeShift
-from shifts.services import shift_plan_totals
+from shifts.models import EmployeeShift, ShiftType
+from shifts.services import recent_shift_reading_corrections, shift_plan_totals
 from trips.dispatcher_header import build_dispatcher_header_context
-from trips.models import DispatcherActionLog, DispatcherActionType, Trip, TripStatus
-from users.models import EmployeeAccess
+from trips.models import (
+    DispatcherActionLog,
+    DispatcherActionType,
+    OPEN_TRIP_STATUSES,
+    Trip,
+    TripStatus,
+)
+from users.active_role import role_session_state
+from users.models import Employee, EmployeeAccess
 
 from .forms import PilotFeedbackForm
 from .models import PilotFeedback, ReportTemplate, ReportType
@@ -347,7 +361,7 @@ def dashboard_status_by_deviation(value):
 
 
 def dispatcher_mining_filters(request):
-    selected_date = parse_filter_date(request.GET.get('date')) or timezone.localdate()
+    selected_date = parse_filter_date(request.GET.get('date')) or production_work_date()
     shift_type = request.GET.get('shift_type', '').strip()
     if shift_type not in {'', 'day', 'night'}:
         shift_type = ''
@@ -360,6 +374,7 @@ def dispatcher_mining_filters(request):
 
 
 def dispatcher_mining_trip_queryset(filters):
+    production_start, production_end = production_day_bounds(filters['date'])
     trips = Trip.objects.filter(status=TripStatus.COMPLETED).select_related(
         'truck',
         'excavator',
@@ -368,9 +383,27 @@ def dispatcher_mining_trip_queryset(filters):
         'loading_shift',
         'unloading_shift',
     )
-    trips = trips.filter(completed_at__date=filters['date'])
+    trips = trips.filter(
+        Q(
+            loading_shift__opened_at__gte=production_start,
+            loading_shift__opened_at__lt=production_end,
+        )
+        | Q(
+            loading_shift__isnull=True,
+            completed_at__gte=production_start,
+            completed_at__lt=production_end,
+        )
+    )
     if filters['shift_type']:
-        trips = trips.filter(loading_shift__shift_type=filters['shift_type'])
+        shift_start, shift_end = production_shift_bounds(filters['date'], filters['shift_type'])
+        trips = trips.filter(
+            Q(loading_shift__shift_type=filters['shift_type'])
+            | Q(
+                loading_shift__isnull=True,
+                completed_at__gte=shift_start,
+                completed_at__lt=shift_end,
+            )
+        )
     return trips.order_by('-completed_at')
 
 
@@ -471,11 +504,21 @@ def dispatcher_mining_context(request, access):
     filters = dispatcher_mining_filters(request)
     trips = list(dispatcher_mining_trip_queryset(filters))
     month_start = filters['date'].replace(day=1)
+    month_range_start = production_day_bounds(month_start)[0]
+    month_range_end = production_day_bounds(filters['date'])[1]
     month_trips = list(
         Trip.objects.filter(
             status=TripStatus.COMPLETED,
-            completed_at__date__gte=month_start,
-            completed_at__date__lte=filters['date'],
+        ).filter(
+            Q(
+                loading_shift__opened_at__gte=month_range_start,
+                loading_shift__opened_at__lt=month_range_end,
+            )
+            | Q(
+                loading_shift__isnull=True,
+                completed_at__gte=month_range_start,
+                completed_at__lt=month_range_end,
+            )
         )
     )
 
@@ -610,7 +653,7 @@ def format_decimal_value(value, places=1):
 
 
 def dispatcher_transport_filters(request):
-    selected_date = parse_filter_date(request.GET.get('date')) or timezone.localdate()
+    selected_date = parse_filter_date(request.GET.get('date')) or production_work_date()
     shift_type = request.GET.get('shift_type', '').strip()
     if shift_type not in {'', 'day', 'night'}:
         shift_type = ''
@@ -623,6 +666,7 @@ def dispatcher_transport_filters(request):
 
 
 def dispatcher_transport_shift_queryset(filters):
+    production_start, production_end = production_day_bounds(filters['date'])
     shifts = EmployeeShift.objects.select_related(
         'employee',
         'equipment',
@@ -630,7 +674,8 @@ def dispatcher_transport_shift_queryset(filters):
         'equipment__model',
     ).filter(
         equipment__equipment_type__name__icontains='Самосвал',
-        opened_at__date=filters['date'],
+        opened_at__gte=production_start,
+        opened_at__lt=production_end,
     )
     if filters['shift_type']:
         shifts = shifts.filter(shift_type=filters['shift_type'])
@@ -638,21 +683,60 @@ def dispatcher_transport_shift_queryset(filters):
 
 
 def dispatcher_transport_trip_stats(filters):
-    trips = Trip.objects.filter(
-        status=TripStatus.COMPLETED,
-        completed_at__date=filters['date'],
-        truck_id__isnull=False,
+    production_start, production_end = production_day_bounds(filters['date'])
+    trips = (
+        Trip.objects
+        .select_related('truck', 'truck__model', 'driver', 'unloading_shift')
+        .filter(
+            status=TripStatus.COMPLETED,
+            truck_id__isnull=False,
+        )
+        .filter(
+            Q(
+                unloading_shift__opened_at__gte=production_start,
+                unloading_shift__opened_at__lt=production_end,
+            )
+            | Q(
+                unloading_shift__isnull=True,
+                completed_at__gte=production_start,
+                completed_at__lt=production_end,
+            )
+        )
     )
+    if filters['shift_type']:
+        shift_start, shift_end = production_shift_bounds(filters['date'], filters['shift_type'])
+        trips = trips.filter(
+            Q(unloading_shift__shift_type=filters['shift_type'])
+            | Q(
+                unloading_shift__isnull=True,
+                completed_at__gte=shift_start,
+                completed_at__lt=shift_end,
+            )
+        )
     grouped = defaultdict(lambda: {
         'trips': 0,
         'volume': Decimal('0'),
         'tonnage': Decimal('0'),
+        'equipment': None,
+        'driver': None,
+        'shift_type': '',
     })
     for trip in trips:
-        row = grouped[trip.truck_id]
+        if trip.unloading_shift_id:
+            key = ('shift', trip.unloading_shift_id)
+        else:
+            fallback_shift_type = production_shift_context(
+                trip.completed_at or trip.created_at
+            ).shift_type
+            key = ('fallback', trip.truck_id, fallback_shift_type)
+        row = grouped[key]
         row['trips'] += 1
         row['volume'] += trip.volume_m3 or Decimal('0')
         row['tonnage'] += trip.tonnage or Decimal('0')
+        row['equipment'] = trip.truck
+        if not trip.unloading_shift_id:
+            row['driver'] = trip.driver
+            row['shift_type'] = fallback_shift_type
     return grouped
 
 
@@ -676,7 +760,10 @@ def dispatcher_transport_rows(shifts, trip_stats):
         fuel_delta = value_delta(shift.start_fuel, shift.end_fuel, reverse=True)
         mileage_delta = value_delta(shift.start_mileage, shift.end_mileage)
         hours_delta = value_delta(shift.start_engine_hours, shift.end_engine_hours)
-        stats = trip_stats.get(shift.equipment_id, {'trips': 0, 'volume': Decimal('0'), 'tonnage': Decimal('0')})
+        stats = trip_stats.get(
+            ('shift', shift.id),
+            {'trips': 0, 'volume': Decimal('0'), 'tonnage': Decimal('0')},
+        )
         row = {
             'equipment': shift.equipment,
             'equipment_label': shift.equipment.garage_number if shift.equipment else '-',
@@ -708,6 +795,41 @@ def dispatcher_transport_rows(shifts, trip_stats):
         row['fuel_per_hour'] = format_decimal_value((fuel_delta / hours_delta), 2) if fuel_delta is not None and hours_delta else '-'
         row['volume_display'] = format_volume(row['volume'])
         rows.append(row)
+    for key, stats in trip_stats.items():
+        if key[0] != 'fallback':
+            continue
+        equipment = stats['equipment']
+        driver = stats['driver']
+        rows.append({
+            'equipment': equipment,
+            'equipment_label': equipment.garage_number if equipment else '-',
+            'model': equipment.model.name if equipment and equipment.model else 'не указана',
+            'driver': driver.full_name if driver else 'Смена не определена',
+            'shift_type': ShiftType(stats['shift_type']).label,
+            'opened_at': '-',
+            'closed_at': '-',
+            'start_fuel': None,
+            'end_fuel': None,
+            'fuel_delta': None,
+            'start_mileage': None,
+            'end_mileage': None,
+            'mileage_delta': None,
+            'start_engine_hours': None,
+            'end_engine_hours': None,
+            'hours_delta': None,
+            'missing_end': False,
+            'has_negative_delta': False,
+            'trips': stats['trips'],
+            'volume': stats['volume'],
+            'tonnage': stats['tonnage'],
+            'status': 'risk',
+            'fuel_display': '-',
+            'mileage_display': '-',
+            'hours_display': '-',
+            'fuel_per_km': '-',
+            'fuel_per_hour': '-',
+            'volume_display': format_volume(stats['volume']),
+        })
     return rows
 
 
@@ -841,7 +963,7 @@ def dispatcher_transport_export_view(request):
 
 
 def dispatcher_downtime_filters(request):
-    selected_date = parse_filter_date(request.GET.get('date')) or timezone.localdate()
+    selected_date = parse_filter_date(request.GET.get('date')) or production_work_date()
     status = request.GET.get('status', '').strip()
     if status not in {'', 'open', 'critical', 'closed'}:
         status = ''
@@ -854,13 +976,14 @@ def dispatcher_downtime_filters(request):
 
 
 def dispatcher_downtime_queryset(filters):
+    production_start, production_end = production_day_bounds(filters['date'])
     events = DowntimeEvent.objects.select_related(
         'equipment',
         'equipment__equipment_type',
         'reason',
         'reason__equipment_state',
         'employee',
-    ).filter(started_at__date=filters['date'])
+    ).filter(started_at__gte=production_start, started_at__lt=production_end)
     if filters['status'] == 'open':
         events = events.filter(ended_at__isnull=True)
     elif filters['status'] == 'closed':
@@ -1054,7 +1177,7 @@ def dispatcher_downtimes_export_view(request):
 
 
 def dispatcher_shift_log_filters(request):
-    selected_date = parse_filter_date(request.GET.get('date')) or timezone.localdate()
+    selected_date = parse_filter_date(request.GET.get('date')) or production_work_date()
     event_type = request.GET.get('event_type', '').strip()
     if event_type not in {'', 'dispatcher', 'downtime', 'trip'}:
         event_type = ''
@@ -1100,6 +1223,7 @@ def dispatcher_trip_route(trip):
 
 
 def dispatcher_shift_action_rows(filters):
+    production_start, production_end = production_day_bounds(filters['date'])
     actions = DispatcherActionLog.objects.select_related(
         'actor',
         'trip',
@@ -1107,7 +1231,7 @@ def dispatcher_shift_action_rows(filters):
         'trip__excavator',
         'trip__dump_point',
         'trip__rock_type',
-    ).filter(created_at__date=filters['date']).order_by('-created_at')
+    ).filter(created_at__gte=production_start, created_at__lt=production_end).order_by('-created_at')
     return [
         {
             'time': action.created_at,
@@ -1128,13 +1252,14 @@ def dispatcher_shift_action_rows(filters):
 
 
 def dispatcher_shift_downtime_rows(filters):
+    production_start, production_end = production_day_bounds(filters['date'])
     events = DowntimeEvent.objects.select_related(
         'equipment',
         'equipment__equipment_type',
         'reason',
         'reason__equipment_state',
         'employee',
-    ).filter(started_at__date=filters['date']).order_by('-started_at')
+    ).filter(started_at__gte=production_start, started_at__lt=production_end).order_by('-started_at')
     rows = []
     for event in events:
         duration = downtime_duration_hours(event)
@@ -1157,6 +1282,7 @@ def dispatcher_shift_downtime_rows(filters):
 
 
 def dispatcher_shift_trip_rows(filters):
+    production_start, production_end = production_day_bounds(filters['date'])
     trips = Trip.objects.select_related(
         'truck',
         'excavator',
@@ -1164,7 +1290,18 @@ def dispatcher_shift_trip_rows(filters):
         'dump_point',
         'driver',
         'excavator_operator',
-    ).filter(completed_at__date=filters['date']).order_by('-completed_at')
+        'unloading_shift',
+    ).filter(
+        Q(
+            unloading_shift__opened_at__gte=production_start,
+            unloading_shift__opened_at__lt=production_end,
+        )
+        | Q(
+            unloading_shift__isnull=True,
+            completed_at__gte=production_start,
+            completed_at__lt=production_end,
+        )
+    ).order_by('-completed_at')
     rows = []
     for trip in trips:
         rows.append({
@@ -1220,6 +1357,9 @@ def dispatcher_shift_log_context(request, access):
         'action_rows': action_rows[:12],
         'downtime_rows': downtime_rows[:12],
         'trip_rows': trip_rows[:12],
+        'shift_reading_corrections': recent_shift_reading_corrections(
+            work_date=filters['date'],
+        ),
         'query_string': request.GET.urlencode(),
     }
 
@@ -1274,12 +1414,61 @@ def write_dispatcher_shift_log_sheet(sheet, context):
         sheet.column_dimensions[get_column_letter(column_index)].width = 20
 
 
+def append_shift_reading_corrections_sheet(workbook, corrections):
+    sheet = workbook.create_sheet('Коррекции показаний')
+    headers = [
+        'Зафиксировано',
+        'Техника',
+        'Предыдущая смена',
+        'Новая смена',
+        'Показатель',
+        'Переданное значение',
+        'Фактическое значение',
+        'Сотрудник',
+    ]
+    sheet.append(headers)
+    for cell in sheet[1]:
+        cell.fill = PatternFill('solid', fgColor='12232E')
+        cell.font = Font(color='FFFFFF', bold=True)
+        cell.alignment = Alignment(vertical='center', wrap_text=True)
+    for correction in corrections:
+        sheet.append([
+            timezone.localtime(correction.corrected_at).strftime('%d.%m.%Y %H:%M'),
+            str(correction.equipment),
+            (
+                f'№{correction.previous_shift_id} · '
+                f'{correction.previous_shift.get_shift_type_display()}'
+            ),
+            (
+                f'№{correction.new_shift_id} · '
+                f'{correction.new_shift.get_shift_type_display()}'
+            ),
+            correction.get_metric_display(),
+            correction.transferred_value,
+            correction.actual_value,
+            correction.employee.full_name,
+        ])
+    for row in sheet.iter_rows(min_row=2):
+        for cell in row:
+            cell.alignment = Alignment(vertical='center', wrap_text=True)
+    for column_index, width in enumerate(
+        (20, 24, 24, 24, 20, 22, 22, 28),
+        start=1,
+    ):
+        sheet.column_dimensions[get_column_letter(column_index)].width = width
+
+
 def dispatcher_shift_log_export_view(request):
     access, response = require_dispatcher_report_access(request)
     if response:
         return response
+    context = dispatcher_shift_log_context(request, access)
     workbook = Workbook()
-    write_dispatcher_shift_log_sheet(workbook.active, dispatcher_shift_log_context(request, access))
+    write_dispatcher_shift_log_sheet(workbook.active, context)
+    append_shift_reading_corrections_sheet(
+        workbook,
+        context['shift_reading_corrections'],
+    )
     response = HttpResponse(
         content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     )
@@ -1296,7 +1485,11 @@ def dispatcher_reports_context(request, access):
         dispatcher_transport_trip_stats(filters),
     )
     downtime_rows = [dispatcher_downtime_row(event) for event in dispatcher_downtime_queryset({'date': filters['date'], 'status': ''})]
-    shift_actions_count = DispatcherActionLog.objects.filter(created_at__date=filters['date']).count()
+    production_start, production_end = production_day_bounds(filters['date'])
+    shift_actions_count = DispatcherActionLog.objects.filter(
+        created_at__gte=production_start,
+        created_at__lt=production_end,
+    ).count()
     active_templates = list(ReportTemplate.objects.filter(is_active=True).order_by('name')[:8])
 
     plan_total = decimal_total(trip.planned_volume_m3 for trip in trips)
@@ -1313,6 +1506,8 @@ def dispatcher_reports_context(request, access):
         if kind == 'mining':
             if not trips:
                 return 'risk'
+            if not plan_total:
+                return 'ok'
             return dashboard_status_by_percent(completion)
         if kind == 'transport':
             if anomaly_transport_count:
@@ -1345,7 +1540,11 @@ def dispatcher_reports_context(request, access):
             'status': report_status('mining'),
             'primary': f'{format_volume(volume_total)} м3',
             'secondary': f'{len(trips)} рейс. / {len({trip.truck_id for trip in trips if trip.truck_id})} самосв.',
-            'readiness': f'План {format_volume(plan_total)} м3 / {completion}%',
+            'readiness': (
+                f'План {format_volume(plan_total)} м3 / {completion}%'
+                if plan_total
+                else 'План не задан'
+            ),
             'view_url': reverse('dispatcher_mining_volumes'),
             'export_url': reverse('dispatcher_mining_volumes_export'),
         },
@@ -1503,15 +1702,29 @@ def dispatcher_management_context(request, access):
     filters = dispatcher_mining_filters(request)
     trips = list(dispatcher_mining_trip_queryset(filters))
     month_start = filters['date'].replace(day=1)
+    month_range_start = production_day_bounds(month_start)[0]
+    month_range_end = production_day_bounds(filters['date'])[1]
     month_trips = list(
         Trip.objects.filter(
             status=TripStatus.COMPLETED,
-            completed_at__date__gte=month_start,
-            completed_at__date__lte=filters['date'],
-        )
+        ).filter(
+            Q(
+                loading_shift__opened_at__gte=month_range_start,
+                loading_shift__opened_at__lt=month_range_end,
+            )
+            | Q(
+                loading_shift__isnull=True,
+                completed_at__gte=month_range_start,
+                completed_at__lt=month_range_end,
+            )
+        ).select_related('loading_shift')
     )
     if filters['shift_type']:
-        month_trips = [trip for trip in month_trips if trip.loading_shift and trip.loading_shift.shift_type == filters['shift_type']]
+        month_trips = [
+            trip
+            for trip in month_trips
+            if trip_shift_type(trip) == filters['shift_type']
+        ]
 
     transport_rows = dispatcher_transport_rows(
         list(dispatcher_transport_shift_queryset(filters)),
@@ -1543,7 +1756,11 @@ def dispatcher_management_context(request, access):
     critical_downtime_count = sum(1 for row in downtime_rows if row['is_critical'])
     missing_transport_count = sum(1 for row in transport_rows if row['missing_end'])
     anomaly_transport_count = sum(1 for row in transport_rows if row['has_negative_delta'])
-    action_count = DispatcherActionLog.objects.filter(created_at__date=filters['date']).count()
+    production_start, production_end = production_day_bounds(filters['date'])
+    action_count = DispatcherActionLog.objects.filter(
+        created_at__gte=production_start,
+        created_at__lt=production_end,
+    ).count()
     attention_rows = dispatcher_management_attention_rows(downtime_rows, transport_rows)
 
     overall_status = dashboard_status_by_percent(completion) if trips else 'risk'
@@ -1680,9 +1897,9 @@ def apply_downtime_report_filters(queryset, filters):
     reason = filters.get('reason', '')
 
     if date_from:
-        queryset = queryset.filter(started_at__date__gte=date_from)
+        queryset = queryset.filter(started_at__gte=production_day_bounds(date_from)[0])
     if date_to:
-        queryset = queryset.filter(started_at__date__lte=date_to)
+        queryset = queryset.filter(started_at__lt=production_day_bounds(date_to)[1])
     if status == 'open':
         queryset = queryset.filter(ended_at__isnull=True)
     elif status == 'closed':
@@ -1752,7 +1969,7 @@ def downtime_summary_by(rows, key):
 def downtime_daily_summary(rows):
     summary = {}
     for row in rows:
-        day = timezone.localtime(row['started_at']).date()
+        day = production_work_date(row['started_at'])
         key = day.isoformat()
         if key not in summary:
             summary[key] = {
@@ -1968,9 +2185,17 @@ def apply_volume_report_filters(queryset, filters):
     dump_point = filters.get('dump_point', '')
 
     if date_from:
-        queryset = queryset.filter(completed_at__date__gte=date_from)
+        range_start = production_day_bounds(date_from)[0]
+        queryset = queryset.filter(
+            Q(unloading_shift__opened_at__gte=range_start)
+            | Q(unloading_shift__isnull=True, completed_at__gte=range_start)
+        )
     if date_to:
-        queryset = queryset.filter(completed_at__date__lte=date_to)
+        range_end = production_day_bounds(date_to)[1]
+        queryset = queryset.filter(
+            Q(unloading_shift__opened_at__lt=range_end)
+            | Q(unloading_shift__isnull=True, completed_at__lt=range_end)
+        )
     if loading_shift_type:
         queryset = queryset.filter(loading_shift__shift_type=loading_shift_type)
     if unloading_shift_type:
@@ -2112,7 +2337,7 @@ def volume_report_export_view(request):
 
 
 def shift_analytics_report_context(request):
-    selected_date = parse_filter_date(request.GET.get('date')) or timezone.localdate()
+    selected_date = parse_filter_date(request.GET.get('date')) or production_work_date()
     shift_type = request.GET.get('shift_type', '').strip()
     if shift_type not in {'', 'day', 'night'}:
         shift_type = ''
@@ -2142,7 +2367,7 @@ def shift_analytics_report_view(request):
 
 
 def management_dynamics_report_context(request):
-    today = timezone.localdate()
+    today = production_work_date()
     date_to = parse_filter_date(request.GET.get('date_to')) or today
     date_from = parse_filter_date(request.GET.get('date_from')) or (date_to - timedelta(days=6))
     if date_from > date_to:
@@ -2520,6 +2745,17 @@ def get_reports_access(request, allowed_roles):
     if not access or access.role.code not in allowed_roles:
         return None
     return access
+
+
+def reports_mutation_role_barrier(request, access):
+    Employee.objects.select_for_update().get(pk=access.employee_id)
+    if role_session_state(request, access)['is_active']:
+        return None
+    return HttpResponse(
+        'Роль неактивна — доступен только просмотр',
+        status=409,
+        content_type='text/plain; charset=utf-8',
+    )
 
 
 PILOT_REPORT_CHECKLIST_SECTIONS = [
@@ -2937,17 +3173,26 @@ def pilot_launch_scenario_view(request):
     )
 
 
+@transaction.atomic
 def pilot_feedback_view(request):
     access = get_reports_access(request, {'admin', 'dispatcher', 'manager'})
     if not access:
         return redirect('login' if not request.session.get('employee_access_id') else 'role_home')
 
     if request.method == 'POST':
+        inactive_role_response = reports_mutation_role_barrier(request, access)
+        if inactive_role_response:
+            return inactive_role_response
         action = request.POST.get('action', '').strip()
         feedback_id = request.POST.get('feedback_id', '').strip()
         next_status = request.POST.get('status', '').strip()
         if action == 'change_status' and feedback_id and next_status in {'in_work', 'decided', 'rejected'}:
-            feedback = PilotFeedback.objects.filter(id=feedback_id).first()
+            feedback = (
+                PilotFeedback.objects
+                .select_for_update()
+                .filter(id=feedback_id)
+                .first()
+            )
             if feedback:
                 feedback.status = next_status
                 feedback.save(update_fields=['status', 'updated_at'])
@@ -3048,6 +3293,7 @@ def pilot_feedback_export_view(request):
     return response
 
 
+@transaction.atomic
 def report_template_builder_view(request):
     access = get_reports_access(request, {'admin', 'dispatcher'})
     if not access:
@@ -3059,6 +3305,9 @@ def report_template_builder_view(request):
         edit_template = ReportTemplate.objects.filter(id=edit_template_id).first()
 
     if request.method == 'POST':
+        inactive_role_response = reports_mutation_role_barrier(request, access)
+        if inactive_role_response:
+            return inactive_role_response
         template_id = request.POST.get('template_id', '').strip()
         name = request.POST.get('name', '').strip()
         columns = [
@@ -3084,7 +3333,12 @@ def report_template_builder_view(request):
 
         template = None
         if template_id:
-            template = ReportTemplate.objects.filter(id=template_id).first()
+            template = (
+                ReportTemplate.objects
+                .select_for_update()
+                .filter(id=template_id)
+                .first()
+            )
             if not template:
                 messages.error(request, 'Шаблон отчета не найден.')
                 return redirect('report_template_builder')
@@ -3151,18 +3405,18 @@ def parse_customer_report_date(request):
         .first()
     )
     if latest_trip and latest_trip.completed_at:
-        return timezone.localtime(latest_trip.completed_at).date()
+        return production_work_date(latest_trip.completed_at)
     if latest_trip:
-        return timezone.localtime(latest_trip.created_at).date()
-    return timezone.localdate()
+        return production_work_date(latest_trip.created_at)
+    return production_work_date()
 
 
 def trip_report_date(trip):
     if trip.loading_shift:
-        return timezone.localtime(trip.loading_shift.opened_at).date()
+        return production_work_date(trip.loading_shift.opened_at)
     if trip.completed_at:
-        return timezone.localtime(trip.completed_at).date()
-    return timezone.localtime(trip.created_at).date()
+        return production_work_date(trip.completed_at)
+    return production_work_date(trip.created_at)
 
 
 def trip_shift_type(trip):
@@ -3170,7 +3424,7 @@ def trip_shift_type(trip):
         return trip.loading_shift.shift_type
     if trip.unloading_shift:
         return trip.unloading_shift.shift_type
-    return 'day'
+    return production_shift_context(trip.completed_at or trip.created_at).shift_type
 
 
 def calculate_plan_completion_percent(volume, plan):
@@ -3262,9 +3516,14 @@ def calculate_customer_accumulated_totals(trips):
 
 
 def build_mechanic_downtime_rows(selected_date):
+    production_start, production_end = production_day_bounds(selected_date)
     events = (
         DowntimeEvent.objects
-        .filter(started_at__date=selected_date)
+        .filter(
+            started_at__gte=production_start,
+            started_at__lt=production_end,
+            reason__show_for_mechanic=True,
+        )
         .select_related('equipment', 'reason', 'employee')
         .order_by('started_at')
     )
@@ -3560,8 +3819,8 @@ def customer_daily_report_export_view(request):
                 cell.font = Font(bold=True, color='FFFFFF')
                 cell.fill = PatternFill('solid', fgColor='17232E')
 
-    day_end_row = append_customer_shift_table(sheet, 'I смена (дневная 08:00 - 20:00)', 13, 1, context['rows_by_shift']['day'])
-    night_end_row = append_customer_shift_table(sheet, 'II смена (ночная 20:00 - 08:00)', 13, 12, context['rows_by_shift']['night'])
+    day_end_row = append_customer_shift_table(sheet, 'I смена (дневная 07:00 - 19:00)', 13, 1, context['rows_by_shift']['day'])
+    night_end_row = append_customer_shift_table(sheet, 'II смена (ночная 19:00 - 07:00)', 13, 12, context['rows_by_shift']['night'])
 
     downtime_start_row = max(day_end_row, night_end_row) + 1
     sheet.cell(downtime_start_row, 1, 'Механические простои за дату')
@@ -3612,12 +3871,12 @@ def management_dashboard_context(request, access):
         'loading_shift',
         'unloading_shift',
     )
-    active_trips = Trip.objects.filter(status=TripStatus.ACTIVE)
+    active_trips = Trip.objects.filter(status__in=OPEN_TRIP_STATUSES)
     open_mechanic_downtimes = (
         DowntimeEvent.objects
-        .filter(ended_at__isnull=True)
+        .filter(ended_at__isnull=True, reason__show_for_mechanic=True)
         .select_related('equipment', 'reason', 'employee')
-        .order_by('started_at')[:8]
+        .order_by('started_at')
     )
     selected_date = parse_customer_report_date(request)
     shift_analytics = build_shift_analytics(selected_date, '')
@@ -3689,8 +3948,10 @@ def management_dashboard_context(request, access):
     daily_deviation = daily_total_volume - daily_plan_total
     daily_plan_completion_percent = calculate_plan_completion_percent(daily_total_volume, daily_plan_total)
     daily_plan_completion_class = (
-        'success'
-        if daily_plan_completion_percent is not None and daily_plan_completion_percent >= Decimal('100')
+        'neutral'
+        if daily_plan_completion_percent is None
+        else 'success'
+        if daily_plan_completion_percent >= Decimal('100')
         else 'danger'
     )
     daily_shift_comparison = []
@@ -3817,15 +4078,19 @@ def management_dashboard_context(request, access):
         'total_tonnage': completed_summary['total_tonnage'] or 0,
         'completed_trip_count': completed_summary['trip_count'] or 0,
         'active_trip_count': active_trips.count(),
-        'open_mechanic_downtime_count': DowntimeEvent.objects.filter(ended_at__isnull=True).count(),
-        'carryover_trip_count': completed_trips.filter(is_carryover=True).count(),
+        'open_mechanic_downtime_count': open_mechanic_downtimes.count(),
+        'carryover_trip_count': active_trips.filter(is_carryover=True).count(),
+        'daily_carryover_trip_count': sum(1 for trip in daily_trips if trip.is_carryover),
         'mechanic_downtime_count': len(build_mechanic_downtime_rows(selected_date)),
-        'open_mechanic_downtimes': open_mechanic_downtimes,
+        'open_mechanic_downtimes': open_mechanic_downtimes[:8],
         'top_excavators': top_excavators,
         'top_rocks': top_rocks,
         'max_excavator_volume': max_excavator_volume,
         'max_rock_volume': max_rock_volume,
         'recent_completed_trips': recent_completed_trips,
+        'shift_reading_corrections': recent_shift_reading_corrections(
+            work_date=selected_date,
+        ),
     }
 
 
@@ -3982,6 +4247,11 @@ def management_dashboard_export_view(request):
             lambda row: row['equipment_display'],
             lambda row: row['employees_display'],
         ],
+    )
+
+    append_shift_reading_corrections_sheet(
+        workbook,
+        context['shift_reading_corrections'],
     )
 
     for sheet in workbook.worksheets:

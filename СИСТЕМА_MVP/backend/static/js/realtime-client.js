@@ -1,6 +1,14 @@
 (function (window, document) {
     "use strict";
 
+    var APP_CONTRACT_VERSION = "pwa-contract-v1";
+    if (
+        window.AppPwaContractGuard
+        && typeof window.AppPwaContractGuard.registerJavaScript === "function"
+    ) {
+        window.AppPwaContractGuard.registerJavaScript(APP_CONTRACT_VERSION);
+    }
+
     function buildPattern(pattern) {
         if (!pattern) return null;
         if (pattern instanceof RegExp) return pattern;
@@ -22,7 +30,8 @@
             idleDelayMs: config.idleDelayMs || 2500,
             pollTimeoutMs: config.pollTimeoutMs || 8000,
             maxSilentMs: config.maxSilentMs || 7000,
-            mobileQueueKey: config.mobileQueueKey || "mining-master-mobile-sync-queue-v1"
+            mobileQueueKey: config.mobileQueueKey || "mining-master-mobile-sync-queue-v1",
+            loginUrl: config.loginUrl || "/"
         };
     }
 
@@ -67,6 +76,22 @@
         window.dispatchEvent(new CustomEvent(name, {detail: detail || {}}));
     }
 
+    function applyActiveRoleState(payload) {
+        if (!payload || typeof payload.role_active === "undefined" || !document.body) {
+            return;
+        }
+        var isActive = payload.role_active !== false;
+        document.body.dataset.roleAccessActive = isActive ? "true" : "false";
+        if (typeof window.applyAppRoleReadonlyState === "function") {
+            window.applyAppRoleReadonlyState(isActive);
+        }
+        dispatchWindowEvent("active-role-state-changed", {
+            active: isActive,
+            activeRoleCode: payload.active_role_code || "",
+            changedAt: payload.active_role_changed_at || ""
+        });
+    }
+
     function initRealtimeClient() {
         var config = mergeConfig(window.AppRealtimeConfig);
         var currentPath = window.location.pathname || "/";
@@ -76,6 +101,12 @@
         markRealtimeScreen(screen, shouldWatch);
 
         if (!shouldWatch || !window.fetch || !config.stateUrl) {
+            if (
+                window.AppPwaContractGuard
+                && typeof window.AppPwaContractGuard.markServerUnavailable === "function"
+            ) {
+                window.AppPwaContractGuard.markServerUnavailable();
+            }
             window.AppRealtime = {
                 config: config,
                 screen: screen,
@@ -107,6 +138,69 @@
         var realtimeUpdateButton = document.querySelector("[data-app-realtime-update-button]");
         var manualRefreshMode = screen && screen.mode === "manual";
         var manualRefreshVersion = null;
+        var authEnded = false;
+        var pollIntervalId = null;
+        var watchdogIntervalId = null;
+        var authRedirectScheduled = false;
+
+        function clearPendingMobileQueue() {
+            try {
+                window.localStorage.removeItem(config.mobileQueueKey);
+            } catch (error) {
+                // Storage can be unavailable in private or locked-down browser modes.
+            }
+        }
+
+        function terminateAuthentication() {
+            if (authEnded) {
+                return;
+            }
+            authEnded = true;
+            pendingVersion = null;
+            pendingPreviousVersion = 0;
+            pendingVersionSince = 0;
+            applyingUpdate = false;
+            manualRefreshVersion = null;
+            if (realtimePollController) {
+                try {
+                    realtimePollController.abort();
+                } catch (error) {}
+            }
+            realtimePollInFlight = false;
+            realtimePollController = null;
+            if (pollIntervalId !== null) {
+                window.clearInterval(pollIntervalId);
+                pollIntervalId = null;
+            }
+            if (watchdogIntervalId !== null) {
+                window.clearInterval(watchdogIntervalId);
+                watchdogIntervalId = null;
+            }
+            clearPendingMobileQueue();
+            applyActiveRoleState({
+                role_active: false,
+                active_role_code: "",
+                active_role_changed_at: ""
+            });
+            if (realtimeStatus) {
+                realtimeStatus.hidden = false;
+                realtimeStatus.textContent = "Сессия завершена. Открываем экран входа…";
+                realtimeStatus.classList.add("is-visible");
+            }
+            dispatchWindowEvent("app-authentication-ended", {
+                loginUrl: config.loginUrl
+            });
+            if (!authRedirectScheduled) {
+                authRedirectScheduled = true;
+                window.setTimeout(function () {
+                    if (window.location && typeof window.location.replace === "function") {
+                        window.location.replace(config.loginUrl);
+                    } else {
+                        window.location.href = config.loginUrl;
+                    }
+                }, 0);
+            }
+        }
 
         function publishRealtimeConnectionState(isConnected, detail) {
             var payload = Object.assign({
@@ -140,6 +234,9 @@
         }
 
         function inspectRealtimeWatchdog(reason) {
+            if (authEnded) {
+                return;
+            }
             var now = Date.now();
             if (realtimePollInFlight && realtimeLastPollStartedAt && now - realtimeLastPollStartedAt > realtimePollTimeoutMs + 1500) {
                 if (realtimePollController) {
@@ -328,6 +425,14 @@
                         applyingUpdate = false;
                         return;
                     }
+                    if (result === false && requiresCustomRefresh) {
+                        applyingUpdate = false;
+                        dispatchWindowEvent("operational-state-refresh-deferred", Object.assign({}, refreshContext, {
+                            reason: "custom_refresh_not_applied"
+                        }));
+                        window.setTimeout(applyPendingUpdate, 2000);
+                        return;
+                    }
                     reloadForOperationalUpdate(versionToApply);
                 }).catch(function () {
                     applyingUpdate = false;
@@ -382,9 +487,18 @@
 
         function pollOperationalState(options) {
             options = options || {};
+            if (authEnded) {
+                return;
+            }
             if (navigator && navigator.onLine === false) {
                 realtimeConsecutiveFailures += 1;
                 publishRealtimeConnectionState(false, {reason: "offline"});
+                if (
+                    window.AppPwaContractGuard
+                    && typeof window.AppPwaContractGuard.markServerUnavailable === "function"
+                ) {
+                    window.AppPwaContractGuard.markServerUnavailable();
+                }
                 return;
             }
             if (realtimePollInFlight && !options.force) {
@@ -418,6 +532,7 @@
             window.fetch(buildOperationalStatePollUrl(), fetchOptions)
                 .then(function (response) {
                     if (response.status === 401) {
+                        terminateAuthentication();
                         return null;
                     }
                     if (!response.ok) {
@@ -426,8 +541,18 @@
                     return response.json();
                 })
                 .then(function (payload) {
+                    if (authEnded) {
+                        return;
+                    }
+                    applyActiveRoleState(payload);
                     if (!payload || typeof payload.version === "undefined") {
                         return;
+                    }
+                    if (
+                        window.AppPwaContractGuard
+                        && typeof window.AppPwaContractGuard.acceptServerContract === "function"
+                    ) {
+                        window.AppPwaContractGuard.acceptServerContract(payload);
                     }
                     realtimeConsecutiveFailures = 0;
                     realtimeLastSuccessAt = Date.now();
@@ -447,7 +572,16 @@
                     }
                 })
                 .catch(function () {
+                    if (authEnded) {
+                        return;
+                    }
                     realtimeConsecutiveFailures += 1;
+                    if (
+                        window.AppPwaContractGuard
+                        && typeof window.AppPwaContractGuard.markServerUnavailable === "function"
+                    ) {
+                        window.AppPwaContractGuard.markServerUnavailable();
+                    }
                     if (realtimeConsecutiveFailures >= 2 || (options && options.force)) {
                         publishRealtimeConnectionState(false, {reason: "fetch_failed"});
                     }
@@ -455,14 +589,23 @@
                 })
                 .finally(function () {
                     window.clearTimeout(timeoutId);
+                    if (authEnded) {
+                        return;
+                    }
                     realtimePollInFlight = false;
                     realtimePollController = null;
                 });
         }
 
         function wakeRealtimeConnection(reason) {
+            if (authEnded) {
+                return;
+            }
             inspectRealtimeWatchdog(reason || "wake");
             window.setTimeout(function () {
+                if (authEnded) {
+                    return;
+                }
                 pollOperationalState({force: true});
             }, 0);
         }
@@ -484,7 +627,8 @@
                 lastSuccessAt: realtimeLastSuccessAt,
                 lastPollStartedAt: realtimeLastPollStartedAt,
                 manualRefreshMode: manualRefreshMode,
-                manualRefreshVersion: manualRefreshVersion
+                manualRefreshVersion: manualRefreshVersion,
+                authEnded: authEnded
             };
         }
 
@@ -508,11 +652,11 @@
         });
 
         pollOperationalState({force: true});
-        window.setInterval(function () {
+        pollIntervalId = window.setInterval(function () {
             inspectRealtimeWatchdog("interval_watchdog");
             pollOperationalState();
         }, pollIntervalMs);
-        window.setInterval(function () {
+        watchdogIntervalId = window.setInterval(function () {
             inspectRealtimeWatchdog("slow_watchdog");
         }, 2000);
         document.addEventListener("visibilitychange", function () {
@@ -533,12 +677,24 @@
             wakeRealtimeConnection("window_resume");
         });
         window.addEventListener("online", function () {
+            if (authEnded) {
+                return;
+            }
             realtimeConsecutiveFailures = 0;
             wakeRealtimeConnection("online");
         });
         window.addEventListener("offline", function () {
+            if (authEnded) {
+                return;
+            }
             realtimeConsecutiveFailures += 1;
             publishRealtimeConnectionState(false, {reason: "offline"});
+            if (
+                window.AppPwaContractGuard
+                && typeof window.AppPwaContractGuard.markServerUnavailable === "function"
+            ) {
+                window.AppPwaContractGuard.markServerUnavailable();
+            }
         });
         ["pointerdown", "pointerup", "touchstart", "touchend", "mousedown", "click", "keydown"].forEach(function (eventName) {
             document.addEventListener(eventName, function () {

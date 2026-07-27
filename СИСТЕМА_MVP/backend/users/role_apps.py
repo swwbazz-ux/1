@@ -7,6 +7,9 @@ from django.conf import settings
 from django.http import HttpResponse, JsonResponse
 
 
+APP_CONTRACT_VERSION = 'pwa-contract-v1'
+
+
 @dataclass(frozen=True)
 class RoleApp:
     role_code: str
@@ -56,7 +59,7 @@ ROLE_APPS = (
         icon_slug='driver',
         manifest_url='/driver.webmanifest',
         service_worker_url='/driver-sw.js',
-        shell_version='driver-mobile-shell-v99',
+        shell_version='driver-mobile-shell-v107',
     ),
     RoleApp(
         role_code='excavator_operator',
@@ -72,7 +75,7 @@ ROLE_APPS = (
         icon_slug='excavator',
         manifest_url='/excavator.webmanifest',
         service_worker_url='/excavator-sw.js',
-        shell_version='excavator-mobile-shell-v113',
+        shell_version='excavator-mobile-shell-v122',
     ),
     RoleApp(
         role_code='mining_master',
@@ -88,7 +91,7 @@ ROLE_APPS = (
         icon_slug='mining-master',
         manifest_url='/mining-master-manifest.webmanifest',
         service_worker_url='/mining-master-sw.js',
-        shell_version='mining-master-mobile-shell-v108',
+        shell_version='mining-master-mobile-shell-v113',
     ),
     RoleApp(
         role_code='deputy_mining_manager',
@@ -104,7 +107,7 @@ ROLE_APPS = (
         icon_slug='deputy-mining-manager',
         manifest_url='/deputy-mining-manager.webmanifest',
         service_worker_url='/deputy-mining-manager-sw.js',
-        shell_version='deputy-mining-manager-desktop-shell-v8',
+        shell_version='deputy-mining-manager-desktop-shell-v14',
     ),
     RoleApp(
         role_code='dispatcher',
@@ -120,7 +123,7 @@ ROLE_APPS = (
         icon_slug='dispatcher',
         manifest_url='/dispatcher.webmanifest',
         service_worker_url='/dispatcher-sw.js',
-        shell_version='dispatcher-desktop-shell-v33',
+        shell_version='dispatcher-desktop-shell-v38',
     ),
     RoleApp(
         role_code='oup',
@@ -136,7 +139,7 @@ ROLE_APPS = (
         icon_slug='oup',
         manifest_url='/oup.webmanifest',
         service_worker_url='/oup-sw.js',
-        shell_version='oup-shell-v16',
+        shell_version='oup-shell-v21',
     ),
     RoleApp(
         role_code='timekeeper',
@@ -152,7 +155,7 @@ ROLE_APPS = (
         icon_slug='timekeeper',
         manifest_url='/timekeeper.webmanifest',
         service_worker_url='/timekeeper-sw.js',
-        shell_version='timekeeper-shell-v6',
+        shell_version='timekeeper-shell-v8',
     ),
     RoleApp(
         role_code='site_manager',
@@ -168,7 +171,7 @@ ROLE_APPS = (
         icon_slug='site-manager',
         manifest_url='/site-manager.webmanifest',
         service_worker_url='/site-manager-sw.js',
-        shell_version='site-manager-shell-v6',
+        shell_version='site-manager-shell-v8',
     ),
     RoleApp(
         role_code='mechanic',
@@ -184,7 +187,7 @@ ROLE_APPS = (
         icon_slug='mechanic',
         manifest_url='/mechanic.webmanifest',
         service_worker_url='/mechanic-sw.js',
-        shell_version='mechanic-shell-v1',
+        shell_version='mechanic-shell-v6',
     ),
     RoleApp(
         role_code='manager',
@@ -200,7 +203,7 @@ ROLE_APPS = (
         icon_slug='management',
         manifest_url='/management.webmanifest',
         service_worker_url='/management-sw.js',
-        shell_version='management-shell-v1',
+        shell_version='management-shell-v5',
     ),
     RoleApp(
         role_code='admin',
@@ -216,7 +219,7 @@ ROLE_APPS = (
         icon_slug='admin',
         manifest_url='/system-admin.webmanifest',
         service_worker_url='/system-admin-sw.js',
-        shell_version='system-admin-shell-v14',
+        shell_version='system-admin-shell-v19',
     ),
 )
 
@@ -263,6 +266,18 @@ def get_role_app_for_request(request):
     return get_role_app_for_host(request.get_host())
 
 
+def get_role_app_for_path(path):
+    normalized_path = path or '/'
+    matches = [
+        app
+        for app in ROLE_APPS
+        if normalized_path.startswith(app.legacy_scope)
+    ]
+    if not matches:
+        return None
+    return max(matches, key=lambda app: len(app.legacy_scope))
+
+
 def is_isolated_role_app_request(request, role_code=None):
     app = get_role_app_for_request(request)
     if not app:
@@ -304,6 +319,9 @@ def build_role_app_manifest(request, role_code):
             }
         )
     return {
+        'app_contract_version': APP_CONTRACT_VERSION,
+        'shell_version': app.shell_version,
+        'role_code': app.role_code,
         'id': app.start_url,
         'name': app.name,
         'short_name': app.short_name,
@@ -339,12 +357,15 @@ def build_basic_role_service_worker(role_code):
     assets = [
         app.manifest_url,
         '/static/css/app.css',
+        '/static/js/role-readonly.js',
         app.icon_180_url,
         app.icon_192_url,
         app.icon_512_url,
         app.icon_maskable_url,
     ]
     return f'''
+const APP_CONTRACT_VERSION = {json.dumps(APP_CONTRACT_VERSION)};
+const ROLE_CODE = {json.dumps(app.role_code)};
 const CACHE_PREFIX = {json.dumps(app.shell_version.rsplit("-v", 1)[0] + "-")};
 const CACHE_NAME = {json.dumps(app.shell_version)};
 const MANIFEST_URL = {json.dumps(app.manifest_url)};
@@ -368,13 +389,18 @@ self.addEventListener("activate", event => {{
   );
 }});
 
-async function cacheFirst(request) {{
+async function networkFirstStatic(request) {{
   const cache = await caches.open(CACHE_NAME);
-  const cached = await cache.match(request, {{ ignoreSearch: true }});
-  if (cached) return cached;
-  const response = await fetch(request, {{ cache: "reload" }});
-  if (response && response.ok) cache.put(request, response.clone());
-  return response;
+  try {{
+    const response = await fetch(request, {{ cache: "no-store" }});
+    if (response && response.ok) await cache.put(request, response.clone());
+    return response;
+  }} catch (error) {{
+    return (await cache.match(request)) || new Response(
+      "Ресурс недоступен без сети.",
+      {{ status: 503, headers: {{ "Content-Type": "text/plain; charset=utf-8" }} }}
+    );
+  }}
 }}
 
 self.addEventListener("fetch", event => {{
@@ -390,7 +416,7 @@ self.addEventListener("fetch", event => {{
     return;
   }}
   if (url.pathname === MANIFEST_URL || url.pathname.startsWith("/static/")) {{
-    event.respondWith(cacheFirst(request));
+    event.respondWith(networkFirstStatic(request));
   }}
 }});
 
@@ -398,13 +424,19 @@ self.addEventListener("message", event => {{
   const data = event.data || {{}};
   if (data.type === "SKIP_WAITING") self.skipWaiting();
   if (data.type === "GET_VERSION" && event.ports && event.ports[0]) {{
-    event.ports[0].postMessage({{ version: CACHE_NAME }});
+    event.ports[0].postMessage({{
+      version: CACHE_NAME,
+      appContractVersion: APP_CONTRACT_VERSION,
+      shellVersion: CACHE_NAME,
+      roleCode: ROLE_CODE
+    }});
   }}
 }});
 '''.strip()
 
 
 def role_app_service_worker_response(request, role_code, script=None):
+    app = ROLE_APPS_BY_CODE[role_code]
     response = HttpResponse(
         script or build_basic_role_service_worker(role_code),
         content_type='application/javascript; charset=utf-8',
@@ -412,4 +444,7 @@ def role_app_service_worker_response(request, role_code, script=None):
     response['Cache-Control'] = 'no-cache'
     response['Service-Worker-Allowed'] = role_app_scope(request, role_code)
     response['X-Content-Type-Options'] = 'nosniff'
+    response['X-App-Contract-Version'] = APP_CONTRACT_VERSION
+    response['X-App-Shell-Version'] = app.shell_version
+    response['X-App-Role-Code'] = app.role_code
     return response

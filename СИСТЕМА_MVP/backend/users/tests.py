@@ -4,6 +4,7 @@ from decimal import Decimal
 from io import BytesIO
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
+from zoneinfo import ZoneInfo
 
 from django.core.files.base import ContentFile
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -16,6 +17,7 @@ from PIL import Image
 
 from assignments.models import AssignmentStatus, EquipmentAssignment, ExcavatorPlacement, HaulAssignment, WorkShiftType
 from core.models import OperationalStateEvent
+from core.production_time import production_work_date
 from downtimes.models import DowntimeEvent, DowntimeReason
 from references.models import (
     Dormitory,
@@ -79,6 +81,12 @@ class AccessLoginTests(TestCase):
         )
 
     def create_registered_driver_shift(self, truck=None):
+        self.employee.status = Employee.Status.ACTIVE
+        self.employee.is_active = True
+        self.employee.save(update_fields=['status', 'is_active'])
+        self.access.status = EmployeeAccess.Status.ACTIVATED
+        self.access.is_active = True
+        self.access.save(update_fields=['status', 'is_active'])
         truck_type = truck.equipment_type if truck else EquipmentType.objects.create(name='Самосвал')
         truck = truck or Equipment.objects.create(equipment_type=truck_type, garage_number='10')
         dormitory = Dormitory.objects.create(number='5')
@@ -177,10 +185,13 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, reverse('driver_manifest'))
         self.assertContains(response, 'rel="manifest"')
         self.assertContains(response, '/driver-sw.js')
-        self.assertContains(response, 'driver-mobile-shell-v99')
+        self.assertContains(response, 'driver-mobile-shell-v107')
         self.assertContains(response, 'data-driver-pwa-update-modal')
         self.assertContains(response, 'data-driver-pwa-update-badge')
-        self.assertContains(response, 'mode: "custom", path: "^/driver/(?:shift/?)?$"')
+        self.assertContains(
+            response,
+            'mode: "custom", path: "^/driver/(?:shift(?:/close)?/?)?$"',
+        )
         self.assertContains(response, 'window.applyOperationalStateRefresh')
         self.assertContains(response, 'window.bindDriverMobileShell')
         self.assertNotContains(response, 'window.' + 'alert')
@@ -263,8 +274,11 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, 'width: max-content')
         self.assertNotContains(response, '--driver-dial-size: clamp(260px, 76vw, 380px)')
         self.assertContains(response, 'var holdMs = 2000')
-        self.assertContains(response, 'holdButton.style.setProperty("--driver-hold", "100")')
-        self.assertContains(response, 'holdButton.style.setProperty("--driver-hold-angle", "360deg")')
+        self.assertContains(
+            response,
+            'holdButton.style.setProperty("--driver-hold", percent.toFixed(2))',
+        )
+        self.assertContains(response, '((percent / 100) * 360).toFixed(2) + "deg"')
         self.assertContains(response, 'window.requestAnimationFrame(function ()')
         self.assertContains(response, 'data-driver-progress=')
         self.assertContains(response, 'function syncDriverDialProgress()')
@@ -318,12 +332,14 @@ class AccessLoginTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Service-Worker-Allowed'], '/driver/')
-        self.assertIn('driver-mobile-shell-v99', script)
+        self.assertIn('driver-mobile-shell-v107', script)
         self.assertIn('/driver/', script)
         self.assertIn('/driver/shift/', script)
         self.assertIn('/driver.webmanifest', script)
         self.assertIn('/static/css/app.css', script)
-        self.assertIn('ignoreSearch: true', script)
+        self.assertIn('/static/js/role-readonly.js', script)
+        self.assertNotIn('ignoreSearch: true', script)
+        self.assertIn('networkFirstStatic(request)', script)
         self.assertIn('GET_VERSION', script)
         self.assertIn('SKIP_WAITING', script)
         self.assertIn('skipWaiting', script)
@@ -1991,6 +2007,7 @@ class AccessLoginTests(TestCase):
             calculation_mode=PlanCalculationMode.TRIPS,
             plan_value='18.00',
             is_active=True,
+            active_from=production_work_date(),
         )
         group.equipment.add(truck)
         EquipmentAssignment.objects.create(
@@ -2146,11 +2163,17 @@ class AccessLoginTests(TestCase):
         truck = self.create_registered_driver_shift(truck=truck)
 
         dispatcher_role = Role.objects.create(code='dispatcher', name='Диспетчер')
-        dispatcher = Employee.objects.create(full_name='Тестовый диспетчер')
+        dispatcher = Employee.objects.create(
+            full_name='Тестовый диспетчер',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
         dispatcher_access = EmployeeAccess.objects.create(
             employee=dispatcher,
             role=dispatcher_role,
             access_code='5000',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
         )
         EmployeeShift.objects.create(
             employee=dispatcher,
@@ -2194,11 +2217,17 @@ class AccessLoginTests(TestCase):
         self.assertEqual(assignment.status, AssignmentStatus.ACCEPTED)
 
         excavator_role = Role.objects.create(code='excavator_operator', name='Машинист экскаватора')
-        excavator_operator = Employee.objects.create(full_name='Тестовый машинист')
+        excavator_operator = Employee.objects.create(
+            full_name='Тестовый машинист',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
         excavator_access = EmployeeAccess.objects.create(
             employee=excavator_operator,
             role=excavator_role,
             access_code='3000',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
         )
         EmployeeShift.objects.create(
             employee=excavator_operator,
@@ -2390,6 +2419,7 @@ class AccessLoginTests(TestCase):
         trip_response = operator_client.post(
             '/excavator/work/',
             {
+                'client_action_id': 'legacy-trip-create-1',
                 'assignment': assignment.id,
                 'rock_type': rock.id,
                 'dump_point': dump_point.id,
@@ -2405,7 +2435,9 @@ class AccessLoginTests(TestCase):
         )
         self.assertEqual(trip_response.status_code, 200)
         trip = Trip.objects.get()
-        self.assertEqual(trip.status, TripStatus.ACTIVE)
+        self.assertEqual(trip.status, TripStatus.LOADED_WAITING_UNLOAD)
+        self.assertIsNone(trip.volume_m3)
+        self.assertIsNone(trip.tonnage)
         self.assertEqual(trip.loading_shift, operator_shift)
         self.assertEqual(trip.planned_volume_m3, Decimal('7000.00'))
         self.assertEqual(trip.loading_horizon, '75')
@@ -2484,7 +2516,11 @@ class AccessLoginTests(TestCase):
         section = DormitorySection.objects.create(block=block, name='А')
         self.assign_driver_work(truck)
         excavator_role = Role.objects.create(code='excavator_operator', name='Машинист экскаватора')
-        excavator_operator = Employee.objects.create(full_name='Тестовый машинист')
+        excavator_operator = Employee.objects.create(
+            full_name='Тестовый машинист',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
         EmployeeAccess.objects.create(employee=excavator_operator, role=excavator_role, access_code='3000')
         driver = Employee.objects.create(full_name='Тестовый водитель')
         EmployeeShift.objects.create(
@@ -2551,7 +2587,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(driver_shift_response, 'ККД')
         self.assertContains(driver_shift_response, 'window.applyOperationalStateRefresh')
         self.assertContains(driver_shift_response, 'data-realtime-mode="custom"')
-        self.assertContains(driver_shift_response, 'driver-mobile-shell-v99')
+        self.assertContains(driver_shift_response, 'driver-mobile-shell-v107')
 
     def test_driver_downtime_buttons_are_rendered_from_server_reference(self):
         truck = self.create_registered_driver_shift()
@@ -2775,7 +2811,11 @@ class AccessLoginTests(TestCase):
         rock = RockType.objects.create(name='Руда', density='2.50')
         dump_point = DumpPoint.objects.create(name='ККД')
         excavator_role = Role.objects.create(code='excavator_operator', name='Машинист экскаватора')
-        excavator_operator = Employee.objects.create(full_name='Тестовый машинист')
+        excavator_operator = Employee.objects.create(
+            full_name='Тестовый машинист',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
         excavator_access = EmployeeAccess.objects.create(
             employee=excavator_operator,
             role=excavator_role,
@@ -2784,7 +2824,7 @@ class AccessLoginTests(TestCase):
             status=EmployeeAccess.Status.ACTIVATED,
         )
         driver = Employee.objects.create(full_name='Тестовый водитель')
-        EmployeeShift.objects.create(
+        driver_shift = EmployeeShift.objects.create(
             employee=driver,
             shift_type='day',
             equipment=truck,
@@ -2805,12 +2845,31 @@ class AccessLoginTests(TestCase):
         operator_session.save()
         operator_client.post(
             '/excavator/work/',
-            {'assignment': assignment.id, 'rock_type': rock.id, 'dump_point': dump_point.id},
+            {
+                'client_action_id': 'legacy-capacity-trip-create-1',
+                'assignment': assignment.id,
+                'rock_type': rock.id,
+                'dump_point': dump_point.id,
+            },
             follow=True,
             HTTP_HOST='localhost',
         )
         trip = Trip.objects.get()
 
+        self.assertEqual(trip.status, TripStatus.LOADED_WAITING_UNLOAD)
+        self.assertIsNone(trip.volume_m3)
+        self.assertIsNone(trip.tonnage)
+
+        from trips.views import finalize_trip_unloaded
+
+        finalize_trip_unloaded(
+            trip,
+            driver=driver,
+            unloading_shift=driver_shift,
+        )
+        trip.refresh_from_db()
+
+        self.assertEqual(trip.status, TripStatus.COMPLETED)
         self.assertEqual(trip.volume_m3, Decimal('38.00'))
         self.assertEqual(trip.tonnage, Decimal('95.00'))
 
@@ -2940,7 +2999,11 @@ class AccessLoginTests(TestCase):
         )
 
         self.client.post('/', {'access_code': '5010'}, follow=True, HTTP_HOST='localhost')
-        response = self.client.get('/dispatcher/transport/', HTTP_HOST='localhost')
+        response = self.client.get(
+            '/dispatcher/transport/',
+            {'date': selected_date.isoformat()},
+            HTTP_HOST='localhost',
+        )
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'Автотранспорт')
@@ -2948,7 +3011,11 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, 'Водитель автотранспорта MVP')
         self.assertContains(response, '20,0')
 
-        export_response = self.client.get('/dispatcher/transport/export/', HTTP_HOST='localhost')
+        export_response = self.client.get(
+            '/dispatcher/transport/export/',
+            {'date': selected_date.isoformat()},
+            HTTP_HOST='localhost',
+        )
         workbook = load_workbook(BytesIO(export_response.content))
         values = [
             cell
@@ -2965,6 +3032,216 @@ class AccessLoginTests(TestCase):
         self.assertIn('Автотранспорт диспетчера', values)
         self.assertIn('15', values)
         self.assertIn('Водитель автотранспорта MVP', values)
+
+    def test_dispatcher_transport_legacy_night_trip_survives_all_night_filters_on_page_and_excel(self):
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        truck = Equipment.objects.create(equipment_type=truck_type, garage_number='LEGACY-15')
+        excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='LEGACY-1')
+        rock = RockType.objects.create(name='Руда legacy')
+        dump_point = DumpPoint.objects.create(name='ККД legacy')
+        dispatcher_role = Role.objects.create(code='dispatcher', name='Диспетчер')
+        dispatcher = Employee.objects.create(full_name='Диспетчер legacy')
+        EmployeeAccess.objects.create(employee=dispatcher, role=dispatcher_role, access_code='5011')
+        production_date = datetime(2026, 7, 23).date()
+        completed_at = datetime(2026, 7, 24, 1, 30, tzinfo=ZoneInfo('Asia/Vladivostok'))
+        Trip.objects.create(
+            excavator=excavator,
+            truck=truck,
+            rock_type=rock,
+            dump_point=dump_point,
+            status=TripStatus.COMPLETED,
+            volume_m3='41.00',
+            tonnage='102.50',
+            completed_at=completed_at,
+            unloading_shift=None,
+        )
+        self.client.post('/', {'access_code': '5011'}, follow=True, HTTP_HOST='localhost')
+
+        def page_trip_count(shift_type):
+            response = self.client.get(
+                '/dispatcher/transport/',
+                {'date': production_date.isoformat(), 'shift_type': shift_type},
+                HTTP_HOST='localhost',
+            )
+            self.assertEqual(response.status_code, 200)
+            return response.context['kpis']['trips']
+
+        def excel_trip_count(shift_type):
+            response = self.client.get(
+                '/dispatcher/transport/export/',
+                {'date': production_date.isoformat(), 'shift_type': shift_type},
+                HTTP_HOST='localhost',
+            )
+            self.assertEqual(response.status_code, 200)
+            workbook = load_workbook(BytesIO(response.content), data_only=True)
+            values = {
+                row[0]: row[1]
+                for row in workbook.active.iter_rows(min_row=1, max_col=2, values_only=True)
+                if row[0]
+            }
+            return values['Рейсы']
+
+        self.assertEqual(page_trip_count(''), 1)
+        self.assertEqual(page_trip_count('day'), 0)
+        self.assertEqual(page_trip_count('night'), 1)
+        self.assertEqual(excel_trip_count(''), 1)
+        self.assertEqual(excel_trip_count('day'), 0)
+        self.assertEqual(excel_trip_count('night'), 1)
+
+    def test_control_instant_appears_on_production_date_pages_and_excel(self):
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        truck = Equipment.objects.create(equipment_type=truck_type, garage_number='КОНТРОЛЬ-15')
+        excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='КОНТРОЛЬ-1')
+        rock = RockType.objects.create(name='Руда контроль 01:30')
+        dump_point = DumpPoint.objects.create(name='ККД контроль 01:30')
+        dispatcher_role = Role.objects.create(code='dispatcher', name='Диспетчер')
+        dispatcher = Employee.objects.create(full_name='Диспетчер контроль 01:30')
+        EmployeeAccess.objects.create(employee=dispatcher, role=dispatcher_role, access_code='5012')
+        control_instant = datetime(2026, 7, 24, 1, 30, tzinfo=ZoneInfo('Asia/Vladivostok'))
+        production_date = datetime(2026, 7, 23).date()
+        trip = Trip.objects.create(
+            excavator=excavator,
+            truck=truck,
+            rock_type=rock,
+            dump_point=dump_point,
+            status=TripStatus.COMPLETED,
+            volume_m3='43.00',
+            completed_at=control_instant,
+        )
+        reason = DowntimeReason.objects.create(
+            name='Простой контроль 01:30',
+            equipment_type=excavator_type,
+        )
+        DowntimeEvent.objects.create(
+            equipment=excavator,
+            employee=dispatcher,
+            reason=reason,
+            started_at=control_instant,
+        )
+        action = DispatcherActionLog.objects.create(
+            actor=dispatcher,
+            action_type=DispatcherActionType.COMPLETE_TRIP,
+            trip=trip,
+            target_summary='Действие контроль 01:30',
+        )
+        DispatcherActionLog.objects.filter(pk=action.pk).update(created_at=control_instant)
+        self.client.post('/', {'access_code': '5012'}, follow=True, HTTP_HOST='localhost')
+
+        query = {'date': production_date.isoformat()}
+        mining_page = self.client.get(
+            '/dispatcher/mining-volumes/',
+            {**query, 'shift_type': 'night'},
+            HTTP_HOST='localhost',
+        )
+        downtime_page = self.client.get('/dispatcher/downtimes/', query, HTTP_HOST='localhost')
+        shift_log_page = self.client.get('/dispatcher/shift-log/', query, HTTP_HOST='localhost')
+
+        self.assertEqual(mining_page.context['kpis']['trips'], 1)
+        self.assertEqual(downtime_page.context['kpis']['events'], 1)
+        self.assertEqual(shift_log_page.context['kpis']['trips'], 1)
+        self.assertEqual(shift_log_page.context['kpis']['downtimes'], 1)
+        self.assertEqual(shift_log_page.context['kpis']['actions'], 1)
+
+        for url, marker in (
+            ('/dispatcher/mining-volumes/export/', 'ККД контроль 01:30'),
+            ('/dispatcher/downtimes/export/', 'Простой контроль 01:30'),
+            ('/dispatcher/shift-log/export/', 'Действие контроль 01:30'),
+        ):
+            export = self.client.get(url, query, HTTP_HOST='localhost')
+            self.assertEqual(export.status_code, 200)
+            workbook = load_workbook(BytesIO(export.content), data_only=True)
+            values = {
+                cell
+                for row in workbook.active.iter_rows(values_only=True)
+                for cell in row
+                if cell not in {None, ''}
+            }
+            self.assertIn(marker, values)
+
+    def test_dispatcher_transport_separates_same_truck_by_unloading_shift(self):
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        truck = Equipment.objects.create(equipment_type=truck_type, garage_number='15')
+        excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='1')
+        rock = RockType.objects.create(name='Руда')
+        dump_point = DumpPoint.objects.create(name='ККД')
+        day_driver = Employee.objects.create(full_name='Водитель день')
+        night_driver = Employee.objects.create(full_name='Водитель ночь')
+        dispatcher_role = Role.objects.create(code='dispatcher', name='Диспетчер')
+        dispatcher = Employee.objects.create(full_name='Тестовый диспетчер')
+        EmployeeAccess.objects.create(employee=dispatcher, role=dispatcher_role, access_code='5011')
+        selected_date = timezone.localdate()
+        day_opened = timezone.make_aware(datetime.combine(selected_date, datetime.min.time().replace(hour=7)))
+        night_opened = timezone.make_aware(datetime.combine(selected_date, datetime.min.time().replace(hour=19)))
+        day_shift = EmployeeShift.objects.create(
+            employee=day_driver,
+            shift_type='day',
+            equipment=truck,
+            opened_at=day_opened,
+            closed_at=day_opened + timedelta(hours=12),
+        )
+        night_shift = EmployeeShift.objects.create(
+            employee=night_driver,
+            shift_type='night',
+            equipment=truck,
+            opened_at=night_opened,
+            closed_at=night_opened + timedelta(hours=12),
+        )
+        for shift, volumes in ((day_shift, ('47.00', '47.00')), (night_shift, ('47.00', '57.00'))):
+            for index, volume in enumerate(volumes):
+                completed_at = shift.opened_at + timedelta(minutes=index + 1)
+                if shift == night_shift and index == 1:
+                    completed_at = night_shift.opened_at + timedelta(hours=6, minutes=30)
+                Trip.objects.create(
+                    excavator=excavator,
+                    truck=truck,
+                    rock_type=rock,
+                    dump_point=dump_point,
+                    unloading_shift=shift,
+                    status=TripStatus.COMPLETED,
+                    volume_m3=volume,
+                    tonnage='100.00',
+                    completed_at=completed_at,
+                )
+
+        self.client.post('/', {'access_code': '5011'}, follow=True, HTTP_HOST='localhost')
+        all_response = self.client.get(
+            f'/dispatcher/transport/?date={selected_date:%Y-%m-%d}',
+            HTTP_HOST='localhost',
+        )
+        day_response = self.client.get(
+            f'/dispatcher/transport/?date={selected_date:%Y-%m-%d}&shift_type=day',
+            HTTP_HOST='localhost',
+        )
+        night_response = self.client.get(
+            f'/dispatcher/transport/?date={selected_date:%Y-%m-%d}&shift_type=night',
+            HTTP_HOST='localhost',
+        )
+        next_date_response = self.client.get(
+            f'/dispatcher/transport/?date={selected_date + timedelta(days=1):%Y-%m-%d}',
+            HTTP_HOST='localhost',
+        )
+
+        self.assertEqual(all_response.context['kpis']['trips'], 4)
+        self.assertEqual(all_response.context['kpis']['volume'], '198')
+        self.assertEqual([row['trips'] for row in all_response.context['rows']], [2, 2])
+        self.assertEqual(day_response.context['kpis']['trips'], 2)
+        self.assertEqual(day_response.context['kpis']['volume'], '94')
+        self.assertEqual(night_response.context['kpis']['trips'], 2)
+        self.assertEqual(night_response.context['kpis']['volume'], '104')
+        self.assertEqual(next_date_response.context['kpis']['trips'], 0)
+        self.assertEqual(next_date_response.context['kpis']['volume'], '0')
+
+        export_response = self.client.get(
+            f'/dispatcher/transport/export/?date={selected_date:%Y-%m-%d}',
+            HTTP_HOST='localhost',
+        )
+        workbook = load_workbook(BytesIO(export_response.content), data_only=True)
+        sheet_values = list(workbook.active.iter_rows(values_only=True))
+        self.assertIn(('Рейсы', 4), [row[:2] for row in sheet_values])
+        self.assertIn(('Объем', '198'), [row[:2] for row in sheet_values])
 
     def test_dispatcher_can_open_downtimes_dashboard_and_export_it(self):
         excavator_type = EquipmentType.objects.create(name='Экскаватор')
@@ -3000,7 +3277,11 @@ class AccessLoginTests(TestCase):
         )
 
         self.client.post('/', {'access_code': '5020'}, follow=True, HTTP_HOST='localhost')
-        response = self.client.get('/dispatcher/downtimes/', HTTP_HOST='localhost')
+        response = self.client.get(
+            '/dispatcher/downtimes/',
+            {'date': selected_date.isoformat()},
+            HTTP_HOST='localhost',
+        )
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'Простои и отклонения')
@@ -3008,7 +3289,11 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, '6')
         self.assertContains(response, '34')
 
-        export_response = self.client.get('/dispatcher/downtimes/export/', HTTP_HOST='localhost')
+        export_response = self.client.get(
+            '/dispatcher/downtimes/export/',
+            {'date': selected_date.isoformat()},
+            HTTP_HOST='localhost',
+        )
         workbook = load_workbook(BytesIO(export_response.content))
         values = [
             cell
@@ -3222,8 +3507,16 @@ class AccessLoginTests(TestCase):
         )
 
         self.client.post('/', {'access_code': '5050'}, follow=True, HTTP_HOST='localhost')
-        response = self.client.get('/dispatcher/management/', HTTP_HOST='localhost')
-        export_response = self.client.get('/dispatcher/management/export/', HTTP_HOST='localhost')
+        response = self.client.get(
+            '/dispatcher/management/',
+            {'date': selected_date.isoformat()},
+            HTTP_HOST='localhost',
+        )
+        export_response = self.client.get(
+            '/dispatcher/management/export/',
+            {'date': selected_date.isoformat()},
+            HTTP_HOST='localhost',
+        )
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'Витрина диспетчерской')
@@ -3352,8 +3645,18 @@ class AccessLoginTests(TestCase):
         truck = Equipment.objects.create(equipment_type=truck_type, garage_number='10')
         excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='1')
         dispatcher_role = Role.objects.create(code='dispatcher', name='Диспетчер')
-        dispatcher = Employee.objects.create(full_name='Тестовый диспетчер')
-        access = EmployeeAccess.objects.create(employee=dispatcher, role=dispatcher_role, access_code='5000')
+        dispatcher = Employee.objects.create(
+            full_name='Тестовый диспетчер',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        access = EmployeeAccess.objects.create(
+            employee=dispatcher,
+            role=dispatcher_role,
+            access_code='5000',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
         ExcavatorPlacement.objects.create(excavator=excavator, zone=ExcavatorPlacement.Zone.INACTIVE)
         session = self.client.session
         session['employee_access_id'] = access.id
@@ -3398,6 +3701,7 @@ class AccessLoginTests(TestCase):
         EmployeeShift.objects.create(
             employee=dispatcher,
             shift_type='day',
+            workplace_code='dispatcher',
             opened_at=timezone.now() - timedelta(hours=1),
             opened_by=dispatcher,
         )
@@ -3472,18 +3776,37 @@ class AccessLoginTests(TestCase):
 
     def test_dispatcher_sees_open_shifts_and_can_service_close_driver_shift(self):
         truck_type = EquipmentType.objects.create(name='Самосвал')
-        truck = Equipment.objects.create(equipment_type=truck_type, garage_number='10')
+        truck_model = EquipmentModel.objects.create(
+            equipment_type=truck_type,
+            name='БЕЛАЗ для служебного закрытия',
+            fuel_capacity_limit_l=2000,
+        )
+        truck = Equipment.objects.create(
+            equipment_type=truck_type,
+            model=truck_model,
+            garage_number='10',
+        )
         dispatcher_role = Role.objects.create(code='dispatcher', name='Диспетчер')
         driver_role, _ = Role.objects.get_or_create(code='driver', defaults={'name': 'Водитель самосвала'})
         dispatcher = Employee.objects.create(full_name='Тестовый диспетчер')
         driver = Employee.objects.create(full_name='Тестовый водитель')
         EmployeeAccess.objects.create(employee=dispatcher, role=dispatcher_role, access_code='5000')
         EmployeeAccess.objects.create(employee=driver, role=driver_role, access_code='2100')
-        EmployeeShift.objects.create(employee=dispatcher, shift_type='day', opened_at=timezone.now(), opened_by=dispatcher)
+        EmployeeShift.objects.create(
+            employee=dispatcher,
+            shift_type='day',
+            workplace_code='dispatcher',
+            opened_at=timezone.now(),
+            opened_by=dispatcher,
+        )
         shift = EmployeeShift.objects.create(
             employee=driver,
             shift_type='day',
+            workplace_code='driver',
             equipment=truck,
+            start_fuel='100.00',
+            start_mileage='1000.00',
+            start_engine_hours='100.00',
             opened_at=timezone.now(),
             opened_by=driver,
         )
@@ -3499,7 +3822,12 @@ class AccessLoginTests(TestCase):
 
         close_response = self.client.post(
             f'/dispatcher/shifts/{shift.id}/service-close/',
-            {'reason': 'Сотрудник не смог закрыть смену'},
+            {
+                'reason': 'Сотрудник не смог закрыть смену',
+                'end_fuel': '90.00',
+                'end_mileage': '1001.00',
+                'end_engine_hours': '101.00',
+            },
             follow=True,
             HTTP_HOST='localhost',
         )
@@ -4277,7 +4605,11 @@ class AccessLoginTests(TestCase):
         mechanic_role = Role.objects.create(code='mechanic', name='Mechanic')
         mechanic = Employee.objects.create(full_name='Mechanic MVP')
         EmployeeAccess.objects.create(employee=mechanic, role=mechanic_role, access_code='7000')
-        reason = DowntimeReason.objects.create(name='Hydraulics', equipment_type=excavator_type)
+        reason = DowntimeReason.objects.create(
+            name='Hydraulics',
+            equipment_type=excavator_type,
+            show_for_mechanic=True,
+        )
         DowntimeEvent.objects.create(
             equipment=excavator,
             employee=mechanic,
@@ -4294,6 +4626,40 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, 'Hydraulics')
         self.assertContains(response, 'Closed downtime')
         self.assertContains(response, '1 ч 30 мин')
+
+    def test_downtime_daily_summary_page_and_excel_use_production_date_after_midnight(self):
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='СВОДКА-23')
+        dispatcher_role = Role.objects.create(code='dispatcher', name='Диспетчер')
+        dispatcher = Employee.objects.create(full_name='Диспетчер сводки')
+        EmployeeAccess.objects.create(employee=dispatcher, role=dispatcher_role, access_code='7099')
+        reason = DowntimeReason.objects.create(
+            name='Сводка после полуночи',
+            equipment_type=excavator_type,
+        )
+        started_at = datetime(2026, 7, 24, 1, 30, tzinfo=ZoneInfo('Asia/Vladivostok'))
+        DowntimeEvent.objects.create(
+            equipment=excavator,
+            employee=dispatcher,
+            reason=reason,
+            started_at=started_at,
+            ended_at=started_at + timedelta(hours=1),
+        )
+        self.client.post('/', {'access_code': '7099'}, follow=True, HTTP_HOST='localhost')
+        query = {'date_from': '2026-07-23', 'date_to': '2026-07-23'}
+
+        page = self.client.get('/reports/downtimes/', query, HTTP_HOST='localhost')
+        export = self.client.get('/reports/downtimes/export/', query, HTTP_HOST='localhost')
+
+        self.assertEqual(page.status_code, 200)
+        self.assertEqual(page.context['daily_summary'][0]['date'], datetime(2026, 7, 23).date())
+        workbook = load_workbook(BytesIO(export.content), data_only=True)
+        summary_dates = [
+            workbook.active.cell(row=row, column=4).value
+            for row in range(14, 25)
+        ]
+        self.assertIn('23.07.2026', summary_dates)
+        self.assertNotIn('24.07.2026', summary_dates)
 
     def test_downtime_report_filters_open_events_and_exports_excel(self):
         excavator_type = EquipmentType.objects.create(name='Excavator')
@@ -4448,7 +4814,11 @@ class AccessLoginTests(TestCase):
         dispatcher = Employee.objects.create(full_name='Dispatcher MVP')
         mechanic = Employee.objects.create(full_name='Mechanic MVP')
         EmployeeAccess.objects.create(employee=dispatcher, role=dispatcher_role, access_code='5000')
-        reason = DowntimeReason.objects.create(name='Hydraulics', equipment_type=excavator_type)
+        reason = DowntimeReason.objects.create(
+            name='Hydraulics',
+            equipment_type=excavator_type,
+            show_for_mechanic=True,
+        )
         started_at = timezone.make_aware(datetime(2026, 6, 17, 9, 0))
         ended_at = timezone.make_aware(datetime(2026, 6, 17, 10, 30))
         DowntimeEvent.objects.create(
@@ -4472,6 +4842,9 @@ class AccessLoginTests(TestCase):
         values = [cell.value for row in sheet.iter_rows() for cell in row]
         self.assertIn('Hydraulics', values)
         self.assertIn('Replace hose', values)
+        self.assertIn('I смена (дневная 07:00 - 19:00)', values)
+        self.assertIn('II смена (ночная 19:00 - 07:00)', values)
+        self.assertNotIn('I смена (дневная 08:00 - 20:00)', values)
 
     def test_management_dashboard_shows_open_mechanic_downtimes(self):
         excavator_type = EquipmentType.objects.create(name='Excavator')
@@ -4481,7 +4854,11 @@ class AccessLoginTests(TestCase):
         manager = Employee.objects.create(full_name='Manager MVP')
         mechanic = Employee.objects.create(full_name='Mechanic MVP')
         EmployeeAccess.objects.create(employee=manager, role=manager_role, access_code='6000')
-        reason = DowntimeReason.objects.create(name='Engine', equipment_type=excavator_type)
+        reason = DowntimeReason.objects.create(
+            name='Engine',
+            equipment_type=excavator_type,
+            show_for_mechanic=True,
+        )
         DowntimeEvent.objects.create(
             equipment=excavator,
             employee=mechanic,

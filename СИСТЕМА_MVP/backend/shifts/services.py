@@ -6,6 +6,9 @@ from django.db import IntegrityError, transaction
 from django.db.models import Count, Q, Sum
 from django.utils import timezone
 
+from core.db_locks import lock_idempotency_key
+from core.production_time import production_day_bounds, production_work_date
+
 from trips.models import Trip, TripStatus
 
 from .models import (
@@ -26,6 +29,31 @@ DRIVER_SHIFT_READING_FIELDS = (
     ('start_mileage', 'end_mileage', ShiftReadingCorrection.Metric.MILEAGE),
     ('start_engine_hours', 'end_engine_hours', ShiftReadingCorrection.Metric.ENGINE_HOURS),
 )
+
+
+def recent_shift_reading_corrections(*, work_date=None, limit=None):
+    corrections = (
+        ShiftReadingCorrection.objects
+        .select_related(
+            'equipment',
+            'equipment__equipment_type',
+            'previous_shift',
+            'previous_shift__employee',
+            'new_shift',
+            'new_shift__employee',
+            'employee',
+        )
+        .order_by('-corrected_at', '-id')
+    )
+    if work_date is not None:
+        production_start, production_end = production_day_bounds(work_date)
+        corrections = corrections.filter(
+            corrected_at__gte=production_start,
+            corrected_at__lt=production_end,
+        )
+    if limit is not None:
+        corrections = corrections[:limit]
+    return list(corrections)
 
 
 def lock_active_employee_for_shift(employee, *, role_code):
@@ -49,6 +77,18 @@ def lock_active_employee_for_shift(employee, *, role_code):
     if not active_access:
         raise ValidationError('Активированный доступ сотрудника не найден. Начало смены недоступно.')
     return locked_employee
+
+
+def open_shift_conflict_message(shift, *, equipment=None):
+    if shift is not None:
+        equipment = shift.equipment or equipment
+        employee_name = str(shift.employee.full_name).strip()
+        sentence_end = '' if employee_name.endswith('.') else '.'
+        return (
+            f'Смена на технике {equipment} уже открыта сотрудником '
+            f'{employee_name}{sentence_end}'
+        )
+    return f'Смена на технике {equipment} уже открыта другим сотрудником.'
 
 
 def validate_driver_fuel_reading(equipment, value):
@@ -101,15 +141,56 @@ def open_driver_shift(*, employee, work_assignment, readings, client_action_id):
     from references.models import Equipment
     try:
         with transaction.atomic():
-            employee = lock_active_employee_for_shift(employee, role_code='driver')
-            equipment = Equipment.objects.select_for_update(of=('self',)).select_related('model').get(pk=work_assignment.equipment_id)
+            lock_idempotency_key('driver_shift_opened', client_action_id)
             existing_shift = _existing_driver_shift_action('driver_shift_opened', client_action_id)
             if existing_shift:
                 return existing_shift, False
-            if EmployeeShift.objects.filter(employee=employee, closed_at__isnull=True).exists():
-                raise ValidationError('У этого водителя уже открыта смена.')
-            if EmployeeShift.objects.filter(equipment=equipment, closed_at__isnull=True).exists():
-                raise ValidationError('Смена по этому самосвалу уже открыта другим водителем.')
+            employee = lock_active_employee_for_shift(employee, role_code='driver')
+            from assignments.models import AssignmentStatus, EquipmentAssignment
+            locked_assignment = (
+                EquipmentAssignment.objects
+                .select_for_update(of=('self',))
+                .select_related('equipment', 'equipment__model', 'role')
+                .filter(
+                    pk=work_assignment.pk,
+                    employee=employee,
+                    role__code='driver',
+                    status=AssignmentStatus.ACCEPTED,
+                    ended_at__isnull=True,
+                    shift__isnull=True,
+                    shift_type__isnull=False,
+                    equipment__is_active=True,
+                )
+                .first()
+            )
+            if not locked_assignment:
+                raise ValidationError(
+                    'Назначение изменилось. Обновите экран перед началом смены.'
+                )
+            equipment = (
+                Equipment.objects
+                .select_for_update(of=('self',))
+                .select_related('model')
+                .get(pk=locked_assignment.equipment_id)
+            )
+            employee_open_shift = (
+                EmployeeShift.objects
+                .select_related('employee', 'equipment', 'equipment__equipment_type')
+                .filter(employee=employee, closed_at__isnull=True)
+                .order_by('id')
+                .first()
+            )
+            if employee_open_shift:
+                raise ValidationError(open_shift_conflict_message(employee_open_shift))
+            equipment_open_shift = (
+                EmployeeShift.objects
+                .select_related('employee', 'equipment', 'equipment__equipment_type')
+                .filter(equipment=equipment, closed_at__isnull=True)
+                .order_by('id')
+                .first()
+            )
+            if equipment_open_shift:
+                raise ValidationError(open_shift_conflict_message(equipment_open_shift))
             validate_driver_fuel_reading(equipment, readings['start_fuel'])
             previous_shift = EmployeeShift.objects.filter(
                 equipment=equipment, closed_at__isnull=False,
@@ -117,7 +198,8 @@ def open_driver_shift(*, employee, work_assignment, readings, client_action_id):
             shift = EmployeeShift.objects.create(
                 employee=employee,
                 opened_by=employee,
-                shift_type=work_assignment.shift_type,
+                shift_type=locked_assignment.shift_type,
+                workplace_code='driver',
                 equipment=equipment,
                 opened_at=timezone.now(),
                 **readings,
@@ -163,36 +245,48 @@ def open_driver_shift(*, employee, work_assignment, readings, client_action_id):
         existing_shift = _existing_driver_shift_action('driver_shift_opened', client_action_id)
         if existing_shift:
             return existing_shift, False
-        raise ValidationError('Смена по этому самосвалу уже открыта другим водителем.') from error
+        equipment_open_shift = (
+            EmployeeShift.objects
+            .select_related('employee', 'equipment', 'equipment__equipment_type')
+            .filter(equipment=work_assignment.equipment, closed_at__isnull=True)
+            .order_by('id')
+            .first()
+        )
+        raise ValidationError(
+            open_shift_conflict_message(
+                equipment_open_shift,
+                equipment=work_assignment.equipment,
+            )
+        ) from error
 
 
 def close_driver_shift(*, shift, employee, readings, client_action_id):
     existing_shift = _existing_driver_shift_action('driver_shift_closed', client_action_id)
     if existing_shift:
         return existing_shift, False
-    from downtimes.models import DowntimeEvent
     from references.models import Equipment
     from trips.models import OPEN_TRIP_STATUSES
     from users.models import Employee
     with transaction.atomic():
-        Employee.objects.select_for_update().get(pk=employee.pk)
-        locked_shift = EmployeeShift.objects.select_for_update(of=('self',)).select_related('equipment__model').get(pk=shift.pk)
-        Equipment.objects.select_for_update().get(pk=locked_shift.equipment_id)
+        lock_idempotency_key('driver_shift_closed', client_action_id)
         existing_shift = _existing_driver_shift_action('driver_shift_closed', client_action_id)
         if existing_shift:
             return existing_shift, False
+        Employee.objects.select_for_update().get(pk=employee.pk)
+        locked_shift = EmployeeShift.objects.select_for_update(of=('self',)).select_related('equipment__model').get(pk=shift.pk)
+        Equipment.objects.select_for_update().get(pk=locked_shift.equipment_id)
         if locked_shift.closed_at:
             raise ValidationError('Смена уже закрыта.')
-        if Trip.objects.filter(truck=locked_shift.equipment, status__in=OPEN_TRIP_STATUSES).exists():
-            raise ValidationError('Нельзя закрыть смену: у самосвала есть активный рейс.')
-        if DowntimeEvent.objects.filter(equipment=locked_shift.equipment, ended_at__isnull=True).exists():
-            raise ValidationError('Нельзя закрыть смену: у самосвала есть активный простой, ремонт или авария.')
         validate_driver_close_readings(locked_shift, **readings)
         for field, value in readings.items():
             setattr(locked_shift, field, value)
         locked_shift.closed_at = timezone.now()
         locked_shift.closed_by = employee
         locked_shift.save(update_fields=[*readings, 'closed_at', 'closed_by'])
+        Trip.objects.filter(
+            truck=locked_shift.equipment,
+            status__in=OPEN_TRIP_STATUSES,
+        ).update(is_carryover=True)
         response = {
             'ok': True, 'shift_id': locked_shift.pk, 'truck_id': locked_shift.equipment_id, 'driver_id': employee.pk,
         }
@@ -306,9 +400,15 @@ def shift_plan_totals_by_shift(date):
         'tonnage': decimal_zero(),
     })
 
+    production_start, production_end = production_day_bounds(date)
     snapshot_shifts = (
         EmployeeShift.objects
-        .filter(opened_at__date=date, plan_status=PlanAssignmentStatus.ASSIGNED, plan_value__isnull=False)
+        .filter(
+            opened_at__gte=production_start,
+            opened_at__lt=production_end,
+            plan_status=PlanAssignmentStatus.ASSIGNED,
+            plan_value__isnull=False,
+        )
     )
     snapshot_found = False
     for shift in snapshot_shifts:
@@ -408,7 +508,7 @@ def assign_shift_plan_snapshot(shift):
         return empty_progress(None, shift=shift)
 
     group = get_equipment_plan_group(shift.equipment)
-    shift_date = timezone.localtime(shift.opened_at).date() if shift.opened_at else timezone.localdate()
+    shift_date = production_work_date(shift.opened_at if shift.opened_at else timezone.now())
     shift.plan_assigned_at = timezone.now()
     shift.plan_group = group
     shift.plan_group_name = group.name if group else ''
@@ -454,9 +554,11 @@ def equipment_shift_trip_queryset(equipment, date, shift_type):
     if not equipment or not date or not shift_type:
         return Trip.objects.none()
 
+    production_start, production_end = production_day_bounds(date)
     shift_filter = {
         'shift_type': shift_type,
-        'opened_at__date': date,
+        'opened_at__gte': production_start,
+        'opened_at__lt': production_end,
     }
     if equipment_is_excavator(equipment):
         query = Q(loading_shift__equipment=equipment, **{f'loading_shift__{key}': value for key, value in shift_filter.items()})
@@ -480,7 +582,7 @@ def aggregate_trip_facts(trips):
 
 def calculate_progress_from_snapshot(shift, trips):
     facts = aggregate_trip_facts(trips)
-    date = timezone.localtime(shift.opened_at).date() if shift and shift.opened_at else None
+    date = production_work_date(shift.opened_at) if shift and shift.opened_at else None
     result = {
         'equipment': shift.equipment if shift else None,
         'date': date,
@@ -602,7 +704,7 @@ def calculate_truck_shift_progress(truck, reference_shift=None):
         return calculate_progress_from_snapshot(truck_shift, trips)
 
     if reference_shift and reference_shift.opened_at and reference_shift.shift_type:
-        date = timezone.localtime(reference_shift.opened_at).date()
+        date = production_work_date(reference_shift.opened_at)
         return calculate_equipment_shift_progress(truck, date, reference_shift.shift_type)
     return empty_progress(truck, status=PlanAssignmentStatus.NO_PLAN_GROUP)
 
@@ -623,7 +725,7 @@ def calculate_open_shift_progress(open_shift):
 
     return calculate_equipment_shift_progress(
         open_shift.equipment,
-        timezone.localtime(open_shift.opened_at).date(),
+        production_work_date(open_shift.opened_at),
         open_shift.shift_type,
     )
 
@@ -719,10 +821,15 @@ def existing_shift_action_payload(action_type, client_action_id):
 
 
 @transaction.atomic
-def open_excavator_shift(*, employee, equipment, shift_type, fuel_value, engine_hours_value, client_action_id):
+def _open_excavator_shift_atomic(*, employee, equipment, shift_type, fuel_value, engine_hours_value, client_action_id):
     from references.models import Equipment
 
     action_type = 'excavator_shift_opened'
+    existing = existing_shift_action_payload(action_type, client_action_id)
+    if existing:
+        return existing
+
+    lock_idempotency_key(action_type, client_action_id)
     existing = existing_shift_action_payload(action_type, client_action_id)
     if existing:
         return existing
@@ -740,15 +847,29 @@ def open_excavator_shift(*, employee, equipment, shift_type, fuel_value, engine_
     if existing:
         return existing
 
-    if EmployeeShift.objects.filter(employee=employee, closed_at__isnull=True).exists():
+    employee_open_shift = (
+        EmployeeShift.objects
+        .select_related('employee', 'equipment', 'equipment__equipment_type')
+        .filter(employee=employee, closed_at__isnull=True)
+        .order_by('id')
+        .first()
+    )
+    if employee_open_shift:
         raise ExcavatorShiftError(
-            'У машиниста уже есть открытая смена.',
+            open_shift_conflict_message(employee_open_shift),
             status=409,
             code='employee_shift_already_open',
         )
-    if EmployeeShift.objects.filter(equipment=equipment, closed_at__isnull=True).exists():
+    equipment_open_shift = (
+        EmployeeShift.objects
+        .select_related('employee', 'equipment', 'equipment__equipment_type')
+        .filter(equipment=equipment, closed_at__isnull=True)
+        .order_by('id')
+        .first()
+    )
+    if equipment_open_shift:
         raise ExcavatorShiftError(
-            'Смена на этом экскаваторе уже открыта другим машинистом.',
+            open_shift_conflict_message(equipment_open_shift),
             status=409,
             code='equipment_shift_already_open',
         )
@@ -764,6 +885,7 @@ def open_excavator_shift(*, employee, equipment, shift_type, fuel_value, engine_
         employee=employee,
         equipment=equipment,
         shift_type=shift_type,
+        workplace_code='excavator_operator',
         start_fuel=fuel,
         start_mileage=None,
         start_engine_hours=engine_hours,
@@ -844,12 +966,63 @@ def open_excavator_shift(*, employee, equipment, shift_type, fuel_value, engine_
     return response
 
 
+def open_excavator_shift(*, employee, equipment, shift_type, fuel_value, engine_hours_value, client_action_id):
+    try:
+        return _open_excavator_shift_atomic(
+            employee=employee,
+            equipment=equipment,
+            shift_type=shift_type,
+            fuel_value=fuel_value,
+            engine_hours_value=engine_hours_value,
+            client_action_id=client_action_id,
+        )
+    except IntegrityError as error:
+        existing = existing_shift_action_payload(
+            'excavator_shift_opened',
+            client_action_id,
+        )
+        if existing:
+            return existing
+        equipment_open_shift = (
+            EmployeeShift.objects
+            .select_related('employee', 'equipment', 'equipment__equipment_type')
+            .filter(equipment=equipment, closed_at__isnull=True)
+            .order_by('id')
+            .first()
+        )
+        employee_open_shift = (
+            EmployeeShift.objects
+            .select_related('employee', 'equipment', 'equipment__equipment_type')
+            .filter(employee=employee, closed_at__isnull=True)
+            .order_by('id')
+            .first()
+        )
+        conflict_shift = equipment_open_shift or employee_open_shift
+        if conflict_shift:
+            raise ExcavatorShiftError(
+                open_shift_conflict_message(conflict_shift, equipment=equipment),
+                status=409,
+                code=(
+                    'equipment_shift_already_open'
+                    if equipment_open_shift
+                    else 'employee_shift_already_open'
+                ),
+            ) from error
+        raise
+
+
 @transaction.atomic
 def close_excavator_shift(*, employee, fuel_value, engine_hours_value, client_action_id):
+    from references.models import Equipment
     from trips.models import OPEN_TRIP_STATUSES, Trip
     from users.models import Employee
 
     action_type = 'excavator_shift_closed'
+    existing = existing_shift_action_payload(action_type, client_action_id)
+    if existing:
+        return existing
+
+    lock_idempotency_key(action_type, client_action_id)
     existing = existing_shift_action_payload(action_type, client_action_id)
     if existing:
         return existing
@@ -859,7 +1032,7 @@ def close_excavator_shift(*, employee, fuel_value, engine_hours_value, client_ac
     if existing:
         return existing
     shift = (
-        EmployeeShift.objects.select_for_update()
+        EmployeeShift.objects.select_for_update(of=('self',))
         .select_related('equipment', 'equipment__model', 'equipment__equipment_type')
         .filter(employee=employee, closed_at__isnull=True)
         .order_by('-opened_at')
@@ -867,9 +1040,15 @@ def close_excavator_shift(*, employee, fuel_value, engine_hours_value, client_ac
     )
     if not shift:
         raise ExcavatorShiftError('Открытая смена уже закрыта.', status=409, code='shift_already_closed')
+    equipment = (
+        Equipment.objects.select_for_update(of=('self',))
+        .select_related('model', 'equipment_type')
+        .get(pk=shift.equipment_id)
+    )
+    shift.equipment = equipment
 
     fuel, engine_hours = validate_excavator_shift_readings(
-        shift.equipment,
+        equipment,
         fuel_value,
         engine_hours_value,
         opening_shift=shift,

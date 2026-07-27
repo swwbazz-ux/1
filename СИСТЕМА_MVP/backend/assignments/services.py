@@ -6,6 +6,7 @@ from django.db.models import Max
 from django.utils import timezone
 
 from core.models import bump_operational_state
+from core.production_time import production_work_date as contract_production_work_date
 from references.models import Equipment
 from shifts.models import EmployeeShift
 from users.models import Employee, Role
@@ -33,13 +34,7 @@ CREW_PLAN_ROLE_CODES = frozenset(WORK_ASSIGNMENT_ROLE_EQUIPMENT_TYPES)
 
 def production_work_date(now=None):
     """Return the date of the 07:00–07:00 production day."""
-    current = now or timezone.now()
-    if timezone.is_aware(current):
-        current = timezone.localtime(current)
-    work_date = current.date()
-    if current.hour < 7:
-        work_date -= timedelta(days=1)
-    return work_date
+    return contract_production_work_date(now)
 
 
 def _crew_plan_role(role):
@@ -744,6 +739,7 @@ def _cancel_assignments(assignments, now):
 @transaction.atomic
 def schedule_haul_assignment(*, truck, excavator, assigned_by=None, now=None):
     now = now or timezone.now()
+    truck = Equipment.objects.select_for_update().get(pk=truck.pk)
     open_assignments = list(
         HaulAssignment.objects.select_for_update()
         .filter(truck=truck, ended_at__isnull=True)

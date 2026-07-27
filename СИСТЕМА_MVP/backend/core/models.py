@@ -44,6 +44,11 @@ class OperationalStateEvent(models.Model):
         return f'{self.key} #{self.version}: {self.event_type}'
 
 
+def lock_production_state():
+    OperationalStateVersion.objects.get_or_create(key='production')
+    return OperationalStateVersion.objects.select_for_update().get(key='production')
+
+
 def bump_operational_state(
     reason='',
     *,

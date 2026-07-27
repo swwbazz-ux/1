@@ -98,7 +98,7 @@
                 <strong>{{ daily_plan_total }} м3</strong>
                 <p>{{ daily_plan_source }}</p>
             </article>
-            <article class="dispatcher-report-tile {% if daily_plan_completion_class == 'success' %}success{% else %}is-danger{% endif %}">
+            <article class="dispatcher-report-tile {% if daily_plan_completion_class == 'success' %}success{% elif daily_plan_completion_class == 'danger' %}is-danger{% endif %}">
                 <div class="dispatcher-report-tile-head"><h2>Выполнение</h2><span>план</span></div>
                 <strong>{% if daily_plan_completion_percent is not None %}{{ daily_plan_completion_percent }}%{% else %}нет плана{% endif %}</strong>
                 <p>факт относительно плана</p>
@@ -144,7 +144,7 @@
         </section>
 
         <section class="management-dashboard-layout">
-            <article class="dispatcher-report-card management-dashboard-summary {% if daily_plan_completion_class == 'success' %}is-ok{% else %}is-danger{% endif %}">
+            <article class="dispatcher-report-card management-dashboard-summary {% if daily_plan_completion_class == 'success' %}is-ok{% elif daily_plan_completion_class == 'danger' %}is-danger{% endif %}">
                 <div class="dispatcher-report-card-head">
                     <h2>Оперативный итог</h2>
                     <span>{{ selected_date|date:"d.m.Y" }}</span>
@@ -161,7 +161,7 @@
                 </div>
                 <div class="dispatcher-management-mini-kpis">
                     <div><strong>{{ active_trip_count }}</strong><span>активные</span></div>
-                    <div><strong>{{ carryover_trip_count }}</strong><span>переходящие</span></div>
+                    <div><strong>{{ carryover_trip_count }}</strong><span>переходящие сейчас</span></div>
                     <div><strong>{{ open_mechanic_downtime_count }}</strong><span>открытые простои</span></div>
                     <div><strong>{{ mechanic_downtime_count }}</strong><span>простои за дату</span></div>
                 </div>
@@ -180,8 +180,13 @@
                     </div>
                     <div class="dispatcher-management-alert {% if carryover_trip_count %}is-danger{% endif %}">
                         <strong>{{ carryover_trip_count }}</strong>
-                        <span>переходящие рейсы</span>
+                        <span>открытые переходящие рейсы</span>
                         <em>{% if carryover_trip_count %}проверить смены{% else %}без переходящих{% endif %}</em>
+                    </div>
+                    <div class="dispatcher-management-alert">
+                        <strong>{{ daily_carryover_trip_count }}</strong>
+                        <span>завершено переходящих за дату</span>
+                        <em>исторический показатель</em>
                     </div>
                     <div class="dispatcher-management-alert {% if active_trip_count %}is-risk{% endif %}">
                         <strong>{{ active_trip_count }}</strong>
@@ -319,6 +324,8 @@
                     <div><strong>{{ active_trip_count }}</strong><span>активные</span></div>
                 </div>
             </article>
+
+            {% include "includes/shift_reading_corrections.html" %}
 
             <article class="dispatcher-report-card dispatcher-report-card-table management-dashboard-table">
                 <div class="dispatcher-report-card-head">

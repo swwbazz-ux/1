@@ -1,4 +1,4 @@
-{% load static %}
+{% load static tz %}
 <!doctype html>
 <html lang="ru">
 <head>
@@ -152,6 +152,47 @@
             outline: 2px solid #bfdbfe;
             outline-offset: 2px;
         }
+        .app-inactive-role-banner {
+            position: sticky;
+            top: 0;
+            z-index: 10050;
+            box-sizing: border-box;
+            width: 100%;
+            padding: 12px 16px;
+            border-bottom: 1px solid #fbbf24;
+            background: #422006;
+            color: #fef3c7;
+            text-align: center;
+            font: 800 14px/1.35 system-ui, sans-serif;
+        }
+        .app-contract-banner {
+            position: fixed;
+            inset: auto 12px 12px;
+            z-index: 10070;
+            box-sizing: border-box;
+            max-width: 560px;
+            margin-inline: auto;
+            padding: 12px 16px;
+            border: 1px solid #fbbf24;
+            border-radius: 10px;
+            background: #422006;
+            color: #fef3c7;
+            box-shadow: 0 14px 34px rgba(0, 0, 0, .35);
+            text-align: center;
+            font: 700 14px/1.4 system-ui, sans-serif;
+        }
+        body[data-app-contract-locked="true"] [data-app-contract-mutation] {
+            cursor: not-allowed !important;
+        }
+        body[data-role-readonly="true"] [data-role-readonly-blocked] {
+            cursor: not-allowed !important;
+        }
+        body[data-role-readonly="true"] button[data-role-readonly-blocked],
+        body[data-role-readonly="true"] input[data-role-readonly-blocked],
+        body[data-role-readonly="true"] select[data-role-readonly-blocked],
+        body[data-role-readonly="true"] textarea[data-role-readonly-blocked] {
+            opacity: .58;
+        }
         @media (max-width: 520px) {
             .app-realtime-update {
                 align-items: stretch;
@@ -162,9 +203,302 @@
             }
         }
     </style>
+    <script>
+    /* APP_PWA_CONTRACT_GUARD_START */
+    (function (window, document) {
+        "use strict";
+
+        var state = {
+            javascriptVersion: "",
+            serviceWorker: null,
+            server: null,
+            serverUnavailable: false,
+            ready: false,
+            locked: true,
+            reloadCount: 0
+        };
+        var registration = null;
+        var updateRequested = false;
+
+        function expectedContract() {
+            var body = document.body;
+            return {
+                appContractVersion: body ? String(body.dataset.appContractVersion || "") : "",
+                shellVersion: body ? String(body.dataset.appShellVersion || "") : "",
+                roleCode: body ? String(body.dataset.appRoleCode || "") : ""
+            };
+        }
+
+        function normalizedWorker(payload) {
+            payload = payload || {};
+            return {
+                appContractVersion: String(payload.appContractVersion || payload.app_contract_version || ""),
+                shellVersion: String(payload.shellVersion || payload.role_shell_version || payload.version || ""),
+                roleCode: String(payload.roleCode || payload.role_app_code || "")
+            };
+        }
+
+        function normalizedServer(payload) {
+            payload = payload || {};
+            return {
+                appContractVersion: String(payload.app_contract_version || payload.appContractVersion || ""),
+                shellVersion: String(payload.role_shell_version || payload.shellVersion || ""),
+                roleCode: String(payload.role_app_code || payload.roleCode || "")
+            };
+        }
+
+        function sameContract(candidate, expected) {
+            return !!candidate
+                && candidate.appContractVersion === expected.appContractVersion
+                && candidate.shellVersion === expected.shellVersion
+                && candidate.roleCode === expected.roleCode;
+        }
+
+        function ensureBanner(locked) {
+            if (!document.body || !document.createElement) return;
+            var banner = document.querySelector("[data-app-contract-banner]");
+            if (!locked) {
+                if (banner && banner.remove) banner.remove();
+                return;
+            }
+            if (banner) return;
+            banner = document.createElement("div");
+            banner.className = "app-contract-banner";
+            banner.setAttribute("data-app-contract-banner", "");
+            banner.setAttribute("role", "status");
+            banner.setAttribute("aria-live", "assertive");
+            banner.textContent = "Обновляется рабочее приложение. Изменяющие действия временно заблокированы.";
+            document.body.prepend(banner);
+        }
+
+        function requestControlledUpdate() {
+            if (updateRequested) return;
+            updateRequested = true;
+            var serviceWorker = window.navigator && window.navigator.serviceWorker;
+            if (!serviceWorker) return;
+            var registrationPromise = registration
+                ? Promise.resolve(registration)
+                : serviceWorker.getRegistration
+                    ? serviceWorker.getRegistration()
+                    : serviceWorker.ready;
+            Promise.resolve(registrationPromise).then(function (currentRegistration) {
+                if (!currentRegistration) return;
+                registration = currentRegistration;
+                if (currentRegistration.waiting) {
+                    currentRegistration.waiting.postMessage({type: "SKIP_WAITING"});
+                }
+                if (currentRegistration.update) {
+                    return currentRegistration.update().then(function () {
+                        if (currentRegistration.waiting) {
+                            currentRegistration.waiting.postMessage({type: "SKIP_WAITING"});
+                        }
+                    });
+                }
+            }).catch(function () {
+                updateRequested = false;
+            });
+        }
+
+        function evaluate() {
+            if (!document.body) return;
+            var expected = expectedContract();
+            var hasContract = !!(
+                expected.appContractVersion
+                && expected.shellVersion
+                && expected.roleCode
+            );
+            var javascriptMatches = state.javascriptVersion === expected.appContractVersion;
+            var workerMatches = sameContract(state.serviceWorker, expected);
+            var serverMatches = state.serverUnavailable || sameContract(state.server, expected);
+            state.ready = hasContract && javascriptMatches && workerMatches && serverMatches;
+            state.locked = hasContract && !state.ready;
+            document.body.dataset.appContractReady = state.ready ? "true" : "false";
+            document.body.dataset.appContractLocked = state.locked ? "true" : "false";
+            document.body.classList.toggle("is-app-contract-locked", state.locked);
+            ensureBanner(state.locked);
+            if (state.locked) requestControlledUpdate();
+            window.dispatchEvent(new CustomEvent("app-pwa-contract-state", {
+                detail: getState()
+            }));
+        }
+
+        function requestWorkerVersion(worker) {
+            if (!worker || !worker.postMessage || typeof MessageChannel === "undefined") {
+                return;
+            }
+            var channel = new MessageChannel();
+            channel.port1.onmessage = function (event) {
+                acceptServiceWorkerVersion(event && event.data);
+            };
+            worker.postMessage({type: "GET_VERSION"}, [channel.port2]);
+        }
+
+        function registerConfiguredWorker() {
+            var serviceWorker = window.navigator && window.navigator.serviceWorker;
+            if (!serviceWorker || !document.body) return;
+            var workerUrl = document.body.dataset.appServiceWorkerUrl || "";
+            var workerScope = document.body.dataset.appServiceWorkerScope || "/";
+            var promise;
+            if (workerUrl && serviceWorker.register) {
+                promise = serviceWorker.register(workerUrl, {
+                    scope: workerScope,
+                    updateViaCache: "none"
+                });
+            } else if (serviceWorker.getRegistration) {
+                promise = serviceWorker.getRegistration(workerScope);
+            } else {
+                promise = serviceWorker.ready;
+            }
+            Promise.resolve(promise).then(function (currentRegistration) {
+                if (!currentRegistration) return;
+                registration = currentRegistration;
+                requestWorkerVersion(
+                    serviceWorker.controller
+                    || currentRegistration.active
+                    || currentRegistration.waiting
+                );
+                if (currentRegistration.waiting) {
+                    currentRegistration.waiting.postMessage({type: "SKIP_WAITING"});
+                }
+                if (currentRegistration.update) {
+                    currentRegistration.update().catch(function () {});
+                }
+            }).catch(function () {});
+        }
+
+        function reloadOnceForExpectedContract() {
+            if (!state.locked || !window.sessionStorage) return;
+            var expected = expectedContract();
+            var key = "app-pwa-contract-reload:"
+                + expected.appContractVersion + ":"
+                + expected.shellVersion + ":"
+                + expected.roleCode;
+            try {
+                if (window.sessionStorage.getItem(key) === "1") return;
+                window.sessionStorage.setItem(key, "1");
+            } catch (error) {
+                return;
+            }
+            state.reloadCount += 1;
+            if (window.location && window.location.reload) {
+                window.location.reload();
+            }
+        }
+
+        function registerJavaScript(version) {
+            state.javascriptVersion = String(version || "");
+            evaluate();
+        }
+
+        function acceptServiceWorkerVersion(payload) {
+            state.serviceWorker = normalizedWorker(payload);
+            updateRequested = false;
+            evaluate();
+        }
+
+        function acceptServerContract(payload) {
+            state.server = normalizedServer(payload);
+            state.serverUnavailable = false;
+            updateRequested = false;
+            evaluate();
+        }
+
+        function markServerUnavailable() {
+            state.serverUnavailable = true;
+            evaluate();
+        }
+
+        function getState() {
+            return {
+                javascriptVersion: state.javascriptVersion,
+                serviceWorker: state.serviceWorker,
+                server: state.server,
+                serverUnavailable: state.serverUnavailable,
+                ready: state.ready,
+                locked: state.locked,
+                reloadCount: state.reloadCount
+            };
+        }
+
+        function isMutationTarget(target) {
+            var node = target;
+            while (node && node !== document.body) {
+                var tagName = String(node.tagName || node.nodeName || "").toLowerCase();
+                var type = node.getAttribute ? String(node.getAttribute("type") || "").toLowerCase() : "";
+                var method = node.getAttribute ? String(node.getAttribute("method") || "").toLowerCase() : "";
+                var href = node.getAttribute ? String(node.getAttribute("href") || "") : "";
+                if (tagName === "a" && (href === "/logout/" || href.indexOf("/logout/?") === 0)) {
+                    return false;
+                }
+                if (
+                    (tagName === "form" && method !== "get")
+                    || tagName === "button"
+                    || (tagName === "input" && ["submit", "button", "checkbox", "radio"].indexOf(type) >= 0)
+                    || (node.hasAttribute && (
+                        node.hasAttribute("data-confirm")
+                        || node.hasAttribute("data-hold-action")
+                        || node.hasAttribute("data-role-readonly-action")
+                    ))
+                ) {
+                    return true;
+                }
+                node = node.parentNode;
+            }
+            return false;
+        }
+
+        function blockMutation(event) {
+            if (!state.locked || !isMutationTarget(event.target)) return;
+            if (event.preventDefault) event.preventDefault();
+            if (event.stopImmediatePropagation) event.stopImmediatePropagation();
+            if (event.stopPropagation) event.stopPropagation();
+        }
+
+        ["submit", "click", "pointerdown", "touchstart", "keydown"].forEach(function (eventName) {
+            document.addEventListener(eventName, blockMutation, true);
+        });
+
+        window.AppPwaContractGuard = {
+            registerJavaScript: registerJavaScript,
+            acceptServiceWorkerVersion: acceptServiceWorkerVersion,
+            acceptServerContract: acceptServerContract,
+            markServerUnavailable: markServerUnavailable,
+            getState: getState
+        };
+
+        function initialize() {
+            evaluate();
+            registerConfiguredWorker();
+        }
+
+        if (document.readyState === "loading") {
+            document.addEventListener("DOMContentLoaded", initialize);
+        } else {
+            initialize();
+        }
+        if (window.navigator && window.navigator.serviceWorker) {
+            window.navigator.serviceWorker.addEventListener("controllerchange", function () {
+                requestWorkerVersion(window.navigator.serviceWorker.controller);
+                reloadOnceForExpectedContract();
+            });
+        }
+        window.addEventListener("online", function () {
+            state.serverUnavailable = false;
+            updateRequested = false;
+            evaluate();
+        });
+    })(window, document);
+    /* APP_PWA_CONTRACT_GUARD_END */
+    </script>
+    <script src="{% static 'js/role-readonly.js' %}?v=role-readonly-v3"></script>
     {% block extra_head %}{% endblock %}
 </head>
-<body class="{% block body_class %}{% endblock %}" data-realtime-screen="{% block realtime_screen %}{% endblock %}" data-realtime-mode="{% block realtime_mode %}{% endblock %}" data-realtime-role="{% block realtime_role %}{% endblock %}" data-operational-state-version="{{ operational_state_version|default:0 }}">
+<body class="{% block body_class %}{% endblock %}" data-realtime-screen="{% block realtime_screen %}{% endblock %}" data-realtime-mode="{% block realtime_mode %}{% endblock %}" data-realtime-role="{% block realtime_role %}{% endblock %}" data-operational-state-version="{{ operational_state_version|default:0 }}" data-role-access-active="{{ role_access_is_active|yesno:'true,false' }}" data-app-contract-version="{{ app_contract_version }}" data-app-shell-version="{{ app_shell_version }}" data-app-role-code="{{ app_role_code }}" data-app-service-worker-url="{{ app_service_worker_url }}" data-app-service-worker-scope="{{ app_service_worker_scope }}" data-app-contract-ready="false">
+{% if role_access_is_active == False %}
+<div class="app-inactive-role-banner" data-inactive-role-banner role="status" aria-live="polite">
+    Роль неактивна — доступен только просмотр
+</div>
+{% endif %}
 {% block body %}{% endblock %}
 
 <div class="app-sync-overlay" data-app-sync-overlay hidden aria-live="polite" aria-busy="true">
@@ -381,7 +715,11 @@ document.addEventListener("DOMContentLoaded", function () {
         if (!confirmModal || !confirmMessage || !confirmAccept || !confirmCancel) {
             return;
         }
+        if (typeof window.isAppRoleReadonly === "function" && window.isAppRoleReadonly()) {
+            return;
+        }
         window.clearInterval(pendingConfirmTimer);
+        pendingConfirmTimer = null;
         syncConfirmTheme();
         applyConfirmVariant(options);
         pendingConfirmAction = action;
@@ -395,6 +733,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 remaining -= 1;
                 if (remaining <= 0) {
                     window.clearInterval(pendingConfirmTimer);
+                    pendingConfirmTimer = null;
                     confirmAccept.disabled = false;
                     confirmAccept.textContent = acceptLabel || "ОК";
                     return;
@@ -416,20 +755,35 @@ document.addEventListener("DOMContentLoaded", function () {
     window.openAppConfirmDialog = openConfirmDialog;
 
     function closeConfirmDialog() {
+        pendingConfirmAction = null;
+        if (pendingConfirmTimer !== null) {
+            window.clearInterval(pendingConfirmTimer);
+        }
+        pendingConfirmTimer = null;
         if (!confirmModal) {
             return;
         }
         confirmModal.hidden = true;
         document.body.classList.remove("modal-open");
-        pendingConfirmAction = null;
-        window.clearInterval(pendingConfirmTimer);
         clearConfirmVariant();
         resetConfirmAccept();
     }
 
+    function closeConfirmOnInactiveRole(event) {
+        if (event && event.detail && event.detail.active === false) {
+            closeConfirmDialog();
+        }
+    }
+
+    window.addEventListener("active-role-state-changed", closeConfirmOnInactiveRole);
+
     if (confirmAccept) {
         confirmAccept.addEventListener("click", function () {
-            var action = pendingConfirmAction;
+            var readonly = (
+                typeof window.isAppRoleReadonly === "function"
+                && window.isAppRoleReadonly()
+            );
+            var action = readonly ? null : pendingConfirmAction;
             closeConfirmDialog();
             if (action) {
                 action();
@@ -497,8 +851,18 @@ document.addEventListener("DOMContentLoaded", function () {
         if (!link) {
             return;
         }
+        var isLogoutLink = link.getAttribute("href") === logoutPath;
+        if (
+            isLogoutLink
+            && typeof window.isAppRoleReadonly === "function"
+            && window.isAppRoleReadonly()
+        ) {
+            event.preventDefault();
+            window.location.href = link.href;
+            return;
+        }
         var message = link.dataset.confirm;
-        if (!message && link.getAttribute("href") === logoutPath) {
+        if (!message && isLogoutLink) {
             message = "Выйти из системы?";
         }
         if (message) {
@@ -674,11 +1038,23 @@ document.addEventListener("DOMContentLoaded", function () {
 
             function updateClockTime() {
                 var now = new Date();
+                var businessParts = new Intl.DateTimeFormat("ru-RU", {
+                    timeZone: "Asia/Vladivostok",
+                    year: "numeric",
+                    month: "2-digit",
+                    day: "2-digit",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                    hourCycle: "h23"
+                }).formatToParts(now).reduce(function (parts, item) {
+                    parts[item.type] = item.value;
+                    return parts;
+                }, {});
                 if (timeNode) {
-                    timeNode.innerHTML = '<span class="dispatcher-radial-clock-hour">' + padDispatcherClockPart(now.getHours()) + '</span><span class="dispatcher-radial-clock-separator" aria-hidden="true">:</span><span class="dispatcher-radial-clock-minute">' + padDispatcherClockPart(now.getMinutes()) + '</span>';
+                    timeNode.innerHTML = '<span class="dispatcher-radial-clock-hour">' + businessParts.hour + '</span><span class="dispatcher-radial-clock-separator" aria-hidden="true">:</span><span class="dispatcher-radial-clock-minute">' + businessParts.minute + '</span>';
                 }
                 if (dateNode) {
-                    dateNode.textContent = padDispatcherClockPart(now.getDate()) + "." + padDispatcherClockPart(now.getMonth() + 1) + "." + now.getFullYear();
+                    dateNode.textContent = businessParts.day + "." + businessParts.month + "." + businessParts.year;
                 }
             }
 
@@ -756,8 +1132,8 @@ window.AppRealtimeConfig = {
         {name: "dispatcher-reports", role: "dispatcher", mode: "manual", path: "^/dispatcher/"},
         {name: "mining-master", role: "mining_master", mode: "custom", path: "^/mining-master/", customRefresh: true},
         {name: "excavator", role: "excavator_operator", mode: "custom", path: "^/excavator/work/?$", customRefresh: true},
-        {name: "driver", role: "driver", mode: "custom", path: "^/driver/(?:shift/?)?$", customRefresh: true},
-        {name: "system-admin", role: "system_admin", mode: "observer", path: "^/system-admin/", customRefresh: true},
+        {name: "driver", role: "driver", mode: "custom", path: "^/driver/(?:shift(?:/close)?/?)?$", customRefresh: true},
+        {name: "system-admin", role: "system_admin", mode: "observer", path: "^/system-admin/"},
         {name: "management-shift-analytics", role: "management", mode: "custom", path: "^/reports/shift-analytics/?$", customRefresh: true},
         {name: "management-dynamics", role: "management", mode: "custom", path: "^/reports/management/dynamics/?$", customRefresh: true},
         {name: "management-reports", role: "management", mode: "manual", path: "^/reports/"}
@@ -765,8 +1141,7 @@ window.AppRealtimeConfig = {
     customRefreshPaths: [
         "^/mining-master/",
         "^/excavator/work/?$",
-        "^/driver/(?:shift/?)?$",
-        "^/system-admin/",
+        "^/driver/(?:shift(?:/close)?/?)?$",
         "^/reports/shift-analytics/?$",
         "^/reports/management/dynamics/?$"
     ]

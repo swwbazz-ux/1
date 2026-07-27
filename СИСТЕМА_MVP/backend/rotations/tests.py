@@ -368,8 +368,8 @@ class RotationWorkflowTests(TestCase):
 
     def test_rotation_role_service_workers_use_updated_header_shells(self):
         expected_versions = {
-            'timekeeper': 'timekeeper-shell-v6',
-            'site-manager': 'site-manager-shell-v6',
+            'timekeeper': 'timekeeper-shell-v8',
+            'site-manager': 'site-manager-shell-v8',
         }
 
         for slug, expected_version in expected_versions.items():
@@ -378,7 +378,8 @@ class RotationWorkflowTests(TestCase):
                 self.assertEqual(response.status_code, 200)
                 self.assertContains(response, expected_version)
                 self.assertContains(response, 'new Request(url, { cache: "reload" })')
-                self.assertContains(response, 'fetch(request, { cache: "reload" })')
+                self.assertContains(response, 'fetch(request, { cache: "no-store" })')
+                self.assertNotContains(response, 'ignoreSearch: true')
 
     def test_rotation_header_uses_shared_compact_action_grid(self):
         backend_root = Path(__file__).resolve().parents[1]

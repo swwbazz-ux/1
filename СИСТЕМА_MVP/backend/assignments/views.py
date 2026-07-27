@@ -5,17 +5,21 @@ from decimal import Decimal
 from django.contrib import messages
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.db.models import Exists, OuterRef, Q
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
+from core.production_time import production_shift_context, production_shift_type
+from core.models import lock_production_state
 from references.models import Equipment
 from shifts.models import EmployeeShift, ShiftType
 from shifts.services import lock_active_employee_for_shift
 from trips.views import dispatcher_control_view as render_dispatcher_control_view
 from users.access_auth import find_employee_access_by_credentials
+from users.active_role import activate_role_session
 from users.models import EmployeeAccess
 from users.role_apps import role_app_manifest_response, role_app_service_worker_response
 from users.session_device import get_session_device_kind, set_session_device_kind
@@ -69,8 +73,10 @@ MINING_MASTER_MANIFEST = {
 
 
 MINING_MASTER_SERVICE_WORKER_JS = r"""
+const APP_CONTRACT_VERSION = "pwa-contract-v1";
+const ROLE_CODE = "mining_master";
 const CACHE_PREFIX = "mining-master-mobile-shell-";
-const CACHE_NAME = `${CACHE_PREFIX}v108`;
+const CACHE_NAME = "mining-master-mobile-shell-v113";
 const APP_SHELL_URL = "/mining-master/assignments/";
 const LOGIN_URL = "/";
 const MANIFEST_URL = "/mining-master-manifest.webmanifest";
@@ -81,6 +87,7 @@ const CORE_ASSETS = [
   APP_SHELL_URL,
   MANIFEST_URL,
   "/static/js/realtime-client.js",
+  "/static/js/role-readonly.js",
   "/static/css/app.css",
   "/static/favicon.ico",
   "/static/img/pwa/mining-master-180.png",
@@ -171,15 +178,21 @@ async function networkOnly(request) {
   }
 }
 
-async function cacheFirst(request) {
+async function networkFirstStatic(request) {
   const cache = await caches.open(CACHE_NAME);
-  const cached = await cache.match(request, { ignoreSearch: true });
-  if (cached) return cached;
-  const response = await fetch(request);
-  if (response && response.ok) {
-    cache.put(request, response.clone()).catch(() => undefined);
+  try {
+    const response = await fetch(request, { cache: "no-store" });
+    if (response && response.ok) {
+      cache.put(request, response.clone()).catch(() => undefined);
+    }
+    return response;
+  } catch (error) {
+    return (await cache.match(request)) ||
+      new Response("Ресурс недоступен без сети.", {
+        status: 503,
+        headers: { "Content-Type": "text/plain; charset=utf-8" }
+      });
   }
-  return response;
 }
 
 self.addEventListener("fetch", event => {
@@ -204,7 +217,7 @@ self.addEventListener("fetch", event => {
     return;
   }
   if (url.pathname.startsWith("/static/")) {
-    event.respondWith(cacheFirst(request));
+    event.respondWith(networkFirstStatic(request));
   }
 });
 
@@ -217,7 +230,10 @@ self.addEventListener("message", event => {
   if (data.type === "GET_VERSION") {
     const message = {
       type: "MINING_MASTER_SW_VERSION",
-      version: CACHE_NAME
+      version: CACHE_NAME,
+      appContractVersion: APP_CONTRACT_VERSION,
+      shellVersion: CACHE_NAME,
+      roleCode: ROLE_CODE
     };
     if (event.ports && event.ports[0]) {
       event.ports[0].postMessage(message);
@@ -265,23 +281,57 @@ def get_excavator_label(equipment):
     return f'Экс {get_equipment_number(equipment)}'
 
 
-def get_shift_state(employee):
-    current_shift = (
+WORKPLACE_ROLE_CODES = {
+    'driver',
+    'excavator_operator',
+    'dispatcher',
+    'mining_master',
+    'oup',
+}
+
+
+def mining_master_shift_queryset():
+    mining_master_access = EmployeeAccess.objects.filter(
+        employee_id=OuterRef('employee_id'),
+        role__code='mining_master',
+        role__is_active=True,
+        is_active=True,
+        status=EmployeeAccess.Status.ACTIVATED,
+    )
+    other_workplace_access = EmployeeAccess.objects.filter(
+        employee_id=OuterRef('employee_id'),
+        role__code__in=WORKPLACE_ROLE_CODES - {'mining_master'},
+        role__is_active=True,
+        is_active=True,
+        status=EmployeeAccess.Status.ACTIVATED,
+    )
+    return (
         EmployeeShift.objects
         .select_related('employee')
-        .filter(closed_at__isnull=True, employee=employee)
+        .filter(closed_at__isnull=True)
+        .annotate(
+            has_mining_master_access=Exists(mining_master_access),
+            has_other_workplace_access=Exists(other_workplace_access),
+        )
+        .filter(
+            Q(workplace_code='mining_master')
+            | Q(
+                workplace_code='',
+                equipment__isnull=True,
+                has_mining_master_access=True,
+                has_other_workplace_access=False,
+            )
+        )
+    )
+
+
+def get_shift_state(employee):
+    open_master_shifts = mining_master_shift_queryset()
+    current_shift = (
+        open_master_shifts
+        .filter(employee=employee)
         .order_by('-opened_at')
         .first()
-    )
-    open_master_shifts = (
-        EmployeeShift.objects
-        .select_related('employee')
-        .filter(
-            closed_at__isnull=True,
-            employee__accesses__role__code='mining_master',
-            employee__accesses__is_active=True,
-        )
-        .distinct()
     )
     blocking_shift = open_master_shifts.exclude(employee=employee).first()
     return current_shift, blocking_shift
@@ -291,14 +341,7 @@ def get_shift_state_for_access(access):
     if access.role.code == 'mining_master':
         return get_shift_state(access.employee)
     blocking_shift = (
-        EmployeeShift.objects
-        .select_related('employee')
-        .filter(
-            closed_at__isnull=True,
-            employee__accesses__role__code='mining_master',
-            employee__accesses__is_active=True,
-        )
-        .distinct()
+        mining_master_shift_queryset()
         .order_by('-opened_at')
         .first()
     )
@@ -306,7 +349,7 @@ def get_shift_state_for_access(access):
 
 
 def get_shift_type_for_now(now):
-    return ShiftType.DAY if 8 <= timezone.localtime(now).hour < 20 else ShiftType.NIGHT
+    return production_shift_type(now)
 
 
 def mining_master_service_worker_view(request):
@@ -493,11 +536,13 @@ def handle_shift_action(request, action, access, current_shift, blocking_shift):
         try:
             with transaction.atomic():
                 employee = lock_active_employee_for_shift(access.employee, role_code='mining_master')
+                lock_production_state()
                 current_shift, blocking_shift = get_shift_state(employee)
                 if not current_shift and not blocking_shift:
                     EmployeeShift.objects.create(
                         employee=employee,
                         shift_type=get_shift_type_for_now(now),
+                        workplace_code='mining_master',
                         opened_at=now,
                         opened_by=employee,
                     )
@@ -536,10 +581,11 @@ def authenticate_shared_shift_start(request):
     if not access:
         return None, 'Телефон или код горного мастера указаны неверно.'
 
-    request.session['employee_access_id'] = access.id
+    try:
+        access = activate_role_session(request, access)
+    except ValidationError as error:
+        return None, '; '.join(error.messages)
     set_session_device_kind(request, device_kind)
-    access.last_login_at = timezone.now()
-    access.save(update_fields=['last_login_at'])
     return access, ''
 
 
@@ -671,11 +717,12 @@ def build_mining_master_dispatcher_header(request, access, current_shift, blocki
 
     can_start_shift = not current_shift and not blocking_shift
     requires_shift_reauth = can_start_shift and get_session_device_kind(request) == 'shared'
-    current_time = timezone.localtime().strftime('%H:%M')
-    current_date = timezone.localdate().strftime('%d.%m.%Y')
+    production_context = production_shift_context()
+    current_time = production_context.local_datetime.strftime('%H:%M')
+    current_date = production_context.production_date.strftime('%d.%m.%Y')
     if current_shift:
-        shift_label = 'Смена открыта'
-        time_range = f'с {active_shift_opened_at}'
+        shift_label = 'Дневная смена' if current_shift.shift_type == ShiftType.DAY else 'Ночная смена'
+        time_range = '07:00-19:00' if current_shift.shift_type == ShiftType.DAY else '19:00-07:00'
         clock_caption = 'в работе'
         shift_status_variant = 'open'
     elif blocking_shift:
@@ -684,8 +731,12 @@ def build_mining_master_dispatcher_header(request, access, current_shift, blocki
         clock_caption = 'наблюдение'
         shift_status_variant = 'blocked'
     else:
-        shift_label = ''
-        time_range = ''
+        shift_label = (
+            'Дневная смена'
+            if production_context.shift_type == ShiftType.DAY
+            else 'Ночная смена'
+        )
+        time_range = production_context.time_range
         clock_caption = ''
         shift_status_variant = 'closed'
 

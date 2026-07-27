@@ -1,12 +1,22 @@
 from django.contrib import messages
+from django.db import transaction
+from django.http import HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 
+from references.models import Equipment
 from trips.models import OPEN_TRIP_STATUSES, Trip
 from users.models import EmployeeAccess
 
 from .forms import MechanicDowntimeCreateForm
 from .models import DowntimeEvent
+
+
+def equipment_is_truck(equipment):
+    equipment_type_name = (
+        getattr(getattr(equipment, 'equipment_type', None), 'name', '') or ''
+    ).casefold()
+    return 'самосвал' in equipment_type_name
 
 
 def format_duration(started_at, ended_at=None):
@@ -87,6 +97,7 @@ def mechanic_dashboard_view(request):
 
     for event in open_events:
         event.duration_text = format_duration(event.started_at)
+        event.mechanic_can_close = not equipment_is_truck(event.equipment)
     for event in recent_closed_events:
         event.duration_text = format_duration(event.started_at, event.ended_at)
 
@@ -106,6 +117,7 @@ def mechanic_dashboard_view(request):
     )
 
 
+@transaction.atomic
 def mechanic_create_downtime_view(request, trip_id):
     access = get_mechanic_access(request)
     if not access:
@@ -130,8 +142,9 @@ def mechanic_create_downtime_view(request, trip_id):
         messages.error(request, 'Не удалось открыть простой механической службы. Проверьте заполнение формы.')
         return redirect('mechanic_dashboard')
 
-    open_event = DowntimeEvent.objects.filter(
-        equipment=trip.excavator,
+    equipment = Equipment.objects.select_for_update().get(pk=trip.excavator_id)
+    open_event = DowntimeEvent.objects.select_for_update().filter(
+        equipment=equipment,
         ended_at__isnull=True,
     ).select_related('reason').first()
     if open_event:
@@ -139,7 +152,7 @@ def mechanic_create_downtime_view(request, trip_id):
         return redirect('mechanic_dashboard')
 
     DowntimeEvent.objects.create(
-        equipment=trip.excavator,
+        equipment=equipment,
         employee=access.employee,
         reason=form.cleaned_data['reason'],
         started_at=timezone.now(),
@@ -149,6 +162,7 @@ def mechanic_create_downtime_view(request, trip_id):
     return redirect('mechanic_dashboard')
 
 
+@transaction.atomic
 def mechanic_close_downtime_view(request, event_id):
     access = get_mechanic_access(request)
     if not access:
@@ -158,11 +172,30 @@ def mechanic_close_downtime_view(request, event_id):
     if request.method != 'POST':
         return redirect('mechanic_dashboard')
 
-    event = get_object_or_404(
-        DowntimeEvent.objects.select_related('equipment', 'reason'),
+    event_reference = get_object_or_404(
+        DowntimeEvent.objects.only('equipment_id'),
         id=event_id,
-        ended_at__isnull=True,
     )
+    equipment = get_object_or_404(
+        Equipment.objects.select_for_update(),
+        id=event_reference.equipment_id,
+    )
+    event = get_object_or_404(
+        DowntimeEvent.objects
+        .select_for_update()
+        .select_related('equipment', 'equipment__equipment_type', 'reason'),
+        id=event_id,
+        equipment=equipment,
+    )
+    if equipment_is_truck(event.equipment):
+        return HttpResponseForbidden(
+            'Простой самосвала закрывает только водитель.',
+            content_type='text/plain; charset=utf-8',
+        )
+    if event.ended_at is not None:
+        messages.info(request, f'Простой по технике {event.equipment} уже закрыт.')
+        return redirect('mechanic_dashboard')
+
     event.ended_at = timezone.now()
     event.save(update_fields=['ended_at'])
     messages.success(request, f'Простой по технике {event.equipment} закрыт.')

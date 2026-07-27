@@ -928,9 +928,17 @@ class DriverOpenShiftForm(forms.ModelForm):
         if not shift_type or not truck:
             return cleaned_data
 
-        truck_busy = EmployeeShift.objects.filter(equipment=truck, closed_at__isnull=True).exists()
-        if truck_busy:
-            raise ValidationError('Смена по этому самосвалу уже открыта другим водителем.')
+        truck_busy_shift = (
+            EmployeeShift.objects
+            .select_related('employee', 'equipment', 'equipment__equipment_type')
+            .filter(equipment=truck, closed_at__isnull=True)
+            .order_by('id')
+            .first()
+        )
+        if truck_busy_shift:
+            from shifts.services import open_shift_conflict_message
+
+            raise ValidationError(open_shift_conflict_message(truck_busy_shift))
 
         from shifts.services import validate_driver_fuel_reading
         try:

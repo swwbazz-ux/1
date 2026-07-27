@@ -1,6 +1,7 @@
 ﻿import json
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from django.core.exceptions import ValidationError
 from django.test import Client, TestCase
@@ -9,6 +10,7 @@ from django.utils import timezone
 
 from assignments.models import AssignmentStatus, EquipmentAssignment, ExcavatorPlacement, HaulAssignment, HaulAssignmentAction
 from core.models import OperationalStateEvent
+from core.production_time import production_work_date
 from downtimes.models import DowntimeEvent, DowntimeReason
 from references.equipment_states import upsert_default_equipment_states
 from references.models import (
@@ -32,8 +34,8 @@ from shifts.models import (
 )
 from shifts.services import assign_shift_plan_snapshot, progress_cycle_visual_context
 from trips.dispatcher_header import open_dispatcher_shift
-from trips.models import Trip, TripClientAction, TripStatus
-from trips.views import build_dispatcher_dashboard_context, finalize_trip_unloaded
+from trips.models import DispatcherActionLog, DispatcherActionType, Trip, TripClientAction, TripStatus
+from trips.views import build_dispatcher_dashboard_context, dispatcher_empty_snapshot_progress, finalize_trip_unloaded
 from users.models import DriverPrimaryRegistration, Employee, EmployeeAccess, Role
 
 
@@ -72,6 +74,18 @@ class DispatcherSharedShiftStartTests(TestCase):
         self.assertContains(response, 'pattern="[0-9]{2}-[0-9]{2}-[0-9]{2}"')
         self.assertContains(response, 'name="device_kind"')
         self.assertContains(response, 'value="shared"')
+
+    def test_empty_dispatcher_snapshot_uses_night_production_date_after_midnight(self):
+        shift = EmployeeShift.objects.create(
+            employee=self.current_dispatcher,
+            shift_type='night',
+            opened_at=datetime(2026, 7, 24, 1, 30, tzinfo=ZoneInfo('Asia/Vladivostok')),
+            plan_status='',
+        )
+
+        progress = dispatcher_empty_snapshot_progress(shift)
+
+        self.assertEqual(progress['date'], datetime(2026, 7, 23).date())
 
     def test_dispatcher_control_uses_reauth_popup_even_if_session_was_personal(self):
         session = self.client.session
@@ -193,11 +207,13 @@ class DispatcherSharedShiftStartTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/dispatcher/')
-        self.assertIn('dispatcher-desktop-shell-v33', script)
+        self.assertIn('dispatcher-desktop-shell-v38', script)
         self.assertIn(reverse('dispatcher_control'), script)
         self.assertIn(reverse('dispatcher_manifest'), script)
         self.assertIn('/static/js/realtime-client.js', script)
-        self.assertIn('ignoreSearch: true', script)
+        self.assertIn('/static/js/role-readonly.js', script)
+        self.assertNotIn('ignoreSearch: true', script)
+        self.assertIn('networkFirstStatic(request)', script)
         self.assertIn('request.headers.get("X-Requested-With") === "XMLHttpRequest"', script)
         self.assertIn('networkOnly(request)', script)
         self.assertIn('self.addEventListener("fetch"', script)
@@ -213,6 +229,71 @@ class DispatcherSharedShiftStartTests(TestCase):
             .filter(employee=self.current_dispatcher, closed_at__isnull=True)
             .exists()
         )
+
+    def test_blocked_dispatcher_can_service_close_previous_shift_with_reason(self):
+        previous_dispatcher = Employee.objects.create(
+            full_name='Предыдущий диспетчер',
+            phone='79000000501',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        EmployeeAccess.objects.create(
+            employee=previous_dispatcher,
+            role=self.dispatcher_role,
+            access_code='500001',
+            is_active=True,
+            status=EmployeeAccess.Status.ACTIVATED,
+        )
+        blocking_shift = EmployeeShift.objects.create(
+            employee=previous_dispatcher,
+            shift_type='day',
+            opened_at=timezone.now() - timedelta(hours=13),
+            opened_by=previous_dispatcher,
+        )
+
+        page = self.client.get(reverse('dispatcher_control'))
+
+        self.assertContains(page, 'Предыдущий диспетчер')
+        self.assertContains(page, 'Закрыть предыдущую смену служебно')
+        response = self.client.post(
+            reverse('dispatcher_service_close_shift', args=[blocking_shift.id]),
+            {'reason': 'Предыдущий сотрудник не завершил смену'},
+        )
+        blocking_shift.refresh_from_db()
+
+        self.assertRedirects(response, reverse('dispatcher_control'))
+        self.assertIsNotNone(blocking_shift.closed_at)
+        self.assertTrue(blocking_shift.is_service_closed)
+        self.assertEqual(blocking_shift.closed_by, self.current_dispatcher)
+        action = DispatcherActionLog.objects.get(
+            action_type=DispatcherActionType.SERVICE_CLOSE_SHIFT,
+            shift=blocking_shift,
+        )
+        self.assertEqual(action.reason, 'Предыдущий сотрудник не завершил смену')
+
+    def test_service_close_requires_reason_and_rejects_own_shift(self):
+        own_shift = EmployeeShift.objects.create(
+            employee=self.current_dispatcher,
+            shift_type='day',
+            opened_at=timezone.now(),
+            opened_by=self.current_dispatcher,
+        )
+
+        missing_reason_response = self.client.post(
+            reverse('dispatcher_service_close_shift', args=[own_shift.id]),
+            {'reason': ''},
+        )
+        own_shift.refresh_from_db()
+        self.assertRedirects(missing_reason_response, reverse('dispatcher_control'))
+        self.assertIsNone(own_shift.closed_at)
+
+        own_shift_response = self.client.post(
+            reverse('dispatcher_service_close_shift', args=[own_shift.id]),
+            {'reason': 'Попытка закрыть свою смену'},
+        )
+        own_shift.refresh_from_db()
+        self.assertRedirects(own_shift_response, reverse('dispatcher_control'))
+        self.assertIsNone(own_shift.closed_at)
 
     def test_open_dispatcher_shift_reloads_access_employee_and_rejects_dismissed_stale_object(self):
         self.assertTrue(self.current_access.employee.is_active)
@@ -314,6 +395,7 @@ class DispatcherGarageCurrentStateTests(TestCase):
             calculation_mode=mode,
             plan_value=value,
             is_active=is_active,
+            active_from=production_work_date(),
         )
         group.equipment.add(equipment)
         return group
@@ -396,6 +478,77 @@ class DispatcherGarageCurrentStateTests(TestCase):
         self.assertEqual(excavators_by_number['2']['label'], 'Гараж')
         self.assertEqual(dashboard['equipment_state_ui']['free']['color_group'], 'gray')
         self.assertEqual(dashboard['equipment_state_ui']['garage']['color_group'], 'gray')
+
+    def test_carryover_trip_is_visible_but_not_counted_in_new_shift_kpi(self):
+        old_operator = Employee.objects.create(full_name='Машинист старой смены')
+        old_loading_shift = EmployeeShift.objects.create(
+            employee=old_operator,
+            shift_type='night',
+            equipment=self.excavator,
+            opened_at=self.shift.opened_at - timedelta(hours=8),
+            closed_at=self.shift.opened_at,
+        )
+        trip = Trip.objects.create(
+            excavator=self.excavator,
+            truck=self.active_truck,
+            rock_type=self.rock,
+            dump_point=self.dump_point,
+            volume_m3='47.00',
+            tonnage='127.37',
+            status=TripStatus.LOADED_WAITING_UNLOAD,
+            loading_shift=old_loading_shift,
+        )
+        Trip.objects.filter(pk=trip.pk).update(
+            created_at=self.shift.opened_at - timedelta(minutes=10),
+        )
+
+        dashboard = self.build_dashboard()
+        trucks_by_name = {tile['name']: tile for tile in dashboard['truck_garage_tiles']}
+
+        self.assertEqual(trucks_by_name['11']['equipment_state_code'], 'loaded_waiting_unload')
+        self.assertEqual(trucks_by_name['11']['label'], 'На разгрузку')
+        self.assertEqual(dashboard['dispatcher_kpis']['fact_tons'], '0')
+
+        Trip.objects.filter(pk=trip.pk).update(
+            status=TripStatus.COMPLETED,
+            completed_at=self.shift.opened_at + timedelta(minutes=10),
+        )
+        completed_dashboard = self.build_dashboard()
+
+        self.assertEqual(completed_dashboard['dispatcher_kpis']['fact_tons'], '0')
+        self.assertTrue(
+            Trip.objects.filter(
+                pk=trip.pk,
+                loading_shift=old_loading_shift,
+                status=TripStatus.COMPLETED,
+            ).exists()
+        )
+
+    def test_trip_loaded_after_boundary_counts_for_actual_loading_shift(self):
+        new_operator = Employee.objects.create(full_name='Машинист новой смены')
+        new_loading_shift = EmployeeShift.objects.create(
+            employee=new_operator,
+            shift_type='day',
+            equipment=self.excavator,
+            opened_at=self.shift.opened_at + timedelta(minutes=1),
+        )
+        trip = Trip.objects.create(
+            excavator=self.excavator,
+            truck=self.active_truck,
+            rock_type=self.rock,
+            dump_point=self.dump_point,
+            volume_m3='47.00',
+            tonnage='127.37',
+            status=TripStatus.LOADED_WAITING_UNLOAD,
+            loading_shift=new_loading_shift,
+        )
+        Trip.objects.filter(pk=trip.pk).update(
+            created_at=self.shift.opened_at - timedelta(minutes=10),
+        )
+
+        dashboard = self.build_dashboard()
+
+        self.assertEqual(dashboard['dispatcher_kpis']['fact_tons'], '127')
 
     def test_complex_cards_use_standard_equipment_state_colors(self):
         blue_excavator = Equipment.objects.create(equipment_type=self.excavator_type, garage_number='3')
@@ -567,7 +720,11 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
             code='driver',
             defaults={'name': 'Водитель'},
         )
-        driver = Employee.objects.create(full_name=full_name)
+        driver = Employee.objects.create(
+            full_name=full_name,
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
         access = EmployeeAccess.objects.create(
             employee=driver,
             role=driver_role,
@@ -681,8 +838,14 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/static/css/excavator-work-v55-shift.css')
         self.assertContains(response, '/excavator-sw.js')
         self.assertContains(response, 'scope: "/excavator/"')
-        self.assertContains(response, 'excavator-mobile-shell-v113')
-        self.assertContains(response, 'class="eo-current-app-version" aria-label="Текущая версия приложения">Версия 113</span>')
+        self.assertContains(response, 'excavator-mobile-shell-v122')
+        self.assertContains(response, 'function requestShiftCloseConfirmation()')
+        self.assertContains(response, 'event.type === "pointerup" || event.type === "touchend"')
+        self.assertContains(response, 'shiftTapConfirmationOpened = true')
+        self.assertContains(response, 'class="eo-current-app-version" aria-label="Текущая версия приложения">Версия 117</span>')
+        self.assertContains(response, 'card.dataset.eoLoadActionId')
+        self.assertContains(response, 'item.dataset.eoCancelActionId')
+        self.assertContains(response, 'shiftPendingActionId')
         self.assertContains(response, 'data-eo-shift-scroll')
         self.assertContains(response, 'data-eo-shift-inputs')
         self.assertContains(response, 'data-eo-shift-review hidden')
@@ -935,6 +1098,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
             calculation_mode=PlanCalculationMode.VOLUME,
             plan_value='100.00',
             is_active=True,
+            active_from=production_work_date(),
         )
         group.equipment.add(self.truck)
         assign_shift_plan_snapshot(self.truck_shift)
@@ -977,6 +1141,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
             calculation_mode=PlanCalculationMode.TRIPS,
             plan_value='20.00',
             is_active=True,
+            active_from=production_work_date(),
         )
         group.equipment.add(self.truck)
         assign_shift_plan_snapshot(self.truck_shift)
@@ -1048,6 +1213,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
             calculation_mode=PlanCalculationMode.TRIPS,
             plan_value='8.00',
             is_active=True,
+            active_from=production_work_date(),
         )
         group.equipment.add(self.truck)
         assign_shift_plan_snapshot(self.truck_shift)
@@ -1413,6 +1579,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
             calculation_mode=PlanCalculationMode.VOLUME,
             plan_value='4200.00',
             is_active=True,
+            active_from=production_work_date(),
         )
         group.equipment.add(self.excavator)
 
@@ -1639,7 +1806,10 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 409)
-        self.assertEqual(response.json()['error'], 'Смена на этом экскаваторе уже открыта другим машинистом.')
+        self.assertEqual(
+            response.json()['error'],
+            f'Смена на технике {self.excavator} уже открыта сотрудником {self.operator.full_name}.',
+        )
         self.assertFalse(EmployeeShift.objects.filter(employee=second_operator, closed_at__isnull=True).exists())
 
     def test_excavator_shift_open_and_close_are_idempotent(self):
@@ -1660,6 +1830,42 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(first_close.json()['shift_id'], second_close.json()['shift_id'])
         self.assertTrue(second_close.json()['deduplicated'])
         self.assertEqual(ShiftClientAction.objects.filter(client_action_id__in=['same-shift-open', 'same-shift-close']).count(), 2)
+
+    def test_excavator_shift_toggle_retry_returns_original_action(self):
+        EmployeeShift.objects.filter(
+            employee=self.operator,
+            closed_at__isnull=True,
+        ).update(closed_at=timezone.now())
+        payload = {
+            'action': 'toggle',
+            'client_action_id': 'same-shift-toggle',
+            'fuel': '100',
+            'engine_hours': '1200',
+        }
+
+        first = self.client.post(
+            reverse('excavator_shift_action'),
+            data=json.dumps(payload),
+            content_type='application/json',
+        )
+        second = self.client.post(
+            reverse('excavator_shift_action'),
+            data=json.dumps(payload),
+            content_type='application/json',
+        )
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+        self.assertTrue(first.json()['shift_open'])
+        self.assertTrue(second.json()['shift_open'])
+        self.assertEqual(first.json()['shift_id'], second.json()['shift_id'])
+        self.assertTrue(second.json()['deduplicated'])
+        self.assertEqual(
+            ShiftClientAction.objects.filter(
+                client_action_id='same-shift-toggle',
+            ).count(),
+            1,
+        )
 
     def test_excavator_shift_close_validates_engine_hours_and_allows_refuel(self):
         shift = EmployeeShift.objects.get(employee=self.operator, closed_at__isnull=True)
@@ -1842,15 +2048,17 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/excavator/')
-        self.assertIn('excavator-mobile-shell-v113', script)
+        self.assertIn('excavator-mobile-shell-v122', script)
         self.assertIn(reverse('excavator_work'), script)
         self.assertIn(reverse('excavator_manifest'), script)
         self.assertIn('/static/js/realtime-client.js', script)
+        self.assertIn('/static/js/role-readonly.js', script)
         self.assertIn('/static/css/app.css', script)
         self.assertIn('/static/css/excavator-work-v55.css', script)
         self.assertIn('/static/css/excavator-work-v55-final.css', script)
         self.assertIn('/static/css/excavator-work-v55-shift.css', script)
-        self.assertIn('ignoreSearch: true', script)
+        self.assertNotIn('ignoreSearch: true', script)
+        self.assertIn('networkFirstStatic(request)', script)
         self.assertIn('request.headers.get("X-Requested-With") === "XMLHttpRequest"', script)
         self.assertIn('networkOnly(request)', script)
         self.assertIn('SKIP_WAITING', script)
@@ -2190,8 +2398,35 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         second_payload = json.loads(second_response.content.decode('utf-8'))
         self.assertEqual(first_payload['trip_id'], second_payload['trip_id'])
         self.assertTrue(second_payload['deduplicated'])
+        self.assertEqual(second_payload['status'], TripStatus.LOADED_WAITING_UNLOAD)
+        self.assertFalse(second_payload['refresh_required'])
         self.assertEqual(Trip.objects.count(), 1)
         self.assertEqual(TripClientAction.objects.count(), 1)
+
+    def test_truck_loaded_late_retry_reports_actual_terminal_trip_status(self):
+        first_response = self.post_truck_loaded(client_action_id='late-terminal-action')
+        self.assertEqual(first_response.status_code, 200)
+        trip = Trip.objects.get(id=first_response.json()['trip_id'])
+
+        for status, expected_label in (
+            (TripStatus.COMPLETED, 'Выполнен'),
+            (TripStatus.CANCELLED, 'Отменен'),
+        ):
+            with self.subTest(status=status):
+                trip.status = status
+                trip.save(update_fields=['status'])
+
+                retry_response = self.post_truck_loaded(
+                    client_action_id='late-terminal-action',
+                )
+
+                self.assertEqual(retry_response.status_code, 200)
+                payload = retry_response.json()
+                self.assertTrue(payload['deduplicated'])
+                self.assertEqual(payload['trip_id'], trip.id)
+                self.assertEqual(payload['status'], status)
+                self.assertEqual(payload['status_label'], expected_label)
+                self.assertTrue(payload['refresh_required'])
 
     def test_truck_loaded_rejects_truck_already_waiting_unload(self):
         self.post_truck_loaded(client_action_id='first-load')
@@ -2310,8 +2545,96 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertTrue(finish_cards_by_number['21']['can_drag'])
 
     def test_truck_loaded_cancel_returns_truck_to_assigned_state(self):
+        no_access_response = Client().post(
+            reverse('excavator_truck_loaded_cancel'),
+            data=json.dumps({
+                'client_action_id': 'cancel-without-access',
+                'truck_id': self.truck.id,
+                'trip_id': 1,
+                'dump_point_id': self.dump_point.id,
+            }),
+            content_type='application/json',
+        )
+        self.assertEqual(no_access_response.status_code, 403)
+        self.assertEqual(
+            no_access_response.json()['error'],
+            'Нет доступа к экрану Экскаваторщика.',
+        )
+
+        missing_action_response = self.client.post(
+            reverse('excavator_truck_loaded_cancel'),
+            data=json.dumps({
+                'truck_id': self.truck.id,
+                'trip_id': 1,
+                'dump_point_id': self.dump_point.id,
+            }),
+            content_type='application/json',
+        )
+        self.assertEqual(missing_action_response.status_code, 400)
+        self.assertEqual(
+            missing_action_response.json()['error'],
+            'Не передан client_action_id.',
+        )
+
+        invalid_parameters_response = self.client.post(
+            reverse('excavator_truck_loaded_cancel'),
+            data=json.dumps({
+                'client_action_id': 'cancel-invalid-parameters',
+                'truck_id': self.truck.id,
+                'trip_id': 'not-an-integer',
+                'dump_point_id': self.dump_point.id,
+            }),
+            content_type='application/json',
+        )
+        self.assertEqual(invalid_parameters_response.status_code, 400)
+        self.assertEqual(
+            invalid_parameters_response.json()['error'],
+            'Некорректные параметры действия.',
+        )
+
+        missing_trip_response = self.client.post(
+            reverse('excavator_truck_loaded_cancel'),
+            data=json.dumps({
+                'client_action_id': 'cancel-missing-trip',
+                'truck_id': self.truck.id,
+                'trip_id': 999999,
+                'dump_point_id': self.dump_point.id,
+            }),
+            content_type='application/json',
+        )
+        self.assertEqual(missing_trip_response.status_code, 409)
+        self.assertEqual(
+            missing_trip_response.json()['error'],
+            'Незакрытый рейс для отмены не найден.',
+        )
+
         load_response = self.post_truck_loaded(client_action_id='cancel-load')
         trip = Trip.objects.get(id=json.loads(load_response.content.decode('utf-8'))['trip_id'])
+        other_dump_point = DumpPoint.objects.create(name='Другая точка разгрузки')
+
+        dump_mismatch_response = self.client.post(
+            reverse('excavator_truck_loaded_cancel'),
+            data=json.dumps({
+                'client_action_id': 'cancel-dump-mismatch',
+                'truck_id': trip.truck_id,
+                'trip_id': trip.id,
+                'dump_point_id': other_dump_point.id,
+            }),
+            content_type='application/json',
+        )
+        self.assertEqual(dump_mismatch_response.status_code, 409)
+        self.assertEqual(
+            dump_mismatch_response.json()['error'],
+            'Точка разгрузки в действии не совпадает с рейсом.',
+        )
+        trip.refresh_from_db()
+        self.assertEqual(trip.status, TripStatus.LOADED_WAITING_UNLOAD)
+        self.assertFalse(
+            TripClientAction.objects.filter(
+                action_type='truck_loaded_cancel',
+                client_action_id='cancel-dump-mismatch',
+            ).exists()
+        )
 
         response = self.post_truck_loaded_cancel(trip)
 
@@ -2427,6 +2750,12 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
             content_type='application/json',
         )
 
+        payload = json.loads(response.content.decode('utf-8'))
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(payload['ok'])
+        self.assertIn('недоступна', payload['error'])
+        self.assertFalse(DowntimeEvent.objects.filter(equipment=self.excavator, reason=wrong_reason).exists())
+
     def post_truck_loaded_cancel(self, trip, *, client_action_id='cancel-1'):
         return self.client.post(
             reverse('excavator_truck_loaded_cancel'),
@@ -2438,12 +2767,6 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
             }),
             content_type='application/json',
         )
-
-        payload = json.loads(response.content.decode('utf-8'))
-        self.assertEqual(response.status_code, 400)
-        self.assertFalse(payload['ok'])
-        self.assertIn('недоступна', payload['error'])
-        self.assertFalse(DowntimeEvent.objects.filter(equipment=self.excavator, reason=wrong_reason).exists())
 
     def test_excavator_downtime_action_publishes_state_payload_for_realtime(self):
         response = self.client.post(
@@ -2563,6 +2886,7 @@ class DispatcherAssignmentRealtimeTests(TestCase):
             full_name='Диспетчер тест',
             phone='79000000600',
             is_active=True,
+            status=Employee.Status.ACTIVE,
         )
         self.access = EmployeeAccess.objects.create(
             employee=self.dispatcher,

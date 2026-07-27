@@ -50,6 +50,14 @@ class EquipmentPlanGroup(models.Model):
     created_at = models.DateTimeField('Создан', auto_now_add=True)
     updated_at = models.DateTimeField('Изменен', auto_now=True)
 
+    def __init__(self, *args, **kwargs):
+        use_production_default = not args and 'active_from' not in kwargs
+        super().__init__(*args, **kwargs)
+        if use_production_default:
+            from core.production_time import production_work_date
+
+            self.active_from = production_work_date()
+
     class Meta:
         verbose_name = 'Ежесменный план техники'
         verbose_name_plural = 'Ежесменные планы техники'
@@ -326,6 +334,14 @@ class ShiftPlan(models.Model):
     comment = models.TextField('Комментарий', blank=True)
     created_at = models.DateTimeField('Создан', auto_now_add=True)
     updated_at = models.DateTimeField('Изменен', auto_now=True)
+
+    def __init__(self, *args, **kwargs):
+        use_production_default = not args and 'date' not in kwargs
+        super().__init__(*args, **kwargs)
+        if use_production_default:
+            from core.production_time import production_work_date
+
+            self.date = production_work_date()
 
     class Meta:
         verbose_name = 'Сменный план'

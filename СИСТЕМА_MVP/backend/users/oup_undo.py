@@ -586,13 +586,19 @@ def _undo_access_action(log, action_code):
 def undo_oup_action(*, log_id, actor, comment=''):
     _require_admin_actor(actor)
     log = (
-        AdminActionLog.objects.select_for_update()
+        AdminActionLog.objects.select_for_update(of=('self',))
         .select_related('actor')
         .get(pk=log_id)
     )
     if AdminActionLog.objects.select_for_update().filter(reversal_of=log).exists():
         raise ValidationError('Это действие ОУП уже отменено.')
-    if _later_effective_actions(log).select_for_update().exists():
+    later_action_id = (
+        _later_effective_actions(log)
+        .select_for_update(of=('self',))
+        .values_list('pk', flat=True)
+        .first()
+    )
+    if later_action_id is not None:
         raise ValidationError('Сначала отмените более позднее действие по этому объекту.')
 
     action_code = resolve_oup_action_code(log)

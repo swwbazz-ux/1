@@ -104,7 +104,7 @@
 
             <div class="admin-employee-list" data-employee-list>
                 {% for employee in employees %}
-                    <article class="admin-employee-row status-{{ employee.status }}" draggable="true" tabindex="0" data-employee-row data-employee-id="{{ employee.id }}" data-detail-url="{% url 'system_admin_employee_detail' employee.id %}" data-employee-name="{{ employee.full_name }}" data-employee-status="{{ employee.get_status_display }}" data-access-status="{% with primary_access=employee.accesses.all.0 %}{% if primary_access %}{{ primary_access.get_status_display }}{% else %}Нет доступа{% endif %}{% endwith %}">
+                    <article class="admin-employee-row status-{{ employee.status }}" draggable="true" tabindex="0" data-employee-row data-employee-id="{{ employee.id }}" data-detail-url="{% url 'system_admin_employee_detail' employee.id %}" data-employee-name="{{ employee.full_name }}" data-employee-status="{{ employee.get_status_display }}" data-employee-status-code="{{ employee.status }}" data-access-status="{% with primary_access=employee.accesses.all.0 %}{% if primary_access %}{{ primary_access.get_status_display }}{% else %}Нет доступа{% endif %}{% endwith %}">
                         <div class="employee-mini-cell">
                             <div class="employee-mini-card">
                                 <span class="employee-mini-avatar">
@@ -159,10 +159,12 @@
                                     <input type="hidden" name="next" value="{{ request.get_full_path }}">
                                     <input type="hidden" name="reason" data-block-reason>
                                 </form>
-                                <form hidden method="post" action="{% url 'system_admin_access_action' primary_access.id 'unblock' %}" data-dnd-form="unblock_access" data-confirm="Разблокировать доступ сотрудника?">
-                                    {% csrf_token %}
-                                    <input type="hidden" name="next" value="{{ request.get_full_path }}">
-                                </form>
+                                {% if employee.status != "archived" and employee.status != "dismissed" and employee.status != "deleted" %}
+                                    <form hidden method="post" action="{% url 'system_admin_access_action' primary_access.id 'unblock' %}" data-dnd-form="unblock_access" data-confirm="Разблокировать доступ сотрудника?">
+                                        {% csrf_token %}
+                                        <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                                    </form>
+                                {% endif %}
                             {% endif %}
                         {% endwith %}
                         <form hidden method="post" action="{% url 'system_admin_employee_status_action' employee.id 'deactivate' %}" data-dnd-form="deactivate" data-confirm="Деактивировать сотрудника? Его доступы будут отключены.">
@@ -186,7 +188,7 @@
                 <p class="muted">Перетащите сотрудника в нужную зону.</p>
             </div>
             <div class="dnd-group-label">Доступ</div>
-            <button class="dnd-zone success" type="button" data-dnd-action="unblock_access">
+            <button class="dnd-zone success" type="button" data-dnd-action="unblock_access" data-dnd-unavailable-hint="Сначала восстановите сотрудника" aria-disabled="false">
                 <strong>Разблокировать</strong>
                 <span>Вернуть вход</span>
             </button>
@@ -353,6 +355,37 @@ document.addEventListener("DOMContentLoaded", function () {
         }
     }
 
+    function setDndZoneAvailability(row) {
+        zones.forEach(function (zone) {
+            var action = zone.dataset.dndAction || "";
+            var form = row ? row.querySelector('[data-dnd-form="' + action + '"]') : null;
+            var unavailable = Boolean(row && !form);
+            var hint = zone.querySelector("span");
+            var terminalStatuses = ["archived", "dismissed", "deleted"];
+            var employeeStatus = row ? (row.dataset.employeeStatusCode || "") : "";
+            var unavailableHint = "Действие недоступно";
+
+            if (action === "unblock_access" && terminalStatuses.indexOf(employeeStatus) >= 0) {
+                unavailableHint = zone.dataset.dndUnavailableHint || unavailableHint;
+            } else if (action.indexOf("_access") >= 0) {
+                unavailableHint = "Доступ не назначен";
+            }
+
+            zone.classList.toggle("is-unavailable", unavailable);
+            zone.setAttribute("aria-disabled", unavailable ? "true" : "false");
+
+            if (!hint) {
+                return;
+            }
+            if (!hint.dataset.defaultText) {
+                hint.dataset.defaultText = hint.textContent.trim();
+            }
+            hint.textContent = unavailable
+                ? unavailableHint
+                : hint.dataset.defaultText;
+        });
+    }
+
     var filterForm = document.querySelector("[data-employee-filter-form]");
     var filterSearch = document.querySelector("[data-auto-filter-search]");
     function submitFilterForm() {
@@ -478,6 +511,7 @@ document.addEventListener("DOMContentLoaded", function () {
         row.addEventListener("dragstart", function (event) {
             draggedId = row.dataset.employeeId || "";
             row.classList.add("is-dragging");
+            setDndZoneAvailability(row);
             event.dataTransfer.effectAllowed = "move";
             event.dataTransfer.setData("text/plain", draggedId);
             removeDragPreview();
@@ -514,6 +548,8 @@ document.addEventListener("DOMContentLoaded", function () {
         row.addEventListener("dragend", function () {
             row.classList.remove("is-dragging");
             removeDragPreview();
+            draggedId = "";
+            setDndZoneAvailability(null);
             zones.forEach(function (zone) {
                 zone.classList.remove("is-drag-over");
             });
@@ -522,6 +558,13 @@ document.addEventListener("DOMContentLoaded", function () {
 
     zones.forEach(function (zone) {
         zone.addEventListener("dragover", function (event) {
+            if (zone.getAttribute("aria-disabled") === "true") {
+                if (event.dataTransfer) {
+                    event.dataTransfer.dropEffect = "none";
+                }
+                moveDragPreview(event);
+                return;
+            }
             event.preventDefault();
             moveDragPreview(event);
             zone.classList.add("is-drag-over");
@@ -535,6 +578,9 @@ document.addEventListener("DOMContentLoaded", function () {
             event.preventDefault();
             removeDragPreview();
             zone.classList.remove("is-drag-over");
+            if (zone.getAttribute("aria-disabled") === "true") {
+                return;
+            }
 
             var employeeId = event.dataTransfer.getData("text/plain") || draggedId;
             var row = document.querySelector('[data-employee-id="' + employeeId + '"]');
@@ -545,6 +591,7 @@ document.addEventListener("DOMContentLoaded", function () {
             var action = zone.dataset.dndAction;
             var form = row.querySelector('[data-dnd-form="' + action + '"]');
             if (!form) {
+                setDndZoneAvailability(row);
                 return;
             }
 

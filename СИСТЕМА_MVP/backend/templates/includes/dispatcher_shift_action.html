@@ -187,5 +187,41 @@
     {% endif %}
 {% endif %}
 {% if not dispatcher_header.can_toggle_shift %}
-    <span class="dispatcher-shift-placeholder" aria-hidden="true"></span>
+    {% if dispatcher_header.can_service_close_blocking_shift %}
+        <form
+            method="post"
+            action="{% url 'dispatcher_service_close_shift' dispatcher_header.blocking_shift.id %}"
+            class="dispatcher-blocking-shift-recovery"
+            data-confirm="Закрыть предыдущую смену служебно?"
+        >
+            {% csrf_token %}
+            <span class="dispatcher-blocking-shift-summary">
+                Смену блокирует {{ dispatcher_header.blocking_shift.employee }}
+                с {{ dispatcher_header.blocking_shift.opened_at|date:"d.m.Y H:i" }}
+            </span>
+            <label>
+                <span class="visually-hidden">Причина служебного закрытия</span>
+                <input type="text" name="reason" required maxlength="255" placeholder="Укажите причину">
+            </label>
+            {% if dispatcher_header.blocking_shift.equipment %}
+                <label>
+                    <span class="visually-hidden">Топливо на конец смены</span>
+                    <input type="number" name="end_fuel" min="0" step="0.01" required placeholder="Топливо на конец">
+                </label>
+                {% if dispatcher_header.blocking_shift.workplace_code == "driver" %}
+                    <label>
+                        <span class="visually-hidden">Одометр на конец смены</span>
+                        <input type="number" name="end_mileage" min="0" step="0.01" required placeholder="Одометр на конец">
+                    </label>
+                {% endif %}
+                <label>
+                    <span class="visually-hidden">Моточасы на конец смены</span>
+                    <input type="number" name="end_engine_hours" min="0" step="0.01" required placeholder="Моточасы на конец">
+                </label>
+            {% endif %}
+            <button type="submit">Закрыть предыдущую смену служебно</button>
+        </form>
+    {% else %}
+        <span class="dispatcher-shift-placeholder" aria-hidden="true"></span>
+    {% endif %}
 {% endif %}

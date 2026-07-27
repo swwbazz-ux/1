@@ -6569,9 +6569,31 @@ body.driver-mobile-screen {
         min-height: 100dvh;
         place-items: start center;
         padding: max(12px, env(safe-area-inset-top)) 10px max(14px, env(safe-area-inset-bottom));
-        overflow: auto;
+        overflow-x: clip;
+        overflow-y: auto;
         overscroll-behavior: contain;
         background: #040b10;
+    }
+
+    .login-page.unified-login-screen .unified-login-dialog,
+    .login-page.unified-login-screen .unified-login-form,
+    .login-page.unified-login-screen .unified-login-form > * {
+        min-width: 0;
+        max-width: 100%;
+    }
+
+    .login-page.unified-login-screen .unified-login-form .shared-shift-login-field,
+    .login-page.unified-login-screen .unified-login-form .shared-shift-phone-shell,
+    .login-page.unified-login-screen .unified-login-form .shared-shift-device-choice,
+    .login-page.unified-login-screen .unified-login-form .app-confirm-actions {
+        min-width: 0;
+        max-width: 100%;
+    }
+
+    .login-page.unified-login-screen .unified-login-dialog .app-confirm-content h2 {
+        max-width: 100%;
+        white-space: normal;
+        overflow-wrap: anywhere;
     }
 
     .dispatcher-shell .unified-login-dialog {
@@ -6703,8 +6725,9 @@ body.driver-mobile-screen {
     }
 
     .login-page.unified-login-screen.is-login-keyboard-active .unified-login-dialog .app-confirm-content h2 {
-        font-size: clamp(22px, 6.2vw, 27px);
-        white-space: nowrap;
+        font-size: clamp(20px, 5.6vw, 27px);
+        line-height: 1.02;
+        white-space: normal;
     }
 
     .login-page.unified-login-screen.is-login-keyboard-active .unified-login-dialog .app-confirm-content p {
@@ -14128,6 +14151,119 @@ body.employees-admin-screen {
     border-left-color: var(--admin-gray);
 }
 
+.shift-reading-corrections-panel {
+    grid-column: 1 / -1;
+    display: grid;
+    min-width: 0;
+    gap: 12px;
+    padding: 14px 16px;
+    border: 1px solid var(--shift-correction-line, rgba(127, 127, 127, .32));
+    border-left: 4px solid var(--shift-correction-accent, #c88712);
+    border-radius: 8px;
+    background: var(--shift-correction-panel, rgba(127, 127, 127, .08));
+    color: var(--shift-correction-ink, inherit);
+    box-shadow: var(--shift-correction-shadow, none);
+}
+
+.dispatcher-shell .shift-reading-corrections-panel {
+    --shift-correction-line: var(--gd-line);
+    --shift-correction-accent: var(--gd-yellow);
+    --shift-correction-panel: var(--gd-panel);
+    --shift-correction-ink: var(--gd-ink);
+    --shift-correction-muted: var(--gd-muted);
+    --shift-correction-soft: var(--gd-panel-soft);
+    --shift-correction-shadow: var(--gd-shadow);
+}
+
+.admin-shell .shift-reading-corrections-panel {
+    --shift-correction-line: var(--admin-line);
+    --shift-correction-accent: var(--admin-yellow);
+    --shift-correction-panel: var(--admin-panel);
+    --shift-correction-ink: var(--admin-ink);
+    --shift-correction-muted: var(--admin-muted);
+    --shift-correction-soft: var(--admin-panel-soft);
+    --shift-correction-shadow: var(--admin-shadow);
+}
+
+.shift-reading-corrections-head {
+    display: flex;
+    align-items: start;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.shift-reading-corrections-head h2 {
+    margin: 0;
+    color: var(--shift-correction-ink, inherit);
+    font-size: 16px;
+    line-height: 1.15;
+}
+
+.shift-reading-corrections-head p {
+    margin: 4px 0 0;
+    color: var(--shift-correction-muted, currentColor);
+    font-size: 12px;
+    line-height: 1.35;
+}
+
+.shift-reading-corrections-head > span {
+    flex: 0 0 auto;
+    padding: 5px 8px;
+    border: 1px solid var(--shift-correction-line, currentColor);
+    border-radius: 999px;
+    color: var(--shift-correction-muted, currentColor);
+    font-size: 11px;
+    font-weight: 900;
+    white-space: nowrap;
+}
+
+.shift-reading-corrections-table-wrap {
+    min-width: 0;
+    overflow: auto;
+    border: 1px solid var(--shift-correction-line, currentColor);
+    border-radius: 6px;
+}
+
+.shift-reading-corrections-table {
+    width: 100%;
+    min-width: 1060px;
+    border-collapse: collapse;
+    color: var(--shift-correction-ink, inherit);
+    font-size: 12px;
+}
+
+.shift-reading-corrections-table th,
+.shift-reading-corrections-table td {
+    padding: 9px 10px;
+    border-bottom: 1px solid var(--shift-correction-line, currentColor);
+    text-align: left;
+    vertical-align: top;
+}
+
+.shift-reading-corrections-table th {
+    background: var(--shift-correction-soft, transparent);
+    color: var(--shift-correction-muted, currentColor);
+    font-size: 10px;
+    font-weight: 900;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+.shift-reading-corrections-table tbody tr:last-child td {
+    border-bottom: 0;
+}
+
+.shift-reading-corrections-table td strong,
+.shift-reading-corrections-table td small {
+    display: block;
+}
+
+.shift-reading-corrections-table td small {
+    margin-top: 3px;
+    color: var(--shift-correction-muted, currentColor);
+    font-size: 10px;
+}
+
 .admin-dashboard-shell .dashboard-row.status-active {
     border-left-color: var(--admin-green);
 }
@@ -15113,6 +15249,23 @@ body.employees-admin-screen {
 .admin-employees-shell.admin-night .dnd-zone:focus-visible,
 .admin-employees-shell.admin-night .dnd-zone.is-drag-over {
     box-shadow: 0 12px 24px rgba(0, 0, 0, .36);
+}
+
+.admin-employees-shell .dnd-zone.is-unavailable,
+.admin-employees-shell .dnd-zone.is-unavailable:hover,
+.admin-employees-shell .dnd-zone.is-unavailable:focus-visible,
+.admin-employees-shell .dnd-zone.is-unavailable.is-drag-over {
+    transform: none;
+    cursor: not-allowed;
+    opacity: .66;
+    border-color: var(--admin-line);
+    border-left-color: var(--admin-gray);
+    background: var(--admin-panel-soft);
+    box-shadow: none;
+}
+
+.admin-employees-shell .dnd-zone.is-unavailable span {
+    color: var(--admin-red);
 }
 
 .admin-employees-shell .dnd-hint {

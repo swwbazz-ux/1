@@ -6,6 +6,7 @@ from django.test import Client, TestCase
 from django.urls import reverse
 from django.utils import timezone
 
+from core.production_time import production_work_date
 from downtimes.models import DowntimeEvent, DowntimeReason
 from references.models import DumpPoint, Equipment, EquipmentModel, EquipmentState, EquipmentType, RockType
 from shifts.models import EmployeeShift, EquipmentPlanGroup, PlanCalculationMode
@@ -129,6 +130,7 @@ class MiningMasterAssignmentsViewTests(TestCase):
             calculation_mode=PlanCalculationMode.VOLUME,
             plan_value='40.00',
             is_active=True,
+            active_from=production_work_date(),
         )
         excavator_group.equipment.add(self.excavator)
         operator = Employee.objects.create(full_name='Машинист цикла')
@@ -146,6 +148,7 @@ class MiningMasterAssignmentsViewTests(TestCase):
             calculation_mode=PlanCalculationMode.TRIPS,
             plan_value='4.00',
             is_active=True,
+            active_from=production_work_date(),
         )
         group.equipment.add(self.assigned_truck)
         driver = Employee.objects.create(full_name='Водитель цикла')
@@ -351,7 +354,7 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertContains(response, 'miningMasterUpdateCheckIntervalMs')
         self.assertContains(response, 'checkMiningMasterPwaUpdateSilently')
         self.assertContains(response, 'Установлена последняя версия приложения')
-        self.assertContains(response, 'mining-master-mobile-shell-v108')
+        self.assertContains(response, 'mining-master-mobile-shell-v113')
         self.assertContains(response, '"trip_changed"')
         self.assertContains(
             response,
@@ -393,7 +396,7 @@ class MiningMasterAssignmentsViewTests(TestCase):
         script = response.content.decode('utf-8')
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn('`${CACHE_PREFIX}v108`', script)
+        self.assertIn('mining-master-mobile-shell-v113', script)
         self.assertEqual(response['Service-Worker-Allowed'], '/mining-master/')
         self.assertIn('const CACHE_PREFIX = "mining-master-mobile-shell-";', script)
         self.assertIn('key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME', script)
@@ -401,7 +404,9 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertIn('EXCLUDED_NAVIGATION_PREFIXES.some(prefix => url.pathname.startsWith(prefix))', script)
         self.assertIn(reverse('mining_master_manifest'), script)
         self.assertIn('/static/js/realtime-client.js', script)
-        self.assertIn('ignoreSearch: true', script)
+        self.assertIn('/static/js/role-readonly.js', script)
+        self.assertNotIn('ignoreSearch: true', script)
+        self.assertIn('networkFirstStatic(request)', script)
         self.assertIn('request.headers.get("X-Requested-With") === "XMLHttpRequest"', script)
         self.assertIn('networkOnly(request)', script)
         self.assertIn('/static/img/pwa/mining-master-192.png', script)
@@ -508,6 +513,34 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertEqual(truck_tile.get('status'), 'green')
         self.assertEqual(truck_tile.get('label'), 'На разгрузку')
         self.assertEqual(truck_tile.get('equipment_state_code'), 'loaded_waiting_unload')
+
+    def test_carryover_trip_created_before_master_shift_remains_visible(self):
+        rock_type = RockType.objects.create(name='Щебень переходящий')
+        dump_point = DumpPoint.objects.create(name='Накопитель переходящий')
+        trip = Trip.objects.create(
+            truck=self.assigned_truck,
+            excavator=self.excavator,
+            rock_type=rock_type,
+            dump_point=dump_point,
+            status=TripStatus.LOADED_WAITING_UNLOAD,
+        )
+        Trip.objects.filter(pk=trip.pk).update(
+            created_at=self.shift.opened_at - timedelta(minutes=10),
+        )
+
+        response = self.client.get(reverse('mining_master_assignments'))
+
+        dashboard = response.context['dispatcher_dashboard']
+        complex_zone = next(
+            zone for zone in dashboard['complex_zones']
+            if str(zone.get('equipment_card_id')) == str(self.excavator.id)
+        )
+        truck_tile = next(
+            tile for tile in complex_zone.get('active_truck_tiles', [])
+            if str(tile.get('card_id')) == str(self.assigned_truck.id)
+        )
+        self.assertEqual(truck_tile.get('equipment_state_code'), 'loaded_waiting_unload')
+        self.assertEqual(truck_tile.get('label'), 'На разгрузку')
 
     def test_accepted_truck_without_trip_is_assigned_blue_in_complex(self):
         HaulAssignment.objects.filter(truck=self.assigned_truck).update(
@@ -1140,7 +1173,7 @@ class MiningMasterAssignmentsViewTests(TestCase):
             {'action': 'start_shift'},
         )
 
-        self.assertRedirects(response, reverse('mining_master_assignments'))
+        self.assertEqual(response.status_code, 409)
         self.assertFalse(
             EmployeeShift.objects.filter(employee=self.master, closed_at__isnull=True).exists()
         )
@@ -1238,7 +1271,11 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.shift.closed_by = self.master
         self.shift.save(update_fields=['closed_at', 'closed_by'])
         dispatcher_role = Role.objects.create(code='dispatcher', name='Диспетчер')
-        dispatcher = Employee.objects.create(full_name='Диспетчер тест', is_active=True)
+        dispatcher = Employee.objects.create(
+            full_name='Диспетчер тест',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
         dispatcher_access = EmployeeAccess.objects.create(
             employee=dispatcher,
             role=dispatcher_role,

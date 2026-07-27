@@ -146,6 +146,10 @@ class RoleAppManifestTests(SimpleTestCase):
                 worker_response = client.get(app.service_worker_url, HTTP_HOST='localhost')
                 self.assertEqual(worker_response.status_code, 200)
                 self.assertEqual(worker_response['Service-Worker-Allowed'], app.legacy_scope)
+                self.assertIn(
+                    '/static/js/role-readonly.js',
+                    worker_response.content.decode('utf-8'),
+                )
 
             with self.subTest(role=app.role_code, mode='isolated-origin'):
                 role_host = f'{app.subdomain}.localhost'

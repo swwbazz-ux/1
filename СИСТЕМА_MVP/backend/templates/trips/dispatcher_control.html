@@ -592,13 +592,13 @@
                                             <form method="post" action="{% url 'dispatcher_complete_trip' trip.id %}" class="dispatcher-inline-form">
                                                 {% csrf_token %}
                                                 {% for filter_name, filter_value in dispatcher_filter_items %}<input type="hidden" name="{{ filter_name }}" value="{{ filter_value }}">{% endfor %}
-                                                <input type="text" name="reason" placeholder="Причина">
+                                                <input type="text" name="reason" required aria-required="true" maxlength="255" placeholder="Причина служебного завершения">
                                                 <button type="submit">Завершить служебно</button>
                                             </form>
                                             <form method="post" action="{% url 'dispatcher_cancel_trip' trip.id %}" class="dispatcher-inline-form">
                                                 {% csrf_token %}
                                                 {% for filter_name, filter_value in dispatcher_filter_items %}<input type="hidden" name="{{ filter_name }}" value="{{ filter_value }}">{% endfor %}
-                                                <input type="text" name="reason" placeholder="Причина">
+                                                <input type="text" name="reason" required aria-required="true" maxlength="255" placeholder="Причина отмены рейса">
                                                 <button type="submit">Отменить</button>
                                             </form>
                                         {% else %}-{% endif %}
@@ -690,6 +690,13 @@
                                                 {% csrf_token %}
                                                 {% for filter_name, filter_value in dispatcher_filter_items %}<input type="hidden" name="{{ filter_name }}" value="{{ filter_value }}">{% endfor %}
                                                 <input type="text" name="reason" placeholder="Причина">
+                                                {% if shift.equipment %}
+                                                    <input type="number" name="end_fuel" min="0" step="0.01" required placeholder="Топливо на конец">
+                                                    {% if shift.workplace_code == "driver" %}
+                                                        <input type="number" name="end_mileage" min="0" step="0.01" required placeholder="Одометр на конец">
+                                                    {% endif %}
+                                                    <input type="number" name="end_engine_hours" min="0" step="0.01" required placeholder="Моточасы на конец">
+                                                {% endif %}
                                                 <button type="submit">Закрыть служебно</button>
                                             </form>
                                         {% else %}-{% endif %}
@@ -879,7 +886,7 @@ document.addEventListener("DOMContentLoaded", function () {
     var dispatcherRealtimeConnected = true;
     var dispatcherRealtimeLastSuccessAt = 0;
     var dispatcherRealtimeLastReason = "";
-    var miningMasterShellVersion = "mining-master-mobile-shell-v108";
+    var miningMasterShellVersion = "mining-master-mobile-shell-v113";
     function readDispatcherSyncQueue() {
         try {
             return JSON.parse(window.localStorage.getItem(dispatcherSyncQueueKey) || "[]");
@@ -928,7 +935,22 @@ document.addEventListener("DOMContentLoaded", function () {
         dispatcherSyncPendingCount = Math.max(0, dispatcherSyncPendingCount + (isPending ? 1 : -1));
         updateDispatcherSyncIndicator();
     }
+    function dispatcherRoleIsReadonly() {
+        return (
+            typeof window.isAppRoleReadonly === "function"
+            && window.isAppRoleReadonly()
+        );
+    }
+    function dispatcherInactiveRoleError() {
+        var error = new Error("Роль неактивна — доступен только просмотр");
+        error.isServerResponse = true;
+        error.code = "inactive_role";
+        return error;
+    }
     function enqueueDispatcherSyncRequest(request, delayMs) {
+        if (dispatcherRoleIsReadonly()) {
+            return false;
+        }
         var queue = readDispatcherSyncQueue();
         queue.push(Object.assign({
             id: "sync-" + Date.now() + "-" + Math.random().toString(16).slice(2),
@@ -937,8 +959,12 @@ document.addEventListener("DOMContentLoaded", function () {
         }, request || {}));
         writeDispatcherSyncQueue(queue);
         scheduleDispatcherSyncFlush(delayMs);
+        return true;
     }
     function sendDispatcherSyncRequest(request) {
+        if (dispatcherRoleIsReadonly()) {
+            return Promise.reject(dispatcherInactiveRoleError());
+        }
         var headers = { "X-CSRFToken": getCsrfToken() };
         var body = null;
         var controller = window.AbortController ? new AbortController() : null;
@@ -1000,6 +1026,10 @@ document.addEventListener("DOMContentLoaded", function () {
         });
     }
     function flushDispatcherSyncQueue() {
+        if (dispatcherRoleIsReadonly()) {
+            updateDispatcherSyncIndicator();
+            return;
+        }
         if (dispatcherSyncQueueFlushing) {
             updateDispatcherSyncIndicator();
             return;
@@ -1062,6 +1092,9 @@ document.addEventListener("DOMContentLoaded", function () {
         }, typeof delayMs === "number" ? delayMs : 80);
     }
     function dispatcherPost(url, data) {
+        if (dispatcherRoleIsReadonly()) {
+            return Promise.reject(dispatcherInactiveRoleError());
+        }
         var payload = Object.assign({}, data || {});
         if (!payload.client_action_id) {
             payload.client_action_id = "mm-" + Date.now() + "-" + Math.random().toString(16).slice(2);
@@ -1081,16 +1114,21 @@ document.addEventListener("DOMContentLoaded", function () {
         });
     }
     function dispatcherPostQueued(url, data, delayMs) {
+        if (dispatcherRoleIsReadonly()) {
+            return Promise.reject(dispatcherInactiveRoleError());
+        }
         var payload = Object.assign({}, data || {});
         if (!payload.client_action_id) {
             payload.client_action_id = "mm-" + Date.now() + "-" + Math.random().toString(16).slice(2);
         }
-        enqueueDispatcherSyncRequest({
+        if (!enqueueDispatcherSyncRequest({
             kind: "json",
             url: url,
             data: payload,
             refreshMobileBoard: true
-        }, typeof delayMs === "number" ? delayMs : dispatcherMobileSyncFlushDelayMs);
+        }, typeof delayMs === "number" ? delayMs : dispatcherMobileSyncFlushDelayMs)) {
+            return Promise.reject(dispatcherInactiveRoleError());
+        }
         return Promise.resolve({ queued: true });
     }
     window.addEventListener("focus", scheduleDispatcherSyncFlush);
@@ -2494,7 +2532,11 @@ document.addEventListener("DOMContentLoaded", function () {
         var tabPanels = Array.from(shell.querySelectorAll("[data-mm-mobile-panel]"));
         var fillScreens = Array.from(shell.querySelectorAll("[data-mm-mobile-fill]"));
         function isMiningMasterMobileReadonly() {
-            return shell.dataset.mmMobileReadonly === "true" || shell.classList.contains("is-readonly");
+            return (
+                (typeof window.isAppRoleReadonly === "function" && window.isAppRoleReadonly())
+                || shell.dataset.mmMobileReadonly === "true"
+                || shell.classList.contains("is-readonly")
+            );
         }
         function isMobileEditableTarget(target) {
             return Boolean(target && target.closest && target.closest("input, textarea, select, [contenteditable='true']"));
@@ -3270,7 +3312,6 @@ document.addEventListener("DOMContentLoaded", function () {
             });
         }
         function bindMobileHomeTruckDrag(mini) {
-            if (isMiningMasterMobileReadonly()) return;
             if (!mini || mini.dataset.mmMobileHomeTruckBound === "true") return;
             mini.dataset.mmMobileHomeTruckBound = "true";
             var activeTouchId = null;
@@ -3309,6 +3350,16 @@ document.addEventListener("DOMContentLoaded", function () {
                 ghost = null;
                 clearMobileHomeTruckDropState();
             }
+            function resetOnInactiveRole(event) {
+                if (!mini.isConnected) {
+                    window.removeEventListener("active-role-state-changed", resetOnInactiveRole);
+                    return;
+                }
+                if (!event.detail || event.detail.active === false) {
+                    resetState();
+                }
+            }
+            window.addEventListener("active-role-state-changed", resetOnInactiveRole);
             function getTrackedTouch(event) {
                 var touches = event.changedTouches || event.touches || [];
                 for (var index = 0; index < touches.length; index += 1) {
@@ -3317,6 +3368,10 @@ document.addEventListener("DOMContentLoaded", function () {
                 return null;
             }
             function startDrag(clientX, clientY) {
+                if (isMiningMasterMobileReadonly()) {
+                    resetState();
+                    return;
+                }
                 if (dragging || !holdReady) return;
                 dragging = true;
                 mini.classList.remove("is-hold-pending");
@@ -3362,6 +3417,10 @@ document.addEventListener("DOMContentLoaded", function () {
                 }
             }
             function finish(clientX, clientY, cancelled) {
+                if (isMiningMasterMobileReadonly()) {
+                    resetState();
+                    return;
+                }
                 if (!dragging || cancelled) {
                     resetState();
                     return;
@@ -3398,6 +3457,7 @@ document.addEventListener("DOMContentLoaded", function () {
                     });
             }
             mini.addEventListener("touchstart", function (event) {
+                if (isMiningMasterMobileReadonly()) return;
                 if (activeTouchId !== null || mini.classList.contains("is-moving")) return;
                 if (!event.changedTouches || !event.changedTouches.length) return;
                 event.stopPropagation();
@@ -3413,13 +3473,20 @@ document.addEventListener("DOMContentLoaded", function () {
                 mini.classList.add("is-hold-pending");
                 clearHoldTimer();
                 holdTimer = window.setTimeout(function () {
-                    if (activeTouchId === touch.identifier) {
+                    if (
+                        activeTouchId === touch.identifier
+                        && !isMiningMasterMobileReadonly()
+                    ) {
                         holdReady = true;
                         mini.classList.add("is-hold-ready");
                     }
                 }, 220);
             }, { passive: true });
             mini.addEventListener("touchmove", function (event) {
+                if (isMiningMasterMobileReadonly()) {
+                    resetState();
+                    return;
+                }
                 if (activeTouchId === null) return;
                 var touch = getTrackedTouch(event);
                 if (!touch) return;
@@ -3461,6 +3528,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 finish(touch ? touch.clientX : startX, touch ? touch.clientY : startY, true);
             }, { passive: false });
             mini.addEventListener("pointerdown", function (event) {
+                if (isMiningMasterMobileReadonly()) return;
                 if (event.pointerType === "touch") return;
                 if (event.pointerType === "mouse" && event.button !== 0) return;
                 if (mini.classList.contains("is-moving")) return;
@@ -3474,7 +3542,10 @@ document.addEventListener("DOMContentLoaded", function () {
                 mini.classList.add("is-hold-pending");
                 clearHoldTimer();
                 holdTimer = window.setTimeout(function () {
-                    if (activePointerId === event.pointerId) {
+                    if (
+                        activePointerId === event.pointerId
+                        && !isMiningMasterMobileReadonly()
+                    ) {
                         holdReady = true;
                         mini.classList.add("is-hold-ready");
                     }
@@ -3486,6 +3557,10 @@ document.addEventListener("DOMContentLoaded", function () {
                 }
             });
             mini.addEventListener("pointermove", function (event) {
+                if (isMiningMasterMobileReadonly()) {
+                    resetState();
+                    return;
+                }
                 if (event.pointerType === "touch") return;
                 if (activePointerId === null || event.pointerId !== activePointerId) return;
                 var dx = event.clientX - startX;
@@ -3661,7 +3736,6 @@ document.addEventListener("DOMContentLoaded", function () {
             });
         }
         function bindMobileGarageExcavatorSwipe(button) {
-            if (isMiningMasterMobileReadonly()) return;
             if (!window.PointerEvent) return;
             var startX = 0;
             var startY = 0;
@@ -3698,6 +3772,21 @@ document.addEventListener("DOMContentLoaded", function () {
                 }
                 resetMobileGarageExcavatorSwipe(button);
             }
+            function resetOnInactiveRole(event) {
+                if (!button.isConnected) {
+                    window.removeEventListener("active-role-state-changed", resetOnInactiveRole);
+                    return;
+                }
+                if (event.detail && event.detail.active !== false) {
+                    return;
+                }
+                if (activePointerId !== null) {
+                    finishSwipe({pointerId: activePointerId}, true);
+                } else {
+                    resetMobileGarageExcavatorSwipe(button);
+                }
+            }
+            window.addEventListener("active-role-state-changed", resetOnInactiveRole);
             button.addEventListener("pointerdown", function (event) {
                 if (isMiningMasterMobileReadonly()) return;
                 if (event.pointerType === "mouse" && event.button !== 0) return;
@@ -4072,7 +4161,6 @@ document.addEventListener("DOMContentLoaded", function () {
             });
         }
         function bindMobileFillAssignedTruckRelease(mini) {
-            if (isMiningMasterMobileReadonly()) return;
             if (!window.PointerEvent || !mini || mini.dataset.mmMobileReleaseBound === "true") return;
             mini.dataset.mmMobileReleaseBound = "true";
             var startX = 0;
@@ -4121,6 +4209,25 @@ document.addEventListener("DOMContentLoaded", function () {
                 var zone = screen && screen.querySelector("[data-mm-mobile-fill-drop]");
                 if (zone) zone.classList.remove("is-shaking-added");
             }
+            function resetOnInactiveRole(event) {
+                if (!mini.isConnected) {
+                    window.removeEventListener("active-role-state-changed", resetOnInactiveRole);
+                    return;
+                }
+                if (event.detail && event.detail.active !== false) {
+                    return;
+                }
+                if (activePointerId !== null && mini.releasePointerCapture) {
+                    try {
+                        mini.releasePointerCapture(activePointerId);
+                    } catch (error) {}
+                }
+                activePointerId = null;
+                dragging = false;
+                dragMode = "";
+                reset();
+            }
+            window.addEventListener("active-role-state-changed", resetOnInactiveRole);
             function removeGhost() {
                 if (ghost) ghost.remove();
                 ghost = null;
@@ -4189,6 +4296,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 reset();
             }
             mini.addEventListener("pointerdown", function (event) {
+                if (isMiningMasterMobileReadonly()) return;
                 if (event.pointerType === "mouse" && event.button !== 0) return;
                 event.stopPropagation();
                 activePointerId = event.pointerId;
@@ -4200,6 +4308,10 @@ document.addEventListener("DOMContentLoaded", function () {
                 mini.classList.add("is-hold-pending");
                 holdTimer = window.setTimeout(function () {
                     holdTimer = null;
+                    if (isMiningMasterMobileReadonly()) {
+                        reset();
+                        return;
+                    }
                     holdReady = true;
                     mini.classList.remove("is-hold-pending");
                     mini.classList.add("is-hold-ready");
@@ -4275,7 +4387,6 @@ document.addEventListener("DOMContentLoaded", function () {
             }, 120);
         }
         function bindMobileFillTruckDrag(button) {
-            if (isMiningMasterMobileReadonly()) return;
             if (!window.PointerEvent) return;
             var startX = 0;
             var startY = 0;
@@ -4348,6 +4459,17 @@ document.addEventListener("DOMContentLoaded", function () {
                 }
                 dragging = false;
             }
+            function resetOnInactiveRole(event) {
+                if (!button.isConnected) {
+                    window.removeEventListener("active-role-state-changed", resetOnInactiveRole);
+                    return;
+                }
+                if (event.detail && event.detail.active !== false) {
+                    return;
+                }
+                finishAt(startX, startY, true);
+            }
+            window.addEventListener("active-role-state-changed", resetOnInactiveRole);
             function finish(event, cancelled) {
                 if (activePointerId === null || event.pointerId !== activePointerId) return;
                 finishAt(event.clientX, event.clientY, cancelled);
@@ -4373,7 +4495,10 @@ document.addEventListener("DOMContentLoaded", function () {
                 button.classList.add("is-hold-pending");
                 clearHoldTimer();
                 holdTimer = window.setTimeout(function () {
-                    if (activePointerId === event.pointerId) {
+                    if (
+                        activePointerId === event.pointerId
+                        && !isMiningMasterMobileReadonly()
+                    ) {
                         holdReady = true;
                         button.classList.add("is-hold-ready");
                     }
@@ -4419,7 +4544,10 @@ document.addEventListener("DOMContentLoaded", function () {
                 button.classList.add("is-hold-pending");
                 clearHoldTimer();
                 holdTimer = window.setTimeout(function () {
-                    if (activeTouchId === touch.identifier) {
+                    if (
+                        activeTouchId === touch.identifier
+                        && !isMiningMasterMobileReadonly()
+                    ) {
                         holdReady = true;
                         button.classList.add("is-hold-ready");
                     }
@@ -4463,7 +4591,6 @@ document.addEventListener("DOMContentLoaded", function () {
             }, { passive: false });
         }
         function bindMobileFillFinishSwipe(zone) {
-            if (isMiningMasterMobileReadonly()) return;
             if (!window.PointerEvent) return;
             var startY = 0;
             var activePointerId = null;
@@ -4518,6 +4645,23 @@ document.addEventListener("DOMContentLoaded", function () {
                 resetSaveState(zone);
                 zone.style.removeProperty("--mm-mobile-fill-exit-y");
             }
+            function resetOnInactiveRole(event) {
+                if (!zone.isConnected) {
+                    window.removeEventListener("active-role-state-changed", resetOnInactiveRole);
+                    return;
+                }
+                if (event.detail && event.detail.active !== false) {
+                    return;
+                }
+                if (activePointerId !== null) {
+                    finish({pointerId: activePointerId}, true);
+                    return;
+                }
+                resetSaveState(zone);
+                zone.classList.remove("is-finish-ready", "is-shaking-added");
+                zone.style.removeProperty("--mm-mobile-fill-exit-y");
+            }
+            window.addEventListener("active-role-state-changed", resetOnInactiveRole);
             zone.addEventListener("pointerdown", function (event) {
                 if (isMiningMasterMobileReadonly()) return;
                 if (event.pointerType === "mouse" && event.button !== 0) return;
@@ -4556,7 +4700,6 @@ document.addEventListener("DOMContentLoaded", function () {
             });
         }
         function bindMobileComplexSwipe(card) {
-            if (isMiningMasterMobileReadonly()) return;
             if (!window.PointerEvent || !card.dataset.mmMobileExcavatorId) return;
             if (card.dataset.mmMobileComplexSwipeBound === "true") return;
             card.dataset.mmMobileComplexSwipeBound = "true";
@@ -4728,7 +4871,24 @@ document.addEventListener("DOMContentLoaded", function () {
                 card.classList.remove("is-fill-swiping", "is-fill-ready", "is-create-swiping", "is-create-ready");
                 card.style.removeProperty("--mm-mobile-fill-swipe-y");
             }
+            function resetOnInactiveRole(event) {
+                if (!card.isConnected) {
+                    window.removeEventListener("active-role-state-changed", resetOnInactiveRole);
+                    return;
+                }
+                if (event.detail && event.detail.active !== false) {
+                    return;
+                }
+                if (activePointerId !== null || activeTouchId !== null) {
+                    finishSwipe(true);
+                    return;
+                }
+                resetMobileComplexSwipe(card);
+                resetMobileComplexTruckSwipe(card);
+            }
+            window.addEventListener("active-role-state-changed", resetOnInactiveRole);
             card.addEventListener("pointerdown", function (event) {
+                if (isMiningMasterMobileReadonly()) return;
                 if (event.pointerType === "mouse" && event.button !== 0) return;
                 if (card.classList.contains("is-releasing")) return;
                 activePointerId = event.pointerId;
@@ -4754,6 +4914,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 finishSwipe(true);
             });
             card.addEventListener("touchstart", function (event) {
+                if (isMiningMasterMobileReadonly()) return;
                 if (activeTouchId !== null || card.classList.contains("is-releasing")) return;
                 if (!event.changedTouches || !event.changedTouches.length) return;
                 var touch = event.changedTouches[0];
@@ -4810,7 +4971,6 @@ document.addEventListener("DOMContentLoaded", function () {
             });
         }
         function bindMobileEmptyComplexSwipe(card) {
-            if (isMiningMasterMobileReadonly()) return;
             if (!window.PointerEvent) return;
             var startX = 0;
             var startY = 0;
@@ -4845,7 +5005,6 @@ document.addEventListener("DOMContentLoaded", function () {
                 }
             }
             card.addEventListener("pointerdown", function (event) {
-                if (isMiningMasterMobileReadonly()) return;
                 if (event.pointerType === "mouse" && event.button !== 0) return;
                 if (card.hidden) return;
                 activePointerId = event.pointerId;

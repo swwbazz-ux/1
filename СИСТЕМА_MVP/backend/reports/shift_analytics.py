@@ -6,6 +6,12 @@ from decimal import Decimal
 from django.db.models import Q
 from django.utils import timezone
 
+from core.production_time import (
+    business_localtime,
+    production_day_bounds,
+    production_shift_context,
+    production_work_date,
+)
 from downtimes.models import DowntimeEvent
 from references.models import TruckCapacityRule
 from trips.models import OPEN_TRIP_STATUSES, Trip, TripClientAction, TripStatus
@@ -74,54 +80,96 @@ def percent(part, total):
 
 def trip_loading_date(trip):
     if trip.loading_shift_id and trip.loading_shift and trip.loading_shift.opened_at:
-        return timezone.localtime(trip.loading_shift.opened_at).date()
-    return timezone.localtime(trip.created_at).date()
+        return production_work_date(trip.loading_shift.opened_at)
+    return production_work_date(trip_loading_reference_at(trip))
 
 
 def trip_unloading_date(trip):
     if trip.unloading_shift_id and trip.unloading_shift and trip.unloading_shift.opened_at:
-        return timezone.localtime(trip.unloading_shift.opened_at).date()
+        return production_work_date(trip.unloading_shift.opened_at)
     if trip.completed_at:
-        return timezone.localtime(trip.completed_at).date()
-    return timezone.localtime(trip.created_at).date()
+        return production_work_date(trip.completed_at)
+    return production_work_date(trip.created_at)
 
 
 def trip_loading_shift_type(trip):
     if trip.loading_shift_id and trip.loading_shift:
         return trip.loading_shift.shift_type
-    return ''
+    return production_shift_context(trip_loading_reference_at(trip)).shift_type
 
 
 def trip_unloading_shift_type(trip):
     if trip.unloading_shift_id and trip.unloading_shift:
         return trip.unloading_shift.shift_type
-    return ''
+    return production_shift_context(trip.completed_at or trip.created_at).shift_type
 
 
 def shift_matches(value, selected_shift_type):
     return not selected_shift_type or value == selected_shift_type
 
 
+def trip_loading_reference_at(trip):
+    if (
+        trip.status == TripStatus.COMPLETED
+        and not trip.loading_shift_id
+        and trip.completed_at
+    ):
+        return trip.completed_at
+    return trip.created_at
+
+
 def calculated_trip_volume_and_tonnage(trip):
+    if trip.status == TripStatus.COMPLETED:
+        return as_decimal(trip.volume_m3), as_decimal(trip.tonnage)
+
     volume = trip.volume_m3
     if volume is None and trip.truck_id and trip.truck and trip.truck.model_id:
-        rule = TruckCapacityRule.objects.filter(equipment_model=trip.truck.model, rock_type=trip.rock_type).first()
+        rule = TruckCapacityRule.objects.filter(
+            equipment_model=trip.truck.model,
+            rock_type=trip.rock_type,
+        ).first()
         if rule:
             volume = rule.volume_m3
         elif trip.truck.model and trip.truck.model.body_volume_m3:
             volume = trip.truck.model.body_volume_m3
 
     tonnage = trip.tonnage
-    if tonnage is None and volume is not None and trip.rock_type_id and trip.rock_type and trip.rock_type.density:
-        tonnage = (Decimal(volume) * Decimal(trip.rock_type.density)).quantize(Decimal('0.01'))
+    if (
+        tonnage is None
+        and volume is not None
+        and trip.rock_type_id
+        and trip.rock_type
+        and trip.rock_type.density
+    ):
+        tonnage = (
+            Decimal(volume) * Decimal(trip.rock_type.density)
+        ).quantize(Decimal('0.01'))
     return as_decimal(volume), as_decimal(tonnage)
 
 
 def trip_queryset_for_loading(selected_date):
+    production_start, production_end = production_day_bounds(selected_date)
     return (
         Trip.objects
         .filter(status__in=(TripStatus.LOADED_WAITING_UNLOAD, TripStatus.COMPLETED))
-        .filter(created_at__date=selected_date)
+        .filter(
+            Q(
+                loading_shift__opened_at__gte=production_start,
+                loading_shift__opened_at__lt=production_end,
+            )
+            | Q(
+                loading_shift__isnull=True,
+                status=TripStatus.COMPLETED,
+                completed_at__gte=production_start,
+                completed_at__lt=production_end,
+            )
+            | Q(
+                loading_shift__isnull=True,
+                completed_at__isnull=True,
+                created_at__gte=production_start,
+                created_at__lt=production_end,
+            )
+        )
         .select_related(
             'truck',
             'truck__model',
@@ -139,10 +187,29 @@ def trip_queryset_for_loading(selected_date):
 
 
 def trip_queryset_for_loading_range(date_from, date_to):
+    production_start = production_day_bounds(date_from)[0]
+    production_end = production_day_bounds(date_to)[1]
     return (
         Trip.objects
         .filter(status__in=(TripStatus.LOADED_WAITING_UNLOAD, TripStatus.COMPLETED))
-        .filter(created_at__date__gte=date_from, created_at__date__lte=date_to)
+        .filter(
+            Q(
+                loading_shift__opened_at__gte=production_start,
+                loading_shift__opened_at__lt=production_end,
+            )
+            | Q(
+                loading_shift__isnull=True,
+                status=TripStatus.COMPLETED,
+                completed_at__gte=production_start,
+                completed_at__lt=production_end,
+            )
+            | Q(
+                loading_shift__isnull=True,
+                completed_at__isnull=True,
+                created_at__gte=production_start,
+                created_at__lt=production_end,
+            )
+        )
         .select_related(
             'truck',
             'truck__model',
@@ -165,17 +232,68 @@ def excavator_label(excavator):
 
 
 def dynamics_bucket(created_at, granularity):
-    local_dt = timezone.localtime(created_at)
+    production_context = production_shift_context(created_at)
+    local_dt = production_context.local_datetime
+    production_date = production_context.production_date
     if granularity == 'hour':
         bucket_start = local_dt.replace(minute=0, second=0, microsecond=0)
         return bucket_start.strftime('%Y-%m-%d-%H'), bucket_start.strftime('%d.%m %H:00')
     if granularity == 'month':
-        return local_dt.strftime('%Y-%m'), local_dt.strftime('%m.%Y')
+        return production_date.strftime('%Y-%m'), production_date.strftime('%m.%Y')
     if granularity == 'shift':
-        shift_type = 'day' if 8 <= local_dt.hour < 20 else 'night'
+        shift_type = production_context.shift_type
         shift_label = 'день' if shift_type == 'day' else 'ночь'
-        return f'{local_dt:%Y-%m-%d}-{shift_type}', f'{local_dt:%d.%m} {shift_label}'
-    return local_dt.strftime('%Y-%m-%d'), local_dt.strftime('%d.%m')
+        return f'{production_date:%Y-%m-%d}-{shift_type}', f'{production_date:%d.%m} {shift_label}'
+    return production_date.strftime('%Y-%m-%d'), production_date.strftime('%d.%m')
+
+
+def authoritative_loading_shift_window(trip):
+    if not trip.loading_shift_id:
+        return None
+    shift_type = trip.loading_shift.shift_type
+    production_context = production_shift_context(trip.loading_shift.opened_at)
+    production_date = production_context.production_date
+    tz = production_context.local_datetime.tzinfo
+    if shift_type == 'night':
+        range_start = datetime.combine(production_date, time(hour=NIGHT_SHIFT_START_HOUR), tzinfo=tz)
+        range_end = datetime.combine(
+            production_date + timedelta(days=1),
+            time(hour=NIGHT_SHIFT_END_HOUR),
+            tzinfo=tz,
+        )
+    else:
+        range_start = datetime.combine(production_date, time(hour=DAY_SHIFT_START_HOUR), tzinfo=tz)
+        range_end = datetime.combine(production_date, time(hour=DAY_SHIFT_END_HOUR), tzinfo=tz)
+    return production_date, shift_type, range_start, range_end
+
+
+def clamp_to_loading_shift_window(trip, event_at):
+    shift_window = authoritative_loading_shift_window(trip)
+    if shift_window is None:
+        return event_at
+    _production_date, _shift_type, range_start, range_end = shift_window
+    local_event_at = business_localtime(event_at)
+    return min(max(local_event_at, range_start), range_end)
+
+
+def dynamics_bucket_for_trip(trip, granularity):
+    shift_window = authoritative_loading_shift_window(trip)
+    if shift_window is None:
+        return dynamics_bucket(trip_loading_reference_at(trip), granularity)
+    production_date, shift_type, _range_start, _range_end = shift_window
+    if granularity == 'hour':
+        bucket_start = clamp_to_loading_shift_window(trip, trip.created_at).replace(
+            minute=0,
+            second=0,
+            microsecond=0,
+        )
+        return bucket_start.strftime('%Y-%m-%d-%H'), bucket_start.strftime('%d.%m %H:00')
+    if granularity == 'month':
+        return production_date.strftime('%Y-%m'), production_date.strftime('%m.%Y')
+    if granularity == 'shift':
+        shift_label = 'день' if shift_type == 'day' else 'ночь'
+        return f'{production_date:%Y-%m-%d}-{shift_type}', f'{production_date:%d.%m} {shift_label}'
+    return production_date.strftime('%Y-%m-%d'), production_date.strftime('%d.%m')
 
 
 CHART_LEFT = Decimal('45')
@@ -373,8 +491,8 @@ def dynamics_time_range(date_from, date_to, granularity, shift_type):
                 tz,
             )
         return range_start, range_end
-    range_start = timezone.make_aware(datetime.combine(date_from, time.min), tz)
-    range_end = timezone.make_aware(datetime.combine(date_to + timedelta(days=1), time.min), tz)
+    range_start, _range_start_end = production_day_bounds(date_from)
+    _range_end_start, range_end = production_day_bounds(date_to)
     return range_start, range_end
 
 
@@ -574,8 +692,7 @@ def build_excavator_dynamics(date_from, date_to, granularity='day', excavator_id
     shift_type = shift_type if shift_type in {'day', 'night'} else 'day'
     chart_mode = chart_mode if chart_mode in DYNAMICS_CHART_MODE_LABELS else 'cumulative'
     excavator_ids = [int(item) for item in (excavator_ids or []) if str(item).isdigit()]
-    query_date_to = date_to + timedelta(days=1) if granularity == 'hour' and shift_type == 'night' else date_to
-    trips = trip_queryset_for_loading_range(date_from, query_date_to)
+    trips = trip_queryset_for_loading_range(date_from, date_to)
     if excavator_ids:
         trips = trips.filter(excavator_id__in=excavator_ids)
     trips = list(trips)
@@ -589,10 +706,17 @@ def build_excavator_dynamics(date_from, date_to, granularity='day', excavator_id
     total_trips = 0
 
     for trip in trips:
-        local_dt = timezone.localtime(trip.created_at)
-        if granularity == 'hour' and not local_dt_in_hourly_shift_range(local_dt, date_from, date_to, shift_type):
+        if trip_loading_shift_type(trip) != shift_type:
             continue
-        bucket_key, bucket_label = dynamics_bucket(trip.created_at, granularity)
+        loading_reference_at = trip_loading_reference_at(trip)
+        local_dt = business_localtime(loading_reference_at)
+        if (
+            granularity == 'hour'
+            and not trip.loading_shift_id
+            and not local_dt_in_hourly_shift_range(local_dt, date_from, date_to, shift_type)
+        ):
+            continue
+        bucket_key, bucket_label = dynamics_bucket_for_trip(trip, granularity)
         bucket = buckets.setdefault(bucket_key, empty_dynamics_bucket(bucket_key, bucket_label))
         excavator_key = trip.excavator_id or 0
         excavator = excavators.setdefault(excavator_key, {
@@ -607,7 +731,9 @@ def build_excavator_dynamics(date_from, date_to, granularity='day', excavator_id
         bucket['excavators'][excavator_key] = bucket['excavators'].get(excavator_key, Decimal('0')) + volume
         excavator['volume_m3'] += volume
         excavator['trip_count'] += 1
-        event_at = loaded_action_times.get(trip.id, trip.created_at)
+        event_at = loaded_action_times.get(trip.id, loading_reference_at)
+        if trip.loading_shift_id:
+            event_at = clamp_to_loading_shift_window(trip, event_at)
         if chart_range_start <= event_at <= chart_range_end:
             event_rows.append({
                 'event_at': event_at,
@@ -705,12 +831,26 @@ def build_excavator_dynamics(date_from, date_to, granularity='day', excavator_id
 
 
 def trip_queryset_for_unloading(selected_date):
+    production_start, production_end = production_day_bounds(selected_date)
     return (
         Trip.objects
         .filter(status=TripStatus.COMPLETED)
         .filter(
-            Q(completed_at__date=selected_date)
-            | Q(completed_at__isnull=True, created_at__date=selected_date)
+            Q(
+                unloading_shift__opened_at__gte=production_start,
+                unloading_shift__opened_at__lt=production_end,
+            )
+            | Q(
+                unloading_shift__isnull=True,
+                completed_at__gte=production_start,
+                completed_at__lt=production_end,
+            )
+            | Q(
+                unloading_shift__isnull=True,
+                completed_at__isnull=True,
+                created_at__gte=production_start,
+                created_at__lt=production_end,
+            )
         )
         .select_related(
             'truck',
@@ -729,9 +869,10 @@ def trip_queryset_for_unloading(selected_date):
 
 
 def downtime_queryset_for_date(selected_date):
+    production_start, production_end = production_day_bounds(selected_date)
     return (
         DowntimeEvent.objects
-        .filter(started_at__date=selected_date)
+        .filter(started_at__gte=production_start, started_at__lt=production_end)
         .select_related(
             'equipment',
             'equipment__equipment_type',
@@ -744,8 +885,7 @@ def downtime_queryset_for_date(selected_date):
 
 
 def downtime_shift_type(event):
-    hour = timezone.localtime(event.started_at).hour
-    return 'day' if 8 <= hour < 20 else 'night'
+    return production_shift_context(event.started_at).shift_type
 
 
 def downtime_duration_hours(event, now=None):

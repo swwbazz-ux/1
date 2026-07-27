@@ -134,6 +134,7 @@
 
 .deputy-category-nav a {
     display: inline-flex;
+    flex-direction: column;
     flex: 0 0 auto;
     align-items: center;
     justify-content: center;
@@ -145,10 +146,19 @@
     color: var(--admin-muted);
     font-size: 12px;
     font-weight: 900;
-    line-height: 1;
+    line-height: 1.15;
     text-decoration: none;
     text-transform: uppercase;
     white-space: nowrap;
+}
+
+.deputy-category-status {
+    margin-top: 3px;
+    color: var(--admin-muted);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0;
+    text-transform: none;
 }
 
 .deputy-category-nav a.is-active {

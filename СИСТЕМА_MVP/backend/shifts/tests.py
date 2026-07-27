@@ -1,16 +1,18 @@
 from datetime import timedelta
 from decimal import Decimal
-from types import SimpleNamespace
+from zoneinfo import ZoneInfo
 
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.test import TestCase
 from django.utils import timezone
 
+from assignments.models import AssignmentStatus, EquipmentAssignment
 from core.models import OperationalStateEvent
+from core.production_time import production_day_bounds, production_work_date
 from downtimes.models import DowntimeEvent, DowntimeReason
 from references.models import DumpPoint, Equipment, EquipmentModel, EquipmentType, RockType
-from trips.models import Trip, TripStatus
+from trips.models import OPEN_TRIP_STATUSES, Trip, TripStatus
 from users.models import Employee, EmployeeAccess, Role
 
 from .models import EmployeeShift, EquipmentPlanGroup, EquipmentShiftPlan, PlanAssignmentStatus, PlanCalculationMode, ShiftClientAction, ShiftPlan, ShiftReadingCorrection
@@ -23,6 +25,7 @@ from .services import (
     assign_shift_plan_snapshot,
     calculate_equipment_shift_progress,
     calculate_open_shift_progress,
+    calculate_truck_shift_progress,
     close_driver_shift,
     open_excavator_shift,
     open_driver_shift,
@@ -58,7 +61,18 @@ class DriverShiftLifecycleTests(TestCase):
             status=EmployeeAccess.Status.ACTIVATED,
             is_active=True,
         )
-        self.assignment = SimpleNamespace(equipment_id=self.truck.pk, shift_type='day')
+        self.assignment = self.create_assignment(self.driver, self.truck)
+
+    def create_assignment(self, employee, equipment, shift_type='day'):
+        return EquipmentAssignment.objects.create(
+            employee=employee,
+            role=self.driver_role,
+            equipment=equipment,
+            shift_type=shift_type,
+            assigned_by=self.driver,
+            status=AssignmentStatus.ACCEPTED,
+            accepted_at=timezone.now(),
+        )
 
     def create_active_driver(self, full_name, access_code):
         employee = Employee.objects.create(
@@ -199,28 +213,61 @@ class DriverShiftLifecycleTests(TestCase):
         close_driver_shift(
             shift=previous, employee=self.driver, readings=self.close_readings(), client_action_id='close-1',
         )
+        previous.refresh_from_db()
+        closed_snapshot = {
+            'end_fuel': previous.end_fuel,
+            'end_mileage': previous.end_mileage,
+            'end_engine_hours': previous.end_engine_hours,
+            'closed_at': previous.closed_at,
+            'closed_by_id': previous.closed_by_id,
+        }
         shift = self.open_shift(action='open-2', fuel='850', mileage='10100', hours='1010')
         correction = shift.reading_corrections.get()
         self.assertEqual(correction.transferred_value, Decimal('900'))
         self.assertEqual(correction.actual_value, Decimal('850'))
+        previous.refresh_from_db()
+        self.assertEqual(
+            {
+                'end_fuel': previous.end_fuel,
+                'end_mileage': previous.end_mileage,
+                'end_engine_hours': previous.end_engine_hours,
+                'closed_at': previous.closed_at,
+                'closed_by_id': previous.closed_by_id,
+            },
+            closed_snapshot,
+        )
 
     def test_second_open_shift_for_driver_is_blocked(self):
         self.open_shift()
+        self.assignment.status = AssignmentStatus.CANCELLED
+        self.assignment.ended_at = timezone.now()
+        self.assignment.save(update_fields=['status', 'ended_at'])
         other = Equipment.objects.create(equipment_type=self.truck_type, model=self.belaz, garage_number='55')
+        other_assignment = self.create_assignment(self.driver, other)
         with self.assertRaises(ValidationError):
             open_driver_shift(
                 employee=self.driver,
-                work_assignment=SimpleNamespace(equipment_id=other.pk, shift_type='day'),
+                work_assignment=other_assignment,
                 readings=self.readings(),
                 client_action_id='open-2',
             )
 
     def test_second_open_shift_for_truck_is_blocked(self):
         self.open_shift()
+        self.assignment.status = AssignmentStatus.CANCELLED
+        self.assignment.ended_at = timezone.now()
+        self.assignment.save(update_fields=['status', 'ended_at'])
         other_driver = self.create_active_driver('Иванов И.И.', '200002')
-        with self.assertRaisesMessage(ValidationError, 'уже открыта другим водителем'):
+        other_assignment = self.create_assignment(other_driver, self.truck)
+        with self.assertRaisesMessage(
+            ValidationError,
+            f'Смена на технике {self.truck} уже открыта сотрудником {self.driver.full_name}',
+        ):
             open_driver_shift(
-                employee=other_driver, work_assignment=self.assignment, readings=self.readings(), client_action_id='other-open',
+                employee=other_driver,
+                work_assignment=other_assignment,
+                readings=self.readings(),
+                client_action_id='other-open',
             )
 
     def test_database_constraint_blocks_concurrent_duplicate_truck_shift(self):
@@ -275,26 +322,53 @@ class DriverShiftLifecycleTests(TestCase):
         with self.assertRaises(ValidationError):
             validate_driver_close_readings(shift, **self.close_readings(hours='999'))
 
-    def test_close_with_active_trip_is_blocked(self):
+    def test_close_with_active_trip_hands_trip_to_replacement_shift(self):
         shift = self.open_shift()
         excavator_type = EquipmentType.objects.create(name='Экскаватор')
         excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='ЭКС-1')
         rock = RockType.objects.create(name='Руда', density='2.50')
         point = DumpPoint.objects.create(name='ККД')
-        Trip.objects.create(truck=self.truck, excavator=excavator, driver=self.driver, rock_type=rock, dump_point=point)
-        with self.assertRaisesMessage(ValidationError, 'активный рейс'):
-            close_driver_shift(
-                shift=shift, employee=self.driver, readings=self.close_readings(), client_action_id='blocked-trip',
-            )
+        trip = Trip.objects.create(
+            truck=self.truck,
+            excavator=excavator,
+            driver=self.driver,
+            rock_type=rock,
+            dump_point=point,
+        )
+        closed_shift, created = close_driver_shift(
+            shift=shift,
+            employee=self.driver,
+            readings=self.close_readings(),
+            client_action_id='handoff-trip',
+        )
+        closed_shift.refresh_from_db()
+        trip.refresh_from_db()
+        self.assertTrue(created)
+        self.assertIsNotNone(closed_shift.closed_at)
+        self.assertTrue(trip.is_carryover)
+        self.assertIn(trip.status, OPEN_TRIP_STATUSES)
 
-    def test_close_with_active_downtime_is_blocked(self):
+    def test_close_with_active_downtime_preserves_continuous_event(self):
         shift = self.open_shift()
         reason, _ = DowntimeReason.objects.get_or_create(name='Ремонт', defaults={'equipment_type': self.truck_type})
-        DowntimeEvent.objects.create(equipment=self.truck, employee=self.driver, reason=reason, started_at=timezone.now())
-        with self.assertRaisesMessage(ValidationError, 'активный простой'):
-            close_driver_shift(
-                shift=shift, employee=self.driver, readings=self.close_readings(), client_action_id='blocked-downtime',
-            )
+        event = DowntimeEvent.objects.create(
+            equipment=self.truck,
+            employee=self.driver,
+            reason=reason,
+            started_at=timezone.now(),
+        )
+        closed_shift, created = close_driver_shift(
+            shift=shift,
+            employee=self.driver,
+            readings=self.close_readings(),
+            client_action_id='handoff-downtime',
+        )
+        closed_shift.refresh_from_db()
+        event.refresh_from_db()
+        self.assertTrue(created)
+        self.assertIsNotNone(closed_shift.closed_at)
+        self.assertIsNone(event.ended_at)
+        self.assertEqual(event.employee, self.driver)
 
     def test_duplicate_close_client_action_is_idempotent(self):
         shift = self.open_shift()
@@ -331,13 +405,14 @@ class ShiftPlanServiceTests(TestCase):
         shift.refresh_from_db()
         return shift
 
-    def create_plan_group(self, *, name, code, mode, value, equipment):
+    def create_plan_group(self, *, name, code, mode, value, equipment, active_from=None):
         group = EquipmentPlanGroup.objects.create(
             name=name,
             code=code,
             calculation_mode=mode,
             plan_value=value,
             is_active=True,
+            active_from=active_from or production_work_date(),
         )
         group.equipment.add(equipment)
         return group
@@ -436,7 +511,8 @@ class ShiftPlanServiceTests(TestCase):
         group.plan_value = '12.00'
         group.calculation_mode = PlanCalculationMode.TRIPS
         group.is_active = True
-        group.save(update_fields=['plan_value', 'calculation_mode', 'is_active'])
+        group.active_from = production_work_date()
+        group.save(update_fields=['plan_value', 'calculation_mode', 'is_active', 'active_from'])
         group.equipment.set([truck])
         shift = self.create_shift_with_snapshot(truck)
         shift.closed_at = timezone.now()
@@ -467,6 +543,7 @@ class ShiftPlanServiceTests(TestCase):
             calculation_mode=PlanCalculationMode.TRIPS,
             plan_value='15.00',
             is_active=True,
+            active_from=production_work_date(),
         )
         old_group.equipment.remove(truck)
         new_group.equipment.add(truck)
@@ -529,6 +606,94 @@ class ShiftPlanServiceTests(TestCase):
         self.assertEqual(shift.plan_calculation_mode, PlanCalculationMode.TRIPS)
         self.assertEqual(shift.plan_value, 15)
         self.assertFalse(ShiftPlan.objects.exists())
+
+    def test_night_shift_snapshot_totals_and_progress_use_shift_start_production_date(self):
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        truck = Equipment.objects.create(equipment_type=truck_type, garage_number='Н-23')
+        opened_at = timezone.make_aware(
+            timezone.datetime(2026, 7, 24, 1, 30),
+            ZoneInfo('Asia/Vladivostok'),
+        )
+        self.create_plan_group(
+            name='Ночная группа производственной даты',
+            code='night-production-date',
+            mode=PlanCalculationMode.TRIPS,
+            value='12.00',
+            equipment=truck,
+            active_from=timezone.datetime(2026, 7, 23).date(),
+        )
+        shift = self.create_shift_with_snapshot(
+            truck,
+            shift_type='night',
+            employee_name='Водитель ночной даты',
+            opened_at=opened_at,
+        )
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='Э-23')
+        rock = RockType.objects.create(name='Руда ночной даты')
+        dump_point = DumpPoint.objects.create(name='ККД ночной даты')
+        Trip.objects.create(
+            excavator=excavator,
+            truck=truck,
+            rock_type=rock,
+            dump_point=dump_point,
+            unloading_shift=shift,
+            status=TripStatus.COMPLETED,
+            volume_m3='41.00',
+            completed_at=opened_at,
+        )
+
+        totals = shift_plan_totals(timezone.datetime(2026, 7, 23).date())
+        progress = calculate_equipment_shift_progress(
+            truck,
+            timezone.datetime(2026, 7, 23).date(),
+            'night',
+        )
+
+        self.assertEqual(totals['by_shift']['night']['trips'], 12)
+        self.assertEqual(progress['date'], timezone.datetime(2026, 7, 23).date())
+        self.assertEqual(progress['trip_count'], 1)
+
+    def test_night_after_midnight_open_shift_fallback_uses_production_date(self):
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        truck = Equipment.objects.create(equipment_type=truck_type, garage_number='FALLBACK-23')
+        employee = Employee.objects.create(full_name='Водитель fallback')
+        opened_at = timezone.make_aware(
+            timezone.datetime(2026, 7, 24, 1, 30),
+            ZoneInfo('Asia/Vladivostok'),
+        )
+        shift = EmployeeShift.objects.create(
+            employee=employee,
+            shift_type='night',
+            equipment=truck,
+            opened_at=opened_at,
+            plan_status='',
+        )
+
+        progress = calculate_open_shift_progress(shift)
+
+        self.assertEqual(progress['date'], timezone.datetime(2026, 7, 23).date())
+
+    def test_truck_progress_reference_shift_fallback_uses_production_date(self):
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        truck = Equipment.objects.create(equipment_type=truck_type, garage_number='REFERENCE-23')
+        excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='REFERENCE-Э')
+        employee = Employee.objects.create(full_name='Машинист reference')
+        opened_at = timezone.make_aware(
+            timezone.datetime(2026, 7, 24, 1, 30),
+            ZoneInfo('Asia/Vladivostok'),
+        )
+        reference_shift = EmployeeShift.objects.create(
+            employee=employee,
+            shift_type='night',
+            equipment=excavator,
+            opened_at=opened_at,
+        )
+
+        progress = calculate_truck_shift_progress(truck, reference_shift)
+
+        self.assertEqual(progress['date'], timezone.datetime(2026, 7, 23).date())
 
     def test_excavator_1_gets_4000_volume_plan(self):
         excavator_type = EquipmentType.objects.create(name='Экскаватор')
@@ -715,7 +880,8 @@ class ShiftPlanServiceTests(TestCase):
         operator = Employee.objects.create(full_name='Машинист')
         rock_type = RockType.objects.create(name='Руда', density='2.4000')
         dump_point = DumpPoint.objects.create(name='ККД')
-        opened_at = timezone.now()
+        production_date = production_work_date()
+        opened_at = production_day_bounds(production_date)[0] + timedelta(hours=3)
         shift = EmployeeShift.objects.create(
             employee=driver,
             shift_type='day',
@@ -731,7 +897,7 @@ class ShiftPlanServiceTests(TestCase):
             opened_by=operator,
         )
         plan = ShiftPlan.objects.create(
-            date=timezone.localtime(opened_at).date(),
+            date=production_date,
             shift_type='day',
             name='План дневной смены',
             is_active=True,
@@ -758,7 +924,7 @@ class ShiftPlanServiceTests(TestCase):
             completed_at=opened_at,
         )
 
-        progress = calculate_equipment_shift_progress(truck, timezone.localtime(opened_at).date(), 'day')
+        progress = calculate_equipment_shift_progress(truck, production_date, 'day')
 
         self.assertEqual(progress['trip_count'], 1)
         self.assertEqual(progress['progress_percent'], 25)

@@ -170,7 +170,9 @@ def generate_unique_access_code():
             return code
 
 
+@transaction.atomic
 def issue_employee_access(*, employee, role, actor):
+    employee = Employee.objects.select_for_update().get(pk=employee.pk)
     if role.code == PROTECTED_OUP_ROLE_CODE:
         raise ValidationError(
             'Специалист ОУП не может выдавать или изменять роль администратора.',
@@ -190,6 +192,11 @@ def issue_employee_access(*, employee, role, actor):
         raise ValidationError(
             'Это приложение не соответствует действующей производственной специализации сотрудника.',
             code='invalid_work_specialization',
+        )
+    if EmployeeShift.objects.filter(employee=employee, closed_at__isnull=True).exists():
+        raise ValidationError(
+            'Нельзя перевыпустить PIN: сначала завершите открытую рабочую смену сотрудника.',
+            code='employee_shift_open',
         )
     previous_access = (
         EmployeeAccess.objects.select_for_update()

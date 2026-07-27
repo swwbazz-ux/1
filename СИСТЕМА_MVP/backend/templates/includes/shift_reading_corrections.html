@@ -1,0 +1,49 @@
+<section class="shift-reading-corrections-panel" data-shift-reading-corrections aria-label="Расхождения начальных показаний">
+    <div class="shift-reading-corrections-head">
+        <div>
+            <h2>Расхождения начальных показаний</h2>
+            <p>Информационные записи передачи смены. Они не блокируют дальнейшую работу.</p>
+        </div>
+        <span>{{ shift_reading_corrections|length }} запис.</span>
+    </div>
+    <div class="shift-reading-corrections-table-wrap">
+        <table class="shift-reading-corrections-table">
+            <thead>
+                <tr>
+                    <th>Зафиксировано</th>
+                    <th>Техника</th>
+                    <th>Предыдущая смена</th>
+                    <th>Новая смена</th>
+                    <th>Показатель</th>
+                    <th>Предложено</th>
+                    <th>Фактически</th>
+                    <th>Сотрудник</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for correction in shift_reading_corrections %}
+                    <tr data-shift-reading-correction-id="{{ correction.id }}">
+                        <td>{{ correction.corrected_at|date:"d.m.Y H:i" }}</td>
+                        <td><strong>{{ correction.equipment }}</strong></td>
+                        <td>
+                            <strong>№{{ correction.previous_shift_id }} · {{ correction.previous_shift.get_shift_type_display }}</strong>
+                            <small>{{ correction.previous_shift.opened_at|date:"d.m.Y H:i" }}</small>
+                        </td>
+                        <td>
+                            <strong>№{{ correction.new_shift_id }} · {{ correction.new_shift.get_shift_type_display }}</strong>
+                            <small>{{ correction.new_shift.opened_at|date:"d.m.Y H:i" }}</small>
+                        </td>
+                        <td>{{ correction.get_metric_display }}</td>
+                        <td>{{ correction.transferred_value|floatformat:"2" }}</td>
+                        <td><strong>{{ correction.actual_value|floatformat:"2" }}</strong></td>
+                        <td>{{ correction.employee.full_name }}</td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="8">Расхождений начальных показаний нет.</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>

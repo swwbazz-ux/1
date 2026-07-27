@@ -5,6 +5,7 @@ from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
+from core.production_time import production_work_date
 from references.models import DumpPoint, Equipment, EquipmentType, RockType
 from shifts.models import AchievementPrize, AchievementUnlock, EmployeeShift, EquipmentPlanGroup, PlanCalculationMode
 from shifts.services import assign_shift_plan_snapshot
@@ -22,8 +23,16 @@ class AchievementPrizeApiTests(TestCase):
 
         self.driver_role = Role.objects.create(code='driver', name='Водитель')
         self.excavator_role = Role.objects.create(code='excavator_operator', name='Машинист экскаватора')
-        self.driver = Employee.objects.create(full_name='Водитель приза', is_active=True)
-        self.operator = Employee.objects.create(full_name='Машинист приза', is_active=True)
+        self.driver = Employee.objects.create(
+            full_name='Водитель приза',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        self.operator = Employee.objects.create(
+            full_name='Машинист приза',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
         self.driver_access = EmployeeAccess.objects.create(
             employee=self.driver,
             role=self.driver_role,
@@ -55,6 +64,7 @@ class AchievementPrizeApiTests(TestCase):
             calculation_mode=PlanCalculationMode.VOLUME,
             plan_value='100.00',
             is_active=True,
+            active_from=production_work_date(),
         )
         truck_group.equipment.add(self.truck)
         self.truck_shift = EmployeeShift.objects.create(
@@ -121,14 +131,15 @@ class AchievementPrizeApiTests(TestCase):
 
         image_response = self.client.get(payload['image_url'])
         self.assertEqual(image_response.status_code, 200)
-        self.assertEqual(b''.join(image_response.streaming_content), b'prize-image')
+        image_content = b''.join(image_response.streaming_content)
+        self.assertEqual(image_content, b'prize-image')
         self.assertEqual(image_response['Cache-Control'], 'private, no-store')
-        image_response.close()
 
         download_response = self.client.get(payload['download_url'])
         self.assertEqual(download_response.status_code, 200)
+        download_content = b''.join(download_response.streaming_content)
+        self.assertEqual(download_content, b'prize-image')
         self.assertIn('attachment', download_response['Content-Disposition'])
-        download_response.close()
 
         shown_response = self.client.post(reverse('achievement_shown', args=[unlock.id]))
         self.assertEqual(shown_response.status_code, 200)
@@ -140,7 +151,11 @@ class AchievementPrizeApiTests(TestCase):
     def test_prize_image_is_forbidden_for_another_employee(self):
         self.add_completed_trip(volume='100.00', unloading_shift=self.truck_shift)
         unlock_id = self.client.get(reverse('achievement_current')).json()['unlock_id']
-        other_employee = Employee.objects.create(full_name='Другой водитель', is_active=True)
+        other_employee = Employee.objects.create(
+            full_name='Другой водитель',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
         other_access = EmployeeAccess.objects.create(
             employee=other_employee,
             role=self.driver_role,
@@ -164,6 +179,7 @@ class AchievementPrizeApiTests(TestCase):
             calculation_mode=PlanCalculationMode.VOLUME,
             plan_value='100.00',
             is_active=True,
+            active_from=production_work_date(),
         )
         excavator_group.equipment.add(self.excavator)
         excavator_shift = EmployeeShift.objects.create(

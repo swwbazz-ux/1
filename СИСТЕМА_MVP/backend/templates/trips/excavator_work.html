@@ -5,9 +5,9 @@
 {% block body_class %}excavator-operator-screen{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v113">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v113">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v113">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v122">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v122">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v122">
 <meta name="theme-color" content="#D58B14">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Погрузка">
@@ -37,6 +37,7 @@
 
     <form class="eo-form" method="post" data-eo-trip-form>
         {% csrf_token %}
+        <input type="hidden" name="client_action_id" value="{{ legacy_trip_client_action_id }}">
         <input type="hidden" name="assignment" value="{{ first_ready_assignment_id|default:'' }}" data-eo-assignment-input>
         <input type="hidden" name="planned_volume_m3" value="{{ planned_volume_value }}">
         <input type="hidden" name="transport_distance_km" value="{{ transport_distance_value }}">
@@ -66,7 +67,7 @@
             <div class="eo-shift-titlebar">
                 <h1>Смена</h1>
                 <div class="eo-shift-update-group">
-                    <span class="eo-current-app-version" aria-label="Текущая версия приложения">Версия 113</span>
+                    <span class="eo-current-app-version" aria-label="Текущая версия приложения">Версия 117</span>
                     <button class="eo-shift-update-button" type="button" data-eo-pwa-update-check aria-label="Проверить обновление приложения">
                         <span aria-hidden="true"></span>
                         <b data-eo-pwa-update-check-label>Обновить</b>
@@ -455,7 +456,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v113";
+var excavatorShellVersion = "excavator-mobile-shell-v122";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var excavatorRelevantEvents = {
     assignment_changed: true,
@@ -955,6 +956,7 @@ window.initExcavatorWorkShell = function () {
         var timer = null;
         var frame = null;
         var startedAt = 0;
+        var completedByHold = false;
 
         function setLabel(text) {
             button.textContent = text;
@@ -1001,6 +1003,7 @@ window.initExcavatorWorkShell = function () {
             startedAt = 0;
             button.classList.remove("is-holding");
             button.style.setProperty("--eo-action-hold", "0%");
+            completedByHold = true;
             onComplete({ resetHold: resetHold, defaultLabel: defaultLabel });
         }
 
@@ -1008,7 +1011,6 @@ window.initExcavatorWorkShell = function () {
             if (button.disabled || button.getAttribute("aria-disabled") === "true") {
                 return;
             }
-            event.preventDefault();
             if (startedAt) {
                 return;
             }
@@ -1021,9 +1023,6 @@ window.initExcavatorWorkShell = function () {
         }
 
         function cancelHold(event) {
-            if (event) {
-                event.preventDefault();
-            }
             if (!button.classList.contains("is-pending")) {
                 resetHold();
             }
@@ -1031,6 +1030,19 @@ window.initExcavatorWorkShell = function () {
 
         button.addEventListener("click", function (event) {
             event.preventDefault();
+            if (completedByHold) {
+                completedByHold = false;
+                return;
+            }
+            if (button.disabled || button.getAttribute("aria-disabled") === "true") return;
+            if (typeof window.openAppConfirmDialog === "function") {
+                window.openAppConfirmDialog(
+                    "Подтвердите действие: " + defaultLabel + ".",
+                    function () { onComplete({ resetHold: resetHold, defaultLabel: defaultLabel }); },
+                    0,
+                    "Подтвердить"
+                );
+            }
         });
         button.addEventListener("pointerdown", startHold);
         ["pointerup", "pointercancel", "pointerleave"].forEach(function (eventName) {
@@ -1502,10 +1514,16 @@ window.initExcavatorWorkShell = function () {
     }
 
     function cancelLoadedTripFromQueue(item) {
+        if (typeof window.isAppRoleReadonly === "function" && window.isAppRoleReadonly()) {
+            showQueueNote("Роль неактивна — доступен только просмотр.", true);
+            return;
+        }
         if (!truckLoadedCancelUrl || !item || !item.dataset.tripId) {
             showQueueNote("Серверная отмена для этого рейса недоступна.", true);
             return;
         }
+        var cancelActionId = item.dataset.eoCancelActionId || generateClientActionId("truck-loaded-cancel");
+        item.dataset.eoCancelActionId = cancelActionId;
         item.disabled = true;
         showQueueNote("Отменяю назначение на сервере...", false);
         fetch(truckLoadedCancelUrl, {
@@ -1518,7 +1536,7 @@ window.initExcavatorWorkShell = function () {
                 "X-Requested-With": "XMLHttpRequest"
             },
             body: JSON.stringify({
-                client_action_id: generateClientActionId("truck-loaded-cancel"),
+                client_action_id: cancelActionId,
                 trip_id: item.dataset.tripId || "",
                 truck_id: item.dataset.truckId || "",
                 dump_point_id: item.dataset.dumpPointId || ""
@@ -1726,6 +1744,9 @@ window.initExcavatorWorkShell = function () {
     }
 
     function postTruckLoaded(card, dumpTarget) {
+        if (typeof window.isAppRoleReadonly === "function" && window.isAppRoleReadonly()) {
+            return;
+        }
         if (!card || !dumpTarget || !truckLoadedUrl) return;
         if (!canTruckLoad(card)) {
             window.alert(truckLoadBlockReason(card));
@@ -1734,8 +1755,21 @@ window.initExcavatorWorkShell = function () {
         var snapshot = snapshotTruckCard(card);
         var optimisticBadge = null;
         var truckId = card.dataset.truckId || "";
+        var loadActionKey = [
+            truckId,
+            dumpTarget.dataset.eoDumpTarget || "",
+            shell.querySelector("select[name='rock_type']") ? shell.querySelector("select[name='rock_type']").value : "",
+            shell.querySelector("input[name='loading_horizon']") ? shell.querySelector("input[name='loading_horizon']").value : "",
+            shell.querySelector("input[name='loading_block']") ? shell.querySelector("input[name='loading_block']").value : ""
+        ].join(":");
+        var loadActionId = (
+            card.dataset.eoLoadActionKey === loadActionKey
+            && card.dataset.eoLoadActionId
+        ) ? card.dataset.eoLoadActionId : generateClientActionId("truck-loaded");
+        card.dataset.eoLoadActionKey = loadActionKey;
+        card.dataset.eoLoadActionId = loadActionId;
         var payload = {
-            client_action_id: generateClientActionId("truck-loaded"),
+            client_action_id: loadActionId,
             truck_id: card.dataset.truckId || "",
             excavator_id: shell.dataset.eoCurrentExcavatorId || "",
             dump_point_id: dumpTarget.dataset.eoDumpTarget || "",
@@ -1768,6 +1802,19 @@ window.initExcavatorWorkShell = function () {
                 return data;
             });
         }).then(function (data) {
+            delete card.dataset.eoLoadActionKey;
+            delete card.dataset.eoLoadActionId;
+            if (data.refresh_required) {
+                restoreTruckCard(card, snapshot);
+                if (optimisticBadge) optimisticBadge.remove();
+                ensureMutedPendingBadge(pendingBadgeList(dumpTarget));
+                return refreshExcavatorWorkFromServer({ preserveTab: true }).then(function (applied) {
+                    if (!applied && window.AppRealtime && typeof window.AppRealtime.wake === "function") {
+                        window.AppRealtime.wake("truck_loaded_refresh_required");
+                    }
+                    return applied;
+                });
+            }
             confirmTruckLoaded(card, data);
             updatePendingTruckBadgeTrip(dumpTarget, truckId, data.trip_id || "");
             if (data.downtime_status) {
@@ -2106,6 +2153,9 @@ window.initExcavatorWorkShell = function () {
     });
 
     function postDowntimeAction(payload) {
+        if (typeof window.isAppRoleReadonly === "function" && window.isAppRoleReadonly()) {
+            return Promise.reject(new Error("Роль неактивна — доступен только просмотр"));
+        }
         return fetch("{% url 'excavator_downtime_action' %}", {
             method: "POST",
             credentials: "same-origin",
@@ -2409,6 +2459,9 @@ window.initExcavatorWorkShell = function () {
 
     updateShiftActionState();
 
+    var shiftPendingActionKey = "";
+    var shiftPendingActionId = "";
+
     function submitExcavatorShiftAction() {
         if (!shiftButton) {
             return;
@@ -2421,9 +2474,19 @@ window.initExcavatorWorkShell = function () {
         if (!validation.valid || (action === "close" && !shiftReadingsVerified)) {
             return;
         }
+        var shiftActionKey = [
+            action,
+            shell.dataset.eoShiftExcavatorId || shell.dataset.eoCurrentExcavatorId || "",
+            shell.querySelector("[data-eo-shift-fuel]") ? shell.querySelector("[data-eo-shift-fuel]").value : "",
+            shell.querySelector("[data-eo-shift-engine-hours]") ? shell.querySelector("[data-eo-shift-engine-hours]").value : ""
+        ].join(":");
+        if (shiftPendingActionKey !== shiftActionKey || !shiftPendingActionId) {
+            shiftPendingActionKey = shiftActionKey;
+            shiftPendingActionId = generateClientActionId("excavator-shift");
+        }
         var payload = {
             action: action,
-            client_action_id: generateClientActionId("excavator-shift"),
+            client_action_id: shiftPendingActionId,
             excavator_id: shell.dataset.eoShiftExcavatorId || shell.dataset.eoCurrentExcavatorId || "",
             fuel: shell.querySelector("[data-eo-shift-fuel]") ? shell.querySelector("[data-eo-shift-fuel]").value : "",
             engine_hours: shell.querySelector("[data-eo-shift-engine-hours]") ? shell.querySelector("[data-eo-shift-engine-hours]").value : ""
@@ -2452,6 +2515,8 @@ window.initExcavatorWorkShell = function () {
                 return data;
             });
         }).then(function () {
+            shiftPendingActionKey = "";
+            shiftPendingActionId = "";
             if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
                 window.AppRealtime.wake("excavator_shift_saved");
             }
@@ -2474,6 +2539,17 @@ window.initExcavatorWorkShell = function () {
     }
 
     if (shiftButton) {
+        var shiftCompletedByHold = false;
+        var shiftTapConfirmationOpened = false;
+        function requestShiftCloseConfirmation() {
+            if (typeof window.openAppConfirmDialog !== "function") return;
+            window.openAppConfirmDialog(
+                "Закрыть смену с указанными конечными показаниями?",
+                submitExcavatorShiftAction,
+                0,
+                "Закрыть смену"
+            );
+        }
         function completeShiftHold() {
             if (!shiftUrl || shiftButton.disabled) {
                 return;
@@ -2482,13 +2558,13 @@ window.initExcavatorWorkShell = function () {
                 submitExcavatorShiftAction();
                 return;
             }
+            shiftCompletedByHold = true;
             submitExcavatorShiftAction();
         }
         function startShiftHold(event) {
             if (shiftButton.disabled || !isShiftCloseAction()) {
                 return;
             }
-            event.preventDefault();
             if (shiftHoldStart) {
                 return;
             }
@@ -2502,16 +2578,36 @@ window.initExcavatorWorkShell = function () {
             shiftHoldTimer = window.setTimeout(completeShiftHold, shiftHoldMs);
         }
         function cancelShiftHold(event) {
-            if (event && isShiftCloseAction()) {
-                event.preventDefault();
-            }
+            var wasHolding = shiftButton.classList.contains("is-holding");
             if (!shiftButton.classList.contains("is-pending")) {
                 resetShiftHold();
+            }
+            if (
+                wasHolding
+                && isShiftCloseAction()
+                && event
+                && (event.type === "pointerup" || event.type === "touchend")
+                && !shiftTapConfirmationOpened
+            ) {
+                shiftTapConfirmationOpened = true;
+                requestShiftCloseConfirmation();
+                window.setTimeout(function () {
+                    shiftTapConfirmationOpened = false;
+                }, 700);
             }
         }
         shiftButton.addEventListener("click", function (event) {
             if (isShiftCloseAction()) {
                 event.preventDefault();
+                if (shiftCompletedByHold) {
+                    shiftCompletedByHold = false;
+                    return;
+                }
+                if (shiftTapConfirmationOpened) {
+                    shiftTapConfirmationOpened = false;
+                    return;
+                }
+                requestShiftCloseConfirmation();
                 return;
             }
             submitExcavatorShiftAction();
@@ -2526,12 +2622,13 @@ window.initExcavatorWorkShell = function () {
         });
         shiftButton.addEventListener("keydown", function (event) {
             if ((event.key === "Enter" || event.key === " ") && !event.repeat && !shiftButton.disabled && isShiftCloseAction()) {
-                startShiftHold(event);
+                event.preventDefault();
+                requestShiftCloseConfirmation();
             }
         });
         shiftButton.addEventListener("keyup", function (event) {
             if ((event.key === "Enter" || event.key === " ") && isShiftCloseAction()) {
-                cancelShiftHold(event);
+                event.preventDefault();
             }
         });
     }

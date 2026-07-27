@@ -289,6 +289,8 @@
     function canRequestTemporaryTransfer() {
         var transfer = temporaryTransferData();
         return Boolean(
+            mutationAllowed()
+            &&
             state.plan.editable
             && state.endpoints.temporary_transfer_request
             && transfer.available
@@ -411,8 +413,38 @@
         return normalizeSearch(searchInput && searchInput.value);
     }
 
+    function contractAllowsMutation() {
+        var guard = window.AppPwaContractGuard;
+        if (!guard || typeof guard.getState !== "function") return false;
+        var contractState = guard.getState();
+        return Boolean(contractState && contractState.locked === false);
+    }
+
+    function roleAllowsMutation() {
+        return !(
+            typeof window.isAppRoleReadonly === "function"
+            && window.isAppRoleReadonly()
+        );
+    }
+
+    function mutationAllowed() {
+        return contractAllowsMutation() && roleAllowsMutation();
+    }
+
+    function contractLockedError() {
+        var error = new Error(
+            "Рабочее приложение обновляется. Изменения временно заблокированы."
+        );
+        error.code = "app_contract_locked";
+        return error;
+    }
+
     function planEditable() {
-        return Boolean(state.plan.editable && state.endpoints.slot);
+        return Boolean(
+            mutationAllowed()
+            && state.plan.editable
+            && state.endpoints.slot
+        );
     }
 
     function sourceForEmployee(employee) {
@@ -524,8 +556,18 @@
         categoryNav.replaceChildren();
         categoryNav.hidden = state.categories.length === 0;
         state.categories.forEach(function (category) {
-            var link = createElement("a", "", category.label || category.code);
+            var link = createElement("a", "", "");
             link.href = category.url || "#";
+            link.appendChild(createElement("strong", "", category.label || category.code));
+            var categoryStatus = createElement(
+                "small",
+                "deputy-category-status",
+                (category.status_label || "Черновик") + " · r" + textValue(category.revision || 1)
+            );
+            if (category.published_at_label) {
+                categoryStatus.textContent += " · " + category.published_at_label;
+            }
+            link.appendChild(categoryStatus);
             var isActive = Boolean(category.active || category.is_active || category.code === state.role.code);
             link.classList.toggle("is-active", isActive);
             if (isActive) link.setAttribute("aria-current", "page");
@@ -622,6 +664,11 @@
         visual.classList.toggle("is-disabled", !canDrag && Boolean(employee.disabled || employee.busy));
         if (!canDrag) return;
         node.addEventListener("dragstart", function (event) {
+            if (!planEditable() || saving) {
+                if (event.preventDefault) event.preventDefault();
+                finishDrag();
+                return;
+            }
             var source = sourceForEmployee(employee);
             dragPayload = {
                 employeeId: employee.id,
@@ -1003,7 +1050,13 @@
         }
         if (!publishButton) return;
         var conflicts = Number(state.summary.conflict_count || 0);
-        var canPublish = Boolean(state.plan.editable && state.endpoints.publish && !saving && conflicts === 0);
+        var canPublish = Boolean(
+            mutationAllowed()
+            && state.plan.editable
+            && state.endpoints.publish
+            && !saving
+            && conflicts === 0
+        );
         publishButton.disabled = !canPublish;
         publishButton.textContent = state.plan.editable ? "Опубликовать" : "Опубликовано";
         if (conflicts > 0) {
@@ -1032,6 +1085,9 @@
     }
 
     async function postJson(url, body) {
+        if (!mutationAllowed()) {
+            throw contractLockedError();
+        }
         var response = await window.fetch(url, {
             method: "POST",
             credentials: "same-origin",
@@ -1064,7 +1120,12 @@
     }
 
     async function saveSlot(row, slot, employeeId, source) {
-        if (saving || !planEditable()) return;
+        if (
+            saving
+            || !mutationAllowed()
+            || !state.plan.editable
+            || !state.endpoints.slot
+        ) return;
         saving = true;
         updateAutosave("saving", "Сохраняю…");
         updatePublishButton();
@@ -1102,18 +1163,31 @@
     }
 
     function openPublishConfirmation() {
-        if (!publishDialog || !state.plan.editable || saving) return;
+        if (
+            !publishDialog
+            || !mutationAllowed()
+            || !state.plan.editable
+            || saving
+        ) return;
         var unfilled = Number(state.summary.unfilled_count || 0);
         if (publishSummary) {
-            publishSummary.textContent = unfilled > 0
+            var publishObject = (state.role.category_label || state.role.label)
+                + " · производственные сутки " + state.plan.work_date_label
+                + " · ревизия r" + textValue(state.plan.revision || 1) + ". ";
+            publishSummary.textContent = publishObject + (unfilled > 0
                 ? "Останутся незаполненные слоты: " + unfilled + ". Карточки сотрудников будут обновлены по текущей расстановке."
-                : "После публикации назначения и карточки сотрудников будут обновлены.";
+                : "После публикации назначения и карточки сотрудников будут обновлены.");
         }
         openDialog(publishDialog);
     }
 
     async function publishPlan() {
-        if (saving || !state.plan.editable || !state.endpoints.publish) return;
+        if (
+            saving
+            || !mutationAllowed()
+            || !state.plan.editable
+            || !state.endpoints.publish
+        ) return;
         closeDialog(publishDialog);
         saving = true;
         updateAutosave("saving", "Публикую…");
@@ -1144,7 +1218,11 @@
 
     async function submitTemporaryTransferRequest(event) {
         event.preventDefault();
-        if (saving || !canRequestTemporaryTransfer()) return;
+        if (
+            saving
+            || !mutationAllowed()
+            || !canRequestTemporaryTransfer()
+        ) return;
         var employeeId = temporaryTransferEmployee && temporaryTransferEmployee.value;
         var specializationId = temporaryTransferSpecialization && temporaryTransferSpecialization.value;
         var watchPeriodId = temporaryTransferWatchPeriod && temporaryTransferWatchPeriod.value;
@@ -1324,6 +1402,29 @@
     });
     document.addEventListener("dragover", moveDragPreview);
     document.addEventListener("drop", finishDrag);
+
+    function handleMutationAvailabilityChange() {
+        if (!mutationAllowed()) {
+            finishDrag();
+            currentSlot = null;
+            closeDialog(candidateDialog);
+            closeDialog(publishDialog);
+            closeDialog(temporaryTransferDialog);
+        }
+        renderEmployees();
+        renderBoard();
+        updatePublishButton();
+        updateTemporaryTransferButton();
+    }
+
+    window.addEventListener(
+        "app-pwa-contract-state",
+        handleMutationAvailabilityChange
+    );
+    window.addEventListener(
+        "active-role-state-changed",
+        handleMutationAvailabilityChange
+    );
 
     var initialSavedLabel = state.plan.updated_at_label
         ? "Сохранено · " + state.plan.updated_at_label

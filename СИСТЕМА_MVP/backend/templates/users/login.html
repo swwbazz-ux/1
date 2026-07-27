@@ -67,16 +67,52 @@ document.addEventListener('DOMContentLoaded', function () {
     var form = document.querySelector('[data-validated-login]');
     var submitButton = form ? form.querySelector('button[type="submit"]') : null;
     var loginPage = document.body;
+    var loginDialog = document.querySelector('.unified-login-dialog');
+
+    function resetLoginHorizontalScroll() {
+        if (loginDialog) {
+            loginDialog.scrollLeft = 0;
+        }
+        if (document.scrollingElement) {
+            document.scrollingElement.scrollLeft = 0;
+        }
+    }
+
+    function scheduleLoginHorizontalReset() {
+        resetLoginHorizontalScroll();
+        window.setTimeout(resetLoginHorizontalScroll, 350);
+    }
 
     function setLoginKeyboardMode(isActive) {
         if (!loginPage || !loginPage.classList.contains('unified-login-screen')) return;
         loginPage.classList.toggle('is-login-keyboard-active', Boolean(isActive));
+        scheduleLoginHorizontalReset();
     }
 
     function keepLoginFieldVisible(input) {
         window.setTimeout(function () {
             if (!input || document.activeElement !== input) return;
-            input.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' });
+            var viewport = window.visualViewport;
+            var viewportTop = viewport ? Number(viewport.offsetTop || 0) : 0;
+            var viewportHeight = viewport ? Number(viewport.height || window.innerHeight) : window.innerHeight;
+            var viewportBottom = viewportTop + viewportHeight;
+            var rect = input.getBoundingClientRect();
+            var safeEdge = 12;
+            var verticalDelta = 0;
+
+            if (rect.bottom > viewportBottom - safeEdge) {
+                verticalDelta = rect.bottom - (viewportBottom - safeEdge);
+            } else if (rect.top < viewportTop + safeEdge) {
+                verticalDelta = rect.top - (viewportTop + safeEdge);
+            }
+            if (verticalDelta && typeof window.scrollTo === 'function') {
+                window.scrollTo({
+                    top: Math.max(0, Number(window.scrollY || 0) + verticalDelta),
+                    left: 0,
+                    behavior: 'smooth'
+                });
+            }
+            scheduleLoginHorizontalReset();
         }, 90);
     }
 
@@ -162,6 +198,20 @@ document.addEventListener('DOMContentLoaded', function () {
         });
         validate();
     });
+    var initiallyFocusedField = document.activeElement;
+    if (
+        form &&
+        form.contains(initiallyFocusedField) &&
+        (
+            initiallyFocusedField.hasAttribute('data-phone-input') ||
+            initiallyFocusedField.hasAttribute('data-pin-input')
+        )
+    ) {
+        setLoginKeyboardMode(true);
+        keepLoginFieldVisible(initiallyFocusedField);
+    } else {
+        scheduleLoginHorizontalReset();
+    }
     if (window.visualViewport) {
         window.visualViewport.addEventListener('resize', function () {
             var keyboardLikelyOpen = window.visualViewport.height < window.innerHeight - 120;

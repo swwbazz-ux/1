@@ -2,6 +2,12 @@ from django.http import JsonResponse
 from django.views.decorators.http import require_GET
 
 from users.models import EmployeeAccess
+from users.active_role import role_session_state
+from users.role_apps import (
+    APP_CONTRACT_VERSION,
+    get_role_app,
+    get_role_app_for_request,
+)
 
 from .models import OperationalStateEvent, OperationalStateVersion
 
@@ -30,23 +36,27 @@ def operational_state_version_view(request):
     if not access_id:
         return JsonResponse({'authenticated': False}, status=401)
 
-    access_exists = (
+    access = (
         EmployeeAccess.objects
+        .select_related('employee', 'role')
         .filter(
             id=access_id,
             is_active=True,
+            status=EmployeeAccess.Status.ACTIVATED,
             employee__is_active=True,
             role__is_active=True,
         )
-        .exclude(status__in=[EmployeeAccess.Status.BLOCKED, EmployeeAccess.Status.DEACTIVATED])
-        .exists()
+        .first()
     )
-    if not access_exists:
+    if not access:
         return JsonResponse({'authenticated': False}, status=401)
+    role_state = role_session_state(request, access)
+    role_app = get_role_app_for_request(request) or get_role_app(access.role.code)
 
-    from assignments.services import reconcile_due_haul_assignments
+    if role_state['is_active']:
+        from assignments.services import reconcile_due_haul_assignments
 
-    reconcile_due_haul_assignments()
+        reconcile_due_haul_assignments()
 
     state = OperationalStateVersion.objects.filter(key='production').first()
     after = parse_positive_int(request.GET.get('after'), 0)
@@ -73,6 +83,18 @@ def operational_state_version_view(request):
         events_truncated = events_queryset.count() > limit
     return JsonResponse({
         'authenticated': True,
+        'role_active': role_state['is_active'],
+        'active_role_code': role_state.get('active_role_code', ''),
+        'active_role_changed_at': (
+            role_state['active_role_changed_at'].isoformat()
+            if role_state.get('active_role_changed_at')
+            else ''
+        ),
+        'session_role_code': role_state.get('session_role_code', access.role.code),
+        'session_revision': role_state.get('session_revision', ''),
+        'app_contract_version': APP_CONTRACT_VERSION,
+        'role_shell_version': role_app.shell_version if role_app else '',
+        'role_app_code': role_app.role_code if role_app else access.role.code,
         'key': 'production',
         'version': state.version if state else 0,
         'reason': state.reason if state else '',

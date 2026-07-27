@@ -2918,7 +2918,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
 {% endblock %}
 
 {% block body %}
-<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v99' }}">
+<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v107' }}">
     {% if messages %}
         <div class="driver-messages">
             {% for message in messages %}
@@ -2961,7 +2961,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
         <div class="driver-work-dial-zone">
             <div class="driver-work-dial {% if active_trip %}is-loaded{% else %}is-empty{% endif %}{% if not shift_plan_has_plan %} is-plan-missing{% endif %}{% if shift_plan_visual.is_overrun %} is-over-plan{% endif %}" style="--driver-progress: {% if shift_plan_has_plan %}{{ shift_plan_percent }}{% else %}0{% endif %}; --driver-progress-capped: {% if shift_plan_visual.is_overrun %}100{% else %}{{ shift_plan_visual.loop_progress }}{% endif %}; --driver-over-progress: {% if shift_plan_visual.is_overrun %}{{ shift_plan_visual.loop_progress }}{% else %}0{% endif %}; --driver-hold: 0;" data-driver-progress="{% if shift_plan_has_plan %}{{ shift_plan_percent }}{% else %}0{% endif %}" data-driver-loop-progress="{% if shift_plan_has_plan %}{{ shift_plan_visual.loop_progress }}{% else %}0{% endif %}" data-driver-completed-loops="{{ shift_plan_visual.completed_loops|default:0 }}" data-driver-has-plan="{% if shift_plan_has_plan %}1{% else %}0{% endif %}" data-plan-progress-phase="{% if shift_plan_has_plan %}{{ shift_plan_visual.phase }}{% endif %}" data-plan-status="{{ shift_plan_status|default:'no_plan_group' }}">
                 {% if active_trip %}
-                    <form method="post" action="{% url 'driver_complete_trip' active_trip.id %}" class="driver-work-dial-form" data-driver-hold-form>
+                    <form method="post" action="{% url 'driver_complete_trip' active_trip.id %}" class="driver-work-dial-form" data-driver-hold-form data-driver-trip-id="{{ active_trip.id }}">
                         {% csrf_token %}
                         <input type="hidden" name="client_action_id" value="" data-driver-client-action>
                         <button class="driver-work-dial-button is-loaded" type="submit" data-driver-hold-button data-driver-pending-label="ОТПРАВКА">
@@ -3129,8 +3129,13 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
                 <div class="driver-shift-section">
                     <div class="driver-shift-section-head"><span>Показатели техники</span></div>
                     <div class="driver-shift-empty-state" role="status">
+                        {% if shift_start_conflict_message %}
+                        <strong>Начало смены заблокировано</strong>
+                        <span>{{ shift_start_conflict_message }}</span>
+                        {% else %}
                         <strong>Смена и самосвал еще не назначены</strong>
                         <span>Обратитесь к руководителю. После назначения данные появятся здесь автоматически.</span>
+                        {% endif %}
                     </div>
                     <div class="driver-shift-metrics">
                         <div class="driver-shift-field"><span>Топливо</span><span class="driver-shift-metric-value"><strong>—</strong><em>л</em></span></div>
@@ -3274,6 +3279,253 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
 {% include "includes/achievement_prize.html" %}
 
 <script>
+/* DRIVER_ROLE_HOLD_GUARD_START */
+window.createDriverRoleHoldGuard = function (options) {
+    options = options || {};
+    var holdMs = Math.max(0, Number(options.holdMs || 2000));
+    var timerId = null;
+    var frameId = null;
+    var startedAt = 0;
+    var holding = false;
+    var destroyed = false;
+
+    function roleIsReadonly() {
+        return (
+            typeof window.isAppRoleReadonly === "function"
+            && window.isAppRoleReadonly()
+        );
+    }
+
+    function clearScheduledCallbacks() {
+        if (timerId !== null) {
+            window.clearTimeout(timerId);
+            timerId = null;
+        }
+        if (frameId !== null) {
+            window.cancelAnimationFrame(frameId);
+            frameId = null;
+        }
+    }
+
+    function reset(force) {
+        var hadActiveHold = holding || timerId !== null || frameId !== null;
+        clearScheduledCallbacks();
+        holding = false;
+        startedAt = 0;
+        if ((hadActiveHold || force === true) && typeof options.onReset === "function") {
+            options.onReset();
+        }
+    }
+
+    function drawProgress() {
+        frameId = null;
+        if (!holding) {
+            return;
+        }
+        if (roleIsReadonly()) {
+            reset(true);
+            return;
+        }
+        var elapsed = Math.max(0, Date.now() - startedAt);
+        var percent = Math.max(0, Math.min(100, (elapsed / holdMs) * 100));
+        if (typeof options.onProgress === "function") {
+            options.onProgress(percent);
+        }
+        if (holding && percent < 100) {
+            frameId = window.requestAnimationFrame(drawProgress);
+        }
+    }
+
+    function complete() {
+        timerId = null;
+        if (!holding) {
+            return;
+        }
+        if (roleIsReadonly()) {
+            reset(true);
+            return;
+        }
+        holding = false;
+        if (frameId !== null) {
+            window.cancelAnimationFrame(frameId);
+            frameId = null;
+        }
+        if (typeof options.onProgress === "function") {
+            options.onProgress(100);
+        }
+        if (roleIsReadonly()) {
+            reset(true);
+            return;
+        }
+        if (typeof options.onComplete === "function") {
+            options.onComplete();
+        }
+    }
+
+    function start() {
+        reset(true);
+        if (destroyed || roleIsReadonly()) {
+            return false;
+        }
+        holding = true;
+        startedAt = Date.now();
+        if (typeof options.onStart === "function") {
+            options.onStart();
+        }
+        if (roleIsReadonly()) {
+            reset(true);
+            return false;
+        }
+        drawProgress();
+        if (holding) {
+            timerId = window.setTimeout(complete, holdMs);
+        }
+        return holding;
+    }
+
+    function resetOnInactiveRole(event) {
+        if (event && event.detail && event.detail.active === false) {
+            reset(true);
+        }
+    }
+
+    window.addEventListener("active-role-state-changed", resetOnInactiveRole);
+
+    return {
+        start: start,
+        reset: function () {
+            reset(false);
+        },
+        cancel: function () {
+            reset(true);
+        },
+        destroy: function () {
+            if (destroyed) {
+                return;
+            }
+            destroyed = true;
+            window.removeEventListener("active-role-state-changed", resetOnInactiveRole);
+            reset(true);
+        }
+    };
+};
+/* DRIVER_ROLE_HOLD_GUARD_END */
+
+/* DRIVER_UNLOAD_RECOVERY_START */
+window.createDriverUnloadRecovery = function (options) {
+    options = options || {};
+    var storagePrefix = String(options.storagePrefix || "driver-trip-unloaded:");
+    var storage = options.storage || null;
+    var input = options.input || null;
+    var tripId = String(options.tripId || "").trim();
+    var storageKey = tripId ? storagePrefix + tripId : "";
+    var eventTarget = options.eventTarget || window;
+    var destroyed = false;
+
+    function storageKeys() {
+        var keys = [];
+        if (!storage) {
+            return keys;
+        }
+        try {
+            for (var index = 0; index < storage.length; index += 1) {
+                var key = storage.key(index);
+                if (key && key.indexOf(storagePrefix) === 0) {
+                    keys.push(key);
+                }
+            }
+        } catch (error) {}
+        return keys;
+    }
+
+    function removeStorageKey(key) {
+        if (!storage || !key) {
+            return;
+        }
+        try {
+            storage.removeItem(key);
+        } catch (error) {}
+    }
+
+    function clearStaleStorage(keepKey) {
+        storageKeys().forEach(function (key) {
+            if (!keepKey || key !== keepKey) {
+                removeStorageKey(key);
+            }
+        });
+    }
+
+    function readStoredActionId() {
+        if (!storage || !storageKey) {
+            return "";
+        }
+        try {
+            return String(storage.getItem(storageKey) || "").trim();
+        } catch (error) {
+            return "";
+        }
+    }
+
+    function storeActionId(actionId) {
+        if (!storage || !storageKey || !actionId) {
+            return;
+        }
+        try {
+            storage.setItem(storageKey, actionId);
+        } catch (error) {}
+    }
+
+    function ensureActionId() {
+        if (!input || !storageKey) {
+            return "";
+        }
+        var actionId = String(input.value || "").trim() || readStoredActionId();
+        if (!actionId && typeof options.generateActionId === "function") {
+            actionId = String(options.generateActionId() || "").trim();
+        }
+        if (actionId) {
+            input.value = actionId;
+            storeActionId(actionId);
+        }
+        return actionId;
+    }
+
+    function recoverPendingUi(event) {
+        if (destroyed || (event && event.type === "pageshow" && event.persisted !== true)) {
+            return;
+        }
+        ensureActionId();
+        if (typeof options.onRecover === "function") {
+            options.onRecover(event || null);
+        }
+    }
+
+    clearStaleStorage(storageKey);
+    if (storageKey && input) {
+        ensureActionId();
+        if (eventTarget && typeof eventTarget.addEventListener === "function") {
+            eventTarget.addEventListener("pageshow", recoverPendingUi);
+        }
+    } else {
+        clearStaleStorage("");
+    }
+
+    return {
+        ensureActionId: ensureActionId,
+        storageKey: storageKey,
+        destroy: function () {
+            if (destroyed) {
+                return;
+            }
+            destroyed = true;
+            if (eventTarget && typeof eventTarget.removeEventListener === "function") {
+                eventTarget.removeEventListener("pageshow", recoverPendingUi);
+            }
+        }
+    };
+};
+/* DRIVER_UNLOAD_RECOVERY_END */
+
 if (typeof window.bindAchievementPrizeUnlock === "function") {
     window.bindAchievementPrizeUnlock();
 }
@@ -3361,6 +3613,24 @@ window.bindDriverMobileShell = function () {
         return;
     }
     shell.dataset.driverShellBound = "true";
+    if (window.driverShiftCloseHoldGuard && typeof window.driverShiftCloseHoldGuard.destroy === "function") {
+        window.driverShiftCloseHoldGuard.destroy();
+        window.driverShiftCloseHoldGuard = null;
+    }
+    if (window.driverUnloadHoldGuard && typeof window.driverUnloadHoldGuard.destroy === "function") {
+        window.driverUnloadHoldGuard.destroy();
+        window.driverUnloadHoldGuard = null;
+    }
+    if (window.driverUnloadRecovery && typeof window.driverUnloadRecovery.destroy === "function") {
+        window.driverUnloadRecovery.destroy();
+        window.driverUnloadRecovery = null;
+    }
+    function driverRoleIsReadonly() {
+        return (
+            typeof window.isAppRoleReadonly === "function"
+            && window.isAppRoleReadonly()
+        );
+    }
     shell.querySelectorAll(".driver-shift-metric-value input").forEach(function (input) {
         if (!input.getAttribute("placeholder")) input.setAttribute("placeholder", "0");
     });
@@ -3449,54 +3719,84 @@ window.bindDriverMobileShell = function () {
         var shiftScroll = form ? form.querySelector("[data-driver-shift-scroll]") : null;
         var reviewPanel = form ? form.querySelector("[data-driver-shift-review]") : null;
         var editButton = form ? form.querySelector("[data-driver-shift-edit]") : null;
-        var holdStartedAt = 0;
-        var holdFrame = null;
-        var holdMs = 2000;
-
-        function resetHold() {
-            holdStartedAt = 0;
-            if (holdFrame) {
-                window.cancelAnimationFrame(holdFrame);
-                holdFrame = null;
-            }
-            if (closeButton) {
-                closeButton.style.setProperty("--driver-shift-hold", "0%");
-            }
-        }
-
-        function drawHold() {
-            if (!holdStartedAt || !closeButton || !form) {
-                return;
-            }
-            var progress = Math.min(100, ((Date.now() - holdStartedAt) / holdMs) * 100);
-            closeButton.style.setProperty("--driver-shift-hold", progress + "%");
-            if (progress >= 100) {
-                form.dataset.driverShiftConfirmed = "true";
-                form.requestSubmit(closeButton);
-                return;
-            }
-            holdFrame = window.requestAnimationFrame(drawHold);
-        }
 
         if (form && closeButton && closeButton.dataset.driverShiftBound !== "true") {
             closeButton.dataset.driverShiftBound = "true";
+            var shiftCloseHoldGuard = window.createDriverRoleHoldGuard({
+                holdMs: 2000,
+                onStart: function () {
+                    closeButton.classList.add("is-holding");
+                },
+                onProgress: function (progress) {
+                    closeButton.style.setProperty("--driver-shift-hold", progress + "%");
+                },
+                onReset: function () {
+                    closeButton.classList.remove("is-holding", "is-pending");
+                    closeButton.style.setProperty("--driver-shift-hold", "0%");
+                    form.dataset.driverShiftConfirmed = "false";
+                },
+                onComplete: function () {
+                    if (driverRoleIsReadonly()) {
+                        shiftCloseHoldGuard.cancel();
+                        return;
+                    }
+                    closeButton.classList.remove("is-holding");
+                    form.dataset.driverShiftConfirmed = "true";
+                    if (driverRoleIsReadonly()) {
+                        shiftCloseHoldGuard.cancel();
+                        return;
+                    }
+                    form.requestSubmit(closeButton);
+                }
+            });
+            window.driverShiftCloseHoldGuard = shiftCloseHoldGuard;
             closeButton.addEventListener("pointerdown", function (event) {
-                if (!shiftAction || shiftAction.value !== "close") {
+                if (
+                    !shiftAction
+                    || shiftAction.value !== "close"
+                    || driverRoleIsReadonly()
+                ) {
                     return;
                 }
-                event.preventDefault();
-                holdStartedAt = Date.now();
-                holdFrame = window.requestAnimationFrame(drawHold);
+                shiftCloseHoldGuard.start();
             });
             ["pointerup", "pointercancel", "pointerleave"].forEach(function (eventName) {
-                closeButton.addEventListener(eventName, resetHold);
+                closeButton.addEventListener(eventName, shiftCloseHoldGuard.reset);
             });
             closeButton.addEventListener("click", function (event) {
                 if (shiftAction && shiftAction.value === "close" && form.dataset.driverShiftConfirmed !== "true") {
                     event.preventDefault();
+                    if (driverRoleIsReadonly()) {
+                        shiftCloseHoldGuard.cancel();
+                        return;
+                    }
+                    if (typeof window.openAppConfirmDialog === "function") {
+                        window.openAppConfirmDialog(
+                            "Закрыть смену с указанными конечными показаниями?",
+                            function () {
+                                if (driverRoleIsReadonly()) {
+                                    shiftCloseHoldGuard.cancel();
+                                    return;
+                                }
+                                form.dataset.driverShiftConfirmed = "true";
+                                if (driverRoleIsReadonly()) {
+                                    shiftCloseHoldGuard.cancel();
+                                    return;
+                                }
+                                form.requestSubmit(closeButton);
+                            },
+                            0,
+                            "Закрыть смену"
+                        );
+                    }
                 }
             });
             form.addEventListener("submit", function (event) {
+                if (driverRoleIsReadonly()) {
+                    event.preventDefault();
+                    shiftCloseHoldGuard.cancel();
+                    return;
+                }
                 if (shiftAction && shiftAction.value === "close" && form.dataset.driverShiftConfirmed !== "true") {
                     event.preventDefault();
                     return;
@@ -3513,7 +3813,7 @@ window.bindDriverMobileShell = function () {
                         if (reviewPanel) reviewPanel.hidden = true;
                         if (inputsSection) inputsSection.hidden = false;
                         form.classList.remove("is-reviewed");
-                        resetHold();
+                        shiftCloseHoldGuard.cancel();
                     }
                 });
             });
@@ -4049,6 +4349,7 @@ window.bindDriverMobileShell = function () {
         var frame = null;
         var startedAt = 0;
         var holdMs = 2000;
+        var completedByHold = false;
         function reset() {
             window.clearTimeout(timer);
             if (frame) window.cancelAnimationFrame(frame);
@@ -4066,17 +4367,32 @@ window.bindDriverMobileShell = function () {
         }
         function complete() {
             reset();
+            completedByHold = true;
             onComplete();
         }
         function begin(event) {
             if (button.disabled || button.getAttribute("aria-disabled") === "true" || startedAt) return;
-            if (event) event.preventDefault();
             startedAt = Date.now();
             button.classList.add("is-holding");
             draw();
             timer = window.setTimeout(complete, holdMs);
         }
-        button.addEventListener("click", function (event) { event.preventDefault(); });
+        button.addEventListener("click", function (event) {
+            event.preventDefault();
+            if (completedByHold) {
+                completedByHold = false;
+                return;
+            }
+            if (button.disabled || button.getAttribute("aria-disabled") === "true") return;
+            if (typeof window.openAppConfirmDialog === "function") {
+                window.openAppConfirmDialog(
+                    "Подтвердите действие: " + button.textContent.trim() + ".",
+                    onComplete,
+                    0,
+                    "Подтвердить"
+                );
+            }
+        });
         button.addEventListener("pointerdown", begin);
         ["pointerup", "pointercancel", "pointerleave"].forEach(function (name) {
             button.addEventListener(name, reset);
@@ -4159,75 +4475,141 @@ window.bindDriverMobileShell = function () {
 
     var holdForm = shell.querySelector("[data-driver-hold-form]");
     var holdButton = shell.querySelector("[data-driver-hold-button]");
+    var unloadHoldGuard = null;
+    var unloadRecoveryStorage = null;
+    try {
+        unloadRecoveryStorage = window.sessionStorage;
+    } catch (error) {}
+    var unloadRecovery = window.createDriverUnloadRecovery({
+        storage: unloadRecoveryStorage,
+        tripId: holdForm ? holdForm.dataset.driverTripId : "",
+        input: holdForm ? holdForm.querySelector("[data-driver-client-action]") : null,
+        generateActionId: function () {
+            return generateClientActionId("trip-unloaded");
+        },
+        onRecover: function () {
+            if (unloadHoldGuard) {
+                unloadHoldGuard.cancel();
+            }
+            if (holdButton && !driverRoleIsReadonly()) {
+                holdButton.disabled = false;
+            }
+        }
+    });
+    window.driverUnloadRecovery = unloadRecovery;
     if (holdForm && holdButton) {
-        var holdTimer = null;
-        var holdStart = 0;
-        var holdFrame = null;
-        var holdMs = 2000;
-        function resetHold() {
-            window.clearTimeout(holdTimer);
-            if (holdFrame) {
-                window.cancelAnimationFrame(holdFrame);
-            }
-            holdTimer = null;
-            holdStart = 0;
-            holdButton.classList.remove("is-holding");
-            holdButton.style.setProperty("--driver-hold", "0");
-            holdButton.style.setProperty("--driver-hold-angle", "0deg");
-        }
-        function drawHold() {
-            if (!holdStart) {
-                return;
-            }
-            var elapsed = Date.now() - holdStart;
-            var percent = Math.max(0, Math.min(100, (elapsed / holdMs) * 100));
-            holdButton.style.setProperty("--driver-hold", percent.toFixed(2));
-            holdButton.style.setProperty("--driver-hold-angle", ((percent / 100) * 360).toFixed(2) + "deg");
-            if (percent < 100) {
-                holdFrame = window.requestAnimationFrame(drawHold);
-            }
-        }
-        function completeHold() {
-            holdButton.style.setProperty("--driver-hold", "100");
-            holdButton.style.setProperty("--driver-hold-angle", "360deg");
-            fillClientAction(holdForm, "trip-unloaded");
-            holdForm.dataset.holdComplete = "true";
-            holdButton.classList.remove("is-loaded");
-            holdButton.classList.add("is-pending");
-            var dialLabel = holdButton.querySelector("[data-driver-dial-label]");
-            if (dialLabel) {
-                dialLabel.textContent = holdButton.dataset.driverPendingLabel || "ОТПРАВКА";
-                delete dialLabel.dataset.driverDialRaw;
-                scheduleDriverDialLabelFit();
-            }
-            holdButton.disabled = true;
-            window.requestAnimationFrame(function () {
+        var completedByHold = false;
+        var dialLabel = holdButton.querySelector("[data-driver-dial-label]");
+        var readyDialLabel = dialLabel
+            ? (dialLabel.dataset.driverDialRaw || dialLabel.textContent.trim().replace(/\s+/g, " "))
+            : "";
+        unloadHoldGuard = window.createDriverRoleHoldGuard({
+            holdMs: 2000,
+            onStart: function () {
+                holdButton.classList.add("is-holding");
+            },
+            onProgress: function (percent) {
+                holdButton.style.setProperty("--driver-hold", percent.toFixed(2));
+                holdButton.style.setProperty(
+                    "--driver-hold-angle",
+                    ((percent / 100) * 360).toFixed(2) + "deg"
+                );
+            },
+            onReset: function () {
+                completedByHold = false;
+                delete holdForm.dataset.holdComplete;
+                holdButton.classList.remove("is-holding", "is-pending");
+                holdButton.classList.add("is-loaded");
+                holdButton.style.setProperty("--driver-hold", "0");
+                holdButton.style.setProperty("--driver-hold-angle", "0deg");
+                if (dialLabel && readyDialLabel) {
+                    renderDriverDialLabel(dialLabel, readyDialLabel);
+                    scheduleDriverDialLabelFit();
+                }
+            },
+            onComplete: function () {
+                if (driverRoleIsReadonly()) {
+                    unloadHoldGuard.cancel();
+                    return;
+                }
+                unloadRecovery.ensureActionId();
+                holdForm.dataset.holdComplete = "true";
+                completedByHold = true;
+                holdButton.classList.remove("is-loaded", "is-holding");
+                holdButton.classList.add("is-pending");
+                if (dialLabel) {
+                    renderDriverDialLabel(
+                        dialLabel,
+                        holdButton.dataset.driverPendingLabel || "ОТПРАВКА"
+                    );
+                    scheduleDriverDialLabelFit();
+                }
+                if (driverRoleIsReadonly()) {
+                    unloadHoldGuard.cancel();
+                    return;
+                }
+                holdButton.disabled = true;
                 holdForm.submit();
-            });
-        }
+            }
+        });
+        window.driverUnloadHoldGuard = unloadHoldGuard;
         holdButton.addEventListener("pointerdown", function (event) {
-            if (holdButton.disabled) {
+            if (holdButton.disabled || driverRoleIsReadonly()) {
                 return;
             }
-            event.preventDefault();
-            resetHold();
-            holdStart = Date.now();
-            holdButton.classList.add("is-holding");
             holdButton.setPointerCapture?.(event.pointerId);
-            drawHold();
-            holdTimer = window.setTimeout(completeHold, holdMs);
+            unloadHoldGuard.start();
+        });
+        holdButton.addEventListener("click", function (event) {
+            event.preventDefault();
+            if (completedByHold) {
+                completedByHold = false;
+                return;
+            }
+            if (
+                holdButton.disabled
+                || driverRoleIsReadonly()
+                || typeof window.openAppConfirmDialog !== "function"
+            ) {
+                unloadHoldGuard.cancel();
+                return;
+            }
+            window.openAppConfirmDialog(
+                "Подтвердите завершение и разгрузку текущего рейса.",
+                function () {
+                    if (driverRoleIsReadonly()) {
+                        unloadHoldGuard.cancel();
+                        return;
+                    }
+                    unloadRecovery.ensureActionId();
+                    holdForm.dataset.holdComplete = "true";
+                    if (driverRoleIsReadonly()) {
+                        unloadHoldGuard.cancel();
+                        return;
+                    }
+                    holdButton.disabled = true;
+                    holdForm.submit();
+                },
+                0,
+                "Завершить рейс"
+            );
         });
         ["pointerup", "pointercancel", "pointerleave"].forEach(function (eventName) {
             holdButton.addEventListener(eventName, function () {
                 if (holdForm.dataset.holdComplete !== "true") {
-                    resetHold();
+                    unloadHoldGuard.reset();
                 }
             });
         });
         holdForm.addEventListener("submit", function (event) {
+            if (driverRoleIsReadonly()) {
+                event.preventDefault();
+                unloadHoldGuard.cancel();
+                return;
+            }
             if (holdForm.dataset.holdComplete !== "true") {
                 event.preventDefault();
-                resetHold();
+                unloadHoldGuard.reset();
             }
         });
     }
@@ -4267,7 +4649,7 @@ window.bindDriverMobileShell = function () {
         if (!("serviceWorker" in navigator)) {
             return;
         }
-        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v99' }}";
+        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v107' }}";
         var updateModal = document.querySelector("[data-driver-pwa-update-modal]");
         var updateBadge = document.querySelector("[data-driver-pwa-update-badge]");
         var updateTarget = document.querySelector("[data-driver-pwa-update-nav-target]");

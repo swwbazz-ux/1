@@ -1,0 +1,33 @@
+{
+  "run_id": "СКВОЗНОЙ_20260724_R04",
+  "timezone": "Asia/Vladivostok",
+  "work_date": "2026-07-24",
+  "marker": "ТЕСТПОВТОР20260724R04",
+  "verdict": "NO-GO",
+  "status": "FAIL_NEW_P1",
+  "new_defect": "QA-P1-006",
+  "employees_created": 14,
+  "accesses_activated": 14,
+  "published_plans": 2,
+  "trips": 4,
+  "carryover_trips": 1,
+  "volume_m3": "198.00",
+  "tonnage_t": "473.31",
+  "http_steps": 165,
+  "assertions": 409,
+  "open_marked_trips": 0,
+  "open_marked_downtimes": 0,
+  "open_marked_shifts": 0,
+  "standing_equipment_assignments": 6,
+  "main_database_sha256_before": "A5CC387E15454B107FE5E04ADC6801E983873AD62EB79DE76E91283E02733222",
+  "main_database_sha256_after": "A5CC387E15454B107FE5E04ADC6801E983873AD62EB79DE76E91283E02733222",
+  "qa_database_sha256_after": "F1B047A40E09929A4BA314D08DB5EC9E53730E8A82BBEBC8D0486C7F97F22281",
+  "screenshots": {
+    "R04_01_master_mobile.png": "E788BD9D5DA7D174E42BCE41A1A2725C3FE2B4E20B07F13109E7B91E7EC81D70",
+    "R04_02_excavator_mobile_shift.png": "A39B0F7400EFD3D510450F776138E9DC9AE7E37A24E2C28A14EB5ED905A3D360",
+    "R04_03_driver_mobile_shift.png": "6A7FD039E2615D9DB665ACB0D6069C739622E826C19426D8ABD52D2E0D519E52",
+    "R04_04_deputy_mobile_published.png": "926CDAAA396750E88C4A9B4180B1C7DE72B83754FBDD6F744F235DACB0B43C48",
+    "R04_05_manager_mobile_totals.png": "CF053BF37262010FBA70022AF5AA7CD4BD98DCB683238DD1DFDDC75DB138E3FD",
+    "R04_06_defect_dynamics_day_hour.png": "64660D35F5FDA382302B4AC188E14F7BA39B0614A368D3979D970A8A57CB82EC"
+  }
+}

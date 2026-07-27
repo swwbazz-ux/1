@@ -1,0 +1,76 @@
+{
+  "run_id": "СКВОЗНОЙ_20260724_R05",
+  "marker": "ТЕСТПОВТОР20260724R05",
+  "work_date": "2026-07-24",
+  "timezone": "Asia/Vladivostok",
+  "branch": "codex/new-public-site-ux-prototype",
+  "head": "e75922ce7d26c1b9cf4335d8c1af67064a40d440",
+  "status": "PASS",
+  "automated_tests": {
+    "exact_regressions": "2/2 PASS",
+    "shift_analytics_report_tests": "13/13 PASS",
+    "calendar_independent_shift_test": "1/1 PASS",
+    "full_suite": "560/560 PASS",
+    "manage_py_check": "PASS",
+    "makemigrations_check": "No changes detected",
+    "git_diff_check": "PASS"
+  },
+  "assertions": 452,
+  "http_steps": 173,
+  "employees_created": 14,
+  "accesses_activated": 14,
+  "crew_plans_published": 2,
+  "standing_assignments_open": 6,
+  "trips": 4,
+  "carryover_trips": 1,
+  "volume_m3": "198.00",
+  "tonnage": "473.31",
+  "marked_open_shifts": 0,
+  "marked_open_downtimes": 0,
+  "open_r05_trips": 0,
+  "defects": [],
+  "database": {
+    "main_before_sha256": "A5CC387E15454B107FE5E04ADC6801E983873AD62EB79DE76E91283E02733222",
+    "main_after_sha256": "A5CC387E15454B107FE5E04ADC6801E983873AD62EB79DE76E91283E02733222",
+    "qa_before_sha256": "A5CC387E15454B107FE5E04ADC6801E983873AD62EB79DE76E91283E02733222",
+    "qa_after_sha256": "1FC0FFE35F7684042BC16D94DAC8CC117DDA5F95C60C97268120784A4567AE74"
+  },
+  "browser_qa": {
+    "authorized": true,
+    "desktop_viewport": "1280x900",
+    "mobile_viewport": "390x844",
+    "day_hour": {
+      "trips": 3,
+      "volume_m3": "141",
+      "boundary_1900_trips": 1,
+      "boundary_1900_volume_m3": "47",
+      "cumulative_final_m3": "141"
+    },
+    "night_hour": {
+      "trips": 1,
+      "volume_m3": "57",
+      "cumulative_final_m3": "57"
+    },
+    "day_day": {
+      "trips": 3,
+      "volume_m3": "141",
+      "cumulative_final_m3": "141"
+    },
+    "night_day": {
+      "trips": 1,
+      "volume_m3": "57",
+      "cumulative_final_m3": "57",
+      "trips_series_final": 1
+    },
+    "filter_controls": "PASS",
+    "horizontal_overflow_mobile": false,
+    "console_errors": 0,
+    "console_warnings": 0,
+    "realtime_state_http": 200,
+    "management_service_worker_http": 200
+  },
+  "residual_acceptance": {
+    "physical_android": "NOT RUN / QA-P2-002 READY FOR PHYSICAL TOUCH VERIFICATION",
+    "postgresql_concurrency": "OPEN RISK / QA-RISK-001 NOT VERIFIED"
+  }
+}

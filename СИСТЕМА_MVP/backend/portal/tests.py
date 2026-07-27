@@ -1,6 +1,7 @@
 import shutil
 import tempfile
 from datetime import date
+from pathlib import Path
 from unittest.mock import patch
 
 from django.contrib import admin as django_admin
@@ -38,6 +39,7 @@ from .services import (
     publication_is_visible_to,
     voter_key,
 )
+from .storage import portal_private_storage
 
 
 class FailingProductionDataProvider:
@@ -78,9 +80,23 @@ def driver_only_scope_provider(*, queryset, site_code):
 class PortalTestCase(TestCase):
     def setUp(self):
         cache.clear()
+        self.addCleanup(cache.clear)
         self.media_dir = tempfile.mkdtemp(prefix='portal-tests-')
-        self.media_override = override_settings(MEDIA_ROOT=self.media_dir)
+        self.addCleanup(shutil.rmtree, self.media_dir, True)
+        self.private_media_temp = tempfile.TemporaryDirectory(prefix='portal-private-tests-')
+        self.private_media_dir = self.private_media_temp.name
+        self.addCleanup(self.private_media_temp.cleanup)
+        self.media_override = override_settings(
+            MEDIA_ROOT=self.media_dir,
+            PORTAL_PRIVATE_MEDIA_ROOT=self.private_media_dir,
+        )
         self.media_override.enable()
+        self.addCleanup(self.media_override.disable)
+
+        self.private_storage_original_location = portal_private_storage._location
+        portal_private_storage._location = self.private_media_dir
+        self._clear_private_storage_location_cache()
+        self.addCleanup(self._restore_private_storage_location)
 
         self.driver_role = Role.objects.create(code='driver', name='Водитель', is_active=True)
         self.admin_role = Role.objects.create(code='admin', name='Администратор', is_active=True)
@@ -113,10 +129,14 @@ class PortalTestCase(TestCase):
             is_active=True,
         )
 
-    def tearDown(self):
-        cache.clear()
-        self.media_override.disable()
-        shutil.rmtree(self.media_dir, ignore_errors=True)
+    @staticmethod
+    def _clear_private_storage_location_cache():
+        portal_private_storage.__dict__.pop('base_location', None)
+        portal_private_storage.__dict__.pop('location', None)
+
+    def _restore_private_storage_location(self):
+        portal_private_storage._location = self.private_storage_original_location
+        self._clear_private_storage_location_cache()
 
     def portal_session(self, employee=None):
         session = self.client.session
@@ -139,6 +159,21 @@ class PortalTestCase(TestCase):
 
 
 class PortalPublicationTests(PortalTestCase):
+    def test_private_image_storage_is_isolated_from_working_directory(self):
+        expected_root = Path(self.private_media_dir).resolve()
+        private_image_fields = (
+            Publication._meta.get_field('cover_image'),
+            PublicationImage._meta.get_field('image'),
+            MaterialSuggestion._meta.get_field('photo'),
+            LeadershipMessage._meta.get_field('photo'),
+        )
+
+        self.assertEqual(Path(portal_private_storage.location).resolve(), expected_root)
+        for field in private_image_fields:
+            with self.subTest(field=f'{field.model._meta.label}.{field.name}'):
+                self.assertIs(field.storage, portal_private_storage)
+                self.assertEqual(Path(field.storage.location).resolve(), expected_root)
+
     def test_new_publication_is_internal_by_default(self):
         publication = Publication(title='Черновик', body='Текст', author=self.admin)
         self.assertEqual(publication.visibility, Publication.Visibility.INTERNAL)

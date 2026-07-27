@@ -6,9 +6,9 @@
     <section class="dispatcher-command-main" aria-label="{% if dispatcher_main_label %}{{ dispatcher_main_label }}{% else %}Текущий раздел{% endif %}">
         <div class="dispatcher-command-context">
             <strong>{% if dispatcher_header_screen %}{{ dispatcher_header_screen }}{% else %}Пульт смены{% endif %}</strong>
-            <span class="dispatcher-command-shift-name">{% if dispatcher_header_shift_label %}{{ dispatcher_header_shift_label }}{% elif shift_label == "Ночная" %}Ночная смена{% elif shift_label == "Дневная" %}Дневная смена{% else %}Дневная смена{% endif %}</span>
-            <span class="dispatcher-command-date">{% if current_date %}{{ current_date }}{% else %}{{ dispatcher_dashboard.current_date }}{% endif %}</span>
-            <span class="dispatcher-command-time-range">{% if dispatcher_header_time_range %}{{ dispatcher_header_time_range }}{% else %}07:00-19:00{% endif %}</span>
+            <span class="dispatcher-command-shift-name">{% if dispatcher_header_shift_label %}{{ dispatcher_header_shift_label }}{% elif dispatcher_header.shift_label == "Ночная" %}Ночная смена{% elif dispatcher_header.shift_label == "Дневная" %}Дневная смена{% elif shift_label == "Ночная" %}Ночная смена{% elif shift_label == "Дневная" %}Дневная смена{% else %}Дневная смена{% endif %}</span>
+            <span class="dispatcher-command-date">{% if current_date %}{{ current_date }}{% elif dispatcher_header.current_date %}{{ dispatcher_header.current_date }}{% else %}{{ dispatcher_dashboard.current_date }}{% endif %}</span>
+            <span class="dispatcher-command-time-range">{% if dispatcher_header_time_range %}{{ dispatcher_header_time_range }}{% elif dispatcher_header.dispatcher_header_time_range %}{{ dispatcher_header.dispatcher_header_time_range }}{% else %}07:00-19:00{% endif %}</span>
         </div>
         {% include "includes/dispatcher_nav.html" %}
     </section>
@@ -32,8 +32,8 @@
         </svg>
         <span class="dispatcher-radial-clock-dot" aria-hidden="true"></span>
         <span class="dispatcher-radial-clock-face">
-            <strong>{% if current_time %}{{ current_time }}{% else %}{{ dispatcher_dashboard.current_time }}{% endif %}</strong>
-            <span>{% if current_date %}{{ current_date }}{% else %}{{ dispatcher_dashboard.current_date }}{% endif %}</span>
+            <strong>{% if current_time %}{{ current_time }}{% elif dispatcher_header.current_time %}{{ dispatcher_header.current_time }}{% else %}{{ dispatcher_dashboard.current_time }}{% endif %}</strong>
+            <span>{% if current_date %}{{ current_date }}{% elif dispatcher_header.current_date %}{{ dispatcher_header.current_date }}{% else %}{{ dispatcher_dashboard.current_date }}{% endif %}</span>
             <em>{% if dispatcher_clock_caption %}{{ dispatcher_clock_caption }}{% else %}текущее время{% endif %}</em>
         </span>
     </section>

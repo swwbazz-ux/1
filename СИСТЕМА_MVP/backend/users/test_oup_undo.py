@@ -333,6 +333,8 @@ class OupActionUndoTests(TestCase):
         self.assertEqual(self.employee_access.access_code, previous_code)
 
     def test_non_admin_cannot_undo_oup_action(self):
+        self.employee_access.status = EmployeeAccess.Status.ACTIVATED
+        self.employee_access.save(update_fields=['status'])
         session = self.client.session
         session['employee_access_id'] = self.employee_access.id
         session.save()

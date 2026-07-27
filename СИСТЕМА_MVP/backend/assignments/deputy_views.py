@@ -99,8 +99,10 @@ DEPUTY_MANIFEST = {
 }
 
 DEPUTY_SERVICE_WORKER_JS = r"""
+const APP_CONTRACT_VERSION = "pwa-contract-v1";
+const ROLE_CODE = "deputy_mining_manager";
 const CACHE_PREFIX = "deputy-mining-manager-desktop-shell-";
-const CACHE_NAME = `${CACHE_PREFIX}v9`;
+const CACHE_NAME = "deputy-mining-manager-desktop-shell-v14";
 const APP_SCOPE = "/deputy-mining-manager/";
 const MANIFEST_URL = "/deputy-mining-manager.webmanifest";
 const LEGACY_ROOT_FALLBACK_URL = "/mining-master/assignments/";
@@ -109,6 +111,7 @@ const CORE_ASSETS = [
   MANIFEST_URL,
   "/static/css/app.css",
   "/static/css/deputy-mining-manager-v3.css",
+  "/static/js/role-readonly.js",
   "/static/js/deputy-mining-manager-v3.js",
   "/static/js/deputy-mining-manager-pwa-v1.js",
   "/static/favicon.ico",
@@ -218,7 +221,7 @@ async function networkFirst(request) {
     }
     return response;
   } catch (error) {
-    return (await cache.match(request, { ignoreSearch: true })) ||
+    return (await cache.match(request)) ||
       new Response("Ресурс недоступен без сети.", {
         status: 503,
         headers: { "Content-Type": "text/plain; charset=utf-8" }
@@ -228,7 +231,7 @@ async function networkFirst(request) {
 
 function canonicalStaticRequest(request) {
   const url = new URL(request.url);
-  return new Request(`${url.origin}${url.pathname}`, {
+  return new Request(`${url.origin}${url.pathname}${url.search}`, {
     method: "GET",
     credentials: "same-origin"
   });
@@ -275,6 +278,19 @@ self.addEventListener("message", event => {
   if (!event.data) return;
   if (event.data.type === "SKIP_WAITING") {
     self.skipWaiting();
+  }
+  if (event.data.type === "GET_VERSION") {
+    const payload = {
+      version: CACHE_NAME,
+      appContractVersion: APP_CONTRACT_VERSION,
+      shellVersion: CACHE_NAME,
+      roleCode: ROLE_CODE
+    };
+    if (event.ports && event.ports[0]) {
+      event.ports[0].postMessage(payload);
+    } else if (event.source) {
+      event.source.postMessage(payload);
+    }
   }
 });
 """
@@ -616,16 +632,40 @@ def build_crew_plan_payload(plan, *, request=None):
     selected_date = plan.work_date.isoformat()
     for role_code, equipment_type_name in WORK_ASSIGNMENT_ROLE_EQUIPMENT_TYPES.items():
         query = urlencode({'role': role_code, 'date': selected_date})
+        role_plans = CrewPlan.objects.filter(
+            work_date=plan.work_date,
+            role__code=role_code,
+        )
+        published_plan = (
+            role_plans.filter(status=CrewPlanStatus.PUBLISHED)
+            .order_by('-revision')
+            .first()
+        )
+        draft_plan = (
+            role_plans.filter(status=CrewPlanStatus.DRAFT)
+            .order_by('-revision')
+            .first()
+        )
+        visible_plan = published_plan or draft_plan
         categories.append({
             'code': role_code,
             'label': TARGET_ROLE_LABELS.get(role_code, equipment_type_name),
             'url': f'{reverse("deputy_mining_manager_placement")}?{query}',
+            'status': CrewPlanStatus.PUBLISHED if published_plan else CrewPlanStatus.DRAFT,
+            'status_label': 'Опубликовано' if published_plan else 'Черновик',
+            'revision': visible_plan.revision if visible_plan else 1,
+            'published_at_label': (
+                timezone.localtime(published_plan.published_at).strftime('%d.%m.%Y %H:%M')
+                if published_plan and published_plan.published_at
+                else ''
+            ),
         })
 
     return {
         'plan': {
             'id': plan.id,
             'version': plan.version,
+            'revision': plan.revision,
             'editable': editable,
             'status': plan.status,
             'work_date': plan.work_date.isoformat(),

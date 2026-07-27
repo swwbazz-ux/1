@@ -386,7 +386,9 @@
                                     {% if employee_card_context == "admin" %}
                                         <div class="employee-card-access-actions">
                                             <form method="post" action="{% url 'system_admin_access_action' item.id 'block' %}" data-confirm="Заблокировать этот доступ? Пользователь не сможет войти.">{% csrf_token %}<button type="submit">Заблокировать</button></form>
+                                            {% if employee.status != "archived" and employee.status != "dismissed" and employee.status != "deleted" %}
                                             <form method="post" action="{% url 'system_admin_access_action' item.id 'unblock' %}">{% csrf_token %}<button type="submit">Разблокировать</button></form>
+                                            {% endif %}
                                             <form method="post" action="{% url 'system_admin_access_action' item.id 'deactivate' %}" data-confirm="Деактивировать этот доступ? Пользователь не сможет войти.">{% csrf_token %}<button type="submit">Отключить</button></form>
                                         </div>
                                     {% endif %}

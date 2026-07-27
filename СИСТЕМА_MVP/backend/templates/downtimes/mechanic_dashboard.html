@@ -115,10 +115,14 @@
                             <td>{{ event.employee|default:"-" }}</td>
                             <td>{{ event.comment|default:"-" }}</td>
                             <td>
+                                {% if event.mechanic_can_close %}
                                 <form method="post" action="{% url 'mechanic_close_downtime' event.id %}">
                                     {% csrf_token %}
                                     <button type="submit">Закрыть простой</button>
                                 </form>
+                                {% else %}
+                                <span class="muted">Закрывает только водитель</span>
+                                {% endif %}
                             </td>
                         </tr>
                     {% empty %}

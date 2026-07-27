@@ -162,6 +162,33 @@ class DeputyPlanningViewTests(TestCase):
         self.assertEqual(response.status_code, 200, response.content)
         return response
 
+    def test_category_publication_statuses_are_independent_by_role(self):
+        driver_plan = self.create_draft()
+        self.publish(driver_plan)
+        excavator_plan, _created = get_or_create_crew_draft(
+            role=self.excavator_role,
+            work_date=driver_plan.work_date,
+            actor=self.deputy,
+        )
+
+        response = self.client.get(
+            reverse('deputy_mining_manager_placement'),
+            {'role': self.excavator_role.code, 'date': driver_plan.work_date.isoformat()},
+            HTTP_HOST='localhost',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        categories = {
+            category['code']: category
+            for category in response.context['planning_payload']['categories']
+        }
+        self.assertEqual(categories['driver']['status_label'], 'Опубликовано')
+        self.assertEqual(categories['driver']['revision'], driver_plan.revision)
+        self.assertTrue(categories['driver']['published_at_label'])
+        self.assertEqual(categories['excavator_operator']['status_label'], 'Черновик')
+        self.assertEqual(categories['excavator_operator']['revision'], excavator_plan.revision)
+        self.assertEqual(categories['excavator_operator']['published_at_label'], '')
+
     def test_profile_is_available_only_to_deputy_and_role_home_routes_to_board(self):
         response = self.client.get(reverse('role_home'), HTTP_HOST='localhost')
         self.assertRedirects(
@@ -357,7 +384,8 @@ class DeputyPlanningViewTests(TestCase):
         self.assertEqual(response['Service-Worker-Allowed'], '/deputy-mining-manager/')
         self.assertEqual(response['X-Content-Type-Options'], 'nosniff')
         self.assertIn('deputy-mining-manager-desktop-shell-', script)
-        self.assertIn('`${CACHE_PREFIX}v9`', script)
+        self.assertIn('deputy-mining-manager-desktop-shell-v14', script)
+        self.assertIn('/static/js/role-readonly.js', script)
         self.assertIn('key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME', script)
         self.assertIn('removeCachedPlanningDocuments()', script)
         self.assertIn('LEGACY_ROOT_FALLBACK_URL', script)
@@ -368,11 +396,13 @@ class DeputyPlanningViewTests(TestCase):
         self.assertIn('STATIC_ASSET_PATHS.has(url.pathname)', script)
         self.assertIn('networkFirstStatic(request)', script)
         self.assertIn('const cacheKey = canonicalStaticRequest(request);', script)
+        self.assertIn('`${url.origin}${url.pathname}${url.search}`', script)
+        self.assertNotIn('ignoreSearch', script)
         self.assertIn('fetch(request, { cache: "no-store" })', script)
         self.assertNotIn('cacheFirst(request)', script)
         self.assertIn('Для работы с расстановкой требуется сеть.', script)
         self.assertIn('SKIP_WAITING', script)
-        self.assertNotIn('GET_VERSION', script)
+        self.assertIn('GET_VERSION', script)
         self.assertIn('/static/css/deputy-mining-manager-v3.css', core_assets)
         self.assertIn('/static/js/deputy-mining-manager-v3.js', core_assets)
         self.assertIn('/static/js/deputy-mining-manager-pwa-v1.js', core_assets)

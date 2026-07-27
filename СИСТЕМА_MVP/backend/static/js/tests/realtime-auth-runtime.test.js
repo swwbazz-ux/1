@@ -1,0 +1,561 @@
+"use strict";
+
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
+const test = require("node:test");
+const vm = require("node:vm");
+
+const REALTIME_CLIENT_PATH = path.resolve(__dirname, "..", "realtime-client.js");
+const REALTIME_CLIENT_SOURCE = fs.readFileSync(REALTIME_CLIENT_PATH, "utf8");
+const BASE_TEMPLATE_PATH = path.resolve(__dirname, "..", "..", "..", "templates", "base.html");
+const BASE_TEMPLATE_SOURCE = fs.readFileSync(BASE_TEMPLATE_PATH, "utf8");
+const MOBILE_QUEUE_KEY = "realtime-auth-runtime-queue";
+
+class FakeClassList {
+    constructor() {
+        this.values = new Set();
+    }
+
+    add(...names) {
+        names.forEach((name) => this.values.add(name));
+    }
+
+    remove(...names) {
+        names.forEach((name) => this.values.delete(name));
+    }
+
+    contains(name) {
+        return this.values.has(name);
+    }
+
+    toggle(name, force) {
+        const enabled = typeof force === "boolean" ? force : !this.values.has(name);
+        if (enabled) {
+            this.values.add(name);
+        } else {
+            this.values.delete(name);
+        }
+        return enabled;
+    }
+}
+
+function createEventTarget() {
+    const listeners = new Map();
+    return {
+        addEventListener(type, listener) {
+            const registered = listeners.get(type) || [];
+            registered.push(listener);
+            listeners.set(type, registered);
+        },
+        removeEventListener(type, listener) {
+            const registered = listeners.get(type) || [];
+            listeners.set(type, registered.filter((candidate) => candidate !== listener));
+        },
+        dispatchEvent(event) {
+            if (!event || !event.type) {
+                throw new TypeError("Event type is required");
+            }
+            const registered = (listeners.get(event.type) || []).slice();
+            registered.forEach((listener) => listener.call(this, event));
+            return true;
+        },
+    };
+}
+
+function createStorage(initialValues) {
+    const values = new Map(
+        Object.entries(initialValues || {}).map(([key, value]) => [key, String(value)])
+    );
+    return {
+        getItem(key) {
+            return values.has(String(key)) ? values.get(String(key)) : null;
+        },
+        setItem(key, value) {
+            values.set(String(key), String(value));
+        },
+        removeItem(key) {
+            values.delete(String(key));
+        },
+        clear() {
+            values.clear();
+        },
+    };
+}
+
+function response(status, payload) {
+    return {
+        status,
+        ok: status >= 200 && status < 300,
+        json() {
+            return Promise.resolve(payload);
+        },
+    };
+}
+
+function createRuntime(options) {
+    const runtimeOptions = options || {};
+    const windowTarget = createEventTarget();
+    const documentTarget = createEventTarget();
+    const redirects = [];
+    const reloads = [];
+    const fetchCalls = [];
+    const readonlyCalls = [];
+    const activeRoleEvents = [];
+    const refreshAppliedEvents = [];
+    const refreshDeferredEvents = [];
+    const refreshSkippedEvents = [];
+    const intervals = new Map();
+    const timeouts = new Map();
+    let nextTimerId = 1;
+    let currentHref = runtimeOptions.currentHref || "http://driver.localhost/driver/";
+
+    const location = {
+        get href() {
+            return currentHref;
+        },
+        set href(value) {
+            const nextHref = new URL(String(value), currentHref).href;
+            redirects.push({method: "href", value: nextHref});
+            currentHref = nextHref;
+        },
+        get origin() {
+            return new URL(currentHref).origin;
+        },
+        get pathname() {
+            return new URL(currentHref).pathname;
+        },
+        assign(value) {
+            const nextHref = new URL(String(value), currentHref).href;
+            redirects.push({method: "assign", value: nextHref});
+            currentHref = nextHref;
+        },
+        replace(value) {
+            const nextHref = new URL(String(value), currentHref).href;
+            redirects.push({method: "replace", value: nextHref});
+            currentHref = nextHref;
+        },
+        reload() {
+            reloads.push(true);
+        },
+    };
+
+    const body = {
+        dataset: {
+            roleAccessActive: "true",
+            operationalStateVersion: "7",
+        },
+        classList: new FakeClassList(),
+    };
+    const document = Object.assign(documentTarget, {
+        body,
+        activeElement: null,
+        hidden: false,
+        querySelector() {
+            return null;
+        },
+    });
+    const localStorage = createStorage({
+        [MOBILE_QUEUE_KEY]: JSON.stringify([{id: "pending-action"}]),
+    });
+    const sessionStorage = createStorage();
+    const navigator = {onLine: runtimeOptions.online !== false};
+
+    const fetchResponses = Array.isArray(runtimeOptions.fetchResponses)
+        ? runtimeOptions.fetchResponses.slice()
+        : [];
+    const fetchImplementation = runtimeOptions.fetch || function () {
+        if (!fetchResponses.length) {
+            throw new Error("Unexpected fetch");
+        }
+        const nextResponse = fetchResponses.shift();
+        return Promise.resolve(
+            typeof nextResponse === "function" ? nextResponse() : nextResponse
+        );
+    };
+
+    const window = Object.assign(windowTarget, {
+        AppRealtimeConfig: {
+            stateUrl: "/api/operational-state/version/",
+            initialVersion: typeof runtimeOptions.initialVersion === "number"
+                ? runtimeOptions.initialVersion
+                : 7,
+            pollIntervalMs: 1000,
+            idleDelayMs: typeof runtimeOptions.idleDelayMs === "number"
+                ? runtimeOptions.idleDelayMs
+                : 1,
+            pollTimeoutMs: 8000,
+            maxSilentMs: 7000,
+            mobileQueueKey: MOBILE_QUEUE_KEY,
+            screens: runtimeOptions.screens || [{
+                name: "driver",
+                role: "driver",
+                mode: "custom",
+                path: "^/driver/?$",
+                customRefresh: true,
+            }],
+            customRefreshPaths: ["^/driver/?$"],
+        },
+        location,
+        localStorage,
+        sessionStorage,
+        navigator,
+        AbortController,
+        fetch(url, fetchOptions) {
+            fetchCalls.push({url, options: fetchOptions});
+            return fetchImplementation(url, fetchOptions);
+        },
+        applyAppRoleReadonlyState(isActive) {
+            readonlyCalls.push(isActive);
+        },
+        requestAnimationFrame(callback) {
+            callback();
+            return 0;
+        },
+        setTimeout(callback, delay) {
+            const timerId = nextTimerId++;
+            timeouts.set(timerId, {callback, delay: Number(delay || 0)});
+            return timerId;
+        },
+        clearTimeout(timerId) {
+            timeouts.delete(timerId);
+        },
+        setInterval(callback, delay) {
+            const timerId = nextTimerId++;
+            intervals.set(timerId, {callback, delay: Number(delay || 0)});
+            return timerId;
+        },
+        clearInterval(timerId) {
+            intervals.delete(timerId);
+        },
+    });
+    if (typeof runtimeOptions.applyOperationalStateRefresh === "function") {
+        window.applyOperationalStateRefresh = runtimeOptions.applyOperationalStateRefresh;
+    }
+    document.location = location;
+    window.window = window;
+    window.document = document;
+
+    window.addEventListener("active-role-state-changed", (event) => {
+        activeRoleEvents.push(event.detail);
+    });
+    window.addEventListener("operational-state-refresh-applied", (event) => {
+        refreshAppliedEvents.push(event.detail);
+    });
+    window.addEventListener("operational-state-refresh-deferred", (event) => {
+        refreshDeferredEvents.push(event.detail);
+    });
+    window.addEventListener("operational-state-refresh-skipped", (event) => {
+        refreshSkippedEvents.push(event.detail);
+    });
+
+    class FakeCustomEvent {
+        constructor(type, init) {
+            this.type = type;
+            this.detail = init && init.detail ? init.detail : {};
+        }
+    }
+
+    const context = vm.createContext({
+        window,
+        document,
+        navigator,
+        CustomEvent: FakeCustomEvent,
+        AbortController,
+        URL,
+        Promise,
+        Error,
+        Date,
+        JSON,
+        Math,
+        Number,
+        Object,
+        Array,
+        RegExp,
+        String,
+        Boolean,
+        console,
+    });
+    vm.runInContext(REALTIME_CLIENT_SOURCE, context, {
+        filename: REALTIME_CLIENT_PATH,
+    });
+    document.dispatchEvent({type: "DOMContentLoaded"});
+
+    return {
+        window,
+        document,
+        navigator,
+        localStorage,
+        sessionStorage,
+        fetchCalls,
+        readonlyCalls,
+        activeRoleEvents,
+        refreshAppliedEvents,
+        refreshDeferredEvents,
+        refreshSkippedEvents,
+        redirects,
+        reloads,
+        runIntervals() {
+            Array.from(intervals.values()).forEach(({callback}) => callback());
+        },
+        flushZeroTimers() {
+            let ranTimer = true;
+            while (ranTimer) {
+                ranTimer = false;
+                for (const [timerId, timer] of Array.from(timeouts.entries())) {
+                    if (timer.delay !== 0) {
+                        continue;
+                    }
+                    timeouts.delete(timerId);
+                    timer.callback();
+                    ranTimer = true;
+                }
+            }
+        },
+        runAllTimeouts() {
+            for (const [timerId, timer] of Array.from(timeouts.entries())) {
+                timeouts.delete(timerId);
+                timer.callback();
+            }
+        },
+    };
+}
+
+async function settlePromises() {
+    for (let round = 0; round < 12; round += 1) {
+        await Promise.resolve();
+    }
+}
+
+function readQueue(runtime) {
+    const rawQueue = runtime.localStorage.getItem(MOBILE_QUEUE_KEY);
+    if (rawQueue === null) {
+        return [];
+    }
+    return JSON.parse(rawQueue);
+}
+
+test("first realtime 401 terminates auth once and permanently stops this client", async () => {
+    const runtime = createRuntime({
+        fetch() {
+            return Promise.resolve(response(401));
+        },
+    });
+    await settlePromises();
+
+    assert.equal(runtime.fetchCalls.length, 1, "DOMContentLoaded must perform the first poll");
+
+    runtime.window.AppRealtime.poll({force: true});
+    runtime.window.dispatchEvent({type: "focus"});
+    runtime.window.dispatchEvent({type: "pageshow", persisted: true});
+    runtime.runIntervals();
+    runtime.flushZeroTimers();
+    await settlePromises();
+
+    assert.deepEqual(
+        runtime.readonlyCalls,
+        [false],
+        "the first 401 must switch the open screen to read-only exactly once"
+    );
+    assert.equal(
+        runtime.window.AppRealtime.getDebugState().authEnded,
+        true,
+        "the realtime client must remember that authentication has ended"
+    );
+    assert.equal(runtime.document.body.dataset.roleAccessActive, "false");
+    assert.deepEqual(
+        runtime.activeRoleEvents.map((event) => ({
+            active: Boolean(event.active),
+            activeRoleCode: String(event.activeRoleCode || ""),
+            changedAt: String(event.changedAt || ""),
+        })),
+        [{
+            active: false,
+            activeRoleCode: "",
+            changedAt: "",
+        }],
+        "one inactive-role event must reset already-running holds"
+    );
+    assert.deepEqual(readQueue(runtime), [], "a stale mobile mutation queue must be cleared");
+    assert.equal(runtime.redirects.length, 1, "login redirect must be scheduled only once");
+    assert.equal(new URL(runtime.redirects[0].value).pathname, "/");
+    assert.equal(runtime.reloads.length, 0, "auth termination must not reload the stale PWA");
+    assert.equal(
+        runtime.fetchCalls.length,
+        1,
+        "poll, interval, focus and pageshow must never fetch again after auth termination"
+    );
+});
+
+test("HTTP 500 is a connection failure, not authentication termination", async () => {
+    const runtime = createRuntime({
+        fetchResponses: [
+            response(500),
+            response(200, {version: 7, role_active: true}),
+        ],
+    });
+    await settlePromises();
+
+    assert.equal(runtime.fetchCalls.length, 1);
+    assert.equal(runtime.window.AppRealtime.getDebugState().consecutiveFailures, 1);
+    assert.notEqual(runtime.window.AppRealtime.getDebugState().authEnded, true);
+    assert.deepEqual(runtime.readonlyCalls, []);
+    assert.deepEqual(runtime.activeRoleEvents, []);
+    assert.deepEqual(readQueue(runtime), [{id: "pending-action"}]);
+    assert.equal(runtime.redirects.length, 0);
+
+    runtime.window.AppRealtime.poll({force: true});
+    await settlePromises();
+
+    assert.equal(runtime.fetchCalls.length, 2, "polling must remain available after HTTP 500");
+    assert.equal(runtime.redirects.length, 0);
+});
+
+test("server restart recovery applies a higher version through custom refresh", async () => {
+    const customRefreshCalls = [];
+    const runtime = createRuntime({
+        idleDelayMs: -1,
+        fetchResponses: [
+            response(500),
+            response(200, {version: 8, role_active: true}),
+        ],
+        applyOperationalStateRefresh(context) {
+            customRefreshCalls.push(context);
+            return Promise.resolve({applied: true});
+        },
+    });
+    await settlePromises();
+
+    assert.equal(runtime.fetchCalls.length, 1);
+    assert.equal(runtime.document.body.classList.contains("is-realtime-stale"), true);
+    assert.equal(runtime.window.AppRealtime.getDebugState().currentVersion, 7);
+
+    runtime.window.AppRealtime.poll({force: true});
+    await settlePromises();
+
+    const debugState = runtime.window.AppRealtime.getDebugState();
+    assert.equal(runtime.fetchCalls.length, 2);
+    assert.equal(customRefreshCalls.length, 1);
+    assert.equal(customRefreshCalls[0].previousVersion, 7);
+    assert.equal(customRefreshCalls[0].version, 8);
+    assert.equal(debugState.currentVersion, 8);
+    assert.equal(debugState.pendingVersion, null);
+    assert.equal(debugState.consecutiveFailures, 0);
+    assert.equal(debugState.authEnded, false);
+    assert.equal(runtime.sessionStorage.getItem("operational-state-version"), "8");
+    assert.equal(runtime.document.body.classList.contains("is-realtime-stale"), false);
+    assert.equal(runtime.refreshAppliedEvents.length, 1);
+    assert.equal(runtime.refreshSkippedEvents.length, 0);
+    assert.equal(runtime.reloads.length, 0);
+});
+
+test("custom refresh false keeps the version pending until a retry applies it", async () => {
+    const customRefreshCalls = [];
+    const runtime = createRuntime({
+        idleDelayMs: -1,
+        fetchResponses: [
+            response(200, {version: 8, role_active: true}),
+        ],
+        applyOperationalStateRefresh(context) {
+            customRefreshCalls.push(context);
+            if (customRefreshCalls.length === 1) {
+                return Promise.resolve(false);
+            }
+            return Promise.resolve({applied: true});
+        },
+    });
+    await settlePromises();
+
+    let debugState = runtime.window.AppRealtime.getDebugState();
+    assert.equal(customRefreshCalls.length, 1);
+    assert.equal(debugState.currentVersion, 7);
+    assert.equal(debugState.pendingVersion, 8);
+    assert.equal(debugState.applyingUpdate, false);
+    assert.equal(runtime.sessionStorage.getItem("operational-state-version"), null);
+    assert.equal(runtime.refreshDeferredEvents.length, 1);
+    assert.equal(
+        runtime.refreshDeferredEvents[0].reason,
+        "custom_refresh_not_applied"
+    );
+    assert.equal(runtime.refreshAppliedEvents.length, 0);
+    assert.equal(runtime.refreshSkippedEvents.length, 0);
+    assert.equal(runtime.reloads.length, 0);
+
+    runtime.runAllTimeouts();
+    await settlePromises();
+
+    debugState = runtime.window.AppRealtime.getDebugState();
+    assert.equal(customRefreshCalls.length, 2);
+    assert.equal(debugState.currentVersion, 8);
+    assert.equal(debugState.pendingVersion, null);
+    assert.equal(debugState.applyingUpdate, false);
+    assert.equal(runtime.sessionStorage.getItem("operational-state-version"), "8");
+    assert.equal(runtime.refreshAppliedEvents.length, 1);
+    assert.equal(runtime.refreshSkippedEvents.length, 0);
+    assert.equal(runtime.reloads.length, 0);
+});
+
+test("system admin uses the generic safe reload after server recovery", async () => {
+    const systemAdminConfigLine = BASE_TEMPLATE_SOURCE
+        .split(/\r?\n/)
+        .find((line) => line.includes('name: "system-admin"'));
+    const customRefreshPathsBlock = BASE_TEMPLATE_SOURCE.match(
+        /customRefreshPaths:\s*\[([\s\S]*?)\]/
+    );
+
+    assert.ok(systemAdminConfigLine, "system-admin realtime screen config must exist");
+    assert.doesNotMatch(systemAdminConfigLine, /customRefresh:\s*true/);
+    assert.ok(customRefreshPathsBlock, "customRefreshPaths config must exist");
+    assert.doesNotMatch(customRefreshPathsBlock[1], /\^\/system-admin\//);
+
+    const runtime = createRuntime({
+        currentHref: "http://admin.localhost/system-admin/",
+        idleDelayMs: -1,
+        screens: [{
+            name: "system-admin",
+            role: "system_admin",
+            mode: "observer",
+            path: "^/system-admin/",
+        }],
+        fetchResponses: [
+            response(200, {version: 8, role_active: true}),
+        ],
+    });
+    await settlePromises();
+
+    assert.equal(runtime.fetchCalls.length, 1);
+    assert.equal(runtime.reloads.length, 0, "pending mobile work must defer a full reload");
+    runtime.localStorage.removeItem(MOBILE_QUEUE_KEY);
+    runtime.runAllTimeouts();
+    await settlePromises();
+
+    assert.equal(runtime.reloads.length, 1);
+    assert.equal(runtime.sessionStorage.getItem("operational-state-version"), "8");
+    assert.equal(runtime.refreshSkippedEvents.length, 0);
+    assert.equal(runtime.window.AppRealtime.getDebugState().authEnded, false);
+});
+
+test("offline state is recoverable and does not terminate authentication", async () => {
+    const runtime = createRuntime({
+        online: false,
+        fetchResponses: [
+            response(200, {version: 7, role_active: true}),
+        ],
+    });
+    await settlePromises();
+
+    assert.equal(runtime.fetchCalls.length, 0);
+    assert.equal(runtime.window.AppRealtime.getDebugState().consecutiveFailures, 1);
+    assert.notEqual(runtime.window.AppRealtime.getDebugState().authEnded, true);
+    assert.deepEqual(runtime.readonlyCalls, []);
+    assert.deepEqual(runtime.activeRoleEvents, []);
+    assert.deepEqual(readQueue(runtime), [{id: "pending-action"}]);
+    assert.equal(runtime.redirects.length, 0);
+
+    runtime.navigator.onLine = true;
+    runtime.window.AppRealtime.poll({force: true});
+    await settlePromises();
+
+    assert.equal(runtime.fetchCalls.length, 1, "polling must resume when connectivity returns");
+    assert.equal(runtime.redirects.length, 0);
+});

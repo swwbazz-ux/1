@@ -34,18 +34,31 @@ from downtimes.models import DowntimeEvent, DowntimeReason
 from references.models import Dormitory, DormitorySection, DumpPoint, Equipment, EquipmentState, EquipmentType, RockType
 from reports.models import ReportTemplate
 from shifts.forms import EquipmentPlanGroupForm
-from shifts.models import AchievementPrize, EmployeeShift, EquipmentPlanGroup, EquipmentShiftPlan, PlanAssignmentStatus, PlanCalculationMode, ShiftPlan, ShiftPlanScope
+from shifts.models import (
+    AchievementPrize,
+    EmployeeShift,
+    EquipmentPlanGroup,
+    EquipmentShiftPlan,
+    PlanAssignmentStatus,
+    PlanCalculationMode,
+    ShiftClientAction,
+    ShiftPlan,
+    ShiftPlanScope,
+)
 from shifts.services import (
     calculate_truck_shift_progress,
     close_driver_shift,
     open_driver_shift,
+    open_shift_conflict_message,
     plan_status_label,
     plan_unit_label,
     progress_cycle_visual_context,
+    recent_shift_reading_corrections,
 )
 from trips.models import DispatcherActionLog, OPEN_TRIP_STATUSES, Trip, TripClientAction, TripStatus
 
 from .access_auth import find_employee_access_by_credentials
+from .active_role import activate_role_session, role_session_state
 from .forms import (
     AdminAccessBlockForm,
     AccessActivationForm,
@@ -77,6 +90,7 @@ from .oup_undo import (
     undo_oup_action,
 )
 from .role_apps import (
+    APP_CONTRACT_VERSION,
     get_role_app_for_request,
     role_app_manifest_response,
     role_app_service_worker_response,
@@ -181,7 +195,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v99'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v107'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -222,6 +236,8 @@ DRIVER_MANIFEST = {
 }
 
 DRIVER_SERVICE_WORKER_JS = f"""
+const APP_CONTRACT_VERSION = {json.dumps(APP_CONTRACT_VERSION)};
+const ROLE_CODE = "driver";
 const CACHE_NAME = "{DRIVER_SHELL_VERSION}";
 const CACHE_PREFIX = "driver-mobile-shell-";
 const APP_SHELL_URL = "/driver/";
@@ -232,7 +248,8 @@ const CORE_ASSETS = [
     LEGACY_SHELL_URL,
     MANIFEST_URL,
     "/static/css/app.css",
-    "/static/js/realtime-client.js",
+  "/static/js/realtime-client.js",
+  "/static/js/role-readonly.js",
     "/static/favicon.ico",
     "/static/img/equipment/truck-green.png",
     "/static/img/equipment/excavator-green.png",
@@ -273,17 +290,20 @@ async function networkFirst(request, fallbackUrl) {{
     }}
 }}
 
-async function cacheFirst(request) {{
+async function networkFirstStatic(request) {{
     const cache = await caches.open(CACHE_NAME);
-    const cached = await cache.match(request, {{ ignoreSearch: true }});
-    if (cached) {{
-        return cached;
+    try {{
+        const response = await fetch(request, {{ cache: "no-store" }});
+        if (response && response.ok) {{
+            await cache.put(request, response.clone());
+        }}
+        return response;
+    }} catch (error) {{
+        return (await cache.match(request)) || new Response(
+            "Ресурс недоступен без сети.",
+            {{ status: 503, headers: {{ "Content-Type": "text/plain; charset=utf-8" }} }}
+        );
     }}
-    const response = await fetch(request);
-    if (response && response.ok) {{
-        cache.put(request, response.clone());
-    }}
-    return response;
 }}
 
 self.addEventListener("fetch", (event) => {{
@@ -308,7 +328,7 @@ self.addEventListener("fetch", (event) => {{
         return;
     }}
     if (url.pathname.startsWith("/static/")) {{
-        event.respondWith(cacheFirst(request));
+        event.respondWith(networkFirstStatic(request));
     }}
 }});
 
@@ -320,7 +340,12 @@ self.addEventListener("message", (event) => {{
         self.skipWaiting();
     }}
     if (event.data.type === "GET_VERSION" && event.ports && event.ports[0]) {{
-        event.ports[0].postMessage({{ version: CACHE_NAME }});
+        event.ports[0].postMessage({{
+            version: CACHE_NAME,
+            appContractVersion: APP_CONTRACT_VERSION,
+            shellVersion: CACHE_NAME,
+            roleCode: ROLE_CODE
+        }});
     }}
 }});
 """.strip()
@@ -474,25 +499,41 @@ def login_view(request):
         ):
             access = None
         if access:
-            request.session.cycle_key()
-            access.last_login_at = timezone.now()
             if access.status == EmployeeAccess.Status.NOT_ACTIVATED:
                 if access.primary_code_issued_at:
+                    request.session.cycle_key()
                     request.session['pending_activation_access_id'] = access.id
                     if next_url:
                         request.session['post_activation_next'] = next_url
                     set_session_device_kind(request, selected_device_kind)
-                    access.save(update_fields=['last_login_at'])
                     return redirect('activate_access')
-                access.status = EmployeeAccess.Status.ACTIVATED
-                access.activated_at = timezone.now()
-                if access.employee.status == Employee.Status.NOT_ACTIVATED:
-                    access.employee.status = Employee.Status.ACTIVE
-                    access.employee.is_active = True
-                    access.employee.save(update_fields=['status', 'is_active', 'updated_at'])
-            request.session['employee_access_id'] = access.id
+            try:
+                with transaction.atomic():
+                    locked_employee = Employee.objects.select_for_update().get(pk=access.employee_id)
+                    locked_access = (
+                        EmployeeAccess.objects
+                        .select_for_update()
+                        .select_related('employee', 'role')
+                        .get(pk=access.pk)
+                    )
+                    if locked_access.status == EmployeeAccess.Status.NOT_ACTIVATED:
+                        locked_access.status = EmployeeAccess.Status.ACTIVATED
+                        locked_access.activated_at = timezone.now()
+                        locked_access.save(update_fields=['status', 'activated_at'])
+                        if locked_employee.status == Employee.Status.NOT_ACTIVATED:
+                            locked_employee.status = Employee.Status.ACTIVE
+                            locked_employee.is_active = True
+                            locked_employee.save(update_fields=['status', 'is_active', 'updated_at'])
+                    activate_role_session(request, locked_access)
+            except ValidationError as error:
+                messages.error(request, '; '.join(error.messages))
+                return render(
+                    request,
+                    'users/login.html',
+                    {'selected_device_kind': selected_device_kind, 'next_url': next_url},
+                )
+            request.session.cycle_key()
             set_session_device_kind(request, selected_device_kind)
-            access.save(update_fields=['last_login_at', 'status', 'activated_at'])
             return redirect(next_url or 'role_home')
         if role_app:
             messages.error(
@@ -534,18 +575,42 @@ def activate_access_view(request):
     if request.method == 'POST':
         form = AccessActivationForm(request.POST, access=access)
         if form.is_valid():
-            access.access_code = form.cleaned_data['new_access_code']
-            access.status = EmployeeAccess.Status.ACTIVATED
-            access.activated_at = timezone.now()
-            access.last_login_at = timezone.now()
-            access.save(update_fields=['access_code', 'status', 'activated_at', 'last_login_at'])
-            if access.employee.status == Employee.Status.NOT_ACTIVATED:
-                access.employee.status = Employee.Status.ACTIVE
-                access.employee.is_active = True
-                access.employee.save(update_fields=['status', 'is_active', 'updated_at'])
+            try:
+                with transaction.atomic():
+                    locked_employee = Employee.objects.select_for_update().get(pk=access.employee_id)
+                    locked_access = (
+                        EmployeeAccess.objects
+                        .select_for_update()
+                        .select_related('employee', 'role')
+                        .get(
+                            pk=access.pk,
+                            is_active=True,
+                            status=EmployeeAccess.Status.NOT_ACTIVATED,
+                        )
+                    )
+                    locked_access.access_code = form.cleaned_data['new_access_code']
+                    locked_access.status = EmployeeAccess.Status.ACTIVATED
+                    locked_access.activated_at = timezone.now()
+                    locked_access.save(update_fields=['access_code', 'status', 'activated_at'])
+                    if locked_employee.status == Employee.Status.NOT_ACTIVATED:
+                        locked_employee.status = Employee.Status.ACTIVE
+                        locked_employee.is_active = True
+                        locked_employee.save(update_fields=['status', 'is_active', 'updated_at'])
+                    access = activate_role_session(request, locked_access)
+            except ValidationError as error:
+                form.add_error(None, '; '.join(error.messages))
+                return render(
+                    request,
+                    'users/activate_access.html',
+                    {
+                        'access': access,
+                        'activation_phone': _masked_activation_phone(access.employee.phone),
+                        'form': form,
+                        'role_app': role_app,
+                    },
+                )
             request.session.pop('pending_activation_access_id', None)
             request.session.cycle_key()
-            request.session['employee_access_id'] = access.id
             set_session_device_kind(request, get_session_device_kind(request))
             if access.role.code != 'oup':
                 messages.success(
@@ -661,6 +726,7 @@ def system_admin_dashboard_view(request):
             'open_conflicts': AdminConflict.objects.select_related('employee', 'role').filter(status=AdminConflict.Status.OPEN)[:8],
             'reference_counts': reference_counts,
             'shift_fact_total': Trip.objects.count() + DowntimeEvent.objects.count(),
+            'shift_reading_corrections': recent_shift_reading_corrections(),
         },
     )
 
@@ -1992,8 +2058,15 @@ def system_admin_access_action_view(request, access_id, action):
                     log_admin_action(admin_access.employee, 'Заблокирован доступ', employee_access, comment=employee_access.block_reason)
                     messages.success(request, 'Доступ заблокирован.')
             elif action == 'unblock':
-                if employee.status in {Employee.Status.DISMISSED, Employee.Status.DELETED}:
-                    messages.error(request, 'Нельзя разблокировать доступ у уволенного или удаленного сотрудника.')
+                if employee.status in {
+                    Employee.Status.ARCHIVED,
+                    Employee.Status.DISMISSED,
+                    Employee.Status.DELETED,
+                }:
+                    messages.error(
+                        request,
+                        'Сначала восстановите сотрудника отдельным действием, затем разблокируйте доступ.',
+                    )
                     return redirect_after_admin_action(request, 'system_admin_employee_detail', employee_id=employee.id)
                 employee_access.status = EmployeeAccess.Status.ACTIVATED
                 employee_access.is_active = True
@@ -2004,7 +2077,6 @@ def system_admin_access_action_view(request, access_id, action):
                 if employee.status in {
                     Employee.Status.NOT_ACTIVATED,
                     Employee.Status.DEACTIVATED,
-                    Employee.Status.ARCHIVED,
                 }:
                     employee.status = Employee.Status.ACTIVE
                     employee.is_active = True
@@ -2385,16 +2457,17 @@ def driver_report_duration_label(seconds, *, total=False):
 def driver_shift_downtime_seconds(equipment, shift, *, until=None):
     if not equipment or not shift or not shift.opened_at:
         return 0
-    period_end = until or shift.closed_at or timezone.now()
+    calculation_end = until or timezone.now()
+    source_period_end = shift.closed_at or calculation_end
     events = DowntimeEvent.objects.filter(
         equipment=equipment,
-        started_at__lt=period_end,
-    ).filter(Q(ended_at__isnull=True) | Q(ended_at__gt=shift.opened_at))
+        started_at__gte=shift.opened_at,
+        started_at__lt=source_period_end,
+    )
     total_seconds = 0
     for event in events.only('started_at', 'ended_at'):
-        overlap_start = max(event.started_at, shift.opened_at)
-        overlap_end = min(event.ended_at or period_end, period_end)
-        total_seconds += max(0, int((overlap_end - overlap_start).total_seconds()))
+        event_end = min(event.ended_at or calculation_end, calculation_end)
+        total_seconds += max(0, int((event_end - event.started_at).total_seconds()))
     return total_seconds
 
 
@@ -2500,6 +2573,17 @@ def driver_compact_context_value(prefix, compact_prefix, value):
     return f'{compact_prefix}{value}'
 
 
+def driver_open_shift_queryset(employee):
+    return (
+        EmployeeShift.objects
+        .filter(employee=employee, closed_at__isnull=True)
+        .filter(
+            Q(workplace_code='driver')
+            | Q(workplace_code='', equipment__equipment_type__name='Самосвал')
+        )
+    )
+
+
 def driver_assignment_countdown_label(assignment):
     if not assignment:
         return '05:00'
@@ -2545,12 +2629,43 @@ def driver_shift_view(request):
     if not registration:
         return redirect('driver_registration')
 
-    open_shift = EmployeeShift.objects.filter(employee=access.employee, closed_at__isnull=True).order_by('-opened_at').first()
+    posted_client_action_id = request.POST.get('client_action_id', '').strip() if request.method == 'POST' else ''
+    if posted_client_action_id and ShiftClientAction.objects.filter(
+        action_type='driver_shift_opened',
+        client_action_id=posted_client_action_id,
+        employee=access.employee,
+    ).exists():
+        messages.success(request, 'Смена открыта.')
+        return redirect('driver_work')
+
+    open_shift = driver_open_shift_queryset(access.employee).order_by('-opened_at').first()
     work_assignment = get_active_equipment_assignment(access.employee, 'driver')
     assignment_state = work_assignment_state(access.employee, work_assignment)
+    shift_start_conflict_message = ''
+    if work_assignment and assignment_state == 'assignment_conflict':
+        busy_shift = (
+            EmployeeShift.objects
+            .select_related('employee', 'equipment', 'equipment__equipment_type')
+            .filter(
+                equipment=work_assignment.equipment,
+                closed_at__isnull=True,
+            )
+            .exclude(employee=access.employee)
+            .order_by('id')
+            .first()
+        )
+        shift_start_conflict_message = open_shift_conflict_message(
+            busy_shift,
+            equipment=work_assignment.equipment,
+        )
     current_truck = open_shift.equipment if open_shift else None
     assigned_truck = work_assignment.equipment if work_assignment and assignment_state == 'assigned' else None
-    header_truck = current_truck or assigned_truck
+    assignment_truck = (
+        work_assignment.equipment
+        if work_assignment and assignment_state in {'assigned', 'assignment_conflict'}
+        else None
+    )
+    header_truck = current_truck or assignment_truck
     if current_truck:
         reconcile_due_haul_assignments(truck_id=current_truck.id)
     current_assignment = None
@@ -2593,7 +2708,7 @@ def driver_shift_view(request):
         active_downtime = (
             DowntimeEvent.objects
             .select_related('reason', 'reason__equipment_state')
-            .filter(equipment=current_truck, employee=access.employee, ended_at__isnull=True)
+            .filter(equipment=current_truck, ended_at__isnull=True)
             .order_by('-started_at')
             .first()
         )
@@ -2809,16 +2924,20 @@ def driver_shift_view(request):
                 form.add_error(None, 'Назначение изменилось. Обновите экран перед началом смены.')
             else:
                 try:
-                    open_driver_shift(
-                        employee=access.employee,
-                        work_assignment=current_work_assignment,
-                        readings={
-                            'start_fuel': form.cleaned_data['start_fuel'],
-                            'start_mileage': form.cleaned_data['start_mileage'],
-                            'start_engine_hours': form.cleaned_data['start_engine_hours'],
-                        },
-                        client_action_id=form.cleaned_data.get('client_action_id') or secrets.token_urlsafe(24),
-                    )
+                    with transaction.atomic():
+                        Employee.objects.select_for_update().get(pk=access.employee_id)
+                        if not role_session_state(request, access)['is_active']:
+                            raise ValidationError('Роль неактивна — доступен только просмотр.')
+                        open_driver_shift(
+                            employee=access.employee,
+                            work_assignment=current_work_assignment,
+                            readings={
+                                'start_fuel': form.cleaned_data['start_fuel'],
+                                'start_mileage': form.cleaned_data['start_mileage'],
+                                'start_engine_hours': form.cleaned_data['start_engine_hours'],
+                            },
+                            client_action_id=form.cleaned_data.get('client_action_id') or secrets.token_urlsafe(24),
+                        )
                 except ValidationError as error:
                     form.add_error(None, error)
                 else:
@@ -2857,8 +2976,9 @@ def driver_shift_view(request):
             'open_shift': open_shift,
             'work_assignment': work_assignment,
             'work_assignment_state': assignment_state,
+            'shift_start_conflict_message': shift_start_conflict_message,
             'work_assignment_shift_label': work_assignment.work_shift_label if work_assignment else '',
-            'work_assignment_equipment': assigned_truck,
+            'work_assignment_equipment': assignment_truck,
             'current_assignment': current_assignment,
             'active_trip': active_trip,
             'form': form,
@@ -2921,6 +3041,7 @@ def driver_shift_view(request):
 
 
 @require_POST
+@transaction.atomic
 def driver_accept_assignment_view(request, assignment_id):
     access_id = request.session.get('employee_access_id')
     access = (
@@ -2930,9 +3051,19 @@ def driver_accept_assignment_view(request, assignment_id):
     )
     if not access:
         return JsonResponse({'ok': False, 'error': 'Нет доступа к приложению водителя.'}, status=403)
+    Employee.objects.select_for_update().get(pk=access.employee_id)
+    if not role_session_state(request, access)['is_active']:
+        return JsonResponse(
+            {
+                'ok': False,
+                'error': 'Роль неактивна — доступен только просмотр',
+                'code': 'inactive_role',
+            },
+            status=409,
+        )
     open_shift = (
-        EmployeeShift.objects
-        .filter(employee=access.employee, closed_at__isnull=True)
+        driver_open_shift_queryset(access.employee)
+        .select_for_update(of=('self',))
         .select_related('equipment')
         .order_by('-opened_at')
         .first()
@@ -2940,7 +3071,7 @@ def driver_accept_assignment_view(request, assignment_id):
     if not open_shift or not open_shift.equipment_id:
         return JsonResponse({'ok': False, 'error': 'Открытая смена водителя не найдена.'}, status=409)
     assignment = get_object_or_404(
-        HaulAssignment,
+        HaulAssignment.objects.select_for_update(),
         id=assignment_id,
         truck_id=open_shift.equipment_id,
         status=AssignmentStatus.PENDING,
@@ -2963,8 +3094,21 @@ def driver_close_shift_view(request):
     if not registration:
         return redirect('driver_registration')
 
-    open_shift = EmployeeShift.objects.filter(employee=access.employee, closed_at__isnull=True).order_by('-opened_at').first()
+    client_action_id = request.POST.get('client_action_id', '').strip()
+    completed_action = lambda: ShiftClientAction.objects.filter(
+        action_type='driver_shift_closed',
+        client_action_id=client_action_id,
+        employee=access.employee,
+    ).exists()
+    if client_action_id and completed_action():
+        messages.success(request, 'Смена закрыта.')
+        return redirect('driver_work')
+
+    open_shift = driver_open_shift_queryset(access.employee).order_by('-opened_at').first()
     if not open_shift:
+        if client_action_id and completed_action():
+            messages.success(request, 'Смена закрыта.')
+            return redirect('driver_work')
         messages.error(request, 'Открытая смена не найдена.')
         return redirect('driver_work')
 
@@ -2996,12 +3140,16 @@ def driver_close_shift_view(request):
             form.add_error(None, 'Показания изменились после проверки. Проверьте их повторно.')
         else:
             try:
-                close_driver_shift(
-                    shift=open_shift,
-                    employee=access.employee,
-                    readings=readings,
-                    client_action_id=form.cleaned_data.get('client_action_id') or secrets.token_urlsafe(24),
-                )
+                with transaction.atomic():
+                    Employee.objects.select_for_update().get(pk=access.employee_id)
+                    if not role_session_state(request, access)['is_active']:
+                        raise ValidationError('Роль неактивна — доступен только просмотр.')
+                    close_driver_shift(
+                        shift=open_shift,
+                        employee=access.employee,
+                        readings=readings,
+                        client_action_id=form.cleaned_data.get('client_action_id') or secrets.token_urlsafe(24),
+                    )
             except ValidationError as error:
                 form.add_error(None, error)
             else:
@@ -3013,6 +3161,7 @@ def driver_close_shift_view(request):
     return driver_shift_view(request)
 
 
+@transaction.atomic
 def driver_downtime_action_view(request):
     wants_json = driver_wants_json(request)
     access_id = request.session.get('employee_access_id')
@@ -3030,10 +3179,29 @@ def driver_downtime_action_view(request):
             return JsonResponse({'ok': False, 'error': 'Водитель не зарегистрирован.'}, status=403)
         return redirect('driver_registration')
 
+    if request.method != 'POST':
+        if wants_json:
+            return JsonResponse({'ok': False, 'error': 'Некорректный метод действия простоя.'}, status=405)
+        return redirect(f'{reverse("driver_work")}?tab=downtimes')
+
+    Employee.objects.select_for_update().get(pk=access.employee_id)
+    if not role_session_state(request, access)['is_active']:
+        if wants_json:
+            return JsonResponse(
+                {
+                    'ok': False,
+                    'error': 'Роль неактивна — доступен только просмотр',
+                    'code': 'inactive_role',
+                },
+                status=409,
+            )
+        messages.error(request, 'Роль неактивна — доступен только просмотр.')
+        return redirect(f'{reverse("driver_work")}?tab=downtimes')
+
     open_shift = (
-        EmployeeShift.objects
-        .filter(employee=access.employee, closed_at__isnull=True)
-        .select_related('equipment')
+        driver_open_shift_queryset(access.employee)
+        .select_for_update(of=('self',))
+        .select_related('equipment', 'equipment__equipment_type')
         .order_by('-opened_at')
         .first()
     )
@@ -3043,17 +3211,14 @@ def driver_downtime_action_view(request):
         messages.error(request, 'Нельзя зафиксировать простой: открытая смена с самосвалом не найдена.')
         return redirect(f'{reverse("driver_work")}?tab=downtimes')
 
-    if request.method != 'POST':
-        if wants_json:
-            return JsonResponse({'ok': False, 'error': 'Некорректный метод действия простоя.'}, status=405)
-        return redirect(f'{reverse("driver_work")}?tab=downtimes')
-
     payload = driver_json_payload(request)
     action = (payload.get('action') or '').strip()
+    locked_equipment = Equipment.objects.select_for_update().get(pk=open_shift.equipment_id)
+    open_shift.equipment = locked_equipment
     active_event = (
         DowntimeEvent.objects
         .select_related('reason', 'reason__equipment_state')
-        .filter(equipment=open_shift.equipment, employee=access.employee, ended_at__isnull=True)
+        .filter(equipment=open_shift.equipment, ended_at__isnull=True)
         .order_by('-started_at')
         .first()
     )
@@ -3085,6 +3250,18 @@ def driver_downtime_action_view(request):
         messages.error(request, 'Причина простоя не найдена.')
         return redirect(f'{reverse("driver_work")}?tab=downtimes')
     if active_event:
+        if active_event.employee_id != access.employee_id:
+            error = (
+                'Этот непрерывный простой уже начат другим сотрудником. '
+                'Сменщик может завершить его, но не менять причину или автора.'
+            )
+            if wants_json:
+                return JsonResponse(
+                    {'ok': False, 'error': error, 'code': 'transferred_downtime_read_only'},
+                    status=409,
+                )
+            messages.error(request, error)
+            return redirect(f'{reverse("driver_work")}?tab=downtimes')
         active_event.reason = reason
         active_event.save(update_fields=['reason'])
         event = active_event
