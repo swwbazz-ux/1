@@ -5,10 +5,12 @@ from decimal import Decimal
 from django.contrib import messages
 from django.db import transaction
 from django.db.models import Count, Q, Sum
-from django.http import HttpResponse
+from django.http import HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils import timezone
+from django.views.decorators.cache import never_cache
+from django.views.decorators.http import require_GET
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
@@ -21,7 +23,7 @@ from core.production_time import (
     production_work_date,
 )
 from references.models import DumpPoint, Equipment, RockType
-from shifts.models import EmployeeShift, ShiftType
+from shifts.models import EmployeeShift, ShiftType, WatchPeriod
 from shifts.services import (
     recent_shift_reading_corrections,
     shift_plan_totals_for_dates,
@@ -34,9 +36,19 @@ from trips.models import (
     Trip,
     TripStatus,
 )
-from users.active_role import role_session_state
+from users.active_role import (
+    ACTIVE_ROLE_CODE_SESSION_KEY,
+    ACTIVE_ROLE_GENERATION_SESSION_KEY,
+    ACTIVE_ROLE_SESSION_KEY,
+    role_session_state,
+)
 from users.models import Employee, EmployeeAccess
 
+from .driver_watch_observation import (
+    build_driver_period_shadow_observation,
+    build_driver_watch_linkage_audit,
+    build_driver_watch_observation,
+)
 from .forms import PilotFeedbackForm
 from .models import PilotFeedback, ReportTemplate, ReportType
 from .shift_analytics import (
@@ -330,6 +342,179 @@ def require_dispatcher_report_access(request):
     if access.role.code not in {'dispatcher', 'admin', 'manager'}:
         return None, redirect('role_home')
     return access, None
+
+
+def get_rating_observation_access(request):
+    access_id = request.session.get('employee_access_id')
+    if not access_id:
+        return None
+    access = (
+        EmployeeAccess.objects
+        .select_related('employee', 'role')
+        .filter(
+            id=access_id,
+            is_active=True,
+            status=EmployeeAccess.Status.ACTIVATED,
+            role__is_active=True,
+            employee__is_active=True,
+            employee__status=Employee.Status.ACTIVE,
+        )
+        .first()
+    )
+    if not access:
+        return None
+    state = role_session_state(request, access)
+    active_access = state.get('active_access')
+    if (
+        not state['authenticated']
+        or not state['is_active']
+        or active_access is None
+        or active_access.id != access.id
+        or active_access.last_login_at is None
+        or request.session.get(ACTIVE_ROLE_SESSION_KEY) != access.id
+        or not request.session.get(ACTIVE_ROLE_GENERATION_SESSION_KEY)
+        or request.session.get(ACTIVE_ROLE_CODE_SESSION_KEY) != access.role.code
+    ):
+        return None
+    return access
+
+
+@never_cache
+@require_GET
+def driver_watch_observation_api(request):
+    access = get_rating_observation_access(request)
+    if not access:
+        return JsonResponse({'error': 'Требуется авторизация.'}, status=401)
+    if access.role.code not in {'dispatcher', 'admin', 'manager'}:
+        return JsonResponse({'error': 'Недостаточно прав.'}, status=403)
+
+    shift_type = request.GET.get('shift_type') or None
+    if shift_type not in {None, ShiftType.DAY, ShiftType.NIGHT}:
+        return JsonResponse(
+            {'error': 'Допустимые значения shift_type: day или night.'},
+            status=400,
+        )
+
+    watch_periods = list(
+        WatchPeriod.objects
+        .order_by('-is_active', '-starts_on', '-id')
+    )
+    watch_period_id = request.GET.get('watch_period')
+    if watch_period_id:
+        try:
+            watch_period_id = int(watch_period_id)
+        except (TypeError, ValueError):
+            return JsonResponse(
+                {'error': 'watch_period должен быть числом.'},
+                status=400,
+            )
+        watch_period = next(
+            (
+                period
+                for period in watch_periods
+                if period.id == watch_period_id
+            ),
+            None,
+        )
+        if watch_period is None:
+            return JsonResponse({'error': 'Вахта не найдена.'}, status=404)
+    else:
+        watch_period = watch_periods[0] if watch_periods else None
+
+    available_watch_periods = [
+        {
+            'id': period.id,
+            'name': period.name,
+            'starts_on': period.starts_on.isoformat(),
+            'ends_on': period.ends_on.isoformat(),
+            'is_active': period.is_active,
+        }
+        for period in watch_periods
+    ]
+    if watch_period is None:
+        return JsonResponse({
+            'available_watch_periods': [],
+            'scope_type': 'watch_period',
+            'official_rating_eligible': False,
+            'watch_period': None,
+            'shift_type': shift_type,
+            'generated_at': timezone.now().isoformat(),
+            'row_count': 0,
+            'summary': {
+                'closed_shift_count': 0,
+                'usable_shift_count': 0,
+                'withheld_shift_count': 0,
+                'total_seconds': 0,
+                'explained_seconds': 0,
+                'coverage_percent': 0.0,
+                'data_ready_for_formula_review': False,
+                'source_counts': {
+                    'trip_count': 0,
+                    'carryover_trip_count': 0,
+                    'downtime_event_count': 0,
+                    'downtime_reported_by_employee_count': 0,
+                    'downtime_reported_by_other_count': 0,
+                    'downtime_without_employee_count': 0,
+                    'assignment_count': 0,
+                },
+                'quality_metrics': {
+                    'trip_without_assignment_seconds': 0,
+                },
+            },
+            'linkage_audit': {
+                'candidate_closed_shift_count': 0,
+                'linked_to_selected_watch_count': 0,
+                'unlinked_shift_count': 0,
+                'linked_to_other_watch_count': 0,
+                'selected_watch_outside_period_count': 0,
+                'linkage_ready': False,
+            },
+            'rows': [],
+        })
+
+    observation = build_driver_watch_observation(
+        watch_period,
+        shift_type=shift_type,
+    )
+    linkage_audit = build_driver_watch_linkage_audit(
+        watch_period,
+        shift_type=shift_type,
+    )
+    observation['linkage_audit'] = linkage_audit
+    observation['summary']['data_ready_for_formula_review'] = (
+        observation['summary']['data_ready_for_formula_review']
+        and linkage_audit['linkage_ready']
+    )
+    observation['available_watch_periods'] = available_watch_periods
+    return JsonResponse(observation)
+
+
+@never_cache
+@require_GET
+def driver_period_shadow_observation_api(request):
+    access = get_rating_observation_access(request)
+    if not access:
+        return JsonResponse({'error': 'Требуется авторизация.'}, status=401)
+    if access.role.code not in {'dispatcher', 'admin', 'manager'}:
+        return JsonResponse({'error': 'Недостаточно прав.'}, status=403)
+
+    starts_on = parse_filter_date(request.GET.get('date_from'))
+    ends_on = parse_filter_date(request.GET.get('date_to'))
+    if starts_on is None or ends_on is None:
+        return JsonResponse(
+            {'error': 'Укажите date_from и date_to в формате ГГГГ-ММ-ДД.'},
+            status=400,
+        )
+    shift_type = request.GET.get('shift_type') or None
+    try:
+        observation = build_driver_period_shadow_observation(
+            starts_on,
+            ends_on,
+            shift_type=shift_type,
+        )
+    except ValueError as error:
+        return JsonResponse({'error': str(error)}, status=400)
+    return JsonResponse(observation)
 
 
 def decimal_total(values):

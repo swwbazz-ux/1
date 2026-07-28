@@ -15,6 +15,8 @@ from .views import (
     dispatcher_shift_log_view,
     dispatcher_transport_export_view,
     dispatcher_transport_view,
+    driver_period_shadow_observation_api,
+    driver_watch_observation_api,
     downtime_report_export_view,
     downtime_report_view,
     management_dashboard_export_view,
@@ -32,6 +34,16 @@ from .views import (
 )
 
 urlpatterns = [
+    path(
+        'reports/rating/driver-shadow-data/',
+        driver_period_shadow_observation_api,
+        name='driver_period_shadow_observation_api',
+    ),
+    path(
+        'reports/rating/driver-watch-data/',
+        driver_watch_observation_api,
+        name='driver_watch_observation_api',
+    ),
     path('dispatcher/mining-volumes/', dispatcher_mining_volumes_view, name='dispatcher_mining_volumes'),
     path('dispatcher/mining-volumes/export/', dispatcher_mining_volumes_export_view, name='dispatcher_mining_volumes_export'),
     path('dispatcher/transport/', dispatcher_transport_view, name='dispatcher_transport'),
