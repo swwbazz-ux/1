@@ -5,9 +5,9 @@
 {% block body_class %}excavator-operator-screen{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v123">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v123">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v123">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v127">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v127">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v127">
 <meta name="theme-color" content="#D58B14">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Погрузка">
@@ -456,7 +456,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v123";
+var excavatorShellVersion = "excavator-mobile-shell-v127";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var viewportSyncFrame = null;
 
@@ -562,7 +562,7 @@ function refreshExcavatorWorkFromServer(options) {
             window.initExcavatorWorkShell();
         }
         if (typeof window.checkAchievementPrize === "function") {
-            window.checkAchievementPrize();
+            window.checkAchievementPrize(options.achievementContext);
         }
         scheduleExcavatorViewportHeightSync();
         return true;
@@ -573,6 +573,12 @@ function refreshExcavatorWorkFromServer(options) {
 
 window.refreshExcavatorWorkFromServer = refreshExcavatorWorkFromServer;
 window.excavatorHasPendingWork = isExcavatorRefreshUnsafe;
+if (
+    window.AppPwaContractGuard
+    && typeof window.AppPwaContractGuard.registerUnsafeCheck === "function"
+) {
+    window.AppPwaContractGuard.registerUnsafeCheck(isExcavatorRefreshUnsafe);
+}
 window.applyOperationalStateRefresh = function (context) {
     if (isExcavatorRefreshUnsafe()) {
         return Promise.resolve({ deferred: true, reason: "excavator_busy" });
@@ -580,7 +586,7 @@ window.applyOperationalStateRefresh = function (context) {
     var targetVersion = Number(context && context.version || 0);
     var events = context && context.events;
     if (context && context.eventsTruncated) {
-        return refreshExcavatorWorkFromServer({ preserveTab: true, version: targetVersion }).then(function (applied) {
+        return refreshExcavatorWorkFromServer({ preserveTab: true, version: targetVersion, achievementContext: context }).then(function (applied) {
             if (!applied) return { deferred: true, reason: "excavator_refresh_failed" };
             storeExcavatorRealtimeVersion(targetVersion);
             return { applied: true };
@@ -590,7 +596,7 @@ window.applyOperationalStateRefresh = function (context) {
         storeExcavatorRealtimeVersion(targetVersion);
         return Promise.resolve({ applied: true });
     }
-    return refreshExcavatorWorkFromServer({ preserveTab: true, version: targetVersion }).then(function (applied) {
+    return refreshExcavatorWorkFromServer({ preserveTab: true, version: targetVersion, achievementContext: context }).then(function (applied) {
         if (!applied) return { deferred: true, reason: "excavator_refresh_failed" };
         storeExcavatorRealtimeVersion(targetVersion);
         return { applied: true };
@@ -2739,7 +2745,9 @@ function initExcavatorPwaUpdates() {
     var checkVersion = document.querySelector("[data-eo-pwa-update-check-version]");
     var registrationRef = null;
     var waitingWorker = null;
-    var userAcceptedReload = false;
+    var waitingInspectionGeneration = 0;
+    var contractSyncGeneration = 0;
+    var manualUpdatePromise = null;
     var storageKey = "excavator-pwa-update-available";
 
     function readStoredUpdate() {
@@ -2808,19 +2816,14 @@ function initExcavatorPwaUpdates() {
         }
     }
 
-    function fetchServerVersion() {
-        return fetch("/excavator-sw.js?version_check=" + Date.now(), {
-            cache: "no-store",
-            credentials: "same-origin"
-        }).then(function (response) {
-            if (!response.ok) return "";
-            return response.text();
-        }).then(function (text) {
-            var match = String(text || "").match(/excavator-mobile-shell-v\d+/);
-            return match ? normalizeExcavatorVersion(match[0]) : "";
-        }).catch(function () {
-            return "";
-        });
+    function serverContractVersion() {
+        var guard = window.AppPwaContractGuard;
+        var state = guard && typeof guard.getState === "function"
+            ? guard.getState()
+            : null;
+        return normalizeExcavatorVersion(
+            state && state.server ? state.server.shellVersion : ""
+        );
     }
 
     function getCurrentVersion() {
@@ -2844,7 +2847,7 @@ function initExcavatorPwaUpdates() {
             if (isExcavatorVersionNewer(workerVersion, baselineVersion)) {
                 return workerVersion;
             }
-            return fetchServerVersion();
+            return serverContractVersion();
         }).then(function (serverVersion) {
             return isExcavatorVersionNewer(serverVersion, baselineVersion) ? serverVersion : "";
         }).catch(function () {
@@ -2883,36 +2886,70 @@ function initExcavatorPwaUpdates() {
     }
 
     function inspectWaitingWorker(registration, worker) {
-        if (!registration || !worker || worker === navigator.serviceWorker.controller) {
+        if (
+            !registration
+            || !worker
+            || registration.waiting !== worker
+            || worker === navigator.serviceWorker.controller
+            || worker.state === "activated"
+        ) {
             return Promise.resolve(false);
+        }
+        var inspectionGeneration = ++waitingInspectionGeneration;
+        function isCurrentInspection() {
+            return (
+                inspectionGeneration === waitingInspectionGeneration
+                && registrationRef === registration
+                && registration.waiting === worker
+                && worker !== navigator.serviceWorker.controller
+                && worker.state !== "activated"
+            );
         }
         return Promise.all([
             requestExcavatorWorkerVersion(registration.active),
             requestExcavatorWorkerVersion(worker)
         ]).then(function (versions) {
-            showUpdateModal(worker, versions[1], versions[0]);
-            return true;
+            if (!isCurrentInspection()) return false;
+            return resolveExcavatorUpdateVersion(
+                worker,
+                versions[1],
+                versions[0]
+            ).then(function (resolvedVersion) {
+                if (!isCurrentInspection() || !resolvedVersion) return false;
+                showUpdateModal(worker, resolvedVersion, versions[0]);
+                return true;
+            });
         });
     }
 
     function runManualUpdateCheck() {
         if (!checkButton) return;
+        if (manualUpdatePromise) return manualUpdatePromise;
         checkButton.classList.add("is-checking");
         checkButton.classList.remove("is-current");
         checkButton.disabled = true;
         if (checkLabel) checkLabel.textContent = "Проверка...";
         var registrationPromise = registrationRef ? Promise.resolve(registrationRef) : navigator.serviceWorker.getRegistration("{% if role_app.role_code == 'excavator_operator' %}/{% else %}/excavator/{% endif %}");
-        registrationPromise.then(function (registration) {
+        manualUpdatePromise = registrationPromise.then(function (registration) {
             if (registration) registrationRef = registration;
-            var updatePromise = registration ? registration.update().catch(function () { return registration; }) : Promise.resolve(null);
+            var guard = window.AppPwaContractGuard;
+            var updatePromise = guard && typeof guard.requestManualUpdate === "function"
+                ? guard.requestManualUpdate().then(function (result) {
+                    return result && result.registration
+                        ? result.registration
+                        : registration;
+                })
+                : registration && registration.update
+                    ? registration.update().then(function () { return registration; })
+                    : Promise.resolve(null);
             return updatePromise.then(function () {
                 registration = registrationRef || registration;
                 if (registration && registration.waiting) {
                     return inspectWaitingWorker(registration, registration.waiting).then(function (shown) {
-                        return shown ? "shown" : checkSilently();
+                        return shown ? "shown" : syncContractState();
                     });
                 }
-                return checkSilently();
+                return syncContractState();
             });
         }).then(function (result) {
             if (result === "shown" || result === true) return;
@@ -2930,14 +2967,46 @@ function initExcavatorPwaUpdates() {
         }).finally(function () {
             checkButton.classList.remove("is-checking");
             checkButton.disabled = false;
+            manualUpdatePromise = null;
         });
+        return manualUpdatePromise;
     }
 
-    function checkSilently() {
+    function syncContractState() {
+        var syncGeneration = ++contractSyncGeneration;
+        if (
+            waitingWorker
+            && (
+                !registrationRef
+                || registrationRef.waiting !== waitingWorker
+                || waitingWorker === navigator.serviceWorker.controller
+                || waitingWorker.state === "activated"
+            )
+        ) {
+            waitingInspectionGeneration += 1;
+            waitingWorker = null;
+            if (modal) modal.hidden = true;
+            setIndicator(false);
+        }
         refreshIndicatorFromStorage();
-        return Promise.all([getCurrentVersion(), fetchServerVersion()]).then(function (versions) {
-            var currentVersion = versions[0] || excavatorShellVersion;
-            var serverVersion = versions[1] || "";
+        var controllerSnapshot = navigator.serviceWorker.controller;
+        var registrationSnapshot = registrationRef;
+        var activeWorkerSnapshot = registrationSnapshot && registrationSnapshot.active;
+        function isCurrentSync() {
+            return (
+                syncGeneration === contractSyncGeneration
+                && navigator.serviceWorker.controller === controllerSnapshot
+                && registrationRef === registrationSnapshot
+                && (
+                    !registrationSnapshot
+                    || registrationSnapshot.active === activeWorkerSnapshot
+                )
+            );
+        }
+        return getCurrentVersion().then(function (currentVersion) {
+            if (!isCurrentSync()) return false;
+            currentVersion = currentVersion || excavatorShellVersion;
+            var serverVersion = serverContractVersion();
             if (serverVersion && isExcavatorVersionNewer(serverVersion, currentVersion)) {
                 setIndicator(true, serverVersion, currentVersion);
                 return true;
@@ -2947,24 +3016,45 @@ function initExcavatorPwaUpdates() {
             }
             return false;
         }).catch(function () {
+            if (!isCurrentSync()) return false;
             refreshIndicatorFromStorage();
             return false;
         });
     }
 
     function applyUpdate() {
-        if (!waitingWorker) {
+        var worker = waitingWorker;
+        if (!worker) {
             if (modal) modal.hidden = true;
             return;
         }
-        userAcceptedReload = true;
+        if (
+            !registrationRef
+            || registrationRef.waiting !== worker
+            || worker === navigator.serviceWorker.controller
+            || worker.state === "activated"
+        ) {
+            waitingWorker = null;
+            if (modal) modal.hidden = true;
+            syncContractState();
+            return;
+        }
+        waitingWorker = null;
         if (statusNode) statusNode.textContent = "Устанавливаем новую версию...";
         if (applyButton) applyButton.disabled = true;
         if (laterButton) laterButton.disabled = true;
+        if (modal) modal.hidden = true;
         try {
-            waitingWorker.postMessage({ type: "SKIP_WAITING" });
+            worker.postMessage({ type: "SKIP_WAITING" });
         } catch (error) {
-            userAcceptedReload = false;
+            if (
+                registrationRef
+                && registrationRef.waiting === worker
+                && worker !== navigator.serviceWorker.controller
+                && worker.state !== "activated"
+            ) {
+                waitingWorker = worker;
+            }
             if (statusNode) statusNode.textContent = "Не удалось запустить обновление. Повторите позже.";
             if (applyButton) applyButton.disabled = false;
             if (laterButton) laterButton.disabled = false;
@@ -2987,13 +3077,6 @@ function initExcavatorPwaUpdates() {
             if (event.target === modal) modal.hidden = true;
         });
     }
-    navigator.serviceWorker.addEventListener("controllerchange", function () {
-        scheduleExcavatorViewportHeightSync();
-        if (!userAcceptedReload) return;
-        setIndicator(false);
-        window.location.reload();
-    });
-
     function watchRegistration(registration) {
         if (!registration) return;
         if (registration.waiting) {
@@ -3010,21 +3093,18 @@ function initExcavatorPwaUpdates() {
         });
     }
 
-    navigator.serviceWorker.register("/excavator-sw.js", { scope: "{% if role_app.role_code == 'excavator_operator' %}/{% else %}/excavator/{% endif %}" }).then(function (registration) {
+    var excavatorGuard = window.AppPwaContractGuard;
+    var excavatorRegistrationSource = excavatorGuard
+        && typeof excavatorGuard.getRegistration === "function"
+        ? excavatorGuard.getRegistration()
+        : navigator.serviceWorker.getRegistration("{% if role_app.role_code == 'excavator_operator' %}/{% else %}/excavator/{% endif %}");
+    Promise.resolve(excavatorRegistrationSource).then(function (registration) {
         registrationRef = registration;
         watchRegistration(registration);
-        registration.update().catch(function () {});
-        checkSilently();
-        window.setInterval(checkSilently, 60000);
-        document.addEventListener("visibilitychange", function () {
-            if (!document.hidden) {
-                registration.update().catch(function () {});
-                checkSilently();
-            }
-        });
-        window.addEventListener("online", checkSilently);
-        window.addEventListener("focus", checkSilently);
+        syncContractState();
     }).catch(function () {});
+    window.addEventListener("app-pwa-contract-state", syncContractState);
+    navigator.serviceWorker.addEventListener("controllerchange", syncContractState);
 }
 
 document.addEventListener("DOMContentLoaded", function () {

@@ -1,0 +1,12 @@
+Operations to perform:
+  Apply all migrations: admin, assignments, auth, contenttypes, core, downtimes, portal, references, reports, rotations, sessions, shifts, trips, users
+Running migrations:
+  No migrations to apply.
+
+Starting MVP local server supervisor.
+URL: http://127.0.0.1:8000/
+Keep this window open while using the site.
+Stop with STOP_SERVER_MVP.bat or Ctrl+C.
+
+Server supervisor stopped.
+Для продолжения нажмите любую клавишу . . . 

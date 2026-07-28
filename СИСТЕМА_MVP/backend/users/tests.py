@@ -185,7 +185,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, reverse('driver_manifest'))
         self.assertContains(response, 'rel="manifest"')
         self.assertContains(response, '/driver-sw.js')
-        self.assertContains(response, 'driver-mobile-shell-v110')
+        self.assertContains(response, 'driver-mobile-shell-v114')
         self.assertContains(response, 'data-driver-pwa-update-modal')
         self.assertContains(response, 'data-driver-pwa-update-badge')
         self.assertContains(
@@ -194,6 +194,8 @@ class AccessLoginTests(TestCase):
         )
         self.assertContains(response, 'window.applyOperationalStateRefresh')
         self.assertContains(response, 'window.bindDriverMobileShell')
+        self.assertNotContains(response, '?version_check')
+        self.assertNotContains(response, 'navigator.serviceWorker.register("/driver-sw.js"')
         self.assertNotContains(response, 'window.' + 'alert')
         self.assertContains(response, '--driver-nav-total-h')
         self.assertContains(response, '--driver-edge: clamp(16px, 5vw, 34px)')
@@ -332,7 +334,7 @@ class AccessLoginTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Service-Worker-Allowed'], '/driver/')
-        self.assertIn('driver-mobile-shell-v110', script)
+        self.assertIn('driver-mobile-shell-v114', script)
         self.assertIn('/driver/', script)
         self.assertIn('/driver/shift/', script)
         self.assertIn('/driver.webmanifest', script)
@@ -343,6 +345,14 @@ class AccessLoginTests(TestCase):
         self.assertIn('GET_VERSION', script)
         self.assertIn('SKIP_WAITING', script)
         self.assertIn('skipWaiting', script)
+        install_handler = script.split(
+            'self.addEventListener("install"',
+            maxsplit=1,
+        )[1].split(
+            'self.addEventListener("activate"',
+            maxsplit=1,
+        )[0]
+        self.assertNotIn('skipWaiting', install_handler)
         self.assertIn('clients.claim', script)
         self.assertIn('key.startsWith(CACHE_PREFIX)', script)
 
@@ -2610,7 +2620,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(driver_shift_response, 'ККД')
         self.assertContains(driver_shift_response, 'window.applyOperationalStateRefresh')
         self.assertContains(driver_shift_response, 'data-realtime-mode="custom"')
-        self.assertContains(driver_shift_response, 'driver-mobile-shell-v110')
+        self.assertContains(driver_shift_response, 'driver-mobile-shell-v114')
 
     def test_driver_downtime_buttons_are_rendered_from_server_reference(self):
         truck = self.create_registered_driver_shift()

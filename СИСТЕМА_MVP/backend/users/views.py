@@ -196,7 +196,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v110'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v114'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -264,7 +264,6 @@ self.addEventListener("install", (event) => {{
     event.waitUntil(
         caches.open(CACHE_NAME).then((cache) => cache.addAll(CORE_ASSETS))
     );
-    self.skipWaiting();
 }});
 
 self.addEventListener("activate", (event) => {{

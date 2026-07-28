@@ -1,0 +1,60 @@
+{
+  "captured_at_utc": "2026-07-28T13:48:49.085Z",
+  "proxy": {
+    "listen": "127.0.0.1:8001",
+    "target": "127.0.0.1:8000",
+    "tool": "tools/traffic_capture_proxy.py"
+  },
+  "stable_windows": [
+    {
+      "role": "driver",
+      "host": "driver.localhost",
+      "artifact": "proxy_driver_60s.jsonl",
+      "start_utc": "2026-07-28T13:38:38.460Z",
+      "end_utc": "2026-07-28T13:39:51.088Z",
+      "duration_seconds": 72.628,
+      "requests": 14,
+      "realtime_get": 14,
+      "achievements_get": 0,
+      "version_check_get": 0,
+      "full_html_get": 0,
+      "errors": 0,
+      "total_bytes": 20776
+    },
+    {
+      "role": "excavator",
+      "host": "excavator.localhost",
+      "artifact": "proxy_excavator_isolated_60s.jsonl",
+      "start_utc": "2026-07-28T13:45:41.459Z",
+      "end_utc": "2026-07-28T13:46:53.906Z",
+      "duration_seconds": 72.447,
+      "requests": 14,
+      "realtime_get": 14,
+      "achievements_get": 0,
+      "version_check_get": 0,
+      "full_html_get": 0,
+      "errors": 0,
+      "total_bytes": 21532
+    },
+    {
+      "role": "mining_master",
+      "host": "mining-master.localhost",
+      "artifact": "proxy_mining_master_isolated_60s.jsonl",
+      "start_utc": "2026-07-28T13:47:33.543Z",
+      "end_utc": "2026-07-28T13:48:49.085Z",
+      "duration_seconds": 75.542,
+      "requests": 16,
+      "realtime_get": 16,
+      "achievements_get": 0,
+      "version_check_get": 0,
+      "full_html_get": 0,
+      "errors": 0,
+      "total_bytes": 24736
+    }
+  ],
+  "notes": [
+    "Initial document and static-asset loads were excluded by starting each stable interval after a five-second settle.",
+    "Each retained capture contains only the named host; prior mixed diagnostic captures were discarded.",
+    "No persistent achievements polling, version_check request, full HTML refresh, or proxy error occurred in any stable interval."
+  ]
+}

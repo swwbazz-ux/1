@@ -141,7 +141,7 @@
 
     function requestAchievementPrize() {
         if (!window.fetch) {
-            return Promise.resolve(null);
+            return Promise.resolve({ok: false, data: null});
         }
         return fetch("/api/achievements/current/", {
             method: "GET",
@@ -153,15 +153,208 @@
             }
         }).then(function (response) {
             if (!response.ok) {
-                return null;
+                return {ok: false, data: null};
             }
-            return response.json();
-        }).then(function (data) {
-            showAchievementPrize(data);
-            return data;
+            return response.json().then(function (data) {
+                showAchievementPrize(data);
+                return {ok: true, data: data};
+            });
         }).catch(function () {
-            return null;
+            return {ok: false, data: null};
         });
+    }
+
+    var ACHIEVEMENT_DEBOUNCE_MS = 250;
+    var ACHIEVEMENT_RETRY_DELAYS = [1000, 3000, 10000];
+    var achievementCheckTimer = null;
+    var achievementRequestInFlight = null;
+    var achievementInFlightKey = "";
+    var achievementCompletedKey = "";
+    var failedAchievementCheck = null;
+    var pendingAchievementCheck = null;
+    var achievementInitialConsumed = false;
+    var achievementConnectionState = null;
+
+    function matchingAchievementEventKey(context) {
+        if (!context) return "";
+        var driverShell = document.querySelector("[data-driver-shell]");
+        var excavatorShell = document.querySelector("[data-eo-shell]");
+        var currentTruckId = driverShell
+            ? String(driverShell.dataset.driverCurrentTruckId || "")
+            : "";
+        var activeExcavatorId = excavatorShell
+            ? String(excavatorShell.dataset.eoCurrentExcavatorId || "")
+            : "";
+        var currentExcavatorId = activeExcavatorId;
+        var events = Array.isArray(context.events) ? context.events : [];
+        for (var index = 0; index < events.length; index += 1) {
+            var event = events[index] || {};
+            var payload = event.payload || {};
+            if (event.type !== "trip_changed" || payload.status !== "completed") {
+                continue;
+            }
+            var equipmentMatches = (
+                currentTruckId
+                && String(payload.truck_id || "") === currentTruckId
+            ) || (
+                currentExcavatorId
+                && String(payload.excavator_id || "") === currentExcavatorId
+            );
+            if (!equipmentMatches) continue;
+            return [
+                String(context.version || event.version || ""),
+                String(payload.trip_id || ""),
+                currentTruckId ? "truck:" + currentTruckId : "excavator:" + currentExcavatorId
+            ].join(":");
+        }
+        if (context.eventsTruncated) {
+            var activeEquipmentKey = currentTruckId
+                ? "truck:" + currentTruckId
+                : (activeExcavatorId ? "excavator:" + activeExcavatorId : "");
+            if (activeEquipmentKey) {
+                return [
+                    String(context.version || ""),
+                    "truncated",
+                    activeEquipmentKey
+                ].join(":");
+            }
+        }
+        return "";
+    }
+
+    function clearAchievementCheckTimer() {
+        if (achievementCheckTimer !== null) {
+            window.clearTimeout(achievementCheckTimer);
+            achievementCheckTimer = null;
+        }
+    }
+
+    function schedulePendingAchievementRun(delay, replaceTimer) {
+        if (
+            !pendingAchievementCheck
+            || document.hidden
+            || achievementRequestInFlight
+        ) {
+            return;
+        }
+        if (achievementCheckTimer !== null) {
+            if (!replaceTimer) {
+                return;
+            }
+            clearAchievementCheckTimer();
+        }
+        achievementCheckTimer = window.setTimeout(function () {
+            achievementCheckTimer = null;
+            runPendingAchievementCheck();
+        }, delay);
+    }
+
+    function runPendingAchievementCheck() {
+        if (!pendingAchievementCheck || document.hidden) {
+            return;
+        }
+        if (achievementRequestInFlight) {
+            return;
+        }
+        var check = pendingAchievementCheck;
+        pendingAchievementCheck = null;
+        achievementInFlightKey = check.key;
+        achievementInitialConsumed = true;
+        achievementRequestInFlight = requestAchievementPrize().then(function (result) {
+            if (result && result.ok) {
+                achievementCompletedKey = check.key;
+                failedAchievementCheck = null;
+            } else {
+                if (
+                    !pendingAchievementCheck
+                    || pendingAchievementCheck.key === check.key
+                ) {
+                    var nextRetryAttempt = (check.retryAttempt || 0) + 1;
+                    failedAchievementCheck = {
+                        key: check.key,
+                        retryAttempt: 0
+                    };
+                    if (nextRetryAttempt <= ACHIEVEMENT_RETRY_DELAYS.length) {
+                        pendingAchievementCheck = {
+                            key: check.key,
+                            retryAttempt: nextRetryAttempt
+                        };
+                    }
+                }
+            }
+            return result;
+        }).finally(function () {
+            achievementRequestInFlight = null;
+            achievementInFlightKey = "";
+            if (
+                pendingAchievementCheck
+                && pendingAchievementCheck.key !== achievementCompletedKey
+                && !document.hidden
+            ) {
+                var retryAttempt = pendingAchievementCheck.retryAttempt || 0;
+                var delay = retryAttempt
+                    ? ACHIEVEMENT_RETRY_DELAYS[retryAttempt - 1]
+                    : ACHIEVEMENT_DEBOUNCE_MS;
+                schedulePendingAchievementRun(delay, false);
+            }
+        });
+    }
+
+    function scheduleAchievementCheck(context, initial) {
+        var key = initial ? "initial" : matchingAchievementEventKey(context);
+        if (!key || key === achievementCompletedKey) {
+            return achievementRequestInFlight || Promise.resolve(null);
+        }
+        if (achievementRequestInFlight && key === achievementInFlightKey) {
+            return achievementRequestInFlight;
+        }
+        if (pendingAchievementCheck && key === pendingAchievementCheck.key) {
+            return achievementRequestInFlight || Promise.resolve(null);
+        }
+        if (
+            failedAchievementCheck
+            && key !== failedAchievementCheck.key
+        ) {
+            failedAchievementCheck = null;
+        }
+        if (
+            failedAchievementCheck
+            && key === failedAchievementCheck.key
+            && !pendingAchievementCheck
+        ) {
+            return Promise.resolve(null);
+        }
+        if (pendingAchievementCheck && pendingAchievementCheck.key !== key) {
+            clearAchievementCheckTimer();
+        }
+        pendingAchievementCheck = {key: key, retryAttempt: 0};
+        if (document.hidden) {
+            return achievementRequestInFlight || Promise.resolve(null);
+        }
+        if (achievementRequestInFlight) {
+            return achievementRequestInFlight;
+        }
+        schedulePendingAchievementRun(ACHIEVEMENT_DEBOUNCE_MS, false);
+        return Promise.resolve(null);
+    }
+
+    function recoverAchievementCheck() {
+        if (document.hidden || achievementRequestInFlight) {
+            return;
+        }
+        if (!pendingAchievementCheck && failedAchievementCheck) {
+            pendingAchievementCheck = {
+                key: failedAchievementCheck.key,
+                retryAttempt: failedAchievementCheck.retryAttempt || 0
+            };
+            failedAchievementCheck = null;
+        }
+        if (pendingAchievementCheck) {
+            schedulePendingAchievementRun(
+                ACHIEVEMENT_DEBOUNCE_MS,
+                true
+            );
+        }
     }
 
     window.bindAchievementPrizeUnlock = function () {
@@ -169,18 +362,56 @@
             return;
         }
         window.__achievementPrizeBound = true;
-        window.checkAchievementPrize = requestAchievementPrize;
-        window.setTimeout(requestAchievementPrize, 1200);
-        window.setInterval(function () {
-            if (!document.hidden) {
-                requestAchievementPrize();
+        window.checkAchievementPrize = function (context) {
+            return scheduleAchievementCheck(context, false);
+        };
+        window.setTimeout(function () {
+            if (
+                !achievementInitialConsumed
+                && !pendingAchievementCheck
+                && !achievementRequestInFlight
+            ) {
+                scheduleAchievementCheck(null, true);
             }
-        }, 20000);
+        }, 1200);
         document.addEventListener("visibilitychange", function () {
-            if (!document.hidden) {
-                requestAchievementPrize();
-            }
+            recoverAchievementCheck();
         });
+        if (window.addEventListener) {
+            window.addEventListener("online", recoverAchievementCheck);
+            window.addEventListener(
+                "operational-state-connection",
+                function (event) {
+                    var detail = event && event.detail ? event.detail : {};
+                    if (detail.reconnected === true) {
+                        achievementConnectionState = true;
+                        recoverAchievementCheck();
+                        return;
+                    }
+                    if (detail.connected === false) {
+                        achievementConnectionState = false;
+                        return;
+                    }
+                    if (detail.connected === true) {
+                        var recovered = achievementConnectionState === false;
+                        achievementConnectionState = true;
+                        if (recovered) {
+                            recoverAchievementCheck();
+                        }
+                    }
+                }
+            );
+        }
+        if (
+            window.navigator
+            && window.navigator.connection
+            && window.navigator.connection.addEventListener
+        ) {
+            window.navigator.connection.addEventListener(
+                "change",
+                recoverAchievementCheck
+            );
+        }
     };
 })();
 </script>

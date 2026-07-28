@@ -218,7 +218,19 @@
             reloadCount: 0
         };
         var registration = null;
-        var updateRequested = false;
+        var registrationPromise = null;
+        var automaticUpdateKey = "";
+        var automaticUpdatePromise = null;
+        var automaticUpdateFailed = false;
+        var manualUpdatePromise = null;
+        var updateFlightRegistration = null;
+        var updateFlightKey = "";
+        var updateFlightPromise = null;
+        var workerVersionGeneration = 0;
+        var registrationNeedsRecovery = false;
+        var controllerReloadPending = false;
+        var controllerVersionPending = false;
+        var unsafeWorkChecks = [];
 
         function expectedContract() {
             var body = document.body;
@@ -271,32 +283,156 @@
             document.body.prepend(banner);
         }
 
-        function requestControlledUpdate() {
-            if (updateRequested) return;
-            updateRequested = true;
+        function contractKey(contract) {
+            if (!contract) return "";
+            var appContractVersion = String(contract.appContractVersion || "");
+            var shellVersion = String(contract.shellVersion || "");
+            var roleCode = String(contract.roleCode || "");
+            if (!appContractVersion || !shellVersion || !roleCode) return "";
+            return appContractVersion + ":" + roleCode + ":" + shellVersion;
+        }
+
+        function configuredRegistration() {
+            if (registration) return Promise.resolve(registration);
+            if (registrationPromise) return registrationPromise;
             var serviceWorker = window.navigator && window.navigator.serviceWorker;
-            if (!serviceWorker) return;
-            var registrationPromise = registration
-                ? Promise.resolve(registration)
-                : serviceWorker.getRegistration
-                    ? serviceWorker.getRegistration()
+            if (!serviceWorker) return Promise.resolve(null);
+            var scope = document.body
+                ? (document.body.dataset.appServiceWorkerScope || "/")
+                : "/";
+            var workerUrl = document.body
+                ? (document.body.dataset.appServiceWorkerUrl || "")
+                : "";
+            var source = serviceWorker.getRegistration
+                ? serviceWorker.getRegistration(scope)
+                : workerUrl
+                    ? Promise.resolve(null)
                     : serviceWorker.ready;
-            Promise.resolve(registrationPromise).then(function (currentRegistration) {
-                if (!currentRegistration) return;
+            registrationPromise = Promise.resolve(source).then(function (currentRegistration) {
+                if (
+                    currentRegistration
+                    || !workerUrl
+                    || !serviceWorker.register
+                ) {
+                    return currentRegistration || null;
+                }
+                return serviceWorker.register(workerUrl, {
+                    scope: scope,
+                    updateViaCache: "none"
+                });
+            }).then(function (currentRegistration) {
+                if (!currentRegistration) {
+                    registrationNeedsRecovery = true;
+                    registrationPromise = null;
+                    return null;
+                }
                 registration = currentRegistration;
-                if (currentRegistration.waiting) {
-                    currentRegistration.waiting.postMessage({type: "SKIP_WAITING"});
-                }
-                if (currentRegistration.update) {
-                    return currentRegistration.update().then(function () {
-                        if (currentRegistration.waiting) {
-                            currentRegistration.waiting.postMessage({type: "SKIP_WAITING"});
-                        }
-                    });
-                }
+                registrationNeedsRecovery = false;
+                watchRegistration(currentRegistration);
+                requestWorkerVersion(
+                    serviceWorker.controller
+                    || currentRegistration.active
+                    || currentRegistration.waiting
+                );
+                return currentRegistration;
             }).catch(function () {
-                updateRequested = false;
+                registrationNeedsRecovery = true;
+                registrationPromise = null;
+                return null;
             });
+            return registrationPromise;
+        }
+
+        function requestRegistrationUpdate(currentRegistration, targetContract) {
+            if (!currentRegistration || !currentRegistration.update) {
+                return Promise.resolve(currentRegistration || null);
+            }
+            var targetKey = contractKey(targetContract)
+                || contractKey(expectedContract())
+                || "current";
+            if (
+                updateFlightPromise
+                && updateFlightRegistration === currentRegistration
+                && updateFlightKey === targetKey
+            ) {
+                return updateFlightPromise;
+            }
+            updateFlightRegistration = currentRegistration;
+            updateFlightKey = targetKey;
+            updateFlightPromise = Promise.resolve(
+                currentRegistration.update()
+            ).then(function () {
+                return currentRegistration;
+            });
+            var currentFlight = updateFlightPromise;
+            function clearCurrentFlight() {
+                if (updateFlightPromise !== currentFlight) return;
+                updateFlightRegistration = null;
+                updateFlightKey = "";
+                updateFlightPromise = null;
+            }
+            currentFlight.then(clearCurrentFlight, clearCurrentFlight);
+            return currentFlight;
+        }
+
+        function requestControlledUpdate(targetContract) {
+            var nextKey = contractKey(targetContract);
+            if (!nextKey || automaticUpdateKey === nextKey) {
+                return automaticUpdatePromise || Promise.resolve(null);
+            }
+            automaticUpdateKey = nextKey;
+            automaticUpdateFailed = false;
+            automaticUpdatePromise = configuredRegistration().then(function (currentRegistration) {
+                if (!currentRegistration || !currentRegistration.update) {
+                    automaticUpdateFailed = true;
+                    return null;
+                }
+                return requestRegistrationUpdate(
+                    currentRegistration,
+                    targetContract
+                ).then(function () {
+                    automaticUpdateFailed = false;
+                    return currentRegistration;
+                });
+            }).catch(function () {
+                automaticUpdateFailed = true;
+                return null;
+            });
+            return automaticUpdatePromise;
+        }
+
+        function requestManualUpdate() {
+            if (manualUpdatePromise) return manualUpdatePromise;
+            if (registrationNeedsRecovery) {
+                registrationPromise = null;
+            }
+            manualUpdatePromise = configuredRegistration().then(function (currentRegistration) {
+                if (!currentRegistration) {
+                    return {status: "unavailable", registration: null};
+                }
+                if (!currentRegistration.update) {
+                    return {
+                        status: currentRegistration.waiting ? "update-ready" : "current",
+                        registration: currentRegistration
+                    };
+                }
+                return requestRegistrationUpdate(
+                    currentRegistration,
+                    state.server || expectedContract()
+                ).then(function () {
+                    automaticUpdateFailed = false;
+                    return {
+                        status: currentRegistration.waiting ? "update-ready" : "current",
+                        registration: currentRegistration
+                    };
+                });
+            }).catch(function () {
+                registrationNeedsRecovery = true;
+                return {status: "error", registration: null};
+            }).finally(function () {
+                manualUpdatePromise = null;
+            });
+            return manualUpdatePromise;
         }
 
         function evaluate() {
@@ -316,69 +452,155 @@
             document.body.dataset.appContractLocked = state.locked ? "true" : "false";
             document.body.classList.toggle("is-app-contract-locked", state.locked);
             ensureBanner(state.locked);
-            if (state.locked) requestControlledUpdate();
+            if (
+                state.locked
+                && state.javascriptVersion
+                && state.serviceWorker
+                && state.server
+                && !state.serverUnavailable
+            ) {
+                requestControlledUpdate(state.server);
+            }
+            if (controllerReloadPending) {
+                reloadOnceForExpectedContract();
+            }
             window.dispatchEvent(new CustomEvent("app-pwa-contract-state", {
                 detail: getState()
             }));
+        }
+
+        function isExpectedVersionWorker(worker, generation) {
+            if (!worker || generation !== workerVersionGeneration) return false;
+            var serviceWorker = window.navigator && window.navigator.serviceWorker;
+            if (serviceWorker && serviceWorker.controller === worker) return true;
+            return !!registration && (
+                registration.active === worker
+                || registration.waiting === worker
+                || registration.installing === worker
+            );
         }
 
         function requestWorkerVersion(worker) {
             if (!worker || !worker.postMessage || typeof MessageChannel === "undefined") {
                 return;
             }
+            var requestGeneration = workerVersionGeneration;
             var channel = new MessageChannel();
             channel.port1.onmessage = function (event) {
+                if (!isExpectedVersionWorker(worker, requestGeneration)) return;
+                var serviceWorker = window.navigator && window.navigator.serviceWorker;
+                if (controllerVersionPending) {
+                    if (!serviceWorker || serviceWorker.controller !== worker) {
+                        return;
+                    }
+                    controllerVersionPending = false;
+                }
                 acceptServiceWorkerVersion(event && event.data);
             };
             worker.postMessage({type: "GET_VERSION"}, [channel.port2]);
         }
 
-        function registerConfiguredWorker() {
-            var serviceWorker = window.navigator && window.navigator.serviceWorker;
-            if (!serviceWorker || !document.body) return;
-            var workerUrl = document.body.dataset.appServiceWorkerUrl || "";
-            var workerScope = document.body.dataset.appServiceWorkerScope || "/";
-            var promise;
-            if (workerUrl && serviceWorker.register) {
-                promise = serviceWorker.register(workerUrl, {
-                    scope: workerScope,
-                    updateViaCache: "none"
-                });
-            } else if (serviceWorker.getRegistration) {
-                promise = serviceWorker.getRegistration(workerScope);
-            } else {
-                promise = serviceWorker.ready;
+        function watchRegistration(currentRegistration) {
+            if (
+                !currentRegistration
+                || !currentRegistration.addEventListener
+                || currentRegistration.__appPwaContractGuardBound
+            ) {
+                return;
             }
-            Promise.resolve(promise).then(function (currentRegistration) {
-                if (!currentRegistration) return;
-                registration = currentRegistration;
-                requestWorkerVersion(
-                    serviceWorker.controller
-                    || currentRegistration.active
-                    || currentRegistration.waiting
-                );
-                if (currentRegistration.waiting) {
-                    currentRegistration.waiting.postMessage({type: "SKIP_WAITING"});
-                }
-                if (currentRegistration.update) {
-                    currentRegistration.update().catch(function () {});
-                }
-            }).catch(function () {});
+            currentRegistration.__appPwaContractGuardBound = true;
+            currentRegistration.addEventListener("updatefound", function () {
+                var installing = currentRegistration.installing;
+                if (!installing || !installing.addEventListener) return;
+                installing.addEventListener("statechange", function () {
+                    if (installing.state === "installed") {
+                        requestWorkerVersion(currentRegistration.waiting || installing);
+                    }
+                });
+            });
+        }
+
+        function registerConfiguredWorker() {
+            return configuredRegistration();
+        }
+
+        function registerUnsafeCheck(check) {
+            if (
+                typeof check === "function"
+                && unsafeWorkChecks.indexOf(check) < 0
+            ) {
+                unsafeWorkChecks.push(check);
+            }
+        }
+
+        function hasUnsafeWorkInProgress() {
+            if (!document.body) return false;
+            for (var checkIndex = 0; checkIndex < unsafeWorkChecks.length; checkIndex += 1) {
+                try {
+                    if (unsafeWorkChecks[checkIndex]()) return true;
+                } catch (error) {}
+            }
+            if (document.body.dataset.pwaUpdateUnsafe === "true") return true;
+            var active = document.activeElement;
+            var activeTag = active && (active.tagName || active.nodeName)
+                ? String(active.tagName || active.nodeName).toLowerCase()
+                : "";
+            if (
+                active
+                && (
+                    active.isContentEditable
+                    || activeTag === "input"
+                    || activeTag === "textarea"
+                    || activeTag === "select"
+                )
+            ) {
+                return true;
+            }
+            var unsafeSelectors = [
+                ".is-holding",
+                ".is-pending",
+                ".is-dragging",
+                "[data-driver-action-pending=\"true\"]",
+                "[data-driver-shift-opening-dirty=\"true\"]",
+                "[data-driver-shift-opening-pending=\"true\"]",
+                "[data-driver-shift-dirty=\"true\"]",
+                "[data-eo-shift-dirty=\"true\"]",
+                "[data-dispatcher-action-pending=\"true\"]",
+                "[data-driver-point-sheet]:not([hidden])",
+                "[data-driver-pwa-update-modal]:not([hidden])",
+                "[data-eo-pwa-update-modal]:not([hidden])",
+                "[data-mm-pwa-update-modal]:not([hidden])",
+                ".app-confirm-modal:not([hidden])"
+            ];
+            for (var index = 0; index < unsafeSelectors.length; index += 1) {
+                if (document.querySelector(unsafeSelectors[index])) return true;
+            }
+            return false;
         }
 
         function reloadOnceForExpectedContract() {
-            if (!state.locked || !window.sessionStorage) return;
+            if (!controllerReloadPending) return;
+            if (controllerVersionPending) return;
+            if (!state.locked) {
+                controllerReloadPending = false;
+                return;
+            }
+            if (!window.sessionStorage || hasUnsafeWorkInProgress()) return;
             var expected = expectedContract();
             var key = "app-pwa-contract-reload:"
                 + expected.appContractVersion + ":"
                 + expected.shellVersion + ":"
                 + expected.roleCode;
             try {
-                if (window.sessionStorage.getItem(key) === "1") return;
+                if (window.sessionStorage.getItem(key) === "1") {
+                    controllerReloadPending = false;
+                    return;
+                }
                 window.sessionStorage.setItem(key, "1");
             } catch (error) {
                 return;
             }
+            controllerReloadPending = false;
             state.reloadCount += 1;
             if (window.location && window.location.reload) {
                 window.location.reload();
@@ -392,14 +614,12 @@
 
         function acceptServiceWorkerVersion(payload) {
             state.serviceWorker = normalizedWorker(payload);
-            updateRequested = false;
             evaluate();
         }
 
         function acceptServerContract(payload) {
             state.server = normalizedServer(payload);
             state.serverUnavailable = false;
-            updateRequested = false;
             evaluate();
         }
 
@@ -422,6 +642,36 @@
 
         function isMutationTarget(target) {
             var node = target;
+            var recoveryAttributes = [
+                "data-validated-login",
+                "data-driver-shift-update",
+                "data-driver-pwa-update-nav-target",
+                "data-driver-pwa-update-apply",
+                "data-driver-pwa-update-later",
+                "data-eo-pwa-update-nav-target",
+                "data-eo-pwa-update-check",
+                "data-eo-pwa-update-apply",
+                "data-eo-pwa-update-later",
+                "data-mm-pwa-update-nav-target",
+                "data-mm-pwa-check-update",
+                "data-mm-pwa-update-apply",
+                "data-mm-pwa-update-later"
+            ];
+            var recoveryNode = target;
+            while (recoveryNode && recoveryNode !== document.body) {
+                if (recoveryNode.hasAttribute) {
+                    for (
+                        var recoveryIndex = 0;
+                        recoveryIndex < recoveryAttributes.length;
+                        recoveryIndex += 1
+                    ) {
+                        if (recoveryNode.hasAttribute(recoveryAttributes[recoveryIndex])) {
+                            return false;
+                        }
+                    }
+                }
+                recoveryNode = recoveryNode.parentNode;
+            }
             while (node && node !== document.body) {
                 var tagName = String(node.tagName || node.nodeName || "").toLowerCase();
                 var type = node.getAttribute ? String(node.getAttribute("type") || "").toLowerCase() : "";
@@ -463,7 +713,11 @@
             acceptServiceWorkerVersion: acceptServiceWorkerVersion,
             acceptServerContract: acceptServerContract,
             markServerUnavailable: markServerUnavailable,
-            getState: getState
+            getState: getState,
+            getRegistration: configuredRegistration,
+            requestManualUpdate: requestManualUpdate,
+            hasUnsafeWorkInProgress: hasUnsafeWorkInProgress,
+            registerUnsafeCheck: registerUnsafeCheck
         };
 
         function initialize() {
@@ -478,13 +732,35 @@
         }
         if (window.navigator && window.navigator.serviceWorker) {
             window.navigator.serviceWorker.addEventListener("controllerchange", function () {
+                workerVersionGeneration += 1;
+                controllerReloadPending = true;
+                controllerVersionPending = true;
+                state.serviceWorker = null;
+                evaluate();
                 requestWorkerVersion(window.navigator.serviceWorker.controller);
-                reloadOnceForExpectedContract();
             });
         }
         window.addEventListener("online", function () {
             state.serverUnavailable = false;
-            updateRequested = false;
+            if (!registration && registrationPromise) {
+                return;
+            }
+            if (
+                registrationNeedsRecovery
+                || automaticUpdateFailed
+                || !registration
+            ) {
+                if (!registration) {
+                    registrationPromise = null;
+                }
+                automaticUpdateKey = "";
+                automaticUpdatePromise = null;
+                automaticUpdateFailed = false;
+                registerConfiguredWorker().then(function () {
+                    evaluate();
+                });
+                return;
+            }
             evaluate();
         });
     })(window, document);

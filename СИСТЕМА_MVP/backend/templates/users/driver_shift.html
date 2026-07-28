@@ -2918,7 +2918,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
 {% endblock %}
 
 {% block body %}
-<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v110' }}">
+<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-current-truck-id="{% if current_truck %}{{ current_truck.id }}{% endif %}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v114' }}">
     {% if messages %}
         <div class="driver-messages">
             {% for message in messages %}
@@ -3563,6 +3563,13 @@ function isDriverOperationalRefreshUnsafe(shell) {
         document.querySelector("[data-driver-pwa-update-modal]:not([hidden]), .app-confirm-modal:not([hidden])")
     );
 }
+window.driverHasPendingWork = isDriverOperationalRefreshUnsafe;
+if (
+    window.AppPwaContractGuard
+    && typeof window.AppPwaContractGuard.registerUnsafeCheck === "function"
+) {
+    window.AppPwaContractGuard.registerUnsafeCheck(isDriverOperationalRefreshUnsafe);
+}
 
 window.applyOperationalStateRefresh = function (context) {
     var currentShell = document.querySelector("[data-driver-shell]");
@@ -3591,7 +3598,7 @@ window.applyOperationalStateRefresh = function (context) {
             window.bindDriverMobileShell();
         }
         if (typeof window.checkAchievementPrize === "function") {
-            window.checkAchievementPrize();
+            window.checkAchievementPrize(context);
         }
         return true;
     }).catch(function () {
@@ -3889,15 +3896,22 @@ window.bindDriverMobileShell = function () {
         if (updateButton && updateButton.dataset.driverShiftUpdateBound !== "true") {
             updateButton.dataset.driverShiftUpdateBound = "true";
             updateButton.addEventListener("click", function () {
+                if (updateButton.disabled) return;
                 updateButton.disabled = true;
                 updateButton.textContent = "Проверка";
-                var updateRequest = navigator.serviceWorker
-                    ? navigator.serviceWorker.getRegistration("{% if role_app.role_code == 'driver' %}/{% else %}/driver/{% endif %}").then(function (registration) {
-                        return registration ? registration.update() : null;
-                    })
-                    : Promise.resolve();
-                updateRequest.finally(function () {
-                    updateButton.textContent = "Обновить";
+                var guard = window.AppPwaContractGuard;
+                var updateRequest = guard && typeof guard.requestManualUpdate === "function"
+                    ? guard.requestManualUpdate()
+                    : Promise.resolve({status: "unavailable"});
+                Promise.resolve(updateRequest).then(function (result) {
+                    updateButton.textContent = result && result.status === "current"
+                        ? "Актуально"
+                        : result && result.status === "update-ready"
+                            ? "Доступно обновление"
+                            : "Повторить";
+                }).catch(function () {
+                    updateButton.textContent = "Повторить";
+                }).finally(function () {
                     updateButton.disabled = false;
                 });
             });
@@ -4691,7 +4705,10 @@ window.bindDriverMobileShell = function () {
         if (!("serviceWorker" in navigator)) {
             return;
         }
-        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v110' }}";
+        var runtime = window.__driverPwaUpdateRuntime;
+        var currentShellVersion = runtime && runtime.currentShellVersion
+            ? runtime.currentShellVersion
+            : shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v114' }}";
         var updateModal = document.querySelector("[data-driver-pwa-update-modal]");
         var updateBadge = document.querySelector("[data-driver-pwa-update-badge]");
         var updateTarget = document.querySelector("[data-driver-pwa-update-nav-target]");
@@ -4700,12 +4717,14 @@ window.bindDriverMobileShell = function () {
         var newVersionNode = document.querySelector("[data-driver-pwa-new-version]");
         var applyButton = document.querySelector("[data-driver-pwa-update-apply]");
         var laterButton = document.querySelector("[data-driver-pwa-update-later]");
-        var waitingWorker = null;
-        var reloading = false;
 
         function formatVersion(version) {
             var match = String(version || "").match(/driver-mobile-shell-v(\d+)/);
             return match ? "v" + match[1] : String(version || "v1");
+        }
+        function versionNumber(version) {
+            var match = String(version || "").match(/driver-mobile-shell-v(\d+)/);
+            return match ? parseInt(match[1], 10) : 0;
         }
         function setBadge(visible) {
             if (updateBadge) {
@@ -4720,8 +4739,7 @@ window.bindDriverMobileShell = function () {
                 statusNode.textContent = text;
             }
         }
-        function showUpdate(nextVersion, worker) {
-            waitingWorker = worker || waitingWorker;
+        function showUpdate(nextVersion) {
             setBadge(true);
             if (currentVersionNode) {
                 currentVersionNode.textContent = formatVersion(currentShellVersion);
@@ -4730,31 +4748,6 @@ window.bindDriverMobileShell = function () {
                 newVersionNode.textContent = formatVersion(nextVersion);
             }
             setStatus("Можно установить новую версию экрана водителя.");
-        }
-        function requestWorkerVersion(worker) {
-            if (!worker || !worker.postMessage || !window.MessageChannel) {
-                return Promise.resolve("");
-            }
-            return new Promise(function (resolve) {
-                var channel = new MessageChannel();
-                var timeout = window.setTimeout(function () {
-                    resolve("");
-                }, 1200);
-                channel.port1.onmessage = function (event) {
-                    window.clearTimeout(timeout);
-                    resolve(event.data && event.data.version ? event.data.version : "");
-                };
-                worker.postMessage({ type: "GET_VERSION" }, [channel.port2]);
-            });
-        }
-        function fetchLatestVersion() {
-            return fetch("/driver-sw.js?version_check=" + Date.now(), { cache: "no-store" })
-                .then(function (response) { return response.ok ? response.text() : ""; })
-                .then(function (text) {
-                    var match = text.match(/driver-mobile-shell-v\d+/);
-                    return match ? match[0] : "";
-                })
-                .catch(function () { return ""; });
         }
         function revealModal() {
             if (updateModal) {
@@ -4766,73 +4759,193 @@ window.bindDriverMobileShell = function () {
                 updateModal.hidden = true;
             }
         }
-        function applyUpdate(registration) {
-            setStatus("Устанавливаем обновление...");
-            var worker = waitingWorker || (registration && registration.waiting);
-            if (worker) {
-                worker.postMessage({ type: "SKIP_WAITING" });
-                return;
-            }
-            if (registration && registration.update) {
-                registration.update().then(function () {
-                    worker = registration.waiting || waitingWorker;
-                    if (worker) {
-                        worker.postMessage({ type: "SKIP_WAITING" });
-                    } else {
-                        window.location.reload();
-                    }
-                }).catch(function () {
-                    setStatus("Не удалось установить обновление. Попробуйте еще раз.");
+
+        if (!runtime) {
+            runtime = {
+                registration: null,
+                registrationPromise: null,
+                waitingWorker: null,
+                activationRequestedWorker: null,
+                currentShellVersion: currentShellVersion,
+                renderUpdate: null,
+                clearUpdate: null,
+                applyPromise: null
+            };
+            runtime.requestWorkerVersion = function (worker) {
+                if (!worker || !worker.postMessage || !window.MessageChannel) {
+                    return Promise.resolve("");
+                }
+                return new Promise(function (resolve) {
+                    var channel = new MessageChannel();
+                    var timeout = window.setTimeout(function () {
+                        resolve("");
+                    }, 1200);
+                    channel.port1.onmessage = function (event) {
+                        window.clearTimeout(timeout);
+                        resolve(event.data && event.data.version ? event.data.version : "");
+                    };
+                    worker.postMessage({type: "GET_VERSION"}, [channel.port2]);
                 });
-            }
+            };
+            runtime.renderWaitingUpdate = function (registration, worker) {
+                var waitingWorker = worker || (registration && registration.waiting);
+                if (!waitingWorker) return Promise.resolve();
+                if (
+                    (registration && registration.waiting !== waitingWorker)
+                    || runtime.activationRequestedWorker === waitingWorker
+                ) {
+                    return Promise.resolve();
+                }
+                var activeWorker = (registration && registration.active)
+                    || navigator.serviceWorker.controller;
+                return Promise.all([
+                    runtime.requestWorkerVersion(activeWorker),
+                    runtime.requestWorkerVersion(waitingWorker)
+                ]).then(function (versions) {
+                    if (
+                        (registration && registration.waiting !== waitingWorker)
+                        || runtime.activationRequestedWorker === waitingWorker
+                    ) {
+                        return;
+                    }
+                    if (runtime.renderUpdate) {
+                        runtime.renderUpdate(versions[1], versions[0]);
+                    }
+                });
+            };
+            runtime.watchRegistration = function (registration) {
+                if (!registration || registration.__driverPwaRuntimeBound) return;
+                registration.__driverPwaRuntimeBound = true;
+                if (registration.waiting) {
+                    runtime.waitingWorker = registration.waiting;
+                    runtime.renderWaitingUpdate(registration, registration.waiting);
+                }
+                registration.addEventListener("updatefound", function () {
+                    var worker = registration.installing;
+                    if (!worker || !worker.addEventListener) return;
+                    worker.addEventListener("statechange", function () {
+                        if (worker.state !== "installed" || !navigator.serviceWorker.controller) return;
+                        runtime.waitingWorker = registration.waiting || worker;
+                        runtime.renderWaitingUpdate(registration, runtime.waitingWorker);
+                    });
+                });
+            };
+            runtime.ensureRegistration = function () {
+                if (runtime.registration) return Promise.resolve(runtime.registration);
+                if (runtime.registrationPromise) return runtime.registrationPromise;
+                var guard = window.AppPwaContractGuard;
+                var source = guard && typeof guard.getRegistration === "function"
+                    ? guard.getRegistration()
+                    : navigator.serviceWorker.getRegistration("{% if role_app.role_code == 'driver' %}/{% else %}/driver/{% endif %}");
+                runtime.registrationPromise = Promise.resolve(source).then(function (registration) {
+                    runtime.registration = registration || null;
+                    runtime.watchRegistration(runtime.registration);
+                    return runtime.registration;
+                }).catch(function () {
+                    return null;
+                });
+                return runtime.registrationPromise;
+            };
+            runtime.requestManualUpdate = function () {
+                if (runtime.applyPromise) return runtime.applyPromise;
+                var guard = window.AppPwaContractGuard;
+                var update = guard && typeof guard.requestManualUpdate === "function"
+                    ? guard.requestManualUpdate()
+                    : runtime.ensureRegistration().then(function (registration) {
+                        if (!registration || !registration.update) {
+                            return {status: "unavailable", registration: registration || null};
+                        }
+                        return Promise.resolve(registration.update()).then(function () {
+                            return {
+                                status: registration.waiting ? "update-ready" : "current",
+                                registration: registration
+                            };
+                        });
+                    });
+                runtime.applyPromise = Promise.resolve(update).then(function (result) {
+                    var registration = result && result.registration
+                        ? result.registration
+                        : runtime.registration;
+                    var worker = registration
+                        ? registration.waiting
+                        : runtime.waitingWorker;
+                    if (worker && runtime.activationRequestedWorker !== worker) {
+                        runtime.activationRequestedWorker = worker;
+                        runtime.waitingWorker = null;
+                        setBadge(false);
+                        hideModal();
+                        worker.postMessage({type: "SKIP_WAITING"});
+                        return result;
+                    }
+                    setStatus(result && result.status === "error"
+                        ? "Не удалось проверить обновление. Попробуйте еще раз."
+                        : "Установлена актуальная версия.");
+                    return result;
+                }).finally(function () {
+                    runtime.applyPromise = null;
+                });
+                return runtime.applyPromise;
+            };
+            window.addEventListener("app-pwa-contract-state", function (event) {
+                var detail = event && event.detail ? event.detail : {};
+                var serverVersion = detail.server && detail.server.shellVersion;
+                if (
+                    serverVersion
+                    && versionNumber(serverVersion) > versionNumber(runtime.currentShellVersion)
+                ) {
+                    if (runtime.renderUpdate) runtime.renderUpdate(serverVersion);
+                } else if (detail.ready && runtime.clearUpdate) {
+                    runtime.clearUpdate();
+                }
+            });
+            window.__driverPwaUpdateRuntime = runtime;
         }
 
-        navigator.serviceWorker.addEventListener("controllerchange", function () {
-            if (!reloading) {
-                reloading = true;
-                window.location.reload();
+        runtime.renderUpdate = function (nextVersion, baselineVersion) {
+            var next = versionNumber(nextVersion);
+            var loaded = versionNumber(currentShellVersion);
+            var baseline = versionNumber(baselineVersion || currentShellVersion);
+            if (
+                next > baseline
+                && (!baselineVersion || next >= loaded)
+            ) {
+                showUpdate(nextVersion);
             }
-        });
-
-        navigator.serviceWorker.register("/driver-sw.js", { scope: "{% if role_app.role_code == 'driver' %}/{% else %}/driver/{% endif %}" }).then(function (registration) {
-            if (registration.waiting) {
-                requestWorkerVersion(registration.waiting).then(function (version) {
-                    if (version && version !== currentShellVersion) {
-                        showUpdate(version, registration.waiting);
-                    }
-                });
+        };
+        runtime.clearUpdate = function () {
+            setBadge(false);
+        };
+        runtime.ensureRegistration().then(function (registration) {
+            var guardState = window.AppPwaContractGuard
+                && typeof window.AppPwaContractGuard.getState === "function"
+                ? window.AppPwaContractGuard.getState()
+                : null;
+            var serverVersion = guardState && guardState.server
+                ? guardState.server.shellVersion
+                : "";
+            if (versionNumber(serverVersion) > versionNumber(currentShellVersion)) {
+                showUpdate(serverVersion);
+            } else if (registration && registration.waiting) {
+                runtime.waitingWorker = registration.waiting;
+                runtime.renderWaitingUpdate(registration, registration.waiting);
             }
-            registration.addEventListener("updatefound", function () {
-                var worker = registration.installing;
-                if (!worker) {
-                    return;
-                }
-                worker.addEventListener("statechange", function () {
-                    if (worker.state === "installed" && navigator.serviceWorker.controller) {
-                        requestWorkerVersion(worker).then(function (version) {
-                            showUpdate(version || currentShellVersion, worker);
-                        });
-                    }
-                });
-            });
-            fetchLatestVersion().then(function (latestVersion) {
-                if (latestVersion && latestVersion !== currentShellVersion) {
-                    showUpdate(latestVersion, registration.waiting);
-                }
-            });
-            if (applyButton) {
+            if (applyButton && applyButton.dataset.driverPwaUpdateBound !== "true") {
+                applyButton.dataset.driverPwaUpdateBound = "true";
                 applyButton.addEventListener("click", function () {
-                    applyUpdate(registration);
+                    setStatus("Проверяем и устанавливаем обновление...");
+                    runtime.requestManualUpdate();
                 });
             }
         }).catch(function () {
             setBadge(false);
         });
 
-        if (laterButton) {
+        if (laterButton && laterButton.dataset.driverPwaUpdateBound !== "true") {
+            laterButton.dataset.driverPwaUpdateBound = "true";
             laterButton.addEventListener("click", hideModal);
         }
-        if (updateTarget) {
+        if (updateTarget && updateTarget.dataset.driverPwaUpdateBound !== "true") {
+            updateTarget.dataset.driverPwaUpdateBound = "true";
             updateTarget.addEventListener("click", function () {
                 if (updateBadge && !updateBadge.hidden) {
                     revealModal();

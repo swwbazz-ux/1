@@ -1,0 +1,63 @@
+----------------------------------------
+Exception occurred during processing of request from ('127.0.0.1', 26580)
+Traceback (most recent call last):
+  File "C:\Users\swwba\AppData\Local\Programs\Python\Python312\Lib\socketserver.py", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+  File "C:\Users\swwba\AppData\Local\Programs\Python\Python312\Lib\socketserver.py", line 362, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+  File "C:\Users\swwba\AppData\Local\Programs\Python\Python312\Lib\socketserver.py", line 766, in __init__
+    self.handle()
+  File "C:\Users\swwba\AppData\Local\Programs\Python\Python312\Lib\http\server.py", line 438, in handle
+    self.handle_one_request()
+  File "C:\Users\swwba\AppData\Local\Programs\Python\Python312\Lib\http\server.py", line 424, in handle_one_request
+    method()
+  File "C:\Users\swwba\Desktop\Проект учетная система\ПОЕКТ\СИСТЕМА_MVP\backend\tools\traffic_capture_proxy.py", line 60, in do_GET
+    self._proxy()
+  File "C:\Users\swwba\Desktop\Проект учетная система\ПОЕКТ\СИСТЕМА_MVP\backend\tools\traffic_capture_proxy.py", line 149, in _proxy
+    self.wfile.write(response_body)
+  File "C:\Users\swwba\AppData\Local\Programs\Python\Python312\Lib\socketserver.py", line 845, in write
+    self._sock.sendall(b)
+ConnectionAbortedError: [WinError 10053] Программа на вашем хост-компьютере разорвала установленное подключение
+----------------------------------------
+----------------------------------------
+Exception occurred during processing of request from ('127.0.0.1', 4462)
+Traceback (most recent call last):
+  File "C:\Users\swwba\AppData\Local\Programs\Python\Python312\Lib\socketserver.py", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+  File "C:\Users\swwba\AppData\Local\Programs\Python\Python312\Lib\socketserver.py", line 362, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+  File "C:\Users\swwba\AppData\Local\Programs\Python\Python312\Lib\socketserver.py", line 766, in __init__
+    self.handle()
+  File "C:\Users\swwba\AppData\Local\Programs\Python\Python312\Lib\http\server.py", line 438, in handle
+    self.handle_one_request()
+  File "C:\Users\swwba\AppData\Local\Programs\Python\Python312\Lib\http\server.py", line 424, in handle_one_request
+    method()
+  File "C:\Users\swwba\Desktop\Проект учетная система\ПОЕКТ\СИСТЕМА_MVP\backend\tools\traffic_capture_proxy.py", line 60, in do_GET
+    self._proxy()
+  File "C:\Users\swwba\Desktop\Проект учетная система\ПОЕКТ\СИСТЕМА_MVP\backend\tools\traffic_capture_proxy.py", line 149, in _proxy
+    self.wfile.write(response_body)
+  File "C:\Users\swwba\AppData\Local\Programs\Python\Python312\Lib\socketserver.py", line 845, in write
+    self._sock.sendall(b)
+ConnectionAbortedError: [WinError 10053] Программа на вашем хост-компьютере разорвала установленное подключение
+----------------------------------------
+----------------------------------------
+Exception occurred during processing of request from ('127.0.0.1', 30335)
+Traceback (most recent call last):
+  File "C:\Users\swwba\AppData\Local\Programs\Python\Python312\Lib\socketserver.py", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+  File "C:\Users\swwba\AppData\Local\Programs\Python\Python312\Lib\socketserver.py", line 362, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+  File "C:\Users\swwba\AppData\Local\Programs\Python\Python312\Lib\socketserver.py", line 766, in __init__
+    self.handle()
+  File "C:\Users\swwba\AppData\Local\Programs\Python\Python312\Lib\http\server.py", line 438, in handle
+    self.handle_one_request()
+  File "C:\Users\swwba\AppData\Local\Programs\Python\Python312\Lib\http\server.py", line 424, in handle_one_request
+    method()
+  File "C:\Users\swwba\Desktop\Проект учетная система\ПОЕКТ\СИСТЕМА_MVP\backend\tools\traffic_capture_proxy.py", line 60, in do_GET
+    self._proxy()
+  File "C:\Users\swwba\Desktop\Проект учетная система\ПОЕКТ\СИСТЕМА_MVP\backend\tools\traffic_capture_proxy.py", line 149, in _proxy
+    self.wfile.write(response_body)
+  File "C:\Users\swwba\AppData\Local\Programs\Python\Python312\Lib\socketserver.py", line 845, in write
+    self._sock.sendall(b)
+ConnectionAbortedError: [WinError 10053] Программа на вашем хост-компьютере разорвала установленное подключение
+----------------------------------------

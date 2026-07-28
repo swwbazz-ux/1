@@ -1,0 +1,76 @@
+{
+  "date": "2026-07-28",
+  "source_document": {
+    "name": "145_ОТЧЕТ_ОБ_ИСПРАВЛЕНИИ_ОСТАТОЧНЫХ_КАРТОЧЕК_ДОКУМЕНТА_144_28_07_2026.md",
+    "sha256": "64327C9B66FFFE53E2DC075BEAA449E530763112733B9BD858B5C5FBB80783B8",
+    "hash_matches_owner_report": true
+  },
+  "accepted_cards": [
+    "QA-TRAFFIC-P2-002-R2-R2",
+    "QA-TRAFFIC-P2-003-R2-R2",
+    "QA-TRAFFIC-P2-003-R3-R2"
+  ],
+  "javascript": {
+    "target": {
+      "passed": 59,
+      "failed": 0
+    },
+    "full": {
+      "passed": 110,
+      "failed": 0
+    }
+  },
+  "postgresql": {
+    "target": {
+      "passed": 40,
+      "failed": 0,
+      "seconds": 6.386
+    },
+    "post_concurrency": {
+      "passed": 31,
+      "failed": 0,
+      "seconds": 29.649
+    },
+    "full": {
+      "passed": 756,
+      "failed": 0,
+      "skipped": 0,
+      "seconds": 106.827
+    }
+  },
+  "django": {
+    "check": "System check identified no issues (0 silenced).",
+    "makemigrations_check_dry_run": "No changes detected"
+  },
+  "git": {
+    "branch": "codex/ready-core-pilot-2026-07-27",
+    "head": "de4de28f8c327ece377b8b133b56c76737b8da8d",
+    "origin_branch_head": "de4de28f8c327ece377b8b133b56c76737b8da8d",
+    "diff_check_exit_code": 0,
+    "commit_created": false,
+    "push_performed": false
+  },
+  "protected_contours": {
+    "sqlite": {
+      "size": 2584576,
+      "mtime_utc": "2026-07-23T17:11:26.0764680Z",
+      "sha256": "A5CC387E15454B107FE5E04ADC6801E983873AD62EB79DE76E91283E02733222"
+    },
+    "private_media": {
+      "files": 78,
+      "bytes": 3042,
+      "manifest_sha256": "49D47A6D248DDD90FEED4AFA366D5CCAE76FAA0972788B44961217CB71B91FF7"
+    },
+    "migrations": {
+      "files": 72,
+      "manifest_sha256": "9A0672A781BD00E52D23DF0DC5330B111F682A95D6646EC29A9E0F2EE58CA306"
+    },
+    "env_present": false
+  },
+  "final_listeners": {
+    "8000": 0,
+    "8001": 0,
+    "55432": 0
+  },
+  "result": "PASS"
+}

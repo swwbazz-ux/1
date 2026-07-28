@@ -150,7 +150,7 @@
                 <div class="mm-mobile-plan-ring" style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" role="img" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%">
                     {{ dispatcher_dashboard.completion_percent|default:0 }}%
                 </div>
-                <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v116</span>
+                <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v118</span>
             </div>
         </header>
 
@@ -233,7 +233,7 @@
                     <div class="mm-mobile-plan-ring" style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" role="img" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%">
                         {{ dispatcher_dashboard.completion_percent|default:0 }}%
                     </div>
-                    <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v116</span>
+                    <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v118</span>
                 </div>
             </header>
 
@@ -287,7 +287,7 @@
                     <div class="mm-mobile-plan-ring" style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" role="img" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%">
                         {{ dispatcher_dashboard.completion_percent|default:0 }}%
                     </div>
-                    <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v116</span>
+                    <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v118</span>
                 </div>
             </header>
 
@@ -340,7 +340,7 @@
                     <div class="mm-mobile-plan-ring" style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" role="img" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%">
                         {{ dispatcher_dashboard.completion_percent|default:0 }}%
                     </div>
-                    <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v116</span>
+                    <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v118</span>
                 </div>
             </header>
 
@@ -403,7 +403,7 @@
 
             <div class="mm-mobile-version-strip" aria-label="Версия приложения">
                 <span>Версия приложения</span>
-                <strong data-mm-pwa-current-shell-version>v116</strong>
+                <strong data-mm-pwa-current-shell-version>v118</strong>
                 <button type="button" data-mm-pwa-check-update>Проверить обновления</button>
             </div>
 
@@ -440,7 +440,7 @@
                             <div class="mm-mobile-plan-ring" style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" role="img" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%">
                                 {{ dispatcher_dashboard.completion_percent|default:0 }}%
                             </div>
-                            <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v116</span>
+                            <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v118</span>
                         </div>
                     </header>
 
@@ -900,7 +900,7 @@ document.addEventListener("DOMContentLoaded", function () {
     var dispatcherRealtimeConnected = true;
     var dispatcherRealtimeLastSuccessAt = 0;
     var dispatcherRealtimeLastReason = "";
-    var miningMasterShellVersion = "mining-master-mobile-shell-v116";
+    var miningMasterShellVersion = "mining-master-mobile-shell-v120";
     function readDispatcherSyncQueue() {
         try {
             return JSON.parse(window.localStorage.getItem(dispatcherSyncQueueKey) || "[]");
@@ -1278,8 +1278,6 @@ document.addEventListener("DOMContentLoaded", function () {
         freshShell.scrollTop = state.scrollTop || 0;
     }
     var miningMasterMobileRefreshPromise = null;
-    var miningMasterMobileLastRefreshAt = 0;
-    var miningMasterMobilePassiveReconcileMs = 10000;
     function refreshMobileBoardFromServer(options) {
         options = options || {};
         if (miningMasterMobileRefreshPromise) {
@@ -1325,7 +1323,6 @@ document.addEventListener("DOMContentLoaded", function () {
                 replacedShell.scrollTop = state.scrollTop || 0;
             }
             updateDispatcherSyncIndicator();
-            miningMasterMobileLastRefreshAt = Date.now();
             return true;
         }).finally(function () {
             miningMasterMobileRefreshPromise = null;
@@ -1355,6 +1352,13 @@ document.addEventListener("DOMContentLoaded", function () {
             return true;
         }
         return false;
+    }
+    window.miningMasterHasPendingWork = isMobileOperationalRefreshUnsafe;
+    if (
+        window.AppPwaContractGuard
+        && typeof window.AppPwaContractGuard.registerUnsafeCheck === "function"
+    ) {
+        window.AppPwaContractGuard.registerUnsafeCheck(isMobileOperationalRefreshUnsafe);
     }
     var miningMasterRealtimeHardLagLimit = 150;
     var dispatcherRealtimeHardLagLimit = 150;
@@ -1584,49 +1588,6 @@ document.addEventListener("DOMContentLoaded", function () {
             return { deferred: true, reason: "mobile_refresh_error" };
         });
     };
-    function runMiningMasterPassiveReconcile(reason) {
-        if (document.hidden || !isMiningMasterMobilePage() || isMobileOperationalRefreshUnsafe()) {
-            return;
-        }
-        if (Date.now() - miningMasterMobileLastRefreshAt < miningMasterMobilePassiveReconcileMs) {
-            return;
-        }
-        miningMasterMobileLastRefreshAt = Date.now();
-        if (window.AppRealtime && typeof window.AppRealtime.poll === "function") {
-            try {
-                Promise.resolve(window.AppRealtime.poll({ force: true })).catch(function () {
-                    miningMasterMobileLastRefreshAt = 0;
-                });
-            } catch (error) {
-                miningMasterMobileLastRefreshAt = 0;
-            }
-        }
-    }
-    window.addEventListener("operational-state-refresh-applied", function () {
-        miningMasterMobileLastRefreshAt = Date.now();
-    });
-    window.addEventListener("operational-state-poll-reset", function () {
-        window.setTimeout(function () {
-            runMiningMasterPassiveReconcile("poll_reset");
-        }, 300);
-    });
-    window.setInterval(function () {
-        runMiningMasterPassiveReconcile("interval");
-    }, miningMasterMobilePassiveReconcileMs);
-    ["focus", "pageshow", "online"].forEach(function (eventName) {
-        window.addEventListener(eventName, function () {
-            window.setTimeout(function () {
-                runMiningMasterPassiveReconcile(eventName);
-            }, 300);
-        });
-    });
-    document.addEventListener("visibilitychange", function () {
-        if (!document.hidden) {
-            window.setTimeout(function () {
-                runMiningMasterPassiveReconcile("visibilitychange");
-            }, 300);
-        }
-    });
     var dispatcherNotice = document.querySelector("[data-dispatcher-notice]");
     var dispatcherNoticeMessage = document.querySelector("[data-dispatcher-notice-message]");
     var dispatcherNoticeClose = document.querySelector("[data-dispatcher-notice-close]");
@@ -1666,11 +1627,10 @@ document.addEventListener("DOMContentLoaded", function () {
     var miningMasterUpdateApply = document.querySelector("[data-mm-pwa-update-apply]");
     var miningMasterServiceWorkerRegistration = null;
     var miningMasterWaitingWorker = null;
-    var miningMasterUpdateReloading = false;
+    var miningMasterWaitingInspectionGeneration = 0;
+    var miningMasterContractSyncGeneration = 0;
     var miningMasterUpdateStorageKey = "mining-master-pwa-update-available";
-    var miningMasterUpdateCheckIntervalMs = 60000;
-    var miningMasterUpdateCheckTimer = null;
-    var miningMasterUpdateSilentCheckInFlight = false;
+    var miningMasterManualUpdatePromise = null;
     function formatMiningMasterVersion(version) {
         return String(version || "неизвестно").replace("mining-master-mobile-shell-", "");
     }
@@ -1855,13 +1815,29 @@ document.addEventListener("DOMContentLoaded", function () {
         if (miningMasterUpdateApply) miningMasterUpdateApply.focus();
     }
     function inspectMiningMasterWaitingWorker(registration, worker, options) {
-        if (!registration || !worker || worker === navigator.serviceWorker.controller) {
+        if (
+            !registration
+            || !worker
+            || registration.waiting !== worker
+            || worker === navigator.serviceWorker.controller
+            || worker.state === "activated"
+        ) {
             return Promise.resolve(false);
         }
+        var inspectionGeneration = ++miningMasterWaitingInspectionGeneration;
         return Promise.all([
             requestMiningMasterWorkerVersion(registration.active || navigator.serviceWorker.controller),
             requestMiningMasterWorkerVersion(worker)
         ]).then(function (versions) {
+            if (
+                inspectionGeneration !== miningMasterWaitingInspectionGeneration
+                || miningMasterServiceWorkerRegistration !== registration
+                || registration.waiting !== worker
+                || worker === navigator.serviceWorker.controller
+                || worker.state === "activated"
+            ) {
+                return false;
+            }
             showMiningMasterUpdateModal(worker, versions[1], versions[0]);
             return true;
         }).catch(function () {
@@ -1871,19 +1847,15 @@ document.addEventListener("DOMContentLoaded", function () {
             return false;
         });
     }
-    function fetchMiningMasterServerVersion() {
-        return fetch("/mining-master-" + "sw.js?version_check=" + Date.now(), {
-            cache: "no-store",
-            credentials: "same-origin"
-        }).then(function (response) {
-            if (!response.ok) return "";
-            return response.text();
-        }).then(function (text) {
-            var match = String(text || "").match(/mining-master-mobile-shell-v\d+/);
-            return match ? match[0] : "";
-        }).catch(function () {
-            return "";
-        });
+    function miningMasterServerContractVersion() {
+        var guard = window.AppPwaContractGuard;
+        var state = guard && typeof guard.getState === "function"
+            ? guard.getState()
+            : null;
+        var version = state && state.server ? state.server.shellVersion : "";
+        return /^mining-master-mobile-shell-v\d+$/.test(String(version || ""))
+            ? String(version)
+            : "";
     }
     function getMiningMasterCurrentWorkerVersion() {
         if (!("serviceWorker" in navigator)) {
@@ -1903,18 +1875,41 @@ document.addEventListener("DOMContentLoaded", function () {
             return miningMasterShellVersion;
         });
     }
-    function checkMiningMasterPwaUpdateSilently() {
-        refreshMiningMasterUpdateIndicatorFromStorage();
-        if (miningMasterUpdateSilentCheckInFlight) {
-            return Promise.resolve(false);
+    function syncMiningMasterPwaContractState() {
+        var syncGeneration = ++miningMasterContractSyncGeneration;
+        if (
+            miningMasterWaitingWorker
+            && (
+                !miningMasterServiceWorkerRegistration
+                || miningMasterServiceWorkerRegistration.waiting !== miningMasterWaitingWorker
+                || miningMasterWaitingWorker === navigator.serviceWorker.controller
+                || miningMasterWaitingWorker.state === "activated"
+            )
+        ) {
+            miningMasterWaitingInspectionGeneration += 1;
+            miningMasterWaitingWorker = null;
+            closeMiningMasterUpdateModal();
+            setMiningMasterUpdateIndicator(false);
         }
-        miningMasterUpdateSilentCheckInFlight = true;
-        return Promise.all([
-            getMiningMasterCurrentWorkerVersion(),
-            fetchMiningMasterServerVersion()
-        ]).then(function (versions) {
-            var currentVersion = versions && versions[0] ? versions[0] : miningMasterShellVersion;
-            var serverVersion = versions && versions[1] ? versions[1] : "";
+        refreshMiningMasterUpdateIndicatorFromStorage();
+        var controllerSnapshot = navigator.serviceWorker.controller;
+        var registrationSnapshot = miningMasterServiceWorkerRegistration;
+        var activeWorkerSnapshot = registrationSnapshot && registrationSnapshot.active;
+        function isCurrentSync() {
+            return (
+                syncGeneration === miningMasterContractSyncGeneration
+                && navigator.serviceWorker.controller === controllerSnapshot
+                && miningMasterServiceWorkerRegistration === registrationSnapshot
+                && (
+                    !registrationSnapshot
+                    || registrationSnapshot.active === activeWorkerSnapshot
+                )
+            );
+        }
+        return getMiningMasterCurrentWorkerVersion().then(function (currentVersion) {
+            if (!isCurrentSync()) return false;
+            currentVersion = currentVersion || miningMasterShellVersion;
+            var serverVersion = miningMasterServerContractVersion();
             setMiningMasterVisibleVersion(currentVersion);
             if (!serverVersion) {
                 return false;
@@ -1928,101 +1923,91 @@ document.addEventListener("DOMContentLoaded", function () {
             }
             return false;
         }).catch(function () {
+            if (!isCurrentSync()) return false;
             refreshMiningMasterUpdateIndicatorFromStorage(miningMasterShellVersion);
             return false;
-        }).finally(function () {
-            miningMasterUpdateSilentCheckInFlight = false;
         });
-    }
-    function startMiningMasterPwaUpdateWatcher() {
-        refreshMiningMasterUpdateIndicatorFromStorage();
-        if (miningMasterUpdateCheckTimer) {
-            window.clearInterval(miningMasterUpdateCheckTimer);
-        }
-        checkMiningMasterPwaUpdateSilently();
-        miningMasterUpdateCheckTimer = window.setInterval(checkMiningMasterPwaUpdateSilently, miningMasterUpdateCheckIntervalMs);
     }
     function checkMiningMasterPwaUpdateManually() {
         if (!("serviceWorker" in navigator)) {
             showMiningMasterNoUpdateModal(miningMasterShellVersion);
-            return;
+            return Promise.resolve(false);
         }
-        var statusTarget = miningMasterUpdateStatus;
+        if (miningMasterManualUpdatePromise) {
+            return miningMasterManualUpdatePromise;
+        }
         setMiningMasterCheckUpdateButtonsDisabled(true);
-        if (statusTarget) {
-            statusTarget.textContent = "Проверяем новую версию приложения...";
+        if (miningMasterUpdateStatus) {
+            miningMasterUpdateStatus.textContent = "Проверяем новую версию приложения...";
         }
-        var registrationPromise = miningMasterServiceWorkerRegistration
+        var guard = window.AppPwaContractGuard;
+        var registrationSource = miningMasterServiceWorkerRegistration
             ? Promise.resolve(miningMasterServiceWorkerRegistration)
-            : navigator.serviceWorker.getRegistration("{% if role_app.role_code == 'mining_master' %}/{% else %}/mining-master/{% endif %}");
-        var checkedRegistration = null;
+            : guard && typeof guard.getRegistration === "function"
+                ? guard.getRegistration()
+                : navigator.serviceWorker.getRegistration("{% if role_app.role_code == 'mining_master' %}/{% else %}/mining-master/{% endif %}");
         var currentVersion = "";
-        var serverVersion = "";
-        registrationPromise.then(function (registration) {
-            checkedRegistration = registration || null;
-            if (!registration) {
-                return Promise.all([Promise.resolve(miningMasterShellVersion), fetchMiningMasterServerVersion()]);
-            }
+        miningMasterManualUpdatePromise = Promise.resolve(registrationSource).then(function (registration) {
+            if (!registration) throw new Error("Service worker недоступен.");
             miningMasterServiceWorkerRegistration = registration;
-            return Promise.all([
-                requestMiningMasterWorkerVersion(registration.active || navigator.serviceWorker.controller).then(function (version) {
-                    return version || miningMasterShellVersion;
-                }),
-                fetchMiningMasterServerVersion()
-            ]);
-        }).then(function (versions) {
-            currentVersion = versions && versions[0] ? versions[0] : miningMasterShellVersion;
-            serverVersion = versions && versions[1] ? versions[1] : "";
-            if (!serverVersion) {
-                throw new Error("Не удалось получить версию сервера.");
-            }
-            if (formatMiningMasterVersion(currentVersion) === formatMiningMasterVersion(serverVersion)) {
-                showMiningMasterNoUpdateModal(currentVersion);
-                return true;
-            }
-            setMiningMasterUpdateIndicator(true, serverVersion, currentVersion);
-            var registration = checkedRegistration;
-            if (!registration) {
-                throw new Error("Service worker недоступен.");
-            }
-            if (registration.waiting) {
-                return inspectMiningMasterWaitingWorker(registration, registration.waiting, { manual: true });
-            }
-            return registration.update().then(function () {
+            return requestMiningMasterWorkerVersion(
+                registration.active || navigator.serviceWorker.controller
+            ).then(function (version) {
+                currentVersion = version || miningMasterShellVersion;
+                var update = guard && typeof guard.requestManualUpdate === "function"
+                    ? guard.requestManualUpdate()
+                    : registration.update
+                        ? registration.update().then(function () {
+                            return {status: "current", registration: registration};
+                        })
+                        : Promise.resolve({status: "unavailable", registration: registration});
+                return Promise.resolve(update);
+            }).then(function (result) {
+                registration = result && result.registration
+                    ? result.registration
+                    : registration;
                 if (registration.waiting) {
                     return inspectMiningMasterWaitingWorker(registration, registration.waiting, { manual: true });
                 }
-                return new Promise(function (resolve) {
-                    window.setTimeout(function () {
-                        if (registration.waiting) {
-                            inspectMiningMasterWaitingWorker(registration, registration.waiting, { manual: true }).then(resolve);
-                        } else {
-                            resolve(false);
-                        }
-                    }, 900);
-                });
+                var serverVersion = miningMasterServerContractVersion();
+                if (
+                    !serverVersion
+                    || formatMiningMasterVersion(currentVersion)
+                        === formatMiningMasterVersion(serverVersion)
+                ) {
+                    showMiningMasterNoUpdateModal(currentVersion);
+                    return true;
+                }
+                setMiningMasterUpdateIndicator(true, serverVersion, currentVersion);
+                showMiningMasterUpdateModal(null, serverVersion, currentVersion);
+                return false;
             });
-        }).then(function (found) {
-            if (found) return;
-            if (formatMiningMasterVersion(currentVersion) === formatMiningMasterVersion(serverVersion)) {
-                showMiningMasterNoUpdateModal(currentVersion);
-                return;
-            }
-            if (miningMasterUpdateStatus) {
-                miningMasterUpdateStatus.textContent = "Сервер отдает новую версию, но браузер еще не подготовил установку. Закройте и снова откройте приложение или повторите проверку.";
-            }
-            showMiningMasterUpdateModal(null, serverVersion, currentVersion);
         }).catch(function () {
             if (miningMasterUpdateStatus) {
                 miningMasterUpdateStatus.textContent = "Не удалось проверить обновление. Проверьте связь и повторите.";
             }
+            return false;
         }).finally(function () {
             setMiningMasterCheckUpdateButtonsDisabled(false);
+            miningMasterManualUpdatePromise = null;
         });
+        return miningMasterManualUpdatePromise;
     }
     function applyMiningMasterPwaUpdate() {
-        if (!miningMasterWaitingWorker) {
+        var waitingWorker = miningMasterWaitingWorker;
+        if (!waitingWorker) {
             closeMiningMasterUpdateModal();
+            return;
+        }
+        if (
+            !miningMasterServiceWorkerRegistration
+            || miningMasterServiceWorkerRegistration.waiting !== waitingWorker
+            || waitingWorker === navigator.serviceWorker.controller
+            || waitingWorker.state === "activated"
+        ) {
+            miningMasterWaitingWorker = null;
+            closeMiningMasterUpdateModal();
+            syncMiningMasterPwaContractState();
             return;
         }
         if (!miningMasterUpdateStatus) return;
@@ -2032,9 +2017,19 @@ document.addEventListener("DOMContentLoaded", function () {
         }
         setMiningMasterUpdateInstalling(true);
         miningMasterUpdateStatus.textContent = "Устанавливаем новую версию приложения...";
+        if (miningMasterUpdateModal) miningMasterUpdateModal.hidden = true;
+        miningMasterWaitingWorker = null;
         try {
-            miningMasterWaitingWorker.postMessage({ type: "SKIP_WAITING" });
+            waitingWorker.postMessage({ type: "SKIP_WAITING" });
         } catch (error) {
+            if (
+                miningMasterServiceWorkerRegistration
+                && miningMasterServiceWorkerRegistration.waiting === waitingWorker
+                && waitingWorker !== navigator.serviceWorker.controller
+                && waitingWorker.state !== "activated"
+            ) {
+                miningMasterWaitingWorker = waitingWorker;
+            }
             miningMasterUpdateStatus.textContent = "Не удалось запустить обновление. Закройте и снова откройте приложение.";
             setMiningMasterUpdateInstalling(false);
         }
@@ -2058,28 +2053,14 @@ document.addEventListener("DOMContentLoaded", function () {
             }
         });
     }
-    if ("serviceWorker" in navigator) {
-        navigator.serviceWorker.addEventListener("controllerchange", function () {
-            if (miningMasterUpdateReloading) return;
-            miningMasterUpdateReloading = true;
-            setMiningMasterUpdateIndicator(false);
-            if (miningMasterUpdateStatus) {
-                miningMasterUpdateStatus.textContent = "Новая версия установлена. Открываем свежий экран...";
-            }
-            window.setTimeout(function () {
-                window.location.reload();
-            }, 350);
-        });
-    }
     refreshMiningMasterUpdateIndicatorFromStorage();
     window.MiningMasterPwaUpdates = {
-        checkNow: checkMiningMasterPwaUpdateSilently,
+        checkNow: syncMiningMasterPwaContractState,
         hydrateIndicator: refreshMiningMasterUpdateIndicatorFromStorage,
         getState: function () {
             return {
                 currentVersion: miningMasterShellVersion,
-                storedUpdate: readMiningMasterStoredUpdate(),
-                checkIntervalMs: miningMasterUpdateCheckIntervalMs
+                storedUpdate: readMiningMasterStoredUpdate()
             };
         }
     };
@@ -5109,22 +5090,20 @@ document.addEventListener("DOMContentLoaded", function () {
                 });
             });
         }
-        navigator.serviceWorker.register("/mining-master-sw.js", { scope: "{% if role_app.role_code == 'mining_master' %}/{% else %}/mining-master/{% endif %}" }).then(function (registration) {
+        var miningMasterGuard = window.AppPwaContractGuard;
+        var miningMasterRegistrationSource = miningMasterGuard
+            && typeof miningMasterGuard.getRegistration === "function"
+            ? miningMasterGuard.getRegistration()
+            : navigator.serviceWorker.getRegistration("{% if role_app.role_code == 'mining_master' %}/{% else %}/mining-master/{% endif %}");
+        Promise.resolve(miningMasterRegistrationSource).then(function (registration) {
+            if (!registration) return;
             miningMasterServiceWorkerRegistration = registration;
             watchMiningMasterRegistration(registration);
             requestMiningMasterWorkerVersion(registration.active || navigator.serviceWorker.controller).then(setMiningMasterVisibleVersion);
-            registration.update().catch(function () {});
-            startMiningMasterPwaUpdateWatcher();
-            document.addEventListener("visibilitychange", function () {
-                if (!document.hidden) {
-                    requestMiningMasterWorkerVersion(registration.active || navigator.serviceWorker.controller).then(setMiningMasterVisibleVersion);
-                    registration.update().catch(function () {});
-                    checkMiningMasterPwaUpdateSilently();
-                }
-            });
-            window.addEventListener("online", checkMiningMasterPwaUpdateSilently);
-            window.addEventListener("focus", checkMiningMasterPwaUpdateSilently);
+            syncMiningMasterPwaContractState();
         }).catch(function () {});
+        window.addEventListener("app-pwa-contract-state", syncMiningMasterPwaContractState);
+        navigator.serviceWorker.addEventListener("controllerchange", syncMiningMasterPwaContractState);
         {% else %}
         navigator.serviceWorker.register("/dispatcher-sw.js", { scope: "{% if role_app.role_code == 'dispatcher' %}/{% else %}/dispatcher/{% endif %}" }).then(function (registration) {
             registration.update().catch(function () {});
@@ -5157,11 +5136,6 @@ document.addEventListener("DOMContentLoaded", function () {
         if (dispatcherRealtimeConnected) {
             dispatcherRealtimeLastSuccessAt = detail.lastSuccessAt || Date.now();
             scheduleDispatcherSyncFlush(0);
-            if (isMiningMasterMobilePage()) {
-                window.setTimeout(function () {
-                    runMiningMasterPassiveReconcile("connection_restored");
-                }, 250);
-            }
         }
         updateDispatcherSyncIndicator();
     });

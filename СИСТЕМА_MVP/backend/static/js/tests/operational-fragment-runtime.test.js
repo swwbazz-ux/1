@@ -329,49 +329,21 @@ test("four production refresh handlers use narrow fragments, never a full HTML G
 });
 
 
-test("Mining Master passive reconcile polls state but does not request a fragment without an event", () => {
-    const passiveReconcileSource = extractBraceBlock(
-        DISPATCHER_TEMPLATE_SOURCE,
-        "function runMiningMasterPassiveReconcile(reason)",
-        "Mining Master passive reconcile"
-    );
-    const counters = {polls: 0, fragmentRefreshes: 0};
-    const runtimeWindow = {
-        AppRealtime: {
-            poll(options) {
-                counters.polls += 1;
-                assert.equal(options.force, true);
-            },
-        },
-    };
-    const context = {
-        window: runtimeWindow,
-        document: {hidden: false},
-        Date: {now: () => 20000},
-        Promise,
-        counters,
-    };
-    vm.runInNewContext(
-        `
-        var miningMasterMobileLastRefreshAt = 0;
-        var miningMasterMobilePassiveReconcileMs = 10000;
-        function isMiningMasterMobilePage() { return true; }
-        function isMobileOperationalRefreshUnsafe() { return false; }
-        function refreshMobileBoardFromServer() {
-            counters.fragmentRefreshes += 1;
-            return Promise.resolve(true);
-        }
-        ${passiveReconcileSource}
-        runMiningMasterPassiveReconcile("interval");
-        `,
-        context,
-        {filename: "templates/trips/dispatcher_control.html#passive-reconcile"}
-    );
-
-    assert.equal(counters.polls, 1);
+test("Mining Master delegates state polling exclusively to the shared realtime client", () => {
     assert.equal(
-        counters.fragmentRefreshes,
-        0,
-        "A timer/focus/online wake without a relevant event must not load a fragment."
+        /\brunMiningMasterPassiveReconcile\b/.test(DISPATCHER_TEMPLATE_SOURCE),
+        false,
+        "The screen must not keep a second forced-poll entry point beside AppRealtime."
+    );
+    assert.equal(
+        /\bminingMasterMobilePassiveReconcileMs\b/.test(DISPATCHER_TEMPLATE_SOURCE),
+        false,
+        "The removed ten-second polling cadence must not be reintroduced."
+    );
+    assert.equal(
+        /AppRealtime\s*\.\s*poll\s*\(\s*\{\s*force\s*:\s*true\s*\}\s*\)/
+            .test(DISPATCHER_TEMPLATE_SOURCE),
+        false,
+        "Focus, visibility, online and connection recovery must use shared AppRealtime scheduling."
     );
 });

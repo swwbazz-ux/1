@@ -1,0 +1,138 @@
+{
+  "responsive": [
+    {
+      "role": "driver",
+      "shell_version": "driver-mobile-shell-v113",
+      "viewport": "1280x720",
+      "contract_ready": true,
+      "contract_locked": false,
+      "horizontal_overflow_px": 0,
+      "console_errors": 0,
+      "update_modal_hidden": true,
+      "update_badge_hidden": true
+    },
+    {
+      "role": "driver",
+      "shell_version": "driver-mobile-shell-v113",
+      "viewport": "390x844",
+      "contract_ready": true,
+      "contract_locked": false,
+      "horizontal_overflow_px": 0,
+      "console_errors": 0,
+      "update_modal_hidden": true,
+      "update_badge_hidden": true
+    },
+    {
+      "role": "excavator_operator",
+      "shell_version": "excavator-mobile-shell-v126",
+      "viewport": "1280x720",
+      "contract_ready": true,
+      "contract_locked": false,
+      "horizontal_overflow_px": 0,
+      "console_errors": 0,
+      "controlled_update_applied": true,
+      "update_modal_hidden": true,
+      "update_badge_hidden": true
+    },
+    {
+      "role": "excavator_operator",
+      "shell_version": "excavator-mobile-shell-v126",
+      "viewport": "390x844",
+      "contract_ready": true,
+      "contract_locked": false,
+      "horizontal_overflow_px": 0,
+      "console_errors": 0,
+      "update_modal_hidden": true,
+      "update_badge_hidden": true
+    },
+    {
+      "role": "mining_master",
+      "shell_version": "mining-master-mobile-shell-v119",
+      "viewport": "1280x720",
+      "contract_ready": true,
+      "contract_locked": false,
+      "horizontal_overflow_px": 0,
+      "console_errors": 0,
+      "controlled_update_applied": true,
+      "update_modal_hidden": true,
+      "update_badge_hidden": true
+    },
+    {
+      "role": "mining_master",
+      "shell_version": "mining-master-mobile-shell-v119",
+      "viewport": "390x844",
+      "contract_ready": true,
+      "contract_locked": false,
+      "horizontal_overflow_px": 0,
+      "console_errors": 0,
+      "update_modal_hidden": true,
+      "update_badge_hidden": true
+    }
+  ],
+  "ready_pwa_smoke": [
+    {
+      "role": "admin",
+      "shell_version": "system-admin-shell-v19",
+      "contract_ready": true,
+      "contract_locked": false,
+      "horizontal_overflow_px": 0,
+      "console_errors": 0
+    },
+    {
+      "role": "oup",
+      "shell_version": "oup-shell-v21",
+      "contract_ready": true,
+      "contract_locked": false,
+      "horizontal_overflow_px": 0,
+      "console_errors": 0
+    },
+    {
+      "role": "deputy_mining_manager",
+      "shell_version": "deputy-mining-manager-desktop-shell-v14",
+      "contract_ready": true,
+      "contract_locked": false,
+      "horizontal_overflow_px": 0,
+      "console_errors": 0
+    },
+    {
+      "role": "dispatcher",
+      "shell_version": "dispatcher-desktop-shell-v41",
+      "contract_ready": true,
+      "contract_locked": false,
+      "horizontal_overflow_px": 0,
+      "console_errors": 0
+    },
+    {
+      "role": "mining_master",
+      "shell_version": "mining-master-mobile-shell-v119",
+      "contract_ready": true,
+      "contract_locked": false,
+      "horizontal_overflow_px": 0,
+      "console_errors": 0
+    },
+    {
+      "role": "excavator_operator",
+      "shell_version": "excavator-mobile-shell-v126",
+      "contract_ready": true,
+      "contract_locked": false,
+      "horizontal_overflow_px": 0,
+      "console_errors": 0
+    },
+    {
+      "role": "driver",
+      "shell_version": "driver-mobile-shell-v113",
+      "contract_ready": true,
+      "contract_locked": false,
+      "horizontal_overflow_px": 0,
+      "console_errors": 0
+    },
+    {
+      "role": "manager",
+      "shell_version": "management-shell-v5",
+      "contract_ready": true,
+      "contract_locked": false,
+      "horizontal_overflow_px": 0,
+      "console_errors": 0
+    }
+  ]
+}

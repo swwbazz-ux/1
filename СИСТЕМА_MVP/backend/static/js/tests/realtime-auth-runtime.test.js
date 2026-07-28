@@ -341,6 +341,17 @@ function createRuntime(options) {
                 timer.callback();
             }
         },
+        runOneTimeoutByDelay(targetDelay) {
+            for (const [timerId, timer] of Array.from(timeouts.entries())) {
+                if (timer.delay !== targetDelay) {
+                    continue;
+                }
+                timeouts.delete(timerId);
+                timer.callback();
+                return true;
+            }
+            return false;
+        },
     };
 }
 
@@ -728,6 +739,153 @@ test("work and observer screens use 5s and 15s polling instead of the global sec
     assert.equal(manager.window.AppRealtime.getDebugState().pollIntervalMs, 15000);
     assert.equal(worker.intervalDelays().includes(1000), false);
     assert.equal(observer.intervalDelays().includes(1000), false);
+});
+
+test("Mining Master runs twelve visible hours with only the shared five-second realtime timer", async () => {
+    const twelveHoursInFiveSecondTicks = (12 * 60 * 60 * 1000) / 5000;
+    const runtime = createRuntime({
+        currentHref: "http://mining-master.localhost/mining-master/assignments/",
+        idleDelayMs: -1,
+        screens: [{
+            name: "mining-master",
+            role: "mining_master",
+            mode: "custom",
+            path: "^/mining-master/assignments/?$",
+            customRefresh: true,
+        }],
+        fetch() {
+            return Promise.resolve(response(200, {
+                version: 7,
+                role_active: true,
+                relevant: false,
+                events: [],
+                events_truncated: false,
+            }));
+        },
+        applyOperationalStateRefresh() {
+            assert.fail("A stable version must not request an operational fragment.");
+        },
+    });
+    await settlePromises();
+
+    assert.equal(runtime.fetchCalls.length, 1, "the visible screen performs one initial state GET");
+    assert.equal(
+        runtime.timeoutDelays().includes(10000),
+        false,
+        "the runtime must not schedule a second ten-second state timer"
+    );
+
+    for (let tick = 0; tick < twelveHoursInFiveSecondTicks; tick += 1) {
+        assert.equal(
+            runtime.runOneTimeoutByDelay(5000),
+            true,
+            `shared realtime tick ${tick + 1} must stay scheduled`
+        );
+        await settlePromises();
+    }
+
+    assert.equal(
+        runtime.fetchCalls.length,
+        twelveHoursInFiveSecondTicks + 1,
+        "twelve hours must contain only the initial GET and shared five-second realtime GETs"
+    );
+    assert.equal(runtime.timeoutDelays().includes(10000), false);
+});
+
+test("Mining Master loads one JSON fragment for a relevant event and none for an irrelevant event", async () => {
+    const fragmentRefreshes = [];
+    const runtime = createRuntime({
+        currentHref: "http://mining-master.localhost/mining-master/assignments/",
+        idleDelayMs: -1,
+        screens: [{
+            name: "mining-master",
+            role: "mining_master",
+            mode: "custom",
+            path: "^/mining-master/assignments/?$",
+            customRefresh: true,
+        }],
+        fetchResponses: [
+            response(200, {
+                version: 8,
+                role_active: true,
+                relevant: false,
+                events: [],
+                events_truncated: false,
+            }),
+            response(200, {
+                version: 9,
+                role_active: true,
+                relevant: true,
+                events: [{
+                    version: 9,
+                    type: "assignment_changed",
+                    payload: {excavator_id: 20, truck_id: 10},
+                }],
+                events_truncated: false,
+            }),
+        ],
+        applyOperationalStateRefresh(context) {
+            fragmentRefreshes.push(context);
+            return Promise.resolve({applied: true});
+        },
+    });
+    await settlePromises();
+
+    assert.equal(
+        fragmentRefreshes.length,
+        0,
+        "a server-filtered irrelevant delta must not invoke the JSON fragment handler"
+    );
+
+    runtime.window.AppRealtime.poll({force: true});
+    await settlePromises();
+
+    assert.equal(fragmentRefreshes.length, 1);
+    assert.equal(fragmentRefreshes[0].version, 9);
+    assert.equal(fragmentRefreshes[0].events.length, 1);
+    assert.equal(fragmentRefreshes[0].events[0].type, "assignment_changed");
+    assert.equal(runtime.reloads.length, 0, "a relevant event is applied without a full HTML reload");
+});
+
+test("Mining Master coalesces focus, visibility and online catch-up into one state request", async () => {
+    const runtime = createRuntime({
+        currentHref: "http://mining-master.localhost/mining-master/assignments/",
+        screens: [{
+            name: "mining-master",
+            role: "mining_master",
+            mode: "custom",
+            path: "^/mining-master/assignments/?$",
+            customRefresh: true,
+        }],
+        fetch() {
+            return Promise.resolve(response(200, {
+                version: 7,
+                role_active: true,
+                relevant: false,
+                events: [],
+                events_truncated: false,
+            }));
+        },
+    });
+    await settlePromises();
+    assert.equal(runtime.fetchCalls.length, 1);
+
+    runtime.window.dispatchEvent({type: "focus"});
+    runtime.document.dispatchEvent({type: "visibilitychange"});
+    runtime.window.dispatchEvent({type: "online"});
+
+    assert.equal(
+        runtime.fetchCalls.length,
+        1,
+        "the burst must stay queued until the shared zero-delay wake runs"
+    );
+    runtime.flushZeroTimers();
+    await settlePromises();
+
+    assert.equal(runtime.fetchCalls.length, 2, "the three recovery signals must coalesce into one GET");
+    runtime.flushZeroTimers();
+    await settlePromises();
+    assert.equal(runtime.fetchCalls.length, 2, "the wake must not leave a polling storm behind");
 });
 
 test("hidden tab performs no initial or timer-driven realtime requests", async () => {

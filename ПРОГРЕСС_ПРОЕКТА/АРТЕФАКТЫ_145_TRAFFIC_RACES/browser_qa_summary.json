@@ -1,0 +1,159 @@
+{
+  "date": "2026-07-28",
+  "browser": "Codex in-app Browser",
+  "server_start": "START_SERVER_MVP.bat",
+  "server_stop": "STOP_SERVER_MVP.bat",
+  "responsive_roles": [
+    {
+      "role": "driver",
+      "url": "http://driver.localhost:8000/driver/",
+      "pwa_version": "driver-mobile-shell-v114",
+      "desktop": {
+        "actual_viewport": "1280x720",
+        "authenticated": true,
+        "ready": true,
+        "locked": false,
+        "horizontal_overflow_px": 0,
+        "update_ui_hidden": true,
+        "console_errors": 0
+      },
+      "mobile": {
+        "actual_viewport": "390x844",
+        "authenticated": true,
+        "ready": true,
+        "locked": false,
+        "horizontal_overflow_px": 0,
+        "shell_width_px": 390,
+        "update_ui_hidden": true,
+        "console_errors": 0
+      }
+    },
+    {
+      "role": "excavator",
+      "url": "http://excavator.localhost:8000/excavator/work/",
+      "pwa_version": "excavator-mobile-shell-v127",
+      "controlled_update": "v126 -> v127 through the visible Update action",
+      "desktop": {
+        "actual_viewport": "1280x720",
+        "authenticated": true,
+        "ready": true,
+        "locked": false,
+        "horizontal_overflow_px": 0,
+        "update_ui_hidden_after_update": true,
+        "console_errors": 0
+      },
+      "mobile": {
+        "actual_viewport": "390x844",
+        "authenticated": true,
+        "ready": true,
+        "locked": false,
+        "horizontal_overflow_px": 0,
+        "shell_width_px": 390,
+        "update_ui_hidden": true,
+        "console_errors": 0
+      }
+    },
+    {
+      "role": "mining_master",
+      "url": "http://mining-master.localhost:8000/mining-master/assignments/",
+      "pwa_version": "mining-master-mobile-shell-v120",
+      "controlled_update": "v119 -> v120 through the visible Update action",
+      "desktop": {
+        "actual_viewport": "1280x720",
+        "authenticated": true,
+        "ready": true,
+        "locked": false,
+        "horizontal_overflow_px": 0,
+        "update_ui_hidden_after_update": true,
+        "console_errors": 0
+      },
+      "mobile": {
+        "actual_viewport": "390x844",
+        "authenticated": true,
+        "ready": true,
+        "locked": false,
+        "horizontal_overflow_px": 0,
+        "update_ui_hidden": true,
+        "console_errors": 0
+      }
+    }
+  ],
+  "eight_pwa_smoke": [
+    {
+      "role": "system_admin",
+      "path": "/system-admin/",
+      "pwa_version": "system-admin-shell-v19",
+      "actual_viewport": "1280x720",
+      "authenticated": true,
+      "ready": true,
+      "locked": false,
+      "horizontal_overflow_px": 0,
+      "console_errors": 0
+    },
+    {
+      "role": "oup",
+      "path": "/oup/employees/",
+      "pwa_version": "oup-shell-v21",
+      "actual_viewport": "1280x720",
+      "authenticated": true,
+      "ready": true,
+      "locked": false,
+      "horizontal_overflow_px": 0,
+      "console_errors": 0
+    },
+    {
+      "role": "deputy_mining_manager",
+      "path": "/deputy-mining-manager/",
+      "pwa_version": "deputy-mining-manager-desktop-shell-v14",
+      "actual_viewport": "1280x720",
+      "authenticated": true,
+      "ready": true,
+      "locked": false,
+      "horizontal_overflow_px": 0,
+      "console_errors": 0
+    },
+    {
+      "role": "dispatcher",
+      "path": "/dispatcher/control/",
+      "pwa_version": "dispatcher-desktop-shell-v41",
+      "actual_viewport": "1280x720",
+      "authenticated": true,
+      "ready": true,
+      "locked": false,
+      "horizontal_overflow_px": 0,
+      "console_errors": 0
+    },
+    {
+      "role": "manager",
+      "path": "/reports/management/?date=2026-07-26",
+      "pwa_version": "management-shell-v5",
+      "actual_viewport": "1280x720",
+      "authenticated": true,
+      "ready": true,
+      "locked": false,
+      "horizontal_overflow_px": 0,
+      "console_errors": 0
+    },
+    {
+      "role": "driver",
+      "pwa_version": "driver-mobile-shell-v114",
+      "result": "PASS"
+    },
+    {
+      "role": "excavator",
+      "pwa_version": "excavator-mobile-shell-v127",
+      "result": "PASS"
+    },
+    {
+      "role": "mining_master",
+      "pwa_version": "mining-master-mobile-shell-v120",
+      "result": "PASS"
+    }
+  ],
+  "result": "PASS",
+  "console_errors_after_proxy_windows": {
+    "driver": 0,
+    "excavator": 0,
+    "mining_master": 0
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "capture_file": "proxy_three_pwa.jsonl",
+  "stable_window_start_utc": "2026-07-28T10:30:11.5530456Z",
+  "stable_window_end_utc": "2026-07-28T10:31:38.539044Z",
+  "stable_window_requests": 54,
+  "stable_window_realtime_requests": 54,
+  "stable_window_achievement_gets": 0,
+  "stable_window_version_check_gets": 0,
+  "stable_window_full_html_gets": 0,
+  "stable_window_http_or_transport_errors": 0,
+  "stable_window_response_body_bytes": 25110,
+  "stable_window_response_gzip_estimate_bytes": 13428,
+  "stable_window_distribution": {
+    "driver": 18,
+    "excavator_operator": 18,
+    "mining_master": 18
+  },
+  "warmup_initial_achievement_gets": {
+    "driver": 1,
+    "excavator_operator": 1,
+    "mining_master": 0
+  }
+}

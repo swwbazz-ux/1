@@ -10,6 +10,30 @@ const vm = require("node:vm");
 const backendRoot = path.resolve(__dirname, "../../..");
 const baseTemplatePath = path.join(backendRoot, "templates", "base.html");
 const baseTemplate = fs.readFileSync(baseTemplatePath, "utf8");
+const driverTemplatePath = path.join(
+    backendRoot,
+    "templates",
+    "users",
+    "driver_shift.html"
+);
+const excavatorTemplatePath = path.join(
+    backendRoot,
+    "templates",
+    "trips",
+    "excavator_work.html"
+);
+const miningMasterTemplatePath = path.join(
+    backendRoot,
+    "templates",
+    "trips",
+    "dispatcher_control.html"
+);
+const driverTemplate = fs.readFileSync(driverTemplatePath, "utf8");
+const excavatorTemplate = fs.readFileSync(excavatorTemplatePath, "utf8");
+const miningMasterTemplate = fs.readFileSync(
+    miningMasterTemplatePath,
+    "utf8"
+);
 const guardStartMarker = "/* APP_PWA_CONTRACT_GUARD_START */";
 const guardEndMarker = "/* APP_PWA_CONTRACT_GUARD_END */";
 
@@ -64,6 +88,10 @@ class EventTargetStub {
             .forEach((listener) => listener.call(this, nextEvent));
         return !nextEvent.defaultPrevented;
     }
+
+    listenerCount(type) {
+        return (this.listeners.get(type) || []).length;
+    }
 }
 
 class ClassListStub {
@@ -115,6 +143,7 @@ class ElementStub extends EventTargetStub {
         this.disabled = false;
         this.textContent = "";
         this.innerHTML = "";
+        this.title = "";
         this.style = {
             setProperty() {},
             removeProperty() {},
@@ -190,6 +219,19 @@ class ElementStub extends EventTargetStub {
             (child) => child !== this
         );
         this.parentNode = null;
+    }
+
+    focus() {}
+
+    closest(selector) {
+        let current = this;
+        while (current) {
+            if (matchesSelector(current, selector)) {
+                return current;
+            }
+            current = current.parentNode;
+        }
+        return null;
     }
 
     querySelector(selector) {
@@ -301,6 +343,10 @@ class CustomEventStub {
     preventDefault() {
         this.defaultPrevented = true;
     }
+
+    stopImmediatePropagation() {}
+
+    stopPropagation() {}
 }
 
 function createMessageChannel() {
@@ -336,7 +382,17 @@ function createRuntime(options = {}) {
         appShellVersion: htmlShellVersion,
         appRoleCode: roleCode,
         appContractReady: "false",
+        appServiceWorkerUrl: "/driver-service-worker.js",
+        appServiceWorkerScope: "/driver/",
     });
+    let unfinishedActionActive = Boolean(options.unfinishedAction);
+    if (options.unfinishedAction) {
+        const unfinishedAction = new ElementStub("article", {
+            "data-active-trip-id": "42",
+            "data-trip-status": "loaded_waiting_unload",
+        });
+        document.body.appendChild(unfinishedAction);
+    }
     const windowTarget = new EventTargetStub();
     const serviceWorkerTarget = new EventTargetStub();
     const registrationTarget = new EventTargetStub();
@@ -346,15 +402,57 @@ function createRuntime(options = {}) {
     const timers = [];
     let reloadCalls = 0;
     let updateCalls = 0;
+    let registerCalls = 0;
+    let registerFailuresRemaining = Number(options.registerFailures || 0);
+    let updateFailuresRemaining = Number(options.updateFailures || 0);
+    let registrationAvailable = options.registrationAvailable !== false;
+    const deferredRegistrationResolvers = [];
+    const deferredUpdateResolvers = [];
+    const activeWorkerVersionResolvers = [];
+    const waitingWorkerVersionResolvers = [];
+    const replacementWorkerVersionResolvers = [];
+    const replacementWorkerMessages = [];
     let online = options.online !== false;
 
-    const waitingWorker = {
+    function workerVersionPayload(contractVersion, shellVersion) {
+        return {
+            appContractVersion: contractVersion,
+            shellVersion,
+            roleCode,
+        };
+    }
+
+    function respondWithWorkerVersion(transfer, payload, resolvers, deferred) {
+        if (!transfer || !transfer[0]) return;
+        const respond = () => transfer[0].postMessage(payload);
+        if (deferred) {
+            resolvers.push(respond);
+        } else {
+            respond();
+        }
+    }
+
+    const waitingWorker = Object.assign(new EventTargetStub(), {
         state: "installed",
-        postMessage(message) {
+        postMessage(message, transfer) {
             waitingWorkerMessages.push(message);
+            if (message && message.type === "GET_VERSION") {
+                respondWithWorkerVersion(
+                    transfer,
+                    workerVersionPayload(
+                        options.waitingWorkerContractVersion
+                            || options.workerContractVersion
+                            || htmlContractVersion,
+                        options.waitingWorkerShellVersion
+                            || options.workerShellVersion
+                            || htmlShellVersion
+                    ),
+                    waitingWorkerVersionResolvers,
+                    Boolean(options.deferWaitingWorkerVersion)
+                );
+            }
         },
-        addEventListener() {},
-    };
+    });
     const activeWorker = {
         state: "activated",
         postMessage(message, transfer) {
@@ -365,22 +463,58 @@ function createRuntime(options = {}) {
                 && transfer
                 && transfer[0]
             ) {
-                transfer[0].postMessage({
-                    appContractVersion: options.workerContractVersion
-                        || htmlContractVersion,
-                    shellVersion: options.workerShellVersion
-                        || htmlShellVersion,
-                    roleCode,
-                });
+                respondWithWorkerVersion(
+                    transfer,
+                    workerVersionPayload(
+                        options.workerContractVersion || htmlContractVersion,
+                        options.workerShellVersion || htmlShellVersion
+                    ),
+                    activeWorkerVersionResolvers,
+                    Boolean(options.deferActiveWorkerVersion)
+                );
+            }
+        },
+    };
+    const replacementWorker = {
+        state: "activated",
+        postMessage(message, transfer) {
+            replacementWorkerMessages.push(message);
+            if (
+                message
+                && message.type === "GET_VERSION"
+                && transfer
+                && transfer[0]
+            ) {
+                if (options.replacementWorkerNoResponse) return;
+                respondWithWorkerVersion(
+                    transfer,
+                    workerVersionPayload(
+                        options.replacementWorkerContractVersion
+                            || htmlContractVersion,
+                        options.replacementWorkerShellVersion
+                            || htmlShellVersion
+                    ),
+                    replacementWorkerVersionResolvers,
+                    Boolean(options.deferReplacementWorkerVersion)
+                );
             }
         },
     };
     const registration = Object.assign(registrationTarget, {
-        waiting: waitingWorker,
+        waiting: options.hasWaitingWorker === false ? null : waitingWorker,
         installing: null,
         active: activeWorker,
         update() {
             updateCalls += 1;
+            if (updateFailuresRemaining > 0) {
+                updateFailuresRemaining -= 1;
+                return Promise.reject(new Error("transient update failure"));
+            }
+            if (options.deferUpdates) {
+                return new Promise((resolve) => {
+                    deferredUpdateResolvers.push(() => resolve(registration));
+                });
+            }
             return Promise.resolve(registration);
         },
     });
@@ -388,12 +522,26 @@ function createRuntime(options = {}) {
         controller: activeWorker,
         ready: Promise.resolve(registration),
         getRegistration() {
-            return Promise.resolve(registration);
+            return Promise.resolve(registrationAvailable ? registration : null);
         },
         getRegistrations() {
             return Promise.resolve([registration]);
         },
         register() {
+            registerCalls += 1;
+            if (registerFailuresRemaining > 0) {
+                registerFailuresRemaining -= 1;
+                return Promise.reject(new Error("transient registration failure"));
+            }
+            if (options.deferRegistration) {
+                return new Promise((resolve) => {
+                    deferredRegistrationResolvers.push(() => {
+                        registrationAvailable = true;
+                        resolve(registration);
+                    });
+                });
+            }
+            registrationAvailable = true;
             return Promise.resolve(registration);
         },
     });
@@ -440,8 +588,12 @@ function createRuntime(options = {}) {
         window,
         navigator,
         registration,
+        activeWorker,
+        waitingWorker,
+        replacementWorker,
         waitingWorkerMessages,
         activeWorkerMessages,
+        replacementWorkerMessages,
         fetchRequests,
         get reloadCalls() {
             return reloadCalls;
@@ -449,9 +601,72 @@ function createRuntime(options = {}) {
         get updateCalls() {
             return updateCalls;
         },
+        get registerCalls() {
+            return registerCalls;
+        },
+        resolveRegistration() {
+            assert.ok(
+                deferredRegistrationResolvers.length,
+                "no deferred registration is pending"
+            );
+            deferredRegistrationResolvers.splice(0).forEach((resolve) => resolve());
+        },
+        resolveUpdates() {
+            assert.ok(
+                deferredUpdateResolvers.length,
+                "no deferred service-worker update is pending"
+            );
+            deferredUpdateResolvers.splice(0).forEach((resolve) => resolve());
+        },
+        resolveActiveWorkerVersions() {
+            assert.ok(
+                activeWorkerVersionResolvers.length,
+                "no deferred active-worker version is pending"
+            );
+            activeWorkerVersionResolvers.splice(0).forEach((resolve) => resolve());
+        },
+        resolveWaitingWorkerVersions() {
+            assert.ok(
+                waitingWorkerVersionResolvers.length,
+                "no deferred waiting-worker version is pending"
+            );
+            waitingWorkerVersionResolvers.splice(0).forEach((resolve) => resolve());
+        },
+        resolveReplacementWorkerVersions() {
+            assert.ok(
+                replacementWorkerVersionResolvers.length,
+                "no deferred replacement-worker version is pending"
+            );
+            replacementWorkerVersionResolvers.splice(0).forEach((resolve) => resolve());
+        },
+        requestWaitingWorkerVersion() {
+            registration.installing = waitingWorker;
+            registration.waiting = waitingWorker;
+            registration.dispatchEvent(new CustomEventStub("updatefound"));
+            waitingWorker.state = "installed";
+            waitingWorker.dispatchEvent(new CustomEventStub("statechange"));
+        },
+        activateReplacementWorker() {
+            registration.active = replacementWorker;
+            registration.waiting = null;
+            registration.installing = null;
+            serviceWorker.controller = replacementWorker;
+            serviceWorker.dispatchEvent(new CustomEventStub("controllerchange"));
+        },
+        listenerCount(type) {
+            return serviceWorker.listenerCount(type);
+        },
         setOnline(value) {
             online = Boolean(value);
             navigator.onLine = online;
+        },
+        finishUnfinishedAction() {
+            unfinishedActionActive = false;
+            document.body.children.slice().forEach((child) => {
+                if (child.hasAttribute("data-active-trip-id")) {
+                    child.remove();
+                }
+            });
         },
         runTimers(limit = 100) {
             let runs = 0;
@@ -537,6 +752,7 @@ function createRuntime(options = {}) {
         runtime.guard,
         "base.html must publish window.AppPwaContractGuard"
     );
+    runtime.guard.registerUnsafeCheck(() => unfinishedActionActive);
     return runtime;
 }
 
@@ -580,6 +796,274 @@ function assertContractState(runtime, expected) {
     return observed;
 }
 
+async function flushPromises(iterations = 12) {
+    for (let index = 0; index < iterations; index += 1) {
+        await Promise.resolve();
+    }
+}
+
+function extractNamedIife(source, name) {
+    const marker = `(function ${name}() {`;
+    const startIndex = source.indexOf(marker);
+    assert.ok(startIndex >= 0, `missing ${marker}`);
+    const endMarker = "\n    })();";
+    const endIndex = source.indexOf(endMarker, startIndex);
+    assert.ok(endIndex > startIndex, `missing closing IIFE for ${name}`);
+    return source.slice(startIndex, endIndex + endMarker.length);
+}
+
+function createRolePwaRuntime(options = {}) {
+    const serviceWorkerTarget = new EventTargetStub();
+    const registrationTarget = new EventTargetStub();
+    const fetchRequests = [];
+    const waitingWorkerMessages = [];
+    let updateCalls = 0;
+    let registerCalls = 0;
+    let reloadCalls = 0;
+    const manualUpdateResolvers = [];
+    const waitingVersionResolvers = [];
+    let deferManualUpdates = false;
+
+    const activeWorker = {
+        state: "activated",
+        postMessage(message, transfer) {
+            if (
+                message
+                && message.type === "GET_VERSION"
+                && transfer
+                && transfer[0]
+            ) {
+                transfer[0].postMessage({
+                    version: options.activeShellVersion || options.shellVersion,
+                    appContractVersion: options.contractVersion || "contract-v2",
+                    shellVersion: options.activeShellVersion || options.shellVersion,
+                    roleCode: options.roleCode,
+                });
+            }
+        },
+    };
+    const waitingWorker = {
+        state: "installed",
+        postMessage(message, transfer) {
+            waitingWorkerMessages.push(message);
+            if (
+                message
+                && message.type === "GET_VERSION"
+                && transfer
+                && transfer[0]
+            ) {
+                const respond = () => transfer[0].postMessage({
+                    version: options.nextShellVersion || options.shellVersion,
+                });
+                if (options.deferWaitingVersion) {
+                    waitingVersionResolvers.push(respond);
+                } else {
+                    respond();
+                }
+            }
+        },
+        addEventListener() {},
+    };
+    const registration = Object.assign(registrationTarget, {
+        active: activeWorker,
+        waiting: options.hasWaitingWorker ? waitingWorker : null,
+        installing: null,
+        update() {
+            updateCalls += 1;
+            if (!deferManualUpdates) {
+                return Promise.resolve(registration);
+            }
+            return new Promise((resolve) => {
+                manualUpdateResolvers.push(() => resolve(registration));
+            });
+        },
+    });
+    const serviceWorker = Object.assign(serviceWorkerTarget, {
+        controller: activeWorker,
+        ready: Promise.resolve(registration),
+        getRegistration() {
+            return Promise.resolve(registration);
+        },
+        register() {
+            registerCalls += 1;
+            return Promise.resolve(registration);
+        },
+    });
+    const navigator = {serviceWorker};
+    const windowTarget = new EventTargetStub();
+    const document = new DocumentStub({});
+    const nodes = new Map();
+    const originalDocumentQuerySelector = document.querySelector.bind(document);
+    document.querySelector = function querySelector(selector) {
+        return nodes.get(selector) || originalDocumentQuerySelector(selector);
+    };
+    document.querySelectorAll = function querySelectorAll(selector) {
+        const node = nodes.get(selector);
+        return node ? [node] : [];
+    };
+    const timers = [];
+    let nextTimerId = 1;
+    function setTimeoutStub(callback, delay) {
+        const timer = {
+            id: nextTimerId,
+            callback,
+            delay: Number(delay || 0),
+            cancelled: false,
+        };
+        nextTimerId += 1;
+        timers.push(timer);
+        return timer.id;
+    }
+    function clearTimeoutStub(timerId) {
+        const timer = timers.find((candidate) => candidate.id === timerId);
+        if (timer) timer.cancelled = true;
+    }
+    async function fetchStub(url, init = {}) {
+        fetchRequests.push({url: String(url), init});
+        return {
+            ok: true,
+            status: 200,
+            text: async () => options.shellVersion,
+            json: async () => ({
+                role_shell_version: options.shellVersion,
+                role_app_code: options.roleCode,
+                app_contract_version: options.contractVersion || "contract-v2",
+            }),
+        };
+    }
+    const window = Object.assign(windowTarget, {
+        document,
+        navigator,
+        location: {
+            reload() {
+                reloadCalls += 1;
+            },
+        },
+        localStorage: new StorageStub(),
+        sessionStorage: new StorageStub(),
+        MessageChannel: function MessageChannelStub() {
+            const channel = createMessageChannel();
+            this.port1 = channel.port1;
+            this.port2 = channel.port2;
+        },
+        AppPwaContractGuard: {
+            getState() {
+                return {
+                    ready: true,
+                    locked: false,
+                    server: {
+                        appContractVersion: options.contractVersion || "contract-v2",
+                        shellVersion: options.shellVersion,
+                        roleCode: options.roleCode,
+                    },
+                    serviceWorker: {
+                        appContractVersion: options.contractVersion || "contract-v2",
+                        shellVersion: options.shellVersion,
+                        roleCode: options.roleCode,
+                    },
+                };
+            },
+        },
+        Promise,
+        Date,
+        console,
+        setTimeout: setTimeoutStub,
+        clearTimeout: clearTimeoutStub,
+        setInterval: setTimeoutStub,
+        clearInterval: clearTimeoutStub,
+        fetch: fetchStub,
+    });
+    const context = vm.createContext({
+        window,
+        self: window,
+        document,
+        navigator,
+        location: window.location,
+        localStorage: window.localStorage,
+        sessionStorage: window.sessionStorage,
+        MessageChannel: window.MessageChannel,
+        Promise,
+        Date,
+        console,
+        setTimeout: setTimeoutStub,
+        clearTimeout: clearTimeoutStub,
+        setInterval: setTimeoutStub,
+        clearInterval: clearTimeoutStub,
+        fetch: fetchStub,
+    });
+    return {
+        context,
+        document,
+        window,
+        navigator,
+        registration,
+        waitingWorker,
+        waitingWorkerMessages,
+        fetchRequests,
+        nodes,
+        get updateCalls() {
+            return updateCalls;
+        },
+        get registerCalls() {
+            return registerCalls;
+        },
+        get reloadCalls() {
+            return reloadCalls;
+        },
+        listenerCount(type) {
+            return serviceWorker.listenerCount(type);
+        },
+        deferManualUpdates() {
+            deferManualUpdates = true;
+        },
+        resolveManualUpdate() {
+            assert.ok(manualUpdateResolvers.length, "no deferred manual update");
+            manualUpdateResolvers.splice(0).forEach((resolve) => resolve());
+            deferManualUpdates = false;
+        },
+        resolveWaitingVersion() {
+            assert.ok(waitingVersionResolvers.length, "no deferred waiting-worker version");
+            waitingVersionResolvers.splice(0).forEach((resolve) => resolve());
+        },
+        promoteWaitingWorker() {
+            registration.active = waitingWorker;
+            registration.waiting = null;
+            serviceWorker.controller = waitingWorker;
+        },
+        addNode(selector, node = new ElementStub("button")) {
+            nodes.set(selector, node);
+            return node;
+        },
+    };
+}
+
+function executeDriverPwaBinding(runtime, shellVersion) {
+    const source = extractNamedIife(driverTemplate, "initDriverPwaUpdates");
+    runtime.context.shell = {
+        dataset: {
+            driverPwaVersion: shellVersion,
+        },
+    };
+    vm.runInContext(source, runtime.context, {
+        filename: "templates/users/driver_shift.html::initDriverPwaUpdates",
+    });
+}
+
+function extractExcavatorPwaSource() {
+    const startMarker = "function formatExcavatorVersion(version) {";
+    const endMarker = "\ndocument.addEventListener(\"DOMContentLoaded\", function () {";
+    const startIndex = excavatorTemplate.indexOf(startMarker);
+    const endIndex = excavatorTemplate.indexOf(endMarker, startIndex);
+    assert.ok(startIndex >= 0, `missing ${startMarker}`);
+    assert.ok(endIndex > startIndex, "missing Excavator PWA runtime terminator");
+    return excavatorTemplate
+        .slice(startIndex, endIndex)
+        .replaceAll(
+            "{% if role_app.role_code == 'excavator_operator' %}/{% else %}/excavator/{% endif %}",
+            "/excavator/"
+        );
+}
+
 test("base.html publishes PWA contract datasets and executable guard markers", () => {
     assert.ok(
         guardSource,
@@ -590,6 +1074,1196 @@ test("base.html publishes PWA contract datasets and executable guard markers", (
     assert.match(baseTemplate, /data-app-role-code="/);
     assert.match(baseTemplate, /data-app-contract-ready="false"/);
 });
+
+test("role controller listeners only reconcile stale UI while base owns contract reload", () => {
+    assert.match(
+        driverTemplate,
+        /registerUnsafeCheck\(isDriverOperationalRefreshUnsafe\)/
+    );
+    assert.match(
+        excavatorTemplate,
+        /registerUnsafeCheck\(isExcavatorRefreshUnsafe\)/
+    );
+    assert.match(
+        miningMasterTemplate,
+        /registerUnsafeCheck\(isMobileOperationalRefreshUnsafe\)/
+    );
+    [
+        ["Driver", driverTemplate, 0],
+        ["Excavator", excavatorTemplate, 1],
+        ["Mining Master", miningMasterTemplate, 1],
+    ].forEach(([roleName, source, expectedBindings]) => {
+        const bindings = source.match(
+            /navigator\.serviceWorker\.addEventListener\("controllerchange",\s*[^)]+\)/g
+        ) || [];
+        assert.equal(
+            bindings.length,
+            expectedBindings,
+            `${roleName} must have only its expected UI reconciliation listener`
+        );
+        bindings.forEach((binding) => {
+            assert.match(
+                binding,
+                /,\s*(?:syncContractState|syncMiningMasterPwaContractState)\s*\)$/,
+                `${roleName} controllerchange may only invoke the stale-modal UI reconciler`
+            );
+            assert.doesNotMatch(
+                binding,
+                /register|update|reload|acceptServiceWorkerVersion|acceptServerContract/,
+                `${roleName} must not compete with the base registration/update/reload owner`
+            );
+        });
+        assert.doesNotMatch(
+            source,
+            /addEventListener\("controllerchange",\s*(?:function|\()/,
+            `${roleName} must not add inline controller contract logic`
+        );
+    });
+});
+
+test("Driver shift manual update delegates to the shared guarded single-flight path", () => {
+    const start = driverTemplate.indexOf(
+        'if (updateButton && updateButton.dataset.driverShiftUpdateBound !== "true")'
+    );
+    const end = driverTemplate.indexOf(
+        'if (logoutButton && logoutButton.dataset.driverLogoutBound !== "true")',
+        start
+    );
+    assert.ok(start >= 0 && end > start, "Driver update handler was not found");
+    const handler = driverTemplate.slice(start, end);
+    assert.match(handler, /AppPwaContractGuard/);
+    assert.match(handler, /requestManualUpdate\(\)/);
+    assert.match(handler, /if \(updateButton\.disabled\) return/);
+    assert.doesNotMatch(handler, /getRegistration\(|registration\.update\(/);
+    assert.match(handler, /Актуально|Доступно обновление|Повторить/);
+});
+
+test(
+    "stable role shells perform no full version_check GET and no automatic update",
+    {skip: guardUnavailable},
+    async () => {
+        const runtime = createRuntime({
+            htmlContractVersion: "contract-v2",
+            htmlShellVersion: "driver-shell-v2",
+            workerContractVersion: "contract-v2",
+            workerShellVersion: "driver-shell-v2",
+            hasWaitingWorker: false,
+        });
+
+        runtime.guard.registerJavaScript("contract-v2");
+        runtime.guard.acceptServiceWorkerVersion({
+            appContractVersion: "contract-v2",
+            shellVersion: "driver-shell-v2",
+            roleCode: "driver",
+        });
+        runtime.guard.acceptServerContract({
+            app_contract_version: "contract-v2",
+            role_shell_version: "driver-shell-v2",
+            role_app_code: "driver",
+        });
+        await flushRuntime(runtime);
+
+        assertContractState(runtime, {ready: true, locked: false});
+        assert.equal(
+            runtime.updateCalls,
+            0,
+            "a coherent stable shell must not call registration.update()"
+        );
+        assert.equal(
+            runtime.fetchRequests.filter(
+                ({url}) => url.includes("?version_check")
+            ).length,
+            0
+        );
+        for (const [roleName, source] of [
+            ["Driver", driverTemplate],
+            ["Excavator", excavatorTemplate],
+            ["Mining Master", miningMasterTemplate],
+        ]) {
+            assert.equal(
+                source.includes("?version_check"),
+                false,
+                `${roleName} must not load a full service worker for version checks`
+            );
+        }
+    }
+);
+
+test(
+    "each new role_shell_version causes exactly one controlled update",
+    {skip: guardUnavailable},
+    async () => {
+        const runtime = createRuntime({
+            htmlContractVersion: "contract-v2",
+            htmlShellVersion: "driver-shell-v2",
+            workerContractVersion: "contract-v2",
+            workerShellVersion: "driver-shell-v2",
+            hasWaitingWorker: false,
+        });
+        runtime.guard.registerJavaScript("contract-v2");
+        runtime.guard.acceptServiceWorkerVersion({
+            appContractVersion: "contract-v2",
+            shellVersion: "driver-shell-v2",
+            roleCode: "driver",
+        });
+        runtime.guard.acceptServerContract({
+            app_contract_version: "contract-v2",
+            role_shell_version: "driver-shell-v2",
+            role_app_code: "driver",
+        });
+        await flushRuntime(runtime);
+        const baselineUpdates = runtime.updateCalls;
+
+        for (let repeat = 0; repeat < 10; repeat += 1) {
+            runtime.guard.acceptServerContract({
+                app_contract_version: "contract-v2",
+                role_shell_version: "driver-shell-v3",
+                role_app_code: "driver",
+            });
+            await flushRuntime(runtime);
+        }
+        assert.equal(
+            runtime.updateCalls - baselineUpdates,
+            1,
+            "ten observations of one new shell must remain single-flight"
+        );
+
+        runtime.guard.acceptServerContract({
+            app_contract_version: "contract-v2",
+            role_shell_version: "driver-shell-v4",
+            role_app_code: "driver",
+        });
+        await flushRuntime(runtime);
+        assert.equal(
+            runtime.updateCalls - baselineUpdates,
+            2,
+            "the next distinct shell must cause one new controlled update"
+        );
+    }
+);
+
+test(
+    "manual update joins an in-flight automatic update for the same target shell",
+    {skip: guardUnavailable},
+    async () => {
+        const runtime = createRuntime({
+            htmlContractVersion: "contract-v2",
+            htmlShellVersion: "driver-shell-v2",
+            workerContractVersion: "contract-v2",
+            workerShellVersion: "driver-shell-v2",
+            hasWaitingWorker: false,
+            deferUpdates: true,
+        });
+        runtime.guard.registerJavaScript("contract-v2");
+        runtime.guard.acceptServiceWorkerVersion({
+            appContractVersion: "contract-v2",
+            shellVersion: "driver-shell-v2",
+            roleCode: "driver",
+        });
+        runtime.guard.acceptServerContract({
+            app_contract_version: "contract-v2",
+            role_shell_version: "driver-shell-v3",
+            role_app_code: "driver",
+        });
+        await flushPromises();
+        assert.equal(runtime.updateCalls, 1, "automatic update must be in flight");
+
+        const manualResult = runtime.guard.requestManualUpdate();
+        await flushPromises();
+        assert.equal(
+            runtime.updateCalls,
+            1,
+            "manual update must join the automatic registration.update()"
+        );
+
+        runtime.resolveUpdates();
+        assert.equal((await manualResult).status, "current");
+        assert.equal(runtime.updateCalls, 1);
+    }
+);
+
+test(
+    "controllerchange reads the current controller and ignores a delayed old active response",
+    {skip: guardUnavailable},
+    async () => {
+        const runtime = createRuntime({
+            htmlContractVersion: "contract-v3",
+            htmlShellVersion: "driver-shell-v3",
+            workerContractVersion: "contract-v2",
+            workerShellVersion: "driver-shell-v2",
+            replacementWorkerContractVersion: "contract-v3",
+            replacementWorkerShellVersion: "driver-shell-v3",
+            hasWaitingWorker: false,
+            deferActiveWorkerVersion: true,
+        });
+        runtime.guard.registerJavaScript("contract-v3");
+        runtime.guard.acceptServerContract({
+            app_contract_version: "contract-v3",
+            role_shell_version: "driver-shell-v3",
+            role_app_code: "driver",
+        });
+        await flushPromises();
+        assert.ok(
+            runtime.activeWorkerMessages.some(
+                (message) => message && message.type === "GET_VERSION"
+            ),
+            "the original active worker must have a delayed version request"
+        );
+
+        runtime.activateReplacementWorker();
+        await flushPromises();
+        assert.equal(
+            runtime.replacementWorkerMessages.filter(
+                (message) => message && message.type === "GET_VERSION"
+            ).length,
+            1,
+            "controllerchange must query the current controller exactly once"
+        );
+        assertContractState(runtime, {ready: true, locked: false});
+        assert.equal(
+            runtime.guard.getState().serviceWorker.shellVersion,
+            "driver-shell-v3"
+        );
+
+        runtime.resolveActiveWorkerVersions();
+        await flushPromises();
+        assertContractState(runtime, {ready: true, locked: false});
+        assert.equal(
+            runtime.guard.getState().serviceWorker.shellVersion,
+            "driver-shell-v3",
+            "a delayed old active response must not roll contract state back"
+        );
+    }
+);
+
+test(
+    "delayed old waiting response after controllerchange cannot roll contract state back",
+    {skip: guardUnavailable},
+    async () => {
+        const runtime = createRuntime({
+            htmlContractVersion: "contract-v3",
+            htmlShellVersion: "driver-shell-v3",
+            workerContractVersion: "contract-v2",
+            workerShellVersion: "driver-shell-v2",
+            waitingWorkerContractVersion: "contract-v2",
+            waitingWorkerShellVersion: "driver-shell-v2",
+            replacementWorkerContractVersion: "contract-v3",
+            replacementWorkerShellVersion: "driver-shell-v3",
+            deferWaitingWorkerVersion: true,
+        });
+        runtime.guard.registerJavaScript("contract-v3");
+        runtime.guard.acceptServerContract({
+            app_contract_version: "contract-v3",
+            role_shell_version: "driver-shell-v3",
+            role_app_code: "driver",
+        });
+        await flushRuntime(runtime);
+        runtime.requestWaitingWorkerVersion();
+        await flushPromises();
+        assert.ok(
+            runtime.waitingWorkerMessages.some(
+                (message) => message && message.type === "GET_VERSION"
+            ),
+            "the old waiting worker must have a delayed version request"
+        );
+
+        runtime.activateReplacementWorker();
+        await flushPromises();
+        assertContractState(runtime, {ready: true, locked: false});
+        runtime.resolveWaitingWorkerVersions();
+        await flushPromises();
+
+        assertContractState(runtime, {ready: true, locked: false});
+        assert.equal(
+            runtime.guard.getState().serviceWorker.shellVersion,
+            "driver-shell-v3",
+            "a delayed old waiting response must not roll contract state back"
+        );
+    }
+);
+
+test(
+    "controllerchange locks immediately until the new controller version is verified",
+    {skip: guardUnavailable},
+    async () => {
+        const runtime = createRuntime({
+            htmlContractVersion: "contract-v3",
+            htmlShellVersion: "driver-shell-v3",
+            workerContractVersion: "contract-v3",
+            workerShellVersion: "driver-shell-v3",
+            replacementWorkerContractVersion: "contract-v3",
+            replacementWorkerShellVersion: "driver-shell-v3",
+            hasWaitingWorker: false,
+            deferReplacementWorkerVersion: true,
+        });
+        runtime.guard.registerJavaScript("contract-v3");
+        runtime.guard.acceptServerContract({
+            app_contract_version: "contract-v3",
+            role_shell_version: "driver-shell-v3",
+            role_app_code: "driver",
+        });
+        await flushPromises();
+        assertContractState(runtime, {ready: true, locked: false});
+
+        runtime.activateReplacementWorker();
+        await flushPromises();
+
+        assertContractState(runtime, {ready: false, locked: true});
+        assert.equal(
+            runtime.guard.getState().serviceWorker,
+            null,
+            "the previous controller version must be invalidated immediately"
+        );
+        assert.equal(
+            runtime.reloadCalls,
+            0,
+            "a controller that has not replied must not consume the pending reload"
+        );
+
+        runtime.resolveReplacementWorkerVersions();
+        await flushPromises();
+        assertContractState(runtime, {ready: true, locked: false});
+        assert.equal(runtime.reloadCalls, 0, "a verified matching controller needs no reload");
+    }
+);
+
+test(
+    "controllerchange with no version response cannot inherit the previous ready state",
+    {skip: guardUnavailable},
+    async () => {
+        const runtime = createRuntime({
+            htmlContractVersion: "contract-v3",
+            htmlShellVersion: "driver-shell-v3",
+            workerContractVersion: "contract-v3",
+            workerShellVersion: "driver-shell-v3",
+            replacementWorkerNoResponse: true,
+            hasWaitingWorker: false,
+        });
+        runtime.guard.registerJavaScript("contract-v3");
+        runtime.guard.acceptServerContract({
+            app_contract_version: "contract-v3",
+            role_shell_version: "driver-shell-v3",
+            role_app_code: "driver",
+        });
+        await flushPromises();
+        assertContractState(runtime, {ready: true, locked: false});
+
+        runtime.activateReplacementWorker();
+        await flushPromises();
+
+        assertContractState(runtime, {ready: false, locked: true});
+        assert.equal(runtime.reloadCalls, 0);
+    }
+);
+
+test(
+    "matching waiting responses cannot unlock an unverified replacement controller",
+    {skip: guardUnavailable},
+    async () => {
+        const runtime = createRuntime({
+            htmlContractVersion: "contract-v3",
+            htmlShellVersion: "driver-shell-v3",
+            workerContractVersion: "contract-v3",
+            workerShellVersion: "driver-shell-v3",
+            replacementWorkerContractVersion: "contract-v3",
+            replacementWorkerShellVersion: "driver-shell-v3",
+            waitingWorkerContractVersion: "contract-v3",
+            waitingWorkerShellVersion: "driver-shell-v3",
+            deferReplacementWorkerVersion: true,
+        });
+        runtime.guard.registerJavaScript("contract-v3");
+        runtime.guard.acceptServerContract({
+            app_contract_version: "contract-v3",
+            role_shell_version: "driver-shell-v3",
+            role_app_code: "driver",
+        });
+        await flushPromises();
+        assertContractState(runtime, {ready: true, locked: false});
+
+        runtime.activateReplacementWorker();
+        await flushPromises();
+        assertContractState(runtime, {ready: false, locked: true});
+
+        runtime.requestWaitingWorkerVersion();
+        await flushPromises();
+        assert.equal(
+            runtime.waitingWorkerMessages.filter(
+                (message) => message && message.type === "GET_VERSION"
+            ).length,
+            1
+        );
+        assertContractState(runtime, {ready: false, locked: true});
+        assert.equal(runtime.guard.getState().serviceWorker, null);
+        assert.equal(runtime.reloadCalls, 0);
+
+        runtime.waitingWorker.dispatchEvent(
+            new CustomEventStub("statechange")
+        );
+        await flushPromises();
+        assert.equal(
+            runtime.waitingWorkerMessages.filter(
+                (message) => message && message.type === "GET_VERSION"
+            ).length,
+            2,
+            "the regression must exercise two matching waiting responses"
+        );
+        assertContractState(runtime, {ready: false, locked: true});
+        assert.equal(runtime.guard.getState().serviceWorker, null);
+        assert.equal(runtime.reloadCalls, 0);
+
+        runtime.resolveReplacementWorkerVersions();
+        await flushPromises();
+        assertContractState(runtime, {ready: true, locked: false});
+        assert.equal(
+            runtime.guard.getState().serviceWorker.shellVersion,
+            "driver-shell-v3",
+            "only the exact controller may complete pending verification"
+        );
+        assert.equal(runtime.reloadCalls, 0);
+    }
+);
+
+test(
+    "waiting responses cannot hide a late controller mismatch or create a reload loop",
+    {skip: guardUnavailable},
+    async () => {
+        const runtime = createRuntime({
+            htmlContractVersion: "contract-v3",
+            htmlShellVersion: "driver-shell-v3",
+            workerContractVersion: "contract-v3",
+            workerShellVersion: "driver-shell-v3",
+            replacementWorkerContractVersion: "contract-v2",
+            replacementWorkerShellVersion: "driver-shell-v2",
+            waitingWorkerContractVersion: "contract-v3",
+            waitingWorkerShellVersion: "driver-shell-v3",
+            deferReplacementWorkerVersion: true,
+        });
+        runtime.guard.registerJavaScript("contract-v3");
+        runtime.guard.acceptServerContract({
+            app_contract_version: "contract-v3",
+            role_shell_version: "driver-shell-v3",
+            role_app_code: "driver",
+        });
+        await flushPromises();
+        assertContractState(runtime, {ready: true, locked: false});
+
+        runtime.activateReplacementWorker();
+        await flushPromises();
+        runtime.requestWaitingWorkerVersion();
+        await flushPromises();
+        runtime.waitingWorker.dispatchEvent(
+            new CustomEventStub("statechange")
+        );
+        await flushPromises();
+
+        assertContractState(runtime, {ready: false, locked: true});
+        assert.equal(runtime.guard.getState().serviceWorker, null);
+        assert.equal(runtime.reloadCalls, 0);
+
+        runtime.resolveReplacementWorkerVersions();
+        await flushPromises();
+        assertContractState(runtime, {ready: false, locked: true});
+        assert.equal(
+            runtime.guard.getState().serviceWorker.shellVersion,
+            "driver-shell-v2"
+        );
+        assert.equal(runtime.reloadCalls, 1);
+
+        runtime.navigator.serviceWorker.dispatchEvent(
+            new CustomEventStub("controllerchange")
+        );
+        await flushPromises();
+        runtime.resolveReplacementWorkerVersions();
+        await flushPromises();
+        assertContractState(runtime, {ready: false, locked: true});
+        assert.equal(
+            runtime.reloadCalls,
+            1,
+            "the same late mismatch must not create a reload loop"
+        );
+    }
+);
+
+test(
+    "mismatching replacement controller triggers at most one safe reload",
+    {skip: guardUnavailable},
+    async () => {
+        const runtime = createRuntime({
+            htmlContractVersion: "contract-v3",
+            htmlShellVersion: "driver-shell-v3",
+            workerContractVersion: "contract-v3",
+            workerShellVersion: "driver-shell-v3",
+            replacementWorkerContractVersion: "contract-v2",
+            replacementWorkerShellVersion: "driver-shell-v2",
+            hasWaitingWorker: false,
+        });
+        runtime.guard.registerJavaScript("contract-v3");
+        runtime.guard.acceptServerContract({
+            app_contract_version: "contract-v3",
+            role_shell_version: "driver-shell-v3",
+            role_app_code: "driver",
+        });
+        await flushPromises();
+        assertContractState(runtime, {ready: true, locked: false});
+
+        runtime.activateReplacementWorker();
+        await flushPromises();
+        assertContractState(runtime, {ready: false, locked: true});
+        assert.equal(runtime.reloadCalls, 1);
+
+        runtime.navigator.serviceWorker.dispatchEvent(
+            new CustomEventStub("controllerchange")
+        );
+        await flushPromises();
+        assert.equal(
+            runtime.reloadCalls,
+            1,
+            "the same mismatching contract must never cause a reload loop"
+        );
+    }
+);
+
+test(
+    "mismatching controller waits for unfinished work and reloads after it becomes safe",
+    {skip: guardUnavailable},
+    async () => {
+        const runtime = createRuntime({
+            htmlContractVersion: "contract-v3",
+            htmlShellVersion: "driver-shell-v3",
+            workerContractVersion: "contract-v3",
+            workerShellVersion: "driver-shell-v3",
+            replacementWorkerContractVersion: "contract-v2",
+            replacementWorkerShellVersion: "driver-shell-v2",
+            hasWaitingWorker: false,
+            unfinishedAction: true,
+        });
+        runtime.guard.registerJavaScript("contract-v3");
+        const serverContract = {
+            app_contract_version: "contract-v3",
+            role_shell_version: "driver-shell-v3",
+            role_app_code: "driver",
+        };
+        runtime.guard.acceptServerContract(serverContract);
+        await flushPromises();
+        assertContractState(runtime, {ready: true, locked: false});
+
+        runtime.activateReplacementWorker();
+        await flushPromises();
+        assertContractState(runtime, {ready: false, locked: true});
+        assert.equal(runtime.reloadCalls, 0, "unfinished work must block the reload");
+
+        runtime.finishUnfinishedAction();
+        runtime.guard.acceptServerContract(serverContract);
+        await flushPromises();
+        assert.equal(
+            runtime.reloadCalls,
+            1,
+            "the pending mismatch must recover once unfinished work is complete"
+        );
+    }
+);
+
+test(
+    "two Driver fragment rebinds add no SW registration or controllerchange listener",
+    async () => {
+        const runtime = createRolePwaRuntime({
+            roleCode: "driver",
+            shellVersion: "driver-mobile-shell-v113",
+        });
+        const updateBadge = runtime.addNode(
+            "[data-driver-pwa-update-badge]",
+            new ElementStub("span")
+        );
+        updateBadge.hidden = true;
+        runtime.addNode(
+            "[data-driver-pwa-update-nav-target]",
+            new ElementStub("button")
+        );
+        executeDriverPwaBinding(runtime, "driver-mobile-shell-v113");
+        await flushPromises();
+        const baselineRegistrations = runtime.registerCalls;
+        const baselineControllerListeners = runtime.listenerCount(
+            "controllerchange"
+        );
+
+        executeDriverPwaBinding(runtime, "driver-mobile-shell-v113");
+        await flushPromises();
+        executeDriverPwaBinding(runtime, "driver-mobile-shell-v113");
+        await flushPromises();
+
+        assert.equal(
+            runtime.registerCalls,
+            baselineRegistrations,
+            "fragment rebind must reuse the existing Driver registration"
+        );
+        assert.equal(
+            runtime.listenerCount("controllerchange"),
+            baselineControllerListeners,
+            "fragment rebind must not accumulate global controller listeners"
+        );
+        assert.equal(
+            runtime.fetchRequests.filter(
+                ({url}) => url.includes("?version_check")
+            ).length,
+            0,
+            "fragment rebind must not fetch the full Driver service worker"
+        );
+        assert.equal(
+            runtime.window.__driverPwaUpdateRuntime.currentShellVersion,
+            "driver-mobile-shell-v113",
+            "fragment HTML must not rewrite the immutable version of the loaded Driver JavaScript"
+        );
+        runtime.window.dispatchEvent(new CustomEventStub(
+            "app-pwa-contract-state",
+            {
+                detail: {
+                    ready: false,
+                    server: {shellVersion: "driver-mobile-shell-v114"},
+                },
+            }
+        ));
+        assert.equal(
+            updateBadge.hidden,
+            false,
+            "a newer server shell must stay visible after a newer fragment is rebound"
+        );
+    }
+);
+
+test(
+    "Driver can activate a waiting worker that matches newly loaded HTML",
+    async () => {
+        const runtime = createRolePwaRuntime({
+            roleCode: "driver",
+            shellVersion: "driver-mobile-shell-v114",
+            activeShellVersion: "driver-mobile-shell-v112",
+            nextShellVersion: "driver-mobile-shell-v114",
+            hasWaitingWorker: true,
+        });
+        const updateBadge = runtime.addNode(
+            "[data-driver-pwa-update-badge]",
+            new ElementStub("span")
+        );
+        updateBadge.hidden = true;
+        const updateTarget = runtime.addNode(
+            "[data-driver-pwa-update-nav-target]",
+            new ElementStub("button")
+        );
+        const updateModal = runtime.addNode(
+            "[data-driver-pwa-update-modal]",
+            new ElementStub("div")
+        );
+        updateModal.hidden = true;
+        runtime.addNode(
+            "[data-driver-pwa-update-status]",
+            new ElementStub("div")
+        );
+        runtime.addNode(
+            "[data-driver-pwa-current-version]",
+            new ElementStub("span")
+        );
+        runtime.addNode(
+            "[data-driver-pwa-new-version]",
+            new ElementStub("span")
+        );
+        const applyButton = runtime.addNode(
+            "[data-driver-pwa-update-apply]",
+            new ElementStub("button")
+        );
+        runtime.addNode(
+            "[data-driver-pwa-update-later]",
+            new ElementStub("button")
+        );
+
+        executeDriverPwaBinding(runtime, "driver-mobile-shell-v114");
+        await flushPromises(24);
+        assert.equal(
+            updateBadge.hidden,
+            false,
+            "active v112 plus waiting v113 must expose the controlled activation path"
+        );
+
+        updateTarget.dispatchEvent(new CustomEventStub("click"));
+        assert.equal(updateModal.hidden, false, "the recovery target must open the update modal");
+        applyButton.dispatchEvent(new CustomEventStub("click"));
+        await flushPromises(24);
+        assert.equal(
+            runtime.waitingWorkerMessages.filter(
+                (message) => message && message.type === "SKIP_WAITING"
+            ).length,
+            1,
+            "the user-controlled action must activate the waiting worker exactly once"
+        );
+    }
+);
+
+test(
+    "Driver never offers an older waiting worker over newer loaded HTML",
+    async () => {
+        const runtime = createRolePwaRuntime({
+            roleCode: "driver",
+            shellVersion: "driver-mobile-shell-v114",
+            activeShellVersion: "driver-mobile-shell-v111",
+            nextShellVersion: "driver-mobile-shell-v112",
+            hasWaitingWorker: true,
+        });
+        const updateBadge = runtime.addNode(
+            "[data-driver-pwa-update-badge]",
+            new ElementStub("span")
+        );
+        updateBadge.hidden = true;
+        runtime.addNode(
+            "[data-driver-pwa-update-nav-target]",
+            new ElementStub("button")
+        );
+        const updateModal = runtime.addNode(
+            "[data-driver-pwa-update-modal]",
+            new ElementStub("div")
+        );
+        updateModal.hidden = true;
+        runtime.addNode(
+            "[data-driver-pwa-update-status]",
+            new ElementStub("div")
+        );
+        runtime.addNode(
+            "[data-driver-pwa-current-version]",
+            new ElementStub("span")
+        );
+        runtime.addNode(
+            "[data-driver-pwa-new-version]",
+            new ElementStub("span")
+        );
+        runtime.addNode(
+            "[data-driver-pwa-update-apply]",
+            new ElementStub("button")
+        );
+        runtime.addNode(
+            "[data-driver-pwa-update-later]",
+            new ElementStub("button")
+        );
+
+        executeDriverPwaBinding(runtime, "driver-mobile-shell-v114");
+        await flushPromises(24);
+        assert.equal(
+            updateBadge.hidden,
+            true,
+            "waiting v112 must not replace already loaded HTML v113"
+        );
+    }
+);
+
+test(
+    "Driver ignores a delayed stale waiting worker after promotion and fragment rebind",
+    async () => {
+        const runtime = createRolePwaRuntime({
+            roleCode: "driver",
+            shellVersion: "driver-mobile-shell-v114",
+            activeShellVersion: "driver-mobile-shell-v112",
+            nextShellVersion: "driver-mobile-shell-v114",
+            hasWaitingWorker: true,
+            deferWaitingVersion: true,
+        });
+        const updateBadge = runtime.addNode(
+            "[data-driver-pwa-update-badge]",
+            new ElementStub("span")
+        );
+        updateBadge.hidden = true;
+        runtime.addNode(
+            "[data-driver-pwa-update-nav-target]",
+            new ElementStub("button")
+        );
+        const updateModal = runtime.addNode(
+            "[data-driver-pwa-update-modal]",
+            new ElementStub("div")
+        );
+        updateModal.hidden = true;
+        runtime.addNode(
+            "[data-driver-pwa-update-status]",
+            new ElementStub("div")
+        );
+        runtime.addNode(
+            "[data-driver-pwa-current-version]",
+            new ElementStub("span")
+        );
+        runtime.addNode(
+            "[data-driver-pwa-new-version]",
+            new ElementStub("span")
+        );
+        const applyButton = runtime.addNode(
+            "[data-driver-pwa-update-apply]",
+            new ElementStub("button")
+        );
+        runtime.addNode(
+            "[data-driver-pwa-update-later]",
+            new ElementStub("button")
+        );
+
+        executeDriverPwaBinding(runtime, "driver-mobile-shell-v114");
+        await flushPromises(12);
+        runtime.promoteWaitingWorker();
+        executeDriverPwaBinding(runtime, "driver-mobile-shell-v114");
+        runtime.resolveWaitingVersion();
+        await flushPromises(24);
+
+        assert.equal(
+            updateBadge.hidden,
+            true,
+            "a worker that is no longer waiting must not restore the update badge"
+        );
+        applyButton.dispatchEvent(new CustomEventStub("click"));
+        await flushPromises(24);
+        assert.equal(
+            runtime.waitingWorkerMessages.filter(
+                (message) => message && message.type === "SKIP_WAITING"
+            ).length,
+            0,
+            "a stale worker must never receive a second activation request"
+        );
+    }
+);
+
+test(
+    "double manual Excavator check is single-flight and keeps an understandable result",
+    async () => {
+        const runtime = createRolePwaRuntime({
+            roleCode: "excavator_operator",
+            shellVersion: "excavator-mobile-shell-v127",
+        });
+        const checkButton = runtime.addNode(
+            "[data-eo-pwa-update-check]",
+            new ElementStub("button")
+        );
+        const checkLabel = runtime.addNode(
+            "[data-eo-pwa-update-check-label]",
+            new ElementStub("b")
+        );
+        runtime.addNode(
+            "[data-eo-pwa-update-check-version]",
+            new ElementStub("em")
+        );
+        runtime.addNode(
+            "[data-eo-pwa-update-status]",
+            new ElementStub("div")
+        );
+        runtime.context.excavatorShellVersion =
+            "excavator-mobile-shell-v127";
+        runtime.context.scheduleExcavatorViewportHeightSync = function () {};
+        vm.runInContext(extractExcavatorPwaSource(), runtime.context, {
+            filename: "templates/trips/excavator_work.html::PwaUpdates",
+        });
+        runtime.context.initExcavatorPwaUpdates();
+        await flushPromises();
+        const baselineUpdates = runtime.updateCalls;
+
+        runtime.deferManualUpdates();
+        checkButton.dispatchEvent(new CustomEventStub("click"));
+        checkButton.dispatchEvent(new CustomEventStub("click"));
+        await flushPromises();
+
+        assert.equal(
+            runtime.updateCalls - baselineUpdates,
+            1,
+            "double click while a manual check is pending must reuse one update"
+        );
+        assert.match(
+            checkLabel.textContent,
+            /Провер/,
+            "the pending manual check must have an understandable status"
+        );
+
+        runtime.resolveManualUpdate();
+        await flushPromises(24);
+        assert.match(
+            checkLabel.textContent,
+            /Актуально|Доступно|Обнов/,
+            "the completed manual check must keep an understandable result"
+        );
+    }
+);
+
+test(
+    "unfinished Driver action never receives SKIP_WAITING or a forced reload",
+    {skip: guardUnavailable},
+    async () => {
+        const runtime = createRuntime({
+            htmlContractVersion: "contract-v2",
+            htmlShellVersion: "driver-shell-v2",
+            workerContractVersion: "contract-v2",
+            workerShellVersion: "driver-shell-v2",
+            unfinishedAction: true,
+        });
+        runtime.guard.registerJavaScript("contract-v2");
+        runtime.guard.acceptServiceWorkerVersion({
+            appContractVersion: "contract-v2",
+            shellVersion: "driver-shell-v2",
+            roleCode: "driver",
+        });
+        runtime.guard.acceptServerContract({
+            app_contract_version: "contract-v2",
+            role_shell_version: "driver-shell-v3",
+            role_app_code: "driver",
+        });
+        await flushRuntime(runtime);
+        runtime.navigator.serviceWorker.dispatchEvent(
+            new CustomEventStub("controllerchange")
+        );
+        await flushRuntime(runtime);
+
+        assert.equal(
+            runtime.waitingWorkerMessages.filter(
+                (message) => message && message.type === "SKIP_WAITING"
+            ).length,
+            0,
+            "an unfinished action must not activate a waiting worker"
+        );
+        assert.equal(
+            runtime.reloadCalls,
+            0,
+            "an unfinished action must not be reloaded"
+        );
+    }
+);
+
+test(
+    "controller change waits for an unfinished action and reloads exactly once when safe",
+    {skip: guardUnavailable},
+    async () => {
+        const runtime = createRuntime({
+            htmlContractVersion: "contract-v2",
+            htmlShellVersion: "driver-shell-v2",
+            workerContractVersion: "contract-v2",
+            workerShellVersion: "driver-shell-v2",
+            unfinishedAction: true,
+        });
+        runtime.guard.registerJavaScript("contract-v2");
+        runtime.guard.acceptServiceWorkerVersion({
+            appContractVersion: "contract-v2",
+            shellVersion: "driver-shell-v2",
+            roleCode: "driver",
+        });
+        const newerServerContract = {
+            app_contract_version: "contract-v2",
+            role_shell_version: "driver-shell-v3",
+            role_app_code: "driver",
+        };
+        runtime.guard.acceptServerContract(newerServerContract);
+        await flushRuntime(runtime);
+        runtime.navigator.serviceWorker.dispatchEvent(
+            new CustomEventStub("controllerchange")
+        );
+        await flushRuntime(runtime);
+        assert.equal(runtime.reloadCalls, 0);
+
+        runtime.finishUnfinishedAction();
+        runtime.guard.acceptServerContract(newerServerContract);
+        await flushRuntime(runtime);
+        assert.equal(
+            runtime.reloadCalls,
+            1,
+            "the pending controller change must recover once the action is safe"
+        );
+
+        runtime.guard.acceptServerContract(newerServerContract);
+        await flushRuntime(runtime);
+        assert.equal(runtime.reloadCalls, 1, "the safe retry must remain single-shot");
+    }
+);
+
+test(
+    "transient registration failure retries once on online and does not storm",
+    {skip: guardUnavailable},
+    async () => {
+        const runtime = createRuntime({
+            htmlContractVersion: "contract-v2",
+            htmlShellVersion: "driver-shell-v2",
+            workerContractVersion: "contract-v2",
+            workerShellVersion: "driver-shell-v2",
+            hasWaitingWorker: false,
+            registrationAvailable: false,
+            registerFailures: 1,
+        });
+        runtime.guard.registerJavaScript("contract-v2");
+        runtime.guard.acceptServiceWorkerVersion({
+            appContractVersion: "contract-v2",
+            shellVersion: "driver-shell-v2",
+            roleCode: "driver",
+        });
+        const newerServerContract = {
+            app_contract_version: "contract-v2",
+            role_shell_version: "driver-shell-v3",
+            role_app_code: "driver",
+        };
+        runtime.guard.acceptServerContract(newerServerContract);
+        await flushRuntime(runtime);
+        assert.equal(runtime.updateCalls, 0);
+        assert.equal(runtime.registerCalls, 1);
+
+        for (let repeat = 0; repeat < 10; repeat += 1) {
+            runtime.guard.acceptServerContract(newerServerContract);
+            await flushRuntime(runtime);
+        }
+        assert.equal(
+            runtime.registerCalls,
+            1,
+            "realtime observations must not retry a failed registration before recovery"
+        );
+        assert.equal(runtime.updateCalls, 0);
+
+        runtime.window.dispatchEvent(new CustomEventStub("online"));
+        await flushRuntime(runtime);
+        assert.equal(runtime.registerCalls, 2, "online must retry the failed registration once");
+        assert.equal(runtime.updateCalls, 1, "the recovered registration receives one update");
+
+        runtime.window.dispatchEvent(new CustomEventStub("online"));
+        runtime.window.dispatchEvent(new CustomEventStub("online"));
+        await flushRuntime(runtime);
+        assert.equal(runtime.registerCalls, 2);
+        assert.equal(runtime.updateCalls, 1, "repeated online signals must not start an update storm");
+    }
+);
+
+test(
+    "failed controlled update waits for explicit online recovery without realtime retries",
+    {skip: guardUnavailable},
+    async () => {
+        const runtime = createRuntime({
+            htmlContractVersion: "contract-v2",
+            htmlShellVersion: "driver-shell-v2",
+            workerContractVersion: "contract-v2",
+            workerShellVersion: "driver-shell-v2",
+            hasWaitingWorker: false,
+            updateFailures: 1,
+        });
+        runtime.guard.registerJavaScript("contract-v2");
+        runtime.guard.acceptServiceWorkerVersion({
+            appContractVersion: "contract-v2",
+            shellVersion: "driver-shell-v2",
+            roleCode: "driver",
+        });
+        const newerServerContract = {
+            app_contract_version: "contract-v2",
+            role_shell_version: "driver-shell-v3",
+            role_app_code: "driver",
+        };
+        runtime.guard.acceptServerContract(newerServerContract);
+        await flushRuntime(runtime);
+        assert.equal(runtime.updateCalls, 1);
+
+        for (let repeat = 0; repeat < 10; repeat += 1) {
+            runtime.guard.acceptServerContract(newerServerContract);
+            await flushRuntime(runtime);
+        }
+        assert.equal(
+            runtime.updateCalls,
+            1,
+            "same-version realtime observations must not retry a failed full SW update"
+        );
+
+        runtime.window.dispatchEvent(new CustomEventStub("online"));
+        await flushRuntime(runtime);
+        assert.equal(
+            runtime.updateCalls,
+            2,
+            "one explicit online recovery may retry the failed controlled update once"
+        );
+    }
+);
+
+test(
+    "online burst reuses an in-flight service-worker registration",
+    {skip: guardUnavailable},
+    async () => {
+        const runtime = createRuntime({
+            htmlContractVersion: "contract-v2",
+            htmlShellVersion: "driver-shell-v2",
+            workerContractVersion: "contract-v2",
+            workerShellVersion: "driver-shell-v2",
+            hasWaitingWorker: false,
+            registrationAvailable: false,
+            deferRegistration: true,
+        });
+        await flushPromises();
+        assert.equal(runtime.registerCalls, 1);
+
+        runtime.window.dispatchEvent(new CustomEventStub("online"));
+        runtime.window.dispatchEvent(new CustomEventStub("online"));
+        runtime.window.dispatchEvent(new CustomEventStub("online"));
+        await flushPromises();
+        assert.equal(
+            runtime.registerCalls,
+            1,
+            "online signals must not replace an unresolved registration promise"
+        );
+
+        runtime.resolveRegistration();
+        await flushRuntime(runtime);
+        assert.equal(runtime.registerCalls, 1);
+    }
+);
+
+test(
+    "PWA recovery controls remain clickable while the contract is locked",
+    {skip: guardUnavailable},
+    async () => {
+        const runtime = createRuntime({
+            htmlContractVersion: "contract-v2",
+            htmlShellVersion: "driver-shell-v2",
+            workerContractVersion: "contract-v1",
+            workerShellVersion: "driver-shell-v1",
+        });
+        runtime.guard.registerJavaScript("contract-v1");
+        runtime.guard.acceptServiceWorkerVersion({
+            appContractVersion: "contract-v1",
+            shellVersion: "driver-shell-v1",
+            roleCode: "driver",
+        });
+        runtime.guard.acceptServerContract({
+            app_contract_version: "contract-v2",
+            role_shell_version: "driver-shell-v2",
+            role_app_code: "driver",
+        });
+        await flushRuntime(runtime);
+
+        for (const attribute of [
+            "data-eo-pwa-update-nav-target",
+            "data-eo-pwa-update-check",
+        ]) {
+            const updateButton = new ElementStub("button", {[attribute]: ""});
+            runtime.document.body.appendChild(updateButton);
+            const click = new CustomEventStub("click");
+            click.target = updateButton;
+            runtime.document.dispatchEvent(click);
+            assert.equal(
+                click.defaultPrevented,
+                false,
+                `a locked shell must still allow its ${attribute} recovery control`
+            );
+        }
+        const loginForm = new ElementStub("form", {
+            method: "post",
+            "data-validated-login": "",
+        });
+        const loginSubmit = new ElementStub("button", {type: "submit"});
+        loginForm.appendChild(loginSubmit);
+        runtime.document.body.appendChild(loginForm);
+        const loginClick = new CustomEventStub("click");
+        loginClick.target = loginSubmit;
+        runtime.document.dispatchEvent(loginClick);
+        assert.equal(
+            loginClick.defaultPrevented,
+            false,
+            "the submit button inside the safe login form must stay clickable"
+        );
+        const submit = new CustomEventStub("submit");
+        submit.target = loginForm;
+        runtime.document.dispatchEvent(submit);
+        assert.equal(
+            submit.defaultPrevented,
+            false,
+            "an old PWA shell must not make the login form impossible to submit"
+        );
+    }
+);
 
 test(
     "old cached JavaScript and service worker lock new HTML and request an atomic update",
@@ -620,11 +2294,12 @@ test(
             runtime.updateCalls >= 1,
             "contract mismatch must request registration.update()"
         );
-        assert.ok(
-            runtime.waitingWorkerMessages.some(
+        assert.equal(
+            runtime.waitingWorkerMessages.filter(
                 (message) => message && message.type === "SKIP_WAITING"
-            ),
-            "waiting compatible release must receive SKIP_WAITING"
+            ).length,
+            0,
+            "automatic contract recovery may download a release but must not activate it"
         );
         assert.ok(runtime.reloadCalls <= 1);
     }
