@@ -1,0 +1,43 @@
+{
+  "generated_at": "2026-07-27",
+  "read_only": true,
+  "database": "copper_week_qa_20260727",
+  "timezone": "Asia/Vladivostok",
+  "range": {
+    "start": "2026-07-20T07:00:00+10:00",
+    "end_exclusive": "2026-07-27T07:00:00+10:00",
+    "shift_hours": 12,
+    "shift_count": 14
+  },
+  "totals": {
+    "events": 80341,
+    "trip_changed": 59364,
+    "distinct_event_seconds": 28563
+  },
+  "shifts": [
+    {"number": 1, "events": 5902, "trip_changed": 4222, "distinct_event_seconds": 2067},
+    {"number": 2, "events": 5686, "trip_changed": 4232, "distinct_event_seconds": 2031},
+    {"number": 3, "events": 5746, "trip_changed": 4248, "distinct_event_seconds": 2046},
+    {"number": 4, "events": 5729, "trip_changed": 4264, "distinct_event_seconds": 2052},
+    {"number": 5, "events": 5772, "trip_changed": 4252, "distinct_event_seconds": 2040},
+    {"number": 6, "events": 5714, "trip_changed": 4240, "distinct_event_seconds": 2029},
+    {"number": 7, "events": 5731, "trip_changed": 4228, "distinct_event_seconds": 2058},
+    {"number": 8, "events": 5677, "trip_changed": 4216, "distinct_event_seconds": 2027},
+    {"number": 9, "events": 5735, "trip_changed": 4232, "distinct_event_seconds": 2036},
+    {"number": 10, "events": 5722, "trip_changed": 4248, "distinct_event_seconds": 2018},
+    {"number": 11, "events": 5782, "trip_changed": 4264, "distinct_event_seconds": 2064},
+    {"number": 12, "events": 5725, "trip_changed": 4252, "distinct_event_seconds": 2015},
+    {"number": 13, "events": 5742, "trip_changed": 4240, "distinct_event_seconds": 2042},
+    {"number": 14, "events": 5678, "trip_changed": 4226, "distinct_event_seconds": 2038}
+  ],
+  "distinct_event_seconds_per_shift": {
+    "minimum": 2015,
+    "average": 2040.2,
+    "maximum": 2067,
+    "sum": 28563
+  },
+  "sql": {
+    "totals": "SELECT COUNT(*) AS events, COUNT(*) FILTER (WHERE event_type = 'trip_changed') AS trip_changed, COUNT(DISTINCT date_trunc('second', created_at)) AS distinct_event_seconds FROM core_operationalstateevent WHERE created_at >= TIMESTAMPTZ '2026-07-20 07:00:00+10' AND created_at < TIMESTAMPTZ '2026-07-27 07:00:00+10';",
+    "shift_series": "Generate 14 half-open 12-hour ranges with generate_series(TIMESTAMPTZ '2026-07-20 07:00:00+10', TIMESTAMPTZ '2026-07-26 19:00:00+10', INTERVAL '12 hours'); LEFT JOIN core_operationalstateevent on created_at >= start_at AND created_at < end_at; aggregate total events, trip_changed and COUNT(DISTINCT date_trunc('second', created_at))."
+  }
+}

@@ -25319,6 +25319,22 @@ body.mining-master-screen .dispatcher-complex-card .complex-truck-tile {
         min-height: 0;
     }
 
+    .dispatcher-board.is-excavator-garage-empty.is-truck-garage-empty {
+        grid-template-columns: minmax(0, 1fr);
+        column-gap: 10px;
+    }
+
+    .dispatcher-board.is-excavator-garage-empty.is-truck-garage-empty .dispatcher-complexes {
+        margin-left: 0;
+    }
+
+    .dispatcher-board.is-excavator-garage-empty.is-truck-garage-empty .dispatcher-topbar.dispatcher-unified-topbar,
+    .dispatcher-board.is-excavator-garage-empty.is-truck-garage-empty .dispatcher-topbar.dispatcher-unified-topbar .dispatcher-header-row {
+        height: auto;
+        min-height: 0;
+        max-height: none;
+    }
+
     .dispatcher-topbar,
     .dispatcher-left,
     .dispatcher-complexes,

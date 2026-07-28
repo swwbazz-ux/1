@@ -22,7 +22,10 @@ from core.production_time import (
 )
 from references.models import DumpPoint, Equipment, RockType
 from shifts.models import EmployeeShift, ShiftType
-from shifts.services import recent_shift_reading_corrections, shift_plan_totals
+from shifts.services import (
+    recent_shift_reading_corrections,
+    shift_plan_totals_for_dates,
+)
 from trips.dispatcher_header import build_dispatcher_header_context
 from trips.models import (
     DispatcherActionLog,
@@ -36,7 +39,11 @@ from users.models import Employee, EmployeeAccess
 
 from .forms import PilotFeedbackForm
 from .models import PilotFeedback, ReportTemplate, ReportType
-from .shift_analytics import build_excavator_dynamics, build_shift_analytics
+from .shift_analytics import (
+    build_excavator_dynamics,
+    build_shift_analytics,
+    load_shift_analytics_data,
+)
 
 
 STATUS_COLOR_GROUPS = {'gray', 'yellow', 'green', 'blue', 'orange', 'red'}
@@ -3412,6 +3419,12 @@ def parse_customer_report_date(request):
 
 
 def trip_report_date(trip):
+    if isinstance(trip, dict):
+        if trip['loading_shift__opened_at']:
+            return production_work_date(trip['loading_shift__opened_at'])
+        if trip['completed_at']:
+            return production_work_date(trip['completed_at'])
+        return production_work_date(trip['created_at'])
     if trip.loading_shift:
         return production_work_date(trip.loading_shift.opened_at)
     if trip.completed_at:
@@ -3420,6 +3433,14 @@ def trip_report_date(trip):
 
 
 def trip_shift_type(trip):
+    if isinstance(trip, dict):
+        if trip['loading_shift__shift_type']:
+            return trip['loading_shift__shift_type']
+        if trip['unloading_shift__shift_type']:
+            return trip['unloading_shift__shift_type']
+        return production_shift_context(
+            trip['completed_at'] or trip['created_at']
+        ).shift_type
     if trip.loading_shift:
         return trip.loading_shift.shift_type
     if trip.unloading_shift:
@@ -3433,12 +3454,17 @@ def calculate_plan_completion_percent(volume, plan):
     return (((volume or Decimal('0')) / plan) * Decimal('100')).quantize(Decimal('0.1'))
 
 
-def build_management_daily_trend(trips, selected_date):
+def build_management_daily_trend(trips, selected_date, plan_totals_by_date=None):
     trend_start = selected_date - timedelta(days=6)
+    trend_dates = [
+        trend_start + timedelta(days=day_offset)
+        for day_offset in range(7)
+    ]
+    if plan_totals_by_date is None:
+        plan_totals_by_date = shift_plan_totals_for_dates(trend_dates)
     trend_by_date = {}
-    for day_offset in range(7):
-        report_date = trend_start + timedelta(days=day_offset)
-        manual_plan_volume = shift_plan_totals(report_date)['volume_m3']
+    for report_date in trend_dates:
+        manual_plan_volume = plan_totals_by_date[report_date]['volume_m3']
         trend_by_date[report_date] = {
             'date': report_date,
             'volume': Decimal('0'),
@@ -3452,10 +3478,18 @@ def build_management_daily_trend(trips, selected_date):
         report_date = trip_report_date(trip)
         if report_date not in trend_by_date:
             continue
-        trend_by_date[report_date]['volume'] += trip.volume_m3 or 0
+        if isinstance(trip, dict):
+            volume_m3 = trip['volume_m3']
+            planned_volume_m3 = trip['planned_volume_m3']
+            tonnage = trip['tonnage']
+        else:
+            volume_m3 = trip.volume_m3
+            planned_volume_m3 = trip.planned_volume_m3
+            tonnage = trip.tonnage
+        trend_by_date[report_date]['volume'] += volume_m3 or 0
         if not trend_by_date[report_date]['has_manual_plan']:
-            trend_by_date[report_date]['plan'] += trip.planned_volume_m3 or 0
-        trend_by_date[report_date]['tonnage'] += trip.tonnage or 0
+            trend_by_date[report_date]['plan'] += planned_volume_m3 or 0
+        trend_by_date[report_date]['tonnage'] += tonnage or 0
         trend_by_date[report_date]['trip_count'] += 1
 
     daily_trend = []
@@ -3865,7 +3899,9 @@ def customer_daily_report_export_view(request):
 def management_dashboard_context(request, access):
     completed_trips = Trip.objects.filter(status=TripStatus.COMPLETED).select_related(
         'truck',
+        'truck__equipment_type',
         'excavator',
+        'excavator__equipment_type',
         'rock_type',
         'dump_point',
         'loading_shift',
@@ -3875,13 +3911,28 @@ def management_dashboard_context(request, access):
     open_mechanic_downtimes = (
         DowntimeEvent.objects
         .filter(ended_at__isnull=True, reason__show_for_mechanic=True)
-        .select_related('equipment', 'reason', 'employee')
+        .select_related('equipment', 'equipment__equipment_type', 'reason', 'employee')
         .order_by('started_at')
     )
     selected_date = parse_customer_report_date(request)
-    shift_analytics = build_shift_analytics(selected_date, '')
-    shift_analytics_day = build_shift_analytics(selected_date, 'day')
-    shift_analytics_night = build_shift_analytics(selected_date, 'night')
+    shift_analytics_source = load_shift_analytics_data(selected_date)
+    shift_analytics = build_shift_analytics(
+        selected_date,
+        '',
+        source=shift_analytics_source,
+    )
+    shift_analytics_day = build_shift_analytics(
+        selected_date,
+        'day',
+        source=shift_analytics_source,
+        totals_only=True,
+    )
+    shift_analytics_night = build_shift_analytics(
+        selected_date,
+        'night',
+        source=shift_analytics_source,
+        totals_only=True,
+    )
     shift_analytics_shift_cards = [
         {
             'label': 'День',
@@ -3894,15 +3945,56 @@ def management_dashboard_context(request, access):
             'url': f"{reverse('shift_analytics_report')}?date={selected_date:%Y-%m-%d}&shift_type=night",
         },
     ]
-    completed_trip_list = list(completed_trips)
-    daily_trips = [
+    trend_start = selected_date - timedelta(days=6)
+    trend_period_start = production_day_bounds(trend_start)[0]
+    trend_period_end = production_day_bounds(selected_date)[1]
+    completed_trip_rows = list(
+        completed_trips
+        .filter(
+            Q(
+                loading_shift__opened_at__gte=trend_period_start,
+                loading_shift__opened_at__lt=trend_period_end,
+            )
+            | Q(
+                loading_shift__isnull=True,
+                completed_at__gte=trend_period_start,
+                completed_at__lt=trend_period_end,
+            )
+            | Q(
+                loading_shift__isnull=True,
+                completed_at__isnull=True,
+                created_at__gte=trend_period_start,
+                created_at__lt=trend_period_end,
+            )
+        )
+        .order_by('completed_at', 'created_at')
+        .values(
+            'volume_m3',
+            'tonnage',
+            'planned_volume_m3',
+            'is_carryover',
+            'completed_at',
+            'created_at',
+            'loading_shift__opened_at',
+            'loading_shift__shift_type',
+            'unloading_shift__shift_type',
+            'excavator__garage_number',
+            'rock_type__name',
+        )
+    )
+    daily_trip_rows = [
         trip
-        for trip in completed_trip_list
+        for trip in completed_trip_rows
         if trip_report_date(trip) == selected_date
     ]
-    daily_total_volume = sum((trip.volume_m3 or 0) for trip in daily_trips)
-    daily_total_tonnage = sum((trip.tonnage or 0) for trip in daily_trips)
-    manual_plan_totals = shift_plan_totals(selected_date)
+    daily_total_volume = sum((trip['volume_m3'] or 0) for trip in daily_trip_rows)
+    daily_total_tonnage = sum((trip['tonnage'] or 0) for trip in daily_trip_rows)
+    trend_dates = [
+        trend_start + timedelta(days=day_offset)
+        for day_offset in range(7)
+    ]
+    plan_totals_by_date = shift_plan_totals_for_dates(trend_dates)
+    manual_plan_totals = plan_totals_by_date[selected_date]
     manual_plan_by_shift = manual_plan_totals['by_shift']
     daily_plan_source = 'из сменных планов админки' if manual_plan_totals['volume_m3'] else 'по заданиям в рейсах'
     daily_shift_totals = {
@@ -3935,14 +4027,14 @@ def management_dashboard_context(request, access):
         key: bool(value['volume_m3'])
         for key, value in manual_plan_by_shift.items()
     }
-    for trip in daily_trips:
+    for trip in daily_trip_rows:
         shift_type = trip_shift_type(trip) or 'unknown'
         if shift_type not in daily_shift_totals:
             shift_type = 'unknown'
-        daily_shift_totals[shift_type]['volume'] += trip.volume_m3 or 0
+        daily_shift_totals[shift_type]['volume'] += trip['volume_m3'] or 0
         if not manual_plan_present_by_shift.get(shift_type):
-            daily_shift_totals[shift_type]['plan'] += trip.planned_volume_m3 or 0
-        daily_shift_totals[shift_type]['tonnage'] += trip.tonnage or 0
+            daily_shift_totals[shift_type]['plan'] += trip['planned_volume_m3'] or 0
+        daily_shift_totals[shift_type]['tonnage'] += trip['tonnage'] or 0
         daily_shift_totals[shift_type]['trip_count'] += 1
     daily_plan_total = sum((item['plan'] for item in daily_shift_totals.values()), Decimal('0'))
     daily_deviation = daily_total_volume - daily_plan_total
@@ -3965,7 +4057,11 @@ def management_dashboard_context(request, access):
             **item,
             'deviation': item['volume'] - item['plan'],
         })
-    daily_trend = build_management_daily_trend(completed_trip_list, selected_date)
+    daily_trend = build_management_daily_trend(
+        completed_trip_rows,
+        selected_date,
+        plan_totals_by_date=plan_totals_by_date,
+    )
     max_daily_trend_volume = max((item['volume'] for item in daily_trend), default=Decimal('0'))
     max_daily_trend_plan = max((item['plan'] for item in daily_trend), default=Decimal('0'))
     trend_total_volume = sum((item['volume'] for item in daily_trend), Decimal('0'))
@@ -3998,12 +4094,13 @@ def management_dashboard_context(request, access):
     )
     daily_excavator_totals = defaultdict(lambda: {'volume': 0, 'trip_count': 0})
     daily_rock_totals = defaultdict(lambda: {'volume': 0, 'trip_count': 0})
-    for trip in daily_trips:
-        excavator_name = f'Экскаватор {trip.excavator.garage_number}' if trip.excavator else '-'
-        rock_name = str(trip.rock_type) if trip.rock_type else '-'
-        daily_excavator_totals[excavator_name]['volume'] += trip.volume_m3 or 0
+    for trip in daily_trip_rows:
+        garage_number = trip['excavator__garage_number']
+        excavator_name = f'Экскаватор {garage_number}' if garage_number else '-'
+        rock_name = trip['rock_type__name'] or '-'
+        daily_excavator_totals[excavator_name]['volume'] += trip['volume_m3'] or 0
         daily_excavator_totals[excavator_name]['trip_count'] += 1
-        daily_rock_totals[rock_name]['volume'] += trip.volume_m3 or 0
+        daily_rock_totals[rock_name]['volume'] += trip['volume_m3'] or 0
         daily_rock_totals[rock_name]['trip_count'] += 1
     daily_top_excavators = sorted(
         [
@@ -4050,7 +4147,7 @@ def management_dashboard_context(request, access):
         'daily_plan_completion_css': str(daily_plan_completion_percent or 0),
         'daily_plan_completion_class': daily_plan_completion_class,
         'daily_total_tonnage': daily_total_tonnage,
-        'daily_trip_count': len(daily_trips),
+        'daily_trip_count': len(daily_trip_rows),
         'daily_top_excavators': daily_top_excavators,
         'daily_top_rocks': daily_top_rocks,
         'shift_analytics': shift_analytics,
@@ -4080,7 +4177,9 @@ def management_dashboard_context(request, access):
         'active_trip_count': active_trips.count(),
         'open_mechanic_downtime_count': open_mechanic_downtimes.count(),
         'carryover_trip_count': active_trips.filter(is_carryover=True).count(),
-        'daily_carryover_trip_count': sum(1 for trip in daily_trips if trip.is_carryover),
+        'daily_carryover_trip_count': sum(
+            1 for trip in daily_trip_rows if trip['is_carryover']
+        ),
         'mechanic_downtime_count': len(build_mechanic_downtime_rows(selected_date)),
         'open_mechanic_downtimes': open_mechanic_downtimes[:8],
         'top_excavators': top_excavators,

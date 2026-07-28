@@ -1,0 +1,416 @@
+{
+  "status": "FAIL",
+  "started_at": "2026-07-28T02:42:13.391880+00:00",
+  "finished_at": "2026-07-28T02:42:45.554883+00:00",
+  "duration_seconds": 32.163,
+  "configuration": {
+    "sessions": 49,
+    "driver_count": 42,
+    "operator_count": 1,
+    "duration_seconds": 30,
+    "interval_seconds": 5.0,
+    "page_interval_seconds": 15.0,
+    "timeout_seconds": 8.0,
+    "startup_jitter_seconds": 0.1,
+    "target": "http://*.localhost:8000",
+    "production_facts_read_only": true,
+    "creates_test_sessions": true
+  },
+  "accounts_by_role": {
+    "admin": 1,
+    "deputy_mining_manager": 1,
+    "dispatcher": 1,
+    "driver": 42,
+    "excavator_operator": 1,
+    "manager": 1,
+    "mining_master": 1,
+    "oup": 1
+  },
+  "login_results": [
+    {
+      "ordinal": 0,
+      "role": "admin",
+      "host": "admin.localhost",
+      "passed": true,
+      "error": ""
+    },
+    {
+      "ordinal": 1,
+      "role": "oup",
+      "host": "oup.localhost",
+      "passed": true,
+      "error": ""
+    },
+    {
+      "ordinal": 2,
+      "role": "deputy_mining_manager",
+      "host": "deputy.localhost",
+      "passed": true,
+      "error": ""
+    },
+    {
+      "ordinal": 3,
+      "role": "manager",
+      "host": "management.localhost",
+      "passed": true,
+      "error": ""
+    },
+    {
+      "ordinal": 4,
+      "role": "dispatcher",
+      "host": "dispatcher.localhost",
+      "passed": true,
+      "error": ""
+    },
+    {
+      "ordinal": 5,
+      "role": "mining_master",
+      "host": "mining-master.localhost",
+      "passed": true,
+      "error": ""
+    },
+    {
+      "ordinal": 12,
+      "role": "excavator_operator",
+      "host": "excavator.localhost",
+      "passed": true,
+      "error": ""
+    },
+    {
+      "ordinal": 44,
+      "role": "driver",
+      "host": "driver.localhost",
+      "passed": true,
+      "error": ""
+    },
+    {
+      "ordinal": 45,
+      "role": "driver",
+      "host": "driver.localhost",
+      "passed": true,
+      "error": ""
+    },
+    {
+      "ordinal": 46,
+      "role": "driver",
+      "host": "driver.localhost",
+      "passed": true,
+      "error": ""
+    },
+    {
+      "ordinal": 47,
+      "role": "driver",
+      "host": "driver.localhost",
+      "passed": true,
+      "error": ""
+    },
+    {
+      "ordinal": 48,
+      "role": "driver",
+      "host": "driver.localhost",
+      "passed": true,
+      "error": ""
+    },
+    {
+      "ordinal": 49,
+      "role": "driver",
+      "host": "driver.localhost",
+      "passed": true,
+      "error": ""
+    },
+    {
+      "ordinal": 50,
+      "role": "driver",
+      "host": "driver.localhost",
+      "passed": true,
+      "error": ""
+    },
+    {
+      "ordinal": 51,
+      "role": "driver",
+      "host": "driver.localhost",
+      "passed": true,
+      "error": ""
+    },
+    {
+      "ordinal": 52,
+      "role": "driver",
+      "host": "driver.localhost",
+      "passed": true,
+      "error": ""
+    },
+    {
+      "ordinal": 53,
+      "role": "driver",
+      "host": "driver.localhost",
+      "passed": true,
+      "error": ""
+    },
+    {
+      "ordinal": 54,
+      "role": "driver",
+      "host": "driver.localhost",
+      "passed": true,
+      "error": ""
+    },
+    {
+      "ordinal": 55,
+      "role": "driver",
+      "host": "driver.localhost",
+      "passed": true,
+      "error": ""
+    },
+    {
+      "ordinal": 56,
+      "role": "driver",
+      "host": "driver.localhost",
+      "passed": true,
+      "error": ""
+    },
+    {
+      "ordinal": 57,
+      "role": "driver",
+      "host": "driver.localhost",
+      "passed": true,
+      "error": ""
+    },
+    {
+      "ordinal": 58,
+      "role": "driver",
+      "host": "driver.localhost",
+      "passed": true,
+      "error": ""
+    },
+    {
+      "ordinal": 59,
+      "role": "driver",
+      "host": "driver.localhost",
+      "passed": true,
+      "error": ""
+    },
+    {
+      "ordinal": 60,
+      "role": "driver",
+      "host": "driver.localhost",
+      "passed": true,
+      "error": ""
+    },
+    {
+      "ordinal": 61,
+      "role": "driver",
+      "host": "driver.localhost",
+      "passed": true,
+      "error": ""
+    },
+    {
+      "ordinal": 62,
+      "role": "driver",
+      "host": "driver.localhost",
+      "passed": true,
+      "error": ""
+    },
+    {
+      "ordinal": 63,
+      "role": "driver",
+      "host": "driver.localhost",
+      "passed": true,
+      "error": ""
+    },
+    {
+      "ordinal": 64,
+      "role": "driver",
+      "host": "driver.localhost",
+      "passed": true,
+      "error": ""
+    },
+    {
+      "ordinal": 65,
+      "role": "driver",
+      "host": "driver.localhost",
+      "passed": true,
+      "error": ""
+    },
+    {
+      "ordinal": 66,
+      "role": "driver",
+      "host": "driver.localhost",
+      "passed": true,
+      "error": ""
+    },
+    {
+      "ordinal": 67,
+      "role": "driver",
+      "host": "driver.localhost",
+      "passed": true,
+      "error": ""
+    },
+    {
+      "ordinal": 68,
+      "role": "driver",
+      "host": "driver.localhost",
+      "passed": true,
+      "error": ""
+    },
+    {
+      "ordinal": 69,
+      "role": "driver",
+      "host": "driver.localhost",
+      "passed": true,
+      "error": ""
+    },
+    {
+      "ordinal": 70,
+      "role": "driver",
+      "host": "driver.localhost",
+      "passed": true,
+      "error": ""
+    },
+    {
+      "ordinal": 71,
+      "role": "driver",
+      "host": "driver.localhost",
+      "passed": true,
+      "error": ""
+    },
+    {
+      "ordinal": 72,
+      "role": "driver",
+      "host": "driver.localhost",
+      "passed": true,
+      "error": ""
+    },
+    {
+      "ordinal": 73,
+      "role": "driver",
+      "host": "driver.localhost",
+      "passed": true,
+      "error": ""
+    },
+    {
+      "ordinal": 74,
+      "role": "driver",
+      "host": "driver.localhost",
+      "passed": true,
+      "error": ""
+    },
+    {
+      "ordinal": 75,
+      "role": "driver",
+      "host": "driver.localhost",
+      "passed": true,
+      "error": ""
+    },
+    {
+      "ordinal": 76,
+      "role": "driver",
+      "host": "driver.localhost",
+      "passed": true,
+      "error": ""
+    },
+    {
+      "ordinal": 77,
+      "role": "driver",
+      "host": "driver.localhost",
+      "passed": true,
+      "error": ""
+    },
+    {
+      "ordinal": 78,
+      "role": "driver",
+      "host": "driver.localhost",
+      "passed": true,
+      "error": ""
+    },
+    {
+      "ordinal": 79,
+      "role": "driver",
+      "host": "driver.localhost",
+      "passed": true,
+      "error": ""
+    },
+    {
+      "ordinal": 80,
+      "role": "driver",
+      "host": "driver.localhost",
+      "passed": true,
+      "error": ""
+    },
+    {
+      "ordinal": 81,
+      "role": "driver",
+      "host": "driver.localhost",
+      "passed": true,
+      "error": ""
+    },
+    {
+      "ordinal": 82,
+      "role": "driver",
+      "host": "driver.localhost",
+      "passed": true,
+      "error": ""
+    },
+    {
+      "ordinal": 83,
+      "role": "driver",
+      "host": "driver.localhost",
+      "passed": true,
+      "error": ""
+    },
+    {
+      "ordinal": 84,
+      "role": "driver",
+      "host": "driver.localhost",
+      "passed": true,
+      "error": ""
+    },
+    {
+      "ordinal": 85,
+      "role": "driver",
+      "host": "driver.localhost",
+      "passed": true,
+      "error": ""
+    }
+  ],
+  "requests": {
+    "total": 278,
+    "status_counts": {
+      "200": 278
+    },
+    "role_counts": {
+      "admin": 2,
+      "excavator_operator": 6,
+      "dispatcher": 6,
+      "driver": 252,
+      "mining_master": 6,
+      "oup": 2,
+      "manager": 2,
+      "deputy_mining_manager": 2
+    },
+    "errors": 0,
+    "unexpected_statuses": 0,
+    "requests_per_second": 9.267
+  },
+  "latency_ms": {
+    "min": 80.875,
+    "mean": 502.582,
+    "median": 304.486,
+    "p95": 1216.437,
+    "p99": 1605.844,
+    "max": 1781.361,
+    "realtime_p95": 1205.392,
+    "realtime_p99": 1234.192,
+    "pages_p95": 1781.361
+  },
+  "criteria": {
+    "all_logins": true,
+    "database_marker_found": true,
+    "no_request_errors": true,
+    "all_status_200": true,
+    "realtime_p95_le_1000_ms": false,
+    "realtime_p99_le_3000_ms": true,
+    "pages_p95_le_5000_ms": true,
+    "max_lt_timeout": true
+  },
+  "error_samples": [],
+  "unexpected_status_samples": []
+}

@@ -26,6 +26,7 @@ from assignments.services import (
 )
 from core.db_locks import lock_idempotency_key
 from core.models import OperationalStateVersion, bump_operational_state
+from core.operational_fragments import operational_fragment_response
 from core.production_time import (
     production_shift_bounds,
     production_shift_context,
@@ -34,7 +35,7 @@ from core.production_time import (
 )
 from downtimes.models import DowntimeEvent, DowntimeReason
 from references.equipment_states import DEFAULT_EQUIPMENT_STATES
-from references.models import DumpPoint, Equipment, EquipmentState, RockType, TruckCapacityRule
+from references.models import DumpPoint, Equipment, EquipmentState, RockType
 from shifts.models import EmployeeShift, ShiftClientAction
 from shifts.models import PlanAssignmentStatus, PlanCalculationMode
 from shifts.services import (
@@ -62,7 +63,10 @@ from users.session_device import get_session_device_kind, set_session_device_kin
 from .forms import TripCreateForm
 from .dispatcher_header import build_dispatcher_header_context, close_dispatcher_shift, get_active_dispatcher_shift, open_dispatcher_shift
 from .models import DispatcherActionLog, DispatcherActionType, OPEN_TRIP_STATUSES, Trip, TripClientAction, TripStatus
-from .trip_creation import create_loaded_waiting_unload_trip
+from .trip_creation import (
+    calculate_trip_volume_and_tonnage,
+    create_loaded_waiting_unload_trip,
+)
 
 
 DISPATCHER_FILTER_KEYS = (
@@ -450,7 +454,7 @@ DISPATCHER_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "dispatcher";
 const CACHE_PREFIX = "dispatcher-desktop-shell-";
-const CACHE_NAME = "dispatcher-desktop-shell-v38";
+const CACHE_NAME = "dispatcher-desktop-shell-v41";
 const APP_SHELL_URL = "/dispatcher/control/";
 const MANIFEST_URL = "/dispatcher.webmanifest";
 const CORE_ASSETS = [
@@ -636,7 +640,7 @@ EXCAVATOR_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "excavator_operator";
 const CACHE_PREFIX = "excavator-mobile-shell-";
-const CACHE_NAME = "excavator-mobile-shell-v122";
+const CACHE_NAME = "excavator-mobile-shell-v123";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const CORE_ASSETS = [
@@ -2971,24 +2975,17 @@ def excavator_json_payload(request):
     return request.POST
 
 
-def calculate_trip_volume_and_tonnage(truck, rock_type):
-    volume = None
-    if truck and truck.model:
-        rule = TruckCapacityRule.objects.filter(equipment_model=truck.model, rock_type=rock_type).first()
-        if rule:
-            volume = rule.volume_m3
-        elif truck.model.body_volume_m3:
-            volume = truck.model.body_volume_m3
-    if not volume or not rock_type or not rock_type.density:
-        return volume, None
-    return volume, (Decimal(volume) * Decimal(rock_type.density)).quantize(Decimal('0.01'))
-
-
 def finalize_trip_unloaded(trip, *, driver, unloading_shift):
     if trip.status not in OPEN_TRIP_STATUSES:
         return False
-    if trip.volume_m3 is None or trip.tonnage is None:
-        volume, tonnage = calculate_trip_volume_and_tonnage(trip.truck, trip.rock_type)
+    volume, tonnage = calculate_trip_volume_and_tonnage(
+        trip.truck,
+        trip.rock_type,
+    )
+    if volume is not None and tonnage is not None:
+        trip.volume_m3 = volume
+        trip.tonnage = tonnage
+    elif trip.volume_m3 is None or trip.tonnage is None:
         trip.volume_m3 = trip.volume_m3 if trip.volume_m3 is not None else volume
         trip.tonnage = trip.tonnage if trip.tonnage is not None else tonnage
     trip.status = TripStatus.COMPLETED
@@ -3171,6 +3168,29 @@ def excavator_truck_loaded_view(request):
         rock_type = get_object_or_404(RockType.objects.filter(is_active=True), id=rock_type_id)
         loading_horizon = normalize_excavator_numeric_setting(payload.get('loading_horizon'))
         loading_block = normalize_excavator_numeric_setting(payload.get('loading_block'))
+        try:
+            trip = create_loaded_waiting_unload_trip(
+                assignment=assignment,
+                excavator_operator=access.employee,
+                loading_shift=open_shift,
+                rock_type=rock_type,
+                dump_point=dump_point,
+                planned_volume_m3=payload.get('planned_volume_m3') or None,
+                loading_horizon=loading_horizon,
+                loading_block=loading_block,
+                transport_distance_km=payload.get('transport_distance_km') or None,
+                downtime_text=payload.get('downtime_text'),
+                note=payload.get('note'),
+            )
+        except ValidationError as error:
+            return JsonResponse(
+                {
+                    'ok': False,
+                    'error': '; '.join(error.messages),
+                    'code': 'trip_measurements_unresolved',
+                },
+                status=409,
+            )
         save_excavator_work_context(
             current_excavator=current_excavator,
             actor=access.employee,
@@ -3178,20 +3198,6 @@ def excavator_truck_loaded_view(request):
             dump_points=[dump_point],
             loading_horizon=loading_horizon,
             loading_block=loading_block,
-        )
-
-        trip = create_loaded_waiting_unload_trip(
-            assignment=assignment,
-            excavator_operator=access.employee,
-            loading_shift=open_shift,
-            rock_type=rock_type,
-            dump_point=dump_point,
-            planned_volume_m3=payload.get('planned_volume_m3') or None,
-            loading_horizon=loading_horizon,
-            loading_block=loading_block,
-            transport_distance_km=payload.get('transport_distance_km') or None,
-            downtime_text=payload.get('downtime_text'),
-            note=payload.get('note'),
         )
         TripClientAction.objects.create(
             action_type='truck_loaded',
@@ -3608,8 +3614,11 @@ def excavator_shift_action_view(request):
 
 
 def excavator_work_view(request):
+    requested_fragment = request.GET.get('_operational_fragment', '').strip()
     access_id = request.session.get('employee_access_id')
     if not access_id:
+        if requested_fragment == 'excavator':
+            return JsonResponse({'authenticated': False}, status=401)
         return redirect('login')
     access = excavator_access_from_request(request)
     if not access:
@@ -4211,7 +4220,8 @@ def excavator_work_view(request):
         value = form[field_name].value()
         return '' if value is None else str(value)
 
-    return render(
+    operational_state_version = get_operational_state_version()
+    response = render(
         request,
         'trips/excavator_work.html',
         {
@@ -4284,13 +4294,22 @@ def excavator_work_view(request):
             'shift_downtime_total_label': shift_downtime_total_label,
             'active_downtime_state': active_downtime_state,
             'downtime_reason_cards': downtime_reason_cards,
-            'operational_state_version': get_operational_state_version(),
+            'operational_state_version': operational_state_version,
             'planned_volume_value': form_value_as_text('planned_volume_m3'),
             'transport_distance_value': form_value_as_text('transport_distance_km'),
             'downtime_text_value': form_value_as_text('downtime_text'),
             'note_value': form_value_as_text('note'),
         },
     )
+    if requested_fragment == 'excavator':
+        return operational_fragment_response(
+            response,
+            screen='excavator',
+            selector='[data-eo-shell]',
+            version=operational_state_version,
+            extra={'equipment_cards': truck_detail_cards},
+        )
+    return response
 
 
 @require_http_methods(["GET", "POST"])
@@ -4409,10 +4428,13 @@ def excavator_downtime_action_view(request):
     return JsonResponse(downtime_event_payload(event, action=action_label))
 
 def dispatcher_control_view(request, *, access_override=None, enforce_dispatcher_access=True, dispatcher_header_override=None, context_overrides=None):
+    requested_fragment = request.GET.get('_operational_fragment', '').strip()
     reconcile_due_haul_assignments()
     if access_override is None:
         access_id = request.session.get('employee_access_id')
         if not access_id:
+            if requested_fragment in {'dispatcher', 'mining_master'}:
+                return JsonResponse({'authenticated': False}, status=401)
             return redirect('login')
         access = EmployeeAccess.objects.select_related('employee', 'role').filter(id=access_id, is_active=True).first()
     else:
@@ -4550,6 +4572,7 @@ def dispatcher_control_view(request, *, access_override=None, enforce_dispatcher
         recent_dispatcher_actions=recent_dispatcher_actions,
     )
 
+    operational_state_version = get_operational_state_version()
     context = {
             'access': access,
             'dispatcher_header': dispatcher_header,
@@ -4557,7 +4580,7 @@ def dispatcher_control_view(request, *, access_override=None, enforce_dispatcher
             'dispatcher_page_title': 'Горный диспетчер',
             'dispatcher_compat_title': 'Диспетчерский пульт',
             'dispatcher_board_label': 'Горный диспетчер',
-            'operational_state_version': get_operational_state_version(),
+            'operational_state_version': operational_state_version,
             'dispatcher_move_excavator_url': reverse('dispatcher_move_excavator'),
             'dispatcher_assign_truck_url': reverse('dispatcher_assign_truck'),
             'active_trips': active_trips,
@@ -4592,7 +4615,17 @@ def dispatcher_control_view(request, *, access_override=None, enforce_dispatcher
     if context_overrides:
         context.update(context_overrides)
 
-    return render(request, 'trips/dispatcher_control.html', context)
+    response = render(request, 'trips/dispatcher_control.html', context)
+    if requested_fragment in {'dispatcher', 'mining_master'}:
+        selector = '.dispatcher-board' if requested_fragment == 'dispatcher' else '.mm-mobile-shell'
+        return operational_fragment_response(
+            response,
+            screen=requested_fragment,
+            selector=selector,
+            version=operational_state_version,
+            extra={'equipment_cards': dispatcher_dashboard['equipment_cards']},
+        )
+    return response
 
 
 @transaction.atomic

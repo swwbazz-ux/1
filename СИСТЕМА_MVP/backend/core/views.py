@@ -10,6 +10,7 @@ from users.role_apps import (
 )
 
 from .models import OperationalStateEvent, OperationalStateVersion
+from .realtime import relevant_event_delta
 
 
 def parse_positive_int(value, default, maximum=None):
@@ -54,9 +55,9 @@ def operational_state_version_view(request):
     role_app = get_role_app_for_request(request) or get_role_app(access.role.code)
 
     if role_state['is_active']:
-        from assignments.services import reconcile_due_haul_assignments
+        from assignments.services import reconcile_due_haul_assignments_throttled
 
-        reconcile_due_haul_assignments()
+        reconcile_due_haul_assignments_throttled()
 
     state = OperationalStateVersion.objects.filter(key='production').first()
     after = parse_positive_int(request.GET.get('after'), 0)
@@ -64,24 +65,21 @@ def operational_state_version_view(request):
     include_events = parse_bool_param(request.GET.get('include_events'), True)
     events = []
     events_truncated = False
-    if include_events:
-        events_queryset = OperationalStateEvent.objects.filter(key='production')
+    state_version = state.version if state else 0
+    if include_events and state_version > after:
+        events_queryset = OperationalStateEvent.objects.filter(
+            key='production',
+            version__lte=state_version,
+        )
         if after:
             events_queryset = events_queryset.filter(version__gt=after)
-        events = [
-            {
-                'version': event.version,
-                'type': event.event_type,
-                'object_type': event.object_type,
-                'object_id': event.object_id,
-                'reason': event.reason,
-                'payload': event.payload,
-                'created_at': event.created_at.isoformat(),
-            }
-            for event in events_queryset.order_by('version')[:limit]
-        ]
-        events_truncated = events_queryset.count() > limit
-    return JsonResponse({
+        events, events_truncated = relevant_event_delta(
+            events_queryset.order_by('version'),
+            access,
+            limit=limit,
+        )
+    relevant = bool(events) or events_truncated
+    payload = {
         'authenticated': True,
         'role_active': role_state['is_active'],
         'active_role_code': role_state.get('active_role_code', ''),
@@ -96,9 +94,14 @@ def operational_state_version_view(request):
         'role_shell_version': role_app.shell_version if role_app else '',
         'role_app_code': role_app.role_code if role_app else access.role.code,
         'key': 'production',
-        'version': state.version if state else 0,
-        'reason': state.reason if state else '',
-        'updated_at': state.updated_at.isoformat() if state else '',
+        'version': state_version,
         'events': events,
         'events_truncated': events_truncated,
-    })
+        'relevant': relevant if include_events else None,
+    }
+    if state_version > after:
+        payload.update({
+            'reason': state.reason if state else '',
+            'updated_at': state.updated_at.isoformat() if state else '',
+        })
+    return JsonResponse(payload)

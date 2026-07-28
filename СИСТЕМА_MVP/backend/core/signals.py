@@ -2,7 +2,12 @@ from django.db.models.signals import post_delete, post_save, pre_save
 from django.dispatch import receiver
 from django.utils import timezone
 
-from assignments.models import AssignmentStatus, ExcavatorPlacement, HaulAssignment
+from assignments.models import (
+    AssignmentStatus,
+    EquipmentAssignment,
+    ExcavatorPlacement,
+    HaulAssignment,
+)
 from downtimes.models import DowntimeEvent, DowntimeReason
 from references.models import DumpPoint, Equipment, EquipmentModel, EquipmentType, RockType, TruckCapacityRule
 from shifts.models import EmployeeShift
@@ -49,13 +54,33 @@ EVENT_TYPE_BY_MODEL = {
 }
 
 
+def active_employee_equipment_ids(employee_id):
+    equipment_ids = set(
+        EmployeeShift.objects.filter(
+            employee_id=employee_id,
+            closed_at__isnull=True,
+            equipment_id__isnull=False,
+        ).values_list('equipment_id', flat=True)
+    )
+    equipment_ids.update(
+        EquipmentAssignment.objects.filter(
+            employee_id=employee_id,
+            status=AssignmentStatus.ACCEPTED,
+            ended_at__isnull=True,
+        ).values_list('equipment_id', flat=True)
+    )
+    return sorted(equipment_ids)
+
+
 def build_event_payload(sender, instance, action):
     payload = {'action': action}
     if sender is Employee:
         payload['employee_id'] = instance.pk
+        payload['equipment_ids'] = active_employee_equipment_ids(instance.pk)
     elif sender is EmployeeAccess:
         payload.update({
             'employee_id': instance.employee_id,
+            'equipment_ids': active_employee_equipment_ids(instance.employee_id),
             'access_id': instance.pk,
             'role_id': instance.role_id,
             'role_code': getattr(getattr(instance, 'role', None), 'code', ''),
@@ -77,6 +102,38 @@ def build_event_payload(sender, instance, action):
             'ended_at': instance.ended_at.isoformat() if instance.ended_at else '',
             'active': not bool(instance.ended_at),
             'equipment_state_code': downtime_equipment_state_code(reason),
+        })
+    elif sender is Equipment:
+        payload.update({
+            'equipment_id': instance.pk,
+            'equipment_type_id': instance.equipment_type_id,
+        })
+    elif sender is HaulAssignment:
+        payload.update({
+            'assignment_id': instance.pk,
+            'truck_id': instance.truck_id,
+            'excavator_id': instance.excavator_id,
+        })
+    elif sender is ExcavatorPlacement:
+        payload.update({
+            'placement_id': instance.pk,
+            'excavator_id': instance.excavator_id,
+        })
+    elif sender is EmployeeShift:
+        payload.update({
+            'shift_id': instance.pk,
+            'employee_id': instance.employee_id,
+            'equipment_id': instance.equipment_id,
+            'workplace_code': instance.workplace_code,
+        })
+    elif sender is Trip:
+        payload.update({
+            'trip_id': instance.pk,
+            'truck_id': instance.truck_id,
+            'excavator_id': instance.excavator_id,
+            'loading_shift_id': instance.loading_shift_id,
+            'unloading_shift_id': instance.unloading_shift_id,
+            'status': instance.status,
         })
     return payload
 
@@ -136,12 +193,13 @@ def release_disabled_excavator_complex(excavator):
         placement.save(update_fields=['zone', 'changed_at'])
         placement_changed = True
 
-    ended_assignments = (
+    assignments_to_end = (
         HaulAssignment.objects
         .filter(excavator=excavator, ended_at__isnull=True)
         .exclude(status=AssignmentStatus.CANCELLED)
-        .update(ended_at=timezone.now())
     )
+    released_truck_ids = list(assignments_to_end.values_list('truck_id', flat=True))
+    ended_assignments = assignments_to_end.update(ended_at=timezone.now())
 
     if placement_changed or ended_assignments:
         bump_operational_state(
@@ -151,6 +209,8 @@ def release_disabled_excavator_complex(excavator):
             object_id=excavator.pk,
             payload={
                 'action': 'release_disabled_excavator',
+                'excavator_id': excavator.pk,
+                'truck_ids': released_truck_ids,
                 'ended_assignments': ended_assignments,
                 'placement_changed': placement_changed,
             },

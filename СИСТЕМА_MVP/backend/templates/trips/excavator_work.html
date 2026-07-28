@@ -5,9 +5,9 @@
 {% block body_class %}excavator-operator-screen{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v122">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v122">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v122">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v123">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v123">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v123">
 <meta name="theme-color" content="#D58B14">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Погрузка">
@@ -456,17 +456,8 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v122";
+var excavatorShellVersion = "excavator-mobile-shell-v123";
 var staticPrefix = "{{ static_prefix|escapejs }}";
-var excavatorRelevantEvents = {
-    assignment_changed: true,
-    personnel_assignment_changed: true,
-    trip_changed: true,
-    downtime_changed: true,
-    shift_changed: true,
-    equipment_changed: true,
-    access_changed: true
-};
 var viewportSyncFrame = null;
 
 if (typeof window.bindAchievementPrizeUnlock === "function") {
@@ -537,32 +528,7 @@ function storeExcavatorRealtimeVersion(version) {
 }
 
 function hasExcavatorRelevantEvents(events) {
-    if (!Array.isArray(events) || !events.length) return false;
-    return events.some(function (event) {
-        return !!(event && excavatorRelevantEvents[event.event_type || event.type]);
-    });
-}
-
-function fetchExcavatorRealtimeState(context) {
-    var config = window.AppRealtime && window.AppRealtime.config ? window.AppRealtime.config : window.AppRealtimeConfig;
-    if (!config || !config.stateUrl || !window.fetch) {
-        return Promise.resolve(null);
-    }
-    var url = new URL(config.stateUrl, window.location.origin);
-    var afterVersion = context && context.previousVersion ? Number(context.previousVersion) : Number(document.body.dataset.operationalStateVersion || 0);
-    if (afterVersion > 0) {
-        url.searchParams.set("after", String(afterVersion));
-    }
-    url.searchParams.set("include_events", "1");
-    return fetch(url.toString(), {
-        method: "GET",
-        credentials: "same-origin",
-        cache: "no-store",
-        headers: {"Accept": "application/json"}
-    }).then(function (response) {
-        if (!response.ok) throw new Error("state " + response.status);
-        return response.json();
-    });
+    return Array.isArray(events) && events.length > 0;
 }
 
 function refreshExcavatorWorkFromServer(options) {
@@ -571,30 +537,24 @@ function refreshExcavatorWorkFromServer(options) {
         return Promise.resolve(false);
     }
     var oldShell = document.querySelector("[data-eo-shell]");
-    if (!oldShell || !window.fetch || !window.DOMParser) {
+    if (!oldShell || !window.AppOperationalFragment) {
         return Promise.resolve(false);
     }
     var activeTab = oldShell.dataset.eoActiveTab || "trucks";
-    var url = new URL(window.location.href);
-    url.searchParams.set("_eo_refresh", String(Date.now()));
-    return fetch(url.toString(), {
-        method: "GET",
-        credentials: "same-origin",
-        cache: "no-store",
-        headers: {"X-Requested-With": "XMLHttpRequest"}
-    }).then(function (response) {
-        if (!response.ok) throw new Error("screen " + response.status);
-        return response.text();
-    }).then(function (html) {
+    return window.AppOperationalFragment.request(
+        "excavator",
+        Number(options.version || 0)
+    ).then(function (payload) {
         if (isExcavatorRefreshUnsafe()) return false;
-        var doc = new DOMParser().parseFromString(html, "text/html");
-        var newShell = doc.querySelector("[data-eo-shell]");
+        var newShell = window.AppOperationalFragment.parseRoot(
+            payload.html,
+            "[data-eo-shell]"
+        );
         var currentShell = document.querySelector("[data-eo-shell]");
         if (!newShell || !currentShell) return false;
-        var newTruckDetailCards = doc.getElementById("eo-truck-detail-cards-data");
         var currentTruckDetailCards = document.getElementById("eo-truck-detail-cards-data");
-        if (newTruckDetailCards && currentTruckDetailCards) {
-            currentTruckDetailCards.textContent = newTruckDetailCards.textContent;
+        if (payload.equipment_cards && currentTruckDetailCards) {
+            currentTruckDetailCards.textContent = JSON.stringify(payload.equipment_cards);
         }
         newShell.dataset.eoActiveTab = options.preserveTab === false ? (newShell.dataset.eoActiveTab || "trucks") : activeTab;
         currentShell.replaceWith(newShell);
@@ -617,28 +577,23 @@ window.applyOperationalStateRefresh = function (context) {
     if (isExcavatorRefreshUnsafe()) {
         return Promise.resolve({ deferred: true, reason: "excavator_busy" });
     }
-    return fetchExcavatorRealtimeState(context).then(function (state) {
-        if (isExcavatorRefreshUnsafe()) {
-            return { deferred: true, reason: "excavator_busy" };
-        }
-        var targetVersion = state && state.version ? Number(state.version) : Number(context && context.version || 0);
-        var events = state && state.events;
-        if (state && state.events_truncated) {
-            return refreshExcavatorWorkFromServer({ preserveTab: true }).then(function (applied) {
-                if (!applied) return { deferred: true, reason: "excavator_refresh_failed" };
-                storeExcavatorRealtimeVersion(targetVersion);
-                return { applied: true };
-            });
-        }
-        if (!hasExcavatorRelevantEvents(events)) {
-            storeExcavatorRealtimeVersion(targetVersion);
-            return { applied: true };
-        }
-        return refreshExcavatorWorkFromServer({ preserveTab: true }).then(function (applied) {
+    var targetVersion = Number(context && context.version || 0);
+    var events = context && context.events;
+    if (context && context.eventsTruncated) {
+        return refreshExcavatorWorkFromServer({ preserveTab: true, version: targetVersion }).then(function (applied) {
             if (!applied) return { deferred: true, reason: "excavator_refresh_failed" };
             storeExcavatorRealtimeVersion(targetVersion);
             return { applied: true };
         });
+    }
+    if (!hasExcavatorRelevantEvents(events)) {
+        storeExcavatorRealtimeVersion(targetVersion);
+        return Promise.resolve({ applied: true });
+    }
+    return refreshExcavatorWorkFromServer({ preserveTab: true, version: targetVersion }).then(function (applied) {
+        if (!applied) return { deferred: true, reason: "excavator_refresh_failed" };
+        storeExcavatorRealtimeVersion(targetVersion);
+        return { applied: true };
     }).catch(function () {
         return { deferred: true, reason: "excavator_refresh_error" };
     });

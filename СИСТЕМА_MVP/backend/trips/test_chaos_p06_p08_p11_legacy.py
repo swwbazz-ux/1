@@ -263,8 +263,8 @@ class ChaosP06P08LoadingParityRegressionTests(TestCase):
         for trip in (json_trip, html_trip):
             with self.subTest(trip=trip.pk):
                 self.assertEqual(trip.status, TripStatus.LOADED_WAITING_UNLOAD)
-                self.assertIsNone(trip.volume_m3)
-                self.assertIsNone(trip.tonnage)
+                self.assertEqual(trip.volume_m3, Decimal('40.00'))
+                self.assertEqual(trip.tonnage, Decimal('80.00'))
 
     def test_both_routes_are_visible_to_driver_and_loading_analytics(self):
         _json_payload, json_trip = self._post_json_load()

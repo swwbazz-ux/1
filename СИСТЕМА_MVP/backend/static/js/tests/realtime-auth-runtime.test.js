@@ -150,7 +150,10 @@ function createRuntime(options) {
     const document = Object.assign(documentTarget, {
         body,
         activeElement: null,
-        hidden: false,
+        hidden: runtimeOptions.hidden === true,
+        hasFocus() {
+            return runtimeOptions.focused !== false;
+        },
         querySelector() {
             return null;
         },
@@ -180,7 +183,12 @@ function createRuntime(options) {
             initialVersion: typeof runtimeOptions.initialVersion === "number"
                 ? runtimeOptions.initialVersion
                 : 7,
-            pollIntervalMs: 1000,
+            workPollIntervalMs: typeof runtimeOptions.workPollIntervalMs === "number"
+                ? runtimeOptions.workPollIntervalMs
+                : 5000,
+            observerPollIntervalMs: typeof runtimeOptions.observerPollIntervalMs === "number"
+                ? runtimeOptions.observerPollIntervalMs
+                : 15000,
             idleDelayMs: typeof runtimeOptions.idleDelayMs === "number"
                 ? runtimeOptions.idleDelayMs
                 : 1,
@@ -298,6 +306,12 @@ function createRuntime(options) {
         runIntervals() {
             Array.from(intervals.values()).forEach(({callback}) => callback());
         },
+        intervalDelays() {
+            return Array.from(intervals.values()).map(({delay}) => delay);
+        },
+        timeoutDelays() {
+            return Array.from(timeouts.values()).map(({delay}) => delay);
+        },
         flushZeroTimers() {
             let ranTimer = true;
             while (ranTimer) {
@@ -314,6 +328,15 @@ function createRuntime(options) {
         },
         runAllTimeouts() {
             for (const [timerId, timer] of Array.from(timeouts.entries())) {
+                timeouts.delete(timerId);
+                timer.callback();
+            }
+        },
+        runTimeoutsUpTo(maxDelay) {
+            for (const [timerId, timer] of Array.from(timeouts.entries())) {
+                if (timer.delay > maxDelay) {
+                    continue;
+                }
                 timeouts.delete(timerId);
                 timer.callback();
             }
@@ -417,7 +440,17 @@ test("server restart recovery applies a higher version through custom refresh", 
         idleDelayMs: -1,
         fetchResponses: [
             response(500),
-            response(200, {version: 8, role_active: true}),
+            response(200, {
+                version: 8,
+                role_active: true,
+                relevant: true,
+                events_truncated: false,
+                events: [{
+                    version: 8,
+                    type: "trip_changed",
+                    payload: {truck_id: 10, excavator_id: 20},
+                }],
+            }),
         ],
         applyOperationalStateRefresh(context) {
             customRefreshCalls.push(context);
@@ -438,6 +471,9 @@ test("server restart recovery applies a higher version through custom refresh", 
     assert.equal(customRefreshCalls.length, 1);
     assert.equal(customRefreshCalls[0].previousVersion, 7);
     assert.equal(customRefreshCalls[0].version, 8);
+    assert.equal(customRefreshCalls[0].events.length, 1);
+    assert.equal(customRefreshCalls[0].events[0].type, "trip_changed");
+    assert.equal(customRefreshCalls[0].eventsTruncated, false);
     assert.equal(debugState.currentVersion, 8);
     assert.equal(debugState.pendingVersion, null);
     assert.equal(debugState.consecutiveFailures, 0);
@@ -447,6 +483,39 @@ test("server restart recovery applies a higher version through custom refresh", 
     assert.equal(runtime.refreshAppliedEvents.length, 1);
     assert.equal(runtime.refreshSkippedEvents.length, 0);
     assert.equal(runtime.reloads.length, 0);
+});
+
+test("irrelevant delta advances version without events GET, custom refresh or HTML reload", async () => {
+    const customRefreshCalls = [];
+    const runtime = createRuntime({
+        idleDelayMs: -1,
+        fetchResponses: [
+            response(200, {
+                version: 8,
+                role_active: true,
+                relevant: false,
+                events: [],
+                events_truncated: false,
+            }),
+        ],
+        applyOperationalStateRefresh(context) {
+            customRefreshCalls.push(context);
+            return Promise.resolve({applied: true});
+        },
+    });
+
+    await settlePromises();
+
+    assert.equal(runtime.fetchCalls.length, 1);
+    assert.equal(
+        new URL(runtime.fetchCalls[0].url).searchParams.get("include_events"),
+        "1",
+        "the light state request must already carry the server-filtered delta"
+    );
+    assert.equal(customRefreshCalls.length, 0);
+    assert.equal(runtime.reloads.length, 0);
+    assert.equal(runtime.window.AppRealtime.getDebugState().currentVersion, 8);
+    assert.equal(runtime.sessionStorage.getItem("operational-state-version"), "8");
 });
 
 test("custom refresh false keeps the version pending until a retry applies it", async () => {
@@ -481,7 +550,7 @@ test("custom refresh false keeps the version pending until a retry applies it", 
     assert.equal(runtime.refreshSkippedEvents.length, 0);
     assert.equal(runtime.reloads.length, 0);
 
-    runtime.runAllTimeouts();
+    runtime.runTimeoutsUpTo(2000);
     await settlePromises();
 
     debugState = runtime.window.AppRealtime.getDebugState();
@@ -493,6 +562,63 @@ test("custom refresh false keeps the version pending until a retry applies it", 
     assert.equal(runtime.refreshAppliedEvents.length, 1);
     assert.equal(runtime.refreshSkippedEvents.length, 0);
     assert.equal(runtime.reloads.length, 0);
+});
+
+test("hidden tab pauses failed HTML refresh retries until one visible catch-up", async () => {
+    const customRefreshCalls = [];
+    const relevantPayload = {
+        version: 8,
+        role_active: true,
+        relevant: true,
+        events_truncated: false,
+        events: [{
+            version: 8,
+            type: "trip_changed",
+            payload: {truck_id: 10},
+        }],
+    };
+    const runtime = createRuntime({
+        idleDelayMs: -1,
+        fetchResponses: [
+            response(200, relevantPayload),
+            response(200, relevantPayload),
+        ],
+        applyOperationalStateRefresh(context) {
+            customRefreshCalls.push(context);
+            if (customRefreshCalls.length === 1) {
+                return Promise.resolve(false);
+            }
+            return Promise.resolve({applied: true});
+        },
+    });
+    await settlePromises();
+
+    assert.equal(runtime.fetchCalls.length, 1);
+    assert.equal(customRefreshCalls.length, 1);
+    assert.equal(runtime.window.AppRealtime.getDebugState().pendingVersion, 8);
+
+    runtime.document.hidden = true;
+    runtime.document.dispatchEvent({type: "visibilitychange"});
+    runtime.runAllTimeouts();
+    await settlePromises();
+
+    assert.equal(runtime.fetchCalls.length, 1, "hidden state must not poll again");
+    assert.equal(
+        customRefreshCalls.length,
+        1,
+        "hidden state must not retry the full-HTML refresh handler"
+    );
+    assert.equal(runtime.window.AppRealtime.getDebugState().pendingVersion, 8);
+
+    runtime.document.hidden = false;
+    runtime.document.dispatchEvent({type: "visibilitychange"});
+    runtime.flushZeroTimers();
+    await settlePromises();
+
+    assert.equal(runtime.fetchCalls.length, 2, "visibility recovery performs one state catch-up");
+    assert.equal(customRefreshCalls.length, 2, "the relevant catch-up retries once");
+    assert.equal(runtime.window.AppRealtime.getDebugState().pendingVersion, null);
+    assert.equal(runtime.window.AppRealtime.getDebugState().currentVersion, 8);
 });
 
 test("system admin uses the generic safe reload after server recovery", async () => {
@@ -526,7 +652,7 @@ test("system admin uses the generic safe reload after server recovery", async ()
     assert.equal(runtime.fetchCalls.length, 1);
     assert.equal(runtime.reloads.length, 0, "pending mobile work must defer a full reload");
     runtime.localStorage.removeItem(MOBILE_QUEUE_KEY);
-    runtime.runAllTimeouts();
+    runtime.runTimeoutsUpTo(2000);
     await settlePromises();
 
     assert.equal(runtime.reloads.length, 1);
@@ -558,4 +684,161 @@ test("offline state is recoverable and does not terminate authentication", async
 
     assert.equal(runtime.fetchCalls.length, 1, "polling must resume when connectivity returns");
     assert.equal(runtime.redirects.length, 0);
+});
+
+test("work and observer screens use 5s and 15s polling instead of the global second", async () => {
+    assert.doesNotMatch(BASE_TEMPLATE_SOURCE, /pollIntervalMs:\s*1000/);
+    assert.match(BASE_TEMPLATE_SOURCE, /workPollIntervalMs:\s*5000/);
+    assert.match(BASE_TEMPLATE_SOURCE, /observerPollIntervalMs:\s*15000/);
+
+    const worker = createRuntime({
+        fetch() {
+            return Promise.resolve(response(200, {version: 7, role_active: true, relevant: false}));
+        },
+    });
+    const observer = createRuntime({
+        currentHref: "http://admin.localhost/system-admin/",
+        screens: [{
+            name: "system-admin",
+            role: "system_admin",
+            mode: "observer",
+            path: "^/system-admin/",
+        }],
+        fetch() {
+            return Promise.resolve(response(200, {version: 7, role_active: true, relevant: false}));
+        },
+    });
+    const manager = createRuntime({
+        currentHref: "http://management.localhost/reports/management/dynamics/",
+        screens: [{
+            name: "management-dynamics",
+            role: "management",
+            mode: "custom",
+            path: "^/reports/management/dynamics/?$",
+            customRefresh: true,
+        }],
+        fetch() {
+            return Promise.resolve(response(200, {version: 7, role_active: true, relevant: false}));
+        },
+    });
+    await settlePromises();
+
+    assert.equal(worker.window.AppRealtime.getDebugState().pollIntervalMs, 5000);
+    assert.equal(observer.window.AppRealtime.getDebugState().pollIntervalMs, 15000);
+    assert.equal(manager.window.AppRealtime.getDebugState().pollIntervalMs, 15000);
+    assert.equal(worker.intervalDelays().includes(1000), false);
+    assert.equal(observer.intervalDelays().includes(1000), false);
+});
+
+test("hidden tab performs no initial or timer-driven realtime requests", async () => {
+    const runtime = createRuntime({
+        hidden: true,
+        fetch() {
+            return Promise.resolve(response(200, {version: 7, role_active: true, relevant: false}));
+        },
+    });
+    await settlePromises();
+
+    runtime.runIntervals();
+    runtime.runAllTimeouts();
+    await settlePromises();
+
+    assert.equal(runtime.fetchCalls.length, 0);
+});
+
+test("blur pauses polling and focus performs one immediate catch-up request", async () => {
+    const runtime = createRuntime({
+        fetch() {
+            return Promise.resolve(response(200, {version: 7, role_active: true, relevant: false}));
+        },
+    });
+    await settlePromises();
+    assert.equal(runtime.fetchCalls.length, 1);
+
+    runtime.window.dispatchEvent({type: "blur"});
+    runtime.runIntervals();
+    await settlePromises();
+    assert.equal(runtime.fetchCalls.length, 1);
+
+    runtime.window.dispatchEvent({type: "focus"});
+    runtime.flushZeroTimers();
+    await settlePromises();
+    assert.equal(runtime.fetchCalls.length, 2);
+});
+
+test("forced catch-up ignores the aborted older response without clearing the new poll", async () => {
+    const resolvers = [];
+    const runtime = createRuntime({
+        fetch() {
+            return new Promise((resolve) => {
+                resolvers.push(resolve);
+            });
+        },
+    });
+    await settlePromises();
+    assert.equal(runtime.fetchCalls.length, 1);
+
+    runtime.window.AppRealtime.poll({force: true});
+    await settlePromises();
+    assert.equal(runtime.fetchCalls.length, 2);
+
+    resolvers[0](response(200, {
+        version: 99,
+        role_active: true,
+        relevant: false,
+    }));
+    await settlePromises();
+    assert.equal(runtime.window.AppRealtime.getDebugState().pollInFlight, true);
+    assert.equal(runtime.window.AppRealtime.getDebugState().currentVersion, 7);
+
+    runtime.window.AppRealtime.poll();
+    assert.equal(runtime.fetchCalls.length, 2, "the new in-flight request must stay protected");
+
+    resolvers[1](response(200, {
+        version: 8,
+        role_active: true,
+        relevant: false,
+    }));
+    await settlePromises();
+    assert.equal(runtime.window.AppRealtime.getDebugState().pollInFlight, false);
+    assert.equal(runtime.window.AppRealtime.getDebugState().currentVersion, 8);
+});
+
+test("active to hidden aborts the current poll and visible resumes exactly once", async () => {
+    const resolvers = [];
+    const runtime = createRuntime({
+        fetch() {
+            return new Promise((resolve) => {
+                resolvers.push(resolve);
+            });
+        },
+    });
+    await settlePromises();
+    assert.equal(runtime.fetchCalls.length, 1);
+
+    runtime.document.hidden = true;
+    runtime.document.dispatchEvent({type: "visibilitychange"});
+    runtime.runAllTimeouts();
+    await settlePromises();
+    assert.equal(runtime.fetchCalls.length, 1);
+    assert.equal(runtime.window.AppRealtime.getDebugState().pageActive, false);
+
+    runtime.document.hidden = false;
+    runtime.document.dispatchEvent({type: "visibilitychange"});
+    runtime.flushZeroTimers();
+    await settlePromises();
+    assert.equal(runtime.fetchCalls.length, 2);
+
+    resolvers[0](response(200, {
+        version: 99,
+        role_active: true,
+        relevant: false,
+    }));
+    resolvers[1](response(200, {
+        version: 8,
+        role_active: true,
+        relevant: false,
+    }));
+    await settlePromises();
+    assert.equal(runtime.window.AppRealtime.getDebugState().currentVersion, 8);
 });

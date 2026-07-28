@@ -1,0 +1,90 @@
+{
+  "driver_dirty_form": {
+    "viewport": [1280, 720],
+    "initial_version": 83583,
+    "event_version": 83584,
+    "values_before_event": ["321", "654", "987"],
+    "values_after_event": ["321", "654", "987"],
+    "version_while_dirty": 83583,
+    "dirty_while_deferred": true,
+    "values_after_restore_to_baseline": ["", "", ""],
+    "version_after_restore_to_baseline": 83584,
+    "dirty_after_restore_to_baseline": false,
+    "manual_reload": false,
+    "result": "PASS"
+  },
+  "dispatcher_runtime_cycle": [
+    {
+      "state": "closed",
+      "version": 83586,
+      "shift_open": false,
+      "readonly": true,
+      "drop_bound_count": 0
+    },
+    {
+      "state": "opened_externally",
+      "version": 83587,
+      "shift_open": true,
+      "readonly": false,
+      "drop_bound_count": 11
+    },
+    {
+      "state": "closed_externally",
+      "version": 83588,
+      "shift_open": false,
+      "readonly": true,
+      "drop_bound_count": 0
+    },
+    {
+      "state": "reopened_externally",
+      "version": 83589,
+      "shift_open": true,
+      "readonly": false,
+      "drop_bound_count": 11
+    }
+  ],
+  "common_realtime_event": {
+    "event_version": 83594,
+    "driver_version": 83594,
+    "excavator_version": 83594,
+    "dispatcher_version": 83594,
+    "mining_master_version": 83594,
+    "manual_reload": false,
+    "result": "PASS"
+  },
+  "mobile_dispatcher_empty_garages": {
+    "viewport": [390, 844],
+    "document_scroll_width": 390,
+    "document_client_width": 390,
+    "board_grid_template_columns": "0px 378.4px 0px",
+    "topbar_width_px": 1.600000023841858,
+    "zone_grid_width_px": 2,
+    "visual_result": "рабочий экран практически полностью пустой",
+    "result": "FAIL"
+  },
+  "driver_logout_hold": {
+    "viewport": [390, 844],
+    "url": "http://driver.localhost:8000/driver/?tab=shift",
+    "action": "удержание кнопки Выйти",
+    "console_level": "error",
+    "console_message": "ReferenceError: holdMs is not defined",
+    "source": "drawLogoutHold",
+    "navigation_after_hold": false,
+    "result": "FAIL"
+  },
+  "fresh_mobile_console_errors": {
+    "driver_before_logout_hold": 0,
+    "excavator": 0,
+    "dispatcher": 0,
+    "mining_master": 0
+  },
+  "proxy_event_only": {
+    "requests": 35,
+    "operational_fragments": 4,
+    "full_html_get": 0,
+    "errors": 0,
+    "response_body_bytes": 1068137,
+    "response_gzip_estimate_bytes": 41718,
+    "result": "PASS"
+  }
+}

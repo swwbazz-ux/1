@@ -77,6 +77,8 @@ class OperationalStateVersionViewTests(TestCase):
         self.assertEqual(payload['key'], 'production')
         self.assertEqual(payload['version'], 7)
         self.assertEqual(payload['events'], [])
+        self.assertNotIn('reason', payload)
+        self.assertNotIn('updated_at', payload)
 
     def test_equipment_save_bumps_operational_state_version(self):
         equipment_type = EquipmentType.objects.create(name='Экскаватор')
@@ -168,11 +170,15 @@ class OperationalStateVersionViewTests(TestCase):
         assignment.refresh_from_db()
         self.assertEqual(placement.zone, ExcavatorPlacement.Zone.INACTIVE)
         self.assertIsNotNone(assignment.ended_at)
-        self.assertTrue(
-            OperationalStateEvent.objects.filter(
+        event = (
+            OperationalStateEvent.objects
+            .filter(
                 event_type='assignment_changed',
                 object_type='Equipment',
                 object_id=str(excavator.id),
                 payload__action='release_disabled_excavator',
-            ).exists()
+            )
+            .latest('version')
         )
+        self.assertEqual(event.payload['excavator_id'], excavator.id)
+        self.assertEqual(event.payload['truck_ids'], [truck.id])

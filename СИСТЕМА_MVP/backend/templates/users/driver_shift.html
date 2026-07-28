@@ -2918,7 +2918,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
 {% endblock %}
 
 {% block body %}
-<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v107' }}">
+<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v110' }}">
     {% if messages %}
         <div class="driver-messages">
             {% for message in messages %}
@@ -3530,67 +3530,62 @@ if (typeof window.bindAchievementPrizeUnlock === "function") {
     window.bindAchievementPrizeUnlock();
 }
 
-window.applyOperationalStateRefresh = function (context) {
-    var currentShell = document.querySelector("[data-driver-shell]");
-    if (!currentShell || !window.fetch || !window.DOMParser) {
-        return Promise.resolve(false);
+function isDriverOperationalRefreshUnsafe(shell) {
+    shell = shell || document.querySelector("[data-driver-shell]");
+    if (!shell) return false;
+    var active = document.activeElement;
+    var activeTag = active && active.tagName ? active.tagName.toLowerCase() : "";
+    if (
+        active &&
+        shell.contains(active) &&
+        (active.isContentEditable || activeTag === "input" || activeTag === "textarea" || activeTag === "select")
+    ) {
+        return true;
     }
-    var activeShiftForm = currentShell.querySelector("[data-driver-shift-close-form]");
+    var openingShiftForm = shell.querySelector(".driver-shift-opening-form");
+    if (openingShiftForm && (
+        openingShiftForm.dataset.driverShiftOpeningDirty === "true" ||
+        openingShiftForm.dataset.driverShiftOpeningPending === "true" ||
+        openingShiftForm.querySelector(".errorlist")
+    )) {
+        return true;
+    }
+    var activeShiftForm = shell.querySelector("[data-driver-shift-close-form]");
     if (activeShiftForm && (
         activeShiftForm.dataset.driverShiftDirty === "true" ||
         activeShiftForm.classList.contains("is-reviewed") ||
         activeShiftForm.querySelector(".errorlist")
     )) {
+        return true;
+    }
+    return !!(
+        shell.querySelector(".is-holding, .is-pending, .is-dragging, [data-driver-point-sheet]:not([hidden])") ||
+        document.querySelector("[data-driver-pwa-update-modal]:not([hidden]), .app-confirm-modal:not([hidden])")
+    );
+}
+
+window.applyOperationalStateRefresh = function (context) {
+    var currentShell = document.querySelector("[data-driver-shell]");
+    if (!currentShell || !window.AppOperationalFragment || isDriverOperationalRefreshUnsafe(currentShell)) {
         return Promise.resolve(false);
     }
     var activeTab = currentShell.dataset.activeTab || "work";
-    var url = new URL(window.location.href);
-    url.searchParams.set("_driver_refresh", Date.now());
-    return fetch(url.toString(), {
-        method: "GET",
-        credentials: "same-origin",
-        cache: "no-store",
-        headers: {
-            "Accept": "text/html",
-            "X-Requested-With": "XMLHttpRequest"
-        }
-    }).then(function (response) {
-        if (!response.ok) {
-            return false;
-        }
-        return response.text();
-    }).then(function (html) {
-        if (!html) {
-            return false;
-        }
-        var doc = new DOMParser().parseFromString(html, "text/html");
-        var freshShell = doc.querySelector("[data-driver-shell]");
-        if (!freshShell) {
-            return false;
-        }
+    var targetVersion = Number(context && context.version || 0);
+    return window.AppOperationalFragment.request("driver", targetVersion).then(function (payload) {
         var oldShell = document.querySelector("[data-driver-shell]");
-        if (!oldShell) {
+        if (!oldShell || isDriverOperationalRefreshUnsafe(oldShell)) {
             return false;
         }
+        var freshShell = window.AppOperationalFragment.parseRoot(
+            payload.html,
+            "[data-driver-shell]"
+        );
+        if (!freshShell) return false;
         freshShell.dataset.activeTab = activeTab;
         oldShell.replaceWith(freshShell);
 
-        var freshModal = doc.querySelector("[data-driver-pwa-update-modal]");
-        var oldModal = document.querySelector("[data-driver-pwa-update-modal]");
-        if (freshModal && oldModal) {
-            oldModal.replaceWith(freshModal);
-        }
-
-        var freshNav = doc.querySelector("[data-driver-bottom-nav]");
-        var oldNav = document.querySelector("[data-driver-bottom-nav]");
-        if (freshNav && oldNav) {
-            oldNav.replaceWith(freshNav);
-        }
-
-        if (doc.body && doc.body.dataset.operationalStateVersion) {
-            document.body.dataset.operationalStateVersion = doc.body.dataset.operationalStateVersion;
-        } else if (context && context.version) {
-            document.body.dataset.operationalStateVersion = String(context.version);
+        if (targetVersion) {
+            document.body.dataset.operationalStateVersion = String(targetVersion);
         }
         if (typeof window.bindDriverMobileShell === "function") {
             window.bindDriverMobileShell();
@@ -3603,6 +3598,65 @@ window.applyOperationalStateRefresh = function (context) {
         return false;
     });
 };
+
+function bindDriverShiftOpeningForm(shell) {
+    var openShiftForm = shell.querySelector(".driver-shift-opening-form");
+    var openShiftButton = shell.querySelector("[data-driver-shift-open-button]");
+    if (!openShiftForm || !openShiftButton || openShiftForm.dataset.driverShiftOpeningBound === "true") {
+        return;
+    }
+    openShiftForm.dataset.driverShiftOpeningBound = "true";
+    openShiftForm.dataset.driverShiftOpeningPending = "false";
+    var openReadings = Array.from(openShiftForm.querySelectorAll("input[type='number']"));
+    var initialReadings = openReadings.map(function (input) {
+        return input.value;
+    });
+
+    function requestDeferredRefresh(reason) {
+        if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
+            window.AppRealtime.wake(reason);
+        }
+    }
+
+    function syncOpenShiftFormState(options) {
+        options = options || {};
+        var wasDirty = openShiftForm.dataset.driverShiftOpeningDirty === "true";
+        var isDirty = openReadings.some(function (input, index) {
+            return input.value !== initialReadings[index];
+        });
+        openShiftForm.dataset.driverShiftOpeningDirty = isDirty ? "true" : "false";
+        openShiftButton.disabled = !openReadings.length || openReadings.some(function (input) {
+            return input.value.trim() === "" || !input.checkValidity();
+        });
+        if (
+            !isDirty &&
+            openShiftForm.dataset.driverShiftOpeningPending !== "true" &&
+            (wasDirty || options.explicitReset)
+        ) {
+            requestDeferredRefresh(
+                options.explicitReset ? "driver_shift_open_reset" : "driver_shift_open_restored"
+            );
+        }
+    }
+
+    openReadings.forEach(function (input) {
+        input.addEventListener("input", syncOpenShiftFormState);
+    });
+    openShiftForm.addEventListener("reset", function () {
+        openShiftForm.dataset.driverShiftOpeningPending = "false";
+        openShiftButton.classList.remove("is-pending");
+        window.setTimeout(function () {
+            syncOpenShiftFormState({explicitReset: true});
+        }, 0);
+    });
+    openShiftForm.addEventListener("submit", function () {
+        openShiftForm.dataset.driverShiftOpeningPending = "true";
+        openShiftButton.disabled = true;
+        openShiftButton.classList.add("is-pending");
+        openShiftButton.textContent = "Открываем смену";
+    });
+    syncOpenShiftFormState();
+}
 
 window.bindDriverMobileShell = function () {
     var shell = document.querySelector("[data-driver-shell]");
@@ -3634,22 +3688,7 @@ window.bindDriverMobileShell = function () {
     shell.querySelectorAll(".driver-shift-metric-value input").forEach(function (input) {
         if (!input.getAttribute("placeholder")) input.setAttribute("placeholder", "0");
     });
-    var openShiftForm = shell.querySelector(".driver-shift-opening-form");
-    var openShiftButton = shell.querySelector("[data-driver-shift-open-button]");
-    if (openShiftForm && openShiftButton) {
-        var openReadings = Array.from(openShiftForm.querySelectorAll("input[type='number']"));
-        function syncOpenShiftButton() {
-            openShiftButton.disabled = !openReadings.length || openReadings.some(function (input) {
-                return input.value.trim() === "" || !input.checkValidity();
-            });
-        }
-        openReadings.forEach(function (input) { input.addEventListener("input", syncOpenShiftButton); });
-        openShiftForm.addEventListener("submit", function () {
-            openShiftButton.disabled = true;
-            openShiftButton.textContent = "Открываем смену";
-        });
-        syncOpenShiftButton();
-    }
+    bindDriverShiftOpeningForm(shell);
     function syncDriverDialProgress() {
         shell.querySelectorAll(".driver-work-dial").forEach(function (dial) {
             var loopProgress = Number(dial.dataset.driverLoopProgress || 0);
@@ -3866,6 +3905,7 @@ window.bindDriverMobileShell = function () {
 
         if (logoutButton && logoutButton.dataset.driverLogoutBound !== "true") {
             logoutButton.dataset.driverLogoutBound = "true";
+            const logoutHoldMs = 2000;
             var logoutStartedAt = 0;
             var logoutFrame = null;
             function resetLogoutHold() {
@@ -3880,9 +3920,11 @@ window.bindDriverMobileShell = function () {
                 if (!logoutStartedAt) {
                     return;
                 }
-                var progress = Math.min(100, ((Date.now() - logoutStartedAt) / holdMs) * 100);
+                var progress = Math.min(100, ((Date.now() - logoutStartedAt) / logoutHoldMs) * 100);
                 logoutButton.style.setProperty("--driver-logout-hold", progress + "%");
                 if (progress >= 100) {
+                    logoutStartedAt = 0;
+                    logoutFrame = null;
                     window.location.href = logoutButton.dataset.driverLogoutUrl;
                     return;
                 }
@@ -4649,7 +4691,7 @@ window.bindDriverMobileShell = function () {
         if (!("serviceWorker" in navigator)) {
             return;
         }
-        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v107' }}";
+        var currentShellVersion = shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v110' }}";
         var updateModal = document.querySelector("[data-driver-pwa-update-modal]");
         var updateBadge = document.querySelector("[data-driver-pwa-update-badge]");
         var updateTarget = document.querySelector("[data-driver-pwa-update-nav-target]");

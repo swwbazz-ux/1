@@ -26,7 +26,8 @@
             screens: Array.isArray(config.screens) ? config.screens : [],
             customRefreshPaths: Array.isArray(config.customRefreshPaths) ? config.customRefreshPaths : [],
             initialVersion: Number(config.initialVersion || 0),
-            pollIntervalMs: config.pollIntervalMs || 1000,
+            workPollIntervalMs: config.workPollIntervalMs || config.pollIntervalMs || 5000,
+            observerPollIntervalMs: config.observerPollIntervalMs || 15000,
             idleDelayMs: config.idleDelayMs || 2500,
             pollTimeoutMs: config.pollTimeoutMs || 8000,
             maxSilentMs: config.maxSilentMs || 7000,
@@ -58,6 +59,24 @@
         return config.customRefreshPaths.some(function (pattern) {
             return pathMatches(pattern, path);
         });
+    }
+
+    function screenPollInterval(config, screen) {
+        if (screen && Number(screen.pollIntervalMs) > 0) {
+            return Number(screen.pollIntervalMs);
+        }
+        if (
+            screen
+            && (
+                screen.mode === "observer"
+                || screen.mode === "manual"
+                || screen.role === "system_admin"
+                || screen.role === "management"
+            )
+        ) {
+            return config.observerPollIntervalMs;
+        }
+        return config.workPollIntervalMs;
     }
 
     function markRealtimeScreen(screen, isWatching) {
@@ -116,12 +135,14 @@
         }
 
         var stateUrl = config.stateUrl;
-        var pollIntervalMs = config.pollIntervalMs;
+        var pollIntervalMs = screenPollInterval(config, screen);
         var idleDelayMs = config.idleDelayMs;
         var currentVersion = config.initialVersion > 0 ? config.initialVersion : null;
         var pendingVersion = null;
         var pendingPreviousVersion = 0;
         var pendingVersionSince = 0;
+        var pendingEvents = [];
+        var pendingEventsTruncated = false;
         var lastInteractionAt = Date.now();
         var applyingUpdate = false;
         var requiresCustomRefresh = screenRequiresCustomRefresh(config, screen, currentPath);
@@ -130,8 +151,9 @@
         var realtimeLastPollStartedAt = 0;
         var realtimePollInFlight = false;
         var realtimePollController = null;
+        var realtimePollGeneration = 0;
         var realtimePollTimeoutMs = config.pollTimeoutMs;
-        var realtimeMaxSilentMs = config.maxSilentMs;
+        var realtimeMaxSilentMs = Math.max(config.maxSilentMs, pollIntervalMs * 2 + 2000);
         var realtimeStatus = document.querySelector("[data-app-realtime-status]");
         var realtimeUpdateNotice = document.querySelector("[data-app-realtime-update]");
         var realtimeUpdateText = document.querySelector("[data-app-realtime-update-text]");
@@ -140,8 +162,78 @@
         var manualRefreshVersion = null;
         var authEnded = false;
         var pollIntervalId = null;
+        var pendingUpdateTimeoutId = null;
         var watchdogIntervalId = null;
+        var wakeTimeoutId = null;
         var authRedirectScheduled = false;
+        var pageFocused = typeof document.hasFocus === "function" ? document.hasFocus() : true;
+
+        function isPageActive() {
+            return document.hidden !== true && pageFocused;
+        }
+
+        function clearPollSchedule() {
+            if (pollIntervalId !== null) {
+                window.clearTimeout(pollIntervalId);
+                pollIntervalId = null;
+            }
+        }
+
+        function clearPendingUpdateSchedule() {
+            if (pendingUpdateTimeoutId !== null) {
+                window.clearTimeout(pendingUpdateTimeoutId);
+                pendingUpdateTimeoutId = null;
+            }
+        }
+
+        function schedulePendingUpdate(delay) {
+            clearPendingUpdateSchedule();
+            if (authEnded || !pendingVersion || !isPageActive()) {
+                return;
+            }
+            pendingUpdateTimeoutId = window.setTimeout(function () {
+                pendingUpdateTimeoutId = null;
+                if (authEnded || !isPageActive()) {
+                    return;
+                }
+                applyPendingUpdate();
+            }, delay);
+        }
+
+        function scheduleNextPoll() {
+            clearPollSchedule();
+            if (authEnded || !isPageActive()) {
+                return;
+            }
+            pollIntervalId = window.setTimeout(function () {
+                pollIntervalId = null;
+                if (authEnded || !isPageActive()) {
+                    return;
+                }
+                inspectRealtimeWatchdog("poll_timer");
+                pollOperationalState();
+                scheduleNextPoll();
+            }, pollIntervalMs);
+        }
+
+        function pauseRealtimeConnection() {
+            clearPollSchedule();
+            clearPendingUpdateSchedule();
+            if (wakeTimeoutId !== null) {
+                window.clearTimeout(wakeTimeoutId);
+                wakeTimeoutId = null;
+            }
+            if (realtimePollInFlight) {
+                realtimePollGeneration += 1;
+                if (realtimePollController) {
+                    try {
+                        realtimePollController.abort();
+                    } catch (error) {}
+                }
+                realtimePollInFlight = false;
+                realtimePollController = null;
+            }
+        }
 
         function clearPendingMobileQueue() {
             try {
@@ -159,6 +251,8 @@
             pendingVersion = null;
             pendingPreviousVersion = 0;
             pendingVersionSince = 0;
+            pendingEvents = [];
+            pendingEventsTruncated = false;
             applyingUpdate = false;
             manualRefreshVersion = null;
             if (realtimePollController) {
@@ -166,11 +260,14 @@
                     realtimePollController.abort();
                 } catch (error) {}
             }
+            realtimePollGeneration += 1;
             realtimePollInFlight = false;
             realtimePollController = null;
-            if (pollIntervalId !== null) {
-                window.clearInterval(pollIntervalId);
-                pollIntervalId = null;
+            clearPollSchedule();
+            clearPendingUpdateSchedule();
+            if (wakeTimeoutId !== null) {
+                window.clearTimeout(wakeTimeoutId);
+                wakeTimeoutId = null;
             }
             if (watchdogIntervalId !== null) {
                 window.clearInterval(watchdogIntervalId);
@@ -334,6 +431,8 @@
                 pendingVersion = null;
                 pendingPreviousVersion = 0;
                 pendingVersionSince = 0;
+                pendingEvents = [];
+                pendingEventsTruncated = false;
                 applyingUpdate = false;
             }
             storeOperationalVersion(parsedVersion);
@@ -378,7 +477,7 @@
         }
 
         function applyPendingUpdate() {
-            if (!pendingVersion || applyingUpdate) {
+            if (authEnded || !isPageActive() || !pendingVersion || applyingUpdate) {
                 return;
             }
             var versionToApply = pendingVersion;
@@ -387,14 +486,16 @@
                 previousVersion: pendingPreviousVersion || currentVersion || config.initialVersion || 0,
                 screen: screen ? screen.name : null,
                 mode: screen ? screen.mode : null,
-                role: screen ? screen.role : null
+                role: screen ? screen.role : null,
+                events: pendingEvents.slice(),
+                eventsTruncated: pendingEventsTruncated
             };
             var busyReason = shouldDeferPendingUpdate();
             if (busyReason) {
                 dispatchWindowEvent("operational-state-refresh-deferred", Object.assign({}, refreshContext, {
                     reason: busyReason
                 }));
-                window.setTimeout(applyPendingUpdate, 1000);
+                schedulePendingUpdate(1000);
                 return;
             }
             applyingUpdate = true;
@@ -412,7 +513,7 @@
                         dispatchWindowEvent("operational-state-refresh-deferred", Object.assign({}, refreshContext, {
                             reason: result.reason || "custom_deferred"
                         }));
-                        window.setTimeout(applyPendingUpdate, 1000);
+                        schedulePendingUpdate(1000);
                         return;
                     }
                     if (result && result.applied) {
@@ -420,6 +521,8 @@
                         pendingVersion = null;
                         pendingPreviousVersion = 0;
                         pendingVersionSince = 0;
+                        pendingEvents = [];
+                        pendingEventsTruncated = false;
                         storeOperationalVersion(versionToApply);
                         dispatchWindowEvent("operational-state-refresh-applied", refreshContext);
                         applyingUpdate = false;
@@ -430,13 +533,13 @@
                         dispatchWindowEvent("operational-state-refresh-deferred", Object.assign({}, refreshContext, {
                             reason: "custom_refresh_not_applied"
                         }));
-                        window.setTimeout(applyPendingUpdate, 2000);
+                        schedulePendingUpdate(2000);
                         return;
                     }
                     reloadForOperationalUpdate(versionToApply);
                 }).catch(function () {
                     applyingUpdate = false;
-                    window.setTimeout(applyPendingUpdate, 2000);
+                    schedulePendingUpdate(2000);
                 });
                 return;
             }
@@ -449,6 +552,8 @@
                 pendingVersion = null;
                 pendingPreviousVersion = 0;
                 pendingVersionSince = 0;
+                pendingEvents = [];
+                pendingEventsTruncated = false;
                 applyingUpdate = false;
                 storeOperationalVersion(version);
                 dispatchWindowEvent("operational-state-refresh-skipped", {
@@ -481,13 +586,13 @@
             if (afterVersion > 0) {
                 url.searchParams.set("after", String(afterVersion));
             }
-            url.searchParams.set("include_events", "0");
+            url.searchParams.set("include_events", "1");
             return url.toString();
         }
 
         function pollOperationalState(options) {
             options = options || {};
-            if (authEnded) {
+            if (authEnded || !isPageActive()) {
                 return;
             }
             if (navigator && navigator.onLine === false) {
@@ -510,13 +615,15 @@
                     realtimePollController.abort();
                 } catch (error) {}
             }
+            var pollGeneration = ++realtimePollGeneration;
             realtimePollInFlight = true;
             realtimeLastPollStartedAt = Date.now();
-            realtimePollController = window.AbortController ? new AbortController() : null;
+            var pollController = window.AbortController ? new AbortController() : null;
+            realtimePollController = pollController;
             var timeoutId = window.setTimeout(function () {
-                if (realtimePollController) {
+                if (pollGeneration === realtimePollGeneration && pollController) {
                     try {
-                        realtimePollController.abort();
+                        pollController.abort();
                     } catch (error) {}
                 }
             }, realtimePollTimeoutMs);
@@ -526,11 +633,14 @@
                 cache: "no-store",
                 headers: {"Accept": "application/json"}
             };
-            if (realtimePollController) {
-                fetchOptions.signal = realtimePollController.signal;
+            if (pollController) {
+                fetchOptions.signal = pollController.signal;
             }
             window.fetch(buildOperationalStatePollUrl(), fetchOptions)
                 .then(function (response) {
+                    if (pollGeneration !== realtimePollGeneration) {
+                        return null;
+                    }
                     if (response.status === 401) {
                         terminateAuthentication();
                         return null;
@@ -541,7 +651,7 @@
                     return response.json();
                 })
                 .then(function (payload) {
-                    if (authEnded) {
+                    if (authEnded || pollGeneration !== realtimePollGeneration) {
                         return;
                     }
                     applyActiveRoleState(payload);
@@ -563,16 +673,31 @@
                         return;
                     }
                     if (version > currentVersion) {
+                        if (payload.relevant === false) {
+                            var irrelevantPreviousVersion = currentVersion || config.initialVersion || 0;
+                            markOperationalStateApplied(version);
+                            dispatchWindowEvent("operational-state-refresh-skipped", {
+                                version: version,
+                                previousVersion: irrelevantPreviousVersion,
+                                reason: "irrelevant",
+                                screen: screen ? screen.name : null,
+                                mode: screen ? screen.mode : null,
+                                role: screen ? screen.role : null
+                            });
+                            return;
+                        }
                         if (pendingVersion !== version) {
                             pendingVersionSince = Date.now();
                             pendingPreviousVersion = currentVersion || config.initialVersion || 0;
                         }
                         pendingVersion = version;
+                        pendingEvents = Array.isArray(payload.events) ? payload.events.slice() : [];
+                        pendingEventsTruncated = payload.events_truncated === true;
                         applyPendingUpdate();
                     }
                 })
                 .catch(function () {
-                    if (authEnded) {
+                    if (authEnded || pollGeneration !== realtimePollGeneration) {
                         return;
                     }
                     realtimeConsecutiveFailures += 1;
@@ -589,7 +714,7 @@
                 })
                 .finally(function () {
                     window.clearTimeout(timeoutId);
-                    if (authEnded) {
+                    if (authEnded || pollGeneration !== realtimePollGeneration) {
                         return;
                     }
                     realtimePollInFlight = false;
@@ -598,15 +723,21 @@
         }
 
         function wakeRealtimeConnection(reason) {
-            if (authEnded) {
+            if (authEnded || !isPageActive()) {
                 return;
             }
             inspectRealtimeWatchdog(reason || "wake");
-            window.setTimeout(function () {
-                if (authEnded) {
+            if (wakeTimeoutId !== null) {
+                return;
+            }
+            clearPollSchedule();
+            wakeTimeoutId = window.setTimeout(function () {
+                wakeTimeoutId = null;
+                if (authEnded || !isPageActive()) {
                     return;
                 }
                 pollOperationalState({force: true});
+                scheduleNextPoll();
             }, 0);
         }
 
@@ -619,11 +750,15 @@
                 pendingVersion: pendingVersion,
                 pendingPreviousVersion: pendingPreviousVersion,
                 pendingVersionSince: pendingVersionSince,
+                pendingEvents: pendingEvents.slice(),
+                pendingEventsTruncated: pendingEventsTruncated,
                 initialVersion: config.initialVersion,
                 applyingUpdate: applyingUpdate,
                 busyReason: getUserBusyReason(),
                 pollInFlight: realtimePollInFlight,
                 consecutiveFailures: realtimeConsecutiveFailures,
+                pageActive: isPageActive(),
+                pollIntervalMs: pollIntervalMs,
                 lastSuccessAt: realtimeLastSuccessAt,
                 lastPollStartedAt: realtimeLastPollStartedAt,
                 manualRefreshMode: manualRefreshMode,
@@ -651,29 +786,41 @@
             role: screen ? screen.role : null
         });
 
-        pollOperationalState({force: true});
-        pollIntervalId = window.setInterval(function () {
-            inspectRealtimeWatchdog("interval_watchdog");
-            pollOperationalState();
-        }, pollIntervalMs);
+        if (isPageActive()) {
+            pollOperationalState({force: true});
+            scheduleNextPoll();
+        }
         watchdogIntervalId = window.setInterval(function () {
             inspectRealtimeWatchdog("slow_watchdog");
         }, 2000);
         document.addEventListener("visibilitychange", function () {
-            if (!document.hidden) {
+            if (document.hidden) {
+                pauseRealtimeConnection();
+                return;
+            }
+            pageFocused = typeof document.hasFocus !== "function" || document.hasFocus();
+            if (pageFocused) {
                 wakeRealtimeConnection("visibilitychange");
             }
         });
         window.addEventListener("focus", function () {
+            pageFocused = true;
             wakeRealtimeConnection("focus");
         });
+        window.addEventListener("blur", function () {
+            pageFocused = false;
+            pauseRealtimeConnection();
+        });
         window.addEventListener("pageshow", function (event) {
+            pageFocused = typeof document.hasFocus !== "function" || document.hasFocus();
             wakeRealtimeConnection(event && event.persisted ? "pageshow_persisted" : "pageshow");
         });
         document.addEventListener("resume", function () {
+            pageFocused = true;
             wakeRealtimeConnection("resume");
         });
         window.addEventListener("resume", function () {
+            pageFocused = true;
             wakeRealtimeConnection("window_resume");
         });
         window.addEventListener("online", function () {

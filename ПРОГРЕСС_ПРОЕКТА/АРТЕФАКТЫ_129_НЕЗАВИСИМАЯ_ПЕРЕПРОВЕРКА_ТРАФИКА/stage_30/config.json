@@ -1,0 +1,247 @@
+{
+  "accounts": [
+    {
+      "ordinal": 0,
+      "role": "admin",
+      "host": "admin.localhost",
+      "path": "/system-admin/employees/?q=QAWEEK-20260727",
+      "realtime": false
+    },
+    {
+      "ordinal": 1,
+      "role": "oup",
+      "host": "oup.localhost",
+      "path": "/oup/employees/",
+      "realtime": false
+    },
+    {
+      "ordinal": 2,
+      "role": "deputy_mining_manager",
+      "host": "deputy.localhost",
+      "path": "/deputy-mining-manager/?role=driver&date=2026-07-26",
+      "realtime": false
+    },
+    {
+      "ordinal": 3,
+      "role": "manager",
+      "host": "management.localhost",
+      "path": "/reports/management/?date=2026-07-26",
+      "realtime": false
+    },
+    {
+      "ordinal": 4,
+      "role": "dispatcher",
+      "host": "dispatcher.localhost",
+      "path": "/realtime/state/?after={after}&limit=1&include_events=0",
+      "realtime": true
+    },
+    {
+      "ordinal": 5,
+      "role": "mining_master",
+      "host": "mining-master.localhost",
+      "path": "/realtime/state/?after={after}&limit=1&include_events=0",
+      "realtime": true
+    },
+    {
+      "ordinal": 12,
+      "role": "excavator_operator",
+      "host": "excavator.localhost",
+      "path": "/realtime/state/?after={after}&limit=1&include_events=0",
+      "realtime": true
+    },
+    {
+      "ordinal": 44,
+      "role": "driver",
+      "host": "driver.localhost",
+      "path": "/realtime/state/?after={after}&limit=1&include_events=0",
+      "realtime": true
+    },
+    {
+      "ordinal": 45,
+      "role": "driver",
+      "host": "driver.localhost",
+      "path": "/realtime/state/?after={after}&limit=1&include_events=0",
+      "realtime": true
+    },
+    {
+      "ordinal": 46,
+      "role": "driver",
+      "host": "driver.localhost",
+      "path": "/realtime/state/?after={after}&limit=1&include_events=0",
+      "realtime": true
+    },
+    {
+      "ordinal": 47,
+      "role": "driver",
+      "host": "driver.localhost",
+      "path": "/realtime/state/?after={after}&limit=1&include_events=0",
+      "realtime": true
+    },
+    {
+      "ordinal": 48,
+      "role": "driver",
+      "host": "driver.localhost",
+      "path": "/realtime/state/?after={after}&limit=1&include_events=0",
+      "realtime": true
+    },
+    {
+      "ordinal": 49,
+      "role": "driver",
+      "host": "driver.localhost",
+      "path": "/realtime/state/?after={after}&limit=1&include_events=0",
+      "realtime": true
+    },
+    {
+      "ordinal": 50,
+      "role": "driver",
+      "host": "driver.localhost",
+      "path": "/realtime/state/?after={after}&limit=1&include_events=0",
+      "realtime": true
+    },
+    {
+      "ordinal": 51,
+      "role": "driver",
+      "host": "driver.localhost",
+      "path": "/realtime/state/?after={after}&limit=1&include_events=0",
+      "realtime": true
+    },
+    {
+      "ordinal": 52,
+      "role": "driver",
+      "host": "driver.localhost",
+      "path": "/realtime/state/?after={after}&limit=1&include_events=0",
+      "realtime": true
+    },
+    {
+      "ordinal": 53,
+      "role": "driver",
+      "host": "driver.localhost",
+      "path": "/realtime/state/?after={after}&limit=1&include_events=0",
+      "realtime": true
+    },
+    {
+      "ordinal": 54,
+      "role": "driver",
+      "host": "driver.localhost",
+      "path": "/realtime/state/?after={after}&limit=1&include_events=0",
+      "realtime": true
+    },
+    {
+      "ordinal": 55,
+      "role": "driver",
+      "host": "driver.localhost",
+      "path": "/realtime/state/?after={after}&limit=1&include_events=0",
+      "realtime": true
+    },
+    {
+      "ordinal": 56,
+      "role": "driver",
+      "host": "driver.localhost",
+      "path": "/realtime/state/?after={after}&limit=1&include_events=0",
+      "realtime": true
+    },
+    {
+      "ordinal": 57,
+      "role": "driver",
+      "host": "driver.localhost",
+      "path": "/realtime/state/?after={after}&limit=1&include_events=0",
+      "realtime": true
+    },
+    {
+      "ordinal": 58,
+      "role": "driver",
+      "host": "driver.localhost",
+      "path": "/realtime/state/?after={after}&limit=1&include_events=0",
+      "realtime": true
+    },
+    {
+      "ordinal": 59,
+      "role": "driver",
+      "host": "driver.localhost",
+      "path": "/realtime/state/?after={after}&limit=1&include_events=0",
+      "realtime": true
+    },
+    {
+      "ordinal": 60,
+      "role": "driver",
+      "host": "driver.localhost",
+      "path": "/realtime/state/?after={after}&limit=1&include_events=0",
+      "realtime": true
+    },
+    {
+      "ordinal": 61,
+      "role": "driver",
+      "host": "driver.localhost",
+      "path": "/realtime/state/?after={after}&limit=1&include_events=0",
+      "realtime": true
+    },
+    {
+      "ordinal": 62,
+      "role": "driver",
+      "host": "driver.localhost",
+      "path": "/realtime/state/?after={after}&limit=1&include_events=0",
+      "realtime": true
+    },
+    {
+      "ordinal": 63,
+      "role": "driver",
+      "host": "driver.localhost",
+      "path": "/realtime/state/?after={after}&limit=1&include_events=0",
+      "realtime": true
+    },
+    {
+      "ordinal": 64,
+      "role": "driver",
+      "host": "driver.localhost",
+      "path": "/realtime/state/?after={after}&limit=1&include_events=0",
+      "realtime": true
+    },
+    {
+      "ordinal": 65,
+      "role": "driver",
+      "host": "driver.localhost",
+      "path": "/realtime/state/?after={after}&limit=1&include_events=0",
+      "realtime": true
+    },
+    {
+      "ordinal": 66,
+      "role": "driver",
+      "host": "driver.localhost",
+      "path": "/realtime/state/?after={after}&limit=1&include_events=0",
+      "realtime": true
+    },
+    {
+      "ordinal": 67,
+      "role": "driver",
+      "host": "driver.localhost",
+      "path": "/realtime/state/?after={after}&limit=1&include_events=0",
+      "realtime": true
+    },
+    {
+      "ordinal": 68,
+      "role": "driver",
+      "host": "driver.localhost",
+      "path": "/realtime/state/?after={after}&limit=1&include_events=0",
+      "realtime": true
+    },
+    {
+      "ordinal": 69,
+      "role": "driver",
+      "host": "driver.localhost",
+      "path": "/realtime/state/?after={after}&limit=1&include_events=0",
+      "realtime": true
+    },
+    {
+      "ordinal": 70,
+      "role": "driver",
+      "host": "driver.localhost",
+      "path": "/realtime/state/?after={after}&limit=1&include_events=0",
+      "realtime": true
+    }
+  ],
+  "duration_seconds": 30,
+  "interval_seconds": 5.0,
+  "page_interval_seconds": 15.0,
+  "timeout_seconds": 8.0,
+  "startup_jitter_seconds": 0.1
+}

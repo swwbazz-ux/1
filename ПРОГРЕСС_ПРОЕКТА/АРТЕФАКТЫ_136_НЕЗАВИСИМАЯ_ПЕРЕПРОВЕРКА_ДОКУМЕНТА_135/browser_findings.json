@@ -1,0 +1,158 @@
+{
+  "date": "2026-07-28",
+  "source_document": "135_ОТЧЕТ_ОБ_ИСПРАВЛЕНИИ_ДВУХ_P1_ДОКУМЕНТА_134_28_07_2026.md",
+  "source_sha256": "2547FFB61859F91C4A9272261254B0E9E08E13D372BD414B443BA108E20A9B20",
+  "verdict": {
+    "QA-REG-P1-DRIVER-LOGOUT-HOLD-001": "PASS",
+    "QA-REG-P1-DISPATCHER-MOBILE-EMPTY-001": "PASS"
+  },
+  "driver": {
+    "mobile": {
+      "viewport": [390, 844],
+      "document_width": [390, 390],
+      "shell": "driver-mobile-shell-v110",
+      "static_release": "ready-core-traffic-v7",
+      "short_press": {
+        "url_after": "http://driver.localhost:8000/driver/?tab=shift",
+        "hold_progress_after": "0%",
+        "console_errors": 0
+      },
+      "full_hold": {
+        "url_after": "http://driver.localhost:8000/",
+        "title_after": "Вход · Водитель",
+        "console_errors": 0
+      },
+      "repeated_full_hold": {
+        "url_after": "http://driver.localhost:8000/",
+        "title_after": "Вход · Водитель",
+        "console_errors": 0
+      }
+    },
+    "desktop": {
+      "viewport": [1280, 720],
+      "document_width": [1280, 1280],
+      "shell": "driver-mobile-shell-v110",
+      "static_release": "ready-core-traffic-v7",
+      "full_hold": {
+        "url_after": "http://driver.localhost:8000/",
+        "title_after": "Вход · Водитель",
+        "console_errors": 0
+      }
+    },
+    "read_only_contract": {
+      "production_runtime_test": "PASS",
+      "server_and_middleware_code_review": "PASS"
+    }
+  },
+  "dispatcher": {
+    "mobile": {
+      "viewport": [390, 844],
+      "document_width": [390, 390],
+      "board_classes": [
+        "dispatcher-board",
+        "is-readonly",
+        "is-excavator-garage-empty",
+        "is-truck-garage-empty"
+      ],
+      "board_columns": "378.4px",
+      "board_rows": "384.4px 433.6px",
+      "board_rect": {"x": 6, "y": 6, "width": 378.4, "height": 828},
+      "topbar_rect": {"x": 6, "y": 6, "width": 378.4, "height": 384.4},
+      "header_rect": {"x": 6.8, "y": 6.8, "width": 359.8, "height": 378.8},
+      "navigation_rect": {"x": 36.8, "y": 144.8, "width": 299, "height": 36},
+      "zone_grid_rect": {"x": 6, "y": 400.4, "width": 378.4, "height": 433.6},
+      "visible_complex_cards": 9,
+      "navigation_center_hit_inside_navigation": true,
+      "zone_grid_scroll_top": {"before": 0, "after": 186.4},
+      "role_access_active": true,
+      "role_readonly": false,
+      "shell": "dispatcher-desktop-shell-v41",
+      "static_release": "ready-core-traffic-v7",
+      "console_errors": 0
+    },
+    "desktop": {
+      "viewport": [1280, 720],
+      "document_width": [1280, 1280],
+      "board_columns": "0px 1264px 0px",
+      "board_rows": "108px 586px",
+      "board_width": 1264,
+      "topbar_width": 1264,
+      "navigation_width": 388.6,
+      "zone_grid_width": 1254,
+      "visible_complex_cards": 9,
+      "shell": "dispatcher-desktop-shell-v41",
+      "static_release": "ready-core-traffic-v7",
+      "console_errors": 0
+    }
+  },
+  "mining_master_version_contract": {
+    "viewport": [390, 844],
+    "document_width": [390, 390],
+    "shell": "mining-master-mobile-shell-v116",
+    "static_release": "ready-core-traffic-v7",
+    "console_errors": 0
+  },
+  "served_assets": [
+    {
+      "host": "driver.localhost",
+      "path": "/driver-sw.js",
+      "status": 200,
+      "bytes": 4997,
+      "marker": "driver-mobile-shell-v110",
+      "marker_present": true
+    },
+    {
+      "host": "dispatcher.localhost",
+      "path": "/dispatcher-sw.js",
+      "status": 200,
+      "bytes": 5900,
+      "marker": "dispatcher-desktop-shell-v41",
+      "marker_present": true
+    },
+    {
+      "host": "mining-master.localhost",
+      "path": "/mining-master-sw.js",
+      "status": 200,
+      "bytes": 6810,
+      "marker": "mining-master-mobile-shell-v116",
+      "marker_present": true
+    },
+    {
+      "host": "driver.localhost",
+      "path": "/static/css/app.css?v=ready-core-traffic-v7",
+      "status": 200,
+      "bytes": 837236,
+      "marker": ".dispatcher-board.is-excavator-garage-empty.is-truck-garage-empty",
+      "marker_present": true
+    }
+  ],
+  "tests": {
+    "driver_javascript": {"found": 3, "passed": 3, "failed": 0},
+    "dispatcher_javascript": {"found": 3, "passed": 3, "failed": 0},
+    "all_javascript": {"found": 54, "passed": 54, "failed": 0, "skipped": 0},
+    "targeted_sqlite": {"found": 9, "passed": 9},
+    "targeted_postgresql": {"found": 9, "passed": 9},
+    "full_postgresql": {"found": 756, "passed": 756, "skipped": 0},
+    "django_check": "PASS",
+    "makemigrations_check_dry_run": "No changes detected",
+    "git_diff_check": "PASS"
+  },
+  "environment_after": {
+    "sqlite_sha256": "A5CC387E15454B107FE5E04ADC6801E983873AD62EB79DE76E91283E02733222",
+    "private_media_files": 78,
+    "private_media_bytes": 3042,
+    "private_media_manifest_sha256": "49D47A6D248DDD90FEED4AFA366D5CCAE76FAA0972788B44961217CB71B91FF7",
+    "migration_files": 72,
+    "migration_manifest_sha256": "9A0672A781BD00E52D23DF0DC5330B111F682A95D6646EC29A9E0F2EE58CA306",
+    "root_env_exists": false,
+    "backend_env_exists": false,
+    "listeners": {"8000": 0, "8001": 0, "55432": 0}
+  },
+  "publication": {
+    "local_only": true,
+    "commit": false,
+    "push": false,
+    "deploy": false,
+    "production_touched": false
+  }
+}

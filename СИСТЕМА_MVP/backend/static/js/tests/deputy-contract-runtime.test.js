@@ -7,6 +7,16 @@ const path = require("node:path");
 const test = require("node:test");
 const vm = require("node:vm");
 
+const ROLE_APPS_MODULE_PATH = path.resolve(
+    __dirname,
+    "..",
+    "..",
+    "..",
+    "users",
+    "role_apps.py"
+);
+const ROLE_APPS_MODULE_SOURCE = fs.readFileSync(ROLE_APPS_MODULE_PATH, "utf8");
+
 const backendRoot = path.resolve(__dirname, "../../..");
 const deputyScriptPath = path.join(
     backendRoot,
@@ -607,6 +617,58 @@ class CacheStub {
         return this.entries.delete(this.key(request));
     }
 }
+
+function extractReleaseStaticWorkerHelper() {
+    const match = ROLE_APPS_MODULE_SOURCE.match(
+        /RELEASE_STATIC_SERVICE_WORKER_JS = r"""([\s\S]*?)"""/
+    );
+    assert.ok(match, "RELEASE_STATIC_SERVICE_WORKER_JS was not found");
+    return match[1].replaceAll("__STATIC_ASSET_RELEASE__", "ready-core-traffic-v7");
+}
+
+test("same release static request is fetched once and then served cache-first", async () => {
+    const workerSource = extractReleaseStaticWorkerHelper();
+    const cache = new CacheStub();
+    let fetchCount = 0;
+    const listeners = new Map();
+    const context = {
+        CACHE_NAME: "traffic-release-test-cache",
+        self: {
+            location: {origin: "https://driver.localhost"},
+            addEventListener(type, listener) {
+                listeners.set(type, listener);
+            },
+        },
+        caches: {
+            async open() {
+                return cache;
+            },
+        },
+        fetch: async (request) => {
+            fetchCount += 1;
+            return new Response(`release-body-${request.url}`);
+        },
+        Request,
+        Response,
+        URL,
+        Set,
+        Promise,
+        console,
+    };
+    vm.runInNewContext(workerSource, context, {
+        filename: "users/role_apps.py::RELEASE_STATIC_SERVICE_WORKER_JS",
+    });
+    const request = new Request(
+        "https://driver.localhost/static/js/realtime-client.js"
+        + "?v=ready-core-traffic-v7"
+    );
+
+    const first = await context.cacheFirstReleaseStatic(request);
+    const second = await context.cacheFirstReleaseStatic(request);
+
+    assert.equal(fetchCount, 1);
+    assert.equal(await first.text(), await second.text());
+});
 
 function extractDeputyWorker() {
     const match = deputyWorkerModule.match(

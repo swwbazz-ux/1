@@ -172,8 +172,10 @@ def trip_queryset_for_loading(selected_date):
         )
         .select_related(
             'truck',
+            'truck__equipment_type',
             'truck__model',
             'excavator',
+            'excavator__equipment_type',
             'excavator_operator',
             'rock_type',
             'dump_point',
@@ -212,6 +214,7 @@ def trip_queryset_for_loading_range(date_from, date_to):
         )
         .select_related(
             'truck',
+            'truck__equipment_type',
             'truck__model',
             'excavator',
             'excavator__equipment_type',
@@ -854,9 +857,11 @@ def trip_queryset_for_unloading(selected_date):
         )
         .select_related(
             'truck',
+            'truck__equipment_type',
             'truck__model',
             'driver',
             'excavator',
+            'excavator__equipment_type',
             'rock_type',
             'dump_point',
             'assigned_dump_point',
@@ -1027,21 +1032,30 @@ def build_downtime_rows(events, now=None):
     return rows
 
 
-def build_shift_analytics(selected_date, shift_type=''):
+def load_shift_analytics_data(selected_date):
+    return {
+        'loading_trips': list(trip_queryset_for_loading(selected_date)),
+        'unloading_trips': list(trip_queryset_for_unloading(selected_date)),
+        'downtime_events': list(downtime_queryset_for_date(selected_date)),
+    }
+
+
+def build_shift_analytics(selected_date, shift_type='', *, source=None, totals_only=False):
     shift_type = shift_type if shift_type in {'', 'day', 'night'} else ''
+    source = source or load_shift_analytics_data(selected_date)
     loading_trips = [
         trip
-        for trip in trip_queryset_for_loading(selected_date)
+        for trip in source['loading_trips']
         if shift_matches(trip_loading_shift_type(trip), shift_type)
     ]
     unloading_trips = [
         trip
-        for trip in trip_queryset_for_unloading(selected_date)
+        for trip in source['unloading_trips']
         if shift_matches(trip_unloading_shift_type(trip), shift_type)
     ]
     downtime_events = [
         event
-        for event in downtime_queryset_for_date(selected_date)
+        for event in source['downtime_events']
         if shift_matches(downtime_shift_type(event), shift_type)
     ]
 
@@ -1056,7 +1070,7 @@ def build_shift_analytics(selected_date, shift_type=''):
     open_trip_count = sum(1 for trip in loading_trips if trip.status in OPEN_TRIP_STATUSES)
     carryover_count = sum(1 for trip in unloading_trips if trip.is_carryover)
 
-    return {
+    result = {
         'selected_date': selected_date,
         'shift_type': shift_type,
         'shift_label': SHIFT_LABELS[shift_type],
@@ -1073,6 +1087,24 @@ def build_shift_analytics(selected_date, shift_type=''):
             'downtime_hours': downtime_hours,
             'downtime_hours_display': format_decimal(downtime_hours, places=2),
         },
+    }
+    if totals_only:
+        return {
+            **result,
+            'excavator_rows': [],
+            'truck_rows': [],
+            'employee_rows': [],
+            'rock_rows': [],
+            'dump_point_rows': [],
+            'face_rows': [],
+            'downtime_reason_rows': [],
+            'loading_trips': [],
+            'unloading_trips': [],
+            'downtime_events': [],
+        }
+
+    return {
+        **result,
         'excavator_rows': group_trips(
             loading_trips,
             lambda trip: trip.excavator_id,

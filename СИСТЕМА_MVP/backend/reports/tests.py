@@ -1,18 +1,27 @@
 from datetime import datetime, time, timedelta, timezone as dt_timezone
 from decimal import Decimal
+from io import BytesIO
 from unittest.mock import patch
 
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.test import RequestFactory, TestCase
 from django.utils import timezone
+from openpyxl import load_workbook
 
 from downtimes.models import DowntimeEvent, DowntimeReason
 from references.models import DumpPoint, Equipment, EquipmentModel, EquipmentType, RockType, TruckCapacityRule
 from shifts.models import EmployeeShift, EquipmentPlanGroup, ShiftPlan
+from shifts.services import shift_plan_totals_for_dates
 from trips.models import Trip, TripClientAction, TripStatus
 from users.models import Employee, EmployeeAccess, Role
 
-from .shift_analytics import build_excavator_dynamics, build_shift_analytics
+from .shift_analytics import (
+    build_excavator_dynamics,
+    build_shift_analytics,
+    load_shift_analytics_data,
+)
 from .views import (
     build_mechanic_downtime_rows,
     dispatcher_downtime_filters,
@@ -55,6 +64,30 @@ class ManagementDashboardPlanTests(TestCase):
         self.assertEqual(context['daily_plan_source'], 'из сменных планов админки')
         self.assertEqual(context['daily_total_volume'], 0)
         self.assertEqual(context['daily_plan_completion_percent'], Decimal('0.0'))
+
+    def test_management_dashboard_loads_seven_day_plans_in_one_batch(self):
+        selected_date = datetime(2026, 7, 26).date()
+        dates = [
+            selected_date - timedelta(days=day_offset)
+            for day_offset in range(6, -1, -1)
+        ]
+        for index, plan_date in enumerate(dates, start=1):
+            ShiftPlan.objects.create(
+                date=plan_date,
+                shift_type='day',
+                name=f'План {plan_date:%Y-%m-%d}',
+                plan_volume_m3=Decimal(index * 100),
+                is_active=True,
+            )
+
+        with CaptureQueriesContext(connection) as plan_queries:
+            totals_by_date = shift_plan_totals_for_dates(dates)
+
+        self.assertEqual(len(plan_queries), 2)
+        self.assertEqual(
+            [totals_by_date[plan_date]['volume_m3'] for plan_date in dates],
+            [Decimal(index * 100) for index in range(1, 8)],
+        )
 
 
 class ProductionConsumerContractTests(TestCase):
@@ -918,6 +951,131 @@ class ShiftAnalyticsReportTests(TestCase):
         self.assertEqual(context['shift_analytics_totals']['open_trip_count'], 1)
         self.assertEqual(context['shift_analytics_totals']['volume_m3'], Decimal('78.00'))
         self.assertEqual(context['shift_analytics_shift_cards'][0]['totals']['loaded_trip_count'], 2)
+
+    def test_management_dashboard_reuses_source_and_preserves_day_night_totals(self):
+        night_at = timezone.make_aware(
+            datetime.combine(self.date, time(20, 0)),
+            timezone.get_current_timezone(),
+        )
+        EmployeeShift.objects.filter(
+            pk__in=[self.driver_shift.pk, self.operator_shift.pk],
+        ).update(closed_at=night_at)
+        night_driver_shift = EmployeeShift.objects.create(
+            employee=self.driver,
+            shift_type='night',
+            equipment=self.truck,
+            opened_at=night_at,
+        )
+        night_operator_shift = EmployeeShift.objects.create(
+            employee=self.operator,
+            shift_type='night',
+            equipment=self.excavator,
+            opened_at=night_at,
+        )
+        Trip.objects.create(
+            excavator=self.excavator,
+            truck=self.truck,
+            excavator_operator=self.operator,
+            driver=self.driver,
+            loading_shift=night_operator_shift,
+            unloading_shift=night_driver_shift,
+            rock_type=self.rock,
+            dump_point=self.dump_point,
+            actual_dump_point=self.dump_point,
+            volume_m3=Decimal('50.00'),
+            tonnage=Decimal('100.00'),
+            status=TripStatus.COMPLETED,
+            completed_at=night_at,
+        )
+
+        source = load_shift_analytics_data(self.date)
+        standalone_day = build_shift_analytics(self.date, 'day')
+        standalone_night = build_shift_analytics(self.date, 'night')
+        shared_day = build_shift_analytics(
+            self.date,
+            'day',
+            source=source,
+            totals_only=True,
+        )
+        shared_night = build_shift_analytics(
+            self.date,
+            'night',
+            source=source,
+            totals_only=True,
+        )
+        request = RequestFactory().get(
+            '/reports/management/',
+            {'date': self.date.strftime('%Y-%m-%d')},
+        )
+        context = management_dashboard_context(request, self.admin_access)
+
+        self.assertEqual(shared_day['totals'], standalone_day['totals'])
+        self.assertEqual(shared_night['totals'], standalone_night['totals'])
+        self.assertEqual(shared_day['excavator_rows'], [])
+        self.assertEqual(shared_night['truck_rows'], [])
+        self.assertEqual(
+            context['shift_analytics_shift_cards'][0]['totals'],
+            standalone_day['totals'],
+        )
+        self.assertEqual(
+            context['shift_analytics_shift_cards'][1]['totals'],
+            standalone_night['totals'],
+        )
+        self.assertEqual(context['shift_analytics_totals']['volume_m3'], Decimal('128.00'))
+        self.assertEqual(context['daily_total_volume'], Decimal('90.00'))
+        self.assertEqual(context['trend_total_volume'], Decimal('90.00'))
+
+    def test_management_dashboard_query_count_is_bounded_when_trip_count_grows(self):
+        url = reverse('management_dashboard')
+        params = {'date': self.date.strftime('%Y-%m-%d')}
+
+        with CaptureQueriesContext(connection) as baseline_queries:
+            baseline_response = self.client.get(url, params)
+        self.assertEqual(baseline_response.status_code, 200)
+
+        for index in range(40):
+            Trip.objects.create(
+                excavator=self.excavator,
+                truck=self.truck,
+                excavator_operator=self.operator,
+                driver=self.driver,
+                loading_shift=self.operator_shift,
+                unloading_shift=self.driver_shift,
+                rock_type=self.rock,
+                dump_point=self.dump_point,
+                actual_dump_point=self.dump_point,
+                volume_m3=Decimal('40.00'),
+                tonnage=Decimal('80.00'),
+                status=TripStatus.COMPLETED,
+                completed_at=self.completed_trip.completed_at + timedelta(minutes=index + 1),
+            )
+
+        with CaptureQueriesContext(connection) as expanded_queries:
+            expanded_response = self.client.get(url, params)
+        self.assertEqual(expanded_response.status_code, 200)
+        self.assertEqual(len(expanded_queries), len(baseline_queries))
+        self.assertLessEqual(len(expanded_queries), 32)
+
+    def test_management_dashboard_export_keeps_page_totals(self):
+        params = {'date': self.date.strftime('%Y-%m-%d')}
+        context = management_dashboard_context(
+            RequestFactory().get('/reports/management/', params),
+            self.admin_access,
+        )
+
+        response = self.client.get(reverse('management_dashboard_export'), params)
+
+        self.assertEqual(response.status_code, 200)
+        workbook = load_workbook(BytesIO(response.content), data_only=True)
+        summary = {
+            row[0].value: row[1].value
+            for row in workbook['Сводка'].iter_rows(min_row=6, max_col=2)
+            if row[0].value
+        }
+        self.assertEqual(summary['Факт за сутки, м3'], context['daily_total_volume'])
+        self.assertEqual(summary['Рейсы за сутки'], context['daily_trip_count'])
+        self.assertEqual(summary['Факт за 7 дней, м3'], context['trend_total_volume'])
+        self.assertEqual(summary['Рейсы за 7 дней'], context['trend_trip_count'])
 
     def test_management_dashboard_page_renders_shift_analytics_flow(self):
         response = self.client.get(reverse('management_dashboard'), {'date': self.date.strftime('%Y-%m-%d')})

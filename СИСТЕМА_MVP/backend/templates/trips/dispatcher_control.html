@@ -34,7 +34,7 @@
         </div>
     {% endif %}
 
-    <section class="dispatcher-board{% if not dispatcher_header.active_shift %} is-readonly{% endif %}" aria-label="{% if dispatcher_board_label %}{{ dispatcher_board_label }}{% else %}Горный диспетчер{% endif %}">
+    <section class="dispatcher-board{% if not dispatcher_header.active_shift %} is-readonly{% endif %}" data-dispatcher-shift-open="{% if dispatcher_header.active_shift %}true{% else %}false{% endif %}" aria-label="{% if dispatcher_board_label %}{{ dispatcher_board_label }}{% else %}Горный диспетчер{% endif %}">
         <header class="dispatcher-topbar dispatcher-unified-topbar">
             {% include "includes/dispatcher_header.html" with dispatcher_nav_active="control" %}
         </header>
@@ -150,7 +150,7 @@
                 <div class="mm-mobile-plan-ring" style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" role="img" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%">
                     {{ dispatcher_dashboard.completion_percent|default:0 }}%
                 </div>
-                <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v101</span>
+                <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v116</span>
             </div>
         </header>
 
@@ -233,7 +233,7 @@
                     <div class="mm-mobile-plan-ring" style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" role="img" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%">
                         {{ dispatcher_dashboard.completion_percent|default:0 }}%
                     </div>
-                    <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v101</span>
+                    <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v116</span>
                 </div>
             </header>
 
@@ -287,7 +287,7 @@
                     <div class="mm-mobile-plan-ring" style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" role="img" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%">
                         {{ dispatcher_dashboard.completion_percent|default:0 }}%
                     </div>
-                    <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v101</span>
+                    <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v116</span>
                 </div>
             </header>
 
@@ -340,7 +340,7 @@
                     <div class="mm-mobile-plan-ring" style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" role="img" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%">
                         {{ dispatcher_dashboard.completion_percent|default:0 }}%
                     </div>
-                    <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v101</span>
+                    <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v116</span>
                 </div>
             </header>
 
@@ -403,7 +403,7 @@
 
             <div class="mm-mobile-version-strip" aria-label="Версия приложения">
                 <span>Версия приложения</span>
-                <strong data-mm-pwa-current-shell-version>v101</strong>
+                <strong data-mm-pwa-current-shell-version>v116</strong>
                 <button type="button" data-mm-pwa-check-update>Проверить обновления</button>
             </div>
 
@@ -440,7 +440,7 @@
                             <div class="mm-mobile-plan-ring" style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" role="img" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%">
                                 {{ dispatcher_dashboard.completion_percent|default:0 }}%
                             </div>
-                            <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v101</span>
+                            <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v116</span>
                         </div>
                     </header>
 
@@ -805,6 +805,20 @@ document.addEventListener("DOMContentLoaded", function () {
     var dispatcherMoveExcavatorUrl = "{{ dispatcher_move_excavator_url }}";
     var dispatcherAssignTruckUrl = "{{ dispatcher_assign_truck_url }}";
     var dispatcherShiftOpen = {{ dispatcher_header.active_shift|yesno:"true,false" }};
+    function syncDispatcherShiftRuntime(freshBoard) {
+        if (!freshBoard) return dispatcherShiftOpen;
+        var fragmentShiftOpen = freshBoard.dataset
+            ? freshBoard.dataset.dispatcherShiftOpen
+            : "";
+        if (fragmentShiftOpen === "true") {
+            dispatcherShiftOpen = true;
+        } else if (fragmentShiftOpen === "false") {
+            dispatcherShiftOpen = false;
+        } else {
+            dispatcherShiftOpen = !freshBoard.classList.contains("is-readonly");
+        }
+        return dispatcherShiftOpen;
+    }
     var equipmentCardsNode = document.getElementById("gd-equipment-cards-data");
     var equipmentCards = equipmentCardsNode ? JSON.parse(equipmentCardsNode.textContent) : {};
     var equipmentStatesNode = document.getElementById("gd-equipment-states-data");
@@ -886,7 +900,7 @@ document.addEventListener("DOMContentLoaded", function () {
     var dispatcherRealtimeConnected = true;
     var dispatcherRealtimeLastSuccessAt = 0;
     var dispatcherRealtimeLastReason = "";
-    var miningMasterShellVersion = "mining-master-mobile-shell-v113";
+    var miningMasterShellVersion = "mining-master-mobile-shell-v116";
     function readDispatcherSyncQueue() {
         try {
             return JSON.parse(window.localStorage.getItem(dispatcherSyncQueueKey) || "[]");
@@ -1173,49 +1187,8 @@ document.addEventListener("DOMContentLoaded", function () {
             window.sessionStorage.setItem(miningMasterRealtimeStorageKey, String(parsed));
         } catch (error) {}
     }
-    function buildMiningMasterRealtimeUrl(afterVersion, limit) {
-        var url = new URL("{% url 'operational_state_version' %}", window.location.origin);
-        var parsed = parseInt(afterVersion || "0", 10);
-        if (Number.isFinite(parsed) && parsed > 0) {
-            url.searchParams.set("after", String(parsed));
-        }
-        var parsedLimit = parseInt(limit || "0", 10);
-        if (Number.isFinite(parsedLimit) && parsedLimit > 0) {
-            url.searchParams.set("limit", String(parsedLimit));
-        }
-        return url.toString();
-    }
-    function fetchMiningMasterRealtimeState(context, limit) {
-        var targetVersion = context && context.version ? parseInt(context.version, 10) : 0;
-        var previousVersion = context && context.previousVersion ? parseInt(context.previousVersion, 10) : 0;
-        var afterVersion = Number.isFinite(previousVersion) && previousVersion > 0
-            ? previousVersion
-            : (miningMasterRealtimeLastVersion || readMiningMasterRealtimeVersion());
-        if (targetVersion > 1 && (!afterVersion || afterVersion >= targetVersion)) {
-            afterVersion = targetVersion - 1;
-        }
-        return dispatcherFetchWithTimeout(buildMiningMasterRealtimeUrl(afterVersion, limit), {
-            method: "GET",
-            credentials: "same-origin",
-            cache: "no-store",
-            headers: { "Accept": "application/json" }
-        }, dispatcherRefreshRequestTimeoutMs).then(function (response) {
-            if (!response.ok) throw new Error("Operational state fetch failed.");
-            return response.json();
-        });
-    }
     function hasMiningMasterRelevantEvents(events) {
-        if (!Array.isArray(events) || !events.length) return true;
-        return events.some(function (event) {
-            return [
-                "equipment_changed",
-                "assignment_changed",
-                "shift_changed",
-                "reference_changed",
-                "downtime_changed",
-                "trip_changed"
-            ].indexOf(event && event.type) !== -1;
-        });
+        return Array.isArray(events) && events.length > 0;
     }
     function getMobileShellScreen(shell) {
         if (!shell) return "home";
@@ -1307,55 +1280,48 @@ document.addEventListener("DOMContentLoaded", function () {
     var miningMasterMobileRefreshPromise = null;
     var miningMasterMobileLastRefreshAt = 0;
     var miningMasterMobilePassiveReconcileMs = 10000;
-    function buildMobileBoardRefreshUrl() {
-        var url = new URL(window.location.href);
-        url.searchParams.set("_mm_refresh", String(Date.now()));
-        return url.toString();
-    }
     function refreshMobileBoardFromServer(options) {
+        options = options || {};
         if (miningMasterMobileRefreshPromise) {
             return miningMasterMobileRefreshPromise;
         }
         var currentShell = document.querySelector(".mm-mobile-shell");
-        if (!currentShell) return Promise.resolve(false);
+        if (!currentShell || !window.AppOperationalFragment) return Promise.resolve(false);
         var state = captureMobileShellState(currentShell);
-        miningMasterMobileRefreshPromise = dispatcherFetchWithTimeout(buildMobileBoardRefreshUrl(), {
-            method: "GET",
-            headers: { "X-Requested-With": "XMLHttpRequest" },
-            cache: "no-store"
-        }, dispatcherRefreshRequestTimeoutMs).then(function (response) {
-            if (!response.ok) throw new Error("Не удалось обновить мобильный пульт.");
-            return response.text();
-        }).then(function (html) {
-            var parser = new DOMParser();
-            var doc = parser.parseFromString(html, "text/html");
-            var freshShell = doc.querySelector(".mm-mobile-shell");
+        miningMasterMobileRefreshPromise = window.AppOperationalFragment.request(
+            "mining_master",
+            Number(options.version || 0)
+        ).then(function (payload) {
+            if (isMobileOperationalRefreshUnsafe()) return false;
+            var freshShell = window.AppOperationalFragment.parseRoot(
+                payload.html,
+                ".mm-mobile-shell"
+            );
             var currentShell = document.querySelector(".mm-mobile-shell");
             if (!freshShell || !currentShell) return false;
-            var freshVersion = parseInt(doc.body ? doc.body.dataset.operationalStateVersion || "0" : "0", 10);
+            var freshVersion = parseInt(payload.version || "0", 10);
             if (Number.isFinite(freshVersion) && freshVersion > 0) {
                 storeMiningMasterRealtimeVersion(freshVersion);
                 if (window.AppRealtime && typeof window.AppRealtime.markApplied === "function") {
                     window.AppRealtime.markApplied(freshVersion);
                 }
             }
-            var freshCardsNode = doc.getElementById("gd-equipment-cards-data");
-            if (freshCardsNode && equipmentCardsNode) {
-                equipmentCardsNode.textContent = freshCardsNode.textContent || "{}";
+            if (payload.equipment_cards && equipmentCardsNode) {
+                equipmentCardsNode.textContent = JSON.stringify(payload.equipment_cards);
                 try {
                     equipmentCards = JSON.parse(equipmentCardsNode.textContent || "{}");
                 } catch (error) {
                     equipmentCards = {};
                 }
             }
-            if (options && options.preserveScreen) {
+            if (options.preserveScreen) {
                 restoreMobileShellState(freshShell, state);
             }
             currentShell.replaceWith(freshShell);
             bindMiningMasterMobileScreens();
             refreshMiningMasterUpdateIndicatorFromStorage();
             var replacedShell = document.querySelector(".mm-mobile-shell");
-            if (replacedShell && options && options.preserveScreen) {
+            if (replacedShell && options.preserveScreen) {
                 replacedShell.scrollTop = state.scrollTop || 0;
             }
             updateDispatcherSyncIndicator();
@@ -1436,19 +1402,7 @@ document.addEventListener("DOMContentLoaded", function () {
         dispatcherLocalAssignmentAppliedUntil = Date.now() + 8000;
     }
     function hasDispatcherRelevantEvents(events) {
-        if (!Array.isArray(events) || !events.length) return true;
-        return events.some(function (event) {
-            return [
-                "equipment_changed",
-                "assignment_changed",
-                "shift_changed",
-                "reference_changed",
-                "downtime_changed",
-                "trip_changed",
-                "employee_changed",
-                "access_changed"
-            ].indexOf(event && event.type) !== -1;
-        });
+        return Array.isArray(events) && events.length > 0;
     }
     function canTrustLocalDispatcherAssignmentEvents(events) {
         if (!Array.isArray(events) || !events.length) return false;
@@ -1525,26 +1479,26 @@ document.addEventListener("DOMContentLoaded", function () {
             if (panel) panel.scrollTop = state.detailScrollTop || 0;
         }
     }
-    function refreshDispatcherDesktopBoardFromServer() {
+    function refreshDispatcherDesktopBoardFromServer(options) {
+        options = options || {};
         if (!isDispatcherDesktopPage()) return Promise.resolve(false);
         var currentBoard = document.querySelector(".dispatcher-board");
         var desktopState = captureDispatcherDesktopState(currentBoard);
-        return fetch(window.location.href, {
-            method: "GET",
-            headers: { "X-Requested-With": "XMLHttpRequest" },
-            cache: "no-store"
-        }).then(function (response) {
-            if (!response.ok) throw new Error("Не удалось обновить диспетчерский пульт.");
-            return response.text();
-        }).then(function (html) {
-            var parser = new DOMParser();
-            var doc = parser.parseFromString(html, "text/html");
-            var freshBoard = doc.querySelector(".dispatcher-board");
-            var freshCardsNode = doc.getElementById("gd-equipment-cards-data");
+        if (!window.AppOperationalFragment) return Promise.resolve(false);
+        return window.AppOperationalFragment.request(
+            "dispatcher",
+            Number(options.version || 0)
+        ).then(function (payload) {
+            if (isDispatcherOperationalRefreshUnsafe()) return false;
+            var freshBoard = window.AppOperationalFragment.parseRoot(
+                payload.html,
+                ".dispatcher-board"
+            );
             currentBoard = document.querySelector(".dispatcher-board");
             if (!freshBoard || !currentBoard) return false;
-            if (freshCardsNode && equipmentCardsNode) {
-                equipmentCardsNode.textContent = freshCardsNode.textContent || "{}";
+            syncDispatcherShiftRuntime(freshBoard);
+            if (payload.equipment_cards && equipmentCardsNode) {
+                equipmentCardsNode.textContent = JSON.stringify(payload.equipment_cards);
                 try {
                     equipmentCards = JSON.parse(equipmentCardsNode.textContent || "{}");
                 } catch (error) {
@@ -1572,30 +1526,27 @@ document.addEventListener("DOMContentLoaded", function () {
         if (isDispatcherOperationalRefreshUnsafe()) {
             return Promise.resolve({ deferred: true, reason: "dispatcher_busy" });
         }
-        return fetchMiningMasterRealtimeState(context, dispatcherRealtimeHardLagLimit).then(function (state) {
-            if (isDispatcherOperationalRefreshUnsafe()) {
-                return { deferred: true, reason: "dispatcher_busy" };
-            }
-            var targetVersion = state && state.version ? state.version : (context && context.version);
-            var events = state && state.events;
-            var currentStoredVersion = miningMasterRealtimeLastVersion || readMiningMasterRealtimeVersion();
-            var versionGap = targetVersion && currentStoredVersion ? targetVersion - currentStoredVersion : 0;
-            if (state && state.events_truncated || versionGap > dispatcherRealtimeHardLagLimit) {
-                return refreshDispatcherDesktopBoardFromServer().then(function (applied) {
-                    if (!applied) return { deferred: true, reason: "dispatcher_refresh_failed" };
-                    storeMiningMasterRealtimeVersion(targetVersion);
-                    return { applied: true };
-                });
-            }
-            if (!hasDispatcherRelevantEvents(events) || canTrustLocalDispatcherAssignmentEvents(events)) {
-                storeMiningMasterRealtimeVersion(targetVersion);
-                return { applied: true };
-            }
-            return refreshDispatcherDesktopBoardFromServer().then(function (applied) {
+        var targetVersion = context && context.version;
+        var events = context && context.events;
+        var currentStoredVersion = miningMasterRealtimeLastVersion || readMiningMasterRealtimeVersion();
+        var versionGap = targetVersion && currentStoredVersion ? targetVersion - currentStoredVersion : 0;
+        if (context && context.eventsTruncated || versionGap > dispatcherRealtimeHardLagLimit) {
+            return refreshDispatcherDesktopBoardFromServer({ version: targetVersion }).then(function (applied) {
                 if (!applied) return { deferred: true, reason: "dispatcher_refresh_failed" };
                 storeMiningMasterRealtimeVersion(targetVersion);
                 return { applied: true };
+            }).catch(function () {
+                return { deferred: true, reason: "dispatcher_refresh_error" };
             });
+        }
+        if (!hasDispatcherRelevantEvents(events) || canTrustLocalDispatcherAssignmentEvents(events)) {
+            storeMiningMasterRealtimeVersion(targetVersion);
+            return Promise.resolve({ applied: true });
+        }
+        return refreshDispatcherDesktopBoardFromServer({ version: targetVersion }).then(function (applied) {
+            if (!applied) return { deferred: true, reason: "dispatcher_refresh_failed" };
+            storeMiningMasterRealtimeVersion(targetVersion);
+            return { applied: true };
         }).catch(function () {
             return { deferred: true, reason: "dispatcher_refresh_error" };
         });
@@ -1608,30 +1559,27 @@ document.addEventListener("DOMContentLoaded", function () {
         if (isMobileOperationalRefreshUnsafe()) {
             return Promise.resolve({ deferred: true, reason: "mobile_busy" });
         }
-        return fetchMiningMasterRealtimeState(context, miningMasterRealtimeHardLagLimit).then(function (state) {
-            if (isMobileOperationalRefreshUnsafe()) {
-                return { deferred: true, reason: "mobile_busy" };
-            }
-            var targetVersion = state && state.version ? state.version : (context && context.version);
-            var events = state && state.events;
-            var currentStoredVersion = miningMasterRealtimeLastVersion || readMiningMasterRealtimeVersion();
-            var versionGap = targetVersion && currentStoredVersion ? targetVersion - currentStoredVersion : 0;
-            if (state && state.events_truncated || versionGap > miningMasterRealtimeHardLagLimit) {
-                return refreshMobileBoardFromServer({ preserveScreen: true }).then(function (applied) {
-                    if (!applied) return { deferred: true, reason: "mobile_refresh_failed" };
-                    storeMiningMasterRealtimeVersion(targetVersion);
-                    return { applied: true };
-                });
-            }
-            if (!hasMiningMasterRelevantEvents(events)) {
-                storeMiningMasterRealtimeVersion(targetVersion);
-                return { applied: true };
-            }
-            return refreshMobileBoardFromServer({ preserveScreen: true }).then(function (applied) {
+        var targetVersion = context && context.version;
+        var events = context && context.events;
+        var currentStoredVersion = miningMasterRealtimeLastVersion || readMiningMasterRealtimeVersion();
+        var versionGap = targetVersion && currentStoredVersion ? targetVersion - currentStoredVersion : 0;
+        if (context && context.eventsTruncated || versionGap > miningMasterRealtimeHardLagLimit) {
+            return refreshMobileBoardFromServer({ preserveScreen: true, version: targetVersion }).then(function (applied) {
                 if (!applied) return { deferred: true, reason: "mobile_refresh_failed" };
                 storeMiningMasterRealtimeVersion(targetVersion);
                 return { applied: true };
+            }).catch(function () {
+                return { deferred: true, reason: "mobile_refresh_error" };
             });
+        }
+        if (!hasMiningMasterRelevantEvents(events)) {
+            storeMiningMasterRealtimeVersion(targetVersion);
+            return Promise.resolve({ applied: true });
+        }
+        return refreshMobileBoardFromServer({ preserveScreen: true, version: targetVersion }).then(function (applied) {
+            if (!applied) return { deferred: true, reason: "mobile_refresh_failed" };
+            storeMiningMasterRealtimeVersion(targetVersion);
+            return { applied: true };
         }).catch(function () {
             return { deferred: true, reason: "mobile_refresh_error" };
         });
@@ -1646,12 +1594,13 @@ document.addEventListener("DOMContentLoaded", function () {
         miningMasterMobileLastRefreshAt = Date.now();
         if (window.AppRealtime && typeof window.AppRealtime.poll === "function") {
             try {
-                window.AppRealtime.poll({ force: true });
-            } catch (error) {}
+                Promise.resolve(window.AppRealtime.poll({ force: true })).catch(function () {
+                    miningMasterMobileLastRefreshAt = 0;
+                });
+            } catch (error) {
+                miningMasterMobileLastRefreshAt = 0;
+            }
         }
-        Promise.resolve(refreshMobileBoardFromServer({ preserveScreen: true, passive: true })).catch(function () {
-            miningMasterMobileLastRefreshAt = 0;
-        });
     }
     window.addEventListener("operational-state-refresh-applied", function () {
         miningMasterMobileLastRefreshAt = Date.now();

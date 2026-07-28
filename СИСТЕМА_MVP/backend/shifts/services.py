@@ -393,14 +393,25 @@ def empty_progress(equipment, date=None, shift_type=None, *, status=PlanAssignme
     }
 
 
-def shift_plan_totals_by_shift(date):
-    totals = defaultdict(lambda: {
+def empty_shift_plan_totals_by_shift():
+    return defaultdict(lambda: {
         'trips': 0,
         'volume_m3': decimal_zero(),
         'tonnage': decimal_zero(),
     })
 
-    production_start, production_end = production_day_bounds(date)
+
+def shift_plan_totals_for_dates(dates):
+    dates = tuple(sorted(set(dates)))
+    if not dates:
+        return {}
+
+    totals_by_date = {
+        date: empty_shift_plan_totals_by_shift()
+        for date in dates
+    }
+    production_start = production_day_bounds(dates[0])[0]
+    production_end = production_day_bounds(dates[-1])[1]
     snapshot_shifts = (
         EmployeeShift.objects
         .filter(
@@ -410,53 +421,75 @@ def shift_plan_totals_by_shift(date):
             plan_value__isnull=False,
         )
     )
-    snapshot_found = False
+    snapshot_dates = set()
     for shift in snapshot_shifts:
-        snapshot_found = True
+        work_date = production_work_date(shift.opened_at)
+        if work_date not in totals_by_date:
+            continue
+        snapshot_dates.add(work_date)
+        totals = totals_by_date[work_date]
         if shift.plan_calculation_mode == PlanCalculationMode.TRIPS:
             totals[shift.shift_type]['trips'] += int(shift.plan_value or 0)
         elif shift.plan_calculation_mode == PlanCalculationMode.VOLUME:
             totals[shift.shift_type]['volume_m3'] += shift.plan_value or Decimal('0')
         elif shift.plan_calculation_mode == PlanCalculationMode.TONNAGE:
             totals[shift.shift_type]['tonnage'] += shift.plan_value or Decimal('0')
-    if snapshot_found:
-        return totals
 
+    plan_dates = [date for date in dates if date not in snapshot_dates]
     plans = (
         ShiftPlan.objects
         .filter(
-            date=date,
+            date__in=plan_dates,
             is_active=True,
             plan_scope__in=[ShiftPlanScope.DAY_SHIFT, ShiftPlanScope.NIGHT_SHIFT],
         )
-        .prefetch_related('equipment_plans')
+        .annotate(
+            active_equipment_plan_count=Count(
+                'equipment_plans',
+                filter=Q(equipment_plans__is_active=True),
+            ),
+            equipment_plan_trips=Sum(
+                'equipment_plans__plan_trips',
+                filter=Q(equipment_plans__is_active=True),
+            ),
+            equipment_plan_volume_m3=Sum(
+                'equipment_plans__plan_volume_m3',
+                filter=Q(equipment_plans__is_active=True),
+            ),
+            equipment_plan_tonnage=Sum(
+                'equipment_plans__plan_tonnage',
+                filter=Q(equipment_plans__is_active=True),
+            ),
+        )
     )
     for shift_plan in plans:
-        equipment_plans = [
-            item
-            for item in shift_plan.equipment_plans.all()
-            if item.is_active
-        ]
-        if equipment_plans:
-            totals[shift_plan.shift_type]['trips'] += sum(item.plan_trips or 0 for item in equipment_plans)
-            totals[shift_plan.shift_type]['volume_m3'] += sum((item.plan_volume_m3 or 0 for item in equipment_plans), Decimal('0'))
-            totals[shift_plan.shift_type]['tonnage'] += sum((item.plan_tonnage or 0 for item in equipment_plans), Decimal('0'))
+        totals = totals_by_date[shift_plan.date]
+        if shift_plan.active_equipment_plan_count:
+            totals[shift_plan.shift_type]['trips'] += shift_plan.equipment_plan_trips or 0
+            totals[shift_plan.shift_type]['volume_m3'] += shift_plan.equipment_plan_volume_m3 or Decimal('0')
+            totals[shift_plan.shift_type]['tonnage'] += shift_plan.equipment_plan_tonnage or Decimal('0')
             continue
 
         totals[shift_plan.shift_type]['trips'] += shift_plan.plan_trips or 0
         totals[shift_plan.shift_type]['volume_m3'] += shift_plan.plan_volume_m3 or Decimal('0')
         totals[shift_plan.shift_type]['tonnage'] += shift_plan.plan_tonnage or Decimal('0')
-    return totals
+    return {
+        date: {
+            'trips': sum(item['trips'] for item in by_shift.values()),
+            'volume_m3': sum((item['volume_m3'] for item in by_shift.values()), Decimal('0')),
+            'tonnage': sum((item['tonnage'] for item in by_shift.values()), Decimal('0')),
+            'by_shift': by_shift,
+        }
+        for date, by_shift in totals_by_date.items()
+    }
+
+
+def shift_plan_totals_by_shift(date):
+    return shift_plan_totals_for_dates([date])[date]['by_shift']
 
 
 def shift_plan_totals(date):
-    by_shift = shift_plan_totals_by_shift(date)
-    return {
-        'trips': sum(item['trips'] for item in by_shift.values()),
-        'volume_m3': sum((item['volume_m3'] for item in by_shift.values()), Decimal('0')),
-        'tonnage': sum((item['tonnage'] for item in by_shift.values()), Decimal('0')),
-        'by_shift': by_shift,
-    }
+    return shift_plan_totals_for_dates([date])[date]
 
 
 def get_equipment_shift_plan(equipment, date, shift_type):

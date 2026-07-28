@@ -16,7 +16,13 @@ from assignments.models import AssignmentStatus, HaulAssignment
 from core.models import OperationalStateEvent
 from downtimes.forms import MechanicDowntimeCreateForm
 from downtimes.models import DowntimeEvent, DowntimeReason
-from references.models import DumpPoint, Equipment, EquipmentType, RockType
+from references.models import (
+    DumpPoint,
+    Equipment,
+    EquipmentModel,
+    EquipmentType,
+    RockType,
+)
 from shifts.models import EmployeeShift
 from trips.models import Trip, TripStatus
 from trips.views import excavator_json_payload
@@ -39,19 +45,29 @@ class DowntimePostgreSQLConcurrencyRegressionTests(TransactionTestCase):
 
         self.excavator_type = EquipmentType.objects.create(name='Экскаватор CHAOS PG 005')
         self.truck_type = EquipmentType.objects.create(name='Самосвал CHAOS PG 005')
+        self.truck_model = EquipmentModel.objects.create(
+            equipment_type=self.truck_type,
+            name='Самосвал CHAOS PG 005',
+            body_volume_m3='49.40',
+        )
         self.excavator = Equipment.objects.create(
             equipment_type=self.excavator_type,
             garage_number='CHAOS-PG-005-EXCAVATOR',
         )
         self.mechanic_source_truck = Equipment.objects.create(
             equipment_type=self.truck_type,
+            model=self.truck_model,
             garage_number='CHAOS-PG-005-SOURCE-TRUCK',
         )
         self.load_truck = Equipment.objects.create(
             equipment_type=self.truck_type,
+            model=self.truck_model,
             garage_number='CHAOS-PG-005-LOAD-TRUCK',
         )
-        self.rock = RockType.objects.create(name='Руда CHAOS PG 005')
+        self.rock = RockType.objects.create(
+            name='Руда CHAOS PG 005',
+            density='2.6000',
+        )
         self.dump_point = DumpPoint.objects.create(name='ККД CHAOS PG 005')
 
         self.mechanic_one, self.mechanic_one_access = self.create_access(

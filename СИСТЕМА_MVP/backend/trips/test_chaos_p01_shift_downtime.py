@@ -1039,6 +1039,7 @@ class ChaosExcavatorLoadingDowntimeRegressionTests(TestCase):
         self.truck_model = EquipmentModel.objects.create(
             equipment_type=self.truck_type,
             name='Самосвал CHAOS P01',
+            body_volume_m3=Decimal('49.40'),
             fuel_capacity_limit_l=Decimal('2000'),
         )
         self.excavator = Equipment.objects.create(
@@ -1051,7 +1052,10 @@ class ChaosExcavatorLoadingDowntimeRegressionTests(TestCase):
             model=self.truck_model,
             garage_number='CHAOS-TRUCK-004',
         )
-        self.rock = RockType.objects.create(name='Руда CHAOS P01 погрузка')
+        self.rock = RockType.objects.create(
+            name='Руда CHAOS P01 погрузка',
+            density=Decimal('2.6000'),
+        )
         self.dump_point = DumpPoint.objects.create(name='ККД CHAOS P01 погрузка')
         self.waiting_reason, _ = DowntimeReason.objects.get_or_create(
             name='Ожидание самосвалов',

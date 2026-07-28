@@ -185,7 +185,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, reverse('driver_manifest'))
         self.assertContains(response, 'rel="manifest"')
         self.assertContains(response, '/driver-sw.js')
-        self.assertContains(response, 'driver-mobile-shell-v107')
+        self.assertContains(response, 'driver-mobile-shell-v110')
         self.assertContains(response, 'data-driver-pwa-update-modal')
         self.assertContains(response, 'data-driver-pwa-update-badge')
         self.assertContains(
@@ -332,7 +332,7 @@ class AccessLoginTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Service-Worker-Allowed'], '/driver/')
-        self.assertIn('driver-mobile-shell-v107', script)
+        self.assertIn('driver-mobile-shell-v110', script)
         self.assertIn('/driver/', script)
         self.assertIn('/driver/shift/', script)
         self.assertIn('/driver.webmanifest', script)
@@ -2156,11 +2156,24 @@ class AccessLoginTests(TestCase):
         self.employee.save(update_fields=['full_name'])
         truck_type = EquipmentType.objects.create(name='Самосвал')
         excavator_type = EquipmentType.objects.create(name='Экскаватор')
-        truck = Equipment.objects.create(equipment_type=truck_type, garage_number='54')
+        truck_model = EquipmentModel.objects.create(
+            equipment_type=truck_type,
+            name='БелАЗ 7513D',
+        )
+        truck = Equipment.objects.create(
+            equipment_type=truck_type,
+            model=truck_model,
+            garage_number='54',
+        )
         excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='1')
-        rock = RockType.objects.create(name='Руда')
+        rock = RockType.objects.create(name='Руда', density=Decimal('2.6000'))
         dump_point = DumpPoint.objects.create(name='ККД')
         truck = self.create_registered_driver_shift(truck=truck)
+        TruckCapacityRule.objects.create(
+            equipment_model=truck.model,
+            rock_type=rock,
+            volume_m3=Decimal('49.40'),
+        )
 
         dispatcher_role = Role.objects.create(code='dispatcher', name='Диспетчер')
         dispatcher = Employee.objects.create(
@@ -2381,7 +2394,7 @@ class AccessLoginTests(TestCase):
         excavator_type = EquipmentType.objects.create(name='Экскаватор')
         truck = Equipment.objects.create(equipment_type=truck_type, garage_number='10')
         excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='1')
-        rock = RockType.objects.create(name='Руда')
+        rock = RockType.objects.create(name='Руда', density=Decimal('2.6000'))
         dump_point = DumpPoint.objects.create(name='ККД')
         skdr_point = DumpPoint.objects.create(name='СКДР')
         dormitory = Dormitory.objects.create(number='5')
@@ -2397,6 +2410,11 @@ class AccessLoginTests(TestCase):
             opened_at=timezone.now(),
         )
         self.assign_driver_work(truck)
+        TruckCapacityRule.objects.create(
+            equipment_model=truck.model,
+            rock_type=rock,
+            volume_m3=Decimal('49.40'),
+        )
 
         driver_client = self.client
         driver_client.post('/', {'access_code': '2000'}, follow=True, HTTP_HOST='localhost')
@@ -2436,8 +2454,8 @@ class AccessLoginTests(TestCase):
         self.assertEqual(trip_response.status_code, 200)
         trip = Trip.objects.get()
         self.assertEqual(trip.status, TripStatus.LOADED_WAITING_UNLOAD)
-        self.assertIsNone(trip.volume_m3)
-        self.assertIsNone(trip.tonnage)
+        self.assertEqual(trip.volume_m3, Decimal('49.40'))
+        self.assertEqual(trip.tonnage, Decimal('128.44'))
         self.assertEqual(trip.loading_shift, operator_shift)
         self.assertEqual(trip.planned_volume_m3, Decimal('7000.00'))
         self.assertEqual(trip.loading_horizon, '75')
@@ -2509,12 +2527,17 @@ class AccessLoginTests(TestCase):
         excavator_type = EquipmentType.objects.create(name='Экскаватор')
         truck = Equipment.objects.create(equipment_type=truck_type, garage_number='10')
         excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='1')
-        rock = RockType.objects.create(name='Руда')
+        rock = RockType.objects.create(name='Руда', density=Decimal('2.6000'))
         dump_point = DumpPoint.objects.create(name='ККД')
         dormitory = Dormitory.objects.create(number='5')
         block = DormitoryBlock.objects.create(dormitory=dormitory, name='Блок 1')
         section = DormitorySection.objects.create(block=block, name='А')
         self.assign_driver_work(truck)
+        TruckCapacityRule.objects.create(
+            equipment_model=truck.model,
+            rock_type=rock,
+            volume_m3=Decimal('49.40'),
+        )
         excavator_role = Role.objects.create(code='excavator_operator', name='Машинист экскаватора')
         excavator_operator = Employee.objects.create(
             full_name='Тестовый машинист',
@@ -2587,7 +2610,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(driver_shift_response, 'ККД')
         self.assertContains(driver_shift_response, 'window.applyOperationalStateRefresh')
         self.assertContains(driver_shift_response, 'data-realtime-mode="custom"')
-        self.assertContains(driver_shift_response, 'driver-mobile-shell-v107')
+        self.assertContains(driver_shift_response, 'driver-mobile-shell-v110')
 
     def test_driver_downtime_buttons_are_rendered_from_server_reference(self):
         truck = self.create_registered_driver_shift()
@@ -2857,8 +2880,8 @@ class AccessLoginTests(TestCase):
         trip = Trip.objects.get()
 
         self.assertEqual(trip.status, TripStatus.LOADED_WAITING_UNLOAD)
-        self.assertIsNone(trip.volume_m3)
-        self.assertIsNone(trip.tonnage)
+        self.assertEqual(trip.volume_m3, Decimal('38.00'))
+        self.assertEqual(trip.tonnage, Decimal('95.00'))
 
         from trips.views import finalize_trip_unloaded
 

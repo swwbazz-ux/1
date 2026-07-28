@@ -23,6 +23,7 @@ from references.models import (
     EquipmentState,
     EquipmentType,
     RockType,
+    TruckCapacityRule,
 )
 from shifts.models import (
     EmployeeShift,
@@ -118,9 +119,9 @@ class DispatcherSharedShiftStartTests(TestCase):
         self.assertContains(response, 'window.initAppConfirmForms')
         self.assertContains(response, 'window.initDispatcherThemeControls')
         self.assertContains(response, 'window.initDispatcherRadialClocks')
-        self.assertContains(response, 'events_truncated')
-        self.assertContains(response, '"employee_changed"')
-        self.assertContains(response, '"access_changed"')
+        self.assertContains(response, 'eventsTruncated')
+        self.assertContains(response, 'function hasDispatcherRelevantEvents')
+        self.assertContains(response, 'return Array.isArray(events) && events.length > 0;')
         self.assertContains(response, 'markDispatcherLocalAssignmentApplied')
         self.assertContains(response, 'dispatcherIncomingRefreshQueueGraceMs')
         self.assertContains(response, 'dispatcherMobileSyncFlushDelayMs = 300')
@@ -147,7 +148,8 @@ class DispatcherSharedShiftStartTests(TestCase):
         self.assertContains(response, 'window.AppRealtimeConfig')
         self.assertContains(response, 'initialVersion: Number(document.body.dataset.operationalStateVersion || 0)')
         self.assertContains(response, 'js/realtime-client.js')
-        self.assertContains(response, 'pollIntervalMs: 1000')
+        self.assertContains(response, 'workPollIntervalMs: 5000')
+        self.assertContains(response, 'observerPollIntervalMs: 15000')
         self.assertContains(response, 'dispatcher-control')
         self.assertContains(response, '{name: "dispatcher-reports", role: "dispatcher", mode: "manual"')
         self.assertContains(response, 'system-admin')
@@ -173,7 +175,7 @@ class DispatcherSharedShiftStartTests(TestCase):
         self.assertIn('initialVersion', script)
         self.assertIn('previousVersion', script)
         self.assertIn('buildOperationalStatePollUrl', script)
-        self.assertIn('include_events", "0"', script)
+        self.assertIn('include_events", "1"', script)
         self.assertIn('operational-state-refresh-deferred', script)
         self.assertIn('pending_mobile_queue', script)
         self.assertIn('refreshMobileBoard: true', response.content.decode('utf-8'))
@@ -207,7 +209,7 @@ class DispatcherSharedShiftStartTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/dispatcher/')
-        self.assertIn('dispatcher-desktop-shell-v38', script)
+        self.assertIn('dispatcher-desktop-shell-v41', script)
         self.assertIn(reverse('dispatcher_control'), script)
         self.assertIn(reverse('dispatcher_manifest'), script)
         self.assertIn('/static/js/realtime-client.js', script)
@@ -778,11 +780,24 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
             name='Экскаватор 4000 тест',
             fuel_capacity_limit_l=7000,
         )
-        self.truck = Equipment.objects.create(equipment_type=self.truck_type, garage_number='21')
+        self.truck_model = EquipmentModel.objects.create(
+            equipment_type=self.truck_type,
+            name='БелАЗ 7513D',
+        )
+        self.truck = Equipment.objects.create(
+            equipment_type=self.truck_type,
+            model=self.truck_model,
+            garage_number='21',
+        )
         self.other_truck = Equipment.objects.create(equipment_type=self.truck_type, garage_number='99')
         self.excavator = Equipment.objects.create(equipment_type=self.excavator_type, model=self.excavator_model, garage_number='12')
         self.other_excavator = Equipment.objects.create(equipment_type=self.excavator_type, model=self.excavator_model, garage_number='13')
-        self.rock = RockType.objects.create(name='Руда')
+        self.rock = RockType.objects.create(name='Руда', density='2.6000')
+        self.capacity_rule = TruckCapacityRule.objects.create(
+            equipment_model=self.truck_model,
+            rock_type=self.rock,
+            volume_m3='49.40',
+        )
         self.dump_point = DumpPoint.objects.create(name='Дробилка')
         self.driver, self.driver_access, self.truck_shift = self.create_registered_driver_shift(
             self.truck,
@@ -838,7 +853,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/static/css/excavator-work-v55-shift.css')
         self.assertContains(response, '/excavator-sw.js')
         self.assertContains(response, 'scope: "/excavator/"')
-        self.assertContains(response, 'excavator-mobile-shell-v122')
+        self.assertContains(response, 'excavator-mobile-shell-v123')
         self.assertContains(response, 'function requestShiftCloseConfirmation()')
         self.assertContains(response, 'event.type === "pointerup" || event.type === "touchend"')
         self.assertContains(response, 'shiftTapConfirmationOpened = true')
@@ -972,12 +987,8 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, 'Удерживайте 2 секунды, чтобы применить настройки')
         self.assertContains(response, 'window.applyOperationalStateRefresh')
         self.assertContains(response, 'refreshExcavatorWorkFromServer')
-        self.assertContains(response, 'assignment_changed')
-        self.assertContains(response, 'trip_changed')
-        self.assertContains(response, 'downtime_changed')
-        self.assertContains(response, 'shift_changed')
-        self.assertContains(response, 'equipment_changed')
-        self.assertContains(response, 'access_changed')
+        self.assertContains(response, 'function hasExcavatorRelevantEvents')
+        self.assertContains(response, 'return Array.isArray(events) && events.length > 0;')
         self.assertContains(response, 'data-eo-pwa-update-modal')
         self.assertContains(response, 'data-eo-pwa-update-badge')
         self.assertContains(response, 'data-eo-refresh-work')
@@ -2048,7 +2059,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/excavator/')
-        self.assertIn('excavator-mobile-shell-v122', script)
+        self.assertIn('excavator-mobile-shell-v123', script)
         self.assertIn(reverse('excavator_work'), script)
         self.assertIn(reverse('excavator_manifest'), script)
         self.assertIn('/static/js/realtime-client.js', script)
@@ -2280,14 +2291,77 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(trip.dump_point, self.dump_point)
         self.assertEqual(trip.loading_horizon, '125')
         self.assertEqual(trip.loading_block, '4')
-        self.assertIsNone(trip.volume_m3)
-        self.assertIsNone(trip.tonnage)
+        self.assertEqual(str(trip.volume_m3), '49.40')
+        self.assertEqual(str(trip.tonnage), '128.44')
         self.assertTrue(
             TripClientAction.objects.filter(
                 action_type='truck_loaded',
                 client_action_id='load-1',
                 trip=trip,
                 actor=self.operator,
+            ).exists()
+        )
+
+    def test_truck_loaded_rejects_undefined_capacity_without_creating_trip(self):
+        self.capacity_rule.delete()
+
+        response = self.post_truck_loaded(client_action_id='missing-capacity')
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(
+            response.json()['error'],
+            'Для выбранных модели самосвала и породы не настроена кубатура.',
+        )
+        self.assertFalse(Trip.objects.exists())
+        self.assertFalse(
+            TripClientAction.objects.filter(client_action_id='missing-capacity').exists()
+        )
+
+    def test_truck_loaded_rejects_undefined_density_without_creating_trip(self):
+        self.rock.density = None
+        self.rock.save(update_fields=['density'])
+
+        response = self.post_truck_loaded(client_action_id='missing-density')
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(
+            response.json()['error'],
+            'Для выбранной породы не настроена плотность.',
+        )
+        self.assertFalse(Trip.objects.exists())
+        self.assertFalse(
+            TripClientAction.objects.filter(client_action_id='missing-density').exists()
+        )
+
+    def test_legacy_truck_loaded_rejects_undefined_capacity_without_creating_trip(self):
+        self.capacity_rule.delete()
+        assignment = HaulAssignment.objects.get(
+            truck=self.truck,
+            excavator=self.excavator,
+        )
+
+        response = self.client.post(
+            reverse('excavator_work'),
+            data={
+                'client_action_id': 'legacy-missing-capacity',
+                'assignment': assignment.id,
+                'rock_type': self.rock.id,
+                'dump_point': self.dump_point.id,
+                'loading_horizon': '125',
+                'loading_block': '4',
+            },
+            HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.json()['errors']['__all__'],
+            ['Для выбранных модели самосвала и породы не настроена кубатура.'],
+        )
+        self.assertFalse(Trip.objects.exists())
+        self.assertFalse(
+            TripClientAction.objects.filter(
+                client_action_id='legacy-missing-capacity',
             ).exists()
         )
 

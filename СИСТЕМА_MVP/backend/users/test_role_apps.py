@@ -1,12 +1,16 @@
 import hashlib
 import json
 import os
+from datetime import timedelta
 from pathlib import Path
 import subprocess
 import sys
 
 from django.conf import settings
+from django.contrib.sessions.models import Session
+from django.db import connection
 from django.test import Client, SimpleTestCase, TestCase, override_settings
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from PIL import Image
 
@@ -352,13 +356,122 @@ class RoleAppLoginTests(TestCase):
             HTTP_HOST='driver.localhost',
         )
         session = self.client.session
-        session.set_expiry(30)
+        session.set_expiry(timezone.now() + timedelta(seconds=30))
         session.save()
 
-        self.client.get('/interfaces/', HTTP_HOST='driver.localhost')
+        with CaptureQueriesContext(connection) as first_captured:
+            response = self.client.get('/interfaces/', HTTP_HOST='driver.localhost')
+        with CaptureQueriesContext(connection) as second_captured:
+            second_response = self.client.get('/interfaces/', HTTP_HOST='driver.localhost')
         self.assertGreaterEqual(
             self.client.session.get_expiry_age(),
             settings.ROLE_APP_PERSONAL_SESSION_AGE - 5,
+        )
+        self.assertIn(settings.SESSION_COOKIE_NAME, response.cookies)
+        self.assertNotIn(settings.SESSION_COOKIE_NAME, second_response.cookies)
+        self.assertEqual(
+            sum('UPDATE "django_session"' in query['sql'] for query in first_captured.captured_queries),
+            1,
+        )
+        self.assertEqual(
+            sum('UPDATE "django_session"' in query['sql'] for query in second_captured.captured_queries),
+            0,
+        )
+
+    def test_legacy_relative_personal_expiry_is_converted_once_on_ordinary_page(self):
+        self.client.post(
+            '/',
+            self._credentials(self.driver_access),
+            HTTP_HOST='driver.localhost',
+        )
+        session = self.client.session
+        session.set_expiry(settings.ROLE_APP_PERSONAL_SESSION_AGE)
+        session.save()
+        self.assertIsInstance(session.get('_session_expiry'), int)
+
+        with CaptureQueriesContext(connection) as first_captured:
+            response = self.client.get('/interfaces/', HTTP_HOST='driver.localhost')
+        with CaptureQueriesContext(connection) as second_captured:
+            second_response = self.client.get('/interfaces/', HTTP_HOST='driver.localhost')
+
+        converted_session = self.client.session
+        self.assertNotIsInstance(converted_session.get('_session_expiry'), int)
+        self.assertGreaterEqual(
+            converted_session.get_expiry_age(),
+            settings.ROLE_APP_PERSONAL_SESSION_AGE - 5,
+        )
+        self.assertIn(settings.SESSION_COOKIE_NAME, response.cookies)
+        self.assertNotIn(settings.SESSION_COOKIE_NAME, second_response.cookies)
+        self.assertEqual(
+            sum('UPDATE "django_session"' in query['sql'] for query in first_captured.captured_queries),
+            1,
+        )
+        self.assertEqual(
+            sum('UPDATE "django_session"' in query['sql'] for query in second_captured.captured_queries),
+            0,
+        )
+
+    def test_one_hundred_personal_realtime_reads_do_not_rewrite_session(self):
+        self.client.post(
+            '/',
+            self._credentials(self.driver_access),
+            HTTP_HOST='driver.localhost',
+        )
+        session = self.client.session
+        session_key = session.session_key
+        expire_date_before = Session.objects.get(session_key=session_key).expire_date
+
+        with CaptureQueriesContext(connection) as captured:
+            responses = [
+                self.client.get(
+                    '/realtime/state/',
+                    {'include_events': '0'},
+                    HTTP_HOST='driver.localhost',
+                )
+                for _ in range(100)
+            ]
+
+        session_updates = [
+            query['sql']
+            for query in captured.captured_queries
+            if 'UPDATE "django_session"' in query['sql']
+        ]
+        self.assertTrue(all(response.status_code == 200 for response in responses))
+        self.assertEqual(session_updates, [])
+        self.assertTrue(
+            all(settings.SESSION_COOKIE_NAME not in response.cookies for response in responses)
+        )
+        self.assertEqual(
+            Session.objects.get(session_key=session_key).expire_date,
+            expire_date_before,
+        )
+        self.assertGreaterEqual(
+            self.client.session.get_expiry_age(),
+            settings.ROLE_APP_PERSONAL_SESSION_AGE - 10,
+        )
+
+    def test_shared_realtime_reads_remain_browser_close_and_do_not_rewrite_session(self):
+        credentials = self._credentials(self.driver_access)
+        credentials['device_kind'] = 'shared'
+        self.client.post('/', credentials, HTTP_HOST='driver.localhost')
+
+        with CaptureQueriesContext(connection) as captured:
+            responses = [
+                self.client.get(
+                    '/realtime/state/',
+                    {'include_events': '0'},
+                    HTTP_HOST='driver.localhost',
+                )
+                for _ in range(20)
+            ]
+
+        self.assertTrue(self.client.session.get_expire_at_browser_close())
+        self.assertEqual(
+            sum('UPDATE "django_session"' in query['sql'] for query in captured.captured_queries),
+            0,
+        )
+        self.assertTrue(
+            all(settings.SESSION_COOKIE_NAME not in response.cookies for response in responses)
         )
 
     def test_new_role_pwa_metadata_is_rendered_on_each_primary_workplace(self):

@@ -29,7 +29,8 @@ from assignments.services import (
     reconcile_due_haul_assignments,
     work_assignment_state,
 )
-from core.models import OperationalStateEvent, bump_operational_state
+from core.models import OperationalStateEvent, OperationalStateVersion, bump_operational_state
+from core.operational_fragments import operational_fragment_response
 from downtimes.models import DowntimeEvent, DowntimeReason
 from references.models import Dormitory, DormitorySection, DumpPoint, Equipment, EquipmentState, EquipmentType, RockType
 from reports.models import ReportTemplate
@@ -195,7 +196,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v107'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v110'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -2619,8 +2620,11 @@ def shift_plan_display_context(progress):
 
 
 def driver_shift_view(request):
+    requested_fragment = request.GET.get('_operational_fragment', '').strip()
     access_id = request.session.get('employee_access_id')
     if not access_id:
+        if requested_fragment == 'driver':
+            return JsonResponse({'authenticated': False}, status=401)
         return redirect('login')
     access = EmployeeAccess.objects.select_related('employee', 'role').filter(id=access_id, is_active=True).first()
     if not access or access.role.code != 'driver':
@@ -2965,6 +2969,13 @@ def driver_shift_view(request):
             initial={'client_action_id': secrets.token_urlsafe(24)},
         )
 
+    operational_state_version = (
+        OperationalStateVersion.objects
+        .filter(key='production')
+        .values_list('version', flat=True)
+        .first()
+        or 0
+    )
     response = render(
         request,
         'users/driver_shift.html',
@@ -3034,8 +3045,16 @@ def driver_shift_view(request):
             'active_trip_actual_dump_point_id': active_trip_actual_dump_point_id,
             'trip_status_loaded': TripStatus.LOADED_WAITING_UNLOAD,
             'driver_shell_version': DRIVER_SHELL_VERSION,
+            'operational_state_version': operational_state_version,
         },
     )
+    if requested_fragment == 'driver':
+        return operational_fragment_response(
+            response,
+            screen='driver',
+            selector='[data-driver-shell]',
+            version=operational_state_version,
+        )
     response['Cache-Control'] = 'no-cache'
     return response
 

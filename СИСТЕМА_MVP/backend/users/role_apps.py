@@ -8,6 +8,61 @@ from django.http import HttpResponse, JsonResponse
 
 
 APP_CONTRACT_VERSION = 'pwa-contract-v1'
+STATIC_ASSET_RELEASE = 'ready-core-traffic-v7'
+READY_TRAFFIC_ROLE_CODES = frozenset({
+    'admin',
+    'oup',
+    'deputy_mining_manager',
+    'dispatcher',
+    'mining_master',
+    'excavator_operator',
+    'driver',
+    'manager',
+})
+RELEASE_STATIC_SERVICE_WORKER_JS = r"""
+const STATIC_ASSET_RELEASE = "__STATIC_ASSET_RELEASE__";
+const RELEASE_STATIC_PATHS = new Set([
+  "/static/css/app.css",
+  "/static/js/realtime-client.js"
+]);
+
+function isReleaseStaticRequest(url) {
+  return RELEASE_STATIC_PATHS.has(url.pathname)
+    && url.searchParams.get("v") === STATIC_ASSET_RELEASE
+    && Array.from(url.searchParams.keys()).length === 1;
+}
+
+async function cacheFirstReleaseStatic(request) {
+  const cache = await caches.open(CACHE_NAME);
+  const cached = await cache.match(request);
+  if (cached) return cached;
+  try {
+    const response = await fetch(request, { cache: "no-store" });
+    if (response && response.ok) {
+      await cache.put(request, response.clone());
+    }
+    return response;
+  } catch (error) {
+    return new Response("Ресурс выпуска недоступен без сети.", {
+      status: 503,
+      headers: { "Content-Type": "text/plain; charset=utf-8" }
+    });
+  }
+}
+
+self.addEventListener("install", event => {
+  const releaseAssets = Array.from(
+    RELEASE_STATIC_PATHS,
+    path => `${path}?v=${encodeURIComponent(STATIC_ASSET_RELEASE)}`
+  );
+  event.waitUntil(
+    caches.open(CACHE_NAME).then(cache => Promise.allSettled([
+      ...Array.from(RELEASE_STATIC_PATHS, path => cache.delete(path)),
+      ...releaseAssets.map(url => cache.add(new Request(url, { cache: "reload" })))
+    ]))
+  );
+});
+""".strip()
 
 
 @dataclass(frozen=True)
@@ -59,7 +114,7 @@ ROLE_APPS = (
         icon_slug='driver',
         manifest_url='/driver.webmanifest',
         service_worker_url='/driver-sw.js',
-        shell_version='driver-mobile-shell-v107',
+        shell_version='driver-mobile-shell-v110',
     ),
     RoleApp(
         role_code='excavator_operator',
@@ -75,7 +130,7 @@ ROLE_APPS = (
         icon_slug='excavator',
         manifest_url='/excavator.webmanifest',
         service_worker_url='/excavator-sw.js',
-        shell_version='excavator-mobile-shell-v122',
+        shell_version='excavator-mobile-shell-v123',
     ),
     RoleApp(
         role_code='mining_master',
@@ -91,7 +146,7 @@ ROLE_APPS = (
         icon_slug='mining-master',
         manifest_url='/mining-master-manifest.webmanifest',
         service_worker_url='/mining-master-sw.js',
-        shell_version='mining-master-mobile-shell-v113',
+        shell_version='mining-master-mobile-shell-v116',
     ),
     RoleApp(
         role_code='deputy_mining_manager',
@@ -123,7 +178,7 @@ ROLE_APPS = (
         icon_slug='dispatcher',
         manifest_url='/dispatcher.webmanifest',
         service_worker_url='/dispatcher-sw.js',
-        shell_version='dispatcher-desktop-shell-v38',
+        shell_version='dispatcher-desktop-shell-v41',
     ),
     RoleApp(
         role_code='oup',
@@ -356,13 +411,14 @@ def build_basic_role_service_worker(role_code):
     app = ROLE_APPS_BY_CODE[role_code]
     assets = [
         app.manifest_url,
-        '/static/css/app.css',
         '/static/js/role-readonly.js',
         app.icon_180_url,
         app.icon_192_url,
         app.icon_512_url,
         app.icon_maskable_url,
     ]
+    if role_code not in READY_TRAFFIC_ROLE_CODES:
+        assets.insert(1, '/static/css/app.css')
     return f'''
 const APP_CONTRACT_VERSION = {json.dumps(APP_CONTRACT_VERSION)};
 const ROLE_CODE = {json.dumps(app.role_code)};
@@ -435,10 +491,38 @@ self.addEventListener("message", event => {{
 '''.strip()
 
 
+def add_release_static_cache(worker_script):
+    release_helper = RELEASE_STATIC_SERVICE_WORKER_JS.replace(
+        '__STATIC_ASSET_RELEASE__',
+        STATIC_ASSET_RELEASE,
+    )
+    unversioned_release_asset_lines = {
+        '"/static/css/app.css",',
+        '"/static/js/realtime-client.js",',
+    }
+    worker_script = '\n'.join(
+        line
+        for line in worker_script.splitlines()
+        if line.strip() not in unversioned_release_asset_lines
+    )
+    worker_script = worker_script.replace(
+        'if (STATIC_ASSET_PATHS.has(url.pathname)) {',
+        'if (isReleaseStaticRequest(url) || STATIC_ASSET_PATHS.has(url.pathname)) {',
+    )
+    worker_script = worker_script.replace(
+        'event.respondWith(networkFirstStatic(request));',
+        'event.respondWith(isReleaseStaticRequest(url) ? cacheFirstReleaseStatic(request) : networkFirstStatic(request));',
+    )
+    return f'{release_helper}\n\n{worker_script}'
+
+
 def role_app_service_worker_response(request, role_code, script=None):
     app = ROLE_APPS_BY_CODE[role_code]
+    worker_script = script or build_basic_role_service_worker(role_code)
+    if role_code in READY_TRAFFIC_ROLE_CODES:
+        worker_script = add_release_static_cache(worker_script)
     response = HttpResponse(
-        script or build_basic_role_service_worker(role_code),
+        worker_script,
         content_type='application/javascript; charset=utf-8',
     )
     response['Cache-Control'] = 'no-cache'

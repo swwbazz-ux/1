@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% block title %}MVP учетной системы{% endblock %}</title>
     <link rel="icon" href="{% static 'favicon.ico' %}">
-    <link rel="stylesheet" href="{% static 'css/app.css' %}?v={% now 'U' %}">
+    <link rel="stylesheet" href="{% static 'css/app.css' %}?v={{ static_asset_release }}">
     <style>
         .app-sync-overlay {
             position: fixed;
@@ -1119,10 +1119,68 @@ document.addEventListener("DOMContentLoaded", function () {
 });
 </script>
 <script>
+/* OPERATIONAL_FRAGMENT_CLIENT_START */
+window.AppOperationalFragment = (function () {
+    "use strict";
+
+    var contract = "operational-fragment-v1";
+
+    function request(screen, version) {
+        var url = new URL(window.location.href);
+        ["_driver_refresh", "_eo_refresh", "_mm_refresh"].forEach(function (name) {
+            url.searchParams.delete(name);
+        });
+        url.searchParams.set("_operational_fragment", String(screen || ""));
+        url.searchParams.set("_operational_version", String(Number(version || 0)));
+        return window.fetch(url.toString(), {
+            method: "GET",
+            credentials: "same-origin",
+            cache: "no-store",
+            headers: {
+                "Accept": "application/json",
+                "X-Requested-With": "XMLHttpRequest"
+            }
+        }).then(function (response) {
+            if (!response.ok) {
+                var error = new Error("operational fragment " + response.status);
+                error.status = response.status;
+                throw error;
+            }
+            return response.json();
+        }).then(function (payload) {
+            if (
+                !payload ||
+                payload.contract !== contract ||
+                payload.screen !== screen ||
+                typeof payload.html !== "string" ||
+                Number(payload.version || 0) < Number(version || 0)
+            ) {
+                throw new Error("operational fragment contract mismatch");
+            }
+            return payload;
+        });
+    }
+
+    function parseRoot(html, selector) {
+        var template = document.createElement("template");
+        template.innerHTML = String(html || "").trim();
+        var roots = template.content.querySelectorAll(selector);
+        return roots.length === 1 ? roots[0] : null;
+    }
+
+    return {
+        contract: contract,
+        request: request,
+        parseRoot: parseRoot
+    };
+})();
+/* OPERATIONAL_FRAGMENT_CLIENT_END */
+
 window.AppRealtimeConfig = {
     stateUrl: "{% url 'operational_state_version' %}",
     initialVersion: Number(document.body.dataset.operationalStateVersion || 0),
-    pollIntervalMs: 1000,
+    workPollIntervalMs: 5000,
+    observerPollIntervalMs: 15000,
     idleDelayMs: 2500,
     pollTimeoutMs: 8000,
     maxSilentMs: 7000,
@@ -1147,6 +1205,6 @@ window.AppRealtimeConfig = {
     ]
 };
 </script>
-<script src="{% static 'js/realtime-client.js' %}?v={% now 'U' %}"></script>
+<script src="{% static 'js/realtime-client.js' %}?v={{ static_asset_release }}"></script>
 </body>
 </html>
