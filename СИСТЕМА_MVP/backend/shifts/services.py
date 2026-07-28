@@ -2,12 +2,16 @@ from collections import defaultdict
 from decimal import Decimal, InvalidOperation
 
 from django.core.exceptions import ValidationError
-from django.db import IntegrityError, transaction
-from django.db.models import Count, Q, Sum
+from django.db import IntegrityError, OperationalError, connection, transaction
+from django.db.models import Count, F, Q, Sum
 from django.utils import timezone
 
 from core.db_locks import lock_idempotency_key
-from core.production_time import production_day_bounds, production_work_date
+from core.production_time import (
+    production_day_bounds,
+    production_shift_type,
+    production_work_date,
+)
 
 from trips.models import Trip, TripStatus
 
@@ -21,6 +25,7 @@ from .models import (
     ShiftPlanScope,
     ShiftClientAction,
     ShiftReadingCorrection,
+    WatchPeriod,
 )
 
 
@@ -134,6 +139,87 @@ def _existing_driver_shift_action(action_type, client_action_id):
     return action.shift if action else None
 
 
+def _try_lock_watch_period_catalog_for_snapshot():
+    """Keep the catalog stable without making a driver wait for a catalog writer."""
+    if connection.vendor != 'postgresql':
+        return True
+    if not connection.in_atomic_block:
+        raise RuntimeError('Watch-period snapshot requires an atomic transaction.')
+    table_name = connection.ops.quote_name(WatchPeriod._meta.db_table)
+    try:
+        # The savepoint restores the outer shift transaction after SQLSTATE
+        # 55P03. A successful table lock survives savepoint release and stays
+        # until the surrounding shift transaction commits.
+        with transaction.atomic():
+            with connection.cursor() as cursor:
+                cursor.execute(f'LOCK TABLE {table_name} IN SHARE MODE NOWAIT')
+    except OperationalError as error:
+        cause = error.__cause__
+        sqlstate = (
+            getattr(cause, 'sqlstate', None)
+            or getattr(cause, 'pgcode', None)
+        )
+        if sqlstate == '55P03':
+            return False
+        raise
+    return True
+
+
+def resolve_published_watch_period_for_shift(
+    *,
+    employee,
+    equipment,
+    shift_type,
+    role_code,
+    opened_at,
+):
+    """Return an unambiguous watch snapshot backed by the deputy's published plan."""
+    from assignments.models import CrewPlanSlot, CrewPlanStatus, WorkShiftType
+
+    if shift_type not in WorkShiftType.values:
+        return None
+    if shift_type != production_shift_type(opened_at):
+        # Ранние комплексы пока не имеют отдельного структурного признака.
+        # Не угадываем их производственную смену внутри контура рейтинга.
+        return None
+
+    work_date = production_work_date(opened_at)
+    is_published_placement = CrewPlanSlot.objects.filter(
+        plan__work_date=work_date,
+        plan__role__code=role_code,
+        plan__status=CrewPlanStatus.PUBLISHED,
+        plan__published_at__isnull=False,
+        plan__published_at__lte=opened_at,
+        plan__published_by__accesses__role__code='deputy_mining_manager',
+        plan__published_by__accesses__role__is_active=True,
+        plan__published_by__accesses__status='activated',
+        plan__published_by__accesses__is_active=True,
+        plan__published_by__accesses__created_at__lte=F('plan__published_at'),
+        plan__published_by__status='active',
+        plan__published_by__is_active=True,
+        employee=employee,
+        equipment=equipment,
+        shift_type=shift_type,
+    ).exists()
+    if not is_published_placement:
+        return None
+
+    if not _try_lock_watch_period_catalog_for_snapshot():
+        return None
+    candidates = list(
+        WatchPeriod.objects
+        .filter(
+            is_active=True,
+            starts_on__lte=work_date,
+            ends_on__gte=work_date,
+        )
+        .order_by('id')[:2]
+    )
+    if len(candidates) != 1:
+        return None
+    return candidates[0]
+
+
 def open_driver_shift(*, employee, work_assignment, readings, client_action_id):
     existing_shift = _existing_driver_shift_action('driver_shift_opened', client_action_id)
     if existing_shift:
@@ -195,13 +281,22 @@ def open_driver_shift(*, employee, work_assignment, readings, client_action_id):
             previous_shift = EmployeeShift.objects.filter(
                 equipment=equipment, closed_at__isnull=False,
             ).order_by('-closed_at').first()
+            opened_at = timezone.now()
+            watch_period = resolve_published_watch_period_for_shift(
+                employee=employee,
+                equipment=equipment,
+                shift_type=locked_assignment.shift_type,
+                role_code='driver',
+                opened_at=opened_at,
+            )
             shift = EmployeeShift.objects.create(
                 employee=employee,
                 opened_by=employee,
                 shift_type=locked_assignment.shift_type,
                 workplace_code='driver',
+                watch_period=watch_period,
                 equipment=equipment,
-                opened_at=timezone.now(),
+                opened_at=opened_at,
                 **readings,
             )
             assign_shift_plan_snapshot(shift)

@@ -397,7 +397,7 @@ class DispatcherGarageCurrentStateTests(TestCase):
             calculation_mode=mode,
             plan_value=value,
             is_active=is_active,
-            active_from=production_work_date(),
+            active_from=production_work_date(self.shift.opened_at),
         )
         group.equipment.add(equipment)
         return group
