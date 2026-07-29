@@ -2,6 +2,7 @@ from datetime import timedelta
 from decimal import Decimal
 from unittest.mock import patch
 
+from core.production_time import production_work_date
 from django.core.cache import cache
 from django.db import connection
 from django.test import Client, TestCase, override_settings
@@ -38,7 +39,7 @@ from .driver_watch_rating import (
     build_driver_watch_rating,
     get_cached_driver_watch_rating,
 )
-from .models import DriverShiftPassportSnapshot
+from .models import DriverShiftPassportSnapshot, RatingPeriod
 from .portal_rating_provider import DriverRatingProductionDataProvider
 from .driver_shift_passport_snapshots import _fingerprint
 
@@ -248,6 +249,8 @@ class DriverRatingFixtureMixin:
                     'equipment_id': self.truck.id,
                     'workplace_code': 'driver',
                     'shift_type': shift_type,
+                    'opened_at': opened_at.isoformat(),
+                    'closed_at': closed_at.isoformat(),
                     'watch_period': {
                         'id': self.watch.id,
                         'watch_composition': {
@@ -1083,22 +1086,27 @@ class DriverWatchRatingTests(
 class DriverWatchRatingApiTests(TestCase):
     def setUp(self):
         self.client = Client()
-        composition = WatchComposition.objects.create(
+        self.composition = WatchComposition.objects.create(
             code='rating-api-watch',
             name='Состав API рейтинга',
         )
         self.watch = WatchPeriod.objects.create(
             name='Вахта API рейтинга',
-            watch_composition=composition,
+            watch_composition=self.composition,
             starts_on=timezone.localdate(),
             ends_on=timezone.localdate() + timedelta(days=29),
+        )
+        self.rating_period = RatingPeriod.objects.create(
+            name='Период API рейтинга',
+            starts_on=production_work_date(),
+            ends_before=production_work_date() + timedelta(days=30),
         )
         self.scope_driver = Employee.objects.create(
             full_name='Водитель области API рейтинга',
             status=Employee.Status.ACTIVE,
             is_active=True,
             work_category=Employee.WorkCategory.DRIVER,
-            watch_composition=composition,
+            watch_composition=self.composition,
         )
 
     def access(self, role_code):
@@ -1182,6 +1190,208 @@ class DriverWatchRatingApiTests(TestCase):
         self.assertEqual(response.status_code, 404)
         self.assertIn('не включён', response.json()['error'])
 
+    def test_period_rating_api_is_private_and_available_to_management_roles(self):
+        for role_code in ('dispatcher', 'admin', 'manager'):
+            with self.subTest(role=role_code):
+                self.client = Client()
+                self.login_as(self.access(role_code))
+                response = self.client.get(
+                    reverse('driver_period_rating_api'),
+                    {'shift_type': ShiftType.DAY},
+                )
+
+                self.assertEqual(response.status_code, 200)
+                payload = response.json()
+                self.assertFalse(payload['official'])
+                self.assertFalse(payload['official_rating_eligible'])
+                self.assertEqual(payload['scope_type'], 'rating_period')
+                self.assertEqual(
+                    payload['rating_period']['id'],
+                    self.rating_period.id,
+                )
+                self.assertEqual(
+                    payload['watch_composition']['id'],
+                    self.composition.id,
+                )
+                self.assertEqual(
+                    [row['id'] for row in payload['available_rating_periods']],
+                    [self.rating_period.id],
+                )
+                self.assertEqual(
+                    [
+                        row['id']
+                        for row in payload['available_watch_compositions']
+                    ],
+                    [self.composition.id],
+                )
+                self.assertIn(
+                    'private',
+                    response.headers['Cache-Control'],
+                )
+                self.assertIn(
+                    'no-store',
+                    response.headers['Cache-Control'],
+                )
+
+    def test_period_rating_api_requires_auth_role_and_shift_type(self):
+        unauthenticated = self.client.get(
+            reverse('driver_period_rating_api'),
+            {'shift_type': ShiftType.DAY},
+        )
+        self.assertEqual(unauthenticated.status_code, 401)
+
+        self.login_as(self.access('driver'))
+        forbidden = self.client.get(
+            reverse('driver_period_rating_api'),
+            {'shift_type': ShiftType.DAY},
+        )
+        self.assertEqual(forbidden.status_code, 403)
+
+        self.client = Client()
+        self.login_as(self.access('dispatcher'))
+        missing_shift = self.client.get(
+            reverse('driver_period_rating_api'),
+        )
+        self.assertEqual(missing_shift.status_code, 400)
+
+    def test_period_rating_api_returns_stable_empty_without_current_period(self):
+        self.rating_period.is_active = False
+        self.rating_period.save()
+        self.login_as(self.access('dispatcher'))
+
+        response = self.client.get(
+            reverse('driver_period_rating_api'),
+            {'shift_type': ShiftType.NIGHT},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertFalse(payload['available'])
+        self.assertIsNone(payload['rating_period'])
+        self.assertEqual(payload['entries'], [])
+        self.assertEqual(payload['available_rating_periods'], [])
+        self.assertEqual(payload['summary']['employee_count'], 0)
+        self.assertEqual(
+            payload['linkage_audit'],
+            {
+                'candidate_closed_shift_count': 0,
+                'linked_to_selected_composition_count': 0,
+                'unlinked_shift_count': 0,
+                'linked_to_other_composition_count': 0,
+                'selected_watch_date_mismatch_count': 0,
+                'covered_watch_period_count': 0,
+                'linkage_ready': False,
+            },
+        )
+        self.assertIn('не задан', payload['status'])
+
+    def test_period_rating_api_fails_closed_on_damaged_overlap(self):
+        other_period = RatingPeriod.objects.create(
+            name='Будущий период для повреждённого пересечения',
+            starts_on=self.rating_period.ends_before,
+            ends_before=self.rating_period.ends_before + timedelta(days=10),
+        )
+        RatingPeriod.objects.filter(pk=other_period.pk).update(
+            starts_on=self.rating_period.starts_on,
+            ends_before=self.rating_period.ends_before,
+        )
+        self.login_as(self.access('dispatcher'))
+
+        response = self.client.get(
+            reverse('driver_period_rating_api'),
+            {'shift_type': ShiftType.DAY},
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertIn('несколько', response.json()['error'])
+        self.assertIn('остановлен', response.json()['error'])
+
+    def test_period_rating_api_requires_composition_when_scope_has_several(self):
+        other_composition = WatchComposition.objects.create(
+            code='rating-api-other-watch',
+            name='Другой состав API рейтинга',
+        )
+        Employee.objects.create(
+            full_name='Водитель другого состава API рейтинга',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+            work_category=Employee.WorkCategory.DRIVER,
+            watch_composition=other_composition,
+        )
+        self.login_as(self.access('manager'))
+
+        missing_selection = self.client.get(
+            reverse('driver_period_rating_api'),
+            {
+                'rating_period': self.rating_period.id,
+                'shift_type': ShiftType.DAY,
+            },
+        )
+        self.assertEqual(missing_selection.status_code, 400)
+        self.assertEqual(
+            len(missing_selection.json()['available_watch_compositions']),
+            2,
+        )
+
+        selected = self.client.get(
+            reverse('driver_period_rating_api'),
+            {
+                'rating_period': self.rating_period.id,
+                'watch_composition': self.composition.id,
+                'shift_type': ShiftType.DAY,
+            },
+        )
+        self.assertEqual(selected.status_code, 200)
+        self.assertEqual(
+            selected.json()['watch_composition']['id'],
+            self.composition.id,
+        )
+
+    def test_period_rating_api_rejects_period_and_composition_outside_scope(self):
+        inactive_period = RatingPeriod.objects.create(
+            name='Отключённый период API рейтинга',
+            starts_on=self.rating_period.ends_before,
+            ends_before=self.rating_period.ends_before + timedelta(days=10),
+            is_active=False,
+        )
+        outside_composition = WatchComposition.objects.create(
+            code='rating-api-outside-watch',
+            name='Состав вне области API рейтинга',
+        )
+        self.login_as(self.access('admin'))
+
+        period_response = self.client.get(
+            reverse('driver_period_rating_api'),
+            {
+                'rating_period': inactive_period.id,
+                'watch_composition': self.composition.id,
+                'shift_type': ShiftType.DAY,
+            },
+        )
+        self.assertEqual(period_response.status_code, 404)
+
+        composition_response = self.client.get(
+            reverse('driver_period_rating_api'),
+            {
+                'rating_period': self.rating_period.id,
+                'watch_composition': outside_composition.id,
+                'shift_type': ShiftType.DAY,
+            },
+        )
+        self.assertEqual(composition_response.status_code, 404)
+
+    @override_settings(PORTAL_WORKING_DRIVER_RATING_ENABLED=False)
+    def test_disabled_period_rating_api_fails_closed(self):
+        self.login_as(self.access('dispatcher'))
+
+        response = self.client.get(
+            reverse('driver_period_rating_api'),
+            {'shift_type': ShiftType.DAY},
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertIn('не включён', response.json()['error'])
+
 
 @override_settings(
     PORTAL_WORKING_DRIVER_RATING_ENABLED=True,
@@ -1196,6 +1406,11 @@ class DriverRatingApiScopeTests(
 ):
     def setUp(self):
         super().setUp()
+        self.rating_period = RatingPeriod.objects.create(
+            name='Тестовый период API состава',
+            starts_on=self.watch.starts_on,
+            ends_before=self.watch.ends_on + timedelta(days=1),
+        )
         manager = Employee.objects.create(
             full_name='Руководитель области рейтинга',
             status=Employee.Status.ACTIVE,
@@ -1275,6 +1490,43 @@ class DriverRatingApiScopeTests(
         )
         self.assertEqual(hidden_watch_response.status_code, 404)
 
+        period_rating_response = self.client.get(
+            reverse('driver_period_rating_api'),
+            {
+                'rating_period': self.rating_period.id,
+                'watch_composition': visible_watch.watch_composition_id,
+                'shift_type': ShiftType.DAY,
+            },
+        )
+        self.assertEqual(period_rating_response.status_code, 200)
+        period_rating_payload = period_rating_response.json()
+        self.assertEqual(
+            [
+                entry['employee_id']
+                for entry in period_rating_payload['entries']
+            ],
+            [visible.id],
+        )
+        self.assertEqual(
+            [
+                item['id']
+                for item in period_rating_payload[
+                    'available_watch_compositions'
+                ]
+            ],
+            [visible_watch.watch_composition_id],
+        )
+
+        hidden_period_rating_response = self.client.get(
+            reverse('driver_period_rating_api'),
+            {
+                'rating_period': self.rating_period.id,
+                'watch_composition': hidden_watch.watch_composition_id,
+                'shift_type': ShiftType.DAY,
+            },
+        )
+        self.assertEqual(hidden_period_rating_response.status_code, 404)
+
         observation_response = self.client.get(
             reverse('driver_watch_observation_api'),
             {
@@ -1317,12 +1569,66 @@ class DriverRatingApiScopeTests(
             {visible.id},
         )
 
+    def test_period_api_keeps_historical_composition_after_transfer(self):
+        visible = self.employee('Водитель после перевода состава API')
+        self.snapshot(visible, ordinal=1, trip_count=20)
+        historical_composition = self.composition
+        current_composition = WatchComposition.objects.create(
+            code='rating-api-current-after-transfer',
+            name='Текущий пустой состав после перевода API',
+        )
+        visible.watch_composition = current_composition
+        visible.save(update_fields=['watch_composition'])
+        historical_composition.is_active = False
+        historical_composition.save(update_fields=['is_active'])
+        self.login_manager()
+
+        response = self.client.get(
+            reverse('driver_period_rating_api'),
+            {
+                'rating_period': self.rating_period.id,
+                'watch_composition': historical_composition.id,
+                'shift_type': ShiftType.DAY,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(
+            [entry['employee_id'] for entry in payload['entries']],
+            [visible.id],
+        )
+        self.assertEqual(
+            {
+                item['id']
+                for item in payload['available_watch_compositions']
+            },
+            {
+                historical_composition.id,
+                current_composition.id,
+            },
+        )
+        historical_payload = next(
+            item
+            for item in payload['available_watch_compositions']
+            if item['id'] == historical_composition.id
+        )
+        self.assertFalse(historical_payload['is_active'])
+
 
 @override_settings(PORTAL_WORKING_DRIVER_RATING_ENABLED=True)
 class DriverRatingPortalProviderTests(
     DriverRatingFixtureMixin,
     TestCase,
 ):
+    def setUp(self):
+        super().setUp()
+        self.rating_period = RatingPeriod.objects.create(
+            name='Тестовый период рейтинга портала',
+            starts_on=self.watch.starts_on,
+            ends_before=self.watch.ends_on + timedelta(days=1),
+        )
+
     def test_internal_portal_shows_places_and_only_personal_score(self):
         first = self.employee('Водитель портала первый')
         second = self.employee('Водитель портала второй')
@@ -1412,11 +1718,227 @@ class DriverRatingPortalProviderTests(
         ranking = DriverRatingProductionDataProvider().ranking(employee)
 
         self.assertTrue(ranking.available)
-        self.assertIn(employee_watch.name, ranking.period_label)
+        self.assertIn(self.rating_period.name, ranking.period_label)
+        self.assertNotIn(employee_watch.name, ranking.period_label)
         self.assertEqual(
             [entry.employee_id for entry in ranking.entries],
             [employee.id],
         )
+
+    def test_provider_keeps_historical_composition_after_employee_transfer(self):
+        employee = self.employee('Водитель с историческим составом')
+        self.snapshot(employee, ordinal=1, trip_count=20)
+        historical_composition = self.composition
+        current_composition = WatchComposition.objects.create(
+            code='rating-provider-current-watch',
+            name='Новый текущий состав водителя',
+        )
+        employee.watch_composition = current_composition
+        employee.save(update_fields=['watch_composition'])
+        historical_composition.is_active = False
+        historical_composition.save(update_fields=['is_active'])
+        provider = DriverRatingProductionDataProvider()
+
+        snapshot_scope = provider._latest_snapshot_scope(
+            self.rating_period,
+            employee,
+        )
+        ranking = provider.ranking(employee)
+
+        self.assertEqual(
+            snapshot_scope['watch_composition_id'],
+            historical_composition.id,
+        )
+        self.assertTrue(ranking.available)
+        self.assertEqual(
+            [entry.employee_id for entry in ranking.entries],
+            [employee.id],
+        )
+
+    def test_provider_discovers_manifest_after_live_watch_link_is_lost(self):
+        employee = self.employee('Водитель с потерянной живой вахтой')
+        snapshot = self.snapshot(employee, ordinal=1, trip_count=20)
+        historical_composition = self.composition
+        EmployeeShift.objects.filter(pk=snapshot.shift_id).update(
+            watch_period=None,
+        )
+        provider = DriverRatingProductionDataProvider()
+
+        snapshot_scope = provider._latest_snapshot_scope(
+            self.rating_period,
+            employee,
+        )
+        ranking = provider.ranking(employee)
+
+        self.assertEqual(
+            snapshot_scope['watch_composition_id'],
+            historical_composition.id,
+        )
+        self.assertFalse(ranking.available)
+
+    def test_provider_discovers_manifest_after_live_watch_dates_move(self):
+        employee = self.employee('Водитель со сдвинутой живой вахтой')
+        self.snapshot(employee, ordinal=1, trip_count=20)
+        historical_composition = self.composition
+        WatchPeriod.objects.filter(pk=self.watch.pk).update(
+            starts_on=self.rating_period.ends_before + timedelta(days=10),
+            ends_on=self.rating_period.ends_before + timedelta(days=40),
+        )
+        provider = DriverRatingProductionDataProvider()
+
+        snapshot_scope = provider._latest_snapshot_scope(
+            self.rating_period,
+            employee,
+        )
+        ranking = provider.ranking(employee)
+
+        self.assertEqual(
+            snapshot_scope['watch_composition_id'],
+            historical_composition.id,
+        )
+        self.assertFalse(ranking.available)
+
+    def test_provider_discovers_manifest_after_shift_and_watch_dates_move(self):
+        employee = self.employee(
+            'Водитель с одновременным сдвигом смены и вахты',
+        )
+        snapshot = self.snapshot(employee, ordinal=1, trip_count=20)
+        historical_composition = self.composition
+        shift = EmployeeShift.objects.get(pk=snapshot.shift_id)
+        live_shift_offset = timedelta(days=90)
+        EmployeeShift.objects.filter(pk=shift.pk).update(
+            opened_at=shift.opened_at + live_shift_offset,
+            closed_at=shift.closed_at + live_shift_offset,
+        )
+        WatchPeriod.objects.filter(pk=self.watch.pk).update(
+            starts_on=self.rating_period.ends_before + timedelta(days=10),
+            ends_on=self.rating_period.ends_before + timedelta(days=40),
+        )
+        provider = DriverRatingProductionDataProvider()
+
+        snapshot_scope = provider._latest_snapshot_scope(
+            self.rating_period,
+            employee,
+        )
+        ranking = provider.ranking(employee)
+
+        self.assertEqual(
+            snapshot_scope['watch_composition_id'],
+            historical_composition.id,
+        )
+        self.assertFalse(ranking.available)
+
+    def test_provider_withholds_malformed_manifest_instead_of_http_500(self):
+        malformed_payloads = (
+            [],
+            {'source_manifest': []},
+            {'source_manifest': {'shift': []}},
+        )
+        provider = DriverRatingProductionDataProvider()
+
+        for ordinal, malformed_payload in enumerate(
+            malformed_payloads,
+            start=1,
+        ):
+            with self.subTest(malformed_payload=malformed_payload):
+                employee = self.employee(
+                    f'Водитель с повреждённым паспортом {ordinal}',
+                )
+                snapshot = self.snapshot(
+                    employee,
+                    ordinal=ordinal,
+                    trip_count=20,
+                )
+                force_snapshot_payload_update(snapshot, malformed_payload)
+
+                ranking = provider.ranking(employee)
+                session = self.client.session
+                session[PORTAL_EMPLOYEE_SESSION_KEY] = employee.id
+                session.save()
+                response = self.client.get(reverse('portal:rating'))
+
+                self.assertFalse(ranking.available)
+                self.assertEqual(response.status_code, 200)
+
+    def test_provider_current_period_uses_inclusive_exclusive_boundaries(self):
+        provider = DriverRatingProductionDataProvider()
+
+        with patch(
+            'reports.portal_rating_provider.production_work_date',
+            return_value=self.rating_period.starts_on,
+        ):
+            self.assertEqual(
+                provider._current_rating_period(),
+                self.rating_period,
+            )
+        with patch(
+            'reports.portal_rating_provider.production_work_date',
+            return_value=self.rating_period.ends_before,
+        ):
+            self.assertIsNone(provider._current_rating_period())
+
+    def test_provider_uses_latest_actual_shift_type_inside_rating_period(self):
+        employee = self.employee('Водитель с фактической сменной группой')
+        self.snapshot(
+            employee,
+            ordinal=2,
+            trip_count=20,
+            shift_type=ShiftType.DAY,
+        )
+        self.snapshot(
+            employee,
+            ordinal=1,
+            trip_count=20,
+            shift_type=ShiftType.NIGHT,
+        )
+
+        ranking = DriverRatingProductionDataProvider().ranking(employee)
+
+        self.assertTrue(ranking.available)
+        self.assertIn(
+            dict(ShiftType.choices)[ShiftType.NIGHT],
+            ranking.period_label,
+        )
+        self.assertEqual(
+            [entry.employee_id for entry in ranking.entries],
+            [employee.id],
+        )
+
+    def test_provider_fails_closed_without_current_rating_period(self):
+        employee = self.employee('Водитель без периода рейтинга')
+        self.snapshot(employee, ordinal=1, trip_count=20)
+        self.rating_period.is_active = False
+        self.rating_period.save()
+
+        ranking = DriverRatingProductionDataProvider().ranking(employee)
+        personal = DriverRatingProductionDataProvider().personal_kpis(
+            employee,
+        )
+
+        self.assertFalse(ranking.available)
+        self.assertFalse(personal.available)
+        self.assertIn('период рейтинга не задан', ranking.status)
+        self.assertIn('период рейтинга не задан', personal.status)
+
+    def test_provider_fails_closed_on_damaged_period_overlap(self):
+        employee = self.employee('Водитель при конфликте периодов')
+        self.snapshot(employee, ordinal=1, trip_count=20)
+        other_period = RatingPeriod.objects.create(
+            name='Будущий конфликтующий период портала',
+            starts_on=self.rating_period.ends_before,
+            ends_before=self.rating_period.ends_before + timedelta(days=10),
+        )
+        RatingPeriod.objects.filter(pk=other_period.pk).update(
+            starts_on=self.rating_period.starts_on,
+            ends_before=self.rating_period.ends_before,
+        )
+        provider = DriverRatingProductionDataProvider()
+
+        self.assertIsNone(provider._current_rating_period())
+        ranking = provider.ranking(employee)
+
+        self.assertFalse(ranking.available)
+        self.assertIn('период рейтинга не задан', ranking.status)
 
     @override_settings(
         PORTAL_EMPLOYEE_SCOPE_PROVIDER=(

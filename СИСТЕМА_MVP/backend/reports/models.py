@@ -31,6 +31,96 @@ class ReportTemplate(models.Model):
         return self.name
 
 
+class RatingPeriod(models.Model):
+    name = models.CharField(
+        'Название периода',
+        max_length=160,
+        help_text='Например: Премирование за август 2026.',
+    )
+    starts_on = models.DateField(
+        'Считать с',
+        help_text='Начальная дата включается в расчёт.',
+    )
+    ends_before = models.DateField(
+        'Считать до (не включая дату)',
+        help_text=(
+            'Эта дата в расчёт не входит. Например, период 14.07–14.08 '
+            'считает данные по 13.08 включительно.'
+        ),
+    )
+    comment = models.TextField(
+        'Причина или примечание',
+        blank=True,
+        help_text=(
+            'Укажите основание, если даты замера отличаются от обычного '
+            'вахтового периода.'
+        ),
+    )
+    is_active = models.BooleanField(
+        'Используется для расчёта',
+        default=True,
+        help_text=(
+            'Только включённые периоды могут использоваться для расчёта '
+            'рейтинга.'
+        ),
+    )
+    created_at = models.DateTimeField('Создан', auto_now_add=True)
+    updated_at = models.DateTimeField('Изменён', auto_now=True)
+
+    class Meta:
+        verbose_name = 'Период рейтинга'
+        verbose_name_plural = 'Периоды рейтинга'
+        ordering = ['-starts_on', '-id']
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(ends_before__gt=models.F('starts_on')),
+                name='rating_period_end_after_start',
+            ),
+        ]
+
+    def __str__(self):
+        return self.name
+
+    def clean(self):
+        super().clean()
+        if (
+            self.starts_on is not None
+            and self.ends_before is not None
+            and self.ends_before <= self.starts_on
+        ):
+            raise ValidationError({
+                'ends_before': 'Дата «Считать до» должна быть позже даты «Считать с».',
+            })
+        if (
+            not self.is_active
+            or self.starts_on is None
+            or self.ends_before is None
+            or self.ends_before <= self.starts_on
+        ):
+            return
+
+        conflicts = type(self).objects.filter(
+            is_active=True,
+            starts_on__lt=self.ends_before,
+            ends_before__gt=self.starts_on,
+        )
+        if self.pk:
+            conflicts = conflicts.exclude(pk=self.pk)
+        conflict = conflicts.order_by('starts_on', 'id').first()
+        if conflict is not None:
+            raise ValidationError(
+                'Период пересекается с '
+                f'«{conflict.name}» '
+                f'({conflict.starts_on:%d.%m.%Y}–'
+                f'{conflict.ends_before:%d.%m.%Y}, конечная дата не входит). '
+                'Измените даты или отключите пересекающийся период.'
+            )
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+
 class PilotFeedbackPriority(models.TextChoices):
     P0 = 'p0', 'P0 - блокирует пилот'
     P1 = 'p1', 'P1 - исправить до запуска'

@@ -43,7 +43,7 @@ from users.active_role import (
     ACTIVE_ROLE_SESSION_KEY,
     role_session_state,
 )
-from users.models import Employee, EmployeeAccess
+from users.models import Employee, EmployeeAccess, WatchComposition
 
 from portal.services import active_employees
 
@@ -55,10 +55,12 @@ from .driver_watch_observation import (
 from .driver_watch_rating import (
     DRIVER_RATING_FORMULA_VERSION,
     DRIVER_RATING_WEIGHTS,
+    get_cached_driver_rating_period,
     get_cached_driver_watch_rating,
 )
 from .forms import PilotFeedbackForm
-from .models import PilotFeedback, ReportTemplate, ReportType
+from .models import PilotFeedback, RatingPeriod, ReportTemplate, ReportType
+from .portal_rating_provider import linked_driver_snapshot_scopes
 from .shift_analytics import (
     build_excavator_dynamics,
     build_shift_analytics,
@@ -631,6 +633,320 @@ def driver_watch_rating_api(request):
     )
     rating['available_watch_periods'] = available_watch_periods
     return JsonResponse(rating)
+
+
+def _rating_period_payload(period):
+    return {
+        'id': period.id,
+        'name': period.name,
+        'starts_on': period.starts_on.isoformat(),
+        'ends_before': period.ends_before.isoformat(),
+        'is_active': period.is_active,
+    }
+
+
+def _watch_composition_payload(composition):
+    return {
+        'id': composition.id,
+        'code': composition.code,
+        'name': composition.name,
+        'is_active': composition.is_active,
+    }
+
+
+def _driver_period_rating_empty(
+    *,
+    shift_type,
+    status,
+    rating_period,
+    watch_composition,
+    available_rating_periods,
+    available_watch_compositions,
+):
+    return {
+        'available': False,
+        'official': False,
+        'official_rating_eligible': False,
+        'rating_mode': 'working',
+        'scope_type': 'rating_period',
+        'formula_version': DRIVER_RATING_FORMULA_VERSION,
+        'formula_label': 'Рабочая формула без м³·км и т·км',
+        'status': status,
+        'generated_at': timezone.now().isoformat(),
+        'source_fingerprint': '',
+        'rating_period': (
+            _rating_period_payload(rating_period)
+            if rating_period is not None
+            else None
+        ),
+        'watch_composition': (
+            _watch_composition_payload(watch_composition)
+            if watch_composition is not None
+            else None
+        ),
+        'shift_type': shift_type,
+        'shift_type_label': dict(ShiftType.choices)[shift_type],
+        'weights': {
+            key: str(value)
+            for key, value in DRIVER_RATING_WEIGHTS.items()
+        },
+        'distance_metrics': {
+            'weight': '0',
+            'status': 'planned',
+            'label': 'м³·км и т·км пока не учитываются',
+        },
+        'linkage_audit': {
+            'candidate_closed_shift_count': 0,
+            'linked_to_selected_composition_count': 0,
+            'unlinked_shift_count': 0,
+            'linked_to_other_composition_count': 0,
+            'selected_watch_date_mismatch_count': 0,
+            'covered_watch_period_count': 0,
+            'linkage_ready': False,
+        },
+        'available_rating_periods': available_rating_periods,
+        'available_watch_compositions': available_watch_compositions,
+        'summary': {
+            'employee_count': 0,
+            'rated_shift_count': 0,
+            'withheld_shift_count': 0,
+            'withheld_reasons': {},
+        },
+        'entries': [],
+    }
+
+
+def _private_rating_json(payload, *, status=200):
+    response = JsonResponse(payload, status=status)
+    response.headers['Cache-Control'] = 'private, no-store'
+    return response
+
+
+@never_cache
+@require_GET
+def driver_period_rating_api(request):
+    access = get_rating_observation_access(request)
+    if not access:
+        return _private_rating_json(
+            {'error': 'Требуется авторизация.'},
+            status=401,
+        )
+    if access.role.code not in {'dispatcher', 'admin', 'manager'}:
+        return _private_rating_json(
+            {'error': 'Недостаточно прав.'},
+            status=403,
+        )
+    site_scope = get_rating_site_scope(access)
+    if site_scope is None:
+        return _private_rating_json(
+            {'error': 'Недостаточно прав.'},
+            status=403,
+        )
+    employee_ids, watch_composition_ids = site_scope
+    if not getattr(
+        settings,
+        'PORTAL_WORKING_DRIVER_RATING_ENABLED',
+        False,
+    ):
+        return _private_rating_json(
+            {'error': 'Рабочий рейтинг Водителей не включён.'},
+            status=404,
+        )
+
+    shift_type = request.GET.get('shift_type')
+    if shift_type not in {ShiftType.DAY, ShiftType.NIGHT}:
+        return _private_rating_json(
+            {'error': 'Для рейтинга укажите shift_type: day или night.'},
+            status=400,
+        )
+
+    rating_periods = list(
+        RatingPeriod.objects
+        .filter(is_active=True)
+        .order_by('-starts_on', '-id')
+    )
+    current_watch_compositions = list(
+        WatchComposition.objects
+        .filter(
+            id__in=watch_composition_ids,
+            is_active=True,
+        )
+        .order_by('name', 'id')
+    )
+    available_rating_periods = [
+        _rating_period_payload(period)
+        for period in rating_periods
+    ]
+
+    rating_period_id = request.GET.get('rating_period')
+    if rating_period_id:
+        try:
+            rating_period_id = int(rating_period_id)
+        except (TypeError, ValueError):
+            return _private_rating_json(
+                {'error': 'rating_period должен быть числом.'},
+                status=400,
+            )
+        rating_period = next(
+            (
+                period
+                for period in rating_periods
+                if period.id == rating_period_id
+            ),
+            None,
+        )
+        if rating_period is None:
+            return _private_rating_json(
+                {'error': 'Период рейтинга не найден.'},
+                status=404,
+            )
+    else:
+        work_date = production_work_date()
+        current_periods = [
+            period
+            for period in rating_periods
+            if period.starts_on <= work_date < period.ends_before
+        ]
+        if len(current_periods) > 1:
+            return _private_rating_json(
+                {
+                    'error': (
+                        'На текущую производственную дату найдено несколько '
+                        'активных периодов рейтинга. Расчёт остановлен.'
+                    ),
+                    'available_rating_periods': available_rating_periods,
+                    'available_watch_compositions': [
+                        _watch_composition_payload(composition)
+                        for composition in current_watch_compositions
+                    ],
+                },
+                status=409,
+            )
+        rating_period = (
+            current_periods[0]
+            if len(current_periods) == 1
+            else None
+        )
+
+    historical_composition_ids = set()
+    if rating_period is not None:
+        historical_composition_ids = {
+            item['watch_composition_id']
+            for item in linked_driver_snapshot_scopes(
+                rating_period,
+                employee_ids=employee_ids,
+            )
+        }
+    available_composition_ids = (
+        historical_composition_ids
+        | {
+            composition.id
+            for composition in current_watch_compositions
+        }
+    )
+    watch_compositions = list(
+        WatchComposition.objects
+        .filter(id__in=available_composition_ids)
+        .order_by('name', 'id')
+    )
+    available_watch_compositions = [
+        _watch_composition_payload(composition)
+        for composition in watch_compositions
+    ]
+
+    watch_composition_id = request.GET.get('watch_composition')
+    if watch_composition_id:
+        try:
+            watch_composition_id = int(watch_composition_id)
+        except (TypeError, ValueError):
+            return _private_rating_json(
+                {'error': 'watch_composition должен быть числом.'},
+                status=400,
+            )
+        watch_composition = next(
+            (
+                composition
+                for composition in watch_compositions
+                if composition.id == watch_composition_id
+            ),
+            None,
+        )
+        if watch_composition is None:
+            return _private_rating_json(
+                {'error': 'Состав вахты не найден в доступной области.'},
+                status=404,
+            )
+    elif len(watch_compositions) == 1:
+        watch_composition = watch_compositions[0]
+    elif len(watch_compositions) > 1:
+        return _private_rating_json(
+            {
+                'error': 'Укажите watch_composition для рейтинга.',
+                'available_rating_periods': available_rating_periods,
+                'available_watch_compositions': (
+                    available_watch_compositions
+                ),
+            },
+            status=400,
+        )
+    else:
+        watch_composition = None
+
+    if rating_period is None:
+        return _private_rating_json(
+            _driver_period_rating_empty(
+                shift_type=shift_type,
+                status=(
+                    'На текущую производственную дату активный период '
+                    'рейтинга не задан.'
+                ),
+                rating_period=None,
+                watch_composition=watch_composition,
+                available_rating_periods=available_rating_periods,
+                available_watch_compositions=(
+                    available_watch_compositions
+                ),
+            )
+        )
+    if watch_composition is None:
+        return _private_rating_json(
+            _driver_period_rating_empty(
+                shift_type=shift_type,
+                status='Нет доступного утверждённого состава вахты.',
+                rating_period=rating_period,
+                watch_composition=None,
+                available_rating_periods=available_rating_periods,
+                available_watch_compositions=(
+                    available_watch_compositions
+                ),
+            )
+        )
+
+    expected_employee_ids = tuple(
+        Employee.objects
+        .filter(
+            id__in=employee_ids,
+            watch_composition=watch_composition,
+        )
+        .values_list('id', flat=True)
+    )
+    rating = dict(
+        get_cached_driver_rating_period(
+            rating_period,
+            watch_composition,
+            shift_type=shift_type,
+            allowed_employee_ids=employee_ids,
+            expected_employee_ids=expected_employee_ids,
+        )
+    )
+    rating.update({
+        'official': False,
+        'official_rating_eligible': False,
+        'scope_type': 'rating_period',
+        'available_rating_periods': available_rating_periods,
+        'available_watch_compositions': available_watch_compositions,
+    })
+    return _private_rating_json(rating)
 
 
 @never_cache

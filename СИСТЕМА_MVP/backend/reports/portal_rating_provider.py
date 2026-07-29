@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+from core.production_time import (
+    business_localtime,
+    production_work_date,
+)
+from django.db.models import F, OuterRef, Subquery
 from django.urls import reverse
 from django.utils.dateparse import parse_datetime
 
-from shifts.models import ShiftType, WatchPeriod
-from users.models import Employee
+from shifts.models import ShiftType
+from users.models import Employee, WatchComposition
 
 from portal import services as portal_services
 from portal.services import (
@@ -14,8 +19,8 @@ from portal.services import (
     ShiftResultSnapshot,
 )
 
-from .driver_watch_rating import get_cached_driver_watch_rating
-from .models import DriverShiftPassportSnapshot
+from .driver_watch_rating import get_cached_driver_rating_period
+from .models import DriverShiftPassportSnapshot, RatingPeriod
 
 
 BLOCK_LABELS = {
@@ -31,6 +36,103 @@ def _display_decimal(value):
     return str(value).replace('.', ',')
 
 
+def linked_driver_snapshot_scopes(rating_period, *, employee_ids):
+    """Возвращает исторические группы по последним паспортам смен.
+
+    Границы периода, сотрудник, состав и тип смены читаются из неизменяемого
+    source_manifest. Текущая карточка Employee здесь намеренно не участвует.
+    """
+
+    employee_ids = tuple(sorted({int(value) for value in employee_ids}))
+    if not employee_ids:
+        return ()
+    latest_snapshot_id = (
+        DriverShiftPassportSnapshot.objects
+        .filter(shift_id=OuterRef('shift_id'))
+        .order_by('-revision', '-id')
+        .values('id')[:1]
+    )
+    snapshots = (
+        DriverShiftPassportSnapshot.objects
+        .filter(
+            id=Subquery(latest_snapshot_id),
+            payload__source_manifest__shift__employee_id__in=employee_ids,
+        )
+        .annotate(
+            manifest_employee_id=F(
+                'payload__source_manifest__shift__employee_id',
+            ),
+            manifest_opened_at=F(
+                'payload__source_manifest__shift__opened_at',
+            ),
+            manifest_closed_at=F(
+                'payload__source_manifest__shift__closed_at',
+            ),
+            manifest_shift_type=F(
+                'payload__source_manifest__shift__shift_type',
+            ),
+            manifest_watch_composition_id=F(
+                'payload__source_manifest__shift__watch_period'
+                '__watch_composition__id',
+            ),
+        )
+        .values(
+            'id',
+            'shift_id',
+            'manifest_employee_id',
+            'manifest_opened_at',
+            'manifest_closed_at',
+            'manifest_shift_type',
+            'manifest_watch_composition_id',
+        )
+        .order_by('shift_id')
+    )
+
+    result = []
+    for snapshot in snapshots.iterator(chunk_size=1000):
+        employee_id = snapshot['manifest_employee_id']
+        try:
+            employee_id = int(employee_id)
+        except (TypeError, ValueError):
+            continue
+        if employee_id not in employee_ids:
+            continue
+        opened_at = parse_datetime(
+            str(snapshot['manifest_opened_at'] or ''),
+        )
+        closed_at = parse_datetime(
+            str(snapshot['manifest_closed_at'] or ''),
+        )
+        if opened_at is None or closed_at is None:
+            continue
+        work_date = production_work_date(opened_at)
+        if not (
+            rating_period.starts_on
+            <= work_date
+            < rating_period.ends_before
+        ):
+            continue
+        shift_type = snapshot['manifest_shift_type']
+        if shift_type not in {ShiftType.DAY, ShiftType.NIGHT}:
+            continue
+        try:
+            watch_composition_id = int(
+                snapshot['manifest_watch_composition_id'],
+            )
+        except (TypeError, ValueError):
+            continue
+        result.append({
+            'snapshot_id': snapshot['id'],
+            'shift_id': snapshot['shift_id'],
+            'employee_id': employee_id,
+            'watch_composition_id': watch_composition_id,
+            'shift_type': shift_type,
+            'opened_at': business_localtime(opened_at),
+            'closed_at': business_localtime(closed_at),
+        })
+    return tuple(result)
+
+
 class DriverRatingProductionDataProvider:
     """Внутренний провайдер рабочего рейтинга Водителей.
 
@@ -44,73 +146,76 @@ class DriverRatingProductionDataProvider:
             work_category=Employee.WorkCategory.DRIVER,
         )
 
-    def _latest_watch_period(self, employee):
-        if employee is None or employee.watch_composition_id is None:
-            return None
-        if not self._active_driver_scope().filter(pk=employee.pk).exists():
-            return None
-        watch_period_id = (
-            DriverShiftPassportSnapshot.objects
+    @staticmethod
+    def _current_rating_period():
+        work_date = production_work_date()
+        periods = list(
+            RatingPeriod.objects
             .filter(
-                shift__employee=employee,
-                shift__watch_period__isnull=False,
-                shift__watch_period__watch_composition_id=(
-                    employee.watch_composition_id
-                ),
-                shift__closed_at__isnull=False,
+                is_active=True,
+                starts_on__lte=work_date,
+                ends_before__gt=work_date,
             )
-            .order_by(
-                '-shift__watch_period__is_active',
-                '-shift__watch_period__ends_on',
-                '-shift__watch_period_id',
-            )
-            .values_list('shift__watch_period_id', flat=True)
-            .first()
+            .order_by('starts_on', 'id')[:2]
         )
-        if watch_period_id is None:
-            return None
-        return WatchPeriod.objects.filter(pk=watch_period_id).first()
+        return periods[0] if len(periods) == 1 else None
 
-    def _shift_type(self, watch_period, employee=None):
+    def _latest_snapshot_scope(self, rating_period, employee=None):
         if employee is None:
             return None
-        snapshots = DriverShiftPassportSnapshot.objects.filter(
-            shift__watch_period=watch_period,
-            shift__employee=employee,
-            shift__closed_at__isnull=False,
+        scopes = linked_driver_snapshot_scopes(
+            rating_period,
+            employee_ids=(employee.id,),
         )
-        employee_shift_type = (
-            snapshots
-            .order_by('-shift__closed_at', '-shift_id')
-            .values_list('shift__shift_type', flat=True)
-            .first()
-        )
-        return (
-            employee_shift_type
-            if employee_shift_type in {ShiftType.DAY, ShiftType.NIGHT}
-            else None
+        return max(
+            scopes,
+            key=lambda item: (
+                item['closed_at'],
+                item['shift_id'],
+                item['snapshot_id'],
+            ),
+            default=None,
         )
 
     def _rating(self, employee=None):
-        watch_period = self._latest_watch_period(employee)
-        if watch_period is None:
+        if employee is None:
             return None, None, None
-        shift_type = self._shift_type(watch_period, employee)
-        if shift_type is None:
-            return watch_period, None, None
+        if not self._active_driver_scope().filter(pk=employee.pk).exists():
+            return None, None, None
+        rating_period = self._current_rating_period()
+        if rating_period is None:
+            return None, None, None
+        snapshot_scope = self._latest_snapshot_scope(
+            rating_period,
+            employee,
+        )
+        if snapshot_scope is None:
+            return rating_period, None, None
+        shift_type = snapshot_scope['shift_type']
+        watch_composition = WatchComposition.objects.filter(
+            pk=snapshot_scope['watch_composition_id'],
+        ).first()
+        if watch_composition is None:
+            return rating_period, shift_type, None
         allowed_employee_ids = tuple(
             self._active_driver_scope()
-            .filter(watch_composition_id=watch_period.watch_composition_id)
+            .values_list('id', flat=True)
+        )
+        expected_employee_ids = tuple(
+            self._active_driver_scope()
+            .filter(watch_composition=watch_composition)
             .values_list('id', flat=True)
         )
         if employee.id not in allowed_employee_ids:
-            return watch_period, shift_type, None
-        rating = get_cached_driver_watch_rating(
-            watch_period,
+            return rating_period, shift_type, None
+        rating = get_cached_driver_rating_period(
+            rating_period,
+            watch_composition,
             shift_type=shift_type,
             allowed_employee_ids=allowed_employee_ids,
+            expected_employee_ids=expected_employee_ids,
         )
-        return watch_period, shift_type, rating
+        return rating_period, shift_type, rating
 
     def _ranking_entries(self, rating):
         employee_ids = [
@@ -146,10 +251,13 @@ class DriverRatingProductionDataProvider:
         return tuple(result)
 
     def ranking(self, employee=None):
-        watch_period, shift_type, rating = self._rating(employee)
-        if watch_period is None or rating is None:
+        rating_period, shift_type, rating = self._rating(employee)
+        if rating_period is None or rating is None:
             return RankingSnapshot(
-                status='Закрытые водительские смены для рейтинга ещё не накоплены.'
+                status=(
+                    'На текущую производственную дату период рейтинга '
+                    'не задан либо закрытые водительские смены ещё не накоплены.'
+                )
             )
         if not rating.get('available'):
             return RankingSnapshot(
@@ -158,7 +266,7 @@ class DriverRatingProductionDataProvider:
                     'Рабочий рейтинг пока не рассчитан.',
                 ),
                 period_label=(
-                    f'{watch_period.name} · '
+                    f'{rating_period.name} · '
                     f'{dict(ShiftType.choices)[shift_type]} смена'
                 ),
             )
@@ -180,7 +288,7 @@ class DriverRatingProductionDataProvider:
                 'м³·км и т·км пока не учитываются.'
             ),
             period_label=(
-                f'{watch_period.name} · '
+                f'{rating_period.name} · '
                 f'{dict(ShiftType.choices)[shift_type]} смена'
             ),
             updated_at=parse_datetime(rating.get('generated_at') or ''),
@@ -201,10 +309,13 @@ class DriverRatingProductionDataProvider:
         return ShiftResultSnapshot()
 
     def personal_kpis(self, employee):
-        watch_period, shift_type, rating = self._rating(employee)
-        if watch_period is None or rating is None:
+        rating_period, shift_type, rating = self._rating(employee)
+        if rating_period is None or rating is None:
             return PersonalKpiSnapshot(
-                status='Закрытые водительские смены ещё не накоплены.'
+                status=(
+                    'На текущую производственную дату период рейтинга '
+                    'не задан либо закрытые водительские смены ещё не накоплены.'
+                )
             )
         item = next(
             (
@@ -221,7 +332,7 @@ class DriverRatingProductionDataProvider:
                     or 'Для выбранной сменной группы результата пока нет.'
                 ),
                 watch_label=(
-                    f'{watch_period.name} · '
+                    f'{rating_period.name} · '
                     f'{dict(ShiftType.choices)[shift_type]} смена'
                 ),
             )
@@ -278,7 +389,7 @@ class DriverRatingProductionDataProvider:
                 'показатели сохранены для будущего расчёта.'
             ),
             watch_label=(
-                f'{watch_period.name} · '
+                f'{rating_period.name} · '
                 f'{dict(ShiftType.choices)[shift_type]} смена'
             ),
             metrics=tuple(metrics),

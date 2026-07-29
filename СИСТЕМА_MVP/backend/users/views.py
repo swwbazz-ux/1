@@ -33,7 +33,8 @@ from core.models import OperationalStateEvent, OperationalStateVersion, bump_ope
 from core.operational_fragments import operational_fragment_response
 from downtimes.models import DowntimeEvent, DowntimeReason
 from references.models import Dormitory, DormitorySection, DumpPoint, Equipment, EquipmentState, EquipmentType, RockType
-from reports.models import ReportTemplate
+from reports.forms import RatingPeriodReferenceForm
+from reports.models import RatingPeriod, ReportTemplate
 from shifts.forms import EquipmentPlanGroupForm
 from shifts.models import (
     AchievementPrize,
@@ -699,6 +700,7 @@ def system_admin_dashboard_view(request):
         ('Подразделения', PersonnelDepartment.objects.count(), '/system-admin/references/personnel-departments/'),
         ('Графики работы', WorkSchedule.objects.count(), '/system-admin/references/work-schedules/'),
         ('Утверждённые составы вахт', WatchComposition.objects.count(), '/system-admin/references/watch-compositions/'),
+        ('Периоды рейтинга', RatingPeriod.objects.count(), '/system-admin/references/rating-periods/'),
         ('Кадровые должности', PersonnelPosition.objects.count(), '/system-admin/references/personnel-positions/'),
         ('Производственные специализации', ProductionSpecialization.objects.count(), '/system-admin/references/production-specializations/'),
         ('Виды техники', EquipmentType.objects.count(), '/admin/references/equipmenttype/'),
@@ -812,6 +814,18 @@ def system_admin_references_view(request):
             ],
         },
         {
+            'title': 'Рейтинг',
+            'items': [
+                {
+                    'name': 'Периоды рейтинга',
+                    'count': RatingPeriod.objects.count(),
+                    'url': '',
+                    'external_url': '/admin/reports/ratingperiod/',
+                    'detail_code': 'rating-periods',
+                },
+            ],
+        },
+        {
             'title': 'Простои',
             'items': [
                 {'name': 'Общий список простоев', 'count': DowntimeReason.objects.count(), 'url': '', 'external_url': '/admin/downtimes/downtimereason/', 'detail_code': 'downtime-reasons'},
@@ -900,6 +914,28 @@ def get_system_admin_reference_configs():
             'preview_fields': ['code', 'is_active'],
             'initial': {'is_active': True},
             'admin_url': '/admin/users/watchcomposition/',
+        },
+        'rating-periods': {
+            'title': 'Периоды рейтинга',
+            'section': 'Рейтинг',
+            'model': RatingPeriod,
+            'form_class': RatingPeriodReferenceForm,
+            'description': (
+                'Период задаёт только даты замера рейтинга. Начальная дата '
+                'включается, конечная — нет. Состав вахты, дневная или ночная '
+                'смена и техника берутся из существующих данных.'
+            ),
+            'fields': [
+                'name',
+                'starts_on',
+                'ends_before',
+                'comment',
+                'is_active',
+            ],
+            'search_fields': ['name', 'comment'],
+            'preview_fields': ['starts_on', 'ends_before', 'is_active'],
+            'initial': {'is_active': True},
+            'admin_url': '/admin/reports/ratingperiod/',
         },
         'personnel-positions': {
             'title': 'Кадровые должности',
@@ -1254,7 +1290,21 @@ def system_admin_reference_detail_view(request, reference_code):
         if action in {'disable', 'enable'} and record and hasattr(record, 'is_active'):
             old_value = 'Активен' if record.is_active else 'Отключен'
             record.is_active = action == 'enable'
-            record.save(update_fields=['is_active'])
+            try:
+                record.save(update_fields=['is_active'])
+            except ValidationError as error:
+                error_messages = []
+                if hasattr(error, 'message_dict'):
+                    for field_messages in error.message_dict.values():
+                        error_messages.extend(field_messages)
+                else:
+                    error_messages.extend(error.messages)
+                messages.error(
+                    request,
+                    'Состояние записи не изменено. '
+                    + ' '.join(str(message) for message in error_messages),
+                )
+                return redirect(reference_detail_redirect_url(record.id))
             new_value = 'Активен' if record.is_active else 'Отключен'
             log_admin_action(access.employee, f'Справочник: {config["title"]}', record, old_value, new_value)
             messages.success(request, 'Состояние записи обновлено.')
