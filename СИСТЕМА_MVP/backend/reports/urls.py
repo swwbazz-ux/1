@@ -15,6 +15,10 @@ from .views import (
     dispatcher_shift_log_view,
     dispatcher_transport_export_view,
     dispatcher_transport_view,
+    driver_rating_employee_photo,
+    driver_rating_tv_data_api,
+    driver_rating_tv_qa_preview_view,
+    driver_rating_tv_view,
     driver_period_rating_api,
     driver_period_shadow_observation_api,
     driver_watch_observation_api,
@@ -36,6 +40,26 @@ from .views import (
 )
 
 urlpatterns = [
+    path(
+        'reports/rating/tv/',
+        driver_rating_tv_view,
+        name='driver_rating_tv',
+    ),
+    path(
+        'reports/rating/tv/qa-preview/',
+        driver_rating_tv_qa_preview_view,
+        name='driver_rating_tv_qa_preview',
+    ),
+    path(
+        'reports/rating/tv/data/',
+        driver_rating_tv_data_api,
+        name='driver_rating_tv_data_api',
+    ),
+    path(
+        'reports/rating/employee-photo/<int:pk>/',
+        driver_rating_employee_photo,
+        name='driver_rating_employee_photo',
+    ),
     path(
         'reports/rating/driver-shadow-data/',
         driver_period_shadow_observation_api,

@@ -228,6 +228,14 @@ PORTAL_WORKING_DRIVER_RATING_ENABLED = _env_bool(
     'PORTAL_WORKING_DRIVER_RATING_ENABLED',
     default=False,
 )
+RATING_TV_SCREEN_ENABLED = _env_bool(
+    'RATING_TV_SCREEN_ENABLED',
+    default=False,
+)
+RATING_TV_QA_PREVIEW_ENABLED = _env_bool(
+    'RATING_TV_QA_PREVIEW_ENABLED',
+    default=False,
+)
 # До появления других участков весь действующий кадровый состав относится к участку № 2.
 # Перед подключением второго участка здесь должен быть указан серверный провайдер
 # членства, возвращающий строго ограниченный Employee QuerySet.
