@@ -7,9 +7,9 @@
     <meta name="robots" content="noindex,nofollow">
     <title>Рейтинг — ООО «Коппер Рисорсез»</title>
     <link rel="icon" href="{% static 'favicon.ico' %}">
-    <link rel="stylesheet" href="{% static 'css/rating-tv-v1.css' %}?v=20260729-9">
+    <link rel="stylesheet" href="{% static 'css/rating-tv-v1.css' %}?v=20260730-2">
 </head>
-<body class="rating-tv-body{% if rating_tv_qa_preview %} is-qa-preview{% endif %}">
+<body class="rating-tv-body{% if rating_tv_qa_preview %} is-qa-preview{% endif %}{% if rating_tv_qa_replay_kind == 'formula' %} is-formula-replay{% endif %}">
     <main class="rating-tv" data-rating-tv>
         <header class="rating-tv__header">
             <div class="rating-tv__brand">
@@ -73,7 +73,13 @@
             <div class="rating-tv__countdown">
                 {% if rating_tv_qa_preview %}
                     <span>Источник данных</span>
-                    <strong data-refresh-countdown>Сохранённый снимок</strong>
+                    <strong data-refresh-countdown>
+                        {% if rating_tv_qa_replay_kind == 'formula' %}
+                            Формульный снимок
+                        {% else %}
+                            Сохранённый снимок
+                        {% endif %}
+                    </strong>
                 {% else %}
                     <span>Следующее обновление через</span>
                     <strong data-refresh-countdown>05:00</strong>
@@ -130,9 +136,19 @@
         {% if rating_tv_qa_preview %}
         <section class="rating-tv__qa" aria-label="Тестовое моделирование">
             <div class="rating-tv__qa-label">
-                <strong>Тестовое моделирование</strong>
+                <strong>
+                    {% if rating_tv_qa_replay_kind == 'formula' %}
+                        Синтетический формульный QA-прогон
+                    {% else %}
+                        Тестовое моделирование
+                    {% endif %}
+                </strong>
                 <span data-qa-replay-status>
-                    Загружаем сохранённые снимки — это не расчёт KPI
+                    {% if rating_tv_qa_replay_kind == 'formula' %}
+                        Синтетические данные · формула рассчитана · результат неофициальный · не для премирования
+                    {% else %}
+                        Загружаем сохранённые снимки — это не расчёт KPI
+                    {% endif %}
                 </span>
             </div>
             <label class="rating-tv__qa-day">
@@ -191,7 +207,11 @@
                 <span class="is-copper">◆ 5 Медный</span>
             </div>
             {% if rating_tv_qa_preview %}
-                <span>Серверный перерасчёт при воспроизведении не выполняется</span>
+                {% if rating_tv_qa_replay_kind == 'formula' %}
+                    <span>Формула рассчитана заранее на синтетических данных; результат неофициальный и не для премирования</span>
+                {% else %}
+                    <span>Серверный перерасчёт при воспроизведении не выполняется</span>
+                {% endif %}
             {% else %}
                 <span>Серверный снимок обновляется раз в 5 минут</span>
             {% endif %}
@@ -208,6 +228,6 @@
     {% if rating_tv_preview_payload %}
         {{ rating_tv_preview_payload|json_script:"rating-tv-preview-payload" }}
     {% endif %}
-    <script src="{% static 'js/rating-tv-v1.js' %}?v=20260729-9" defer></script>
+    <script src="{% static 'js/rating-tv-v1.js' %}?v=20260730-2" defer></script>
 </body>
 </html>

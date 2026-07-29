@@ -68,6 +68,12 @@ from .rating_tv import (
     RATING_TV_ROTATION_SECONDS,
     build_rating_tv_qa_preview,
 )
+from .rating_tv_formula_replay import (
+    RATING_TV_FORMULA_REPLAY_DAY_COUNT,
+    RATING_TV_FORMULA_REPLAY_SCHEMA,
+    RatingTvFormulaReplayError,
+    load_rating_tv_formula_replay,
+)
 from .rating_tv_replay import (
     RATING_TV_REPLAY_SCHEMA,
     RatingTvReplayError,
@@ -794,7 +800,60 @@ def driver_rating_tv_qa_preview_view(request):
     )
 
 
-def _render_driver_rating_tv(request, *, access, qa_preview):
+def _rating_tv_formula_enabled_shift_types():
+    return [
+        shift_type
+        for shift_type, setting_name in (
+            ('day', 'RATING_TV_QA_FORMULA_REPLAY_DAY_ENABLED'),
+            ('night', 'RATING_TV_QA_FORMULA_REPLAY_NIGHT_ENABLED'),
+        )
+        if getattr(settings, setting_name, False)
+    ]
+
+
+@never_cache
+@require_GET
+def driver_rating_tv_formula_qa_preview_view(request):
+    access, access_response = _rating_tv_access_or_redirect(request)
+    if access_response:
+        return access_response
+    enabled_shift_types = _rating_tv_formula_enabled_shift_types()
+    if not (
+        settings.DEBUG
+        and getattr(
+            settings,
+            'RATING_TV_QA_PREVIEW_ENABLED',
+            False,
+        )
+        and enabled_shift_types
+    ):
+        raise Http404
+    initial_shift_type = (
+        'night'
+        if 'night' in enabled_shift_types
+        else enabled_shift_types[0]
+    )
+    return _render_driver_rating_tv(
+        request,
+        access=access,
+        qa_preview=True,
+        qa_replay_kind='formula',
+        initial_shift_type=initial_shift_type,
+        formula_enabled_shift_types=enabled_shift_types,
+    )
+
+
+def _render_driver_rating_tv(
+    request,
+    *,
+    access,
+    qa_preview,
+    qa_replay_kind='visual',
+    initial_shift_type='night',
+    formula_enabled_shift_types=None,
+):
+    formula_enabled_shift_types = formula_enabled_shift_types or []
+    formula_replay = qa_preview and qa_replay_kind == 'formula'
     photo_url_template = reverse(
         'driver_rating_employee_photo',
         args=[0],
@@ -802,34 +861,54 @@ def _render_driver_rating_tv(request, *, access, qa_preview):
     context = {
         'rating_tv_config': {
             'apiUrl': reverse('driver_rating_tv_data_api'),
-            'qaReplayUrl': reverse('driver_rating_tv_qa_replay_api'),
-            'qaReplaySchema': RATING_TV_REPLAY_SCHEMA,
+            'qaReplayKind': qa_replay_kind,
+            'qaReplayUrl': reverse(
+                'driver_rating_tv_formula_qa_replay_api'
+                if formula_replay
+                else 'driver_rating_tv_qa_replay_api'
+            ),
+            'qaReplaySchema': (
+                RATING_TV_FORMULA_REPLAY_SCHEMA
+                if formula_replay
+                else RATING_TV_REPLAY_SCHEMA
+            ),
             'qaReplayEnabled': bool(
                 qa_preview
                 and settings.DEBUG
-                and getattr(
-                    settings,
-                    'RATING_TV_QA_REPLAY_ENABLED',
-                    False,
+                and (
+                    bool(formula_enabled_shift_types)
+                    if formula_replay
+                    else getattr(
+                        settings,
+                        'RATING_TV_QA_REPLAY_ENABLED',
+                        False,
+                    )
                 )
             ),
+            'qaFormulaEnabledShiftTypes': formula_enabled_shift_types,
             'photoUrlTemplate': photo_url_template,
             'refreshSeconds': RATING_TV_REFRESH_SECONDS,
             'rotationSeconds': RATING_TV_ROTATION_SECONDS,
-            'qaDayCount': RATING_TV_QA_DAY_COUNT,
+            'qaDayCount': (
+                RATING_TV_FORMULA_REPLAY_DAY_COUNT
+                if formula_replay
+                else RATING_TV_QA_DAY_COUNT
+            ),
             'qaPreview': qa_preview,
-            'initialShiftType': 'night',
+            'initialShiftType': initial_shift_type,
         },
         'rating_tv_preview_payload': (
             build_rating_tv_qa_preview()
-            if qa_preview
+            if qa_preview and not formula_replay
             else None
         ),
         'rating_tv_qa_preview': qa_preview,
+        'rating_tv_qa_replay_kind': qa_replay_kind,
         'rating_tv_access': access,
     }
     response = render(request, 'reports/rating_tv.html', context)
     response.headers['Cache-Control'] = 'private, no-store'
+    response.headers['X-Content-Type-Options'] = 'nosniff'
     return response
 
 
@@ -901,6 +980,140 @@ def driver_rating_tv_qa_replay_api(request):
     response = _private_rating_json(replay)
     response.headers['X-Rating-Replay-SHA256'] = artifact_sha256
     response.headers['X-Content-Type-Options'] = 'nosniff'
+    return response
+
+
+def _formula_replay_source(shift_type):
+    if shift_type == 'day':
+        return (
+            getattr(
+                settings,
+                'RATING_TV_QA_FORMULA_REPLAY_DAY_ENABLED',
+                False,
+            ),
+            getattr(
+                settings,
+                'RATING_TV_QA_FORMULA_REPLAY_DAY_ARTIFACT',
+                '',
+            ),
+            getattr(
+                settings,
+                'RATING_TV_QA_FORMULA_REPLAY_DAY_SHA256',
+                '',
+            ),
+        )
+    if shift_type == 'night':
+        return (
+            getattr(
+                settings,
+                'RATING_TV_QA_FORMULA_REPLAY_NIGHT_ENABLED',
+                False,
+            ),
+            getattr(
+                settings,
+                'RATING_TV_QA_FORMULA_REPLAY_NIGHT_ARTIFACT',
+                '',
+            ),
+            getattr(
+                settings,
+                'RATING_TV_QA_FORMULA_REPLAY_NIGHT_SHA256',
+                '',
+            ),
+        )
+    return False, '', ''
+
+
+@never_cache
+@require_GET
+def driver_rating_tv_formula_qa_replay_api(request):
+    if not (
+        settings.DEBUG
+        and getattr(
+            settings,
+            'RATING_TV_QA_PREVIEW_ENABLED',
+            False,
+        )
+    ):
+        return _private_rating_json(
+            {'error': 'Формульное QA-воспроизведение рейтинга не включено.'},
+            status=404,
+        )
+
+    shift_type_values = request.GET.getlist('shift_type')
+    if (
+        set(request.GET.keys()) != {'shift_type'}
+        or len(shift_type_values) != 1
+        or shift_type_values[0] not in {ShiftType.DAY, ShiftType.NIGHT}
+    ):
+        return _private_rating_json(
+            {
+                'error': (
+                    'Нужно передать ровно один shift_type: day или night.'
+                ),
+            },
+            status=400,
+        )
+    shift_type = shift_type_values[0]
+    enabled, artifact_path, artifact_sha256 = _formula_replay_source(
+        shift_type,
+    )
+    if not enabled:
+        return _private_rating_json(
+            {
+                'error': (
+                    'Формульное QA-воспроизведение для выбранной смены '
+                    'не включено.'
+                ),
+            },
+            status=404,
+        )
+
+    access = get_rating_observation_access(request)
+    if access is None:
+        return _private_rating_json(
+            {'error': 'Требуется авторизация.'},
+            status=401,
+        )
+    if access.role.code not in {'dispatcher', 'admin', 'manager'}:
+        return _private_rating_json(
+            {'error': 'Недостаточно прав.'},
+            status=403,
+        )
+    if get_rating_site_scope(access) is None:
+        return _private_rating_json(
+            {'error': 'Недостаточно прав.'},
+            status=403,
+        )
+
+    try:
+        replay, loaded_sha256 = load_rating_tv_formula_replay(
+            artifact_path,
+            expected_sha256=artifact_sha256,
+        )
+        replay_shift_type = (
+            replay.get('scope', {}).get('shift_type')
+            if isinstance(replay, dict)
+            else None
+        )
+        if replay_shift_type != shift_type:
+            raise RatingTvFormulaReplayError(
+                'Formula replay не соответствует выбранной смене.',
+            )
+    except RatingTvFormulaReplayError:
+        return _private_rating_json(
+            {
+                'error': (
+                    'Формульное QA-воспроизведение отсутствует, '
+                    'не соответствует смене или не прошло проверку '
+                    'целостности.'
+                ),
+            },
+            status=409,
+        )
+
+    response = _private_rating_json(replay)
+    response.headers['X-Rating-Replay-SHA256'] = loaded_sha256
+    response.headers['X-Rating-Replay-Kind'] = 'formula'
     return response
 
 

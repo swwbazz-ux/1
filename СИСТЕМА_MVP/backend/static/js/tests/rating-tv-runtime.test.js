@@ -664,6 +664,229 @@ function buildReplayDocument() {
     };
 }
 
+function buildFormulaReplayDocument(shiftType = "night") {
+    const shiftLabel = shiftType === "day" ? "Дневная" : "Ночная";
+    const ratingLevels = {
+        1: "Алмазный уровень",
+        2: "Платиновый уровень",
+        3: "Золотой уровень",
+        4: "Серебряный уровень",
+        5: "Медный уровень"
+    };
+    const ratingPeriod = {
+        id: -3101,
+        name: "Синтетический формульный период",
+        starts_on: "2026-05-01",
+        ends_before: "2026-05-31",
+        is_active: true
+    };
+    const watchComposition = {
+        id: shiftType === "day" ? -3202 : -3201,
+        code: `qa-formula-${shiftType}`,
+        name: `Синтетический ${shiftLabel.toLowerCase()} состав`,
+        is_active: true
+    };
+    const replayId = `QA-FORMULA-RUNTIME-${shiftType.toUpperCase()}`;
+    const cohort = Array.from({length: 53}, (_, index) => ({
+        employee_id: -(index + 1),
+        full_name: `ТЕСТ_Водитель ${String(index + 1).padStart(2, "0")}`
+    }));
+    const scoreFor = (ordinal) => {
+        if (ordinal === 1) return "99.0001";
+        if (ordinal === 2) return "99.0000";
+        if (ordinal === 3 || ordinal === 4) return "98.0000";
+        return (98 - (ordinal - 4) / 10).toFixed(4);
+    };
+    const snapshots = [];
+    let previousPlaces = new Map();
+    let previousStatuses = new Map();
+
+    for (let day = 1; day <= 30; day += 1) {
+        const entries = [];
+        let previousScore = null;
+        let densePlace = 0;
+        for (let ordinal = 1; ordinal <= 51; ordinal += 1) {
+            const score = scoreFor(ordinal);
+            if (previousScore === null || score !== previousScore) {
+                densePlace += 1;
+            }
+            const employeeId = -ordinal;
+            const place = densePlace;
+            entries.push({
+                employee_id: employeeId,
+                full_name: cohort[ordinal - 1].full_name,
+                equipment: [`БелАЗ №${String(ordinal).padStart(2, "0")}`],
+                row_status: "rated",
+                ranking_eligible: true,
+                shift_count: day,
+                withheld_shift_count: 0,
+                withheld_reasons: {},
+                quality_flags: [],
+                quality_flags_status: "captured",
+                trip_count: 17 * day,
+                volume_m3: (382.5 * day).toFixed(2),
+                tonnage_t: (939.25 * day).toFixed(2),
+                score,
+                blocks: {
+                    production: "80.0000",
+                    work_time: "81.0000",
+                    stability: "82.0000",
+                    assignments: "83.0000",
+                    digital_accounting: "84.0000"
+                },
+                confidence: "90.0000",
+                source_shift_ids: Array.from(
+                    {length: day},
+                    (_, shiftIndex) => -(ordinal * 1000 + shiftIndex + 1)
+                ),
+                place,
+                shared_score_place: place,
+                display_order: ordinal,
+                level: ratingLevels[place] || "",
+                position_delta: previousStatuses.get(employeeId) === "rated"
+                    ? previousPlaces.get(employeeId) - place
+                    : null
+            });
+            previousScore = score;
+        }
+        entries.push({
+            employee_id: -52,
+            full_name: cohort[51].full_name,
+            equipment: ["БелАЗ №52"],
+            row_status: "withheld",
+            ranking_eligible: false,
+            shift_count: day,
+            withheld_shift_count: day,
+            withheld_reasons: {"blocking_quality:data_conflict": day},
+            quality_flags: ["data_conflict"],
+            quality_flags_status: "captured",
+            trip_count: null,
+            volume_m3: null,
+            tonnage_t: null,
+            score: null,
+            blocks: null,
+            confidence: null,
+            source_shift_ids: Array.from(
+                {length: day},
+                (_, shiftIndex) => -(52000 + shiftIndex + 1)
+            ),
+            place: null,
+            shared_score_place: null,
+            display_order: 52,
+            level: "",
+            position_delta: null
+        });
+        entries.push({
+            employee_id: -53,
+            full_name: cohort[52].full_name,
+            equipment: [],
+            row_status: "not_observed",
+            ranking_eligible: false,
+            shift_count: 0,
+            withheld_shift_count: 0,
+            withheld_reasons: {},
+            quality_flags: [],
+            quality_flags_status: "not_applicable",
+            trip_count: null,
+            volume_m3: null,
+            tonnage_t: null,
+            score: null,
+            blocks: null,
+            confidence: null,
+            source_shift_ids: [],
+            place: null,
+            shared_score_place: null,
+            display_order: 53,
+            level: "",
+            position_delta: null
+        });
+
+        previousPlaces = new Map(
+            entries
+                .filter((entry) => entry.row_status === "rated")
+                .map((entry) => [entry.employee_id, entry.place])
+        );
+        previousStatuses = new Map(
+            entries.map((entry) => [entry.employee_id, entry.row_status])
+        );
+        const workDate = `2026-05-${String(day).padStart(2, "0")}`;
+        const generatedAt = `${workDate}T22:00:00+10:00`;
+        snapshots.push({
+            day,
+            work_date: workDate,
+            as_of: generatedAt,
+            previous_payload_sha256: day === 1 ? null : `${day - 1}`,
+            payload_sha256: `${day}`,
+            payload: {
+                available: true,
+                calculation_available: true,
+                official: false,
+                official_rating_eligible: false,
+                synthetic: true,
+                formula_evaluated: true,
+                rating_mode: "qa_formula_replay",
+                scope_type: "rating_period",
+                formula_version: "DRIVER_WATCH_V3_NO_DISTANCE_TIME_POLICY_NEUTRAL",
+                formula_label: "Рабочая формула",
+                status: `Синтетический формульный день ${day}`,
+                generated_at: generatedAt,
+                rating_period: ratingPeriod,
+                watch_composition: watchComposition,
+                shift_type: shiftType,
+                shift_type_label: shiftLabel,
+                available_rating_periods: [ratingPeriod],
+                available_watch_compositions: [watchComposition],
+                entries,
+                qa_day: day,
+                qa_day_count: 30,
+                qa_work_date: workDate,
+                replay_run_id: replayId
+            }
+        });
+    }
+
+    return {
+        schema: "copper.driver-rating-formula-replay",
+        schema_version: 1,
+        data_classification: "isolated_synthetic_formula_qa_only",
+        synthetic: true,
+        formula_evaluated: true,
+        official: false,
+        official_rating_eligible: false,
+        warning: "Синтетический формульный QA-прогон",
+        replay: {
+            id: replayId,
+            label: "Runtime formula replay",
+            scenario_version: "RUNTIME_FORMULA_V1",
+            rating_mode: "qa_formula_replay",
+            synthetic: true,
+            formula_evaluated: true,
+            official: false,
+            day_count: 30,
+            expected_employee_count: 53,
+            initial_day: 1,
+            base_step_ms: 3000
+        },
+        scope: {
+            scope_type: "rating_period",
+            profession: "driver",
+            profession_label: "Водитель самосвала",
+            rating_period: ratingPeriod,
+            watch_composition: watchComposition,
+            shift_type: shiftType,
+            shift_type_label: shiftLabel,
+            cohort
+        },
+        snapshots,
+        integrity: {
+            algorithm: "SHA-256",
+            canonicalization: "json-sort-keys-utf8-v1",
+            snapshot_chain_sha256: "runtime",
+            canonical_sha256: "runtime"
+        }
+    };
+}
+
 
 function queuedResponse(payload, status = 200) {
     return {payload, status};
@@ -674,10 +897,37 @@ function queuedFailure(error) {
     return {error};
 }
 
+function deferredResponse() {
+    let resolve;
+    let reject;
+    const promise = new Promise((resolvePromise, rejectPromise) => {
+        resolve = resolvePromise;
+        reject = rejectPromise;
+    });
+    return {
+        promise,
+        resolve(payload, status = 200) {
+            resolve({
+                ok: status >= 200 && status < 300,
+                status,
+                json() {
+                    return Promise.resolve(payload);
+                }
+            });
+        },
+        reject
+    };
+}
+
 
 function createRuntime({
     qaPreview = false,
     qaReplayEnabled = false,
+    qaReplayKind = "visual",
+    qaFormulaEnabledShiftTypes = (
+        qaReplayKind === "formula" ? ["day", "night"] : []
+    ),
+    initialShiftType = "night",
     previewPayload = null,
     responses = []
 } = {}) {
@@ -696,9 +946,15 @@ function createRuntime({
         rotationSeconds: 15,
         qaPreview,
         qaReplayEnabled,
-        qaReplayUrl: "/reports/rating/tv/qa-replay-data/",
-        qaReplaySchema: "copper.driver-rating-replay",
-        initialShiftType: "night"
+        qaReplayKind,
+        qaReplayUrl: qaReplayKind === "formula"
+            ? "/reports/rating/tv/qa-formula-replay-data/"
+            : "/reports/rating/tv/qa-replay-data/",
+        qaReplaySchema: qaReplayKind === "formula"
+            ? "copper.driver-rating-formula-replay"
+            : "copper.driver-rating-replay",
+        qaFormulaEnabledShiftTypes,
+        initialShiftType
     });
     document.nodesById.set("rating-tv-config", configNode);
     if (previewPayload) {
@@ -1121,6 +1377,246 @@ test("fullscreen rejection preserves replay day phase and status", async () => {
         runtime.elements.fullscreen.title,
         "Полноэкранный режим недоступен"
     );
+});
+
+
+test("formula replay uses its pinned schema and preserves exact nullable KPI rows", async () => {
+    const runtime = createRuntime({
+        qaPreview: true,
+        qaReplayEnabled: true,
+        qaReplayKind: "formula",
+        responses: [queuedResponse(buildFormulaReplayDocument("night"))]
+    });
+    await runtime.flush();
+
+    assert.equal(runtime.fetchCalls.length, 1);
+    const requestUrl = new URL(runtime.fetchCalls[0].url);
+    assert.equal(
+        requestUrl.pathname,
+        "/reports/rating/tv/qa-formula-replay-data/"
+    );
+    assert.deepEqual(
+        Array.from(requestUrl.searchParams.keys()),
+        ["shift_type"]
+    );
+    assert.equal(requestUrl.searchParams.get("shift_type"), "night");
+    assert.equal(runtime.fetchCalls[0].options.signal.aborted, false);
+    assert.equal(runtime.window.RatingTvScreen.state.qaReplayPhase, "PAUSED");
+    assert.equal(runtime.elements.grid.children.length, 53);
+
+    const firstScore = runtime.elements.grid.children[0]
+        .querySelector(".rating-tv__score").children[0].textContent;
+    const secondScore = runtime.elements.grid.children[1]
+        .querySelector(".rating-tv__score").children[0].textContent;
+    assert.equal(firstScore, "99.0001");
+    assert.equal(secondScore, "99.0000");
+
+    for (const row of runtime.elements.grid.children) {
+        const avatar = row.querySelector(".rating-tv__avatar");
+        assert.equal(avatar.children.length, 0);
+    }
+    const unrankedExpectations = [
+        {
+            rowIndex: 51,
+            rowStatus: "withheld",
+            rowClass: "is-withheld",
+            statusText: "Удержан",
+            statusLabel: "проверка данных"
+        },
+        {
+            rowIndex: 52,
+            rowStatus: "not_observed",
+            rowClass: "is-not-observed",
+            statusText: "Нет смен",
+            statusLabel: "за период"
+        }
+    ];
+    for (const expected of unrankedExpectations) {
+        const row = runtime.elements.grid.children[expected.rowIndex];
+        const sourceEntry = runtime.window.RatingTvScreen.state.qaReplay
+            .snapshots[0].payload.entries[expected.rowIndex];
+        assert.equal(row.dataset.rowStatus, expected.rowStatus);
+        assert.equal(row.classList.contains(expected.rowClass), true);
+        assert.equal(row.dataset.place, "");
+        assert.equal(row.classList.contains("is-premium"), false);
+        const place = row.querySelector(".rating-tv__place");
+        assert.equal(place.children.length, 1);
+        assert.equal(place.children[0].textContent, "—");
+        const score = row.querySelector(".rating-tv__score");
+        assert.equal(
+            score.children[0].textContent,
+            expected.statusText
+        );
+        assert.equal(
+            score.children[1].textContent,
+            expected.statusLabel
+        );
+        assert.equal(
+            score.children.some((child) => child.textContent === "балл"),
+            false
+        );
+        const movement = row.querySelector(".rating-tv__movement");
+        assert.equal(movement.textContent, "");
+        assert.equal(movement.classList.contains("is-unranked"), true);
+        assert.equal(movement.getAttribute("aria-hidden"), "true");
+        for (const field of [
+            "score",
+            "place",
+            "shared_score_place",
+            "position_delta"
+        ]) {
+            assert.equal(sourceEntry[field], null);
+        }
+        assert.equal(sourceEntry.level, "");
+    }
+});
+
+
+test("visual and formula replay validators never autodetect or fall back", async () => {
+    const formulaAsVisual = createRuntime({
+        qaPreview: true,
+        qaReplayEnabled: true,
+        qaReplayKind: "visual",
+        responses: [queuedResponse(buildFormulaReplayDocument("night"))]
+    });
+    await formulaAsVisual.flush();
+    assert.equal(
+        formulaAsVisual.window.RatingTvScreen.state.qaReplayPhase,
+        "ERROR"
+    );
+    assert.equal(formulaAsVisual.window.RatingTvScreen.state.qaReplay, null);
+
+    const visualAsFormula = createRuntime({
+        qaPreview: true,
+        qaReplayEnabled: true,
+        qaReplayKind: "formula",
+        responses: [queuedResponse(buildReplayDocument())]
+    });
+    await visualAsFormula.flush();
+    assert.equal(
+        visualAsFormula.window.RatingTvScreen.state.qaReplayPhase,
+        "ERROR"
+    );
+    assert.equal(visualAsFormula.window.RatingTvScreen.state.qaReplay, null);
+});
+
+
+test("formula replay rejects fake zero KPI and non-four-decimal rated score", async () => {
+    const fakeZero = buildFormulaReplayDocument("night");
+    const withheld = fakeZero.snapshots[0].payload.entries[51];
+    withheld.score = "0.0000";
+    withheld.place = 0;
+    withheld.shared_score_place = 0;
+    withheld.position_delta = 0;
+
+    const zeroRuntime = createRuntime({
+        qaPreview: true,
+        qaReplayEnabled: true,
+        qaReplayKind: "formula",
+        responses: [queuedResponse(fakeZero)]
+    });
+    await zeroRuntime.flush();
+    assert.equal(
+        zeroRuntime.window.RatingTvScreen.state.qaReplayPhase,
+        "ERROR"
+    );
+    assert.equal(zeroRuntime.elements.grid.hidden, true);
+
+    const rounded = buildFormulaReplayDocument("night");
+    rounded.snapshots[0].payload.entries[0].score = "99.00";
+    const roundedRuntime = createRuntime({
+        qaPreview: true,
+        qaReplayEnabled: true,
+        qaReplayKind: "formula",
+        responses: [queuedResponse(rounded)]
+    });
+    await roundedRuntime.flush();
+    assert.equal(
+        roundedRuntime.window.RatingTvScreen.state.qaReplayPhase,
+        "ERROR"
+    );
+});
+
+
+test("formula shift switch aborts stale response and preserves day on pause", async () => {
+    const delayedDay = deferredResponse();
+    const runtime = createRuntime({
+        qaPreview: true,
+        qaReplayEnabled: true,
+        qaReplayKind: "formula",
+        responses: [
+            queuedResponse(buildFormulaReplayDocument("night")),
+            {promise: delayedDay.promise},
+            queuedResponse(buildFormulaReplayDocument("night"))
+        ]
+    });
+    await runtime.flush();
+
+    runtime.elements.qaDaySelect.value = "12";
+    runtime.elements.qaDaySelect.dispatch("change");
+    runtime.elements.qaForward.dispatch("click");
+    assert.equal(
+        runtime.window.RatingTvScreen.state.qaReplayPhase,
+        "PLAYING_FORWARD"
+    );
+
+    runtime.elements.shiftType.value = "day";
+    runtime.elements.shiftType.dispatch("change");
+    assert.equal(runtime.fetchCalls.length, 2);
+    assert.equal(runtime.elements.grid.hidden, true);
+    assert.match(runtime.elements.messageText.textContent, /формульный/i);
+    const staleSignal = runtime.fetchCalls[1].options.signal;
+    assert.equal(staleSignal.aborted, false);
+
+    runtime.elements.shiftType.value = "night";
+    runtime.elements.shiftType.dispatch("change");
+    assert.equal(runtime.fetchCalls.length, 3);
+    assert.equal(staleSignal.aborted, true);
+    await runtime.flush();
+
+    assert.equal(
+        runtime.window.RatingTvScreen.state.qaReplay.scope.shift_type,
+        "night"
+    );
+    assert.equal(runtime.window.RatingTvScreen.state.qaReplayDay, 12);
+    assert.equal(
+        runtime.window.RatingTvScreen.state.qaReplayPhase,
+        "PAUSED"
+    );
+    assert.equal(runtime.elements.grid.hidden, false);
+
+    delayedDay.resolve(buildFormulaReplayDocument("day"));
+    await runtime.flush();
+    assert.equal(
+        runtime.window.RatingTvScreen.state.qaReplay.scope.shift_type,
+        "night"
+    );
+    assert.equal(runtime.window.RatingTvScreen.state.qaReplayDay, 12);
+    assert.equal(
+        runtime.window.RatingTvScreen.state.qaReplayPhase,
+        "PAUSED"
+    );
+});
+
+
+test("formula preview cannot force a disabled shift", async () => {
+    const runtime = createRuntime({
+        qaPreview: true,
+        qaReplayEnabled: true,
+        qaReplayKind: "formula",
+        qaFormulaEnabledShiftTypes: ["night"],
+        responses: [queuedResponse(buildFormulaReplayDocument("night"))]
+    });
+    await runtime.flush();
+
+    assert.equal(runtime.elements.shiftType.disabled, true);
+    runtime.elements.shiftType.value = "day";
+    runtime.elements.shiftType.dispatch("change");
+    await runtime.flush();
+
+    assert.equal(runtime.fetchCalls.length, 1);
+    assert.equal(runtime.window.RatingTvScreen.state.shiftType, "night");
+    assert.equal(runtime.elements.shiftType.value, "night");
 });
 
 

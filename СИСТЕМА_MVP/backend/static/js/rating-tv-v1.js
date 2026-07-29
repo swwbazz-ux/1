@@ -61,6 +61,16 @@
         rotationPlaying: true,
         qaPreview: config.qaPreview === true,
         qaReplayEnabled: config.qaReplayEnabled === true,
+        qaReplayKind: ["visual", "formula"].includes(config.qaReplayKind)
+            ? config.qaReplayKind
+            : "",
+        qaFormulaEnabledShiftTypes: Array.isArray(
+            config.qaFormulaEnabledShiftTypes
+        )
+            ? config.qaFormulaEnabledShiftTypes.filter(function (value) {
+                return value === "day" || value === "night";
+            })
+            : [],
         qaReplay: null,
         qaReplayPhase: config.qaPreview === true ? "BOOTING" : "DISABLED",
         qaReplayDay: 1,
@@ -71,6 +81,8 @@
         qaReplayBaseStepMs: 3000,
         qaPlaybackGeneration: 0,
         qaReplayTimerId: null,
+        qaRequestGeneration: 0,
+        qaRequestController: null,
         requestGeneration: 0,
         requestController: null,
         requestInFlight: false,
@@ -167,6 +179,26 @@
         );
     }
 
+    function updateQaShiftControl() {
+        if (!elements.shiftType || !state.qaPreview) return;
+        if (state.qaReplayKind !== "formula") {
+            elements.shiftType.disabled = true;
+            return;
+        }
+        Array.from(elements.shiftType.children).forEach(
+            function (option) {
+                option.disabled = (
+                    !state.qaFormulaEnabledShiftTypes.includes(
+                        option.value
+                    )
+                );
+            }
+        );
+        elements.shiftType.disabled = (
+            state.qaFormulaEnabledShiftTypes.length < 2
+        );
+    }
+
     function updateScopeControls(payload) {
         state.availablePeriods = Array.isArray(payload.available_rating_periods)
             ? payload.available_rating_periods
@@ -232,7 +264,7 @@
         if (state.qaPreview) {
             if (elements.period) elements.period.disabled = true;
             if (elements.composition) elements.composition.disabled = true;
-            if (elements.shiftType) elements.shiftType.disabled = true;
+            updateQaShiftControl();
         }
     }
 
@@ -258,19 +290,27 @@
     }
 
     function photoUrl(employeeId) {
+        var normalizedEmployeeId = Number(employeeId);
         if (
             !config.photoUrlTemplate
-            || Number(employeeId) <= 0
+            || !Number.isSafeInteger(normalizedEmployeeId)
+            || normalizedEmployeeId <= 0
         ) {
             return "";
         }
         return String(config.photoUrlTemplate).replace(
             "__employee_id__",
-            encodeURIComponent(String(employeeId))
+            encodeURIComponent(String(normalizedEmployeeId))
         );
     }
 
     function movementFor(entry) {
+        if (
+            entry.row_status === "withheld"
+            || entry.row_status === "not_observed"
+        ) {
+            return null;
+        }
         if (
             entry.position_delta != null
             && entry.position_delta !== ""
@@ -283,7 +323,14 @@
 
     function setMovementContent(movement, delta) {
         movement.className = "rating-tv__movement";
-        if (delta > 0) {
+        movement.setAttribute(
+            "aria-hidden",
+            delta == null ? "true" : "false"
+        );
+        if (delta == null) {
+            movement.classList.add("is-unranked");
+            movement.textContent = "";
+        } else if (delta > 0) {
             movement.classList.add("is-up");
             movement.textContent = "↑ " + delta;
         } else if (delta < 0) {
@@ -319,13 +366,23 @@
 
     function updateRatingRow(row, entry) {
         var place = Number(entry.place);
+        var rowStatus = entry.row_status || "";
+        var isWithheld = rowStatus === "withheld";
+        var isNotObserved = rowStatus === "not_observed";
+        var isUnranked = isWithheld || isNotObserved;
         row.className = "rating-tv__row";
         row.dataset.employeeId = String(entry.employee_id || "");
         row.dataset.place = String(entry.place == null ? "" : entry.place);
+        row.dataset.rowStatus = rowStatus;
         row.dataset.displayOrder = String(
             entry.display_order == null ? "" : entry.display_order
         );
-        if (place >= 1 && place <= 5) {
+        if (isWithheld) {
+            row.classList.add("is-withheld");
+        } else if (isNotObserved) {
+            row.classList.add("is-not-observed");
+        }
+        if (!isUnranked && place >= 1 && place <= 5) {
             row.classList.add("is-premium", "is-place-" + place);
         }
 
@@ -336,10 +393,12 @@
             row._ratingPlaceNode = placeNode;
         }
         placeNode.replaceChildren();
-        var gem = document.createElement("b");
-        gem.textContent = "◆";
-        gem.setAttribute("aria-hidden", "true");
-        placeNode.appendChild(gem);
+        if (!isUnranked) {
+            var gem = document.createElement("b");
+            gem.textContent = "◆";
+            gem.setAttribute("aria-hidden", "true");
+            placeNode.appendChild(gem);
+        }
         placeNode.appendChild(
             document.createTextNode(String(entry.place == null ? "—" : entry.place))
         );
@@ -359,13 +418,23 @@
         var score = document.createElement("span");
         score.className = "rating-tv__score";
         var scoreValue = document.createElement("b");
-        scoreValue.textContent = (
-            entry.score == null || entry.score === ""
-                ? "—"
-                : String(entry.score)
-        );
         var scoreLabel = document.createElement("small");
-        scoreLabel.textContent = "балл";
+        if (isWithheld) {
+            score.classList.add("is-status", "is-withheld");
+            scoreValue.textContent = "Удержан";
+            scoreLabel.textContent = "проверка данных";
+        } else if (isNotObserved) {
+            score.classList.add("is-status", "is-not-observed");
+            scoreValue.textContent = "Нет смен";
+            scoreLabel.textContent = "за период";
+        } else {
+            scoreValue.textContent = (
+                entry.score == null || entry.score === ""
+                    ? "—"
+                    : String(entry.score)
+            );
+            scoreLabel.textContent = "балл";
+        }
         score.append(scoreValue, scoreLabel);
 
         var movement = document.createElement("span");
@@ -681,9 +750,12 @@
         Array.from(elements.grid.children).forEach(function (row) {
             var movement = row.querySelector(".rating-tv__movement");
             if (!movement) return;
+            var employeeId = String(row.dataset.employeeId);
             setMovementContent(
                 movement,
-                deltas.get(String(row.dataset.employeeId)) || 0
+                deltas.has(employeeId)
+                    ? deltas.get(employeeId)
+                    : 0
             );
         });
     }
@@ -732,7 +804,7 @@
         return JSON.stringify(left) === JSON.stringify(right);
     }
 
-    function validateQaReplay(document) {
+    function validateVisualQaReplay(document) {
         if (!document || typeof document !== "object") return false;
         if (document.schema !== config.qaReplaySchema) return false;
         if (
@@ -896,6 +968,312 @@
             previousPlaces = places;
         }
         return true;
+    }
+
+    function isNonnegativeInteger(value) {
+        return (
+            Number.isInteger(value)
+            && value >= 0
+        );
+    }
+
+    function isFormulaScore(value) {
+        return (
+            typeof value === "string"
+            && /^(?:0|[1-9][0-9]{0,2})\.[0-9]{4}$/.test(value)
+            && Number.isFinite(Number(value))
+            && Number(value) >= 0
+            && Number(value) <= 100
+        );
+    }
+
+    function isFormulaQuantity(value) {
+        return (
+            typeof value === "string"
+            && /^(?:0|[1-9][0-9]*)\.[0-9]{2}$/.test(value)
+        );
+    }
+
+    function validateFormulaQaReplay(replayDocument) {
+        if (!replayDocument || typeof replayDocument !== "object") {
+            return false;
+        }
+        if (replayDocument.schema !== config.qaReplaySchema) return false;
+        if (
+            replayDocument.schema_version !== 1
+            || replayDocument.synthetic !== true
+            || replayDocument.formula_evaluated !== true
+            || replayDocument.official !== false
+            || replayDocument.official_rating_eligible !== false
+        ) {
+            return false;
+        }
+        var replay = replayDocument.replay;
+        var scope = replayDocument.scope;
+        var snapshots = replayDocument.snapshots;
+        if (
+            !replay
+            || replay.rating_mode !== "qa_formula_replay"
+            || replay.synthetic !== true
+            || replay.formula_evaluated !== true
+            || replay.official !== false
+            || replay.day_count !== 30
+            || replay.expected_employee_count !== 53
+            || replay.initial_day !== 1
+            || !scope
+            || scope.shift_type !== state.shiftType
+            || !["day", "night"].includes(scope.shift_type)
+            || !scope.rating_period
+            || !scope.watch_composition
+            || !Array.isArray(scope.cohort)
+            || scope.cohort.length !== 53
+            || !Array.isArray(snapshots)
+            || snapshots.length !== 30
+        ) {
+            return false;
+        }
+
+        var cohortNames = new Map();
+        for (
+            var cohortIndex = 0;
+            cohortIndex < scope.cohort.length;
+            cohortIndex += 1
+        ) {
+            var cohortEntry = scope.cohort[cohortIndex];
+            if (
+                !cohortEntry
+                || !Number.isInteger(cohortEntry.employee_id)
+                || cohortEntry.employee_id >= 0
+                || cohortNames.has(cohortEntry.employee_id)
+                || typeof cohortEntry.full_name !== "string"
+                || !cohortEntry.full_name.trim()
+            ) {
+                return false;
+            }
+            cohortNames.set(
+                cohortEntry.employee_id,
+                cohortEntry.full_name
+            );
+        }
+
+        var blockNames = [
+            "production",
+            "work_time",
+            "stability",
+            "assignments",
+            "digital_accounting"
+        ];
+        var levelNames = {
+            1: "Алмазный уровень",
+            2: "Платиновый уровень",
+            3: "Золотой уровень",
+            4: "Серебряный уровень",
+            5: "Медный уровень"
+        };
+        var previousStatuses = new Map();
+        var previousPlaces = new Map();
+
+        for (
+            var snapshotIndex = 0;
+            snapshotIndex < snapshots.length;
+            snapshotIndex += 1
+        ) {
+            var snapshot = snapshots[snapshotIndex];
+            var day = snapshotIndex + 1;
+            var payload = snapshot && snapshot.payload;
+            if (
+                !snapshot
+                || snapshot.day !== day
+                || !payload
+                || payload.available !== true
+                || typeof payload.calculation_available !== "boolean"
+                || payload.rating_mode !== "qa_formula_replay"
+                || payload.synthetic !== true
+                || payload.formula_evaluated !== true
+                || payload.official !== false
+                || payload.official_rating_eligible !== false
+                || payload.scope_type !== "rating_period"
+                || payload.qa_day !== day
+                || payload.qa_day_count !== 30
+                || payload.replay_run_id !== replay.id
+                || payload.shift_type !== scope.shift_type
+                || !sameJson(payload.rating_period, scope.rating_period)
+                || !sameJson(
+                    payload.watch_composition,
+                    scope.watch_composition
+                )
+                || !Array.isArray(payload.entries)
+                || payload.entries.length !== 53
+            ) {
+                return false;
+            }
+
+            var seenIds = new Set();
+            var seenOrders = new Set();
+            var orderedEntries = payload.entries.slice().sort(
+                function (left, right) {
+                    return left.display_order - right.display_order;
+                }
+            );
+            var currentStatuses = new Map();
+            var currentPlaces = new Map();
+            var previousScore = null;
+            var densePlace = 0;
+            var foundUnrated = false;
+
+            for (
+                var entryIndex = 0;
+                entryIndex < orderedEntries.length;
+                entryIndex += 1
+            ) {
+                var entry = orderedEntries[entryIndex];
+                if (
+                    !entry
+                    || !Number.isInteger(entry.employee_id)
+                    || entry.employee_id >= 0
+                    || seenIds.has(entry.employee_id)
+                    || cohortNames.get(entry.employee_id)
+                        !== entry.full_name
+                    || !Number.isInteger(entry.display_order)
+                    || entry.display_order !== entryIndex + 1
+                    || seenOrders.has(entry.display_order)
+                    || !["rated", "withheld", "not_observed"].includes(
+                        entry.row_status
+                    )
+                    || !isNonnegativeInteger(entry.shift_count)
+                    || !isNonnegativeInteger(entry.withheld_shift_count)
+                    || typeof entry.level !== "string"
+                ) {
+                    return false;
+                }
+                seenIds.add(entry.employee_id);
+                seenOrders.add(entry.display_order);
+                currentStatuses.set(
+                    entry.employee_id,
+                    entry.row_status
+                );
+
+                if (entry.row_status !== "rated") {
+                    foundUnrated = true;
+                    if (
+                        entry.ranking_eligible !== false
+                        || entry.score !== null
+                        || entry.blocks !== null
+                        || entry.confidence !== null
+                        || entry.trip_count !== null
+                        || entry.volume_m3 !== null
+                        || entry.tonnage_t !== null
+                        || entry.place !== null
+                        || entry.shared_score_place !== null
+                        || entry.position_delta !== null
+                        || entry.level !== ""
+                    ) {
+                        return false;
+                    }
+                    if (
+                        entry.row_status === "withheld"
+                        && (
+                            entry.shift_count < 1
+                            || entry.withheld_shift_count < 1
+                        )
+                    ) {
+                        return false;
+                    }
+                    if (
+                        entry.row_status === "not_observed"
+                        && (
+                            entry.shift_count !== 0
+                            || entry.withheld_shift_count !== 0
+                        )
+                    ) {
+                        return false;
+                    }
+                    continue;
+                }
+
+                if (
+                    foundUnrated
+                    || entry.ranking_eligible !== true
+                    || entry.shift_count < 1
+                    || entry.withheld_shift_count !== 0
+                    || !isNonnegativeInteger(entry.trip_count)
+                    || !isFormulaQuantity(entry.volume_m3)
+                    || !isFormulaQuantity(entry.tonnage_t)
+                    || !isFormulaScore(entry.score)
+                    || !isFormulaScore(entry.confidence)
+                    || !entry.blocks
+                    || typeof entry.blocks !== "object"
+                    || Object.keys(entry.blocks).length !== blockNames.length
+                    || !blockNames.every(function (name) {
+                        return (
+                            Object.prototype.hasOwnProperty.call(
+                                entry.blocks,
+                                name
+                            )
+                            && isFormulaScore(entry.blocks[name])
+                        );
+                    })
+                    || !Number.isInteger(entry.place)
+                    || entry.place < 1
+                    || entry.shared_score_place !== entry.place
+                ) {
+                    return false;
+                }
+                if (
+                    previousScore !== null
+                    && Number(entry.score) > Number(previousScore)
+                ) {
+                    return false;
+                }
+                if (
+                    previousScore === null
+                    || entry.score !== previousScore
+                ) {
+                    densePlace += 1;
+                }
+                if (
+                    entry.place !== densePlace
+                    || entry.level !== (levelNames[densePlace] || "")
+                ) {
+                    return false;
+                }
+                var expectedDelta = (
+                    previousStatuses.get(entry.employee_id) === "rated"
+                        ? (
+                            previousPlaces.get(entry.employee_id)
+                            - entry.place
+                        )
+                        : null
+                );
+                if (entry.position_delta !== expectedDelta) {
+                    return false;
+                }
+                currentPlaces.set(entry.employee_id, entry.place);
+                previousScore = entry.score;
+            }
+
+            if (
+                seenIds.size !== cohortNames.size
+                || Array.from(cohortNames.keys()).some(function (employeeId) {
+                    return !seenIds.has(employeeId);
+                })
+            ) {
+                return false;
+            }
+            previousStatuses = currentStatuses;
+            previousPlaces = currentPlaces;
+        }
+        return true;
+    }
+
+    function validatePinnedQaReplay(replayDocument) {
+        if (state.qaReplayKind === "visual") {
+            return validateVisualQaReplay(replayDocument);
+        }
+        if (state.qaReplayKind === "formula") {
+            return validateFormulaQaReplay(replayDocument);
+        }
+        return false;
     }
 
     function populateQaDaySelect() {
@@ -1145,56 +1523,140 @@
         updateQaReplayControls();
     }
 
-    async function loadQaReplay() {
+    function qaReplayRequestUrl() {
+        var url = new URL(
+            config.qaReplayUrl,
+            window.location.origin
+        );
+        if (state.qaReplayKind === "formula") {
+            url.searchParams.set("shift_type", state.shiftType);
+        }
+        return url.toString();
+    }
+
+    async function loadQaReplay(options) {
+        options = options || {};
         if (
             !state.qaReplayEnabled
             || !config.qaReplayUrl
+            || !["visual", "formula"].includes(state.qaReplayKind)
         ) {
             showQaReplayFallback();
             return;
         }
+        var preservedDay = options.preserveDay
+            ? state.qaReplayDay
+            : null;
+        if (state.qaRequestController) {
+            state.qaRequestController.abort();
+        }
+        cancelQaReplayTimer();
+        state.qaReplayPhase = "BOOTING";
+        state.qaReplayDirection = 0;
+        if (
+            options.preserveDay
+            && state.qaReplayKind === "formula"
+        ) {
+            showMessage(
+                "Загружаем выбранную смену",
+                "Проверяем сохранённый формульный снимок."
+            );
+        }
+        updateQaReplayControls();
+        state.qaRequestGeneration += 1;
+        var requestGeneration = state.qaRequestGeneration;
+        var requestedShiftType = state.shiftType;
+        var controller = new AbortController();
+        state.qaRequestController = controller;
         try {
             var response = await window.fetch(
-                new URL(
-                    config.qaReplayUrl,
-                    window.location.origin
-                ).toString(),
+                qaReplayRequestUrl(),
                 {
                     method: "GET",
                     credentials: "same-origin",
                     cache: "no-store",
-                    headers: {"Accept": "application/json"}
+                    headers: {"Accept": "application/json"},
+                    signal: controller.signal
                 }
             );
-            var document = await response.json();
+            if (
+                requestGeneration !== state.qaRequestGeneration
+                || controller.signal.aborted
+            ) {
+                return;
+            }
+            var replayDocument = await response.json();
+            if (
+                requestGeneration !== state.qaRequestGeneration
+                || controller.signal.aborted
+            ) {
+                return;
+            }
             if (!response.ok) {
                 replayError(
-                    document.error
+                    replayDocument.error
                     || "Сервер не отдал сохранённое воспроизведение."
                 );
                 return;
             }
-            if (!validateQaReplay(document)) {
+            if (
+                state.qaReplayKind === "formula"
+                && (
+                    state.shiftType !== requestedShiftType
+                    || !replayDocument.scope
+                    || replayDocument.scope.shift_type
+                        !== requestedShiftType
+                )
+            ) {
+                replayError(
+                    "Формульное воспроизведение не соответствует выбранной смене."
+                );
+                return;
+            }
+            if (!validatePinnedQaReplay(replayDocument)) {
                 replayError(
                     "Сохранённое воспроизведение имеет неверную схему."
                 );
                 return;
             }
-            state.qaReplay = document;
-            state.qaReplayDayCount = document.replay.day_count;
-            state.qaReplayDay = document.replay.initial_day;
-            state.qaReplayBaseStepMs = document.replay.base_step_ms;
+            state.qaReplay = replayDocument;
+            state.qaReplayDayCount = replayDocument.replay.day_count;
+            state.qaReplayDay = preservedDay == null
+                ? replayDocument.replay.initial_day
+                : Math.max(
+                    1,
+                    Math.min(
+                        state.qaReplayDayCount,
+                        Number(preservedDay) || 1
+                    )
+                );
+            state.qaReplayBaseStepMs = replayDocument.replay.base_step_ms;
             state.qaReplayPhase = "PAUSED";
             state.qaReplayDirection = 0;
             state.qaReplayLastDirection = 1;
             populateQaDaySelect();
             renderQaReplayDay(state.qaReplayDay);
-            qaReplayStatusText("Пауза на дне 1.");
+            qaReplayStatusText(
+                "Пауза на дне " + state.qaReplayDay + "."
+            );
             updateQaReplayControls();
         } catch (_error) {
+            if (
+                requestGeneration !== state.qaRequestGeneration
+                || controller.signal.aborted
+            ) {
+                return;
+            }
             replayError(
                 "Не удалось получить проверенные сохранённые снимки."
             );
+        } finally {
+            if (
+                requestGeneration === state.qaRequestGeneration
+                && state.qaRequestController === controller
+            ) {
+                state.qaRequestController = null;
+            }
         }
     }
 
@@ -1566,8 +2028,25 @@
                 loadRating({replaceRequest: true});
             });
         }
-        if (elements.shiftType && !state.qaPreview) {
+        if (elements.shiftType) {
             elements.shiftType.addEventListener("change", function () {
+                if (state.qaPreview) {
+                    if (state.qaReplayKind !== "formula") return;
+                    if (
+                        !state.qaFormulaEnabledShiftTypes.includes(
+                            elements.shiftType.value
+                        )
+                    ) {
+                        elements.shiftType.value = state.shiftType;
+                        return;
+                    }
+                    state.shiftType = elements.shiftType.value;
+                    loadQaReplay({
+                        preserveDay: true,
+                        replaceRequest: true
+                    });
+                    return;
+                }
                 state.shiftType = elements.shiftType.value;
                 state.rotationRemaining = state.rotationSeconds;
                 updateProgramUi();
@@ -1675,6 +2154,7 @@
     if (elements.shiftType) {
         elements.shiftType.value = state.shiftType;
     }
+    updateQaShiftControl();
     updateCountdowns();
     if (state.qaPreview) {
         loadQaReplay();

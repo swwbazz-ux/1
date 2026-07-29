@@ -400,6 +400,21 @@ button {
     background: linear-gradient(90deg, rgba(115, 48, 20, 0.92), rgba(41, 23, 16, 0.98));
 }
 
+.rating-tv__row.is-withheld {
+    border-color: rgba(212, 151, 67, 0.42);
+    background: linear-gradient(90deg, rgba(75, 55, 25, 0.7), rgba(22, 23, 22, 0.98));
+}
+
+.rating-tv__row.is-not-observed {
+    border-color: rgba(133, 145, 153, 0.28);
+    background: linear-gradient(90deg, rgba(39, 45, 49, 0.72), rgba(16, 20, 22, 0.98));
+}
+
+.rating-tv__row.is-withheld .rating-tv__place,
+.rating-tv__row.is-not-observed .rating-tv__place {
+    color: var(--rating-muted);
+}
+
 .rating-tv__place {
     height: 100%;
     display: grid;
@@ -484,6 +499,21 @@ button {
     text-transform: uppercase;
 }
 
+.rating-tv__score.is-status {
+    justify-items: end;
+    font-size: clamp(10px, 0.72vw, 15px);
+    line-height: 1.05;
+    white-space: nowrap;
+}
+
+.rating-tv__score.is-status.is-withheld b {
+    color: #e2ad67;
+}
+
+.rating-tv__score.is-status.is-not-observed b {
+    color: #aeb8be;
+}
+
 .rating-tv__movement {
     justify-self: center;
     font-size: clamp(12px, 0.83vw, 17px);
@@ -501,6 +531,10 @@ button {
 
 .rating-tv__movement.is-same {
     color: var(--rating-muted);
+}
+
+.rating-tv__movement.is-unranked {
+    min-width: 1px;
 }
 
 .rating-tv__grid.is-dense .rating-tv__avatar {
