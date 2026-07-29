@@ -17,6 +17,7 @@ from .views import (
     dispatcher_transport_view,
     driver_rating_employee_photo,
     driver_rating_tv_data_api,
+    driver_rating_tv_qa_replay_api,
     driver_rating_tv_qa_preview_view,
     driver_rating_tv_view,
     driver_period_rating_api,
@@ -54,6 +55,11 @@ urlpatterns = [
         'reports/rating/tv/data/',
         driver_rating_tv_data_api,
         name='driver_rating_tv_data_api',
+    ),
+    path(
+        'reports/rating/tv/qa-replay-data/',
+        driver_rating_tv_qa_replay_api,
+        name='driver_rating_tv_qa_replay_api',
     ),
     path(
         'reports/rating/employee-photo/<int:pk>/',

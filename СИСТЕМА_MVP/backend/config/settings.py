@@ -236,6 +236,25 @@ RATING_TV_QA_PREVIEW_ENABLED = _env_bool(
     'RATING_TV_QA_PREVIEW_ENABLED',
     default=False,
 )
+RATING_TV_QA_REPLAY_ENABLED = _env_bool(
+    'RATING_TV_QA_REPLAY_ENABLED',
+    default=False,
+)
+RATING_TV_QA_REPLAY_ARTIFACT = Path(
+    os.getenv(
+        'RATING_TV_QA_REPLAY_ARTIFACT',
+        str(
+            BASE_DIR
+            / 'reports'
+            / 'qa_artifacts'
+            / 'driver_rating_tv_visual_replay_v1.json'
+        ),
+    ),
+)
+RATING_TV_QA_REPLAY_SHA256 = os.getenv(
+    'RATING_TV_QA_REPLAY_SHA256',
+    'D48D515AA3CC9341AA31357D48C49982A4C3056E3D0E1A4D141DB1A4BA9C5106',
+).strip().upper()
 # До появления других участков весь действующий кадровый состав относится к участку № 2.
 # Перед подключением второго участка здесь должен быть указан серверный провайдер
 # членства, возвращающий строго ограниченный Employee QuerySet.

@@ -219,6 +219,14 @@ button {
     overflow: hidden;
 }
 
+.is-qa-preview .rating-tv__statusbar {
+    grid-template-columns:
+        minmax(300px, 1.5fr)
+        minmax(220px, 0.85fr)
+        minmax(260px, 1fr)
+        minmax(180px, 0.55fr);
+}
+
 .rating-tv__status,
 .rating-tv__timestamp,
 .rating-tv__countdown,
@@ -268,6 +276,11 @@ button {
     align-items: center;
     padding: 6px;
     border-right: 1px solid var(--rating-line);
+}
+
+.rating-tv__presentation-controls.is-qa-fullscreen {
+    grid-template-columns: minmax(0, 1fr);
+    border-right: 0;
 }
 
 .rating-tv__presentation-controls button {
@@ -390,7 +403,11 @@ button {
 .rating-tv__place {
     height: 100%;
     display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: max-content;
     place-items: center;
+    justify-content: center;
+    gap: 3px;
     border-right: 1px solid var(--rating-line);
     color: #f4f6f7;
     font-size: clamp(16px, 1.22vw, 25px);
@@ -563,14 +580,34 @@ button {
 }
 
 .rating-tv__qa-day {
+    display: flex;
+    align-items: center;
+    gap: 7px;
     color: #dfe5e8;
     font-size: clamp(14px, 1vw, 20px);
     white-space: nowrap;
 }
 
-.rating-tv__qa-day strong {
+.rating-tv__qa-day strong,
+.rating-tv__qa-day select {
     color: var(--rating-copper-soft);
     font-size: 1.35em;
+}
+
+.rating-tv__qa-day select {
+    width: 68px;
+    height: 40px;
+    padding: 0 8px;
+    border: 1px solid var(--rating-line);
+    border-radius: 4px;
+    outline: 0;
+    background: #0d1215;
+    font-weight: 800;
+    text-align: center;
+}
+
+.rating-tv__qa-day select:focus-visible {
+    border-color: var(--rating-copper);
 }
 
 .rating-tv__qa-controls {
@@ -588,8 +625,25 @@ button {
     font-size: 12px;
 }
 
+.rating-tv__qa-controls button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    cursor: pointer;
+}
+
+.rating-tv__qa-controls button:hover:not(:disabled),
+.rating-tv__qa-controls button:focus-visible,
+.rating-tv__qa-speed select:focus-visible {
+    border-color: var(--rating-copper);
+    outline: 0;
+    background: rgba(196, 125, 75, 0.1);
+}
+
 .rating-tv__qa-controls button:disabled,
-.rating-tv__qa-speed select:disabled {
+.rating-tv__qa-speed select:disabled,
+.rating-tv__qa-day select:disabled {
     cursor: not-allowed;
     opacity: 0.68;
 }
@@ -658,6 +712,22 @@ button {
 
     .rating-tv__header h1 {
         font-size: 36px;
+    }
+
+    .rating-tv__row {
+        grid-template-columns:
+            30px
+            28px
+            minmax(0, 1.7fr)
+            minmax(0, 0.7fr)
+            40px
+            28px;
+    }
+
+    .rating-tv__name,
+    .rating-tv__equipment,
+    .rating-tv__score {
+        padding-right: 2px;
     }
 }
 

@@ -33,7 +33,14 @@
         composition: root.querySelector("[data-watch-composition]"),
         shiftType: root.querySelector("[data-shift-type]"),
         qaDay: root.querySelector("[data-qa-day]"),
-        qaDayCount: root.querySelector("[data-qa-day-count]")
+        qaDayCount: root.querySelector("[data-qa-day-count]"),
+        qaDaySelect: root.querySelector("[data-qa-day-select]"),
+        qaReplayStatus: root.querySelector("[data-qa-replay-status]"),
+        qaBackward: root.querySelector("[data-qa-backward]"),
+        qaPause: root.querySelector("[data-qa-pause]"),
+        qaStep: root.querySelector("[data-qa-step]"),
+        qaForward: root.querySelector("[data-qa-forward]"),
+        qaSpeed: root.querySelector("[data-qa-speed]")
     };
 
     var state = {
@@ -53,6 +60,17 @@
         rotationRemaining: Number(config.rotationSeconds) || 15,
         rotationPlaying: true,
         qaPreview: config.qaPreview === true,
+        qaReplayEnabled: config.qaReplayEnabled === true,
+        qaReplay: null,
+        qaReplayPhase: config.qaPreview === true ? "BOOTING" : "DISABLED",
+        qaReplayDay: 1,
+        qaReplayDayCount: Number(config.qaDayCount) || 30,
+        qaReplayDirection: 0,
+        qaReplayLastDirection: 1,
+        qaReplaySpeed: 1,
+        qaReplayBaseStepMs: 3000,
+        qaPlaybackGeneration: 0,
+        qaReplayTimerId: null,
         requestGeneration: 0,
         requestController: null,
         requestInFlight: false,
@@ -210,6 +228,11 @@
         );
         if (elements.shiftType) {
             elements.shiftType.value = state.shiftType;
+        }
+        if (state.qaPreview) {
+            if (elements.period) elements.period.disabled = true;
+            if (elements.composition) elements.composition.disabled = true;
+            if (elements.shiftType) elements.shiftType.disabled = true;
         }
     }
 
@@ -602,12 +625,20 @@
     function renderPayloadMetadata(payload) {
         state.payload = payload;
         updateScopeControls(payload);
-        ensureInitialProgramGroup();
+        if (!state.qaPreview) {
+            ensureInitialProgramGroup();
+        }
 
         if (elements.status) {
-            elements.status.textContent = payload.official
-                ? "Подтверждённый результат"
-                : "Предварительный результат";
+            if (state.qaPreview) {
+                elements.status.textContent = payload.formula_evaluated
+                    ? "Виртуальный расчёт — неофициально"
+                    : "Визуальный replay — не KPI";
+            } else {
+                elements.status.textContent = payload.official
+                    ? "Подтверждённый результат"
+                    : "Предварительный результат";
+            }
         }
         if (elements.updatedAt) {
             elements.updatedAt.textContent = formatDateTime(
@@ -680,24 +711,499 @@
         );
     }
 
+    function replayError(message) {
+        state.qaReplay = null;
+        state.qaReplayPhase = "ERROR";
+        state.qaReplayDirection = 0;
+        if (elements.qaReplayStatus) {
+            elements.qaReplayStatus.textContent = (
+                message
+                || "Сохранённое воспроизведение не прошло проверку."
+            );
+        }
+        updateQaReplayControls();
+        showMessage(
+            "Тестовое воспроизведение недоступно",
+            "Сохранённые снимки не прошли проверку целостности."
+        );
+    }
+
+    function sameJson(left, right) {
+        return JSON.stringify(left) === JSON.stringify(right);
+    }
+
+    function validateQaReplay(document) {
+        if (!document || typeof document !== "object") return false;
+        if (document.schema !== config.qaReplaySchema) return false;
+        if (
+            document.schema_version !== 1
+            ||
+            document.synthetic !== true
+            || document.official !== false
+            || document.official_rating_eligible !== false
+        ) {
+            return false;
+        }
+        var replay = document.replay;
+        var scope = document.scope;
+        var snapshots = document.snapshots;
+        if (
+            !replay
+            || replay.rating_mode !== "qa_saved_replay"
+            || replay.synthetic !== true
+            || replay.official !== false
+            || replay.day_count !== 30
+            || replay.expected_employee_count !== 53
+            || replay.initial_day !== 1
+            || !scope
+            || !scope.rating_period
+            || !scope.watch_composition
+            || !["day", "night"].includes(scope.shift_type)
+            || !Array.isArray(snapshots)
+            || snapshots.length !== 30
+        ) {
+            return false;
+        }
+
+        var baselineIds = null;
+        var previousPlaces = null;
+        for (var index = 0; index < snapshots.length; index += 1) {
+            var snapshot = snapshots[index];
+            var day = index + 1;
+            var payload = snapshot && snapshot.payload;
+            if (
+                !snapshot
+                || snapshot.day !== day
+                || !payload
+                || payload.available !== true
+                || payload.rating_mode !== "qa_saved_replay"
+                || payload.synthetic !== true
+                || payload.official !== false
+                || payload.official_rating_eligible !== false
+                || payload.scope_type !== "rating_period"
+                || payload.qa_day !== day
+                || payload.qa_day_count !== 30
+                || payload.replay_run_id !== replay.id
+                || payload.shift_type !== scope.shift_type
+                || !sameJson(payload.rating_period, scope.rating_period)
+                || !sameJson(
+                    payload.watch_composition,
+                    scope.watch_composition
+                )
+                || !Array.isArray(payload.entries)
+                || payload.entries.length !== 53
+            ) {
+                return false;
+            }
+            var ids = [];
+            var places = new Map();
+            var seenIds = new Set();
+            var seenOrders = new Set();
+            var rankedEntries = [];
+            for (
+                var entryIndex = 0;
+                entryIndex < payload.entries.length;
+                entryIndex += 1
+            ) {
+                var entry = payload.entries[entryIndex];
+                if (
+                    !entry
+                    || !Number.isInteger(entry.employee_id)
+                    || entry.employee_id >= 0
+                    || seenIds.has(entry.employee_id)
+                    || !Number.isInteger(entry.place)
+                    || entry.place < 1
+                    || !Number.isInteger(entry.shared_score_place)
+                    || entry.shared_score_place < 1
+                    || !Number.isInteger(entry.display_order)
+                    || entry.display_order < 1
+                    || seenOrders.has(entry.display_order)
+                    || !Number.isInteger(entry.position_delta)
+                    || typeof entry.score !== "string"
+                    || !/^(?:0|[1-9][0-9]{0,2})\.[0-9]{2}$/.test(
+                        entry.score
+                    )
+                    || !Number.isFinite(Number(entry.score))
+                    || Number(entry.score) < 0
+                    || Number(entry.score) > 100
+                    || typeof entry.level !== "string"
+                ) {
+                    return false;
+                }
+                seenIds.add(entry.employee_id);
+                seenOrders.add(entry.display_order);
+                ids.push(entry.employee_id);
+                places.set(entry.employee_id, entry.place);
+                rankedEntries.push(entry);
+                var expectedDelta = previousPlaces === null
+                    ? 0
+                    : previousPlaces.get(entry.employee_id) - entry.place;
+                if (entry.position_delta !== expectedDelta) {
+                    return false;
+                }
+            }
+            ids.sort(function (left, right) {
+                return left - right;
+            });
+            if (baselineIds === null) {
+                baselineIds = ids;
+            } else if (!sameJson(ids, baselineIds)) {
+                return false;
+            }
+            rankedEntries.sort(function (left, right) {
+                return left.display_order - right.display_order;
+            });
+            var ratingLevels = {
+                1: "Алмазный уровень",
+                2: "Платиновый уровень",
+                3: "Золотой уровень",
+                4: "Серебряный уровень",
+                5: "Медный уровень"
+            };
+            var previousScore = null;
+            var densePlace = 0;
+            for (
+                var rankIndex = 0;
+                rankIndex < rankedEntries.length;
+                rankIndex += 1
+            ) {
+                var rankedEntry = rankedEntries[rankIndex];
+                var numericScore = Number(rankedEntry.score);
+                if (
+                    rankedEntry.display_order !== rankIndex + 1
+                    || (
+                        previousScore !== null
+                        && numericScore > previousScore
+                    )
+                ) {
+                    return false;
+                }
+                if (
+                    previousScore === null
+                    || numericScore !== previousScore
+                ) {
+                    densePlace += 1;
+                }
+                if (
+                    rankedEntry.place !== densePlace
+                    || rankedEntry.shared_score_place !== densePlace
+                    || rankedEntry.level !== (ratingLevels[densePlace] || "")
+                ) {
+                    return false;
+                }
+                previousScore = numericScore;
+            }
+            previousPlaces = places;
+        }
+        return true;
+    }
+
+    function populateQaDaySelect() {
+        if (!elements.qaDaySelect) return;
+        var fragment = document.createDocumentFragment();
+        for (var day = 1; day <= state.qaReplayDayCount; day += 1) {
+            var option = document.createElement("option");
+            option.value = String(day);
+            option.textContent = String(day);
+            option.selected = day === state.qaReplayDay;
+            fragment.appendChild(option);
+        }
+        elements.qaDaySelect.replaceChildren(fragment);
+        elements.qaDaySelect.value = String(state.qaReplayDay);
+    }
+
+    function qaReplayIsPlaying() {
+        return (
+            state.qaReplayPhase === "PLAYING_FORWARD"
+            || state.qaReplayPhase === "PLAYING_BACKWARD"
+        );
+    }
+
+    function qaReplayIsReady() {
+        return Boolean(
+            state.qaReplay
+            && ["PAUSED", "PLAYING_FORWARD", "PLAYING_BACKWARD"].includes(
+                state.qaReplayPhase
+            )
+        );
+    }
+
+    function qaReplayStatusText(message) {
+        if (!elements.qaReplayStatus) return;
+        var prefix = state.qaReplay
+            && state.qaReplay.replay.formula_evaluated
+            ? "Синтетический расчёт"
+            : "Визуальная синтетика — KPI не рассчитывался";
+        elements.qaReplayStatus.textContent = message
+            ? prefix + ". " + message
+            : prefix;
+    }
+
+    function updateQaReplayControls() {
+        if (!state.qaPreview) return;
+        var ready = qaReplayIsReady();
+        var playing = qaReplayIsPlaying();
+        var atStart = state.qaReplayDay <= 1;
+        var atEnd = state.qaReplayDay >= state.qaReplayDayCount;
+        if (elements.qaDaySelect) {
+            elements.qaDaySelect.disabled = !ready;
+            elements.qaDaySelect.value = String(state.qaReplayDay);
+        }
+        if (elements.qaBackward) {
+            elements.qaBackward.disabled = !ready || atStart;
+        }
+        if (elements.qaForward) {
+            elements.qaForward.disabled = !ready || atEnd;
+        }
+        if (elements.qaStep) {
+            elements.qaStep.disabled = !ready || atEnd;
+        }
+        if (elements.qaSpeed) {
+            elements.qaSpeed.disabled = !ready;
+            elements.qaSpeed.value = String(state.qaReplaySpeed);
+        }
+        if (elements.qaPause) {
+            elements.qaPause.disabled = !ready;
+            var icon = elements.qaPause.querySelector("span");
+            var label = elements.qaPause.querySelector("b");
+            if (icon) icon.textContent = playing ? "Ⅱ" : "▶";
+            if (label) label.textContent = playing ? "Пауза" : "Продолжить";
+        }
+    }
+
+    function cancelQaReplayTimer() {
+        state.qaPlaybackGeneration += 1;
+        if (state.qaReplayTimerId != null) {
+            window.clearTimeout(state.qaReplayTimerId);
+            state.qaReplayTimerId = null;
+        }
+    }
+
+    function renderQaReplayDay(day) {
+        if (!state.qaReplay) return false;
+        var normalizedDay = Math.max(
+            1,
+            Math.min(state.qaReplayDayCount, Number(day) || 1)
+        );
+        var snapshot = state.qaReplay.snapshots[normalizedDay - 1];
+        if (!snapshot || snapshot.day !== normalizedDay) {
+            replayError("В сохранённом прогоне отсутствует выбранный день.");
+            return false;
+        }
+        state.qaReplayDay = normalizedDay;
+        renderPayload(snapshot.payload);
+        if (elements.qaDay) {
+            elements.qaDay.textContent = String(normalizedDay);
+        }
+        if (elements.qaDayCount) {
+            elements.qaDayCount.textContent = String(
+                state.qaReplayDayCount
+            );
+        }
+        if (elements.qaDaySelect) {
+            elements.qaDaySelect.value = String(normalizedDay);
+        }
+        updateQaReplayControls();
+        return true;
+    }
+
+    function pauseQaReplay(message) {
+        if (!qaReplayIsReady()) return;
+        cancelQaReplayTimer();
+        state.qaReplayPhase = "PAUSED";
+        state.qaReplayDirection = 0;
+        qaReplayStatusText(
+            message || "Пауза на дне " + state.qaReplayDay + "."
+        );
+        updateQaReplayControls();
+    }
+
+    function scheduleQaReplayStep(generation) {
+        if (!qaReplayIsPlaying()) return;
+        var delay = Math.max(
+            100,
+            Math.round(
+                state.qaReplayBaseStepMs / state.qaReplaySpeed
+            )
+        );
+        state.qaReplayTimerId = window.setTimeout(function () {
+            if (
+                generation !== state.qaPlaybackGeneration
+                || !qaReplayIsPlaying()
+            ) {
+                return;
+            }
+            state.qaReplayTimerId = null;
+            var nextDay = (
+                state.qaReplayDay + state.qaReplayDirection
+            );
+            if (
+                nextDay < 1
+                || nextDay > state.qaReplayDayCount
+            ) {
+                pauseQaReplay(
+                    state.qaReplayDirection > 0
+                        ? "Прогон завершён на дне 30."
+                        : "Достигнут день 1."
+                );
+                return;
+            }
+            if (!renderQaReplayDay(nextDay)) return;
+            if (
+                nextDay === 1
+                || nextDay === state.qaReplayDayCount
+            ) {
+                pauseQaReplay(
+                    nextDay === state.qaReplayDayCount
+                        ? "Прогон завершён на дне 30."
+                        : "Достигнут день 1."
+                );
+                return;
+            }
+            scheduleQaReplayStep(generation);
+        }, delay);
+    }
+
+    function startQaReplay(direction) {
+        if (!qaReplayIsReady()) return;
+        var normalizedDirection = direction < 0 ? -1 : 1;
+        if (
+            (normalizedDirection < 0 && state.qaReplayDay <= 1)
+            || (
+                normalizedDirection > 0
+                && state.qaReplayDay >= state.qaReplayDayCount
+            )
+        ) {
+            pauseQaReplay(
+                normalizedDirection > 0
+                    ? "Прогон уже находится на дне 30."
+                    : "Прогон уже находится на дне 1."
+            );
+            return;
+        }
+        cancelQaReplayTimer();
+        state.qaReplayDirection = normalizedDirection;
+        state.qaReplayLastDirection = normalizedDirection;
+        state.qaReplayPhase = normalizedDirection > 0
+            ? "PLAYING_FORWARD"
+            : "PLAYING_BACKWARD";
+        qaReplayStatusText(
+            normalizedDirection > 0
+                ? "Воспроизведение вперёд."
+                : "Воспроизведение назад."
+        );
+        updateQaReplayControls();
+        scheduleQaReplayStep(state.qaPlaybackGeneration);
+    }
+
+    function toggleQaReplayPause() {
+        if (!qaReplayIsReady()) return;
+        if (qaReplayIsPlaying()) {
+            pauseQaReplay();
+            return;
+        }
+        var direction = state.qaReplayLastDirection || 1;
+        if (
+            (direction > 0 && state.qaReplayDay >= state.qaReplayDayCount)
+            || (direction < 0 && state.qaReplayDay <= 1)
+        ) {
+            direction *= -1;
+        }
+        startQaReplay(direction);
+    }
+
+    function stepQaReplay(direction) {
+        if (!qaReplayIsReady()) return;
+        pauseQaReplay();
+        var targetDay = state.qaReplayDay + (direction < 0 ? -1 : 1);
+        if (
+            targetDay < 1
+            || targetDay > state.qaReplayDayCount
+        ) {
+            updateQaReplayControls();
+            return;
+        }
+        renderQaReplayDay(targetDay);
+        qaReplayStatusText("Пауза на дне " + targetDay + ".");
+    }
+
+    function showQaReplayFallback() {
+        state.qaReplayPhase = "ERROR";
+        if (previewPayload) {
+            renderPayload(previewPayload);
+            if (elements.qaReplayStatus) {
+                elements.qaReplayStatus.textContent = (
+                    "Статический визуальный макет. "
+                    + "Сохранённое воспроизведение выключено."
+                );
+            }
+        } else {
+            replayError(
+                "Сохранённое воспроизведение выключено."
+            );
+        }
+        updateQaReplayControls();
+    }
+
+    async function loadQaReplay() {
+        if (
+            !state.qaReplayEnabled
+            || !config.qaReplayUrl
+        ) {
+            showQaReplayFallback();
+            return;
+        }
+        try {
+            var response = await window.fetch(
+                new URL(
+                    config.qaReplayUrl,
+                    window.location.origin
+                ).toString(),
+                {
+                    method: "GET",
+                    credentials: "same-origin",
+                    cache: "no-store",
+                    headers: {"Accept": "application/json"}
+                }
+            );
+            var document = await response.json();
+            if (!response.ok) {
+                replayError(
+                    document.error
+                    || "Сервер не отдал сохранённое воспроизведение."
+                );
+                return;
+            }
+            if (!validateQaReplay(document)) {
+                replayError(
+                    "Сохранённое воспроизведение имеет неверную схему."
+                );
+                return;
+            }
+            state.qaReplay = document;
+            state.qaReplayDayCount = document.replay.day_count;
+            state.qaReplayDay = document.replay.initial_day;
+            state.qaReplayBaseStepMs = document.replay.base_step_ms;
+            state.qaReplayPhase = "PAUSED";
+            state.qaReplayDirection = 0;
+            state.qaReplayLastDirection = 1;
+            populateQaDaySelect();
+            renderQaReplayDay(state.qaReplayDay);
+            qaReplayStatusText("Пауза на дне 1.");
+            updateQaReplayControls();
+        } catch (_error) {
+            replayError(
+                "Не удалось получить проверенные сохранённые снимки."
+            );
+        }
+    }
+
     async function loadRating(options) {
         options = options || {};
         if (state.qaPreview) {
-            if (previewPayload) {
-                var preview = Object.assign({}, previewPayload, {
-                    shift_type: state.shiftType,
-                    shift_type_label: (
-                        state.shiftType === "day" ? "Дневная" : "Ночная"
-                    )
-                });
-                renderPayload(preview);
-            } else {
-                showMessage(
-                    "Тестовый макет недоступен",
-                    "Локальный payload не был передан сервером."
-                );
+            if (state.qaReplay) {
+                renderQaReplayDay(state.qaReplayDay);
             }
-            state.refreshRemaining = state.refreshSeconds;
             return;
         }
 
@@ -878,9 +1384,9 @@
 
     function updateCountdowns() {
         if (elements.refreshCountdown) {
-            elements.refreshCountdown.textContent = formatSeconds(
-                state.refreshRemaining
-            );
+            elements.refreshCountdown.textContent = state.qaPreview
+                ? "Сохранённый снимок"
+                : formatSeconds(state.refreshRemaining);
         }
         if (elements.rotationCountdown) {
             if (state.presentationPlaylist.length <= 1) {
@@ -948,8 +1454,8 @@
             && typeof fullscreenPromise.catch === "function"
         ) {
             fullscreenPromise.catch(function () {
-                if (elements.status) {
-                    elements.status.textContent = (
+                if (elements.fullscreen) {
+                    elements.fullscreen.title = (
                         "Полноэкранный режим недоступен"
                     );
                 }
@@ -957,8 +1463,92 @@
         }
     }
 
+    function qaReplayHiddenByViewport() {
+        return (
+            Number(window.innerWidth) <= 1100
+            || Number(window.innerHeight) <= 650
+        );
+    }
+
+    function handleViewportChange() {
+        layoutGrid();
+        if (
+            state.qaPreview
+            && qaReplayIsPlaying()
+            && qaReplayHiddenByViewport()
+        ) {
+            pauseQaReplay(
+                "Воспроизведение остановлено на узком экране."
+            );
+        }
+    }
+
+    function interactiveKeyboardTarget(target) {
+        var tagName = target && target.tagName
+            ? String(target.tagName).toLowerCase()
+            : "";
+        return ["button", "select", "input", "textarea"].includes(
+            tagName
+        );
+    }
+
+    function handleQaReplayKeyboard(event) {
+        if (
+            !state.qaPreview
+            || !qaReplayIsReady()
+            || qaReplayHiddenByViewport()
+            || interactiveKeyboardTarget(event.target)
+            || event.ctrlKey
+            || event.altKey
+            || event.metaKey
+        ) {
+            return;
+        }
+        var handled = true;
+        if (event.key === " " || event.key === "Spacebar") {
+            toggleQaReplayPause();
+        } else if (event.key === "ArrowLeft") {
+            stepQaReplay(-1);
+        } else if (event.key === "ArrowRight") {
+            stepQaReplay(1);
+        } else if (event.key === "Home") {
+            pauseQaReplay();
+            renderQaReplayDay(1);
+            qaReplayStatusText("Пауза на дне 1.");
+        } else if (event.key === "End") {
+            pauseQaReplay();
+            renderQaReplayDay(state.qaReplayDayCount);
+            qaReplayStatusText(
+                "Пауза на дне " + state.qaReplayDayCount + "."
+            );
+        } else if (
+            event.key === "f"
+            || event.key === "F"
+        ) {
+            toggleFullscreen();
+        } else {
+            handled = false;
+        }
+        if (handled && typeof event.preventDefault === "function") {
+            event.preventDefault();
+        }
+    }
+
+    function updateFullscreenControl() {
+        if (!elements.fullscreen) return;
+        var label = elements.fullscreen.querySelector("b");
+        var icon = elements.fullscreen.querySelector("span");
+        var active = Boolean(document.fullscreenElement);
+        if (label) {
+            label.textContent = active
+                ? "Выйти из полного экрана"
+                : "Полный экран";
+        }
+        if (icon) icon.textContent = active ? "⤢" : "⛶";
+    }
+
     function bindEvents() {
-        if (elements.period) {
+        if (elements.period && !state.qaPreview) {
             elements.period.addEventListener("change", function () {
                 state.selectedPeriod = elements.period.value;
                 state.selectedComposition = "";
@@ -968,7 +1558,7 @@
                 loadRating({replaceRequest: true});
             });
         }
-        if (elements.composition) {
+        if (elements.composition && !state.qaPreview) {
             elements.composition.addEventListener("change", function () {
                 state.selectedComposition = elements.composition.value;
                 state.rotationRemaining = state.rotationSeconds;
@@ -976,7 +1566,7 @@
                 loadRating({replaceRequest: true});
             });
         }
-        if (elements.shiftType) {
+        if (elements.shiftType && !state.qaPreview) {
             elements.shiftType.addEventListener("change", function () {
                 state.shiftType = elements.shiftType.value;
                 state.rotationRemaining = state.rotationSeconds;
@@ -1012,7 +1602,73 @@
                 toggleFullscreen
             );
         }
-        window.addEventListener("resize", layoutGrid);
+        if (elements.qaBackward) {
+            elements.qaBackward.addEventListener("click", function () {
+                startQaReplay(-1);
+            });
+        }
+        if (elements.qaPause) {
+            elements.qaPause.addEventListener(
+                "click",
+                toggleQaReplayPause
+            );
+        }
+        if (elements.qaStep) {
+            elements.qaStep.addEventListener("click", function () {
+                stepQaReplay(1);
+            });
+        }
+        if (elements.qaForward) {
+            elements.qaForward.addEventListener("click", function () {
+                startQaReplay(1);
+            });
+        }
+        if (elements.qaDaySelect) {
+            elements.qaDaySelect.addEventListener("change", function () {
+                if (!qaReplayIsReady()) return;
+                var selectedDay = Number(elements.qaDaySelect.value);
+                pauseQaReplay();
+                renderQaReplayDay(selectedDay);
+                qaReplayStatusText(
+                    "Пауза на дне " + state.qaReplayDay + "."
+                );
+            });
+        }
+        if (elements.qaSpeed) {
+            elements.qaSpeed.addEventListener("change", function () {
+                var speed = Number(elements.qaSpeed.value);
+                if (![0.5, 1, 2, 4].includes(speed)) {
+                    elements.qaSpeed.value = String(
+                        state.qaReplaySpeed
+                    );
+                    return;
+                }
+                state.qaReplaySpeed = speed;
+                if (qaReplayIsPlaying()) {
+                    startQaReplay(state.qaReplayDirection);
+                } else {
+                    updateQaReplayControls();
+                }
+            });
+        }
+        window.addEventListener("resize", handleViewportChange);
+        if (document.addEventListener) {
+            document.addEventListener(
+                "keydown",
+                handleQaReplayKeyboard
+            );
+            document.addEventListener("visibilitychange", function () {
+                if (document.hidden && qaReplayIsPlaying()) {
+                    pauseQaReplay(
+                        "Воспроизведение остановлено в скрытой вкладке."
+                    );
+                }
+            });
+            document.addEventListener(
+                "fullscreenchange",
+                updateFullscreenControl
+            );
+        }
     }
 
     bindEvents();
@@ -1020,15 +1676,24 @@
         elements.shiftType.value = state.shiftType;
     }
     updateCountdowns();
-    loadRating();
-    state.timerId = window.setInterval(tick, 1000);
+    if (state.qaPreview) {
+        loadQaReplay();
+    } else {
+        loadRating();
+        state.timerId = window.setInterval(tick, 1000);
+    }
 
     window.RatingTvScreen = {
         formatSeconds: formatSeconds,
         layoutGrid: layoutGrid,
         loadRating: loadRating,
+        loadQaReplay: loadQaReplay,
         moveGroup: moveGroup,
+        pauseQaReplay: pauseQaReplay,
+        renderQaReplayDay: renderQaReplayDay,
         renderPayload: renderPayload,
+        startQaReplay: startQaReplay,
+        stepQaReplay: stepQaReplay,
         state: state
     };
 })(window, document);

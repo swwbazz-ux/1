@@ -68,6 +68,11 @@ from .rating_tv import (
     RATING_TV_ROTATION_SECONDS,
     build_rating_tv_qa_preview,
 )
+from .rating_tv_replay import (
+    RATING_TV_REPLAY_SCHEMA,
+    RatingTvReplayError,
+    load_rating_tv_replay,
+)
 from .shift_analytics import (
     build_excavator_dynamics,
     build_shift_analytics,
@@ -726,6 +731,7 @@ def _driver_period_rating_empty(
 def _private_rating_json(payload, *, status=200):
     response = JsonResponse(payload, status=status)
     response.headers['Cache-Control'] = 'private, no-store'
+    response.headers['X-Content-Type-Options'] = 'nosniff'
     return response
 
 
@@ -796,6 +802,17 @@ def _render_driver_rating_tv(request, *, access, qa_preview):
     context = {
         'rating_tv_config': {
             'apiUrl': reverse('driver_rating_tv_data_api'),
+            'qaReplayUrl': reverse('driver_rating_tv_qa_replay_api'),
+            'qaReplaySchema': RATING_TV_REPLAY_SCHEMA,
+            'qaReplayEnabled': bool(
+                qa_preview
+                and settings.DEBUG
+                and getattr(
+                    settings,
+                    'RATING_TV_QA_REPLAY_ENABLED',
+                    False,
+                )
+            ),
             'photoUrlTemplate': photo_url_template,
             'refreshSeconds': RATING_TV_REFRESH_SECONDS,
             'rotationSeconds': RATING_TV_ROTATION_SECONDS,
@@ -828,6 +845,63 @@ def driver_rating_tv_data_api(request):
             status=404,
         )
     return driver_period_rating_api(request)
+
+
+@never_cache
+@require_GET
+def driver_rating_tv_qa_replay_api(request):
+    if not (
+        settings.DEBUG
+        and getattr(
+            settings,
+            'RATING_TV_QA_REPLAY_ENABLED',
+            False,
+        )
+        and getattr(
+            settings,
+            'RATING_TV_QA_PREVIEW_ENABLED',
+            False,
+        )
+    ):
+        return _private_rating_json(
+            {'error': 'QA-воспроизведение рейтинга не включено.'},
+            status=404,
+        )
+    access = get_rating_observation_access(request)
+    if access is None:
+        return _private_rating_json(
+            {'error': 'Требуется авторизация.'},
+            status=401,
+        )
+    if access.role.code not in {'dispatcher', 'admin', 'manager'}:
+        return _private_rating_json(
+            {'error': 'Недостаточно прав.'},
+            status=403,
+        )
+    if get_rating_site_scope(access) is None:
+        return _private_rating_json(
+            {'error': 'Недостаточно прав.'},
+            status=403,
+        )
+    try:
+        replay, artifact_sha256 = load_rating_tv_replay(
+            settings.RATING_TV_QA_REPLAY_ARTIFACT,
+            expected_sha256=settings.RATING_TV_QA_REPLAY_SHA256,
+        )
+    except RatingTvReplayError:
+        return _private_rating_json(
+            {
+                'error': (
+                    'Сохранённое QA-воспроизведение отсутствует '
+                    'или не прошло проверку целостности.'
+                ),
+            },
+            status=409,
+        )
+    response = _private_rating_json(replay)
+    response.headers['X-Rating-Replay-SHA256'] = artifact_sha256
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    return response
 
 
 @never_cache

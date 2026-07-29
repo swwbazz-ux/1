@@ -213,6 +213,8 @@ class FakeDocument {
         this.nodesById = new Map();
         this.documentElement = new FakeElement("html");
         this.fullscreenElement = null;
+        this.hidden = false;
+        this.listeners = new Map();
     }
 
     getElementById(id) {
@@ -235,6 +237,32 @@ class FakeDocument {
     createDocumentFragment() {
         return new FakeDocumentFragment();
     }
+
+    addEventListener(type, listener) {
+        const listeners = this.listeners.get(type) || [];
+        listeners.push(listener);
+        this.listeners.set(type, listeners);
+    }
+
+    dispatch(type, overrides = {}) {
+        let prevented = false;
+        const event = {
+            type,
+            target: this,
+            currentTarget: this,
+            ctrlKey: false,
+            altKey: false,
+            metaKey: false,
+            preventDefault() {
+                prevented = true;
+            },
+            ...overrides
+        };
+        (this.listeners.get(type) || [])
+            .slice()
+            .forEach((listener) => listener.call(this, event));
+        return {event, prevented};
+    }
 }
 
 
@@ -243,6 +271,7 @@ class FakeClock {
         this.now = 0;
         this.nextId = 1;
         this.intervals = new Map();
+        this.timeouts = new Map();
     }
 
     setInterval(callback, delay) {
@@ -261,11 +290,27 @@ class FakeClock {
         this.intervals.delete(id);
     }
 
+    setTimeout(callback, delay) {
+        const normalizedDelay = Math.max(1, Number(delay) || 0);
+        const id = this.nextId;
+        this.nextId += 1;
+        this.timeouts.set(id, {
+            callback,
+            dueAt: this.now + normalizedDelay
+        });
+        return id;
+    }
+
+    clearTimeout(id) {
+        this.timeouts.delete(id);
+    }
+
     advance(milliseconds) {
         const target = this.now + Number(milliseconds);
         while (true) {
             let nextId = null;
             let nextTask = null;
+            let nextKind = "";
             this.intervals.forEach((task, id) => {
                 if (
                     task.dueAt <= target
@@ -273,15 +318,31 @@ class FakeClock {
                 ) {
                     nextId = id;
                     nextTask = task;
+                    nextKind = "interval";
+                }
+            });
+            this.timeouts.forEach((task, id) => {
+                if (
+                    task.dueAt <= target
+                    && (!nextTask || task.dueAt < nextTask.dueAt)
+                ) {
+                    nextId = id;
+                    nextTask = task;
+                    nextKind = "timeout";
                 }
             });
             if (!nextTask) break;
 
             this.now = nextTask.dueAt;
+            if (nextKind === "timeout") {
+                this.timeouts.delete(nextId);
+            }
             nextTask.callback();
-            const current = this.intervals.get(nextId);
-            if (current === nextTask) {
-                current.dueAt += current.delay;
+            if (nextKind === "interval") {
+                const current = this.intervals.get(nextId);
+                if (current === nextTask) {
+                    current.dueAt += current.delay;
+                }
             }
         }
         this.now = target;
@@ -331,6 +392,17 @@ function buildScreen() {
     programLabel.textContent = "В показ";
     programToggle.append(programIcon, programLabel);
 
+    function replayButton(iconText, labelText) {
+        const button = new FakeElement("button");
+        const icon = new FakeElement("span");
+        const label = new FakeElement("b");
+        icon.textContent = iconText;
+        label.textContent = labelText;
+        button.append(icon, label);
+        button.disabled = true;
+        return button;
+    }
+
     const elements = {
         grid,
         message,
@@ -350,9 +422,18 @@ function buildScreen() {
         composition: new FakeElement("select"),
         shiftType: new FakeElement("select"),
         qaDay: new FakeElement("strong"),
-        qaDayCount: new FakeElement("span")
+        qaDayCount: new FakeElement("span"),
+        qaDaySelect: new FakeElement("select"),
+        qaReplayStatus: new FakeElement("span"),
+        qaBackward: replayButton("◀◀", "Назад"),
+        qaPause: replayButton("▶", "Запуск"),
+        qaStep: replayButton("▶", "Шаг"),
+        qaForward: replayButton("▶▶", "Вперёд"),
+        qaSpeed: new FakeElement("select")
     };
     elements.status.textContent = "Загрузка рейтинга";
+    elements.qaDaySelect.disabled = true;
+    elements.qaSpeed.disabled = true;
 
     const selectors = {
         "[data-rating-grid]": elements.grid,
@@ -371,7 +452,14 @@ function buildScreen() {
         "[data-watch-composition]": elements.composition,
         "[data-shift-type]": elements.shiftType,
         "[data-qa-day]": elements.qaDay,
-        "[data-qa-day-count]": elements.qaDayCount
+        "[data-qa-day-count]": elements.qaDayCount,
+        "[data-qa-day-select]": elements.qaDaySelect,
+        "[data-qa-replay-status]": elements.qaReplayStatus,
+        "[data-qa-backward]": elements.qaBackward,
+        "[data-qa-pause]": elements.qaPause,
+        "[data-qa-step]": elements.qaStep,
+        "[data-qa-forward]": elements.qaForward,
+        "[data-qa-speed]": elements.qaSpeed
     };
     Object.entries(selectors).forEach(([selector, element]) => {
         root.selectorMap.set(selector, element);
@@ -440,6 +528,142 @@ function buildPayload({
     };
 }
 
+function buildReplayDocument() {
+    const ratingLevels = {
+        1: "Алмазный уровень",
+        2: "Платиновый уровень",
+        3: "Золотой уровень",
+        4: "Серебряный уровень",
+        5: "Медный уровень"
+    };
+    const ratingPeriod = {
+        id: -1001,
+        name: "Тестовый период 30 дней",
+        starts_on: "2026-05-01",
+        ends_before: "2026-05-31",
+        is_active: true
+    };
+    const watchComposition = {
+        id: -2001,
+        code: "qa-runtime-replay",
+        name: "Тестовый состав runtime",
+        is_active: true
+    };
+    const replayId = "QA-RUNTIME-30D";
+    const snapshots = [];
+    let previousPlaces = null;
+
+    for (let day = 1; day <= 30; day += 1) {
+        const ordinals = Array.from({length: 53}, (_, index) => index + 1);
+        ordinals.sort((left, right) => {
+            const leftRank = (left + day * 7) % 53;
+            const rightRank = (right + day * 7) % 53;
+            return leftRank - rightRank || left - right;
+        });
+        const entries = ordinals.map((ordinal, index) => {
+            const place = index + 1;
+            const employeeId = -ordinal;
+            return {
+                employee_id: employeeId,
+                full_name: `ТЕСТ_Водитель ${String(ordinal).padStart(2, "0")}`,
+                equipment: [`БелАЗ №${String(ordinal).padStart(2, "0")}`],
+                shift_count: day,
+                score: (100 - place / 2).toFixed(2),
+                place,
+                shared_score_place: place,
+                display_order: place,
+                level: ratingLevels[place] || "",
+                position_delta: previousPlaces === null
+                    ? 0
+                    : previousPlaces.get(employeeId) - place
+            };
+        });
+        previousPlaces = new Map(
+            entries.map((entry) => [entry.employee_id, entry.place])
+        );
+        const generatedAt = (
+            `2026-05-${String(day).padStart(2, "0")}T22:00:00+10:00`
+        );
+        snapshots.push({
+            day,
+            work_date: `2026-05-${String(day).padStart(2, "0")}`,
+            as_of: generatedAt,
+            previous_payload_sha256: day === 1 ? null : `${day - 1}`,
+            payload_sha256: `${day}`,
+            payload: {
+                available: true,
+                official: false,
+                official_rating_eligible: false,
+                synthetic: true,
+                formula_evaluated: false,
+                rating_mode: "qa_saved_replay",
+                scope_type: "rating_period",
+                formula_version: "TV_VISUAL_REPLAY_NOT_KPI",
+                formula_label: "Визуальный replay — не KPI",
+                status: `Сохранённый день ${day}`,
+                generated_at: generatedAt,
+                source_fingerprint: `day-${day}`,
+                rating_period: ratingPeriod,
+                watch_composition: watchComposition,
+                shift_type: "night",
+                shift_type_label: "Ночная",
+                available_rating_periods: [ratingPeriod],
+                available_watch_compositions: [watchComposition],
+                summary: {
+                    employee_count: 53,
+                    rated_shift_count: 53 * day,
+                    withheld_shift_count: 0,
+                    withheld_reasons: {}
+                },
+                entries,
+                qa_day: day,
+                qa_day_count: 30,
+                qa_work_date: `2026-05-${String(day).padStart(2, "0")}`,
+                replay_run_id: replayId
+            }
+        });
+    }
+    return {
+        schema: "copper.driver-rating-replay",
+        schema_version: 1,
+        data_classification: "synthetic_qa_only",
+        synthetic: true,
+        official: false,
+        official_rating_eligible: false,
+        warning: "Синтетический QA replay",
+        replay: {
+            id: replayId,
+            label: "Runtime replay",
+            scenario_version: "RUNTIME_V1",
+            rating_mode: "qa_saved_replay",
+            synthetic: true,
+            formula_evaluated: false,
+            official: false,
+            day_count: 30,
+            expected_employee_count: 53,
+            initial_day: 1,
+            base_step_ms: 3000,
+            formula_version: "TV_VISUAL_REPLAY_NOT_KPI",
+            formula_label: "Визуальный replay — не KPI"
+        },
+        scope: {
+            scope_type: "rating_period",
+            profession: "driver",
+            rating_period: ratingPeriod,
+            watch_composition: watchComposition,
+            shift_type: "night",
+            shift_type_label: "Ночная"
+        },
+        snapshots,
+        integrity: {
+            algorithm: "sha256",
+            canonicalization: "json-sort-keys-utf8-v1",
+            snapshot_chain_sha256: "runtime",
+            canonical_sha256: "runtime"
+        }
+    };
+}
+
 
 function queuedResponse(payload, status = 200) {
     return {payload, status};
@@ -453,6 +677,7 @@ function queuedFailure(error) {
 
 function createRuntime({
     qaPreview = false,
+    qaReplayEnabled = false,
     previewPayload = null,
     responses = []
 } = {}) {
@@ -470,6 +695,9 @@ function createRuntime({
         refreshSeconds: 300,
         rotationSeconds: 15,
         qaPreview,
+        qaReplayEnabled,
+        qaReplayUrl: "/reports/rating/tv/qa-replay-data/",
+        qaReplaySchema: "copper.driver-rating-replay",
         initialShiftType: "night"
     });
     document.nodesById.set("rating-tv-config", configNode);
@@ -510,10 +738,13 @@ function createRuntime({
     const windowObject = {
         document,
         location: {origin: "https://driverform.test"},
+        innerWidth: 1920,
         innerHeight: 1080,
         fetch: fetchStub,
         setInterval: clock.setInterval.bind(clock),
         clearInterval: clock.clearInterval.bind(clock),
+        setTimeout: clock.setTimeout.bind(clock),
+        clearTimeout: clock.clearTimeout.bind(clock),
         addEventListener(type, listener) {
             const listeners = windowListeners.get(type) || [];
             listeners.push(listener);
@@ -603,6 +834,292 @@ test("QA preview renders all 53 sorted rows and premium five without fetch", asy
     assert.equal(
         runtime.elements.grid.children[5].classList.contains("is-premium"),
         false
+    );
+});
+
+test("saved replay fetches once and boots paused without live timers", async () => {
+    const replay = buildReplayDocument();
+    const runtime = createRuntime({
+        qaPreview: true,
+        qaReplayEnabled: true,
+        responses: [queuedResponse(replay)]
+    });
+    await runtime.flush();
+
+    assert.equal(runtime.fetchCalls.length, 1);
+    const call = runtime.fetchCalls[0];
+    const url = new URL(call.url);
+    assert.equal(url.pathname, "/reports/rating/tv/qa-replay-data/");
+    assert.equal(url.search, "");
+    assert.equal(call.options.method, "GET");
+    assert.equal(call.options.credentials, "same-origin");
+    assert.equal(call.options.cache, "no-store");
+    assert.equal(runtime.window.RatingTvScreen.state.qaReplayPhase, "PAUSED");
+    assert.equal(runtime.window.RatingTvScreen.state.qaReplayDay, 1);
+    assert.equal(runtime.elements.grid.children.length, 53);
+    assert.equal(runtime.elements.qaDaySelect.children.length, 30);
+    assert.equal(runtime.elements.qaDaySelect.value, "1");
+    assert.equal(runtime.elements.qaDaySelect.disabled, false);
+    assert.equal(runtime.elements.qaBackward.disabled, true);
+    assert.equal(runtime.elements.qaForward.disabled, false);
+    assert.equal(runtime.elements.refreshCountdown.textContent, "Сохранённый снимок");
+
+    runtime.clock.advance(300000);
+    await runtime.flush();
+    assert.equal(runtime.fetchCalls.length, 1);
+    assert.equal(runtime.window.RatingTvScreen.state.qaReplayDay, 1);
+    assert.equal(runtime.window.RatingTvScreen.state.presentationPlaylist.length, 0);
+});
+
+
+test("saved replay plays forward to day 30 and stops without wrapping", async () => {
+    const runtime = createRuntime({
+        qaPreview: true,
+        qaReplayEnabled: true,
+        responses: [queuedResponse(buildReplayDocument())]
+    });
+    await runtime.flush();
+
+    runtime.elements.qaSpeed.value = "4";
+    runtime.elements.qaSpeed.dispatch("change");
+    runtime.elements.qaForward.dispatch("click");
+    assert.equal(
+        runtime.window.RatingTvScreen.state.qaReplayPhase,
+        "PLAYING_FORWARD"
+    );
+
+    runtime.clock.advance(29 * 750);
+    await runtime.flush();
+    assert.equal(runtime.window.RatingTvScreen.state.qaReplayDay, 30);
+    assert.equal(runtime.window.RatingTvScreen.state.qaReplayPhase, "PAUSED");
+    assert.equal(runtime.elements.qaForward.disabled, true);
+    assert.match(runtime.elements.qaReplayStatus.textContent, /завершён/i);
+
+    runtime.clock.advance(30000);
+    await runtime.flush();
+    assert.equal(runtime.window.RatingTvScreen.state.qaReplayDay, 30);
+    assert.equal(runtime.fetchCalls.length, 1);
+});
+
+
+test("saved replay plays backward to day 1 and stops without wrapping", async () => {
+    const runtime = createRuntime({
+        qaPreview: true,
+        qaReplayEnabled: true,
+        responses: [queuedResponse(buildReplayDocument())]
+    });
+    await runtime.flush();
+
+    runtime.elements.qaDaySelect.value = "30";
+    runtime.elements.qaDaySelect.dispatch("change");
+    assert.equal(runtime.window.RatingTvScreen.state.qaReplayDay, 30);
+    runtime.elements.qaSpeed.value = "4";
+    runtime.elements.qaSpeed.dispatch("change");
+    runtime.elements.qaBackward.dispatch("click");
+
+    runtime.clock.advance(29 * 750);
+    await runtime.flush();
+    assert.equal(runtime.window.RatingTvScreen.state.qaReplayDay, 1);
+    assert.equal(runtime.window.RatingTvScreen.state.qaReplayPhase, "PAUSED");
+    assert.equal(runtime.elements.qaBackward.disabled, true);
+    assert.match(runtime.elements.qaReplayStatus.textContent, /день 1/i);
+});
+
+
+test("replay speed reschedules once while pause and step stay deterministic", async () => {
+    const runtime = createRuntime({
+        qaPreview: true,
+        qaReplayEnabled: true,
+        responses: [queuedResponse(buildReplayDocument())]
+    });
+    await runtime.flush();
+
+    runtime.elements.qaForward.dispatch("click");
+    runtime.clock.advance(1000);
+    assert.equal(runtime.window.RatingTvScreen.state.qaReplayDay, 1);
+
+    runtime.elements.qaSpeed.value = "4";
+    runtime.elements.qaSpeed.dispatch("change");
+    runtime.clock.advance(749);
+    assert.equal(runtime.window.RatingTvScreen.state.qaReplayDay, 1);
+    runtime.clock.advance(1);
+    assert.equal(runtime.window.RatingTvScreen.state.qaReplayDay, 2);
+
+    runtime.elements.qaPause.dispatch("click");
+    assert.equal(runtime.window.RatingTvScreen.state.qaReplayPhase, "PAUSED");
+    runtime.clock.advance(10000);
+    assert.equal(runtime.window.RatingTvScreen.state.qaReplayDay, 2);
+
+    runtime.elements.qaStep.dispatch("click");
+    assert.equal(runtime.window.RatingTvScreen.state.qaReplayDay, 3);
+    assert.equal(runtime.window.RatingTvScreen.state.qaReplayPhase, "PAUSED");
+    assert.equal(runtime.fetchCalls.length, 1);
+});
+
+
+test("random replay navigation keeps saved deltas and fixed place slots", async () => {
+    const replay = buildReplayDocument();
+    const runtime = createRuntime({
+        qaPreview: true,
+        qaReplayEnabled: true,
+        responses: [queuedResponse(replay)]
+    });
+    await runtime.flush();
+
+    const firstSlot = runtime.elements.grid.children[0];
+    const firstPlaceNode = firstSlot._ratingPlaceNode;
+    runtime.elements.qaDaySelect.value = "3";
+    runtime.elements.qaDaySelect.dispatch("change");
+    const savedDayThreeDeltas = Array.from(
+        replay.snapshots[2].payload.entries,
+        (entry) => entry.position_delta
+    );
+    assert.deepEqual(
+        Array.from(
+            runtime.window.RatingTvScreen.state.payload.entries,
+            (entry) => entry.position_delta
+        ),
+        savedDayThreeDeltas
+    );
+    assert.equal(runtime.elements.grid.children[0], firstSlot);
+    assert.equal(runtime.elements.grid.children[0]._ratingPlaceNode, firstPlaceNode);
+
+    runtime.elements.qaDaySelect.value = "1";
+    runtime.elements.qaDaySelect.dispatch("change");
+    runtime.elements.qaDaySelect.value = "2";
+    runtime.elements.qaDaySelect.dispatch("change");
+    assert.deepEqual(
+        Array.from(
+            runtime.window.RatingTvScreen.state.payload.entries,
+            (entry) => entry.position_delta
+        ),
+        Array.from(
+            replay.snapshots[1].payload.entries,
+            (entry) => entry.position_delta
+        )
+    );
+    assert.equal(runtime.elements.grid.children.length, 53);
+    assert.equal(runtime.elements.grid.children[0], firstSlot);
+    assert.equal(runtime.elements.grid.children[0]._ratingPlaceNode, firstPlaceNode);
+});
+
+
+test("incomplete saved replay fails closed without static fallback", async () => {
+    const replay = buildReplayDocument();
+    replay.snapshots.pop();
+    const runtime = createRuntime({
+        qaPreview: true,
+        qaReplayEnabled: true,
+        previewPayload: buildPayload({entries: buildEntries(53)}),
+        responses: [queuedResponse(replay)]
+    });
+    await runtime.flush();
+
+    assert.equal(runtime.fetchCalls.length, 1);
+    assert.equal(runtime.window.RatingTvScreen.state.qaReplayPhase, "ERROR");
+    assert.equal(runtime.window.RatingTvScreen.state.qaReplay, null);
+    assert.equal(runtime.elements.grid.hidden, true);
+    assert.equal(runtime.elements.message.hidden, false);
+    assert.equal(runtime.elements.qaDaySelect.disabled, true);
+    assert.match(runtime.elements.messageTitle.textContent, /недоступно/i);
+});
+
+
+test("saved replay rejects different places for one equal score", async () => {
+    const replay = buildReplayDocument();
+    const firstDayEntries = replay.snapshots[0].payload.entries;
+    firstDayEntries[1].score = firstDayEntries[0].score;
+    const runtime = createRuntime({
+        qaPreview: true,
+        qaReplayEnabled: true,
+        responses: [queuedResponse(replay)]
+    });
+    await runtime.flush();
+
+    assert.equal(runtime.window.RatingTvScreen.state.qaReplayPhase, "ERROR");
+    assert.equal(runtime.window.RatingTvScreen.state.qaReplay, null);
+    assert.equal(runtime.elements.grid.hidden, true);
+    assert.match(runtime.elements.messageTitle.textContent, /недоступно/i);
+});
+
+
+test("saved replay rejects a day marked unavailable", async () => {
+    const replay = buildReplayDocument();
+    replay.snapshots[11].payload.available = false;
+    const runtime = createRuntime({
+        qaPreview: true,
+        qaReplayEnabled: true,
+        responses: [queuedResponse(replay)]
+    });
+    await runtime.flush();
+
+    assert.equal(runtime.window.RatingTvScreen.state.qaReplayPhase, "ERROR");
+    assert.equal(runtime.window.RatingTvScreen.state.qaReplay, null);
+    assert.equal(runtime.elements.grid.hidden, true);
+});
+
+
+test("keyboard visibility and mobile state pause replay safely", async () => {
+    const runtime = createRuntime({
+        qaPreview: true,
+        qaReplayEnabled: true,
+        responses: [queuedResponse(buildReplayDocument())]
+    });
+    await runtime.flush();
+
+    const right = runtime.document.dispatch("keydown", {
+        key: "ArrowRight",
+        target: runtime.document
+    });
+    assert.equal(right.prevented, true);
+    assert.equal(runtime.window.RatingTvScreen.state.qaReplayDay, 2);
+
+    const ignored = runtime.document.dispatch("keydown", {
+        key: "ArrowRight",
+        target: runtime.elements.qaSpeed
+    });
+    assert.equal(ignored.prevented, false);
+    assert.equal(runtime.window.RatingTvScreen.state.qaReplayDay, 2);
+
+    runtime.elements.qaForward.dispatch("click");
+    runtime.document.hidden = true;
+    runtime.document.dispatch("visibilitychange");
+    assert.equal(runtime.window.RatingTvScreen.state.qaReplayPhase, "PAUSED");
+    runtime.clock.advance(10000);
+    assert.equal(runtime.window.RatingTvScreen.state.qaReplayDay, 2);
+
+    runtime.document.hidden = false;
+    runtime.elements.qaForward.dispatch("click");
+    runtime.window.innerWidth = 390;
+    runtime.window.dispatch("resize");
+    assert.equal(runtime.window.RatingTvScreen.state.qaReplayPhase, "PAUSED");
+    runtime.clock.advance(10000);
+    assert.equal(runtime.window.RatingTvScreen.state.qaReplayDay, 2);
+});
+
+
+test("fullscreen rejection preserves replay day phase and status", async () => {
+    const runtime = createRuntime({
+        qaPreview: true,
+        qaReplayEnabled: true,
+        responses: [queuedResponse(buildReplayDocument())]
+    });
+    await runtime.flush();
+
+    const originalStatus = runtime.elements.qaReplayStatus.textContent;
+    runtime.document.documentElement.requestFullscreen = () => (
+        Promise.reject(new Error("Fullscreen unavailable"))
+    );
+
+    runtime.elements.fullscreen.dispatch("click");
+    await runtime.flush();
+
+    assert.equal(runtime.window.RatingTvScreen.state.qaReplayDay, 1);
+    assert.equal(runtime.window.RatingTvScreen.state.qaReplayPhase, "PAUSED");
+    assert.equal(runtime.elements.qaReplayStatus.textContent, originalStatus);
+    assert.equal(
+        runtime.elements.fullscreen.title,
+        "Полноэкранный режим недоступен"
     );
 });
 
