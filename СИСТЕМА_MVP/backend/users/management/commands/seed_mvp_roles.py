@@ -16,6 +16,7 @@ ROLES = [
     ('dispatcher', 'Диспетчер'),
     ('mechanic', 'Механик'),
     ('manager', 'Руководство'),
+    ('settlement_clerk', 'Делопроизводитель'),
 ]
 
 
