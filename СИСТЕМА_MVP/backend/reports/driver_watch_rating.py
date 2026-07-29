@@ -29,7 +29,9 @@ from .models import DriverShiftPassportSnapshot, RatingPeriod
 logger = logging.getLogger(__name__)
 
 
-DRIVER_RATING_FORMULA_VERSION = 'DRIVER_WATCH_V2_NO_DISTANCE'
+DRIVER_RATING_FORMULA_VERSION = (
+    'DRIVER_WATCH_V3_NO_DISTANCE_TIME_POLICY_NEUTRAL'
+)
 DRIVER_RATING_CACHE_SECONDS = 300
 DRIVER_RATING_MIN_COMPARABLE_CYCLES = 5
 DRIVER_RATING_WEIGHTS = {
@@ -698,7 +700,10 @@ def _empty_rating(
         'official': False,
         'rating_mode': 'working',
         'formula_version': DRIVER_RATING_FORMULA_VERSION,
-        'formula_label': 'Рабочая формула без м³·км и т·км',
+        'formula_label': (
+            'Рабочая формула без м³·км и т·км; '
+            'рабочее время нейтрально'
+        ),
         'status': status,
         'generated_at': timezone.now().isoformat(),
         'source_fingerprint': '',
@@ -1222,22 +1227,34 @@ def _stability_scores(records, cycle_samples, cycle_medians):
 
 def _work_time_score(record):
     time_data = record['time']
-    if (
-        time_data.get('scheduled_window_status')
-        == 'schedule_snapshot_unavailable'
-    ):
+    if not _work_time_rating_is_available(time_data):
         return FIFTY
     unjustified_seconds = _decimal(
         time_data.get('unjustified_short_shift_seconds')
     )
     if unjustified_seconds is None:
-        return HUNDRED
+        return FIFTY
     penalty = _clip(
         unjustified_seconds / Decimal('3600'),
         ZERO,
         Decimal('1'),
     )
     return HUNDRED * (Decimal('1') - penalty)
+
+
+def _work_time_rating_is_available(time_data):
+    """Fail closed until both schedule and reason policy are auditable."""
+    return bool(
+        time_data.get('work_time_rating_available') is True
+        and time_data.get('scheduled_window_status')
+        == 'structural_schedule_observed'
+        and time_data.get('work_time_rating_status')
+        == 'assessed_structural_schedule_and_reason_policy'
+        and _decimal(
+            time_data.get('unjustified_short_shift_seconds')
+        )
+        is not None
+    )
 
 
 def _assignments_score(record):
@@ -1321,12 +1338,9 @@ def _confidence_score(record, assignments, digital):
     )
     source_core = (assignments + digital) / Decimal('2')
     schedule_component = (
-        ZERO
-        if (
-            record['time'].get('scheduled_window_status')
-            == 'schedule_snapshot_unavailable'
-        )
-        else HUNDRED
+        HUNDRED
+        if _work_time_rating_is_available(record['time'])
+        else ZERO
     )
     return (
         Decimal('0.50') * coverage
@@ -1670,7 +1684,10 @@ def build_driver_watch_rating(
         'official': False,
         'rating_mode': 'working',
         'formula_version': DRIVER_RATING_FORMULA_VERSION,
-        'formula_label': 'Рабочая формула без м³·км и т·км',
+        'formula_label': (
+            'Рабочая формула без м³·км и т·км; '
+            'рабочее время нейтрально'
+        ),
         'status': (
             'Рабочий рейтинг рассчитан. '
             'м³·км и т·км пока не учитываются.'
@@ -2061,7 +2078,10 @@ def build_driver_rating_period(
         'rating_mode': 'working',
         'scope_type': 'rating_period',
         'formula_version': DRIVER_RATING_FORMULA_VERSION,
-        'formula_label': 'Рабочая формула без м³·км и т·км',
+        'formula_label': (
+            'Рабочая формула без м³·км и т·км; '
+            'рабочее время нейтрально'
+        ),
         'status': (
             'Рабочий рейтинг рассчитан. '
             'м³·км и т·км пока не учитываются.'

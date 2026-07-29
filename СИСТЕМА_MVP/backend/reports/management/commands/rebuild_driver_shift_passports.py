@@ -4,6 +4,7 @@ from django.db.models import Q
 
 from reports.driver_shift_passport_snapshots import (
     DRIVER_SHIFT_PASSPORT_CALCULATOR_VERSION,
+    LEGACY_REQUEST_SUPERSEDED_PREFIX,
     enqueue_driver_shift_passport_capture,
     enqueue_driver_shift_passport_rebuild,
     process_driver_shift_passport_request,
@@ -50,6 +51,8 @@ class Command(BaseCommand):
                 DriverShiftPassportRequestStatus.PROCESSING,
                 DriverShiftPassportRequestStatus.FAILED,
             },
+        ).exclude(
+            last_error__startswith=LEGACY_REQUEST_SUPERSEDED_PREFIX,
         )
         if shift_ids:
             pending = pending.filter(shift_id__in=shift_ids)

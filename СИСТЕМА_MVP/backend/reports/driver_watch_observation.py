@@ -11,7 +11,10 @@ from users.models import WatchComposition
 
 from .driver_shift_timeline import (
     DOWNTIME_CATEGORIES,
+    SCHEDULE_WINDOW_STATUS_INFERRED,
+    SCHEDULE_WINDOW_STATUS_UNAVAILABLE,
     TimelineCategory,
+    WORK_TIME_RATING_STATUS_NEUTRAL,
     build_driver_shift_timelines,
     cycle_aggregation_inputs_from_samples,
     cycle_statistics_from_samples,
@@ -196,6 +199,51 @@ def _aggregate_shift_passports(passports, cycle_sample_groups):
         key: sum(passport['time'][key] for passport in passports)
         for key in PASSPORT_TIME_SUM_KEYS
     }
+    schedule_statuses = {
+        passport['time'].get('scheduled_window_status')
+        for passport in passports
+    }
+    if schedule_statuses == {SCHEDULE_WINDOW_STATUS_INFERRED}:
+        aggregate_schedule_status = SCHEDULE_WINDOW_STATUS_INFERRED
+    elif schedule_statuses == {SCHEDULE_WINDOW_STATUS_UNAVAILABLE}:
+        aggregate_schedule_status = SCHEDULE_WINDOW_STATUS_UNAVAILABLE
+    elif schedule_statuses and schedule_statuses <= {
+        SCHEDULE_WINDOW_STATUS_INFERRED,
+        SCHEDULE_WINDOW_STATUS_UNAVAILABLE,
+    }:
+        aggregate_schedule_status = 'mixed_schedule_sources_unavailable'
+    else:
+        aggregate_schedule_status = 'unknown_schedule_status'
+
+    def optional_schedule_sum(key):
+        values = [
+            passport['time'].get(key)
+            for passport in passports
+        ]
+        if not values or any(value is None for value in values):
+            return None
+        return sum(int(value) for value in values)
+
+    schedule_sums = {
+        key: optional_schedule_sum(key)
+        for key in (
+            'scheduled_duration_seconds',
+            'extra_presence_seconds',
+            'confirmed_extra_productive_seconds',
+            'inferred_schedule_gap_seconds',
+            'observed_short_shift_seconds',
+        )
+    }
+    unjustified_values = [
+        passport['time'].get('unjustified_short_shift_seconds')
+        for passport in passports
+    ]
+    unjustified_short_shift_seconds = (
+        sum(int(value) for value in unjustified_values)
+        if unjustified_values
+        and all(value is not None for value in unjustified_values)
+        else None
+    )
     formula_ready = bool(passports) and all(
         passport['rates_per_available_hour']['is_formula_ready']
         for passport in passports
@@ -287,7 +335,7 @@ def _aggregate_shift_passports(passports, cycle_sample_groups):
     ).hexdigest()
     merged_cycle_samples = _merge_cycle_samples(cycle_sample_groups)
     return {
-        'passport_schema_version': 1,
+        'passport_schema_version': 2,
         'source_fingerprint': aggregate_fingerprint,
         'scope': 'employee_period',
         'shift_count': len(passports),
@@ -323,12 +371,28 @@ def _aggregate_shift_passports(passports, cycle_sample_groups):
             **time,
             'scheduled_start_at': None,
             'scheduled_end_at': None,
-            'scheduled_window_status': 'schedule_snapshot_unavailable',
+            **schedule_sums,
+            'scheduled_window_status': aggregate_schedule_status,
+            'schedule_source': (
+                'production_shift_default'
+                if aggregate_schedule_status
+                == SCHEDULE_WINDOW_STATUS_INFERRED
+                else None
+            ),
+            'schedule_confidence_percent': 0,
             'start_deviation_seconds': None,
             'end_deviation_seconds': None,
-            'confirmed_extra_productive_seconds': None,
-            'unjustified_short_shift_seconds': None,
-            'short_shift_status': 'policy_unavailable',
+            'unjustified_short_shift_seconds': (
+                unjustified_short_shift_seconds
+            ),
+            'short_shift_status': (
+                'inferred_comparison_only'
+                if aggregate_schedule_status
+                == SCHEDULE_WINDOW_STATUS_INFERRED
+                else 'policy_unavailable'
+            ),
+            'work_time_rating_available': False,
+            'work_time_rating_status': WORK_TIME_RATING_STATUS_NEUTRAL,
         },
         'cycles': cycle_statistics_from_samples(merged_cycle_samples),
         'aggregation_inputs': {

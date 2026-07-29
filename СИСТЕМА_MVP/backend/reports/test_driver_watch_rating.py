@@ -144,6 +144,15 @@ class DriverRatingFixtureMixin:
         m3_km_known_value='0',
         t_km_known_value='0',
         downtime_review_seconds=0,
+        scheduled_window_status='schedule_snapshot_unavailable',
+        unjustified_short_shift_seconds=None,
+        extra_presence_seconds=0,
+        confirmed_extra_productive_seconds=0,
+        inferred_schedule_gap_seconds=None,
+        work_time_rating_available=False,
+        work_time_rating_status=(
+            'neutral_structural_schedule_and_reason_policy_unavailable'
+        ),
     ):
         opened_at = self.now - timedelta(days=ordinal, hours=12)
         closed_at = opened_at + timedelta(hours=12)
@@ -268,10 +277,21 @@ class DriverRatingFixtureMixin:
                 'time': {
                     'available_seconds': 43200,
                     'downtime_review_seconds': downtime_review_seconds,
-                    'scheduled_window_status': (
-                        'schedule_snapshot_unavailable'
+                    'scheduled_window_status': scheduled_window_status,
+                    'unjustified_short_shift_seconds': (
+                        unjustified_short_shift_seconds
                     ),
-                    'unjustified_short_shift_seconds': None,
+                    'extra_presence_seconds': extra_presence_seconds,
+                    'confirmed_extra_productive_seconds': (
+                        confirmed_extra_productive_seconds
+                    ),
+                    'inferred_schedule_gap_seconds': (
+                        inferred_schedule_gap_seconds
+                    ),
+                    'work_time_rating_available': (
+                        work_time_rating_available
+                    ),
+                    'work_time_rating_status': work_time_rating_status,
                 },
                 'routing': {
                     'match_count': route_match_count,
@@ -351,6 +371,139 @@ class DriverWatchRatingTests(
             ] is False
             for snapshot in snapshots
         ))
+
+    def test_formula_version_declares_neutral_work_time_policy(self):
+        self.assertEqual(
+            DRIVER_RATING_FORMULA_VERSION,
+            'DRIVER_WATCH_V3_NO_DISTANCE_TIME_POLICY_NEUTRAL',
+        )
+
+    def test_unjustified_none_stays_neutral_without_reason_policy(self):
+        driver = self.employee(
+            'Р’РѕРґРёС‚РµР»СЊ СЃ РЅР°Р±Р»СЋРґР°РµРјС‹Рј РѕРєРЅРѕРј СЃРјРµРЅС‹',
+        )
+        self.snapshot(
+            driver,
+            ordinal=1,
+            trip_count=20,
+            scheduled_window_status=(
+                'structural_schedule_observed'
+            ),
+            unjustified_short_shift_seconds=None,
+            work_time_rating_available=True,
+            work_time_rating_status=(
+                'assessed_structural_schedule_and_reason_policy'
+            ),
+        )
+
+        result = build_driver_watch_rating(
+            self.watch,
+            shift_type=ShiftType.DAY,
+        )
+
+        self.assertTrue(result['available'])
+        self.assertEqual(
+            result['entries'][0]['blocks']['work_time'],
+            '50.0000',
+        )
+
+    def test_inferred_presence_and_productive_extra_do_not_change_rank(self):
+        baseline = self.employee('ТЕСТ водитель без отклонения')
+        early = self.employee('ТЕСТ водитель с графиком 06-18')
+        self.snapshot(
+            baseline,
+            ordinal=1,
+            trip_count=20,
+            scheduled_window_status='standard_production_shift_inferred',
+            inferred_schedule_gap_seconds=0,
+        )
+        self.snapshot(
+            early,
+            ordinal=2,
+            trip_count=20,
+            scheduled_window_status='standard_production_shift_inferred',
+            extra_presence_seconds=3600,
+            confirmed_extra_productive_seconds=1200,
+            inferred_schedule_gap_seconds=3600,
+        )
+
+        result = build_driver_watch_rating(
+            self.watch,
+            shift_type=ShiftType.DAY,
+        )
+        by_employee = {
+            entry['employee_id']: entry
+            for entry in result['entries']
+        }
+
+        self.assertEqual(
+            by_employee[baseline.id]['blocks']['work_time'],
+            '50.0000',
+        )
+        self.assertEqual(
+            by_employee[early.id]['blocks']['work_time'],
+            '50.0000',
+        )
+        self.assertEqual(
+            by_employee[baseline.id]['score'],
+            by_employee[early.id]['score'],
+        )
+        self.assertEqual(by_employee[baseline.id]['place'], 1)
+        self.assertEqual(by_employee[early.id]['place'], 1)
+
+    def test_unknown_schedule_status_is_neutral_with_zero_confidence_component(
+        self,
+    ):
+        unavailable = self.employee(
+            'ТЕСТ водитель без снимка графика',
+        )
+        unknown = self.employee(
+            'ТЕСТ водитель с неизвестным статусом графика',
+        )
+        self.snapshot(
+            unavailable,
+            ordinal=1,
+            trip_count=20,
+        )
+        self.snapshot(
+            unknown,
+            ordinal=2,
+            trip_count=20,
+            scheduled_window_status='unexpected_schedule_status',
+            unjustified_short_shift_seconds=3600,
+            work_time_rating_available=True,
+            work_time_rating_status=(
+                'assessed_structural_schedule_and_reason_policy'
+            ),
+        )
+
+        result = build_driver_watch_rating(
+            self.watch,
+            shift_type=ShiftType.DAY,
+        )
+        by_employee = {
+            entry['employee_id']: entry
+            for entry in result['entries']
+        }
+
+        self.assertEqual(
+            by_employee[unknown.id]['blocks']['work_time'],
+            '50.0000',
+        )
+        self.assertEqual(
+            by_employee[unavailable.id]['confidence'],
+            by_employee[unknown.id]['confidence'],
+        )
+        self.assertEqual(
+            by_employee[unknown.id]['confidence'],
+            '52.5000',
+        )
+        self.assertEqual(
+            by_employee[unavailable.id]['score'],
+            by_employee[unknown.id]['score'],
+        )
+        self.assertEqual(by_employee[unavailable.id]['place'], 1)
+        self.assertEqual(by_employee[unknown.id]['place'], 1)
 
     def test_zero_weight_distance_is_invariant_for_missing_null_zero_and_arbitrary(
         self,

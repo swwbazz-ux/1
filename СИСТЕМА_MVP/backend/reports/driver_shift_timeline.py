@@ -13,9 +13,21 @@ from assignments.models import (
     HaulAssignment,
     HaulAssignmentAction,
 )
+from core.production_time import (
+    BUSINESS_TIME_ZONE,
+    DAY_SHIFT_START,
+    production_shift_bounds,
+)
 from downtimes.models import DowntimeEvent
-from shifts.models import EmployeeShift, ShiftReadingCorrection
+from shifts.models import EmployeeShift, ShiftReadingCorrection, ShiftType
 from trips.models import Trip, TripStatus
+
+
+SCHEDULE_WINDOW_STATUS_INFERRED = 'standard_production_shift_inferred'
+SCHEDULE_WINDOW_STATUS_UNAVAILABLE = 'schedule_snapshot_unavailable'
+WORK_TIME_RATING_STATUS_NEUTRAL = (
+    'neutral_structural_schedule_and_reason_policy_unavailable'
+)
 
 
 class TimelineCategory:
@@ -545,6 +557,106 @@ def _union_seconds(spans):
     return max(0, total)
 
 
+def _scheduled_shift_bounds(shift, window_start):
+    local_start = window_start.astimezone(BUSINESS_TIME_ZONE)
+    production_date = local_start.date()
+    if (
+        shift.shift_type == ShiftType.NIGHT
+        and local_start.time().replace(tzinfo=None) < DAY_SHIFT_START
+    ):
+        production_date -= timedelta(days=1)
+    return production_shift_bounds(production_date, shift.shift_type)
+
+
+def _overlap_seconds(start, end, range_start, range_end):
+    overlap_start = max(start, range_start)
+    overlap_end = min(end, range_end)
+    if overlap_start >= overlap_end:
+        return 0
+    return int((overlap_end - overlap_start).total_seconds())
+
+
+def _schedule_observation(shift, window_start, window_end, intervals):
+    scheduled_start, scheduled_end = _scheduled_shift_bounds(
+        shift,
+        window_start,
+    )
+    scheduled_duration_seconds = int(
+        (scheduled_end - scheduled_start).total_seconds()
+    )
+    covered_schedule_seconds = _overlap_seconds(
+        window_start,
+        window_end,
+        scheduled_start,
+        scheduled_end,
+    )
+    inferred_schedule_gap_seconds = max(
+        0,
+        scheduled_duration_seconds - covered_schedule_seconds,
+    )
+    extra_presence_seconds = (
+        _overlap_seconds(
+            window_start,
+            window_end,
+            window_start,
+            scheduled_start,
+        )
+        + _overlap_seconds(
+            window_start,
+            window_end,
+            scheduled_end,
+            window_end,
+        )
+    )
+    confirmed_extra_productive_seconds = sum(
+        (
+            _overlap_seconds(
+                interval.start,
+                interval.end,
+                window_start,
+                scheduled_start,
+            )
+            + _overlap_seconds(
+                interval.start,
+                interval.end,
+                scheduled_end,
+                window_end,
+            )
+        )
+        for interval in intervals
+        if interval.category == TimelineCategory.TRIP
+    )
+    return {
+        'scheduled_start_at': scheduled_start.isoformat(),
+        'scheduled_end_at': scheduled_end.isoformat(),
+        'scheduled_duration_seconds': scheduled_duration_seconds,
+        # 07:00-19:00 / 19:00-07:00 is only the common production
+        # convention. EmployeeShift currently has no immutable link to the
+        # shift-specific schedule that was actually approved for this person.
+        # Therefore this comparison is diagnostic and must never be presented
+        # as an observed schedule.
+        'scheduled_window_status': SCHEDULE_WINDOW_STATUS_INFERRED,
+        'schedule_source': 'production_shift_default',
+        'schedule_confidence_percent': 0,
+        'start_deviation_seconds': int(
+            (window_start - scheduled_start).total_seconds()
+        ),
+        'end_deviation_seconds': int(
+            (window_end - scheduled_end).total_seconds()
+        ),
+        'extra_presence_seconds': extra_presence_seconds,
+        'confirmed_extra_productive_seconds': (
+            confirmed_extra_productive_seconds
+        ),
+        'inferred_schedule_gap_seconds': inferred_schedule_gap_seconds,
+        'observed_short_shift_seconds': None,
+        'unjustified_short_shift_seconds': None,
+        'short_shift_status': 'inferred_comparison_only',
+        'work_time_rating_available': False,
+        'work_time_rating_status': WORK_TIME_RATING_STATUS_NEUTRAL,
+    }
+
+
 def _cycle_context(trip, shift):
     if (
         trip.truck.model_id is None
@@ -689,6 +801,7 @@ def _build_shift_passport(
     trip_records,
     assignment_spans,
     corrections,
+    intervals,
     seconds_by_category,
     total_seconds,
     explained_seconds,
@@ -847,8 +960,14 @@ def _build_shift_passport(
         )
 
     cycle_samples = _cycle_samples_for_trips(credited_trips, shift)
+    schedule_observation = _schedule_observation(
+        shift,
+        window_start,
+        window_end,
+        intervals,
+    )
     return {
-        'passport_schema_version': 1,
+        'passport_schema_version': 2,
         'scope': 'employee_shift',
         'shift': {
             'id': shift.id,
@@ -933,14 +1052,7 @@ def _build_shift_passport(
             'actual_start_at': window_start.isoformat(),
             'actual_end_at': window_end.isoformat(),
             'actual_duration_seconds': total_seconds,
-            'scheduled_start_at': None,
-            'scheduled_end_at': None,
-            'scheduled_window_status': 'schedule_snapshot_unavailable',
-            'start_deviation_seconds': None,
-            'end_deviation_seconds': None,
-            'confirmed_extra_productive_seconds': None,
-            'unjustified_short_shift_seconds': None,
-            'short_shift_status': 'policy_unavailable',
+            **schedule_observation,
             'available_seconds': available_seconds,
             'loaded_to_unloaded_seconds': seconds_by_category.get(
                 TimelineCategory.TRIP,
@@ -1462,6 +1574,7 @@ def _build_timeline(
         trip_records=trip_records,
         assignment_spans=assignments,
         corrections=corrections,
+        intervals=intervals,
         seconds_by_category=seconds_by_category,
         total_seconds=total_seconds,
         explained_seconds=explained_seconds,
@@ -1529,6 +1642,7 @@ def _invalid_shift_timeline(shift, *, extra_quality_flags=()):
         trip_records=(),
         assignment_spans=(),
         corrections=(),
+        intervals=(),
         seconds_by_category={},
         total_seconds=0,
         explained_seconds=0,

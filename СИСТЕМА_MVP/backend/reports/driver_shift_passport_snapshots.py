@@ -31,7 +31,10 @@ from .models import (
 logger = logging.getLogger(__name__)
 
 DRIVER_SHIFT_PASSPORT_SCHEMA_VERSION = 1
-DRIVER_SHIFT_PASSPORT_CALCULATOR_VERSION = 'driver-shift-passport-v1'
+DRIVER_SHIFT_PASSPORT_CALCULATOR_VERSION = 'driver-shift-passport-v2'
+LEGACY_REQUEST_SUPERSEDED_PREFIX = (
+    'superseded_legacy_calculator_request:'
+)
 CAPTURE_LATE_AFTER = timedelta(minutes=5)
 FORBIDDEN_DIAGNOSTIC_KEYS = {'score', 'place', 'weight'}
 CLOSURE_TRIGGERS = {
@@ -509,6 +512,14 @@ def _timeline_payload(
 
 
 def _capture_driver_shift_passport(locked_request):
+    if (
+        locked_request.calculator_version
+        != DRIVER_SHIFT_PASSPORT_CALCULATOR_VERSION
+    ):
+        raise ValueError(
+            'Версия калькулятора запроса не поддерживается текущим '
+            'построителем паспорта.'
+        )
     shift = (
         EmployeeShift.objects
         .select_for_update(of=('self',))
@@ -595,7 +606,87 @@ def _mark_capture_failed(request_id, error):
     )
 
 
+def _legacy_superseded_error(legacy_request, current_request):
+    return (
+        f'{LEGACY_REQUEST_SUPERSEDED_PREFIX} '
+        f'{legacy_request.calculator_version} -> '
+        f'{DRIVER_SHIFT_PASSPORT_CALCULATOR_VERSION}; '
+        f'current_request_id={current_request.pk}'
+    )
+
+
+def _supersede_legacy_capture_request(request_id):
+    with transaction.atomic():
+        capture_request = (
+            DriverShiftPassportCaptureRequest.objects
+            .select_for_update(of=('self',))
+            .select_related(
+                'captured_by',
+                'shift__equipment__equipment_type',
+            )
+            .get(pk=request_id)
+        )
+        if (
+            capture_request.status
+            == DriverShiftPassportRequestStatus.COMPLETED
+            or capture_request.calculator_version
+            == DRIVER_SHIFT_PASSPORT_CALCULATOR_VERSION
+        ):
+            return capture_request.pk
+
+        current_request = enqueue_driver_shift_passport_capture(
+            shift=capture_request.shift,
+            trigger=(
+                DriverShiftPassportTrigger.CALCULATOR_UPGRADE
+            ),
+            captured_by=capture_request.captured_by,
+            calculator_version=(
+                DRIVER_SHIFT_PASSPORT_CALCULATOR_VERSION
+            ),
+            schedule_on_commit=False,
+        )
+        if current_request is None:
+            raise ValueError(
+                'Не удалось создать запрос текущей версии калькулятора.'
+            )
+
+        superseded_error = _legacy_superseded_error(
+            capture_request,
+            current_request,
+        )
+        if not (
+            capture_request.status
+            == DriverShiftPassportRequestStatus.FAILED
+            and capture_request.last_error == superseded_error
+        ):
+            capture_request.status = (
+                DriverShiftPassportRequestStatus.FAILED
+            )
+            capture_request.attempt_count += 1
+            capture_request.started_at = timezone.now()
+            capture_request.completed_at = None
+            capture_request.last_error = superseded_error
+            capture_request.save(
+                update_fields=[
+                    'status',
+                    'attempt_count',
+                    'started_at',
+                    'completed_at',
+                    'last_error',
+                ]
+            )
+        return current_request.pk
+
+
 def process_driver_shift_passport_request(request_id):
+    current_request_id = _supersede_legacy_capture_request(
+        request_id,
+    )
+    if current_request_id != request_id:
+        return process_driver_shift_passport_request(
+            current_request_id,
+        )
+
     outermost_transaction = not connection.in_atomic_block
     try:
         with transaction.atomic():
