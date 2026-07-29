@@ -108,6 +108,68 @@ RUN_KEYS = {
 DATABASE_KEYS = {'configured', 'actual', 'business_counts'}
 CONFIGURED_DATABASE_KEYS = {'engine', 'name', 'user', 'host', 'port'}
 ACTUAL_DATABASE_KEYS = {'name', 'host', 'port', 'user'}
+BUSINESS_COUNT_KEYS = {
+    'employees',
+    'employee_shifts',
+    'trips',
+    'downtime_events',
+    'crew_plans',
+    'equipment_assignments',
+    'haul_assignments',
+    'excavator_placements',
+    'watch_compositions',
+    'watch_periods',
+    'rating_periods',
+    'passport_requests',
+    'passport_snapshots',
+}
+REFERENCE_KEYS = {
+    'truck_count',
+    'excavator_count',
+    'rock_count',
+    'dump_point_count',
+}
+EXPECTED_STAFF = {
+    'admin': 1,
+    'oup': 1,
+    'deputy_mining_manager': 1,
+    'dispatcher': 2,
+    'mining_master': 2,
+    'excavator_operator': 16,
+    'driver': 106,
+}
+GENERATION_KEYS = {
+    'shift_count',
+    'loaded_trip_count',
+    'unloaded_trip_count',
+}
+FINAL_STATE_KEYS = {'counts', 'expected'}
+FINAL_COUNT_KEYS = {
+    'driver_shifts',
+    'operator_shifts',
+    'linked_driver_shifts',
+    'closed_driver_shifts',
+    'closed_operator_shifts',
+    'passport_snapshots',
+    'completed_passport_requests',
+    'open_shifts',
+    'open_trips',
+    'completed_trips',
+    'formula_snapshots',
+}
+FINAL_EXPECTED_KEYS = FINAL_COUNT_KEYS - {'completed_trips'}
+EXPECTED_FINAL_COUNTS = {
+    'driver_shifts': 3180,
+    'operator_shifts': 480,
+    'linked_driver_shifts': 3180,
+    'closed_driver_shifts': 3180,
+    'closed_operator_shifts': 480,
+    'passport_snapshots': 3180,
+    'completed_passport_requests': 3180,
+    'open_shifts': 0,
+    'open_trips': 0,
+    'formula_snapshots': SOURCE_RAW_COUNT,
+}
 SCOPE_KEYS = {
     'watch_composition',
     'watch_period',
@@ -413,7 +475,21 @@ def _validate_database(database):
         raise FormulaReplayBuildError(
             'Фактическая БД manifest не является целевой локальной QA-БД.',
         )
-    _require_dict(database.get('business_counts'), 'database.business_counts')
+    business_counts = _require_exact_keys(
+        database.get('business_counts'),
+        BUSINESS_COUNT_KEYS,
+        'database.business_counts',
+    )
+    if any(
+        _require_nonnegative_int(
+            business_counts.get(key),
+            f'database.business_counts.{key}',
+        )
+        for key in BUSINESS_COUNT_KEYS
+    ):
+        raise FormulaReplayBuildError(
+            'Целевая QA-БД не была пустой до начала 30-дневного прогона.',
+        )
 
 
 def _validate_manifest(manifest):
@@ -517,6 +593,56 @@ def _validate_manifest(manifest):
         raise FormulaReplayBuildError(
             'Каждая shift-когорта manifest должна иметь ровно 53 сотрудника.',
         )
+    references = _require_exact_keys(
+        manifest.get('references'),
+        REFERENCE_KEYS,
+        'references',
+    )
+    if (
+        references.get('truck_count')
+        != RATING_TV_FORMULA_REPLAY_EMPLOYEE_COUNT
+        or references.get('excavator_count') != 8
+        or _require_nonnegative_int(
+            references.get('rock_count'),
+            'references.rock_count',
+        )
+        < 1
+        or _require_nonnegative_int(
+            references.get('dump_point_count'),
+            'references.dump_point_count',
+        )
+        < 1
+    ):
+        raise FormulaReplayBuildError(
+            'Справочники manifest не подтверждают целевой 30-дневный сценарий.',
+        )
+    staff = _require_exact_keys(
+        manifest.get('staff'),
+        set(EXPECTED_STAFF),
+        'staff',
+    )
+    if staff != EXPECTED_STAFF:
+        raise FormulaReplayBuildError(
+            'Тестовый штат manifest не совпадает с целевым составом.',
+        )
+    generation = _require_exact_keys(
+        manifest.get('generation'),
+        GENERATION_KEYS,
+        'generation',
+    )
+    if (
+        generation.get('shift_count') != 60
+        or _require_nonnegative_int(
+            generation.get('loaded_trip_count'),
+            'generation.loaded_trip_count',
+        )
+        < 1
+        or generation.get('unloaded_trip_count')
+        != generation.get('loaded_trip_count')
+    ):
+        raise FormulaReplayBuildError(
+            'Generation manifest не подтверждает 60 полностью закрытых смен.',
+        )
     conversion = _require_exact_keys(
         manifest.get('replay_conversion'),
         REPLAY_CONVERSION_KEYS,
@@ -534,11 +660,32 @@ def _validate_manifest(manifest):
         raise FormulaReplayBuildError(
             'run_manifest должен перечислять ровно 60 raw formula.',
         )
-    final_state = _require_dict(manifest.get('final_state'), 'final_state')
-    counts = _require_dict(final_state.get('counts'), 'final_state.counts')
-    if counts.get('formula_snapshots') != SOURCE_RAW_COUNT:
+    final_state = _require_exact_keys(
+        manifest.get('final_state'),
+        FINAL_STATE_KEYS,
+        'final_state',
+    )
+    counts = _require_exact_keys(
+        final_state.get('counts'),
+        FINAL_COUNT_KEYS,
+        'final_state.counts',
+    )
+    expected = _require_exact_keys(
+        final_state.get('expected'),
+        FINAL_EXPECTED_KEYS,
+        'final_state.expected',
+    )
+    if (
+        any(
+            counts.get(key) != value
+            for key, value in EXPECTED_FINAL_COUNTS.items()
+        )
+        or expected != EXPECTED_FINAL_COUNTS
+        or counts.get('completed_trips')
+        != generation.get('unloaded_trip_count')
+    ):
         raise FormulaReplayBuildError(
-            'Финальная целостность не подтверждает 60 raw formula.',
+            'Финальная целостность не подтверждает полный 30-дневный сценарий.',
         )
     return {
         'run_id': run_id,
@@ -919,6 +1066,10 @@ def load_verified_source_run(run_dir):
     run_dir = Path(run_dir).expanduser().resolve()
     if not run_dir.is_dir():
         raise FormulaReplayBuildError('Каталог завершённого run не найден.')
+    if (run_dir / 'failure.json').exists():
+        raise FormulaReplayBuildError(
+            'Каталог run содержит failure.json и не может быть опубликован.',
+        )
     manifest, manifest_sha256 = _read_json(
         run_dir / 'run_manifest.json',
         label='run_manifest',

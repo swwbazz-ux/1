@@ -261,10 +261,37 @@ def _manifest(artifacts):
                 'port': '55434',
                 'user': 'copper_rating30_qa_runner',
             },
-            'business_counts': {'employees': 106},
+            'business_counts': {
+                'employees': 0,
+                'employee_shifts': 0,
+                'trips': 0,
+                'downtime_events': 0,
+                'crew_plans': 0,
+                'equipment_assignments': 0,
+                'haul_assignments': 0,
+                'excavator_placements': 0,
+                'watch_compositions': 0,
+                'watch_periods': 0,
+                'rating_periods': 0,
+                'passport_requests': 0,
+                'passport_snapshots': 0,
+            },
         },
-        'references': {'truck_count': 12},
-        'staff': {'driver': 106},
+        'references': {
+            'truck_count': 53,
+            'excavator_count': 8,
+            'rock_count': 4,
+            'dump_point_count': 3,
+        },
+        'staff': {
+            'admin': 1,
+            'oup': 1,
+            'deputy_mining_manager': 1,
+            'dispatcher': 2,
+            'mining_master': 2,
+            'excavator_operator': 16,
+            'driver': 106,
+        },
         'scope': {
             'watch_composition': COMPOSITION,
             'watch_period': {
@@ -287,8 +314,31 @@ def _manifest(artifacts):
         },
         'formula_artifacts': artifacts,
         'final_state': {
-            'counts': {'formula_snapshots': 60},
-            'expected': {'formula_snapshots': 60},
+            'counts': {
+                'driver_shifts': 3180,
+                'operator_shifts': 480,
+                'linked_driver_shifts': 3180,
+                'closed_driver_shifts': 3180,
+                'closed_operator_shifts': 480,
+                'passport_snapshots': 3180,
+                'completed_passport_requests': 3180,
+                'open_shifts': 0,
+                'open_trips': 0,
+                'completed_trips': 1,
+                'formula_snapshots': 60,
+            },
+            'expected': {
+                'driver_shifts': 3180,
+                'operator_shifts': 480,
+                'linked_driver_shifts': 3180,
+                'closed_driver_shifts': 3180,
+                'closed_operator_shifts': 480,
+                'passport_snapshots': 3180,
+                'completed_passport_requests': 3180,
+                'open_shifts': 0,
+                'open_trips': 0,
+                'formula_snapshots': 60,
+            },
         },
         'replay_conversion': {
             'performed': False,
@@ -505,6 +555,85 @@ class DriverRating30dFormulaReplayBuilderTests(SimpleTestCase):
                     )
 
                 self.assertFalse(output_dir.exists())
+
+    def test_rejects_failure_artifact_even_with_complete_manifest(self):
+        with TemporaryDirectory(prefix='rating-formula-source-') as source:
+            with TemporaryDirectory(prefix='rating-formula-target-parent-') as target:
+                run_dir = Path(source)
+                output_dir = Path(target) / 'published'
+                _write_run(run_dir)
+                (run_dir / 'failure.json').write_bytes(
+                    _json_bytes({'error': 'ТЕСТ_ОШИБКА'}),
+                )
+
+                with self.assertRaises(FormulaReplayBuildError):
+                    convert_formula_replays(
+                        run_dir=run_dir,
+                        output_dir=output_dir,
+                        source_commit=SOURCE_COMMIT,
+                    )
+
+                self.assertFalse(output_dir.exists())
+
+    def test_rejects_incomplete_final_state_even_with_60_raw_files(self):
+        with TemporaryDirectory(prefix='rating-formula-source-') as source:
+            with TemporaryDirectory(prefix='rating-formula-target-parent-') as target:
+                run_dir = Path(source)
+                output_dir = Path(target) / 'published'
+                manifest = _write_run(run_dir)
+                manifest['final_state']['counts']['driver_shifts'] = 3179
+                (run_dir / 'run_manifest.json').write_bytes(
+                    _json_bytes(manifest),
+                )
+
+                with self.assertRaises(FormulaReplayBuildError):
+                    convert_formula_replays(
+                        run_dir=run_dir,
+                        output_dir=output_dir,
+                        source_commit=SOURCE_COMMIT,
+                    )
+
+                self.assertFalse(output_dir.exists())
+
+    def test_rejects_changed_operational_manifest_sections(self):
+        mutations = {
+            'nonempty_source_database': lambda manifest: (
+                manifest['database']['business_counts'].__setitem__(
+                    'employees',
+                    1,
+                )
+            ),
+            'wrong_reference_count': lambda manifest: (
+                manifest['references'].__setitem__('truck_count', 52)
+            ),
+            'incomplete_staff': lambda manifest: (
+                manifest['staff'].__setitem__('driver', 105)
+            ),
+            'incomplete_generation': lambda manifest: (
+                manifest['generation'].__setitem__('shift_count', 59)
+            ),
+        }
+        with TemporaryDirectory(prefix='rating-formula-source-') as source:
+            with TemporaryDirectory(prefix='rating-formula-target-parent-') as target:
+                run_dir = Path(source)
+                baseline = _write_run(run_dir)
+                for label, mutate in mutations.items():
+                    with self.subTest(label=label):
+                        manifest = json.loads(json.dumps(baseline))
+                        mutate(manifest)
+                        (run_dir / 'run_manifest.json').write_bytes(
+                            _json_bytes(manifest),
+                        )
+                        output_dir = Path(target) / label
+
+                        with self.assertRaises(FormulaReplayBuildError):
+                            convert_formula_replays(
+                                run_dir=run_dir,
+                                output_dir=output_dir,
+                                source_commit=SOURCE_COMMIT,
+                            )
+
+                        self.assertFalse(output_dir.exists())
 
     def test_rejects_changed_cohort_even_with_updated_raw_sha(self):
         with TemporaryDirectory(prefix='rating-formula-source-') as source:
