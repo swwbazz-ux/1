@@ -546,7 +546,13 @@ def _build_driver_closed_shift_observation(
     }
 
 
-def build_driver_watch_observation(watch_period, *, shift_type=None, as_of=None):
+def build_driver_watch_observation(
+    watch_period,
+    *,
+    shift_type=None,
+    as_of=None,
+    employee_ids=None,
+):
     if shift_type not in {None, ShiftType.DAY, ShiftType.NIGHT}:
         raise ValueError('Допустимые значения смены: day или night.')
 
@@ -555,6 +561,8 @@ def build_driver_watch_observation(watch_period, *, shift_type=None, as_of=None)
         watch_period=watch_period,
         opened_at__lt=now,
     )
+    if employee_ids is not None:
+        shifts = shifts.filter(employee_id__in=employee_ids)
     if shift_type:
         shifts = shifts.filter(shift_type=shift_type)
     shifts = tuple(shifts)
@@ -595,6 +603,7 @@ def build_driver_period_shadow_observation(
     *,
     shift_type=None,
     as_of=None,
+    employee_ids=None,
 ):
     if ends_on < starts_on:
         raise ValueError('Дата окончания не может быть раньше даты начала.')
@@ -610,6 +619,8 @@ def build_driver_period_shadow_observation(
         opened_at__gte=period_start,
         opened_at__lt=min(period_end, now),
     )
+    if employee_ids is not None:
+        shifts = shifts.filter(employee_id__in=employee_ids)
     if shift_type:
         shifts = shifts.filter(shift_type=shift_type)
     shifts = tuple(shifts)
@@ -638,13 +649,20 @@ def build_driver_period_shadow_observation(
     return observation
 
 
-def build_driver_watch_linkage_audit(watch_period, *, shift_type=None):
+def build_driver_watch_linkage_audit(
+    watch_period,
+    *,
+    shift_type=None,
+    employee_ids=None,
+):
     if shift_type not in {None, ShiftType.DAY, ShiftType.NIGHT}:
         raise ValueError('Допустимые значения смены: day или night.')
 
     period_start = production_day_bounds(watch_period.starts_on)[0]
     period_end = production_day_bounds(watch_period.ends_on)[1]
     base_shifts = _driver_closed_shift_queryset()
+    if employee_ids is not None:
+        base_shifts = base_shifts.filter(employee_id__in=employee_ids)
     if shift_type:
         base_shifts = base_shifts.filter(shift_type=shift_type)
     period_shifts = base_shifts.filter(

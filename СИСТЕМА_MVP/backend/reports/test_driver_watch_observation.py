@@ -26,7 +26,7 @@ from users.active_role import (
     ACTIVE_ROLE_GENERATION_SESSION_KEY,
     ACTIVE_ROLE_SESSION_KEY,
 )
-from users.models import Employee, EmployeeAccess, Role
+from users.models import Employee, EmployeeAccess, Role, WatchComposition
 
 from .driver_shift_timeline import TimelineCategory
 from .driver_watch_observation import (
@@ -611,10 +611,22 @@ class DriverWatchObservationTests(TestCase):
 class DriverWatchObservationApiTests(TestCase):
     def setUp(self):
         self.client = Client()
+        composition = WatchComposition.objects.create(
+            code='watch-observation-api',
+            name='Состав API наблюдения',
+        )
         self.watch = WatchPeriod.objects.create(
             name='Вахта API рейтинга',
+            watch_composition=composition,
             starts_on=timezone.localdate(),
             ends_on=timezone.localdate() + timedelta(days=29),
+        )
+        self.scope_driver = Employee.objects.create(
+            full_name='Водитель области API наблюдения',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+            work_category=Employee.WorkCategory.DRIVER,
+            watch_composition=composition,
         )
         self.dispatcher = Employee.objects.create(
             full_name='Диспетчер рейтинга',

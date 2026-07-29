@@ -96,6 +96,24 @@ class DriverShiftPassportRequestStatus(models.TextChoices):
     COMPLETED = 'completed', 'Готово'
 
 
+class DriverShiftPassportSnapshotQuerySet(models.QuerySet):
+    def update(self, **kwargs):
+        raise ValidationError(
+            'Готовые паспорта смен нельзя изменять массовым обновлением.'
+        )
+
+    def delete(self):
+        raise ValidationError(
+            'Готовые паспорта смен нельзя удалять массовой операцией.'
+        )
+
+
+class DriverShiftPassportSnapshotManager(
+    models.Manager.from_queryset(DriverShiftPassportSnapshotQuerySet)
+):
+    pass
+
+
 class DriverShiftPassportSnapshot(models.Model):
     shift = models.ForeignKey(
         'shifts.EmployeeShift',
@@ -127,6 +145,8 @@ class DriverShiftPassportSnapshot(models.Model):
         blank=True,
     )
     captured_at = models.DateTimeField('Сформирован', auto_now_add=True)
+
+    objects = DriverShiftPassportSnapshotManager()
 
     class Meta:
         verbose_name = 'Диагностический паспорт смены водителя'

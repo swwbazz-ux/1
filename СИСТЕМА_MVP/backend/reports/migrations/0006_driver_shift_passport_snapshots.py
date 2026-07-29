@@ -10,6 +10,7 @@ class Migration(migrations.Migration):
     dependencies = [
         ('reports', '0005_pilotfeedback'),
         ('shifts', '0012_watchperiod_watch_composition'),
+        ('trips', '0008_trip_cancelled_at'),
         ('users', '0016_watchcomposition_employee_watch_composition'),
     ]
 

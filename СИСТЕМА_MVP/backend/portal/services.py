@@ -23,12 +23,15 @@ logger = logging.getLogger(__name__)
 
 
 PREMIUM_LEVELS = {
-    1: 'Бриллиант',
-    2: 'Платина',
-    3: 'Золото',
-    4: 'Серебро',
-    5: 'Бронза',
+    1: 'Алмазный уровень',
+    2: 'Платиновый уровень',
+    3: 'Золотой уровень',
+    4: 'Серебряный уровень',
+    5: 'Медный уровень',
 }
+DEFAULT_PORTAL_PRODUCTION_DATA_PROVIDER = (
+    'reports.portal_rating_provider.DriverRatingProductionDataProvider'
+)
 
 
 @dataclass(frozen=True)
@@ -95,7 +98,13 @@ class UnavailableProductionDataProvider:
 def production_data_provider():
     provider_path = getattr(settings, 'PORTAL_PRODUCTION_DATA_PROVIDER', '')
     if not provider_path:
-        return UnavailableProductionDataProvider()
+        if not getattr(
+            settings,
+            'PORTAL_WORKING_DRIVER_RATING_ENABLED',
+            False,
+        ):
+            return UnavailableProductionDataProvider()
+        provider_path = DEFAULT_PORTAL_PRODUCTION_DATA_PROVIDER
     provider_class = import_string(provider_path)
     return provider_class()
 

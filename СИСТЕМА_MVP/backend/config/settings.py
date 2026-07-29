@@ -224,6 +224,10 @@ if PORTAL_CACHE_URL:
 PORTAL_PRIVATE_MEDIA_ROOT = BASE_DIR / 'private_media'
 PORTAL_SITE_CODE = 'section_2'
 PORTAL_PRODUCTION_DATA_PROVIDER = ''
+PORTAL_WORKING_DRIVER_RATING_ENABLED = _env_bool(
+    'PORTAL_WORKING_DRIVER_RATING_ENABLED',
+    default=False,
+)
 # До появления других участков весь действующий кадровый состав относится к участку № 2.
 # Перед подключением второго участка здесь должен быть указан серверный провайдер
 # членства, возвращающий строго ограниченный Employee QuerySet.

@@ -9,7 +9,8 @@ from django.contrib.sessions.middleware import SessionMiddleware
 from django.core.exceptions import ValidationError
 from django.core.management import call_command
 from django.db import transaction
-from django.test import RequestFactory, TestCase
+from django.db.migrations.loader import MigrationLoader
+from django.test import RequestFactory, SimpleTestCase, TestCase
 from django.urls import reverse
 from django.utils import timezone
 
@@ -38,6 +39,19 @@ from .models import (
     DriverShiftPassportSnapshot,
     DriverShiftPassportTrigger,
 )
+
+
+class DriverPassportMigrationDependencyTests(SimpleTestCase):
+    def test_reports_0006_requires_trip_cancelled_at_schema(self):
+        target = ('reports', '0006_driver_shift_passport_snapshots')
+        prerequisite = ('trips', '0008_trip_cancelled_at')
+        loader = MigrationLoader(None, ignore_no_migrations=True)
+
+        self.assertIn(
+            prerequisite,
+            loader.disk_migrations[target].dependencies,
+        )
+        self.assertIn(prerequisite, loader.graph.forwards_plan(target))
 
 
 class DriverShiftPassportSnapshotTests(TestCase):
@@ -422,6 +436,14 @@ class DriverShiftPassportSnapshotTests(TestCase):
             snapshot.save(update_fields=['trigger'])
         with self.assertRaises(ValidationError):
             snapshot.delete()
+        with self.assertRaises(ValidationError):
+            DriverShiftPassportSnapshot.objects.filter(
+                pk=snapshot.pk,
+            ).update(trigger=DriverShiftPassportTrigger.BACKFILL)
+        with self.assertRaises(ValidationError):
+            DriverShiftPassportSnapshot.objects.filter(
+                pk=snapshot.pk,
+            ).delete()
 
     def test_calculator_upgrade_creates_revision_with_same_source_hash(self):
         shift = self.create_open_shift()

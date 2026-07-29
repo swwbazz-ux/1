@@ -2,6 +2,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from decimal import Decimal
 
+from django.conf import settings
 from django.contrib import messages
 from django.db import transaction
 from django.db.models import Count, Q, Sum
@@ -44,10 +45,17 @@ from users.active_role import (
 )
 from users.models import Employee, EmployeeAccess
 
+from portal.services import active_employees
+
 from .driver_watch_observation import (
     build_driver_period_shadow_observation,
     build_driver_watch_linkage_audit,
     build_driver_watch_observation,
+)
+from .driver_watch_rating import (
+    DRIVER_RATING_FORMULA_VERSION,
+    DRIVER_RATING_WEIGHTS,
+    get_cached_driver_watch_rating,
 )
 from .forms import PilotFeedbackForm
 from .models import PilotFeedback, ReportTemplate, ReportType
@@ -379,6 +387,25 @@ def get_rating_observation_access(request):
     return access
 
 
+def get_rating_site_scope(access):
+    scoped_employees = active_employees()
+    if not scoped_employees.filter(pk=access.employee_id).exists():
+        return None
+    driver_scope = scoped_employees.filter(
+        work_category=Employee.WorkCategory.DRIVER,
+    )
+    employee_ids = tuple(
+        driver_scope.values_list('id', flat=True)
+    )
+    watch_composition_ids = tuple(
+        driver_scope
+        .exclude(watch_composition_id__isnull=True)
+        .values_list('watch_composition_id', flat=True)
+        .distinct()
+    )
+    return employee_ids, watch_composition_ids
+
+
 @never_cache
 @require_GET
 def driver_watch_observation_api(request):
@@ -387,6 +414,10 @@ def driver_watch_observation_api(request):
         return JsonResponse({'error': 'Требуется авторизация.'}, status=401)
     if access.role.code not in {'dispatcher', 'admin', 'manager'}:
         return JsonResponse({'error': 'Недостаточно прав.'}, status=403)
+    site_scope = get_rating_site_scope(access)
+    if site_scope is None:
+        return JsonResponse({'error': 'Недостаточно прав.'}, status=403)
+    employee_ids, watch_composition_ids = site_scope
 
     shift_type = request.GET.get('shift_type') or None
     if shift_type not in {None, ShiftType.DAY, ShiftType.NIGHT}:
@@ -397,6 +428,7 @@ def driver_watch_observation_api(request):
 
     watch_periods = list(
         WatchPeriod.objects
+        .filter(watch_composition_id__in=watch_composition_ids)
         .order_by('-is_active', '-starts_on', '-id')
     )
     watch_period_id = request.GET.get('watch_period')
@@ -475,10 +507,12 @@ def driver_watch_observation_api(request):
     observation = build_driver_watch_observation(
         watch_period,
         shift_type=shift_type,
+        employee_ids=employee_ids,
     )
     linkage_audit = build_driver_watch_linkage_audit(
         watch_period,
         shift_type=shift_type,
+        employee_ids=employee_ids,
     )
     observation['linkage_audit'] = linkage_audit
     observation['summary']['data_ready_for_formula_review'] = (
@@ -491,12 +525,126 @@ def driver_watch_observation_api(request):
 
 @never_cache
 @require_GET
+def driver_watch_rating_api(request):
+    access = get_rating_observation_access(request)
+    if not access:
+        return JsonResponse({'error': 'Требуется авторизация.'}, status=401)
+    if access.role.code not in {'dispatcher', 'admin', 'manager'}:
+        return JsonResponse({'error': 'Недостаточно прав.'}, status=403)
+    site_scope = get_rating_site_scope(access)
+    if site_scope is None:
+        return JsonResponse({'error': 'Недостаточно прав.'}, status=403)
+    employee_ids, watch_composition_ids = site_scope
+    if not getattr(
+        settings,
+        'PORTAL_WORKING_DRIVER_RATING_ENABLED',
+        False,
+    ):
+        return JsonResponse(
+            {'error': 'Рабочий рейтинг Водителей не включён.'},
+            status=404,
+        )
+
+    shift_type = request.GET.get('shift_type')
+    if shift_type not in {ShiftType.DAY, ShiftType.NIGHT}:
+        return JsonResponse(
+            {'error': 'Для рейтинга укажите shift_type: day или night.'},
+            status=400,
+        )
+
+    watch_periods = list(
+        WatchPeriod.objects
+        .filter(watch_composition_id__in=watch_composition_ids)
+        .order_by('-is_active', '-starts_on', '-id')
+    )
+    watch_period_id = request.GET.get('watch_period')
+    if watch_period_id:
+        try:
+            watch_period_id = int(watch_period_id)
+        except (TypeError, ValueError):
+            return JsonResponse(
+                {'error': 'watch_period должен быть числом.'},
+                status=400,
+            )
+        watch_period = next(
+            (
+                period
+                for period in watch_periods
+                if period.id == watch_period_id
+            ),
+            None,
+        )
+        if watch_period is None:
+            return JsonResponse({'error': 'Вахта не найдена.'}, status=404)
+    else:
+        watch_period = watch_periods[0] if watch_periods else None
+
+    available_watch_periods = [
+        {
+            'id': period.id,
+            'name': period.name,
+            'starts_on': period.starts_on.isoformat(),
+            'ends_on': period.ends_on.isoformat(),
+            'is_active': period.is_active,
+        }
+        for period in watch_periods
+    ]
+    if watch_period is None:
+        return JsonResponse({
+            'available': False,
+            'official': False,
+            'rating_mode': 'working',
+            'formula_version': DRIVER_RATING_FORMULA_VERSION,
+            'formula_label': 'Рабочая формула без м³·км и т·км',
+            'status': 'Нет структурной вахты с закрытыми сменами.',
+            'generated_at': timezone.now().isoformat(),
+            'source_fingerprint': '',
+            'watch_period': None,
+            'shift_type': shift_type,
+            'shift_type_label': dict(ShiftType.choices)[shift_type],
+            'weights': {
+                key: str(value)
+                for key, value in DRIVER_RATING_WEIGHTS.items()
+            },
+            'distance_metrics': {
+                'weight': '0',
+                'status': 'planned',
+                'label': 'м³·км и т·км пока не учитываются',
+            },
+            'linkage_audit': {},
+            'available_watch_periods': [],
+            'summary': {
+                'employee_count': 0,
+                'rated_shift_count': 0,
+                'withheld_shift_count': 0,
+                'withheld_reasons': {},
+            },
+            'entries': [],
+        })
+
+    rating = dict(
+        get_cached_driver_watch_rating(
+            watch_period,
+            shift_type=shift_type,
+            allowed_employee_ids=employee_ids,
+        )
+    )
+    rating['available_watch_periods'] = available_watch_periods
+    return JsonResponse(rating)
+
+
+@never_cache
+@require_GET
 def driver_period_shadow_observation_api(request):
     access = get_rating_observation_access(request)
     if not access:
         return JsonResponse({'error': 'Требуется авторизация.'}, status=401)
     if access.role.code not in {'dispatcher', 'admin', 'manager'}:
         return JsonResponse({'error': 'Недостаточно прав.'}, status=403)
+    site_scope = get_rating_site_scope(access)
+    if site_scope is None:
+        return JsonResponse({'error': 'Недостаточно прав.'}, status=403)
+    employee_ids, _watch_composition_ids = site_scope
 
     starts_on = parse_filter_date(request.GET.get('date_from'))
     ends_on = parse_filter_date(request.GET.get('date_to'))
@@ -511,6 +659,7 @@ def driver_period_shadow_observation_api(request):
             starts_on,
             ends_on,
             shift_type=shift_type,
+            employee_ids=employee_ids,
         )
     except ValueError as error:
         return JsonResponse({'error': str(error)}, status=400)
