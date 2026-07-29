@@ -1847,7 +1847,11 @@
     function updateCountdowns() {
         if (elements.refreshCountdown) {
             elements.refreshCountdown.textContent = state.qaPreview
-                ? "Сохранённый снимок"
+                ? (
+                    state.qaReplayKind === "formula"
+                        ? "Формульный снимок"
+                        : "Сохранённый снимок"
+                )
                 : formatSeconds(state.refreshRemaining);
         }
         if (elements.rotationCountdown) {

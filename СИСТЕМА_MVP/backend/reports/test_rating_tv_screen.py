@@ -713,8 +713,15 @@ class DriverRatingTvScreenTests(TestCase):
                         args=[self.driver.pk],
                     ),
                 )
-                body = b''.join(response.streaming_content)
-                response.close()
+                try:
+                    body = b''.join(response.streaming_content)
+                finally:
+                    # FileResponse.close() also emits request_finished. With
+                    # PostgreSQL that closes the TestCase class transaction's
+                    # connection and contaminates every following test.
+                    for resource_closer in response._resource_closers:
+                        resource_closer()
+                    response._resource_closers.clear()
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(body, image_bytes)

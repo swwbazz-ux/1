@@ -1402,6 +1402,10 @@ test("formula replay uses its pinned schema and preserves exact nullable KPI row
     assert.equal(requestUrl.searchParams.get("shift_type"), "night");
     assert.equal(runtime.fetchCalls[0].options.signal.aborted, false);
     assert.equal(runtime.window.RatingTvScreen.state.qaReplayPhase, "PAUSED");
+    assert.equal(
+        runtime.elements.refreshCountdown.textContent,
+        "Формульный снимок"
+    );
     assert.equal(runtime.elements.grid.children.length, 53);
 
     const firstScore = runtime.elements.grid.children[0]
