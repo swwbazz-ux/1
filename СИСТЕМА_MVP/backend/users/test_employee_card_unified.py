@@ -12,6 +12,7 @@ from .models import (
     PersonnelPosition,
     ProductionSpecialization,
     Role,
+    WatchComposition,
     WorkSchedule,
 )
 from .oup_forms import OupEmployeeForm
@@ -81,6 +82,7 @@ class UnifiedEmployeeCardTests(TestCase):
         self.assertContains(create_response, 'name="personnel_department"', html=False)
         self.assertContains(create_response, 'name="work_schedule"', html=False)
         self.assertContains(create_response, 'name="brigade_number"', html=False)
+        self.assertContains(create_response, 'name="watch_composition"', html=False)
         self.assertContains(create_response, 'data-brigade-count="0"', html=False)
         self.assertContains(create_response, 'value="Активен"', html=False)
         self.assertNotContains(create_response, 'id="id_status"', html=False)
@@ -347,6 +349,10 @@ class UnifiedEmployeeCardTests(TestCase):
         self.assertEqual(oup_form.cleaned_data['status'], Employee.Status.ACTIVE)
 
     def test_schedule_and_department_are_shared_structured_fields(self):
+        watch_composition = WatchComposition.objects.create(
+            code='test-approved-watch-composition',
+            name='ТЕСТ_Утверждённый состав вахты',
+        )
         common = {
             'full_name': 'Смирнов Семен',
             'phone': '+79005554433',
@@ -356,6 +362,7 @@ class UnifiedEmployeeCardTests(TestCase):
             'personnel_department': self.department.id,
             'work_schedule': self.schedule.id,
             'brigade_number': 4,
+            'watch_composition': watch_composition.id,
         }
         admin_form = AdminEmployeeForm(data={**common, 'role': self.driver_role.id})
         oup_form = OupEmployeeForm(data=common)
@@ -366,8 +373,55 @@ class UnifiedEmployeeCardTests(TestCase):
         self.assertEqual(employee.personnel_department, self.department)
         self.assertEqual(employee.work_schedule, self.schedule)
         self.assertEqual(employee.brigade_number, 4)
+        self.assertEqual(employee.watch_composition, watch_composition)
         self.assertEqual(employee.department, self.department.name)
         self.assertEqual(employee.rotation, f'{self.schedule.name} Бригада №4')
+
+    def test_new_employee_cannot_select_inactive_watch_composition(self):
+        inactive_composition = WatchComposition.objects.create(
+            code='test-inactive-watch-composition',
+            name='ТЕСТ_Неактивный состав вахты',
+            is_active=False,
+        )
+        common = {
+            'full_name': 'Смирнов Семен',
+            'phone': '+79005554433',
+            'status': Employee.Status.ACTIVE,
+            'personnel_position': self.truck_position.id,
+            'base_specialization': self.truck_specialization.id,
+            'watch_composition': inactive_composition.id,
+        }
+
+        admin_form = AdminEmployeeForm(data={**common, 'role': self.driver_role.id})
+        oup_form = OupEmployeeForm(data=common)
+
+        self.assertFalse(admin_form.is_valid())
+        self.assertFalse(oup_form.is_valid())
+        self.assertIn('watch_composition', admin_form.errors)
+        self.assertIn('watch_composition', oup_form.errors)
+
+    def test_existing_inactive_watch_composition_remains_visible(self):
+        inactive_composition = WatchComposition.objects.create(
+            code='test-current-inactive-watch-composition',
+            name='ТЕСТ_Текущий неактивный состав вахты',
+            is_active=False,
+        )
+        self.employee.watch_composition = inactive_composition
+        self.employee.save(update_fields=['watch_composition'])
+
+        admin_form = AdminEmployeeForm(instance=self.employee)
+        oup_form = OupEmployeeForm(instance=self.employee)
+
+        self.assertTrue(
+            admin_form.fields['watch_composition'].queryset.filter(
+                pk=inactive_composition.pk,
+            ).exists()
+        )
+        self.assertTrue(
+            oup_form.fields['watch_composition'].queryset.filter(
+                pk=inactive_composition.pk,
+            ).exists()
+        )
 
     def test_brigade_must_belong_to_selected_schedule(self):
         two_brigade_schedule = WorkSchedule.objects.get(code='schedule_11')

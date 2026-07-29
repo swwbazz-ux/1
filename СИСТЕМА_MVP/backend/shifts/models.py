@@ -1,3 +1,4 @@
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
 
@@ -83,7 +84,21 @@ class EquipmentPlanGroup(models.Model):
 
 
 class WatchPeriod(models.Model):
+    IMMUTABLE_FIELDS = (
+        'name',
+        'watch_composition_id',
+        'starts_on',
+        'ends_on',
+    )
+
     name = models.CharField('Название вахты', max_length=128)
+    watch_composition = models.ForeignKey(
+        'users.WatchComposition',
+        verbose_name='Утверждённый состав вахты',
+        on_delete=models.PROTECT,
+        related_name='watch_periods',
+        null=True,
+    )
     starts_on = models.DateField('Дата начала')
     ends_on = models.DateField('Дата окончания')
     is_active = models.BooleanField('Активна', default=True)
@@ -92,6 +107,39 @@ class WatchPeriod(models.Model):
         verbose_name = 'Вахта'
         verbose_name_plural = 'Вахты'
         ordering = ['-starts_on']
+
+    def _changed_structural_fields(self):
+        if not self.pk:
+            return ()
+        original = (
+            type(self).objects
+            .filter(pk=self.pk)
+            .values(*self.IMMUTABLE_FIELDS)
+            .first()
+        )
+        if original is None:
+            return ()
+        return tuple(
+            field
+            for field in self.IMMUTABLE_FIELDS
+            if getattr(self, field) != original[field]
+        )
+
+    def validate_structural_immutability(self):
+        changed_fields = self._changed_structural_fields()
+        if changed_fields:
+            raise ValidationError(
+                'Структурные поля существующей вахты менять нельзя. '
+                'Деактивируйте её и создайте новый календарный период.'
+            )
+
+    def clean(self):
+        super().clean()
+        self.validate_structural_immutability()
+
+    def save(self, *args, **kwargs):
+        self.validate_structural_immutability()
+        return super().save(*args, **kwargs)
 
     def __str__(self):
         return self.name
@@ -154,6 +202,37 @@ class EmployeeShift(models.Model):
                 name='unique_open_shift_per_equipment',
             ),
         ]
+
+    def _watch_period_snapshot_changed(self):
+        if self._state.adding or not self.pk:
+            return False
+        original = (
+            type(self).objects
+            .filter(pk=self.pk)
+            .values('watch_period_id')
+            .first()
+        )
+        return bool(
+            original is not None
+            and original['watch_period_id'] != self.watch_period_id
+        )
+
+    def validate_watch_period_snapshot(self):
+        if self._watch_period_snapshot_changed():
+            raise ValidationError({
+                'watch_period': (
+                    'Вахта сохраняется при открытии смены как неизменяемый '
+                    'snapshot и не может быть перепривязана позднее.'
+                ),
+            })
+
+    def clean(self):
+        super().clean()
+        self.validate_watch_period_snapshot()
+
+    def save(self, *args, **kwargs):
+        self.validate_watch_period_snapshot()
+        return super().save(*args, **kwargs)
 
     def __str__(self):
         return f'{self.employee} / {self.get_shift_type_display()} / {self.opened_at:%d.%m.%Y}'

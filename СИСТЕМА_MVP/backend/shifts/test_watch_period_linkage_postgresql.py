@@ -19,7 +19,7 @@ from assignments.models import (
 )
 from core.production_time import BUSINESS_TIME_ZONE, production_work_date
 from references.models import Equipment, EquipmentModel, EquipmentType
-from users.models import Employee, EmployeeAccess, Role
+from users.models import Employee, EmployeeAccess, Role, WatchComposition
 
 from .models import EmployeeShift, WatchPeriod
 from .services import open_driver_shift
@@ -55,10 +55,15 @@ class DriverWatchPeriodCatalogPostgreSQLTests(TransactionTestCase):
             status=EmployeeAccess.Status.ACTIVATED,
             is_active=True,
         )
+        self.watch_composition = WatchComposition.objects.create(
+            code='test-watch-composition-pg',
+            name='ТЕСТ_ВАХТА_PG_Утверждённый состав',
+        )
         self.driver = Employee.objects.create(
             full_name='ТЕСТ_ВАХТА_PG_Водитель',
             status=Employee.Status.ACTIVE,
             is_active=True,
+            watch_composition=self.watch_composition,
         )
         EmployeeAccess.objects.create(
             employee=self.driver,
@@ -96,6 +101,7 @@ class DriverWatchPeriodCatalogPostgreSQLTests(TransactionTestCase):
         work_date = production_work_date(self.opened_at)
         self.watch_period = WatchPeriod.objects.create(
             name='ТЕСТ_ВАХТА_PG_Основная',
+            watch_composition=self.watch_composition,
             starts_on=work_date - timedelta(days=14),
             ends_on=work_date + timedelta(days=14),
             is_active=True,
@@ -161,6 +167,7 @@ class DriverWatchPeriodCatalogPostgreSQLTests(TransactionTestCase):
         with connection.execute_wrapper(mark_insert):
             watch = WatchPeriod.objects.create(
                 name='ТЕСТ_ВАХТА_PG_Конкурентная',
+                watch_composition=self.watch_composition,
                 starts_on=self.watch_period.starts_on,
                 ends_on=self.watch_period.ends_on,
                 is_active=True,

@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+from decimal import Decimal
 
 from django.test import TestCase
 from django.utils import timezone
@@ -21,7 +22,7 @@ from references.models import (
     EquipmentType,
     RockType,
 )
-from shifts.models import EmployeeShift, ShiftType
+from shifts.models import EmployeeShift, ShiftReadingCorrection, ShiftType
 from trips.models import Trip, TripStatus
 from users.models import Employee
 
@@ -379,11 +380,35 @@ class DriverShiftTimelineTests(TestCase):
             self.shift,
             as_of=replacement_shift.closed_at,
         )
+        replacement_timeline = build_driver_shift_timeline(
+            replacement_shift,
+            as_of=replacement_shift.closed_at,
+        )
 
         self.assertFalse(timeline.usable_for_formula_review)
         self.assertIn(
             'trip_unloading_shift_time_mismatch',
             timeline.quality_flags,
+        )
+        self.assertEqual(
+            replacement_timeline.passport[
+                'production'
+            ]['completed_trip_count'],
+            0,
+        )
+        self.assertEqual(
+            replacement_timeline.passport[
+                'production'
+            ]['output_attribution']['ambiguous_trip_count'],
+            1,
+        )
+        self.assertIn(
+            'trip_unloading_shift_time_mismatch',
+            replacement_timeline.quality_flags,
+        )
+        self.assertIn(
+            'ambiguous_trip_output_attribution',
+            replacement_timeline.quality_flags,
         )
 
     def test_unloading_shift_employee_must_match_completed_trip_driver(self):
@@ -422,6 +447,66 @@ class DriverShiftTimelineTests(TestCase):
         self.assertFalse(timeline.usable_for_formula_review)
         self.assertIn(
             'trip_driver_unloading_shift_mismatch',
+            timeline.quality_flags,
+        )
+        self.assertEqual(
+            timeline.passport['production']['completed_trip_count'],
+            0,
+        )
+        self.assertEqual(
+            timeline.passport[
+                'production'
+            ]['output_attribution']['ambiguous_trip_count'],
+            1,
+        )
+        self.assertIn(
+            'ambiguous_trip_output_attribution',
+            timeline.quality_flags,
+        )
+
+    def test_explicit_unloading_shift_with_truck_conflict_withholds_output(self):
+        mismatched_truck = Equipment.objects.create(
+            equipment_type=self.truck.equipment_type,
+            model=self.truck.model,
+            garage_number='TL-TRUCK-UNLOADING-MISMATCH',
+        )
+        trip = Trip.objects.create(
+            excavator=self.excavator,
+            truck=mismatched_truck,
+            driver=self.driver,
+            loading_shift=self.loading_shift,
+            unloading_shift=self.shift,
+            rock_type=self.rock,
+            dump_point=self.dump_point,
+            volume_m3=Decimal('50.00'),
+            tonnage=Decimal('100.00'),
+            status=TripStatus.COMPLETED,
+            completed_at=self.start + timedelta(hours=2),
+        )
+        Trip.objects.filter(pk=trip.pk).update(
+            created_at=self.start + timedelta(hours=1),
+        )
+
+        timeline = build_driver_shift_timeline(self.shift, as_of=self.end)
+
+        self.assertEqual(timeline.source_counts['trip_count'], 1)
+        self.assertEqual(timeline.productive_seconds, 0)
+        self.assertEqual(
+            timeline.passport['production']['completed_trip_count'],
+            0,
+        )
+        self.assertEqual(
+            timeline.passport[
+                'production'
+            ]['output_attribution']['ambiguous_trip_count'],
+            1,
+        )
+        self.assertIn(
+            'trip_unloading_shift_equipment_mismatch',
+            timeline.quality_flags,
+        )
+        self.assertIn(
+            'ambiguous_trip_output_attribution',
             timeline.quality_flags,
         )
 
@@ -470,6 +555,12 @@ class DriverShiftTimelineTests(TestCase):
             timeline.quality_metrics['trip_without_assignment_seconds'],
             3600,
         )
+        self.assertEqual(
+            timeline.quality_metrics[
+                'trip_assignment_mismatch_seconds'
+            ],
+            3600,
+        )
         self.assertEqual(timeline.productive_seconds, 3600)
         self.assertEqual(timeline.conflict_seconds, 0)
 
@@ -513,6 +604,7 @@ class DriverShiftTimelineTests(TestCase):
         trip = Trip.objects.create(
             excavator=self.excavator,
             truck=self.truck,
+            excavator_operator=self.excavator_operator,
             driver=self.driver,
             loading_shift=self.loading_shift,
             unloading_shift=self.shift,
@@ -525,7 +617,12 @@ class DriverShiftTimelineTests(TestCase):
 
         timeline = build_driver_shift_timeline(self.shift, as_of=self.end)
 
-        self.assertTrue(timeline.usable_for_formula_review)
+        self.assertFalse(timeline.usable_for_formula_review)
+        self.assertFalse(
+            timeline.passport['rates_per_available_hour'][
+                'is_formula_ready'
+            ]
+        )
         self.assertEqual(timeline.productive_seconds, 3600)
         self.assertEqual(timeline.source_counts['assignment_count'], 2)
         self.assertNotIn('trip_without_assignment', timeline.quality_flags)
@@ -565,7 +662,7 @@ class DriverShiftTimelineTests(TestCase):
             excavator=self.excavator,
             truck=self.truck,
             driver=self.driver,
-            loading_shift=self.loading_shift,
+            loading_shift=None,
             unloading_shift=self.shift,
             rock_type=self.rock,
             dump_point=self.dump_point,
@@ -577,7 +674,12 @@ class DriverShiftTimelineTests(TestCase):
 
         timeline = build_driver_shift_timeline(self.shift, as_of=self.end)
 
-        self.assertTrue(timeline.usable_for_formula_review)
+        self.assertFalse(timeline.usable_for_formula_review)
+        self.assertFalse(
+            timeline.passport['rates_per_available_hour'][
+                'is_formula_ready'
+            ]
+        )
         self.assertEqual(timeline.productive_seconds, 30 * 60)
         self.assertEqual(timeline.source_counts['assignment_count'], 2)
         self.assertNotIn('trip_without_assignment', timeline.quality_flags)
@@ -812,6 +914,7 @@ class DriverShiftTimelineTests(TestCase):
             dump_point=self.dump_point,
             status=TripStatus.CANCELLED,
             completed_at=self.start + timedelta(hours=2),
+            cancelled_at=self.start + timedelta(hours=2),
         )
         Trip.objects.filter(pk=trip.pk).update(
             created_at=self.start + timedelta(hours=1),
@@ -1104,3 +1207,649 @@ class DriverShiftTimelineTests(TestCase):
         self.assertGreater(timeline.unexplained_seconds, 0)
         self.assertFalse(timeline.usable_for_formula_review)
         self.assertIn('unexplained_time', timeline.quality_flags)
+
+    def test_passport_credits_carryover_output_only_to_unloading_shift(self):
+        replacement_driver = Employee.objects.create(
+            full_name='Сменный водитель паспорта',
+            work_category=Employee.WorkCategory.DRIVER,
+        )
+        replacement_end = self.end + timedelta(hours=12)
+        replacement_shift = EmployeeShift.objects.create(
+            employee=replacement_driver,
+            shift_type=ShiftType.NIGHT,
+            workplace_code='driver',
+            equipment=self.truck,
+            opened_at=self.end,
+            closed_at=replacement_end,
+        )
+        trip = Trip.objects.create(
+            excavator=self.excavator,
+            truck=self.truck,
+            driver=replacement_driver,
+            loading_shift=self.loading_shift,
+            unloading_shift=replacement_shift,
+            rock_type=self.rock,
+            dump_point=self.dump_point,
+            volume_m3=Decimal('55.50'),
+            tonnage=Decimal('120.25'),
+            transport_distance_km=Decimal('2.00'),
+            status=TripStatus.COMPLETED,
+            completed_at=self.end + timedelta(minutes=30),
+            is_carryover=True,
+        )
+        Trip.objects.filter(pk=trip.pk).update(
+            created_at=self.end - timedelta(minutes=30),
+        )
+
+        first, second = build_driver_shift_timelines(
+            (self.shift, replacement_shift),
+            as_of=replacement_end,
+        )
+
+        self.assertEqual(
+            first.passport['production']['completed_trip_count'],
+            0,
+        )
+        self.assertEqual(
+            first.passport['production']['volume_m3']['known_value'],
+            Decimal('0'),
+        )
+        self.assertEqual(
+            second.passport['production']['completed_trip_count'],
+            1,
+        )
+        self.assertEqual(
+            second.passport['production']['volume_m3']['value'],
+            Decimal('55.50'),
+        )
+        self.assertEqual(first.productive_seconds, 30 * 60)
+        self.assertEqual(second.productive_seconds, 30 * 60)
+
+    def test_legacy_output_at_shared_boundary_is_credited_once(self):
+        next_shift = EmployeeShift.objects.create(
+            employee=self.driver,
+            shift_type=ShiftType.NIGHT,
+            workplace_code='driver',
+            equipment=self.truck,
+            opened_at=self.end,
+            closed_at=self.end + timedelta(hours=12),
+        )
+        trip = Trip.objects.create(
+            excavator=self.excavator,
+            truck=self.truck,
+            excavator_operator=self.excavator_operator,
+            driver=self.driver,
+            loading_shift=self.loading_shift,
+            unloading_shift=None,
+            rock_type=self.rock,
+            dump_point=self.dump_point,
+            volume_m3=Decimal('50.00'),
+            tonnage=Decimal('100.00'),
+            status=TripStatus.COMPLETED,
+            completed_at=self.end,
+        )
+        Trip.objects.filter(pk=trip.pk).update(
+            created_at=self.end - timedelta(hours=1),
+        )
+
+        first, second = build_driver_shift_timelines(
+            (self.shift, next_shift),
+            as_of=next_shift.closed_at,
+        )
+
+        self.assertEqual(
+            first.passport['production']['completed_trip_count'],
+            0,
+        )
+        self.assertEqual(
+            second.passport['production']['completed_trip_count'],
+            1,
+        )
+        self.assertEqual(
+            (
+                first.passport['production']['completed_trip_count']
+                + second.passport['production']['completed_trip_count']
+            ),
+            1,
+        )
+        second_only = build_driver_shift_timeline(
+            next_shift,
+            as_of=next_shift.closed_at,
+        )
+        self.assertEqual(
+            second_only.passport['production']['completed_trip_count'],
+            1,
+        )
+
+    def test_passport_withholds_incomplete_totals_and_counts_cancelled_trip(self):
+        completed = Trip.objects.create(
+            excavator=self.excavator,
+            truck=self.truck,
+            driver=self.driver,
+            loading_shift=self.loading_shift,
+            unloading_shift=self.shift,
+            rock_type=self.rock,
+            dump_point=self.dump_point,
+            volume_m3=Decimal('48.00'),
+            tonnage=None,
+            transport_distance_km=None,
+            status=TripStatus.COMPLETED,
+            completed_at=self.start + timedelta(hours=2),
+        )
+        Trip.objects.filter(pk=completed.pk).update(
+            created_at=self.start + timedelta(hours=1),
+        )
+        cancelled = Trip.objects.create(
+            excavator=self.excavator,
+            truck=self.truck,
+            driver=self.driver,
+            rock_type=self.rock,
+            dump_point=self.dump_point,
+            status=TripStatus.CANCELLED,
+        )
+        Trip.objects.filter(pk=cancelled.pk).update(
+            created_at=self.start + timedelta(hours=3),
+            cancelled_at=self.start + timedelta(hours=3, minutes=15),
+        )
+
+        timeline = build_driver_shift_timeline(self.shift, as_of=self.end)
+        passport = timeline.passport
+
+        self.assertEqual(
+            passport['production']['volume_m3']['value'],
+            Decimal('48.00'),
+        )
+        self.assertIsNone(passport['production']['tonnage_t']['value'])
+        self.assertEqual(
+            passport['production']['tonnage_t']['known_value'],
+            Decimal('0'),
+        )
+        self.assertIsNone(passport['production']['m3_km']['value'])
+        self.assertEqual(passport['trip_states']['cancelled_count'], 1)
+        self.assertEqual(timeline.source_counts['trip_count'], 1)
+        self.assertEqual(
+            passport['routing']['explicit_assigned_and_actual_count'],
+            0,
+        )
+        self.assertEqual(passport['routing']['match_count'], 0)
+        self.assertEqual(passport['routing']['missing_assigned_count'], 1)
+        self.assertEqual(passport['routing']['missing_actual_count'], 1)
+        self.assertIsNone(
+            passport['expected']['actual_to_expected_ratio']
+        )
+        self.assertIsNone(passport['time']['scheduled_start_at'])
+        self.assertEqual(
+            passport['time']['scheduled_window_status'],
+            'schedule_snapshot_unavailable',
+        )
+
+    def test_passport_builds_transport_work_route_and_cycle_diagnostics(self):
+        self.create_assignment()
+        trip = Trip.objects.create(
+            excavator=self.excavator,
+            truck=self.truck,
+            excavator_operator=self.excavator_operator,
+            driver=self.driver,
+            loading_shift=self.loading_shift,
+            unloading_shift=self.shift,
+            rock_type=self.rock,
+            dump_point=self.dump_point,
+            assigned_dump_point=self.dump_point,
+            actual_dump_point=self.dump_point,
+            volume_m3=Decimal('50.00'),
+            tonnage=Decimal('110.00'),
+            transport_distance_km=Decimal('2.50'),
+            status=TripStatus.COMPLETED,
+            completed_at=self.start + timedelta(hours=2),
+        )
+        Trip.objects.filter(pk=trip.pk).update(
+            created_at=self.start + timedelta(hours=1),
+        )
+
+        first = build_driver_shift_timeline(self.shift, as_of=self.end)
+        second = build_driver_shift_timeline(self.shift, as_of=self.end)
+        passport = first.passport
+
+        self.assertEqual(
+            passport['production']['m3_km']['value'],
+            Decimal('125.0000'),
+        )
+        self.assertEqual(
+            passport['production']['t_km']['value'],
+            Decimal('275.0000'),
+        )
+        self.assertEqual(passport['routing']['match_count'], 1)
+        self.assertEqual(passport['routing']['mismatch_count'], 0)
+        self.assertEqual(passport['cycles']['segment_count'], 1)
+        self.assertEqual(
+            passport['aggregation_inputs']['cycle_samples'][0][
+                'durations_seconds'
+            ],
+            [3600],
+        )
+        self.assertEqual(
+            passport['cycles']['segments'][0]['median_seconds'],
+            3600.0,
+        )
+        self.assertEqual(
+            passport['source_fingerprint'],
+            second.passport['source_fingerprint'],
+        )
+        self.assertEqual(len(passport['source_fingerprint']), 64)
+        self.assertNotIn('score', passport)
+        self.assertNotIn('place', passport)
+        self.assertNotIn('weight', passport)
+
+    def test_empty_shift_passport_keeps_complete_versioned_schema(self):
+        timeline = build_driver_shift_timeline(self.shift, as_of=self.end)
+        passport = timeline.passport
+
+        self.assertEqual(
+            set(passport),
+            {
+                'passport_schema_version',
+                'source_fingerprint',
+                'scope',
+                'shift',
+                'production',
+                'rates_per_available_hour',
+                'expected',
+                'time',
+                'cycles',
+                'aggregation_inputs',
+                'routing',
+                'trip_states',
+                'open_close',
+                'handover',
+                'quality',
+            },
+        )
+        self.assertEqual(passport['passport_schema_version'], 1)
+        self.assertEqual(
+            passport['production']['completed_trip_count'],
+            0,
+        )
+        self.assertEqual(
+            passport['production']['volume_m3']['value'],
+            Decimal('0'),
+        )
+        self.assertEqual(passport['cycles']['segments'], [])
+        self.assertIsNone(
+            passport['rates_per_available_hour']['trip_count']['value']
+        )
+        self.assertFalse(
+            passport['quality']['official_rating_eligible']
+        )
+
+    def test_passport_exposes_handover_readings_without_calling_fuel_use(self):
+        previous_driver = Employee.objects.create(
+            full_name='Предыдущий водитель показаний',
+            work_category=Employee.WorkCategory.DRIVER,
+        )
+        previous_shift = EmployeeShift.objects.create(
+            employee=previous_driver,
+            shift_type=ShiftType.NIGHT,
+            workplace_code='driver',
+            equipment=self.truck,
+            start_fuel=Decimal('1000'),
+            start_mileage=Decimal('9000'),
+            start_engine_hours=Decimal('700'),
+            end_fuel=Decimal('900'),
+            end_mileage=Decimal('9100'),
+            end_engine_hours=Decimal('710'),
+            opened_at=self.start - timedelta(hours=12),
+            closed_at=self.start,
+        )
+        self.shift.start_fuel = Decimal('880')
+        self.shift.start_mileage = Decimal('9105')
+        self.shift.start_engine_hours = Decimal('710')
+        self.shift.end_fuel = Decimal('700')
+        self.shift.end_mileage = Decimal('9200')
+        self.shift.end_engine_hours = Decimal('720')
+        self.shift.save(update_fields=[
+            'start_fuel',
+            'start_mileage',
+            'start_engine_hours',
+            'end_fuel',
+            'end_mileage',
+            'end_engine_hours',
+        ])
+        ShiftReadingCorrection.objects.create(
+            equipment=self.truck,
+            new_shift=self.shift,
+            previous_shift=previous_shift,
+            metric=ShiftReadingCorrection.Metric.MILEAGE,
+            transferred_value=Decimal('9100'),
+            actual_value=Decimal('9105'),
+            employee=self.driver,
+        )
+
+        timeline = build_driver_shift_timeline(self.shift, as_of=self.end)
+        handover = timeline.passport['handover']
+
+        self.assertEqual(handover['reading_correction_count'], 1)
+        self.assertEqual(
+            handover['corrections_by_metric']['mileage'][
+                'total_absolute_difference'
+            ],
+            Decimal('5'),
+        )
+        self.assertEqual(handover['mileage_delta_km'], Decimal('95'))
+        self.assertEqual(handover['engine_hours_delta'], Decimal('10'))
+        self.assertEqual(handover['net_fuel_change_l'], Decimal('-180'))
+        self.assertEqual(
+            handover['fuel_metric_status'],
+            'net_change_not_consumption',
+        )
+
+    def test_late_cancellation_preserves_open_trip_state_at_shift_close(self):
+        self.create_assignment()
+        trip = Trip.objects.create(
+            excavator=self.excavator,
+            truck=self.truck,
+            excavator_operator=self.excavator_operator,
+            driver=self.driver,
+            loading_shift=self.loading_shift,
+            rock_type=self.rock,
+            dump_point=self.dump_point,
+            status=TripStatus.CANCELLED,
+            cancelled_at=self.end + timedelta(hours=1),
+            is_carryover=True,
+        )
+        Trip.objects.filter(pk=trip.pk).update(
+            created_at=self.start + timedelta(hours=1),
+        )
+
+        timeline = build_driver_shift_timeline(self.shift, as_of=self.end)
+
+        self.assertEqual(timeline.productive_seconds, 11 * 3600)
+        self.assertEqual(
+            timeline.passport['trip_states']['open_at_close_count'],
+            1,
+        )
+        self.assertEqual(
+            timeline.passport['trip_states']['cancelled_count'],
+            0,
+        )
+        self.assertIn('open_trip_on_closed_shift', timeline.quality_flags)
+
+    def test_cancellation_at_shared_boundary_belongs_to_closing_shift_once(self):
+        next_shift = EmployeeShift.objects.create(
+            employee=self.driver,
+            shift_type=ShiftType.NIGHT,
+            workplace_code='driver',
+            equipment=self.truck,
+            opened_at=self.end,
+            closed_at=self.end + timedelta(hours=12),
+        )
+        trip = Trip.objects.create(
+            excavator=self.excavator,
+            truck=self.truck,
+            excavator_operator=self.excavator_operator,
+            driver=self.driver,
+            loading_shift=self.loading_shift,
+            rock_type=self.rock,
+            dump_point=self.dump_point,
+            status=TripStatus.CANCELLED,
+            cancelled_at=self.end,
+            is_carryover=True,
+        )
+        Trip.objects.filter(pk=trip.pk).update(
+            created_at=self.start + timedelta(hours=1),
+        )
+
+        first, second = build_driver_shift_timelines(
+            (self.shift, next_shift),
+            as_of=next_shift.closed_at,
+        )
+
+        self.assertEqual(
+            first.passport['trip_states']['cancelled_count'],
+            1,
+        )
+        self.assertEqual(
+            second.passport['trip_states']['cancelled_count'],
+            0,
+        )
+        self.assertEqual(
+            (
+                first.passport['trip_states']['cancelled_count']
+                + second.passport['trip_states']['cancelled_count']
+            ),
+            1,
+        )
+
+    def test_legacy_cancelled_trip_without_timestamp_is_withheld(self):
+        trip = Trip.objects.create(
+            excavator=self.excavator,
+            truck=self.truck,
+            driver=self.driver,
+            rock_type=self.rock,
+            dump_point=self.dump_point,
+            status=TripStatus.CANCELLED,
+        )
+        Trip.objects.filter(pk=trip.pk).update(
+            created_at=self.start + timedelta(hours=1),
+            cancelled_at=None,
+        )
+
+        timeline = build_driver_shift_timeline(self.shift, as_of=self.end)
+
+        self.assertIn(
+            'cancelled_trip_without_cancelled_at',
+            timeline.quality_flags,
+        )
+        self.assertFalse(timeline.usable_for_formula_review)
+        self.assertEqual(timeline.productive_seconds, 0)
+
+    def test_immediate_model_cancellation_is_not_an_invalid_window(self):
+        trip = Trip.objects.create(
+            excavator=self.excavator,
+            truck=self.truck,
+            excavator_operator=self.excavator_operator,
+            driver=self.driver,
+            loading_shift=self.loading_shift,
+            rock_type=self.rock,
+            dump_point=self.dump_point,
+            status=TripStatus.CANCELLED,
+        )
+        self.assertIsNotNone(trip.cancelled_at)
+        instant = self.start + timedelta(hours=1)
+        Trip.objects.filter(pk=trip.pk).update(
+            created_at=instant,
+            cancelled_at=instant,
+        )
+        trip.refresh_from_db()
+
+        timeline = build_driver_shift_timeline(self.shift, as_of=self.end)
+
+        self.assertNotIn(
+            'invalid_trip_cancellation_window',
+            timeline.quality_flags,
+        )
+        self.assertEqual(
+            timeline.passport['trip_states']['cancelled_count'],
+            1,
+        )
+
+    def test_carryover_trip_is_excluded_from_cycle_calibration_samples(self):
+        self.create_assignment()
+        trip = Trip.objects.create(
+            excavator=self.excavator,
+            truck=self.truck,
+            excavator_operator=self.excavator_operator,
+            driver=self.driver,
+            loading_shift=self.loading_shift,
+            unloading_shift=self.shift,
+            rock_type=self.rock,
+            dump_point=self.dump_point,
+            actual_dump_point=self.dump_point,
+            volume_m3=Decimal('50'),
+            tonnage=Decimal('100'),
+            transport_distance_km=Decimal('2'),
+            status=TripStatus.COMPLETED,
+            completed_at=self.start + timedelta(minutes=30),
+            is_carryover=True,
+        )
+        Trip.objects.filter(pk=trip.pk).update(
+            created_at=self.start - timedelta(minutes=30),
+        )
+
+        timeline = build_driver_shift_timeline(self.shift, as_of=self.end)
+
+        self.assertEqual(
+            timeline.passport['production']['completed_trip_count'],
+            1,
+        )
+        self.assertEqual(timeline.passport['cycles']['sample_count'], 0)
+        self.assertEqual(
+            timeline.passport['aggregation_inputs']['cycle_samples'],
+            [],
+        )
+        self.assertEqual(
+            timeline.passport['production']['completeness'][
+                'cycle_calibration_excluded_carryover_trip_count'
+            ],
+            1,
+        )
+
+    def test_zero_available_time_is_not_ready_for_formula_review(self):
+        timeline = build_driver_shift_timeline(self.shift, as_of=self.end)
+
+        self.assertEqual(timeline.available_seconds, 0)
+        self.assertFalse(
+            timeline.passport['rates_per_available_hour'][
+                'is_formula_ready'
+            ]
+        )
+        self.assertFalse(timeline.usable_for_formula_review)
+
+    def test_negative_trip_measurements_are_flagged_and_withheld(self):
+        self.create_assignment()
+        trip = Trip.objects.create(
+            excavator=self.excavator,
+            truck=self.truck,
+            excavator_operator=self.excavator_operator,
+            driver=self.driver,
+            loading_shift=self.loading_shift,
+            unloading_shift=self.shift,
+            rock_type=self.rock,
+            dump_point=self.dump_point,
+            actual_dump_point=self.dump_point,
+            planned_volume_m3=Decimal('-1'),
+            volume_m3=Decimal('-50'),
+            tonnage=Decimal('-100'),
+            transport_distance_km=Decimal('-2'),
+            status=TripStatus.COMPLETED,
+            completed_at=self.end,
+        )
+        Trip.objects.filter(pk=trip.pk).update(created_at=self.start)
+
+        timeline = build_driver_shift_timeline(self.shift, as_of=self.end)
+        passport = timeline.passport
+
+        self.assertIn('negative_trip_volume_m3', timeline.quality_flags)
+        self.assertIn('negative_trip_tonnage', timeline.quality_flags)
+        self.assertIn(
+            'negative_trip_transport_distance_km',
+            timeline.quality_flags,
+        )
+        self.assertIn(
+            'negative_trip_planned_volume_m3',
+            timeline.quality_flags,
+        )
+        self.assertIsNone(passport['production']['volume_m3']['value'])
+        self.assertIsNone(passport['production']['tonnage_t']['value'])
+        self.assertIsNone(passport['production']['m3_km']['value'])
+        self.assertIsNone(passport['production']['t_km']['value'])
+        self.assertFalse(
+            passport['rates_per_available_hour']['is_formula_ready']
+        )
+        self.assertEqual(passport['cycles']['sample_count'], 0)
+
+    def test_future_explicit_unload_is_not_credited_before_as_of(self):
+        self.shift.closed_at = None
+        self.shift.save(update_fields=['closed_at'])
+        self.create_assignment()
+        trip = Trip.objects.create(
+            excavator=self.excavator,
+            truck=self.truck,
+            excavator_operator=self.excavator_operator,
+            driver=self.driver,
+            loading_shift=self.loading_shift,
+            unloading_shift=self.shift,
+            rock_type=self.rock,
+            dump_point=self.dump_point,
+            volume_m3=Decimal('50'),
+            tonnage=Decimal('100'),
+            status=TripStatus.COMPLETED,
+            completed_at=self.start + timedelta(hours=4),
+        )
+        Trip.objects.filter(pk=trip.pk).update(created_at=self.start)
+
+        timeline = build_driver_shift_timeline(
+            self.shift,
+            as_of=self.start + timedelta(hours=2),
+        )
+
+        self.assertEqual(
+            timeline.passport['production']['completed_trip_count'],
+            0,
+        )
+        self.assertEqual(
+            timeline.passport['trip_states']['open_at_close_count'],
+            1,
+        )
+
+    def test_inconsistent_loading_shift_is_flagged_and_excluded_from_cycles(self):
+        self.create_assignment()
+        other_excavator = Equipment.objects.create(
+            equipment_type=self.excavator.equipment_type,
+            garage_number='TL-EXC-BAD-LOADING-SHIFT',
+        )
+        other_operator = Employee.objects.create(
+            full_name='Машинист ошибочной смены загрузки',
+            work_category=Employee.WorkCategory.EXCAVATOR_OPERATOR,
+        )
+        bad_loading_shift = EmployeeShift.objects.create(
+            employee=other_operator,
+            shift_type=ShiftType.DAY,
+            workplace_code='excavator',
+            equipment=other_excavator,
+            opened_at=self.start + timedelta(hours=2),
+            closed_at=self.end,
+        )
+        trip = Trip.objects.create(
+            excavator=self.excavator,
+            truck=self.truck,
+            excavator_operator=self.excavator_operator,
+            driver=self.driver,
+            loading_shift=bad_loading_shift,
+            unloading_shift=self.shift,
+            rock_type=self.rock,
+            dump_point=self.dump_point,
+            actual_dump_point=self.dump_point,
+            volume_m3=Decimal('50'),
+            tonnage=Decimal('100'),
+            transport_distance_km=Decimal('2'),
+            status=TripStatus.COMPLETED,
+            completed_at=self.end,
+        )
+        Trip.objects.filter(pk=trip.pk).update(created_at=self.start)
+
+        timeline = build_driver_shift_timeline(self.shift, as_of=self.end)
+
+        self.assertIn(
+            'trip_loading_shift_equipment_mismatch',
+            timeline.quality_flags,
+        )
+        self.assertIn(
+            'trip_operator_loading_shift_mismatch',
+            timeline.quality_flags,
+        )
+        self.assertIn(
+            'trip_loading_shift_time_mismatch',
+            timeline.quality_flags,
+        )
+        self.assertFalse(timeline.usable_for_formula_review)
+        self.assertEqual(timeline.passport['cycles']['sample_count'], 0)

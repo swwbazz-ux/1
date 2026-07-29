@@ -1,4 +1,6 @@
+import hashlib
 from collections import defaultdict
+from decimal import Decimal
 
 from django.db.models import Count, Q
 from django.utils import timezone
@@ -10,6 +12,8 @@ from .driver_shift_timeline import (
     DOWNTIME_CATEGORIES,
     TimelineCategory,
     build_driver_shift_timelines,
+    cycle_aggregation_inputs_from_samples,
+    cycle_statistics_from_samples,
 )
 
 
@@ -36,6 +40,7 @@ SOURCE_COUNT_KEYS = (
 
 QUALITY_METRIC_KEYS = (
     'trip_without_assignment_seconds',
+    'trip_assignment_mismatch_seconds',
 )
 
 
@@ -77,6 +82,303 @@ def _driver_closed_shift_queryset():
         )
         .order_by('employee__full_name', 'shift_type', 'opened_at', 'id')
     )
+
+
+PASSPORT_DECIMAL_METRICS = (
+    'volume_m3',
+    'tonnage_t',
+    'm3_km',
+    't_km',
+)
+
+PASSPORT_TIME_SUM_KEYS = (
+    'actual_duration_seconds',
+    'available_seconds',
+    'loaded_to_unloaded_seconds',
+    'assignment_covered_seconds',
+    'downtime_external_seconds',
+    'downtime_technical_seconds',
+    'downtime_regulated_seconds',
+    'downtime_review_seconds',
+    'no_assignment_seconds',
+    'unexplained_seconds',
+    'conflict_seconds',
+)
+
+
+def _aggregate_decimal_metric(passports, key):
+    metrics = [
+        passport['production'][key]
+        for passport in passports
+    ]
+    known_value = sum(
+        (metric['known_value'] for metric in metrics),
+        Decimal('0'),
+    )
+    missing_trip_count = sum(
+        metric['missing_trip_count']
+        for metric in metrics
+    )
+    complete_trip_count = sum(
+        metric['complete_trip_count']
+        for metric in metrics
+    )
+    return {
+        'value': known_value if not missing_trip_count else None,
+        'known_value': known_value,
+        'complete_trip_count': complete_trip_count,
+        'missing_trip_count': missing_trip_count,
+        'is_complete': missing_trip_count == 0,
+    }
+
+
+def _aggregate_rate(metric, available_seconds, *, formula_ready):
+    if available_seconds <= 0:
+        known_value = None
+        strict_value = None
+    else:
+        known_value = (
+            Decimal(metric['known_value'])
+            * Decimal('3600')
+            / Decimal(available_seconds)
+        ).quantize(Decimal('0.0001'))
+        strict_value = (
+            (
+                Decimal(metric['value'])
+                * Decimal('3600')
+                / Decimal(available_seconds)
+            ).quantize(Decimal('0.0001'))
+            if metric['value'] is not None
+            else None
+        )
+    return {
+        'value': strict_value if formula_ready else None,
+        'known_value': known_value,
+        'is_complete': bool(
+            formula_ready
+            and metric['is_complete']
+            and strict_value is not None
+        ),
+    }
+
+
+def _merge_cycle_samples(sample_groups):
+    merged = defaultdict(list)
+    for samples in sample_groups:
+        for context, values in samples.items():
+            merged[context].extend(values)
+    return {
+        context: tuple(values)
+        for context, values in merged.items()
+    }
+
+
+def _aggregate_shift_passports(passports, cycle_sample_groups):
+    passports = tuple(passports)
+    decimal_metrics = {
+        key: _aggregate_decimal_metric(passports, key)
+        for key in PASSPORT_DECIMAL_METRICS
+    }
+    completed_trip_count = sum(
+        passport['production']['completed_trip_count']
+        for passport in passports
+    )
+    completed_trip_metric = {
+        'value': Decimal(completed_trip_count),
+        'known_value': Decimal(completed_trip_count),
+        'complete_trip_count': completed_trip_count,
+        'missing_trip_count': 0,
+        'is_complete': True,
+    }
+    time = {
+        key: sum(passport['time'][key] for passport in passports)
+        for key in PASSPORT_TIME_SUM_KEYS
+    }
+    formula_ready = bool(passports) and all(
+        passport['rates_per_available_hour']['is_formula_ready']
+        for passport in passports
+    )
+    available_seconds = time['available_seconds']
+    output_attribution = {
+        key: sum(
+            passport['production']['output_attribution'][key]
+            for passport in passports
+        )
+        for key in (
+            'unloading_shift_trip_count',
+            'legacy_driver_trip_count',
+            'ambiguous_trip_count',
+        )
+    }
+    production_completeness = {
+        key: sum(
+            passport['production']['completeness'][key]
+            for passport in passports
+        )
+        for key in (
+            'credited_trip_count',
+            'volume_missing_trip_count',
+            'tonnage_missing_trip_count',
+            'distance_missing_trip_count',
+            'cycle_calibration_excluded_carryover_trip_count',
+            'comparison_context_missing_trip_count',
+        )
+    }
+    routing = {
+        key: sum(passport['routing'][key] for passport in passports)
+        for key in (
+            'credited_trip_count',
+            'explicit_assigned_and_actual_count',
+            'match_count',
+            'mismatch_count',
+            'missing_assigned_count',
+            'missing_actual_count',
+        )
+    }
+    trip_states = {
+        key: sum(passport['trip_states'][key] for passport in passports)
+        for key in (
+            'loaded_during_shift_count',
+            'open_at_close_count',
+            'cancelled_count',
+            'carryover_in_count',
+            'carryover_out_count',
+        )
+    }
+    corrections_by_metric = {}
+    for passport in passports:
+        for metric, values in passport['handover'][
+            'corrections_by_metric'
+        ].items():
+            target = corrections_by_metric.setdefault(
+                metric,
+                {
+                    'count': 0,
+                    'total_absolute_difference': Decimal('0'),
+                },
+            )
+            target['count'] += values['count']
+            target['total_absolute_difference'] += (
+                values['total_absolute_difference']
+            )
+    quality_flags = sorted({
+        flag
+        for passport in passports
+        for flag in passport['quality']['flags']
+    })
+    passport_quality_metrics = {
+        key: sum(
+            passport['quality']['quality_metrics'].get(key, 0)
+            for passport in passports
+        )
+        for key in (
+            'trip_without_assignment_seconds',
+            'trip_assignment_mismatch_seconds',
+        )
+    }
+    source_fingerprints = sorted(
+        passport['source_fingerprint']
+        for passport in passports
+    )
+    aggregate_fingerprint = hashlib.sha256(
+        '|'.join(source_fingerprints).encode('ascii')
+    ).hexdigest()
+    merged_cycle_samples = _merge_cycle_samples(cycle_sample_groups)
+    return {
+        'passport_schema_version': 1,
+        'source_fingerprint': aggregate_fingerprint,
+        'scope': 'employee_period',
+        'shift_count': len(passports),
+        'production': {
+            'completed_trip_count': completed_trip_count,
+            'output_attribution': output_attribution,
+            **decimal_metrics,
+            'completeness': production_completeness,
+        },
+        'rates_per_available_hour': {
+            'trip_count': _aggregate_rate(
+                completed_trip_metric,
+                available_seconds,
+                formula_ready=formula_ready,
+            ),
+            **{
+                key: _aggregate_rate(
+                    metric,
+                    available_seconds,
+                    formula_ready=formula_ready,
+                )
+                for key, metric in decimal_metrics.items()
+            },
+            'is_formula_ready': formula_ready,
+        },
+        'expected': {
+            'actual_to_expected_ratio': None,
+            'status': 'expected_model_unavailable',
+        },
+        'time': {
+            'actual_start_at': None,
+            'actual_end_at': None,
+            **time,
+            'scheduled_start_at': None,
+            'scheduled_end_at': None,
+            'scheduled_window_status': 'schedule_snapshot_unavailable',
+            'start_deviation_seconds': None,
+            'end_deviation_seconds': None,
+            'confirmed_extra_productive_seconds': None,
+            'unjustified_short_shift_seconds': None,
+            'short_shift_status': 'policy_unavailable',
+        },
+        'cycles': cycle_statistics_from_samples(merged_cycle_samples),
+        'aggregation_inputs': {
+            'cycle_samples': cycle_aggregation_inputs_from_samples(
+                merged_cycle_samples
+            ),
+        },
+        'routing': routing,
+        'trip_states': trip_states,
+        'open_close': {
+            'shift_count': len(passports),
+            'opened_by_employee_shift_count': sum(
+                passport['open_close']['opened_by_employee']
+                for passport in passports
+            ),
+            'closed_by_employee_shift_count': sum(
+                passport['open_close']['closed_by_employee']
+                for passport in passports
+            ),
+            'service_closed_shift_count': sum(
+                passport['open_close']['service_closed']
+                for passport in passports
+            ),
+            'valid_window_shift_count': sum(
+                passport['open_close']['window_valid']
+                for passport in passports
+            ),
+            'complete_start_readings_shift_count': sum(
+                passport['open_close']['start_readings_complete']
+                for passport in passports
+            ),
+            'complete_end_readings_shift_count': sum(
+                passport['open_close']['end_readings_complete']
+                for passport in passports
+            ),
+        },
+        'handover': {
+            'reading_correction_count': sum(
+                passport['handover']['reading_correction_count']
+                for passport in passports
+            ),
+            'corrections_by_metric': corrections_by_metric,
+            'fuel_metric_status': 'net_change_not_consumption',
+            'shift_detail_status': 'available_in_shift_passports',
+        },
+        'quality': {
+            'flags': quality_flags,
+            'quality_metrics': passport_quality_metrics,
+            'data_usable_for_formula_review': formula_ready,
+            'official_rating_eligible': False,
+        },
+    }
 
 
 def _build_driver_closed_shift_observation(
@@ -122,9 +424,13 @@ def _build_driver_closed_shift_observation(
             for key in SOURCE_COUNT_KEYS
         }
         quality_metrics = {key: 0 for key in QUALITY_METRIC_KEYS}
+        shift_passports = []
+        cycle_sample_groups = []
 
         for shift in employee_shifts:
             timeline = timelines_by_shift[shift.id]
+            shift_passports.append(timeline.passport)
+            cycle_sample_groups.append(timeline.cycle_samples)
             total_seconds += timeline.total_seconds
             explained_seconds += timeline.explained_seconds
             closed_shift_count += int(bool(shift.closed_at))
@@ -176,6 +482,11 @@ def _build_driver_closed_shift_observation(
             'quality_flags': sorted(quality_flags),
             'source_counts': source_counts,
             'quality_metrics': quality_metrics,
+            'passport': _aggregate_shift_passports(
+                shift_passports,
+                cycle_sample_groups,
+            ),
+            'shift_passports': shift_passports,
             'data_usable_for_formula_review': (
                 usable_shift_count == shift_count
                 and closed_shift_count == shift_count

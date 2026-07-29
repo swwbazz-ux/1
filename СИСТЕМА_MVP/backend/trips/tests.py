@@ -2720,6 +2720,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         payload = json.loads(response.content.decode('utf-8'))
         trip.refresh_from_db()
         self.assertEqual(trip.status, TripStatus.CANCELLED)
+        self.assertIsNotNone(trip.cancelled_at)
         self.assertEqual(payload['equipment_state'], 'assigned')
         self.assertEqual(payload['status'], TripStatus.CANCELLED)
         self.assertTrue(

@@ -84,6 +84,7 @@ from .models import (
     ProductionSpecialization,
     Role,
     TemporaryWorkTransfer,
+    WatchComposition,
     WorkSchedule,
 )
 from .oup_undo import (
@@ -697,6 +698,7 @@ def system_admin_dashboard_view(request):
     reference_counts = [
         ('Подразделения', PersonnelDepartment.objects.count(), '/system-admin/references/personnel-departments/'),
         ('Графики работы', WorkSchedule.objects.count(), '/system-admin/references/work-schedules/'),
+        ('Утверждённые составы вахт', WatchComposition.objects.count(), '/system-admin/references/watch-compositions/'),
         ('Кадровые должности', PersonnelPosition.objects.count(), '/system-admin/references/personnel-positions/'),
         ('Производственные специализации', ProductionSpecialization.objects.count(), '/system-admin/references/production-specializations/'),
         ('Виды техники', EquipmentType.objects.count(), '/admin/references/equipmenttype/'),
@@ -782,6 +784,7 @@ def system_admin_references_view(request):
                 {'name': 'Сотрудники', 'count': Employee.objects.count(), 'url': 'system_admin_employees', 'external_url': ''},
                 {'name': 'Подразделения', 'count': PersonnelDepartment.objects.count(), 'url': '', 'external_url': '/admin/users/personneldepartment/', 'detail_code': 'personnel-departments'},
                 {'name': 'Графики работы', 'count': WorkSchedule.objects.count(), 'url': '', 'external_url': '/admin/users/workschedule/', 'detail_code': 'work-schedules'},
+                {'name': 'Утверждённые составы вахт', 'count': WatchComposition.objects.count(), 'url': '', 'external_url': '/admin/users/watchcomposition/', 'detail_code': 'watch-compositions'},
                 {'name': 'Кадровые должности', 'count': PersonnelPosition.objects.count(), 'url': '', 'external_url': '/admin/users/personnelposition/', 'detail_code': 'personnel-positions'},
                 {'name': 'Производственные специализации', 'count': ProductionSpecialization.objects.count(), 'url': '', 'external_url': '/admin/users/productionspecialization/', 'detail_code': 'production-specializations'},
                 {'name': 'Роли', 'count': Role.objects.count(), 'url': '', 'external_url': '/admin/users/role/'},
@@ -886,6 +889,17 @@ def get_system_admin_reference_configs():
             'preview_fields': ['code', 'brigade_count', 'is_active'],
             'initial': {'is_active': True, 'brigade_count': 2},
             'admin_url': '/admin/users/workschedule/',
+        },
+        'watch-compositions': {
+            'title': 'Утверждённые составы вахт',
+            'section': 'Сотрудники и доступы',
+            'model': WatchComposition,
+            'description': 'Уже утверждённые составы вахт. ОУП выбирает состав в карточке сотрудника; график и бригада не подставляют его автоматически.',
+            'fields': ['name', 'code', 'is_active'],
+            'search_fields': ['name', 'code'],
+            'preview_fields': ['code', 'is_active'],
+            'initial': {'is_active': True},
+            'admin_url': '/admin/users/watchcomposition/',
         },
         'personnel-positions': {
             'title': 'Кадровые должности',
@@ -2314,11 +2328,13 @@ def system_admin_employee_export_view(request):
     sheet.title = 'Сотрудники'
     sheet.append([
         'ФИО', 'Табельный номер', 'Телефон', 'Статус', 'Подразделение',
-        'Дата приема', 'Дата увольнения', 'График работы', 'Бригада', 'Место проживания',
+        'Дата приема', 'Дата увольнения', 'График работы', 'Бригада',
+        'Утверждённый состав вахты', 'Место проживания',
     ])
     for employee in Employee.objects.select_related(
         'personnel_department',
         'work_schedule',
+        'watch_composition',
     ).order_by('full_name'):
         sheet.append([
             employee.full_name,
@@ -2330,6 +2346,7 @@ def system_admin_employee_export_view(request):
             excel_value(employee.dismissed_at),
             employee.work_schedule_label,
             employee.get_brigade_number_display() if employee.brigade_number else '',
+            str(employee.watch_composition or ''),
             employee.residence_text,
         ])
     return build_workbook_response(workbook, 'admin_employees.xlsx')

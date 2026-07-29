@@ -29,6 +29,7 @@ from .models import (
     PersonnelPosition,
     ProductionSpecialization,
     Role,
+    WatchComposition,
     WorkSchedule,
 )
 from .work_profiles import legacy_work_category_for_specialization, validate_base_specialization
@@ -155,6 +156,7 @@ class EmployeeCardForm(forms.ModelForm):
             'dismissed_at',
             'work_schedule',
             'brigade_number',
+            'watch_composition',
             'residence_text',
             'comment',
             'hr_data',
@@ -174,6 +176,7 @@ class EmployeeCardForm(forms.ModelForm):
             'dismissed_at': 'Дата увольнения',
             'work_schedule': 'График работы',
             'brigade_number': 'Бригада',
+            'watch_composition': 'Утверждённый состав вахты',
             'residence_text': 'Место проживания',
             'comment': 'Комментарий',
             'hr_data': 'Паспортные / кадровые данные',
@@ -221,6 +224,7 @@ class EmployeeCardForm(forms.ModelForm):
         self.fields['personnel_department'].required = False
         self.fields['work_schedule'].required = False
         self.fields['brigade_number'].required = False
+        self.fields['watch_composition'].required = False
         # The employee lifecycle is changed only by dedicated actions. A new
         # card always begins as active; PIN/access activation is independent.
         if not is_existing_employee:
@@ -234,6 +238,11 @@ class EmployeeCardForm(forms.ModelForm):
         current_specialization_id = getattr(self.instance, 'base_specialization_id', None)
         current_department_id = getattr(self.instance, 'personnel_department_id', None)
         current_schedule_id = getattr(self.instance, 'work_schedule_id', None)
+        current_watch_composition_id = getattr(
+            self.instance,
+            'watch_composition_id',
+            None,
+        )
         self._initial_personnel_department_id = current_department_id
         self._initial_work_schedule_id = current_schedule_id
         self.fields['personnel_position'].queryset = (
@@ -254,8 +263,14 @@ class EmployeeCardForm(forms.ModelForm):
             WorkSchedule.objects.filter(Q(is_active=True) | Q(pk=current_schedule_id))
             .order_by('name')
         )
+        self.fields['watch_composition'].queryset = (
+            WatchComposition.objects
+            .filter(Q(is_active=True) | Q(pk=current_watch_composition_id))
+            .order_by('name')
+        )
         self.fields['personnel_department'].empty_label = 'Не указано'
         self.fields['work_schedule'].empty_label = 'Не указано'
+        self.fields['watch_composition'].empty_label = 'Не указан'
         self.fields['brigade_number'].choices = [('', 'Не указана'), *Employee.BrigadeNumber.choices]
         self.fields['work_schedule'].widget.attrs['data-work-schedule'] = '1'
         self.fields['brigade_number'].widget.attrs['data-work-brigade'] = '1'

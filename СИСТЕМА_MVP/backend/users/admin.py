@@ -11,6 +11,7 @@ from .models import (
     ProductionSpecialization,
     Role,
     TemporaryWorkTransfer,
+    WatchComposition,
     WorkSchedule,
 )
 
@@ -24,11 +25,20 @@ class EmployeeAdmin(admin.ModelAdmin):
         'base_specialization',
         'work_schedule',
         'brigade_number',
+        'watch_composition',
         'status',
         'is_active',
     )
     search_fields = ('full_name', 'phone', 'personnel_department__name', 'department', 'position')
-    list_filter = ('status', 'is_active', 'work_category', 'personnel_department', 'work_schedule', 'brigade_number')
+    list_filter = (
+        'status',
+        'is_active',
+        'work_category',
+        'personnel_department',
+        'work_schedule',
+        'brigade_number',
+        'watch_composition',
+    )
 
 
 @admin.register(PersonnelDepartment)
@@ -43,6 +53,13 @@ class WorkScheduleAdmin(admin.ModelAdmin):
     list_display = ('name', 'code', 'brigade_count', 'is_active')
     search_fields = ('name', 'code')
     list_filter = ('brigade_count', 'is_active')
+
+
+@admin.register(WatchComposition)
+class WatchCompositionAdmin(admin.ModelAdmin):
+    list_display = ('name', 'code', 'is_active')
+    search_fields = ('name', 'code')
+    list_filter = ('is_active',)
 
 
 @admin.register(Role)

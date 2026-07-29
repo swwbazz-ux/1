@@ -31,7 +31,13 @@ from shifts.models import EmployeeShift, ShiftType
 
 from .admin import AdminActionLogAdmin
 from .forms import optimize_employee_photo
-from .models import AdminActionLog, Employee, EmployeeAccess, Role
+from .models import (
+    AdminActionLog,
+    Employee,
+    EmployeeAccess,
+    Role,
+    WatchComposition,
+)
 from .oup_services import lock_oup_write_context, open_oup_shift
 
 
@@ -526,6 +532,53 @@ class OupWorkplaceTests(TestCase):
         self.assertIn('Новое Имя Сотрудника', log.old_value)
         detail = self.client.get(reverse('oup_employee_detail', args=[employee.id]))
         self.assertContains(detail, 'изменена карточка сотрудника')
+
+    def test_oup_saves_and_audits_structural_watch_composition(self):
+        self.start_shift()
+        previous_composition = WatchComposition.objects.create(
+            code='test-oup-watch-composition-previous',
+            name='ТЕСТ_ОУП_Предыдущий состав вахты',
+        )
+        next_composition = WatchComposition.objects.create(
+            code='test-oup-watch-composition-next',
+            name='ТЕСТ_ОУП_Новый состав вахты',
+        )
+        employee = Employee.objects.create(
+            full_name='Сотрудник Состава Вахты',
+            personnel_number='CR-WATCH-1',
+            phone='+79001112234',
+            position='Водитель',
+            department='Участок',
+            work_category=Employee.WorkCategory.DRIVER,
+            hired_at=timezone.localdate(),
+            rotation='Legacy подпись не определяет состав',
+            watch_composition=previous_composition,
+            status=Employee.Status.ACTIVE,
+        )
+
+        response = self.client.post(
+            reverse('oup_employee_detail', args=[employee.id]),
+            self.employee_payload(
+                full_name=employee.full_name,
+                personnel_number=employee.personnel_number,
+                phone=employee.phone,
+                watch_composition=str(next_composition.id),
+            ),
+        )
+
+        self.assertRedirects(
+            response,
+            reverse('oup_employee_detail', args=[employee.id]),
+            fetch_redirect_response=False,
+        )
+        employee.refresh_from_db()
+        self.assertEqual(employee.watch_composition, next_composition)
+        log = AdminActionLog.objects.get(
+            action='ОУП: изменена карточка сотрудника',
+            object_id=str(employee.id),
+        )
+        self.assertIn(previous_composition.name, log.old_value)
+        self.assertIn(next_composition.name, log.old_value)
 
     def test_edit_rechecks_shift_inside_write_transaction(self):
         self.start_shift()

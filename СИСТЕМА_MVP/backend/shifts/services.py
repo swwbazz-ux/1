@@ -141,18 +141,23 @@ def _existing_driver_shift_action(action_type, client_action_id):
 
 def _try_lock_watch_period_catalog_for_snapshot():
     """Keep the catalog stable without making a driver wait for a catalog writer."""
+    from users.models import WatchComposition
+
     if connection.vendor != 'postgresql':
         return True
     if not connection.in_atomic_block:
         raise RuntimeError('Watch-period snapshot requires an atomic transaction.')
-    table_name = connection.ops.quote_name(WatchPeriod._meta.db_table)
+    table_names = ', '.join(
+        connection.ops.quote_name(model._meta.db_table)
+        for model in (WatchComposition, WatchPeriod)
+    )
     try:
         # The savepoint restores the outer shift transaction after SQLSTATE
         # 55P03. A successful table lock survives savepoint release and stays
         # until the surrounding shift transaction commits.
         with transaction.atomic():
             with connection.cursor() as cursor:
-                cursor.execute(f'LOCK TABLE {table_name} IN SHARE MODE NOWAIT')
+                cursor.execute(f'LOCK TABLE {table_names} IN SHARE MODE NOWAIT')
     except OperationalError as error:
         cause = error.__cause__
         sqlstate = (
@@ -173,10 +178,12 @@ def resolve_published_watch_period_for_shift(
     role_code,
     opened_at,
 ):
-    """Return an unambiguous watch snapshot backed by the deputy's published plan."""
+    """Return the roster-backed watch snapshot for the deputy's published plan."""
     from assignments.models import CrewPlanSlot, CrewPlanStatus, WorkShiftType
 
     if shift_type not in WorkShiftType.values:
+        return None
+    if not employee.watch_composition_id:
         return None
     if shift_type != production_shift_type(opened_at):
         # Ранние комплексы пока не имеют отдельного структурного признака.
@@ -209,6 +216,8 @@ def resolve_published_watch_period_for_shift(
     candidates = list(
         WatchPeriod.objects
         .filter(
+            watch_composition_id=employee.watch_composition_id,
+            watch_composition__is_active=True,
             is_active=True,
             starts_on__lte=work_date,
             ends_on__gte=work_date,
@@ -382,6 +391,16 @@ def close_driver_shift(*, shift, employee, readings, client_action_id):
             truck=locked_shift.equipment,
             status__in=OPEN_TRIP_STATUSES,
         ).update(is_carryover=True)
+        from reports.driver_shift_passport_snapshots import (
+            enqueue_driver_shift_passport_capture,
+        )
+        from reports.models import DriverShiftPassportTrigger
+
+        enqueue_driver_shift_passport_capture(
+            shift=locked_shift,
+            trigger=DriverShiftPassportTrigger.DRIVER_CLOSE,
+            captured_by=employee,
+        )
         response = {
             'ok': True, 'shift_id': locked_shift.pk, 'truck_id': locked_shift.equipment_id, 'driver_id': employee.pk,
         }

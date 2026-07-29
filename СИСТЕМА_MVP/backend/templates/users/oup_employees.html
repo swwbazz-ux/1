@@ -126,7 +126,7 @@
                         </span>
                         <span class="oup-work-cell">
                             <strong>{{ employee.position|default:"Должность не указана" }}</strong>
-                            <small>{{ employee.department_label|default:"Подразделение не указано" }} · {{ employee.work_schedule_label|default:"График не указан" }}{% if employee.brigade_number %} · {{ employee.get_brigade_number_display }}{% endif %}</small>
+                            <small>{{ employee.department_label|default:"Подразделение не указано" }} · {{ employee.work_schedule_label|default:"График не указан" }}{% if employee.brigade_number %} · {{ employee.get_brigade_number_display }}{% endif %} · {{ employee.watch_composition|default:"Состав вахты не указан" }}</small>
                         </span>
                         <span class="oup-contact-cell">
                             <strong>{{ employee.phone|default:"Телефон не указан" }}</strong>

@@ -184,6 +184,19 @@ def _close_previous_role_shifts(employee, current_access, shifts):
             ).update(is_carryover=True)
     if closed:
         EmployeeShift.objects.bulk_update(closed, ['closed_at', 'closed_by'])
+        from reports.driver_shift_passport_snapshots import (
+            enqueue_driver_shift_passport_capture,
+        )
+        from reports.models import DriverShiftPassportTrigger
+
+        for shift in closed:
+            if _shift_workplace_code(shift) != 'driver':
+                continue
+            enqueue_driver_shift_passport_capture(
+                shift=shift,
+                trigger=DriverShiftPassportTrigger.ROLE_SWITCH,
+                captured_by=employee,
+            )
     return closed
 
 

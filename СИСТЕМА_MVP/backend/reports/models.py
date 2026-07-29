@@ -1,3 +1,5 @@
+from django.core.exceptions import ValidationError
+from django.core.serializers.json import DjangoJSONEncoder
 from django.db import models
 
 
@@ -76,3 +78,147 @@ class PilotFeedback(models.Model):
 
     def __str__(self):
         return self.title
+
+
+class DriverShiftPassportTrigger(models.TextChoices):
+    DRIVER_CLOSE = 'driver_close', 'Обычное закрытие водителем'
+    SERVICE_CLOSE = 'service_close', 'Служебное закрытие'
+    ROLE_SWITCH = 'role_switch', 'Закрытие при переключении роли'
+    SOURCE_RECONCILE = 'source_reconcile', 'Пересчёт после изменения источников'
+    BACKFILL = 'backfill', 'Ретроспективное заполнение'
+    CALCULATOR_UPGRADE = 'calculator_upgrade', 'Новая версия калькулятора'
+
+
+class DriverShiftPassportRequestStatus(models.TextChoices):
+    PENDING = 'pending', 'Ожидает обработки'
+    PROCESSING = 'processing', 'Обрабатывается'
+    FAILED = 'failed', 'Ошибка'
+    COMPLETED = 'completed', 'Готово'
+
+
+class DriverShiftPassportSnapshot(models.Model):
+    shift = models.ForeignKey(
+        'shifts.EmployeeShift',
+        verbose_name='Смена водителя',
+        on_delete=models.PROTECT,
+        related_name='passport_snapshots',
+    )
+    revision = models.PositiveIntegerField('Ревизия')
+    schema_version = models.PositiveSmallIntegerField('Версия схемы паспорта')
+    calculator_version = models.CharField('Версия калькулятора', max_length=64)
+    source_fingerprint = models.CharField('Fingerprint источников', max_length=64)
+    payload_fingerprint = models.CharField('Fingerprint паспорта', max_length=64)
+    payload = models.JSONField(
+        'Диагностический паспорт',
+        encoder=DjangoJSONEncoder,
+    )
+    trigger = models.CharField(
+        'Причина формирования',
+        max_length=32,
+        choices=DriverShiftPassportTrigger.choices,
+    )
+    captured_late = models.BooleanField('Сформирован с задержкой', default=False)
+    captured_by = models.ForeignKey(
+        'users.Employee',
+        verbose_name='Кем инициирован',
+        on_delete=models.PROTECT,
+        related_name='captured_driver_shift_passports',
+        null=True,
+        blank=True,
+    )
+    captured_at = models.DateTimeField('Сформирован', auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Диагностический паспорт смены водителя'
+        verbose_name_plural = 'Диагностические паспорта смен водителей'
+        ordering = ['shift_id', '-revision']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['shift', 'revision'],
+                name='unique_driver_passport_shift_revision',
+            ),
+            models.UniqueConstraint(
+                fields=['shift', 'calculator_version', 'source_fingerprint'],
+                name='unique_driver_passport_source_version',
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=['shift', '-revision'],
+                name='driver_passport_shift_rev_idx',
+            ),
+        ]
+
+    def __str__(self):
+        return f'Смена {self.shift_id}, паспорт r{self.revision}'
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding:
+            raise ValidationError(
+                'Готовый паспорт смены неизменяем; создайте новую ревизию.'
+            )
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError(
+            'Готовый паспорт смены нельзя удалить штатным способом.'
+        )
+
+
+class DriverShiftPassportCaptureRequest(models.Model):
+    shift = models.ForeignKey(
+        'shifts.EmployeeShift',
+        verbose_name='Смена водителя',
+        on_delete=models.PROTECT,
+        related_name='passport_capture_requests',
+    )
+    request_key = models.CharField('Ключ запроса', max_length=64, unique=True)
+    trigger = models.CharField(
+        'Причина формирования',
+        max_length=32,
+        choices=DriverShiftPassportTrigger.choices,
+    )
+    calculator_version = models.CharField('Версия калькулятора', max_length=64)
+    closed_at = models.DateTimeField('Момент закрытия смены')
+    status = models.CharField(
+        'Статус',
+        max_length=16,
+        choices=DriverShiftPassportRequestStatus.choices,
+        default=DriverShiftPassportRequestStatus.PENDING,
+        db_index=True,
+    )
+    attempt_count = models.PositiveIntegerField('Количество попыток', default=0)
+    last_error = models.TextField('Последняя ошибка', blank=True)
+    captured_by = models.ForeignKey(
+        'users.Employee',
+        verbose_name='Кем инициирован',
+        on_delete=models.PROTECT,
+        related_name='driver_shift_passport_requests',
+        null=True,
+        blank=True,
+    )
+    snapshot = models.ForeignKey(
+        DriverShiftPassportSnapshot,
+        verbose_name='Сформированный паспорт',
+        on_delete=models.PROTECT,
+        related_name='capture_requests',
+        null=True,
+        blank=True,
+    )
+    requested_at = models.DateTimeField('Запрошен', auto_now_add=True)
+    started_at = models.DateTimeField('Обработка начата', null=True, blank=True)
+    completed_at = models.DateTimeField('Обработка завершена', null=True, blank=True)
+
+    class Meta:
+        verbose_name = 'Запрос на паспорт смены водителя'
+        verbose_name_plural = 'Запросы на паспорта смен водителей'
+        ordering = ['requested_at', 'id']
+        indexes = [
+            models.Index(
+                fields=['status', 'requested_at'],
+                name='driver_passport_req_status_idx',
+            ),
+        ]
+
+    def __str__(self):
+        return f'Смена {self.shift_id}: {self.status}'

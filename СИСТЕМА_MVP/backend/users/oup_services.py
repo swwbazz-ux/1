@@ -45,6 +45,7 @@ OUP_AUDIT_FIELDS = (
     ('hired_at', 'Дата приема'),
     ('work_schedule', 'График работы'),
     ('brigade_number', 'Бригада'),
+    ('watch_composition', 'Утверждённый состав вахты'),
     ('comment', 'Комментарий'),
 )
 
@@ -125,6 +126,7 @@ def emit_employee_changed(employee, action):
             'work_category': employee.work_category,
             'personnel_position_id': employee.personnel_position_id,
             'base_specialization_id': employee.base_specialization_id,
+            'watch_composition_id': employee.watch_composition_id,
             'status': employee.status,
             'is_active': employee.is_active,
         },

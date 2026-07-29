@@ -1,4 +1,5 @@
 from django.db import models
+from django.utils import timezone
 
 
 class TripStatus(models.TextChoices):
@@ -51,12 +52,27 @@ class Trip(models.Model):
     status = models.CharField('Статус', max_length=32, choices=TripStatus.choices, default=TripStatus.ACTIVE)
     created_at = models.DateTimeField('Создан', auto_now_add=True)
     completed_at = models.DateTimeField('Выполнен', null=True, blank=True)
+    cancelled_at = models.DateTimeField('Отменён', null=True, blank=True)
     is_carryover = models.BooleanField('Переходящий рейс', default=False)
 
     class Meta:
         verbose_name = 'Рейс'
         verbose_name_plural = 'Рейсы'
         ordering = ['-created_at']
+
+    def save(self, *args, **kwargs):
+        if (
+            self.status == TripStatus.CANCELLED
+            and self.cancelled_at is None
+        ):
+            self.cancelled_at = timezone.now()
+            update_fields = kwargs.get('update_fields')
+            if update_fields is not None:
+                kwargs['update_fields'] = tuple(dict.fromkeys((
+                    *update_fields,
+                    'cancelled_at',
+                )))
+        return super().save(*args, **kwargs)
 
     def __str__(self):
         return f'{self.truck} -> {self.dump_point} ({self.rock_type})'

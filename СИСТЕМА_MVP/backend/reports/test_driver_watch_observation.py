@@ -1,11 +1,15 @@
+import json
 from datetime import timedelta
+from decimal import Decimal
 
+from django.core.serializers.json import DjangoJSONEncoder
 from django.db import connection
 from django.test import Client, TestCase
 from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone
 
+from assignments.models import AssignmentStatus, HaulAssignment
 from core.production_time import production_day_bounds, production_work_date
 from downtimes.models import DowntimeEvent, DowntimeReason
 from references.models import (
@@ -96,6 +100,11 @@ class DriverWatchObservationTests(TestCase):
         )
 
         self.assertEqual(result['row_count'], 2)
+        self.assertEqual(result['summary']['usable_shift_count'], 0)
+        self.assertEqual(result['summary']['withheld_shift_count'], 2)
+        self.assertFalse(
+            result['summary']['data_ready_for_formula_review']
+        )
         self.assertEqual(
             {row['shift_type'] for row in result['rows']},
             {ShiftType.DAY, ShiftType.NIGHT},
@@ -141,7 +150,7 @@ class DriverWatchObservationTests(TestCase):
             result['summary']['data_ready_for_formula_review']
         )
 
-    def test_loads_any_number_of_shift_timelines_in_five_queries(self):
+    def test_loads_any_number_of_shift_passports_in_six_queries(self):
         first_shift = self.create_shift(ShiftType.DAY, self.day_truck)
         second_driver = Employee.objects.create(
             full_name='Второй водитель сводки',
@@ -187,7 +196,216 @@ class DriverWatchObservationTests(TestCase):
             )
 
         self.assertEqual(result['row_count'], 2)
-        self.assertEqual(len(queries), 5)
+        self.assertEqual(len(queries), 6)
+
+    def test_exposes_shift_and_employee_period_passports_without_scores(self):
+        shift = self.create_shift(ShiftType.DAY, self.day_truck)
+        excavator_type = EquipmentType.objects.create(
+            name='Экскаватор passport output',
+        )
+        excavator = Equipment.objects.create(
+            equipment_type=excavator_type,
+            garage_number='WR-PASS-EXC',
+        )
+        rock = RockType.objects.create(name='Порода passport output')
+        dump_point = DumpPoint.objects.create(
+            name='Разгрузка passport output',
+        )
+        trip = Trip.objects.create(
+            excavator=excavator,
+            truck=shift.equipment,
+            driver=shift.employee,
+            unloading_shift=shift,
+            rock_type=rock,
+            dump_point=dump_point,
+            volume_m3=Decimal('50.00'),
+            tonnage=Decimal('100.00'),
+            transport_distance_km=Decimal('2.00'),
+            status=TripStatus.COMPLETED,
+            completed_at=self.start + timedelta(hours=2),
+        )
+        Trip.objects.filter(pk=trip.pk).update(
+            created_at=self.start + timedelta(hours=1),
+        )
+
+        result = build_driver_watch_observation(
+            self.watch,
+            as_of=self.end,
+        )
+        row = result['rows'][0]
+
+        self.assertEqual(len(row['shift_passports']), 1)
+        self.assertEqual(
+            row['shift_passports'][0]['passport_schema_version'],
+            1,
+        )
+        self.assertEqual(row['passport']['passport_schema_version'], 1)
+        self.assertEqual(
+            row['passport']['production']['completed_trip_count'],
+            1,
+        )
+        self.assertEqual(
+            row['passport']['production']['m3_km']['value'],
+            Decimal('100.0000'),
+        )
+        self.assertFalse(
+            row['passport']['quality']['official_rating_eligible']
+        )
+        self.assertIsNone(
+            row['passport']['expected']['actual_to_expected_ratio']
+        )
+        serialized_keys = str(row['passport']).lower()
+        self.assertNotIn("'score'", serialized_keys)
+        self.assertNotIn("'place'", serialized_keys)
+        self.assertNotIn("'weight'", serialized_keys)
+        encoded = json.dumps(
+            result,
+            cls=DjangoJSONEncoder,
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        self.assertIn('"passport_schema_version": 1', encoded)
+
+    def test_period_passport_withholds_total_when_one_shift_is_incomplete(self):
+        current_shift = self.create_shift(ShiftType.DAY, self.day_truck)
+        previous_shift = EmployeeShift.objects.create(
+            employee=self.driver,
+            shift_type=ShiftType.DAY,
+            workplace_code='driver',
+            watch_period=self.watch,
+            equipment=self.night_truck,
+            opened_at=self.start - timedelta(hours=12),
+            closed_at=self.start,
+        )
+        excavator_type = EquipmentType.objects.create(
+            name='Экскаватор aggregate passport',
+        )
+        excavator = Equipment.objects.create(
+            equipment_type=excavator_type,
+            garage_number='WR-AGG-EXC',
+        )
+        rock = RockType.objects.create(name='Порода aggregate passport')
+        dump_point = DumpPoint.objects.create(
+            name='Разгрузка aggregate passport',
+        )
+        complete_trip = Trip.objects.create(
+            excavator=excavator,
+            truck=current_shift.equipment,
+            driver=self.driver,
+            unloading_shift=current_shift,
+            rock_type=rock,
+            dump_point=dump_point,
+            volume_m3=Decimal('50.00'),
+            tonnage=Decimal('100.00'),
+            transport_distance_km=Decimal('2.00'),
+            status=TripStatus.COMPLETED,
+            completed_at=self.start + timedelta(hours=2),
+        )
+        Trip.objects.filter(pk=complete_trip.pk).update(
+            created_at=self.start + timedelta(hours=1),
+        )
+        incomplete_trip = Trip.objects.create(
+            excavator=excavator,
+            truck=previous_shift.equipment,
+            driver=self.driver,
+            unloading_shift=previous_shift,
+            rock_type=rock,
+            dump_point=dump_point,
+            volume_m3=None,
+            tonnage=Decimal('90.00'),
+            transport_distance_km=Decimal('2.00'),
+            status=TripStatus.COMPLETED,
+            completed_at=previous_shift.opened_at + timedelta(hours=2),
+        )
+        Trip.objects.filter(pk=incomplete_trip.pk).update(
+            created_at=previous_shift.opened_at + timedelta(hours=1),
+        )
+
+        result = build_driver_watch_observation(
+            self.watch,
+            as_of=self.end,
+        )
+        passport = result['rows'][0]['passport']
+
+        self.assertEqual(passport['shift_count'], 2)
+        self.assertEqual(
+            passport['production']['completed_trip_count'],
+            2,
+        )
+        self.assertIsNone(passport['production']['volume_m3']['value'])
+        self.assertEqual(
+            passport['production']['volume_m3']['known_value'],
+            Decimal('50.00'),
+        )
+        self.assertEqual(
+            passport['production']['volume_m3']['missing_trip_count'],
+            1,
+        )
+        self.assertIsNone(
+            passport['rates_per_available_hour']['volume_m3']['value']
+        )
+
+    def test_period_passport_keeps_assignment_mismatch_seconds(self):
+        shift = self.create_shift(ShiftType.DAY, self.day_truck)
+        excavator_type = EquipmentType.objects.create(
+            name='Экскаватор mismatch aggregate',
+        )
+        assigned_excavator = Equipment.objects.create(
+            equipment_type=excavator_type,
+            garage_number='WR-MISMATCH-ASSIGNED',
+        )
+        actual_excavator = Equipment.objects.create(
+            equipment_type=excavator_type,
+            garage_number='WR-MISMATCH-ACTUAL',
+        )
+        HaulAssignment.objects.create(
+            excavator=assigned_excavator,
+            truck=shift.equipment,
+            status=AssignmentStatus.ACCEPTED,
+            accepted_at=self.start,
+            ended_at=self.end,
+        )
+        rock = RockType.objects.create(name='Порода mismatch aggregate')
+        dump_point = DumpPoint.objects.create(
+            name='Разгрузка mismatch aggregate',
+        )
+        trip = Trip.objects.create(
+            excavator=actual_excavator,
+            truck=shift.equipment,
+            driver=shift.employee,
+            unloading_shift=shift,
+            rock_type=rock,
+            dump_point=dump_point,
+            status=TripStatus.COMPLETED,
+            completed_at=self.start + timedelta(hours=2),
+        )
+        Trip.objects.filter(pk=trip.pk).update(
+            created_at=self.start + timedelta(hours=1),
+        )
+
+        result = build_driver_watch_observation(
+            self.watch,
+            as_of=self.end,
+        )
+
+        self.assertEqual(
+            result['rows'][0]['passport']['quality'][
+                'quality_metrics'
+            ]['trip_assignment_mismatch_seconds'],
+            3600,
+        )
+        self.assertEqual(
+            result['rows'][0]['quality_metrics'][
+                'trip_assignment_mismatch_seconds'
+            ],
+            3600,
+        )
+        self.assertEqual(
+            result['summary']['quality_metrics'][
+                'trip_assignment_mismatch_seconds'
+            ],
+            3600,
+        )
 
     def test_linkage_audit_finds_closed_shift_without_watch(self):
         linked = self.create_shift(ShiftType.DAY, self.day_truck)
@@ -213,8 +431,8 @@ class DriverWatchObservationTests(TestCase):
 
     def test_date_range_shadow_observes_unlinked_closed_shift_without_rating(self):
         shift = self.create_shift(ShiftType.DAY, self.day_truck)
-        shift.watch_period = None
-        shift.save(update_fields=['watch_period'])
+        EmployeeShift.objects.filter(pk=shift.pk).update(watch_period=None)
+        shift.refresh_from_db()
         work_date = production_work_date(shift.opened_at)
 
         result = build_driver_period_shadow_observation(

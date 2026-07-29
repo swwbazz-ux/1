@@ -140,6 +140,7 @@ def _employees_queryset(scope):
     queryset = Employee.objects.select_related(
         'personnel_department',
         'work_schedule',
+        'watch_composition',
         'personnel_position',
         'base_specialization',
     ).order_by('full_name')

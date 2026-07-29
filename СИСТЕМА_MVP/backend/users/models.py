@@ -45,6 +45,22 @@ class WorkSchedule(models.Model):
         return self.name
 
 
+class WatchComposition(models.Model):
+    """Approved personnel roster used as the structural watch identity."""
+
+    code = models.SlugField('Код состава вахты', max_length=64, unique=True)
+    name = models.CharField('Утверждённый состав вахты', max_length=160, unique=True)
+    is_active = models.BooleanField('Активен', default=True)
+
+    class Meta:
+        verbose_name = 'Утверждённый состав вахты'
+        verbose_name_plural = 'Утверждённые составы вахт'
+        ordering = ['name']
+
+    def __str__(self):
+        return self.name
+
+
 class Employee(models.Model):
     class BrigadeNumber(models.IntegerChoices):
         BRIGADE_1 = 1, 'Бригада №1'
@@ -117,6 +133,14 @@ class Employee(models.Model):
     brigade_number = models.PositiveSmallIntegerField(
         'Бригада',
         choices=BrigadeNumber.choices,
+        null=True,
+        blank=True,
+    )
+    watch_composition = models.ForeignKey(
+        WatchComposition,
+        verbose_name='Утверждённый состав вахты',
+        on_delete=models.PROTECT,
+        related_name='employees',
         null=True,
         blank=True,
     )

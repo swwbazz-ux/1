@@ -217,6 +217,14 @@
                             </div>
                             {{ form.brigade_number }}{{ form.brigade_number.errors }}
                         </div>
+                        <div class="employee-card-field span-2" data-card-field data-copy-label="Утверждённый состав вахты">
+                            <div class="employee-card-label-row">
+                                <label for="{{ form.watch_composition.id_for_label }}">{{ form.watch_composition.label }}</label>
+                                <button type="button" class="employee-copy-icon" data-copy-target="#{{ form.watch_composition.id_for_label }}" aria-label="Скопировать утверждённый состав вахты" title="Скопировать утверждённый состав вахты"></button>
+                            </div>
+                            {{ form.watch_composition }}{{ form.watch_composition.errors }}
+                            <small class="employee-card-field-help">ОУП выбирает только уже утверждённый состав. График и бригада не определяют эту связь автоматически.</small>
+                        </div>
                         <div class="employee-card-field span-2" data-card-field data-copy-label="Место проживания">
                             <div class="employee-card-label-row">
                                 <label for="{{ form.residence_text.id_for_label }}">{{ form.residence_text.label }}</label>

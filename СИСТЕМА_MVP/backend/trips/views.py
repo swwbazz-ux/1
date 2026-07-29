@@ -3314,7 +3314,8 @@ def excavator_truck_loaded_cancel_view(request):
             return JsonResponse({'ok': False, 'error': 'Точка разгрузки в действии не совпадает с рейсом.'}, status=409)
 
         trip.status = TripStatus.CANCELLED
-        trip.save(update_fields=['status'])
+        trip.cancelled_at = timezone.now()
+        trip.save(update_fields=['status', 'cancelled_at'])
         reconcile_excavator_waiting_for_trucks(current_excavator)
         TripClientAction.objects.create(
             action_type='truck_loaded_cancel',
@@ -4804,6 +4805,16 @@ def dispatcher_service_close_shift_view(request, shift_id):
                 truck=shift.equipment,
                 status__in=OPEN_TRIP_STATUSES,
             ).update(is_carryover=True)
+            from reports.driver_shift_passport_snapshots import (
+                enqueue_driver_shift_passport_capture,
+            )
+            from reports.models import DriverShiftPassportTrigger
+
+            enqueue_driver_shift_passport_capture(
+                shift=shift,
+                trigger=DriverShiftPassportTrigger.SERVICE_CLOSE,
+                captured_by=access.employee,
+            )
         else:
             Trip.objects.filter(
                 loading_shift=shift,
@@ -4911,7 +4922,8 @@ def dispatcher_cancel_trip_view(request, trip_id):
         return redirect(redirect_url)
 
     trip.status = TripStatus.CANCELLED
-    trip.save(update_fields=['status'])
+    trip.cancelled_at = timezone.now()
+    trip.save(update_fields=['status', 'cancelled_at'])
     reconcile_excavator_waiting_for_trucks(trip.excavator)
     log_dispatcher_action(
         actor=access.employee,

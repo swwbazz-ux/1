@@ -16,9 +16,14 @@ from .models import (
 
 @admin.register(WatchPeriod)
 class WatchPeriodAdmin(admin.ModelAdmin):
-    list_display = ('name', 'starts_on', 'ends_on', 'is_active')
-    search_fields = ('name',)
-    list_filter = ('is_active',)
+    list_display = ('name', 'watch_composition', 'starts_on', 'ends_on', 'is_active')
+    search_fields = ('name', 'watch_composition__name', 'watch_composition__code')
+    list_filter = ('watch_composition', 'is_active')
+
+    def get_readonly_fields(self, request, obj=None):
+        if obj is None:
+            return ()
+        return ('name', 'watch_composition', 'starts_on', 'ends_on')
 
 
 @admin.register(EmployeeShift)
@@ -26,6 +31,13 @@ class EmployeeShiftAdmin(admin.ModelAdmin):
     list_display = ('employee', 'shift_type', 'equipment', 'plan_group_name', 'plan_calculation_mode', 'plan_value', 'plan_status', 'opened_at', 'closed_at', 'is_service_closed')
     search_fields = ('employee__full_name',)
     list_filter = ('shift_type', 'watch_period', 'equipment', 'plan_status', 'plan_group', 'is_service_closed')
+    readonly_fields = ('closed_at', 'closed_by', 'is_service_closed')
+
+    def get_readonly_fields(self, request, obj=None):
+        fields = tuple(super().get_readonly_fields(request, obj))
+        if obj is None:
+            return fields
+        return (*fields, 'watch_period')
 
 
 @admin.register(ShiftClientAction)

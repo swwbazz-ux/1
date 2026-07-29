@@ -1,7 +1,12 @@
+import hashlib
+import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from decimal import Decimal
+from statistics import median
 
 from django.db.models import F, Q
+from django.core.serializers.json import DjangoJSONEncoder
 from django.utils import timezone
 
 from assignments.models import (
@@ -9,7 +14,7 @@ from assignments.models import (
     HaulAssignmentAction,
 )
 from downtimes.models import DowntimeEvent
-from shifts.models import EmployeeShift
+from shifts.models import EmployeeShift, ShiftReadingCorrection
 from trips.models import Trip, TripStatus
 
 
@@ -70,6 +75,7 @@ TRIP_SPAN_BLOCKING_FLAGS = {
     'trip_unloading_shift_equipment_mismatch',
     'trip_driver_unloading_shift_mismatch',
     'trip_unloading_shift_time_mismatch',
+    'invalid_trip_cancellation_window',
 }
 
 
@@ -112,10 +118,18 @@ class DriverShiftTimeline:
     source_counts: dict[str, int] = None
     source_ids: dict[str, tuple[int, ...]] = None
     quality_metrics: dict[str, int] = None
+    passport: dict = None
+    cycle_samples: dict[tuple, tuple[int, ...]] = None
 
     @property
     def usable_for_formula_review(self):
-        return not self.quality_flags
+        return bool(
+            self.passport
+            and self.passport.get(
+                'rates_per_available_hour',
+                {},
+            ).get('is_formula_ready')
+        )
 
     @property
     def productive_seconds(self):
@@ -276,9 +290,17 @@ def _trip_spans(trips, window_start, window_end):
     for trip in trips:
         if _trip_quality_flags(trip) & TRIP_SPAN_BLOCKING_FLAGS:
             continue
+        if trip.status == TripStatus.CANCELLED:
+            if trip.cancelled_at is None:
+                continue
+            if trip.cancelled_at <= window_end:
+                continue
+            trip_end = window_end
+        else:
+            trip_end = trip.completed_at or window_end
         clipped = _clip_span(
             trip.created_at,
-            trip.completed_at or window_end,
+            trip_end,
             window_start,
             window_end,
         )
@@ -343,18 +365,23 @@ def _assignment_spans(assignments, window_start, window_end):
 def _driver_trip_records_for_shift(trips, shift, window_start, window_end):
     records = []
     for trip in trips:
+        effective_end = (
+            (trip.cancelled_at or trip.created_at)
+            if trip.status == TripStatus.CANCELLED
+            else trip.completed_at
+        )
         loaded_during_shift = window_start <= trip.created_at < window_end
         unloaded_during_shift = trip.unloading_shift_id == shift.id
         completed_during_legacy_shift = bool(
             trip.unloading_shift_id is None
             and trip.completed_at is not None
-            and window_start <= trip.completed_at <= window_end
+            and window_start <= trip.completed_at < window_end
         )
         temporal_overlap = (
             trip.created_at < window_end
             and (
-                trip.completed_at is None
-                or trip.completed_at > window_start
+                effective_end is None
+                or effective_end > window_start
             )
         )
         reverse_interval_overlap = (
@@ -381,8 +408,675 @@ def _driver_trip_records_for_shift(trips, shift, window_start, window_end):
     return tuple(records)
 
 
+def _trip_output_credit_status(trip, shift, window_start, window_end):
+    if trip.status != TripStatus.COMPLETED:
+        return None
+    if trip.unloading_shift_id is not None:
+        if trip.unloading_shift_id != shift.id:
+            return None
+        if (
+            trip.completed_at is not None
+            and trip.completed_at > window_end
+        ):
+            return None
+        if (
+            trip.completed_at is None
+            or (
+                _trip_quality_flags(trip)
+                & TRIP_SPAN_BLOCKING_FLAGS
+            )
+        ):
+            return 'ambiguous'
+        return 'unloading_shift'
+    if trip.completed_at is None:
+        return None
+    if not (window_start <= trip.completed_at < window_end):
+        return None
+    if _trip_quality_flags(trip) & TRIP_SPAN_BLOCKING_FLAGS:
+        return 'ambiguous'
+    if trip.driver_id == shift.employee_id:
+        return 'legacy_driver'
+    return 'ambiguous'
+
+
+def _trip_is_open_at(trip, moment):
+    if trip.created_at >= moment:
+        return False
+    if trip.completed_at is not None and trip.completed_at <= moment:
+        return False
+    if trip.status == TripStatus.CANCELLED:
+        return (
+            trip.cancelled_at is not None
+            and trip.cancelled_at > moment
+        )
+    return True
+
+
+def _strict_decimal_metric(records, value_getter):
+    known_value = Decimal('0')
+    complete_trip_count = 0
+    missing_trip_count = 0
+    for record in records:
+        value = value_getter(record)
+        if value is None:
+            missing_trip_count += 1
+            continue
+        known_value += value
+        complete_trip_count += 1
+    return {
+        'value': known_value if not missing_trip_count else None,
+        'known_value': known_value,
+        'complete_trip_count': complete_trip_count,
+        'missing_trip_count': missing_trip_count,
+        'is_complete': missing_trip_count == 0,
+    }
+
+
+def _non_negative(value):
+    if value is None or value < 0:
+        return None
+    return value
+
+
+def _per_available_hour(value, available_seconds):
+    if value is None or available_seconds <= 0:
+        return None
+    return (
+        Decimal(value) * Decimal('3600') / Decimal(available_seconds)
+    ).quantize(Decimal('0.0001'))
+
+
+def _rate_metric(metric, available_seconds, *, formula_ready):
+    known_value = _per_available_hour(
+        metric['known_value'],
+        available_seconds,
+    )
+    strict_value = _per_available_hour(
+        metric['value'],
+        available_seconds,
+    )
+    return {
+        'value': strict_value if formula_ready else None,
+        'known_value': known_value,
+        'is_complete': bool(
+            formula_ready
+            and metric['is_complete']
+            and strict_value is not None
+        ),
+    }
+
+
+def _count_metric(value):
+    return {
+        'value': Decimal(value),
+        'known_value': Decimal(value),
+        'complete_trip_count': value,
+        'missing_trip_count': 0,
+        'is_complete': True,
+    }
+
+
+def _decimal_delta(start, end):
+    if start is None or end is None:
+        return None
+    return end - start
+
+
+def _union_seconds(spans):
+    ordered = sorted(
+        (
+            (span.start, span.end)
+            for span in spans
+            if span.start < span.end
+        ),
+        key=lambda item: (item[0], item[1]),
+    )
+    if not ordered:
+        return 0
+    total = 0
+    current_start, current_end = ordered[0]
+    for start, end in ordered[1:]:
+        if start <= current_end:
+            current_end = max(current_end, end)
+            continue
+        total += int((current_end - current_start).total_seconds())
+        current_start, current_end = start, end
+    total += int((current_end - current_start).total_seconds())
+    return max(0, total)
+
+
+def _cycle_context(trip, shift):
+    if (
+        trip.truck.model_id is None
+        or trip.excavator_id is None
+        or trip.rock_type_id is None
+        or trip.transport_distance_km is None
+        or trip.transport_distance_km < 0
+        or trip.actual_dump_point_id is None
+    ):
+        return None
+    return (
+        trip.truck.model_id,
+        trip.excavator_id,
+        trip.rock_type_id,
+        trip.actual_dump_point_id,
+        str(trip.transport_distance_km),
+        trip.loading_horizon or '',
+        trip.loading_block or '',
+    )
+
+
+def _cycle_samples_for_trips(trips, shift):
+    samples = {}
+    for trip in trips:
+        if (
+            trip.is_carryover
+            or trip.created_at < shift.opened_at
+            or trip.completed_at is None
+            or trip.completed_at <= trip.created_at
+            or _trip_quality_flags(trip)
+        ):
+            continue
+        context = _cycle_context(trip, shift)
+        if context is None:
+            continue
+        samples.setdefault(context, []).append(
+            int((trip.completed_at - trip.created_at).total_seconds())
+        )
+    return {
+        context: tuple(values)
+        for context, values in samples.items()
+    }
+
+
+def cycle_statistics_from_samples(samples):
+    segments = []
+    for context, values in sorted(
+        samples.items(),
+        key=lambda item: tuple(str(value) for value in item[0]),
+    ):
+        ordered = sorted(values)
+        sample_median = median(ordered)
+        absolute_deviations = [
+            abs(value - sample_median)
+            for value in ordered
+        ]
+        segments.append({
+            'context': {
+                'truck_model_id': context[0],
+                'excavator_id': context[1],
+                'rock_type_id': context[2],
+                'actual_dump_point_id': context[3],
+                'transport_distance_km': context[4],
+                'loading_horizon': context[5],
+                'loading_block': context[6],
+            },
+            'sample_count': len(ordered),
+            'average_seconds': round(sum(ordered) / len(ordered), 2),
+            'median_seconds': round(float(sample_median), 2),
+            'spread_seconds': max(ordered) - min(ordered),
+            'median_absolute_deviation_seconds': round(
+                float(median(absolute_deviations)),
+                2,
+            ),
+        })
+    return {
+        'measurement': 'loaded_to_unloaded',
+        'segment_count': len(segments),
+        'sample_count': sum(
+            segment['sample_count']
+            for segment in segments
+        ),
+        'segments': segments,
+        'status': (
+            'observed'
+            if segments
+            else 'comparable_samples_unavailable'
+        ),
+    }
+
+
+def cycle_aggregation_inputs_from_samples(samples):
+    return [
+        {
+            'context': {
+                'truck_model_id': context[0],
+                'excavator_id': context[1],
+                'rock_type_id': context[2],
+                'actual_dump_point_id': context[3],
+                'transport_distance_km': context[4],
+                'loading_horizon': context[5],
+                'loading_block': context[6],
+            },
+            'durations_seconds': list(sorted(values)),
+        }
+        for context, values in sorted(
+            samples.items(),
+            key=lambda item: tuple(str(value) for value in item[0]),
+        )
+    ]
+
+
+def _passport_source_fingerprint(passport, intervals, source_ids):
+    canonical = {
+        'passport': passport,
+        'intervals': [
+            {
+                'start': interval.start,
+                'end': interval.end,
+                'category': interval.category,
+                'source_ids': interval.source_ids,
+            }
+            for interval in intervals
+        ],
+        'source_ids': source_ids,
+    }
+    encoded = json.dumps(
+        canonical,
+        cls=DjangoJSONEncoder,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(',', ':'),
+    ).encode('utf-8')
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _build_shift_passport(
+    shift,
+    *,
+    window_start,
+    window_end,
+    trip_records,
+    assignment_spans,
+    corrections,
+    seconds_by_category,
+    total_seconds,
+    explained_seconds,
+    coverage_percent,
+    quality_flags,
+    source_counts,
+    quality_metrics,
+):
+    credit_statuses = {
+        trip.id: _trip_output_credit_status(
+            trip,
+            shift,
+            window_start,
+            window_end,
+        )
+        for trip in trip_records
+    }
+    if {
+        'equipment_shift_overlap',
+        'employee_shift_overlap',
+    } & set(quality_flags):
+        credit_statuses = {
+            trip_id: (
+                'ambiguous'
+                if status == 'legacy_driver'
+                else status
+            )
+            for trip_id, status in credit_statuses.items()
+        }
+    credited_trips = tuple(
+        trip
+        for trip in trip_records
+        if credit_statuses[trip.id] in {
+            'unloading_shift',
+            'legacy_driver',
+        }
+    )
+    ambiguous_output_trip_count = sum(
+        status == 'ambiguous'
+        for status in credit_statuses.values()
+    )
+    volume_metric = _strict_decimal_metric(
+        credited_trips,
+        lambda trip: _non_negative(trip.volume_m3),
+    )
+    tonnage_metric = _strict_decimal_metric(
+        credited_trips,
+        lambda trip: _non_negative(trip.tonnage),
+    )
+    m3_km_metric = _strict_decimal_metric(
+        credited_trips,
+        lambda trip: (
+            trip.volume_m3 * trip.transport_distance_km
+            if (
+                trip.volume_m3 is not None
+                and trip.volume_m3 >= 0
+                and trip.transport_distance_km is not None
+                and trip.transport_distance_km >= 0
+            )
+            else None
+        ),
+    )
+    t_km_metric = _strict_decimal_metric(
+        credited_trips,
+        lambda trip: (
+            trip.tonnage * trip.transport_distance_km
+            if (
+                trip.tonnage is not None
+                and trip.tonnage >= 0
+                and trip.transport_distance_km is not None
+                and trip.transport_distance_km >= 0
+            )
+            else None
+        ),
+    )
+    completed_trip_metric = _count_metric(len(credited_trips))
+
+    downtime_seconds = sum(
+        seconds_by_category.get(category, 0)
+        for category in DOWNTIME_CATEGORIES
+    )
+    no_assignment_seconds = seconds_by_category.get(
+        TimelineCategory.NO_ASSIGNMENT,
+        0,
+    )
+    available_seconds = max(
+        0,
+        total_seconds - downtime_seconds - no_assignment_seconds,
+    )
+    production_metrics_complete = all(
+        metric['is_complete']
+        for metric in (
+            volume_metric,
+            tonnage_metric,
+            m3_km_metric,
+            t_km_metric,
+        )
+    )
+    formula_ready = bool(
+        not quality_flags
+        and available_seconds > 0
+        and production_metrics_complete
+    )
+
+    loaded_trip_count = sum(
+        window_start <= trip.created_at < window_end
+        for trip in trip_records
+    )
+    cancelled_trip_count = sum(
+        trip.status == TripStatus.CANCELLED
+        and trip.cancelled_at is not None
+        and window_start < trip.cancelled_at <= window_end
+        for trip in trip_records
+    )
+    open_trip_count_at_close = sum(
+        _trip_is_open_at(trip, window_end)
+        for trip in trip_records
+    )
+    carryover_in_trip_count = sum(
+        trip.is_carryover
+        and _trip_is_open_at(trip, window_start)
+        for trip in trip_records
+    )
+    carryover_out_trip_count = sum(
+        trip.is_carryover
+        and _trip_is_open_at(trip, window_end)
+        for trip in trip_records
+    )
+
+    explicit_route_trips = tuple(
+        trip
+        for trip in credited_trips
+        if (
+            trip.assigned_dump_point_id is not None
+            and trip.actual_dump_point_id is not None
+        )
+    )
+    route_match_count = sum(
+        trip.assigned_dump_point_id == trip.actual_dump_point_id
+        for trip in explicit_route_trips
+    )
+    route_mismatch_count = len(explicit_route_trips) - route_match_count
+
+    corrections_by_metric = {}
+    for correction in corrections:
+        item = corrections_by_metric.setdefault(
+            correction.metric,
+            {
+                'count': 0,
+                'total_absolute_difference': Decimal('0'),
+            },
+        )
+        item['count'] += 1
+        item['total_absolute_difference'] += abs(
+            correction.actual_value - correction.transferred_value
+        )
+
+    cycle_samples = _cycle_samples_for_trips(credited_trips, shift)
+    return {
+        'passport_schema_version': 1,
+        'scope': 'employee_shift',
+        'shift': {
+            'id': shift.id,
+            'employee_id': shift.employee_id,
+            'equipment_id': shift.equipment_id,
+            'watch_period_id': shift.watch_period_id,
+            'shift_type': shift.shift_type,
+        },
+        'production': {
+            'completed_trip_count': len(credited_trips),
+            'output_attribution': {
+                'unloading_shift_trip_count': sum(
+                    status == 'unloading_shift'
+                    for status in credit_statuses.values()
+                ),
+                'legacy_driver_trip_count': sum(
+                    status == 'legacy_driver'
+                    for status in credit_statuses.values()
+                ),
+                'ambiguous_trip_count': ambiguous_output_trip_count,
+            },
+            'volume_m3': volume_metric,
+            'tonnage_t': tonnage_metric,
+            'm3_km': m3_km_metric,
+            't_km': t_km_metric,
+            'completeness': {
+                'credited_trip_count': len(credited_trips),
+                'volume_missing_trip_count': (
+                    volume_metric['missing_trip_count']
+                ),
+                'tonnage_missing_trip_count': (
+                    tonnage_metric['missing_trip_count']
+                ),
+                'distance_missing_trip_count': sum(
+                    trip.transport_distance_km is None
+                    for trip in credited_trips
+                ),
+                'cycle_calibration_excluded_carryover_trip_count': sum(
+                    trip.is_carryover
+                    or trip.created_at < shift.opened_at
+                    for trip in credited_trips
+                ),
+                'comparison_context_missing_trip_count': (
+                    len(credited_trips)
+                    - sum(len(values) for values in cycle_samples.values())
+                ),
+            },
+        },
+        'rates_per_available_hour': {
+            'trip_count': _rate_metric(
+                completed_trip_metric,
+                available_seconds,
+                formula_ready=formula_ready,
+            ),
+            'volume_m3': _rate_metric(
+                volume_metric,
+                available_seconds,
+                formula_ready=formula_ready,
+            ),
+            'tonnage_t': _rate_metric(
+                tonnage_metric,
+                available_seconds,
+                formula_ready=formula_ready,
+            ),
+            'm3_km': _rate_metric(
+                m3_km_metric,
+                available_seconds,
+                formula_ready=formula_ready,
+            ),
+            't_km': _rate_metric(
+                t_km_metric,
+                available_seconds,
+                formula_ready=formula_ready,
+            ),
+            'is_formula_ready': formula_ready,
+        },
+        'expected': {
+            'actual_to_expected_ratio': None,
+            'status': 'expected_model_unavailable',
+        },
+        'time': {
+            'actual_start_at': window_start.isoformat(),
+            'actual_end_at': window_end.isoformat(),
+            'actual_duration_seconds': total_seconds,
+            'scheduled_start_at': None,
+            'scheduled_end_at': None,
+            'scheduled_window_status': 'schedule_snapshot_unavailable',
+            'start_deviation_seconds': None,
+            'end_deviation_seconds': None,
+            'confirmed_extra_productive_seconds': None,
+            'unjustified_short_shift_seconds': None,
+            'short_shift_status': 'policy_unavailable',
+            'available_seconds': available_seconds,
+            'loaded_to_unloaded_seconds': seconds_by_category.get(
+                TimelineCategory.TRIP,
+                0,
+            ),
+            'assignment_covered_seconds': _union_seconds(assignment_spans),
+            'downtime_external_seconds': seconds_by_category.get(
+                TimelineCategory.DOWNTIME_EXTERNAL,
+                0,
+            ),
+            'downtime_technical_seconds': seconds_by_category.get(
+                TimelineCategory.DOWNTIME_TECHNICAL,
+                0,
+            ),
+            'downtime_regulated_seconds': seconds_by_category.get(
+                TimelineCategory.DOWNTIME_REGULATED,
+                0,
+            ),
+            'downtime_review_seconds': seconds_by_category.get(
+                TimelineCategory.DOWNTIME_REVIEW,
+                0,
+            ),
+            'no_assignment_seconds': no_assignment_seconds,
+            'unexplained_seconds': seconds_by_category.get(
+                TimelineCategory.UNEXPLAINED,
+                0,
+            ),
+            'conflict_seconds': seconds_by_category.get(
+                TimelineCategory.DATA_CONFLICT,
+                0,
+            ),
+        },
+        'cycles': cycle_statistics_from_samples(cycle_samples),
+        'aggregation_inputs': {
+            'cycle_samples': cycle_aggregation_inputs_from_samples(
+                cycle_samples
+            ),
+        },
+        'routing': {
+            'credited_trip_count': len(credited_trips),
+            'explicit_assigned_and_actual_count': len(explicit_route_trips),
+            'match_count': route_match_count,
+            'mismatch_count': route_mismatch_count,
+            'missing_assigned_count': sum(
+                trip.assigned_dump_point_id is None
+                for trip in credited_trips
+            ),
+            'missing_actual_count': sum(
+                trip.actual_dump_point_id is None
+                for trip in credited_trips
+            ),
+        },
+        'trip_states': {
+            'loaded_during_shift_count': loaded_trip_count,
+            'open_at_close_count': open_trip_count_at_close,
+            'cancelled_count': cancelled_trip_count,
+            'carryover_in_count': carryover_in_trip_count,
+            'carryover_out_count': carryover_out_trip_count,
+        },
+        'open_close': {
+            'opened_by_employee': shift.opened_by_id == shift.employee_id,
+            'closed_by_employee': shift.closed_by_id == shift.employee_id,
+            'service_closed': shift.is_service_closed,
+            'window_valid': window_end > window_start,
+            'start_readings_complete': all(
+                value is not None
+                for value in (
+                    shift.start_fuel,
+                    shift.start_mileage,
+                    shift.start_engine_hours,
+                )
+            ),
+            'end_readings_complete': all(
+                value is not None
+                for value in (
+                    shift.end_fuel,
+                    shift.end_mileage,
+                    shift.end_engine_hours,
+                )
+            ),
+        },
+        'handover': {
+            'start_fuel_l': shift.start_fuel,
+            'end_fuel_l': shift.end_fuel,
+            'net_fuel_change_l': _decimal_delta(
+                shift.start_fuel,
+                shift.end_fuel,
+            ),
+            'start_mileage_km': shift.start_mileage,
+            'end_mileage_km': shift.end_mileage,
+            'mileage_delta_km': _decimal_delta(
+                shift.start_mileage,
+                shift.end_mileage,
+            ),
+            'start_engine_hours': shift.start_engine_hours,
+            'end_engine_hours': shift.end_engine_hours,
+            'engine_hours_delta': _decimal_delta(
+                shift.start_engine_hours,
+                shift.end_engine_hours,
+            ),
+            'reading_correction_count': len(corrections),
+            'corrections_by_metric': corrections_by_metric,
+            'fuel_metric_status': 'net_change_not_consumption',
+        },
+        'quality': {
+            'coverage_percent': coverage_percent,
+            'explained_seconds': explained_seconds,
+            'flags': list(quality_flags),
+            'source_counts': source_counts,
+            'quality_metrics': quality_metrics,
+            'production_metrics_complete': (
+                production_metrics_complete
+            ),
+            'data_usable_for_formula_review': formula_ready,
+            'official_rating_eligible': False,
+        },
+        '_cycle_samples': cycle_samples,
+    }
+
+
 def _trip_quality_flags(trip):
     flags = set()
+    if trip.volume_m3 is not None and trip.volume_m3 < 0:
+        flags.add('negative_trip_volume_m3')
+    if trip.tonnage is not None and trip.tonnage < 0:
+        flags.add('negative_trip_tonnage')
+    if (
+        trip.planned_volume_m3 is not None
+        and trip.planned_volume_m3 < 0
+    ):
+        flags.add('negative_trip_planned_volume_m3')
+    if (
+        trip.transport_distance_km is not None
+        and trip.transport_distance_km < 0
+    ):
+        flags.add('negative_trip_transport_distance_km')
     if (
         trip.status == TripStatus.COMPLETED
         and trip.completed_at is None
@@ -401,6 +1095,38 @@ def _trip_quality_flags(trip):
         and trip.completed_at <= trip.created_at
     ):
         flags.add('invalid_trip_window')
+    if (
+        trip.status == TripStatus.CANCELLED
+        and trip.cancelled_at is None
+    ):
+        flags.add('cancelled_trip_without_cancelled_at')
+    if (
+        trip.cancelled_at is not None
+        and trip.cancelled_at < trip.created_at
+    ):
+        flags.add('invalid_trip_cancellation_window')
+    if (
+        trip.status != TripStatus.CANCELLED
+        and trip.cancelled_at is not None
+    ):
+        flags.add('non_cancelled_trip_with_cancelled_at')
+
+    loading_shift = trip.loading_shift
+    if loading_shift is not None:
+        if loading_shift.equipment_id != trip.excavator_id:
+            flags.add('trip_loading_shift_equipment_mismatch')
+        if trip.excavator_operator_id is None:
+            flags.add('trip_operator_missing_for_loading_shift')
+        elif trip.excavator_operator_id != loading_shift.employee_id:
+            flags.add('trip_operator_loading_shift_mismatch')
+        if (
+            trip.created_at < loading_shift.opened_at
+            or (
+                loading_shift.closed_at is not None
+                and trip.created_at > loading_shift.closed_at
+            )
+        ):
+            flags.add('trip_loading_shift_time_mismatch')
 
     unloading_shift = trip.unloading_shift
     if unloading_shift is None:
@@ -482,6 +1208,7 @@ def _build_timeline(
     trips,
     downtimes,
     assignments,
+    corrections,
     extra_quality_flags=(),
 ):
     window_start = shift.opened_at
@@ -538,6 +1265,11 @@ def _build_timeline(
     mismatched_trip_ids = set()
     trip_loading_assignment_records = {}
     for trip in trip_records:
+        if (
+            trip.status == TripStatus.CANCELLED
+            and trip.cancelled_at is None
+        ):
+            continue
         if _trip_quality_flags(trip) & TRIP_SPAN_BLOCKING_FLAGS:
             continue
         loading_assignments = _assignments_at_trip_loading(
@@ -632,7 +1364,7 @@ def _build_timeline(
     if trip_assignment_mismatch_seconds:
         quality_flags.append('trip_assignment_mismatch')
     if shift.closed_at and any(
-        trip.completed_at is None
+        _trip_is_open_at(trip, window_end)
         for trip in trip_records
     ):
         quality_flags.append('open_trip_on_closed_shift')
@@ -640,18 +1372,45 @@ def _build_timeline(
         trip.completed_at
         and trip.completed_at - trip.created_at > MAX_PLAUSIBLE_SHIFT_DURATION
         for trip in trip_records
+        if trip.status != TripStatus.CANCELLED
     ):
         quality_flags.append('trip_duration_over_16h')
+    if any(
+        _trip_output_credit_status(
+            trip,
+            shift,
+            window_start,
+            window_end,
+        ) == 'ambiguous'
+        for trip in trip_records
+    ):
+        quality_flags.append('ambiguous_trip_output_attribution')
 
     source_ids = {
         'trip_count': tuple(sorted({
             trip.id
             for trip in trip_records
+            if (
+                trip.status != TripStatus.CANCELLED
+                or (
+                    trip.cancelled_at is not None
+                    and trip.cancelled_at > window_end
+                )
+            )
         })),
         'carryover_trip_count': tuple(sorted({
             trip.id
             for trip in trip_records
-            if trip.is_carryover
+            if (
+                trip.is_carryover
+                and (
+                    trip.status != TripStatus.CANCELLED
+                    or (
+                        trip.cancelled_at is not None
+                        and trip.cancelled_at > window_end
+                    )
+                )
+            )
         })),
         'downtime_event_count': tuple(sorted({
             event.id
@@ -683,6 +1442,40 @@ def _build_timeline(
             )
         })),
     }
+    quality_flags = tuple(sorted(set(quality_flags)))
+    source_counts = {
+        key: len(ids)
+        for key, ids in source_ids.items()
+    }
+    quality_metrics = {
+        'trip_without_assignment_seconds': (
+            trip_without_assignment_seconds
+        ),
+        'trip_assignment_mismatch_seconds': (
+            trip_assignment_mismatch_seconds
+        ),
+    }
+    passport = _build_shift_passport(
+        shift,
+        window_start=window_start,
+        window_end=window_end,
+        trip_records=trip_records,
+        assignment_spans=assignments,
+        corrections=corrections,
+        seconds_by_category=seconds_by_category,
+        total_seconds=total_seconds,
+        explained_seconds=explained_seconds,
+        coverage_percent=coverage_percent,
+        quality_flags=quality_flags,
+        source_counts=source_counts,
+        quality_metrics=quality_metrics,
+    )
+    cycle_samples = passport.pop('_cycle_samples')
+    passport['source_fingerprint'] = _passport_source_fingerprint(
+        passport,
+        intervals,
+        source_ids,
+    )
     return DriverShiftTimeline(
         shift_id=shift.id,
         employee_id=shift.employee_id,
@@ -694,17 +1487,12 @@ def _build_timeline(
         total_seconds=total_seconds,
         explained_seconds=explained_seconds,
         coverage_percent=coverage_percent,
-        quality_flags=tuple(sorted(set(quality_flags))),
-        source_counts={
-            key: len(ids)
-            for key, ids in source_ids.items()
-        },
+        quality_flags=quality_flags,
+        source_counts=source_counts,
         source_ids=source_ids,
-        quality_metrics={
-            'trip_without_assignment_seconds': (
-                trip_without_assignment_seconds
-            ),
-        },
+        quality_metrics=quality_metrics,
+        passport=passport,
+        cycle_samples=cycle_samples,
     )
 
 
@@ -722,6 +1510,39 @@ def _empty_source_ids():
 
 def _invalid_shift_timeline(shift, *, extra_quality_flags=()):
     source_ids = _empty_source_ids()
+    quality_flags = tuple(sorted({
+        'invalid_shift_window',
+        *extra_quality_flags,
+    }))
+    source_counts = {
+        key: 0
+        for key in source_ids
+    }
+    quality_metrics = {
+        'trip_without_assignment_seconds': 0,
+        'trip_assignment_mismatch_seconds': 0,
+    }
+    passport = _build_shift_passport(
+        shift,
+        window_start=shift.opened_at,
+        window_end=shift.opened_at,
+        trip_records=(),
+        assignment_spans=(),
+        corrections=(),
+        seconds_by_category={},
+        total_seconds=0,
+        explained_seconds=0,
+        coverage_percent=0.0,
+        quality_flags=quality_flags,
+        source_counts=source_counts,
+        quality_metrics=quality_metrics,
+    )
+    cycle_samples = passport.pop('_cycle_samples')
+    passport['source_fingerprint'] = _passport_source_fingerprint(
+        passport,
+        (),
+        source_ids,
+    )
     return DriverShiftTimeline(
         shift_id=shift.id,
         employee_id=shift.employee_id,
@@ -733,18 +1554,12 @@ def _invalid_shift_timeline(shift, *, extra_quality_flags=()):
         total_seconds=0,
         explained_seconds=0,
         coverage_percent=0.0,
-        quality_flags=tuple(sorted({
-            'invalid_shift_window',
-            *extra_quality_flags,
-        })),
-        source_counts={
-            key: 0
-            for key in source_ids
-        },
+        quality_flags=quality_flags,
+        source_counts=source_counts,
         source_ids=source_ids,
-        quality_metrics={
-            'trip_without_assignment_seconds': 0,
-        },
+        quality_metrics=quality_metrics,
+        passport=passport,
+        cycle_samples=cycle_samples,
     )
 
 
@@ -894,29 +1709,47 @@ def build_driver_shift_timelines(
     )
     equipment_ids = {shift.equipment_id for shift in valid_shifts}
     valid_shift_ids = {shift.id for shift in valid_shifts}
+    valid_shift_equipment_by_id = {
+        shift.id: shift.equipment_id
+        for shift in valid_shifts
+    }
 
     trips_by_equipment = {equipment_id: [] for equipment_id in equipment_ids}
     trips = (
         Trip.objects
-        .filter(truck_id__in=equipment_ids)
-        .exclude(status=TripStatus.CANCELLED)
+        .filter(
+            Q(truck_id__in=equipment_ids)
+            | Q(unloading_shift_id__in=valid_shift_ids)
+        )
         .filter(
             Q(
                 created_at__gte=window_start,
                 created_at__lt=window_end,
             )
             | Q(
-                completed_at__gt=window_start,
+                completed_at__gte=window_start,
                 completed_at__lte=window_end,
+            )
+            | Q(
+                cancelled_at__gte=window_start,
+                cancelled_at__lte=window_end,
             )
             | Q(unloading_shift_id__in=valid_shift_ids)
             | Q(
                 created_at__lt=window_end,
                 completed_at__isnull=True,
+                status__in={
+                    TripStatus.ACTIVE,
+                    TripStatus.LOADED_WAITING_UNLOAD,
+                },
             )
             | Q(
                 created_at__lt=window_end,
                 completed_at__gt=window_start,
+            )
+            | Q(
+                created_at__lt=window_end,
+                cancelled_at__gt=window_start,
             )
             | (
                 Q(completed_at__isnull=False)
@@ -928,18 +1761,41 @@ def build_driver_shift_timelines(
         .select_related(
             'excavator',
             'excavator__equipment_type',
+            'truck',
+            'truck__model',
             'dump_point',
+            'assigned_dump_point',
+            'actual_dump_point',
             'rock_type',
+            'loading_shift',
             'unloading_shift',
         )
         .order_by('created_at', 'id')
     )
     for trip in trips:
-        trips_by_equipment[trip.truck_id].append(trip)
+        related_equipment_ids = set()
+        if trip.truck_id in trips_by_equipment:
+            related_equipment_ids.add(trip.truck_id)
+        unloading_equipment_id = valid_shift_equipment_by_id.get(
+            trip.unloading_shift_id,
+        )
+        if unloading_equipment_id is not None:
+            related_equipment_ids.add(unloading_equipment_id)
+        for equipment_id in related_equipment_ids:
+            trips_by_equipment[equipment_id].append(trip)
     assignment_trip_load_times = [
         trip.created_at
         for trip in trips
-        if not (_trip_quality_flags(trip) & TRIP_SPAN_BLOCKING_FLAGS)
+        if (
+            (
+                trip.status != TripStatus.CANCELLED
+                or trip.cancelled_at is not None
+            )
+            and not (
+                _trip_quality_flags(trip)
+                & TRIP_SPAN_BLOCKING_FLAGS
+            )
+        )
     ]
 
     downtimes_by_equipment = {equipment_id: [] for equipment_id in equipment_ids}
@@ -1026,6 +1882,25 @@ def build_driver_shift_timelines(
     for assignment in assignments:
         assignments_by_equipment[assignment.truck_id].append(assignment)
 
+    corrections_by_shift = {
+        shift_id: []
+        for shift_id in valid_shift_ids
+    }
+    corrections = (
+        ShiftReadingCorrection.objects
+        .filter(new_shift_id__in=valid_shift_ids)
+        .only(
+            'id',
+            'new_shift_id',
+            'metric',
+            'transferred_value',
+            'actual_value',
+        )
+        .order_by('new_shift_id', 'metric', 'id')
+    )
+    for correction in corrections:
+        corrections_by_shift[correction.new_shift_id].append(correction)
+
     timelines_by_shift_id = {
         shift.id: _build_timeline(
             shift,
@@ -1033,6 +1908,7 @@ def build_driver_shift_timelines(
             trips=trips_by_equipment[shift.equipment_id],
             downtimes=downtimes_by_equipment[shift.equipment_id],
             assignments=assignments_by_equipment[shift.equipment_id],
+            corrections=corrections_by_shift[shift.id],
             extra_quality_flags=(
                 set(overlap_flags.get(shift.id, ()))
                 | set(extra_quality_flags_by_shift.get(shift.id, ()))

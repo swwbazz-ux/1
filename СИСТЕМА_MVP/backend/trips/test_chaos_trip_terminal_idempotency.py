@@ -339,6 +339,7 @@ class TripTerminalSequentialRegressionTests(TripTerminalFixtureMixin, TestCase):
                     self.assertIsNone(trip.completed_at)
                     self.assertIsNone(trip.driver_id)
                     self.assertIsNone(trip.unloading_shift_id)
+                    self.assertIsNotNone(trip.cancelled_at)
 
     def test_repeated_dispatcher_terminal_actions_keep_first_result_and_single_audit(self):
         dispatcher_client = self.client_for_access(self.dispatcher_access)

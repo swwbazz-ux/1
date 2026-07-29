@@ -5,7 +5,13 @@ from django.utils import timezone
 from assignments.models import AssignmentStatus, EquipmentAssignment, WorkShiftType
 from references.models import Equipment, EquipmentModel, EquipmentType
 
-from .models import AdminActionLog, Employee, EmployeeAccess, Role
+from .models import (
+    AdminActionLog,
+    Employee,
+    EmployeeAccess,
+    Role,
+    WatchComposition,
+)
 from .oup_services import (
     deactivate_employee_access,
     dismiss_employee,
@@ -234,9 +240,24 @@ class OupActionUndoTests(TestCase):
 
     def test_admin_can_undo_latest_employee_card_edit(self):
         actor = self.create_oup_actor()
+        previous_composition = WatchComposition.objects.create(
+            code='test-undo-watch-composition-previous',
+            name='ТЕСТ_ОТМЕНА_Предыдущий состав',
+        )
+        next_composition = WatchComposition.objects.create(
+            code='test-undo-watch-composition-next',
+            name='ТЕСТ_ОТМЕНА_Новый состав',
+        )
+        self.employee.watch_composition = previous_composition
+        self.employee.save(update_fields=['watch_composition', 'updated_at'])
         before = employee_card_undo_state(self.employee)
         self.employee.full_name = 'Измененное Имя ОУП'
-        self.employee.save(update_fields=['full_name', 'updated_at'])
+        self.employee.watch_composition = next_composition
+        self.employee.save(update_fields=[
+            'full_name',
+            'watch_composition',
+            'updated_at',
+        ])
         after = employee_card_undo_state(self.employee)
         log = log_oup_action(
             actor,
@@ -253,6 +274,10 @@ class OupActionUndoTests(TestCase):
 
         self.employee.refresh_from_db()
         self.assertEqual(self.employee.full_name, 'Новый Водитель')
+        self.assertEqual(
+            self.employee.watch_composition,
+            previous_composition,
+        )
 
     def test_older_employee_edit_waits_for_later_action(self):
         actor = self.create_oup_actor()

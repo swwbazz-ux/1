@@ -19,9 +19,11 @@ class TripAdmin(admin.ModelAdmin):
         'is_carryover',
         'created_at',
         'completed_at',
+        'cancelled_at',
     )
     search_fields = ('truck__garage_number', 'excavator__garage_number', 'driver__full_name', 'excavator_operator__full_name')
     list_filter = ('status', 'rock_type', 'dump_point', 'is_carryover')
+    readonly_fields = ('cancelled_at',)
 
 
 @admin.register(DispatcherActionLog)

@@ -58,6 +58,7 @@ EMPLOYEE_CARD_UNDO_FIELDS = (
     'rotation',
     'work_schedule_id',
     'brigade_number',
+    'watch_composition_id',
     'comment',
     'photo',
 )
