@@ -18,12 +18,28 @@ class RatingPeriodAdmin(admin.ModelAdmin):
         'name',
         'starts_on',
         'ends_before',
+        'generation_source_label',
+        'manual_override_label',
         'is_active',
         'updated_at',
     )
     search_fields = ('name', 'comment')
-    list_filter = ('is_active', 'starts_on', 'ends_before')
-    readonly_fields = ('created_at', 'updated_at')
+    list_filter = (
+        'is_active',
+        'starts_on',
+        'ends_before',
+        'nominal_starts_on',
+    )
+    readonly_fields = (
+        'nominal_starts_on',
+        'generation_source_label',
+        'manual_override_label',
+        'created_at',
+        'updated_at',
+    )
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(PilotFeedback)

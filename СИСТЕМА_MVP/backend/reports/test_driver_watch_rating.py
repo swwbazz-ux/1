@@ -1100,6 +1100,7 @@ class DriverWatchRatingApiTests(TestCase):
             name='Период API рейтинга',
             starts_on=production_work_date(),
             ends_before=production_work_date() + timedelta(days=30),
+            comment='Технический период проверки API рейтинга.',
         )
         self.scope_driver = Employee.objects.create(
             full_name='Водитель области API рейтинга',
@@ -1290,8 +1291,9 @@ class DriverWatchRatingApiTests(TestCase):
             name='Будущий период для повреждённого пересечения',
             starts_on=self.rating_period.ends_before,
             ends_before=self.rating_period.ends_before + timedelta(days=10),
+            comment='Техническая проверка повреждённого пересечения.',
         )
-        RatingPeriod.objects.filter(pk=other_period.pk).update(
+        RatingPeriod._base_manager.filter(pk=other_period.pk).update(
             starts_on=self.rating_period.starts_on,
             ends_before=self.rating_period.ends_before,
         )
@@ -1352,6 +1354,7 @@ class DriverWatchRatingApiTests(TestCase):
             name='Отключённый период API рейтинга',
             starts_on=self.rating_period.ends_before,
             ends_before=self.rating_period.ends_before + timedelta(days=10),
+            comment='Техническая проверка отключённого периода.',
             is_active=False,
         )
         outside_composition = WatchComposition.objects.create(
@@ -1410,6 +1413,7 @@ class DriverRatingApiScopeTests(
             name='Тестовый период API состава',
             starts_on=self.watch.starts_on,
             ends_before=self.watch.ends_on + timedelta(days=1),
+            comment='Технический период проверки API состава.',
         )
         manager = Employee.objects.create(
             full_name='Руководитель области рейтинга',
@@ -1627,6 +1631,7 @@ class DriverRatingPortalProviderTests(
             name='Тестовый период рейтинга портала',
             starts_on=self.watch.starts_on,
             ends_before=self.watch.ends_on + timedelta(days=1),
+            comment='Технический период проверки портала.',
         )
 
     def test_internal_portal_shows_places_and_only_personal_score(self):
@@ -1927,8 +1932,9 @@ class DriverRatingPortalProviderTests(
             name='Будущий конфликтующий период портала',
             starts_on=self.rating_period.ends_before,
             ends_before=self.rating_period.ends_before + timedelta(days=10),
+            comment='Техническая проверка конфликта периодов портала.',
         )
-        RatingPeriod.objects.filter(pk=other_period.pk).update(
+        RatingPeriod._base_manager.filter(pk=other_period.pk).update(
             starts_on=self.rating_period.starts_on,
             ends_before=self.rating_period.ends_before,
         )

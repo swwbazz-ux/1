@@ -1,0 +1,11 @@
+[Unit]
+Description=Ежедневная проверка календаря периодов рейтинга
+
+[Timer]
+OnCalendar=*-*-* 00:15:00 Europe/Moscow
+Persistent=true
+AccuracySec=1min
+Unit=accounting-mvp-rating-periods.service
+
+[Install]
+WantedBy=timers.target

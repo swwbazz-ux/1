@@ -1,0 +1,14 @@
+[Unit]
+Description=Дополнение календаря периодов рейтинга ООО Коппер Рисорсез
+After=network-online.target postgresql.service
+Wants=network-online.target postgresql.service
+
+[Service]
+Type=oneshot
+User=deploy
+WorkingDirectory=/srv/accounting-mvp
+EnvironmentFile=/srv/accounting-mvp/.env
+ExecStart=/srv/accounting-mvp/.venv/bin/python manage.py ensure_rating_periods --strict
+TimeoutStartSec=120
+Nice=10
+UMask=0027

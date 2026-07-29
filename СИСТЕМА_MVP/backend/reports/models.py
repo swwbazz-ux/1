@@ -1,6 +1,15 @@
 from django.core.exceptions import ValidationError
 from django.core.serializers.json import DjangoJSONEncoder
-from django.db import models
+from django.db import models, transaction
+
+from core.db_locks import lock_idempotency_key
+
+from .rating_period_calendar import (
+    RATING_PERIOD_CATALOG_LOCK_ACTION,
+    RATING_PERIOD_CATALOG_LOCK_KEY,
+    RATING_PERIOD_DEFAULT_START_DAY,
+    nominal_rating_period_end,
+)
 
 
 class ReportType(models.TextChoices):
@@ -31,7 +40,28 @@ class ReportTemplate(models.Model):
         return self.name
 
 
+class RatingPeriodQuerySet(models.QuerySet):
+    mutation_error = (
+        'Периоды рейтинга нельзя массово изменять или удалять. '
+        'Измените одну запись через справочник либо отключите её.'
+    )
+
+    def update(self, **kwargs):
+        raise ValidationError(self.mutation_error)
+
+    def delete(self):
+        raise ValidationError(self.mutation_error)
+
+    def bulk_create(self, objs, **kwargs):
+        raise ValidationError(self.mutation_error)
+
+    def bulk_update(self, objs, fields, **kwargs):
+        raise ValidationError(self.mutation_error)
+
+
 class RatingPeriod(models.Model):
+    objects = RatingPeriodQuerySet.as_manager()
+
     name = models.CharField(
         'Название периода',
         max_length=160,
@@ -64,6 +94,17 @@ class RatingPeriod(models.Model):
             'рейтинга.'
         ),
     )
+    nominal_starts_on = models.DateField(
+        'Обычная дата начала',
+        null=True,
+        blank=True,
+        unique=True,
+        editable=False,
+        help_text=(
+            'Стабильный ключ автоматически созданного периода. '
+            'Не меняется при ручной корректировке дат.'
+        ),
+    )
     created_at = models.DateTimeField('Создан', auto_now_add=True)
     updated_at = models.DateTimeField('Изменён', auto_now=True)
 
@@ -81,16 +122,91 @@ class RatingPeriod(models.Model):
     def __str__(self):
         return self.name
 
+    @property
+    def is_automatically_created(self):
+        return self.nominal_starts_on is not None
+
+    @property
+    def has_manual_override(self):
+        if self.starts_on is None or self.ends_before is None:
+            return False
+        if self.nominal_starts_on is None:
+            return (
+                self.starts_on.day != RATING_PERIOD_DEFAULT_START_DAY
+                or self.ends_before
+                != nominal_rating_period_end(self.starts_on)
+            )
+        return (
+            self.starts_on != self.nominal_starts_on
+            or self.ends_before
+            != nominal_rating_period_end(self.nominal_starts_on)
+        )
+
+    def generation_source_label(self):
+        if self.is_automatically_created:
+            return 'Автоматически'
+        return 'Вручную'
+
+    generation_source_label.short_description = 'Создание'
+
+    def manual_override_label(self):
+        if self.has_manual_override:
+            if self.is_automatically_created:
+                return 'Даты изменены вручную'
+            return 'Ручное исключение'
+        if not self.is_automatically_created:
+            return 'По правилу 14-е → 14-е (создан вручную)'
+        return 'По правилу 14-е → 14-е'
+
+    manual_override_label.short_description = 'Режим дат'
+
+    def audit_value(self):
+        return (
+            f'Название: {self.name}; '
+            f'границы: {self.starts_on:%d.%m.%Y}–'
+            f'{self.ends_before:%d.%m.%Y} '
+            '(конечная дата не входит); '
+            f'состояние: {"активен" if self.is_active else "отключён"}; '
+            f'создание: {self.generation_source_label()}; '
+            f'режим: {self.manual_override_label()}; '
+            f'примечание: {(self.comment or "").strip() or "нет"}.'
+        )
+
     def clean(self):
         super().clean()
+        errors = {}
+        if self.pk:
+            stored_nominal_starts_on = (
+                type(self).objects
+                .filter(pk=self.pk)
+                .values_list('nominal_starts_on', flat=True)
+                .first()
+            )
+            if stored_nominal_starts_on != self.nominal_starts_on:
+                errors['nominal_starts_on'] = (
+                    'Обычная дата начала автоматического периода '
+                    'не может быть изменена.'
+                )
         if (
             self.starts_on is not None
             and self.ends_before is not None
             and self.ends_before <= self.starts_on
         ):
-            raise ValidationError({
-                'ends_before': 'Дата «Считать до» должна быть позже даты «Считать с».',
-            })
+            errors['ends_before'] = (
+                'Дата «Считать до» должна быть позже даты «Считать с».'
+            )
+        if (
+            self.starts_on is not None
+            and self.ends_before is not None
+            and self.has_manual_override
+            and not (self.comment or '').strip()
+        ):
+            errors['comment'] = (
+                'Укажите причину, почему даты отличаются от обычного '
+                'периода 14-е → 14-е.'
+            )
+        if errors:
+            raise ValidationError(errors)
         if (
             not self.is_active
             or self.starts_on is None
@@ -116,9 +232,50 @@ class RatingPeriod(models.Model):
                 'Измените даты или отключите пересекающийся период.'
             )
 
+    @classmethod
+    def lock_catalog(cls):
+        lock_idempotency_key(
+            RATING_PERIOD_CATALOG_LOCK_ACTION,
+            RATING_PERIOD_CATALOG_LOCK_KEY,
+        )
+
+    def _refresh_fields_excluded_from_partial_update(self, update_fields):
+        if self._state.adding or self.pk is None or update_fields is None:
+            return
+        try:
+            stored = (
+                type(self)._base_manager
+                .select_for_update()
+                .get(pk=self.pk)
+            )
+        except type(self).DoesNotExist as error:
+            raise ValidationError(
+                'Период рейтинга уже удалён или недоступен.'
+            ) from error
+        included_fields = set(update_fields)
+        for field in self._meta.concrete_fields:
+            if field.primary_key:
+                continue
+            if (
+                field.name not in included_fields
+                and field.attname not in included_fields
+            ):
+                setattr(self, field.attname, getattr(stored, field.attname))
+
     def save(self, *args, **kwargs):
-        self.full_clean()
-        return super().save(*args, **kwargs)
+        with transaction.atomic():
+            self.lock_catalog()
+            self._refresh_fields_excluded_from_partial_update(
+                kwargs.get('update_fields'),
+            )
+            self.full_clean()
+            return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError(
+            'Период рейтинга нельзя удалить. Отключите его, чтобы '
+            'сохранить историю расчётов и изменений.'
+        )
 
 
 class PilotFeedbackPriority(models.TextChoices):
