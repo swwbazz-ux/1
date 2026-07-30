@@ -56,12 +56,14 @@ from .driver_watch_observation import (
 from .driver_watch_rating import (
     DRIVER_RATING_FORMULA_VERSION,
     DRIVER_RATING_WEIGHTS,
-    get_cached_driver_rating_period,
-    get_cached_driver_watch_rating,
+)
+from .driver_rating_materialization import (
+    DriverRatingSnapshotUnavailable,
+    get_materialized_driver_rating_period,
+    materialized_driver_rating_rows,
 )
 from .forms import PilotFeedbackForm
 from .models import PilotFeedback, RatingPeriod, ReportTemplate, ReportType
-from .portal_rating_provider import linked_driver_snapshot_scopes
 from .rating_tv import (
     RATING_TV_QA_DAY_COUNT,
     RATING_TV_REFRESH_SECONDS,
@@ -554,14 +556,22 @@ def driver_watch_rating_api(request):
     site_scope = get_rating_site_scope(access)
     if site_scope is None:
         return JsonResponse({'error': 'Недостаточно прав.'}, status=403)
-    employee_ids, watch_composition_ids = site_scope
     if not getattr(
         settings,
         'PORTAL_WORKING_DRIVER_RATING_ENABLED',
         False,
+    ) or not getattr(
+        settings,
+        'DRIVER_WATCH_RATING_DIAGNOSTIC_API_ENABLED',
+        False,
     ):
         return JsonResponse(
-            {'error': 'Рабочий рейтинг Водителей не включён.'},
+            {
+                'error': (
+                    'Диагностический расчёт рейтинга по одной вахте '
+                    'не включён.'
+                ),
+            },
             status=404,
         )
 
@@ -571,86 +581,17 @@ def driver_watch_rating_api(request):
             {'error': 'Для рейтинга укажите shift_type: day или night.'},
             status=400,
         )
-
-    watch_periods = list(
-        WatchPeriod.objects
-        .filter(watch_composition_id__in=watch_composition_ids)
-        .order_by('-is_active', '-starts_on', '-id')
-    )
-    watch_period_id = request.GET.get('watch_period')
-    if watch_period_id:
-        try:
-            watch_period_id = int(watch_period_id)
-        except (TypeError, ValueError):
-            return JsonResponse(
-                {'error': 'watch_period должен быть числом.'},
-                status=400,
-            )
-        watch_period = next(
-            (
-                period
-                for period in watch_periods
-                if period.id == watch_period_id
-            ),
-            None,
-        )
-        if watch_period is None:
-            return JsonResponse({'error': 'Вахта не найдена.'}, status=404)
-    else:
-        watch_period = watch_periods[0] if watch_periods else None
-
-    available_watch_periods = [
+    return JsonResponse(
         {
-            'id': period.id,
-            'name': period.name,
-            'starts_on': period.starts_on.isoformat(),
-            'ends_on': period.ends_on.isoformat(),
-            'is_active': period.is_active,
-        }
-        for period in watch_periods
-    ]
-    if watch_period is None:
-        return JsonResponse({
-            'available': False,
-            'official': False,
-            'rating_mode': 'working',
-            'formula_version': DRIVER_RATING_FORMULA_VERSION,
-            'formula_label': 'Рабочая формула без м³·км и т·км',
-            'status': 'Нет структурной вахты с закрытыми сменами.',
-            'generated_at': timezone.now().isoformat(),
-            'source_fingerprint': '',
-            'watch_period': None,
-            'shift_type': shift_type,
-            'shift_type_label': dict(ShiftType.choices)[shift_type],
-            'weights': {
-                key: str(value)
-                for key, value in DRIVER_RATING_WEIGHTS.items()
-            },
-            'distance_metrics': {
-                'weight': '0',
-                'status': 'planned',
-                'label': 'м³·км и т·км пока не учитываются',
-            },
-            'linkage_audit': {},
-            'available_watch_periods': [],
-            'summary': {
-                'employee_count': 0,
-                'rated_shift_count': 0,
-                'withheld_shift_count': 0,
-                'withheld_reasons': {},
-            },
-            'entries': [],
-        })
-
-    rating = dict(
-        get_cached_driver_watch_rating(
-            watch_period,
-            shift_type=shift_type,
-            allowed_employee_ids=employee_ids,
-        )
+            'error': (
+                'HTTP-пересчёт рейтинга по одной вахте выведен из '
+                'эксплуатации. Используйте общий фоновый снимок периода '
+                'рейтинга.'
+            ),
+            'snapshot_status': 'diagnostic_http_calculation_retired',
+        },
+        status=410,
     )
-    rating['available_watch_periods'] = available_watch_periods
-    return JsonResponse(rating)
 
 
 def _rating_period_payload(period):
@@ -1267,13 +1208,14 @@ def driver_period_rating_api(request):
 
     historical_composition_ids = set()
     if rating_period is not None:
-        historical_composition_ids = {
-            item['watch_composition_id']
-            for item in linked_driver_snapshot_scopes(
-                rating_period,
-                employee_ids=employee_ids,
+        historical_composition_ids = set(
+            materialized_driver_rating_rows(rating_period)
+            .filter(
+                formula_version=DRIVER_RATING_FORMULA_VERSION,
+                last_success_at__isnull=False,
             )
-        }
+            .values_list('watch_composition_id', flat=True)
+        )
     available_composition_ids = (
         historical_composition_ids
         | {
@@ -1377,15 +1319,33 @@ def driver_period_rating_api(request):
         )
         .values_list('id', flat=True)
     )
-    rating = dict(
-        get_cached_driver_rating_period(
-            rating_period,
-            watch_composition,
-            shift_type=shift_type,
-            allowed_employee_ids=employee_ids,
-            expected_employee_ids=expected_employee_ids,
+    try:
+        rating = dict(
+            get_materialized_driver_rating_period(
+                rating_period,
+                watch_composition,
+                shift_type=shift_type,
+                allowed_employee_ids=employee_ids,
+                expected_employee_ids=expected_employee_ids,
+            )
         )
-    )
+    except DriverRatingSnapshotUnavailable as error:
+        unavailable = _driver_period_rating_empty(
+            shift_type=shift_type,
+            status=error.public_status,
+            rating_period=rating_period,
+            watch_composition=watch_composition,
+            available_rating_periods=available_rating_periods,
+            available_watch_compositions=available_watch_compositions,
+        )
+        unavailable.update({
+            'error': error.public_status,
+            'snapshot_status': error.code,
+        })
+        return _private_rating_json(
+            unavailable,
+            status=error.http_status,
+        )
     rating.update({
         'official': False,
         'official_rating_eligible': False,

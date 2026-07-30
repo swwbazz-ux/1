@@ -278,6 +278,171 @@ class RatingPeriod(models.Model):
         )
 
 
+class DriverRatingSnapshotRefreshStatus(models.TextChoices):
+    READY = 'ready', 'Готов'
+    FAILED = 'failed', 'Последнее обновление завершилось ошибкой'
+
+
+class DriverRatingPeriodMaterializedSnapshot(models.Model):
+    """Одна текущая серверная витрина рейтинга для канонической группы."""
+
+    scope_code = models.CharField(
+        'Техническая область рейтинга',
+        max_length=64,
+    )
+    rating_period = models.ForeignKey(
+        RatingPeriod,
+        verbose_name='Период рейтинга',
+        on_delete=models.PROTECT,
+        related_name='driver_rating_materialized_snapshots',
+    )
+    watch_composition = models.ForeignKey(
+        'users.WatchComposition',
+        verbose_name='Состав вахты',
+        on_delete=models.PROTECT,
+        related_name='driver_rating_materialized_snapshots',
+    )
+    shift_type = models.CharField(
+        'Тип смены',
+        max_length=16,
+        choices=(
+            ('day', 'Дневная'),
+            ('night', 'Ночная'),
+        ),
+    )
+    formula_version = models.CharField(
+        'Версия формулы',
+        max_length=96,
+    )
+    payload_schema_version = models.PositiveSmallIntegerField(
+        'Версия схемы готового снимка',
+        default=1,
+    )
+    scope_fingerprint = models.CharField(
+        'Fingerprint области расчёта',
+        max_length=64,
+    )
+    source_fingerprint = models.CharField(
+        'Fingerprint источников',
+        max_length=64,
+        blank=True,
+    )
+    shift_score_fingerprint = models.CharField(
+        'Fingerprint сменных баллов',
+        max_length=64,
+        blank=True,
+    )
+    payload_fingerprint = models.CharField(
+        'Fingerprint готового снимка',
+        max_length=64,
+        blank=True,
+    )
+    member_fingerprint = models.CharField(
+        'Fingerprint состава готового снимка',
+        max_length=64,
+        blank=True,
+    )
+    payload = models.JSONField(
+        'Готовый серверный снимок',
+        encoder=DjangoJSONEncoder,
+        default=dict,
+        blank=True,
+    )
+    member_employee_ids = models.JSONField(
+        'Сотрудники, представленные в группе',
+        encoder=DjangoJSONEncoder,
+        default=list,
+        blank=True,
+    )
+    member_latest_closed_at = models.JSONField(
+        'Последнее закрытие смены сотрудника в группе',
+        encoder=DjangoJSONEncoder,
+        default=dict,
+        blank=True,
+    )
+    revision = models.PositiveIntegerField('Ревизия', default=0)
+    published_at = models.DateTimeField(
+        'Содержимое опубликовано',
+        null=True,
+        blank=True,
+    )
+    last_success_at = models.DateTimeField(
+        'Последняя успешная проверка',
+        null=True,
+        blank=True,
+    )
+    last_attempt_at = models.DateTimeField(
+        'Последняя попытка обновления',
+        null=True,
+        blank=True,
+    )
+    last_failure_at = models.DateTimeField(
+        'Последняя ошибка обновления',
+        null=True,
+        blank=True,
+    )
+    last_refresh_status = models.CharField(
+        'Состояние последнего обновления',
+        max_length=16,
+        choices=DriverRatingSnapshotRefreshStatus.choices,
+        default=DriverRatingSnapshotRefreshStatus.FAILED,
+    )
+    failure_code = models.CharField(
+        'Код последней ошибки',
+        max_length=64,
+        blank=True,
+    )
+    consecutive_failure_count = models.PositiveIntegerField(
+        'Ошибок обновления подряд',
+        default=0,
+    )
+    last_error = models.CharField(
+        'Сокращённая внутренняя ошибка',
+        max_length=500,
+        blank=True,
+    )
+    created_at = models.DateTimeField('Создан', auto_now_add=True)
+    updated_at = models.DateTimeField('Изменён', auto_now=True)
+
+    class Meta:
+        verbose_name = 'Текущий серверный снимок рейтинга водителей'
+        verbose_name_plural = (
+            'Текущие серверные снимки рейтинга водителей'
+        )
+        ordering = [
+            '-rating_period__starts_on',
+            'watch_composition_id',
+            'shift_type',
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=[
+                    'scope_code',
+                    'rating_period',
+                    'watch_composition',
+                    'shift_type',
+                ],
+                name='uniq_drv_rating_mat_group',
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=[
+                    'scope_code',
+                    'rating_period',
+                    'formula_version',
+                ],
+                name='drv_rating_mat_scope_period_ix',
+            ),
+        ]
+
+    def __str__(self):
+        return (
+            f'{self.scope_code}: {self.rating_period} / '
+            f'{self.watch_composition} / {self.get_shift_type_display()}'
+        )
+
+
 class PilotFeedbackPriority(models.TextChoices):
     P0 = 'p0', 'P0 - блокирует пилот'
     P1 = 'p1', 'P1 - исправить до запуска'

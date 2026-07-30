@@ -33,6 +33,23 @@ def _env_bool(name: str, default: bool = False) -> bool:
     raise ValueError(f'{name} must be a boolean value, got {value!r}')
 
 
+def _env_positive_int(name: str, default: int) -> int:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        parsed = int(value.strip())
+    except (TypeError, ValueError) as error:
+        raise ValueError(
+            f'{name} must be a positive integer, got {value!r}'
+        ) from error
+    if parsed <= 0:
+        raise ValueError(
+            f'{name} must be a positive integer, got {value!r}'
+        )
+    return parsed
+
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / '.env')
@@ -227,6 +244,22 @@ PORTAL_PRODUCTION_DATA_PROVIDER = ''
 PORTAL_WORKING_DRIVER_RATING_ENABLED = _env_bool(
     'PORTAL_WORKING_DRIVER_RATING_ENABLED',
     default=False,
+)
+DRIVER_WATCH_RATING_DIAGNOSTIC_API_ENABLED = _env_bool(
+    'DRIVER_WATCH_RATING_DIAGNOSTIC_API_ENABLED',
+    default=False,
+)
+DRIVER_RATING_SNAPSHOT_REFRESH_SECONDS = _env_positive_int(
+    'DRIVER_RATING_SNAPSHOT_REFRESH_SECONDS',
+    300,
+)
+DRIVER_RATING_SNAPSHOT_SOFT_STALE_SECONDS = _env_positive_int(
+    'DRIVER_RATING_SNAPSHOT_SOFT_STALE_SECONDS',
+    600,
+)
+DRIVER_RATING_SNAPSHOT_HARD_EXPIRE_SECONDS = _env_positive_int(
+    'DRIVER_RATING_SNAPSHOT_HARD_EXPIRE_SECONDS',
+    1800,
 )
 RATING_TV_SCREEN_ENABLED = _env_bool(
     'RATING_TV_SCREEN_ENABLED',

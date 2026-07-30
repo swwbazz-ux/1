@@ -1,10 +1,6 @@
 from __future__ import annotations
 
-from core.production_time import (
-    business_localtime,
-    production_work_date,
-)
-from django.db.models import F, OuterRef, Subquery
+from core.production_time import production_work_date
 from django.urls import reverse
 from django.utils.dateparse import parse_datetime
 
@@ -19,8 +15,15 @@ from portal.services import (
     ShiftResultSnapshot,
 )
 
-from .driver_watch_rating import get_cached_driver_rating_period
-from .models import DriverShiftPassportSnapshot, RatingPeriod
+from .driver_rating_materialization import (
+    DriverRatingSnapshotUnavailable,
+    driver_rating_member_fingerprint,
+    get_materialized_driver_rating_period,
+    materialized_driver_rating_rows,
+)
+from .driver_watch_rating import DRIVER_RATING_FORMULA_VERSION
+from .driver_rating_scope_membership import linked_driver_snapshot_scopes
+from .models import RatingPeriod
 
 
 BLOCK_LABELS = {
@@ -36,107 +39,10 @@ def _display_decimal(value):
     return str(value).replace('.', ',')
 
 
-def linked_driver_snapshot_scopes(rating_period, *, employee_ids):
-    """Возвращает исторические группы по последним паспортам смен.
-
-    Границы периода, сотрудник, состав и тип смены читаются из неизменяемого
-    source_manifest. Текущая карточка Employee здесь намеренно не участвует.
-    """
-
-    employee_ids = tuple(sorted({int(value) for value in employee_ids}))
-    if not employee_ids:
-        return ()
-    latest_snapshot_id = (
-        DriverShiftPassportSnapshot.objects
-        .filter(shift_id=OuterRef('shift_id'))
-        .order_by('-revision', '-id')
-        .values('id')[:1]
-    )
-    snapshots = (
-        DriverShiftPassportSnapshot.objects
-        .filter(
-            id=Subquery(latest_snapshot_id),
-            payload__source_manifest__shift__employee_id__in=employee_ids,
-        )
-        .annotate(
-            manifest_employee_id=F(
-                'payload__source_manifest__shift__employee_id',
-            ),
-            manifest_opened_at=F(
-                'payload__source_manifest__shift__opened_at',
-            ),
-            manifest_closed_at=F(
-                'payload__source_manifest__shift__closed_at',
-            ),
-            manifest_shift_type=F(
-                'payload__source_manifest__shift__shift_type',
-            ),
-            manifest_watch_composition_id=F(
-                'payload__source_manifest__shift__watch_period'
-                '__watch_composition__id',
-            ),
-        )
-        .values(
-            'id',
-            'shift_id',
-            'manifest_employee_id',
-            'manifest_opened_at',
-            'manifest_closed_at',
-            'manifest_shift_type',
-            'manifest_watch_composition_id',
-        )
-        .order_by('shift_id')
-    )
-
-    result = []
-    for snapshot in snapshots.iterator(chunk_size=1000):
-        employee_id = snapshot['manifest_employee_id']
-        try:
-            employee_id = int(employee_id)
-        except (TypeError, ValueError):
-            continue
-        if employee_id not in employee_ids:
-            continue
-        opened_at = parse_datetime(
-            str(snapshot['manifest_opened_at'] or ''),
-        )
-        closed_at = parse_datetime(
-            str(snapshot['manifest_closed_at'] or ''),
-        )
-        if opened_at is None or closed_at is None:
-            continue
-        work_date = production_work_date(opened_at)
-        if not (
-            rating_period.starts_on
-            <= work_date
-            < rating_period.ends_before
-        ):
-            continue
-        shift_type = snapshot['manifest_shift_type']
-        if shift_type not in {ShiftType.DAY, ShiftType.NIGHT}:
-            continue
-        try:
-            watch_composition_id = int(
-                snapshot['manifest_watch_composition_id'],
-            )
-        except (TypeError, ValueError):
-            continue
-        result.append({
-            'snapshot_id': snapshot['id'],
-            'shift_id': snapshot['shift_id'],
-            'employee_id': employee_id,
-            'watch_composition_id': watch_composition_id,
-            'shift_type': shift_type,
-            'opened_at': business_localtime(opened_at),
-            'closed_at': business_localtime(closed_at),
-        })
-    return tuple(result)
-
-
 class DriverRatingProductionDataProvider:
     """Внутренний провайдер рабочего рейтинга Водителей.
 
-    Провайдер читает только неизменяемые паспорта закрытых смен. Открытый
+    Провайдер читает только опубликованный общий серверный снимок. Открытый
     корпоративный сайт намеренно не получает рабочие места и личные KPI.
     """
 
@@ -163,10 +69,64 @@ class DriverRatingProductionDataProvider:
     def _latest_snapshot_scope(self, rating_period, employee=None):
         if employee is None:
             return None
-        scopes = linked_driver_snapshot_scopes(
-            rating_period,
-            employee_ids=(employee.id,),
-        )
+        scopes = []
+        for snapshot in (
+            materialized_driver_rating_rows(rating_period)
+            .filter(
+                formula_version=DRIVER_RATING_FORMULA_VERSION,
+                last_success_at__isnull=False,
+            )
+            .values(
+                'id',
+                'watch_composition_id',
+                'shift_type',
+                'member_employee_ids',
+                'member_latest_closed_at',
+                'member_fingerprint',
+            )
+        ):
+            try:
+                member_ids = {
+                    int(value)
+                    for value in snapshot['member_employee_ids']
+                }
+            except (TypeError, ValueError):
+                continue
+            member_latest_closed_at = (
+                snapshot['member_latest_closed_at']
+                if isinstance(
+                    snapshot['member_latest_closed_at'],
+                    dict,
+                )
+                else {}
+            )
+            if (
+                not snapshot['member_fingerprint']
+                or driver_rating_member_fingerprint(
+                    member_ids,
+                    member_latest_closed_at,
+                ) != snapshot['member_fingerprint']
+            ):
+                continue
+            if employee.id not in member_ids:
+                continue
+            closed_at = parse_datetime(
+                str(
+                    member_latest_closed_at.get(str(employee.id), '')
+                )
+            )
+            if closed_at is None:
+                continue
+            scopes.append({
+                'snapshot_id': snapshot['id'],
+                'shift_id': 0,
+                'employee_id': employee.id,
+                'watch_composition_id': snapshot[
+                    'watch_composition_id'
+                ],
+                'shift_type': snapshot['shift_type'],
+                'closed_at': closed_at,
+            })
         return max(
             scopes,
             key=lambda item: (
@@ -208,13 +168,20 @@ class DriverRatingProductionDataProvider:
         )
         if employee.id not in allowed_employee_ids:
             return rating_period, shift_type, None
-        rating = get_cached_driver_rating_period(
-            rating_period,
-            watch_composition,
-            shift_type=shift_type,
-            allowed_employee_ids=allowed_employee_ids,
-            expected_employee_ids=expected_employee_ids,
-        )
+        try:
+            rating = get_materialized_driver_rating_period(
+                rating_period,
+                watch_composition,
+                shift_type=shift_type,
+                allowed_employee_ids=allowed_employee_ids,
+                expected_employee_ids=expected_employee_ids,
+            )
+        except DriverRatingSnapshotUnavailable as error:
+            rating = {
+                'available': False,
+                'status': error.public_status,
+                'entries': [],
+            }
         return rating_period, shift_type, rating
 
     def _ranking_entries(self, rating):
