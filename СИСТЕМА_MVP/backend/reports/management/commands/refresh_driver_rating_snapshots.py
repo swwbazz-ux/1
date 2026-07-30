@@ -1,5 +1,3 @@
-from collections import defaultdict
-
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 
@@ -14,6 +12,7 @@ from reports.driver_rating_materialization import (
 )
 from reports.models import RatingPeriod
 from reports.driver_rating_scope_membership import (
+    linked_driver_closed_shift_groups,
     linked_driver_snapshot_scopes,
 )
 
@@ -134,19 +133,39 @@ class Command(BaseCommand):
         allowed_employee_ids = tuple(
             sorted(employee_id for employee_id, _ in driver_rows)
         )
-        expected_by_composition = defaultdict(set)
-        for employee_id, composition_id in driver_rows:
-            if composition_id is not None:
-                expected_by_composition[composition_id].add(employee_id)
+        shift_types = tuple(
+            dict.fromkeys(
+                options.get('shift_types')
+                or (ShiftType.DAY, ShiftType.NIGHT)
+            )
+        )
+        current_groups = {
+            (composition_id, shift_type)
+            for _employee_id, composition_id in driver_rows
+            if composition_id is not None
+            for shift_type in shift_types
+        }
 
         historical_groups = self._historical_groups(
             rating_period,
             allowed_employee_ids,
         )
-        composition_ids = set(expected_by_composition)
-        composition_ids.update(
-            composition_id
-            for composition_id, _shift_type in historical_groups
+        historical_groups = {
+            group
+            for group in historical_groups
+            if group[1] in shift_types
+        }
+        linked_shift_groups = set(
+            linked_driver_closed_shift_groups(
+                rating_period,
+                employee_ids=allowed_employee_ids,
+                shift_types=shift_types,
+            )
+        )
+        groups = (
+            current_groups
+            | historical_groups
+            | linked_shift_groups
         )
         selected_composition_id = options.get('watch_composition')
         if selected_composition_id is not None:
@@ -154,62 +173,62 @@ class Command(BaseCommand):
                 pk=selected_composition_id,
             ).exists():
                 raise CommandError('Состав вахты не найден.')
-            composition_ids = {selected_composition_id}
+            groups = {
+                (selected_composition_id, shift_type)
+                for shift_type in shift_types
+            }
 
+        composition_ids = {
+            composition_id
+            for composition_id, _shift_type in groups
+        }
         compositions = {
             composition.id: composition
             for composition in WatchComposition.objects.filter(
                 id__in=composition_ids,
             )
         }
-        shift_types = tuple(
-            dict.fromkeys(
-                options.get('shift_types')
-                or (ShiftType.DAY, ShiftType.NIGHT)
-            )
-        )
         attempted = 0
         published = 0
         verified = 0
         locked = 0
         failures = []
 
-        for composition_id in sorted(composition_ids):
+        for composition_id, shift_type in sorted(groups):
             composition = compositions.get(composition_id)
             if composition is None:
                 failures.append(
                     f'Состав {composition_id} отсутствует.'
                 )
                 continue
-            for shift_type in shift_types:
-                attempted += 1
-                try:
-                    result = refresh_driver_rating_group(
-                        rating_period,
-                        composition,
-                        shift_type=shift_type,
-                        scope_code=scope_code,
-                    )
-                except DriverRatingMaterializationError as error:
-                    failures.append(
-                        (
-                            f'{composition.code}/{shift_type}: '
-                            f'{error}'
-                        )
-                    )
-                    continue
-                if result.status == 'published':
-                    published += 1
-                elif result.status == 'verified':
-                    verified += 1
-                else:
-                    locked += 1
-                self.stdout.write(
+            attempted += 1
+            try:
+                result = refresh_driver_rating_group(
+                    rating_period,
+                    composition,
+                    shift_type=shift_type,
+                    scope_code=scope_code,
+                )
+            except DriverRatingMaterializationError as error:
+                failures.append(
                     (
                         f'{composition.code}/{shift_type}: '
-                        f'{result.status}, revision={result.revision}'
+                        f'{error}'
                     )
                 )
+                continue
+            if result.status == 'published':
+                published += 1
+            elif result.status == 'verified':
+                verified += 1
+            else:
+                locked += 1
+            self.stdout.write(
+                (
+                    f'{composition.code}/{shift_type}: '
+                    f'{result.status}, revision={result.revision}'
+                )
+            )
 
         summary = (
             f'Групп: {attempted}; опубликовано: {published}; '

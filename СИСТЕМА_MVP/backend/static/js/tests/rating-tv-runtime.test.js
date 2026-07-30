@@ -429,7 +429,14 @@ function buildScreen() {
         qaPause: replayButton("▶", "Запуск"),
         qaStep: replayButton("▶", "Шаг"),
         qaForward: replayButton("▶▶", "Вперёд"),
-        qaSpeed: new FakeElement("select")
+        qaSpeed: new FakeElement("select"),
+        qaLiveStep: new FakeElement("strong"),
+        qaLiveVirtualAt: new FakeElement("strong"),
+        qaLiveShift: new FakeElement("strong"),
+        qaLiveRevision: new FakeElement("strong"),
+        qaLiveSourceFingerprint: new FakeElement("b"),
+        qaLiveScoreFingerprint: new FakeElement("b"),
+        qaLiveStateStatus: new FakeElement("p")
     };
     elements.status.textContent = "Загрузка рейтинга";
     elements.qaDaySelect.disabled = true;
@@ -459,7 +466,18 @@ function buildScreen() {
         "[data-qa-pause]": elements.qaPause,
         "[data-qa-step]": elements.qaStep,
         "[data-qa-forward]": elements.qaForward,
-        "[data-qa-speed]": elements.qaSpeed
+        "[data-qa-speed]": elements.qaSpeed,
+        "[data-qa-live-step]": elements.qaLiveStep,
+        "[data-qa-live-virtual-at]": elements.qaLiveVirtualAt,
+        "[data-qa-live-shift]": elements.qaLiveShift,
+        "[data-qa-live-revision]": elements.qaLiveRevision,
+        "[data-qa-live-source-fingerprint]": (
+            elements.qaLiveSourceFingerprint
+        ),
+        "[data-qa-live-score-fingerprint]": (
+            elements.qaLiveScoreFingerprint
+        ),
+        "[data-qa-live-state-status]": elements.qaLiveStateStatus
     };
     Object.entries(selectors).forEach(([selector, element]) => {
         root.selectorMap.set(selector, element);
@@ -525,6 +543,33 @@ function buildPayload({
             name: `Состав ${id}`
         })),
         entries
+    };
+}
+
+function buildQaLiveState({
+    step = 1,
+    periodId = 10,
+    compositionId = 20,
+    shiftType = "night",
+    placeholders = []
+} = {}) {
+    return {
+        schema: "driver-rating-qa-live-state",
+        schema_version: 1,
+        synthetic: true,
+        official: false,
+        official_rating_eligible: false,
+        run_id: "qa-live-runtime-run",
+        site_code: "section_2",
+        rating_period_id: periodId,
+        watch_composition_id: compositionId,
+        step,
+        virtual_at: (
+            "2026-07-30T"
+            + `${String(step % 24).padStart(2, "0")}:00:00+04:00`
+        ),
+        shift_type: shiftType,
+        placeholders
     };
 }
 
@@ -922,6 +967,7 @@ function deferredResponse() {
 
 function createRuntime({
     qaPreview = false,
+    qaLive = false,
     qaReplayEnabled = false,
     qaReplayKind = "visual",
     qaFormulaEnabledShiftTypes = (
@@ -940,11 +986,19 @@ function createRuntime({
 
     const configNode = new FakeElement("script");
     configNode.textContent = JSON.stringify({
-        apiUrl: "/reports/rating/driver-period-ranking/",
+        apiUrl: qaLive
+            ? "/reports/rating/tv/qa-live/data/"
+            : "/reports/rating/driver-period-ranking/",
         photoUrlTemplate: "/reports/rating/employee/__employee_id__/photo/",
-        refreshSeconds: 300,
+        refreshSeconds: qaLive ? 10 : 300,
         rotationSeconds: 15,
         qaPreview,
+        qaLive,
+        qaLiveRunId: qaLive ? "qa-live-runtime-run" : "",
+        qaLiveSiteCode: qaLive ? "section_2" : "",
+        qaLiveStateUrl: qaLive
+            ? "/reports/rating/tv/qa-live/state/"
+            : "",
         qaReplayEnabled,
         qaReplayKind,
         qaReplayUrl: qaReplayKind === "formula"
@@ -1057,7 +1111,7 @@ function createRuntime({
             responseQueue.push(queuedFailure(error));
         },
         async flush() {
-            for (let index = 0; index < 8; index += 1) {
+            for (let index = 0; index < 24; index += 1) {
                 await Promise.resolve();
             }
         }
@@ -2078,5 +2132,357 @@ test("network failure preserves the last successful rating snapshot", async () =
     assert.equal(
         runtime.elements.status.textContent,
         "Показан последний снимок"
+    );
+});
+
+
+test("QA live reads state then materialized data and renders held placeholders", async () => {
+    const qaState = buildQaLiveState({
+        placeholders: [{
+            employee_id: 99,
+            status: "withheld",
+            reasons: ["blocking_quality:data_conflict"],
+            full_name: "ТЕСТ Удержанный водитель"
+        }]
+    });
+    const payload = buildPayload({
+        fingerprint: "source-materialized-abcdef",
+        entries: buildEntries(2, {prefix: "LIVE водитель"})
+    });
+    payload.snapshot_revision = 7;
+    payload.shift_score_fingerprint = "score-materialized-uvwxyz";
+    const runtime = createRuntime({
+        qaLive: true,
+        responses: [
+            queuedResponse(qaState),
+            queuedResponse(payload)
+        ]
+    });
+    await runtime.flush();
+
+    assert.equal(runtime.fetchCalls.length, 2);
+    assert.equal(
+        new URL(
+            runtime.fetchCalls[0].url,
+            "https://driverform.test"
+        ).pathname,
+        "/reports/rating/tv/qa-live/state/"
+    );
+    const dataUrl = new URL(runtime.fetchCalls[1].url);
+    assert.equal(
+        dataUrl.pathname,
+        "/reports/rating/tv/qa-live/data/"
+    );
+    assert.equal(dataUrl.searchParams.get("rating_period"), "10");
+    assert.equal(dataUrl.searchParams.get("watch_composition"), "20");
+    assert.equal(dataUrl.searchParams.get("shift_type"), "night");
+    assert.equal(
+        dataUrl.searchParams.get("qa_run_id"),
+        "qa-live-runtime-run"
+    );
+    assert.equal(dataUrl.searchParams.get("qa_step"), "1");
+    for (const call of runtime.fetchCalls) {
+        assert.equal(call.options.method, "GET");
+        assert.equal(call.options.credentials, "same-origin");
+        assert.equal(call.options.cache, "no-store");
+    }
+    assert.equal(runtime.elements.period.disabled, true);
+    assert.equal(runtime.elements.composition.disabled, true);
+    assert.equal(runtime.elements.shiftType.disabled, true);
+    assert.equal(runtime.elements.refreshCountdown.textContent, "00:10");
+    assert.equal(runtime.elements.qaLiveStep.textContent, "1");
+    assert.equal(runtime.elements.qaLiveShift.textContent, "Ночная");
+    assert.equal(runtime.elements.qaLiveRevision.textContent, "7");
+    assert.equal(
+        runtime.elements.qaLiveSourceFingerprint.textContent,
+        "source-mat"
+    );
+    assert.equal(
+        runtime.elements.qaLiveScoreFingerprint.textContent,
+        "score-mate"
+    );
+    assert.equal(runtime.elements.grid.children.length, 3);
+    const heldRow = runtime.elements.grid.children[2];
+    assert.equal(heldRow.dataset.rowStatus, "withheld");
+    assert.equal(heldRow.dataset.place, "");
+    assert.equal(
+        heldRow.querySelector(".rating-tv__name").textContent,
+        "ТЕСТ Удержанный водитель"
+    );
+    assert.equal(
+        heldRow.querySelector(".rating-tv__score").children[0].textContent,
+        "Удержан"
+    );
+    assert.equal(
+        runtime.window.RatingTvScreen.state.presentationPlaylist.length,
+        0
+    );
+});
+
+
+test("QA live refreshes the real chain after ten seconds", async () => {
+    const firstPayload = buildPayload({
+        fingerprint: "qa-live-source-1",
+        entries: buildEntries(2, {prefix: "До шага"})
+    });
+    firstPayload.snapshot_revision = 1;
+    firstPayload.shift_score_fingerprint = "qa-live-scores-1";
+    const secondPayload = buildPayload({
+        fingerprint: "qa-live-source-2",
+        entries: buildEntries(2, {prefix: "После шага"})
+    });
+    secondPayload.snapshot_revision = 2;
+    secondPayload.shift_score_fingerprint = "qa-live-scores-2";
+    const runtime = createRuntime({
+        qaLive: true,
+        responses: [
+            queuedResponse(buildQaLiveState({step: 1})),
+            queuedResponse(firstPayload)
+        ]
+    });
+    await runtime.flush();
+
+    runtime.enqueueResponse(buildQaLiveState({step: 2}));
+    runtime.enqueueResponse(secondPayload);
+    runtime.clock.advance(10000);
+    await runtime.flush();
+
+    assert.equal(runtime.fetchCalls.length, 4);
+    assert.equal(runtime.elements.qaLiveStep.textContent, "2");
+    assert.equal(runtime.elements.qaLiveRevision.textContent, "2");
+    assert.match(
+        runtime.elements.grid.children[0]
+            .querySelector(".rating-tv__name")
+            .textContent,
+        /После шага/
+    );
+});
+
+
+test("QA live never keeps another group under a 503 response", async () => {
+    const firstPayload = buildPayload({
+        compositionId: 20,
+        shiftType: "night",
+        fingerprint: "qa-live-night",
+        entries: buildEntries(2, {prefix: "Чужая ночная группа"})
+    });
+    firstPayload.snapshot_revision = 1;
+    firstPayload.shift_score_fingerprint = "night-scores";
+    const runtime = createRuntime({
+        qaLive: true,
+        responses: [
+            queuedResponse(buildQaLiveState({
+                compositionId: 20,
+                shiftType: "night"
+            })),
+            queuedResponse(firstPayload)
+        ]
+    });
+    await runtime.flush();
+    assert.equal(runtime.elements.grid.hidden, false);
+
+    runtime.enqueueResponse(buildQaLiveState({
+        step: 2,
+        compositionId: 21,
+        shiftType: "day"
+    }));
+    runtime.enqueueResponse(
+        {error: "Снимок дневной группы ещё не сформирован."},
+        503
+    );
+    await runtime.window.RatingTvScreen.loadQaLive();
+    await runtime.flush();
+
+    assert.equal(runtime.elements.grid.hidden, true);
+    assert.equal(runtime.elements.message.hidden, false);
+    assert.equal(runtime.window.RatingTvScreen.state.payload, null);
+    assert.equal(runtime.window.RatingTvScreen.state.activeGroupKey, "");
+    assert.doesNotMatch(
+        runtime.elements.messageText.textContent,
+        /Чужая ночная группа/
+    );
+    assert.equal(
+        runtime.elements.messageText.textContent,
+        "Снимок дневной группы ещё не сформирован."
+    );
+});
+
+
+test("QA live rejects a materialized response with another group identity", async () => {
+    const mismatchedPayload = buildPayload({
+        periodId: 10,
+        compositionId: 21,
+        shiftType: "night",
+        fingerprint: "wrong-group",
+        entries: buildEntries(2, {prefix: "Чужой ответ"})
+    });
+    mismatchedPayload.snapshot_revision = 4;
+    mismatchedPayload.shift_score_fingerprint = "wrong-scores";
+    const runtime = createRuntime({
+        qaLive: true,
+        responses: [
+            queuedResponse(buildQaLiveState({
+                periodId: 10,
+                compositionId: 20,
+                shiftType: "night"
+            })),
+            queuedResponse(mismatchedPayload)
+        ]
+    });
+    await runtime.flush();
+
+    assert.equal(runtime.elements.grid.hidden, true);
+    assert.equal(runtime.window.RatingTvScreen.state.payload, null);
+    assert.equal(
+        runtime.elements.messageTitle.textContent,
+        "Снимок другой группы отклонён"
+    );
+    assert.doesNotMatch(
+        runtime.elements.messageText.textContent,
+        /Чужой ответ/
+    );
+});
+
+
+test("QA live clears a same-group frame on 409 or 503 and retries later", async () => {
+    for (const status of [409, 503]) {
+        const firstPayload = buildPayload({
+            fingerprint: `same-group-before-${status}`,
+            entries: buildEntries(2, {prefix: "Старый кадр"})
+        });
+        firstPayload.snapshot_revision = 3;
+        firstPayload.shift_score_fingerprint = `scores-before-${status}`;
+        const runtime = createRuntime({
+            qaLive: true,
+            responses: [
+                queuedResponse(buildQaLiveState({step: 1})),
+                queuedResponse(firstPayload)
+            ]
+        });
+        await runtime.flush();
+        assert.equal(runtime.elements.grid.hidden, false);
+
+        runtime.enqueueResponse(buildQaLiveState({step: 2}));
+        runtime.enqueueResponse(
+            {
+                error: (
+                    status === 409
+                        ? "Состояние шага изменилось."
+                        : "Состояние шага временно недоступно."
+                )
+            },
+            status
+        );
+        await runtime.window.RatingTvScreen.loadQaLive();
+        await runtime.flush();
+
+        assert.equal(runtime.elements.grid.hidden, true);
+        assert.equal(runtime.elements.message.hidden, false);
+        assert.equal(runtime.window.RatingTvScreen.state.payload, null);
+        assert.equal(runtime.window.RatingTvScreen.state.activeGroupKey, "");
+        assert.equal(runtime.elements.qaLiveRevision.textContent, "—");
+        assert.equal(
+            runtime.elements.qaLiveSourceFingerprint.textContent,
+            "—"
+        );
+        assert.equal(
+            runtime.elements.qaLiveScoreFingerprint.textContent,
+            "—"
+        );
+        assert.equal(
+            runtime.elements.messageTitle.textContent,
+            "Ожидаем согласованный QA-live снимок"
+        );
+        assert.equal(
+            runtime.window.RatingTvScreen.state.groupCache.size,
+            0
+        );
+
+        const recoveredPayload = buildPayload({
+            fingerprint: `same-group-after-${status}`,
+            entries: buildEntries(2, {prefix: "Новый кадр"})
+        });
+        recoveredPayload.snapshot_revision = 4;
+        recoveredPayload.shift_score_fingerprint = (
+            `scores-after-${status}`
+        );
+        runtime.enqueueResponse(buildQaLiveState({step: 2}));
+        runtime.enqueueResponse(recoveredPayload);
+        await runtime.window.RatingTvScreen.loadQaLive();
+        await runtime.flush();
+
+        assert.equal(runtime.elements.grid.hidden, false);
+        assert.equal(runtime.elements.qaLiveRevision.textContent, "4");
+        assert.match(
+            runtime.elements.grid.children[0]
+                .querySelector(".rating-tv__name")
+                .textContent,
+            /Новый кадр/
+        );
+    }
+});
+
+
+test("QA live ignores a late materialized response from the previous step", async () => {
+    const lateData = deferredResponse();
+    const runtime = createRuntime({
+        qaLive: true,
+        responses: [
+            queuedResponse(buildQaLiveState({step: 1})),
+            lateData
+        ]
+    });
+    await runtime.flush();
+
+    assert.equal(runtime.fetchCalls.length, 2);
+    const lateSignal = runtime.fetchCalls[1].options.signal;
+    assert.equal(lateSignal.aborted, false);
+    assert.equal(
+        new URL(runtime.fetchCalls[1].url).searchParams.get("qa_step"),
+        "1"
+    );
+
+    const currentPayload = buildPayload({
+        fingerprint: "current-step-source",
+        entries: buildEntries(2, {prefix: "Текущий шаг"})
+    });
+    currentPayload.snapshot_revision = 8;
+    currentPayload.shift_score_fingerprint = "current-step-scores";
+    runtime.enqueueResponse(buildQaLiveState({step: 2}));
+    runtime.enqueueResponse(currentPayload);
+    await runtime.window.RatingTvScreen.loadQaLive();
+    await runtime.flush();
+
+    assert.equal(lateSignal.aborted, true);
+    assert.equal(runtime.fetchCalls.length, 4);
+    assert.equal(
+        new URL(runtime.fetchCalls[3].url).searchParams.get("qa_step"),
+        "2"
+    );
+    assert.equal(runtime.elements.qaLiveStep.textContent, "2");
+    assert.equal(runtime.elements.qaLiveRevision.textContent, "8");
+
+    const stalePayload = buildPayload({
+        fingerprint: "late-step-source",
+        entries: buildEntries(2, {prefix: "Опоздавший шаг"})
+    });
+    stalePayload.snapshot_revision = 7;
+    stalePayload.shift_score_fingerprint = "late-step-scores";
+    lateData.resolve(stalePayload);
+    await runtime.flush();
+
+    assert.equal(runtime.elements.qaLiveStep.textContent, "2");
+    assert.equal(runtime.elements.qaLiveRevision.textContent, "8");
+    assert.match(
+        runtime.elements.grid.children[0]
+            .querySelector(".rating-tv__name")
+            .textContent,
+        /Текущий шаг/
+    );
+    assert.doesNotMatch(
+        runtime.elements.grid.children[0]
+            .querySelector(".rating-tv__name")
+            .textContent,
+        /Опоздавший шаг/
     );
 });

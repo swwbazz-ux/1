@@ -62,6 +62,9 @@ from .driver_rating_materialization import (
     get_materialized_driver_rating_period,
     materialized_driver_rating_rows,
 )
+from .driver_rating_scope_membership import (
+    discover_driver_rating_current_scope,
+)
 from .forms import PilotFeedbackForm
 from .models import PilotFeedback, RatingPeriod, ReportTemplate, ReportType
 from .rating_tv import (
@@ -75,6 +78,13 @@ from .rating_tv_formula_replay import (
     RATING_TV_FORMULA_REPLAY_SCHEMA,
     RatingTvFormulaReplayError,
     load_rating_tv_formula_replay,
+)
+from .rating_tv_live_qa import (
+    RATING_TV_LIVE_QA_REFRESH_SECONDS,
+    RatingTvLiveQaStateError,
+    load_rating_tv_live_qa_state,
+    rating_tv_live_qa_gate_enabled,
+    rating_tv_live_qa_state_identity,
 )
 from .rating_tv_replay import (
     RATING_TV_REPLAY_SCHEMA,
@@ -721,6 +731,22 @@ def driver_rating_tv_view(request):
 
 @never_cache
 @require_GET
+def driver_rating_tv_qa_live_view(request):
+    access, access_response = _rating_tv_access_or_redirect(request)
+    if access_response:
+        return access_response
+    if not rating_tv_live_qa_gate_enabled(request):
+        raise Http404
+    return _render_driver_rating_tv(
+        request,
+        access=access,
+        qa_preview=False,
+        qa_live=True,
+    )
+
+
+@never_cache
+@require_GET
 def driver_rating_tv_qa_preview_view(request):
     access, access_response = _rating_tv_access_or_redirect(request)
     if access_response:
@@ -789,6 +815,7 @@ def _render_driver_rating_tv(
     *,
     access,
     qa_preview,
+    qa_live=False,
     qa_replay_kind='visual',
     initial_shift_type='night',
     formula_enabled_shift_types=None,
@@ -801,7 +828,28 @@ def _render_driver_rating_tv(
     ).replace('/0/', '/__employee_id__/')
     context = {
         'rating_tv_config': {
-            'apiUrl': reverse('driver_rating_tv_data_api'),
+            'apiUrl': reverse(
+                'driver_rating_tv_qa_live_data_api'
+                if qa_live
+                else 'driver_rating_tv_data_api'
+            ),
+            'qaLiveStateUrl': (
+                reverse('driver_rating_tv_qa_live_state_api')
+                if qa_live
+                else ''
+            ),
+            'qaLiveRunId': (
+                str(
+                    getattr(settings, 'RATING_TV_QA_LIVE_RUN_ID', '')
+                ).strip()
+                if qa_live
+                else ''
+            ),
+            'qaLiveSiteCode': (
+                str(getattr(settings, 'PORTAL_SITE_CODE', '')).strip()
+                if qa_live
+                else ''
+            ),
             'qaReplayKind': qa_replay_kind,
             'qaReplayUrl': reverse(
                 'driver_rating_tv_formula_qa_replay_api'
@@ -828,7 +876,11 @@ def _render_driver_rating_tv(
             ),
             'qaFormulaEnabledShiftTypes': formula_enabled_shift_types,
             'photoUrlTemplate': photo_url_template,
-            'refreshSeconds': RATING_TV_REFRESH_SECONDS,
+            'refreshSeconds': (
+                RATING_TV_LIVE_QA_REFRESH_SECONDS
+                if qa_live
+                else RATING_TV_REFRESH_SECONDS
+            ),
             'rotationSeconds': RATING_TV_ROTATION_SECONDS,
             'qaDayCount': (
                 RATING_TV_FORMULA_REPLAY_DAY_COUNT
@@ -836,6 +888,7 @@ def _render_driver_rating_tv(
                 else RATING_TV_QA_DAY_COUNT
             ),
             'qaPreview': qa_preview,
+            'qaLive': qa_live,
             'initialShiftType': initial_shift_type,
         },
         'rating_tv_preview_payload': (
@@ -844,6 +897,7 @@ def _render_driver_rating_tv(
             else None
         ),
         'rating_tv_qa_preview': qa_preview,
+        'rating_tv_qa_live': qa_live,
         'rating_tv_qa_replay_kind': qa_replay_kind,
         'rating_tv_access': access,
     }
@@ -865,6 +919,151 @@ def driver_rating_tv_data_api(request):
             status=404,
         )
     return driver_period_rating_api(request)
+
+
+def _rating_tv_qa_live_api_access(request):
+    if not rating_tv_live_qa_gate_enabled(request):
+        return None, None, _private_rating_json(
+            {'error': 'QA-live экран рейтинга не включён.'},
+            status=404,
+        )
+    access = get_rating_observation_access(request)
+    if access is None:
+        return None, None, _private_rating_json(
+            {'error': 'Требуется авторизация.'},
+            status=401,
+        )
+    if access.role.code not in {'dispatcher', 'admin', 'manager'}:
+        return None, None, _private_rating_json(
+            {'error': 'Недостаточно прав.'},
+            status=403,
+        )
+    site_scope = get_rating_site_scope(access)
+    if site_scope is None:
+        return None, None, _private_rating_json(
+            {'error': 'Недостаточно прав.'},
+            status=403,
+        )
+    return access, site_scope, None
+
+
+def _rating_tv_qa_live_state_for_scope(site_scope):
+    state = load_rating_tv_live_qa_state()
+    employee_ids, watch_composition_ids = site_scope
+    placeholder_employee_ids = {
+        placeholder['employee_id']
+        for placeholder in state['placeholders']
+    }
+    if (
+        state['watch_composition_id'] not in set(watch_composition_ids)
+        or not RatingPeriod.objects.filter(
+            pk=state['rating_period_id'],
+            is_active=True,
+        ).exists()
+        or not placeholder_employee_ids.issubset(set(employee_ids))
+    ):
+        raise RatingTvLiveQaStateError(
+            'QA-live state находится вне области текущей роли.'
+        )
+    employees = {
+        employee.id: employee.full_name
+        for employee in Employee.objects.filter(
+            id__in=placeholder_employee_ids,
+            watch_composition_id=state['watch_composition_id'],
+            is_active=True,
+            status=Employee.Status.ACTIVE,
+        ).only('id', 'full_name')
+    }
+    if set(employees) != placeholder_employee_ids:
+        raise RatingTvLiveQaStateError(
+            'QA-live state содержит недоступного сотрудника.'
+        )
+    state['placeholders'] = [
+        {
+            **placeholder,
+            'full_name': employees[placeholder['employee_id']],
+        }
+        for placeholder in state['placeholders']
+    ]
+    return state
+
+
+def _rating_tv_qa_live_waiting_response():
+    return _private_rating_json(
+        {
+            'error': (
+                'Ожидание актуального шага синтетического '
+                'QA-live прогона.'
+            ),
+        },
+        status=503,
+    )
+
+
+@never_cache
+@require_GET
+def driver_rating_tv_qa_live_state_api(request):
+    _access, site_scope, access_response = _rating_tv_qa_live_api_access(
+        request
+    )
+    if access_response:
+        return access_response
+    try:
+        state = _rating_tv_qa_live_state_for_scope(site_scope)
+    except RatingTvLiveQaStateError:
+        return _rating_tv_qa_live_waiting_response()
+    return _private_rating_json(state)
+
+
+def _resolve_rating_tv_qa_live_data(request, site_scope):
+    try:
+        state_before = _rating_tv_qa_live_state_for_scope(site_scope)
+    except RatingTvLiveQaStateError:
+        return _rating_tv_qa_live_waiting_response()
+
+    expected_query = {
+        'rating_period': str(state_before['rating_period_id']),
+        'watch_composition': str(state_before['watch_composition_id']),
+        'shift_type': state_before['shift_type'],
+        'qa_run_id': state_before['run_id'],
+        'qa_step': str(state_before['step']),
+    }
+    if any(
+        request.GET.get(key) != value
+        for key, value in expected_query.items()
+    ):
+        return _private_rating_json(
+            {
+                'error': (
+                    'Запрошенная группа не соответствует текущему '
+                    'шагу QA-live прогона.'
+                ),
+            },
+            status=409,
+        )
+
+    materialized_response = driver_period_rating_api(request)
+    try:
+        state_after = _rating_tv_qa_live_state_for_scope(site_scope)
+    except RatingTvLiveQaStateError:
+        return _rating_tv_qa_live_waiting_response()
+    if (
+        rating_tv_live_qa_state_identity(state_before)
+        != rating_tv_live_qa_state_identity(state_after)
+    ):
+        return _rating_tv_qa_live_waiting_response()
+    return materialized_response
+
+
+@never_cache
+@require_GET
+def driver_rating_tv_qa_live_data_api(request):
+    _access, site_scope, access_response = _rating_tv_qa_live_api_access(
+        request
+    )
+    if access_response:
+        return access_response
+    return _resolve_rating_tv_qa_live_data(request, site_scope)
 
 
 @never_cache
@@ -1311,13 +1510,10 @@ def driver_period_rating_api(request):
             )
         )
 
-    expected_employee_ids = tuple(
-        Employee.objects
-        .filter(
-            id__in=employee_ids,
-            watch_composition=watch_composition,
-        )
-        .values_list('id', flat=True)
+    current_scope = discover_driver_rating_current_scope(
+        rating_period,
+        watch_composition,
+        shift_type=shift_type,
     )
     try:
         rating = dict(
@@ -1325,8 +1521,12 @@ def driver_period_rating_api(request):
                 rating_period,
                 watch_composition,
                 shift_type=shift_type,
-                allowed_employee_ids=employee_ids,
-                expected_employee_ids=expected_employee_ids,
+                allowed_employee_ids=(
+                    current_scope.allowed_employee_ids
+                ),
+                expected_employee_ids=(
+                    current_scope.expected_employee_ids
+                ),
             )
         )
     except DriverRatingSnapshotUnavailable as error:

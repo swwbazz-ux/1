@@ -19,6 +19,9 @@ from .views import (
     driver_rating_tv_data_api,
     driver_rating_tv_formula_qa_preview_view,
     driver_rating_tv_formula_qa_replay_api,
+    driver_rating_tv_qa_live_data_api,
+    driver_rating_tv_qa_live_state_api,
+    driver_rating_tv_qa_live_view,
     driver_rating_tv_qa_replay_api,
     driver_rating_tv_qa_preview_view,
     driver_rating_tv_view,
@@ -52,6 +55,21 @@ urlpatterns = [
         'reports/rating/tv/qa-preview/',
         driver_rating_tv_qa_preview_view,
         name='driver_rating_tv_qa_preview',
+    ),
+    path(
+        'reports/rating/tv/qa-live/',
+        driver_rating_tv_qa_live_view,
+        name='driver_rating_tv_qa_live',
+    ),
+    path(
+        'reports/rating/tv/qa-live/data/',
+        driver_rating_tv_qa_live_data_api,
+        name='driver_rating_tv_qa_live_data_api',
+    ),
+    path(
+        'reports/rating/tv/qa-live/state/',
+        driver_rating_tv_qa_live_state_api,
+        name='driver_rating_tv_qa_live_state_api',
     ),
     path(
         'reports/rating/tv/qa-formula-preview/',

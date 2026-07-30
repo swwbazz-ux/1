@@ -22,7 +22,10 @@ from .driver_rating_materialization import (
     materialized_driver_rating_rows,
 )
 from .driver_watch_rating import DRIVER_RATING_FORMULA_VERSION
-from .driver_rating_scope_membership import linked_driver_snapshot_scopes
+from .driver_rating_scope_membership import (
+    discover_driver_rating_current_scope,
+    linked_driver_snapshot_scopes,
+)
 from .models import RatingPeriod
 
 
@@ -157,24 +160,27 @@ class DriverRatingProductionDataProvider:
         ).first()
         if watch_composition is None:
             return rating_period, shift_type, None
-        allowed_employee_ids = tuple(
-            self._active_driver_scope()
-            .values_list('id', flat=True)
+        current_scope = discover_driver_rating_current_scope(
+            rating_period,
+            watch_composition,
+            shift_type=shift_type,
         )
-        expected_employee_ids = tuple(
-            self._active_driver_scope()
-            .filter(watch_composition=watch_composition)
-            .values_list('id', flat=True)
-        )
-        if employee.id not in allowed_employee_ids:
+        if (
+            employee.id
+            not in current_scope.allowed_employee_ids
+        ):
             return rating_period, shift_type, None
         try:
             rating = get_materialized_driver_rating_period(
                 rating_period,
                 watch_composition,
                 shift_type=shift_type,
-                allowed_employee_ids=allowed_employee_ids,
-                expected_employee_ids=expected_employee_ids,
+                allowed_employee_ids=(
+                    current_scope.allowed_employee_ids
+                ),
+                expected_employee_ids=(
+                    current_scope.expected_employee_ids
+                ),
             )
         except DriverRatingSnapshotUnavailable as error:
             rating = {

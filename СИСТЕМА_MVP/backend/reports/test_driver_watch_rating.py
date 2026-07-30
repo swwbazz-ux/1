@@ -1783,6 +1783,81 @@ class DriverRatingApiScopeTests(
             {visible.id},
         )
 
+    def test_period_api_uses_current_day_night_scope_without_passports(self):
+        day_driver = self.employee('Дневной водитель materialized API')
+        night_driver = self.employee('Ночной водитель materialized API')
+        self.snapshot(
+            day_driver,
+            ordinal=1,
+            trip_count=20,
+            shift_type=ShiftType.DAY,
+        )
+        self.snapshot(
+            night_driver,
+            ordinal=2,
+            trip_count=20,
+            shift_type=ShiftType.NIGHT,
+        )
+        self.login_manager()
+
+        with (
+            patch(
+                (
+                    'reports.driver_rating_scope_membership.'
+                    'linked_driver_snapshot_scopes'
+                )
+            ) as linked_snapshot_scan,
+            patch(
+                (
+                    'reports.driver_rating_scope_membership.'
+                    'driver_rating_group_membership'
+                )
+            ) as historical_membership_scan,
+        ):
+            day_response = self.client.get(
+                reverse('driver_period_rating_api'),
+                {
+                    'rating_period': self.rating_period.id,
+                    'watch_composition': self.composition.id,
+                    'shift_type': ShiftType.DAY,
+                },
+            )
+            night_response = self.client.get(
+                reverse('driver_period_rating_api'),
+                {
+                    'rating_period': self.rating_period.id,
+                    'watch_composition': self.composition.id,
+                    'shift_type': ShiftType.NIGHT,
+                },
+            )
+
+        self.assertEqual(day_response.status_code, 200)
+        self.assertEqual(night_response.status_code, 200)
+        self.assertEqual(
+            [
+                entry['employee_id']
+                for entry in day_response.json()['entries']
+            ],
+            [day_driver.id],
+        )
+        self.assertEqual(
+            [
+                entry['employee_id']
+                for entry in night_response.json()['entries']
+            ],
+            [night_driver.id],
+        )
+        self.assertNotEqual(
+            day_response.json().get('snapshot_status'),
+            'snapshot_scope_mismatch',
+        )
+        self.assertNotEqual(
+            night_response.json().get('snapshot_status'),
+            'snapshot_scope_mismatch',
+        )
+        linked_snapshot_scan.assert_not_called()
+        historical_membership_scan.assert_not_called()
+
     def test_period_api_keeps_historical_composition_after_transfer(self):
         visible = self.employee('Водитель после перевода состава API')
         self.snapshot(visible, ordinal=1, trip_count=20)
@@ -1917,6 +1992,12 @@ class DriverRatingPortalProviderTests(
                     'linked_driver_snapshot_scopes'
                 )
             ) as passport_scan,
+            patch(
+                (
+                    'reports.driver_rating_scope_membership.'
+                    'driver_rating_group_membership'
+                )
+            ) as historical_membership_scan,
             CaptureQueriesContext(connection) as queries,
         ):
             ranking = provider.ranking(employee)
@@ -1924,6 +2005,7 @@ class DriverRatingPortalProviderTests(
         self.assertTrue(ranking.available)
         calculator.assert_not_called()
         passport_scan.assert_not_called()
+        historical_membership_scan.assert_not_called()
         materialized_table = (
             DriverRatingPeriodMaterializedSnapshot._meta.db_table
         )

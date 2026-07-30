@@ -40,7 +40,20 @@
         qaPause: root.querySelector("[data-qa-pause]"),
         qaStep: root.querySelector("[data-qa-step]"),
         qaForward: root.querySelector("[data-qa-forward]"),
-        qaSpeed: root.querySelector("[data-qa-speed]")
+        qaSpeed: root.querySelector("[data-qa-speed]"),
+        qaLiveStep: root.querySelector("[data-qa-live-step]"),
+        qaLiveVirtualAt: root.querySelector("[data-qa-live-virtual-at]"),
+        qaLiveShift: root.querySelector("[data-qa-live-shift]"),
+        qaLiveRevision: root.querySelector("[data-qa-live-revision]"),
+        qaLiveSourceFingerprint: root.querySelector(
+            "[data-qa-live-source-fingerprint]"
+        ),
+        qaLiveScoreFingerprint: root.querySelector(
+            "[data-qa-live-score-fingerprint]"
+        ),
+        qaLiveStateStatus: root.querySelector(
+            "[data-qa-live-state-status]"
+        )
     };
 
     var state = {
@@ -60,6 +73,10 @@
         rotationRemaining: Number(config.rotationSeconds) || 15,
         rotationPlaying: true,
         qaPreview: config.qaPreview === true,
+        qaLive: config.qaLive === true,
+        qaLiveState: null,
+        qaLiveRequestGeneration: 0,
+        qaLiveRequestController: null,
         qaReplayEnabled: config.qaReplayEnabled === true,
         qaReplayKind: ["visual", "formula"].includes(config.qaReplayKind)
             ? config.qaReplayKind
@@ -261,10 +278,14 @@
         if (elements.shiftType) {
             elements.shiftType.value = state.shiftType;
         }
-        if (state.qaPreview) {
+        if (state.qaPreview || state.qaLive) {
             if (elements.period) elements.period.disabled = true;
             if (elements.composition) elements.composition.disabled = true;
-            updateQaShiftControl();
+            if (elements.shiftType && state.qaLive) {
+                elements.shiftType.disabled = true;
+            } else {
+                updateQaShiftControl();
+            }
         }
     }
 
@@ -691,15 +712,106 @@
         return Object.assign({}, payload, {entries: entries});
     }
 
+    function shortFingerprint(value) {
+        var normalized = String(value || "").trim();
+        return normalized ? normalized.slice(0, 10) : "—";
+    }
+
+    function renderQaLiveStateMetadata(qaState) {
+        if (!qaState) return;
+        if (elements.qaLiveStep) {
+            elements.qaLiveStep.textContent = String(qaState.step);
+        }
+        if (elements.qaLiveVirtualAt) {
+            elements.qaLiveVirtualAt.textContent = formatDateTime(
+                qaState.virtual_at
+            );
+        }
+        if (elements.qaLiveShift) {
+            elements.qaLiveShift.textContent = qaState.shift_type === "day"
+                ? "Дневная"
+                : "Ночная";
+        }
+        if (elements.qaLiveStateStatus) {
+            elements.qaLiveStateStatus.textContent = (
+                "Получен шаг "
+                + qaState.step
+                + " · ждём только закрытые смены"
+            );
+        }
+    }
+
+    function applyQaLivePlaceholders(payload) {
+        if (
+            !state.qaLive
+            || !state.qaLiveState
+            || !Array.isArray(state.qaLiveState.placeholders)
+        ) {
+            return payload;
+        }
+        var entries = Array.isArray(payload.entries)
+            ? payload.entries.map(function (entry) {
+                return Object.assign({}, entry);
+            })
+            : [];
+        var existingIds = new Set(entries.map(function (entry) {
+            return String(entry.employee_id);
+        }));
+        var nextDisplayOrder = entries.reduce(function (maximum, entry) {
+            return Math.max(
+                maximum,
+                Number(entry.display_order || entry.place || 0)
+            );
+        }, 0);
+        state.qaLiveState.placeholders.forEach(function (placeholder) {
+            var employeeId = String(placeholder.employee_id);
+            if (existingIds.has(employeeId)) return;
+            nextDisplayOrder += 1;
+            entries.push({
+                employee_id: placeholder.employee_id,
+                full_name: (
+                    placeholder.full_name
+                    || "Синтетический сотрудник №"
+                        + placeholder.employee_id
+                ),
+                equipment: [],
+                row_status: placeholder.status,
+                ranking_eligible: false,
+                shift_count: null,
+                withheld_shift_count: (
+                    placeholder.status === "withheld" ? 1 : 0
+                ),
+                withheld_reasons: {},
+                quality_flags: Array.isArray(placeholder.reasons)
+                    ? placeholder.reasons.slice()
+                    : [],
+                score: null,
+                blocks: null,
+                confidence: null,
+                place: null,
+                shared_score_place: null,
+                display_order: nextDisplayOrder,
+                level: "",
+                position_delta: null
+            });
+            existingIds.add(employeeId);
+        });
+        return Object.assign({}, payload, {entries: entries});
+    }
+
     function renderPayloadMetadata(payload) {
         state.payload = payload;
         updateScopeControls(payload);
-        if (!state.qaPreview) {
+        if (!state.qaPreview && !state.qaLive) {
             ensureInitialProgramGroup();
         }
 
         if (elements.status) {
-            if (state.qaPreview) {
+            if (state.qaLive) {
+                elements.status.textContent = (
+                    "Синтетический live-тест — неофициально"
+                );
+            } else if (state.qaPreview) {
                 elements.status.textContent = payload.formula_evaluated
                     ? "Виртуальный расчёт — неофициально"
                     : "Визуальный replay — не KPI";
@@ -719,6 +831,23 @@
         }
         if (elements.qaDayCount && payload.qa_day_count != null) {
             elements.qaDayCount.textContent = String(payload.qa_day_count);
+        }
+        if (elements.qaLiveRevision) {
+            elements.qaLiveRevision.textContent = (
+                payload.snapshot_revision == null
+                    ? "—"
+                    : String(payload.snapshot_revision)
+            );
+        }
+        if (elements.qaLiveSourceFingerprint) {
+            elements.qaLiveSourceFingerprint.textContent = shortFingerprint(
+                payload.source_fingerprint
+            );
+        }
+        if (elements.qaLiveScoreFingerprint) {
+            elements.qaLiveScoreFingerprint.textContent = shortFingerprint(
+                payload.shift_score_fingerprint
+            );
         }
     }
 
@@ -770,6 +899,16 @@
             url.searchParams.set(
                 "watch_composition",
                 state.selectedComposition
+            );
+        }
+        if (state.qaLive && state.qaLiveState) {
+            url.searchParams.set(
+                "qa_run_id",
+                state.qaLiveState.run_id
+            );
+            url.searchParams.set(
+                "qa_step",
+                String(state.qaLiveState.step)
             );
         }
         return url.toString();
@@ -1660,6 +1799,231 @@
         }
     }
 
+    function qaLiveStateGroupKey(qaState) {
+        if (!qaState) return "";
+        return groupKey(
+            qaState.rating_period_id,
+            qaState.watch_composition_id,
+            qaState.shift_type
+        );
+    }
+
+    function validateQaLiveState(documentValue) {
+        if (!documentValue || typeof documentValue !== "object") {
+            return false;
+        }
+        var expectedKeys = [
+            "schema",
+            "schema_version",
+            "synthetic",
+            "official",
+            "official_rating_eligible",
+            "run_id",
+            "site_code",
+            "rating_period_id",
+            "watch_composition_id",
+            "step",
+            "virtual_at",
+            "shift_type",
+            "placeholders"
+        ].sort();
+        if (
+            Object.keys(documentValue).sort().join("|")
+            !== expectedKeys.join("|")
+        ) {
+            return false;
+        }
+        if (
+            documentValue.schema
+                !== "driver-rating-qa-live-state"
+            || documentValue.schema_version !== 1
+            || documentValue.synthetic !== true
+            || documentValue.official !== false
+            || documentValue.official_rating_eligible !== false
+            || documentValue.run_id !== config.qaLiveRunId
+            || documentValue.site_code !== config.qaLiveSiteCode
+            || !Number.isSafeInteger(documentValue.step)
+            || documentValue.step < 0
+            || !["day", "night"].includes(documentValue.shift_type)
+            || !Number.isSafeInteger(documentValue.rating_period_id)
+            || documentValue.rating_period_id <= 0
+            || !Number.isSafeInteger(documentValue.watch_composition_id)
+            || documentValue.watch_composition_id <= 0
+            || !parseDate(documentValue.virtual_at)
+            || !Array.isArray(documentValue.placeholders)
+        ) {
+            return false;
+        }
+        var forbiddenKeys = [
+            "score",
+            "place",
+            "shared_score_place",
+            "blocks",
+            "kpi",
+            "weights",
+            "confidence",
+            "source_fingerprint",
+            "shift_score_fingerprint",
+            "payload_fingerprint",
+            "snapshot_revision"
+        ];
+        return documentValue.placeholders.every(function (placeholder) {
+            if (!placeholder || typeof placeholder !== "object") {
+                return false;
+            }
+            var placeholderKeys = Object.keys(placeholder).sort();
+            if (
+                placeholderKeys.join("|")
+                !== [
+                    "employee_id",
+                    "full_name",
+                    "reasons",
+                    "status"
+                ].sort().join("|")
+            ) {
+                return false;
+            }
+            return (
+                Number.isSafeInteger(placeholder.employee_id)
+                && placeholder.employee_id > 0
+                && ["withheld", "not_observed"].includes(
+                    placeholder.status
+                )
+                && Array.isArray(placeholder.reasons)
+                && !forbiddenKeys.some(function (key) {
+                    return Object.prototype.hasOwnProperty.call(
+                        placeholder,
+                        key
+                    );
+                })
+            );
+        });
+    }
+
+    function clearQaLiveMaterializedMetadata() {
+        if (elements.updatedAt) {
+            elements.updatedAt.textContent = "—";
+        }
+        if (elements.qaLiveRevision) {
+            elements.qaLiveRevision.textContent = "—";
+        }
+        if (elements.qaLiveSourceFingerprint) {
+            elements.qaLiveSourceFingerprint.textContent = "—";
+        }
+        if (elements.qaLiveScoreFingerprint) {
+            elements.qaLiveScoreFingerprint.textContent = "—";
+        }
+    }
+
+    function showQaLiveWaiting(message) {
+        state.payload = null;
+        state.activeGroupKey = "";
+        state.sourceFingerprint = "";
+        clearQaLiveMaterializedMetadata();
+        if (elements.status) {
+            elements.status.textContent = "Ожидание QA-live шага";
+        }
+        if (elements.qaLiveStateStatus) {
+            elements.qaLiveStateStatus.textContent = (
+                message || "Ожидание первого шага"
+            );
+        }
+        showMessage(
+            "Ожидание первого закрытого шага",
+            "Рейтинг появится после публикации материализованного снимка."
+        );
+    }
+
+    async function loadQaLive() {
+        if (
+            !state.qaLive
+            || !config.qaLiveStateUrl
+            || !config.qaLiveRunId
+        ) {
+            showQaLiveWaiting("QA-live режим не настроен.");
+            return;
+        }
+        if (state.qaLiveRequestController) {
+            state.qaLiveRequestController.abort();
+        }
+        state.qaLiveRequestGeneration += 1;
+        var generation = state.qaLiveRequestGeneration;
+        var controller = new AbortController();
+        state.qaLiveRequestController = controller;
+        try {
+            var response = await window.fetch(
+                config.qaLiveStateUrl,
+                {
+                    method: "GET",
+                    credentials: "same-origin",
+                    cache: "no-store",
+                    headers: {"Accept": "application/json"},
+                    signal: controller.signal
+                }
+            );
+            var qaState = await response.json();
+            if (
+                generation !== state.qaLiveRequestGeneration
+                || controller.signal.aborted
+            ) {
+                return;
+            }
+            if (!response.ok || !validateQaLiveState(qaState)) {
+                state.qaLiveState = null;
+                showQaLiveWaiting(
+                    qaState.error || "Ожидание актуального QA-live шага."
+                );
+                return;
+            }
+            var previousGroupKey = qaLiveStateGroupKey(
+                state.qaLiveState
+            );
+            var nextGroupKey = qaLiveStateGroupKey(qaState);
+            if (previousGroupKey && previousGroupKey !== nextGroupKey) {
+                state.payload = null;
+                state.activeGroupKey = "";
+                showMessage(
+                    "Переключаем закрытую смену",
+                    "Ожидаем снимок новой QA-live группы."
+                );
+            }
+            state.qaLiveState = qaState;
+            state.selectedPeriod = String(qaState.rating_period_id);
+            state.selectedComposition = String(
+                qaState.watch_composition_id
+            );
+            state.shiftType = qaState.shift_type;
+            if (elements.shiftType) {
+                elements.shiftType.value = state.shiftType;
+                elements.shiftType.disabled = true;
+            }
+            renderQaLiveStateMetadata(qaState);
+            await loadRating({
+                forceRefresh: true,
+                replaceRequest: true
+            });
+        } catch (error) {
+            if (
+                error
+                && error.name === "AbortError"
+            ) {
+                return;
+            }
+            if (generation !== state.qaLiveRequestGeneration) return;
+            state.qaLiveState = null;
+            showQaLiveWaiting(
+                "Нет актуального состояния синтетического прогона."
+            );
+        } finally {
+            if (
+                generation === state.qaLiveRequestGeneration
+                && state.qaLiveRequestController === controller
+            ) {
+                state.qaLiveRequestController = null;
+            }
+        }
+    }
+
     async function loadRating(options) {
         options = options || {};
         if (state.qaPreview) {
@@ -1676,6 +2040,12 @@
             state.requestInFlight = false;
         }
         var requestedGroupKey = currentGroupKey();
+        var requestedIdentityComplete = Boolean(
+            state.selectedPeriod && state.selectedComposition
+        );
+        var requestedQaLiveStep = state.qaLiveState
+            ? state.qaLiveState.step
+            : null;
         var cachedGroup = state.groupCache.get(requestedGroupKey);
         var cacheAgeMilliseconds = cachedGroup
             ? Date.now() - cachedGroup.fetchedAt
@@ -1699,6 +2069,18 @@
             return;
         }
         if (state.requestInFlight) return;
+        if (
+            state.activeGroupKey
+            && state.activeGroupKey !== requestedGroupKey
+            && !cachedGroup
+        ) {
+            showMessage(
+                "Ожидаем снимок выбранной группы",
+                "Данные другой смены на этом месте не показываются."
+            );
+            state.payload = null;
+            state.activeGroupKey = "";
+        }
 
         state.requestGeneration += 1;
         var generation = state.requestGeneration;
@@ -1718,7 +2100,20 @@
                 signal: controller.signal
             });
             var payload = await response.json();
-            if (generation !== state.requestGeneration) return;
+            if (
+                generation !== state.requestGeneration
+                || (
+                    state.qaLive
+                    && (
+                        !state.qaLiveState
+                        || state.qaLiveState.step !== requestedQaLiveStep
+                        || qaLiveStateGroupKey(state.qaLiveState)
+                            !== requestedGroupKey
+                    )
+                )
+            ) {
+                return;
+            }
 
             if (!response.ok) {
                 if (
@@ -1729,17 +2124,43 @@
                     await loadRating({replaceRequest: true});
                     return;
                 }
+                if (
+                    state.qaLive
+                    && [409, 503].includes(response.status)
+                ) {
+                    state.payload = null;
+                    state.activeGroupKey = "";
+                    state.sourceFingerprint = "";
+                    state.groupCache.delete(requestedGroupKey);
+                    clearQaLiveMaterializedMetadata();
+                    showMessage(
+                        "Ожидаем согласованный QA-live снимок",
+                        payload.error
+                        || "Текущий шаг будет прочитан повторно."
+                    );
+                    return;
+                }
+                var hasRequestedGroupPayload = Boolean(
+                    state.payload
+                    && state.activeGroupKey === requestedGroupKey
+                );
                 if ([401, 403, 409].includes(response.status)) {
                     state.payload = null;
                     state.activeGroupKey = "";
-                    state.groupCache.clear();
+                    if ([401, 403].includes(response.status)) {
+                        state.groupCache.clear();
+                    } else {
+                        state.groupCache.delete(requestedGroupKey);
+                    }
                     showMessage(
                         "Рейтинг временно недоступен",
                         payload.error || "Проверьте доступ и выбранную группу."
                     );
-                } else if (state.payload && elements.status) {
+                } else if (hasRequestedGroupPayload && elements.status) {
                     elements.status.textContent = "Показан последний снимок";
                 } else {
+                    state.payload = null;
+                    state.activeGroupKey = "";
                     showMessage(
                         "Не удалось получить рейтинг",
                         payload.error || "Сервер не вернул готовый снимок."
@@ -1750,8 +2171,35 @@
 
             var fingerprint = String(payload.source_fingerprint || "");
             var responseGroupKey = payloadGroupKey(payload);
+            if (
+                (
+                    (state.qaLive || requestedIdentityComplete)
+                    && responseGroupKey !== requestedGroupKey
+                )
+                || (
+                    state.qaLive
+                    && responseGroupKey
+                        !== qaLiveStateGroupKey(state.qaLiveState)
+                )
+            ) {
+                state.payload = null;
+                state.activeGroupKey = "";
+                state.sourceFingerprint = "";
+                if (state.qaLive) {
+                    state.groupCache.delete(requestedGroupKey);
+                    clearQaLiveMaterializedMetadata();
+                }
+                showMessage(
+                    "Снимок другой группы отклонён",
+                    "Ожидаем результат выбранной закрытой смены."
+                );
+                return;
+            }
+            payload = applyQaLivePlaceholders(payload);
             var previousCachedGroup = state.groupCache.get(responseGroupKey);
             if (
+                !state.qaLive
+                &&
                 fingerprint
                 && previousCachedGroup
                 && fingerprint === previousCachedGroup.fingerprint
@@ -1793,9 +2241,15 @@
             state.refreshRemaining = state.refreshSeconds;
         } catch (error) {
             if (error && error.name === "AbortError") return;
-            if (state.payload && elements.status) {
+            if (
+                state.payload
+                && state.activeGroupKey === requestedGroupKey
+                && elements.status
+            ) {
                 elements.status.textContent = "Показан последний снимок";
             } else {
+                state.payload = null;
+                state.activeGroupKey = "";
                 showMessage(
                     "Нет связи с сервером",
                     "Последний успешный рейтинг пока не получен."
@@ -1869,7 +2323,11 @@
         state.refreshRemaining -= 1;
         if (state.refreshRemaining <= 0) {
             state.refreshRemaining = state.refreshSeconds;
-            loadRating();
+            if (state.qaLive) {
+                loadQaLive();
+            } else {
+                loadRating();
+            }
         }
         if (
             state.rotationPlaying
@@ -2014,7 +2472,7 @@
     }
 
     function bindEvents() {
-        if (elements.period && !state.qaPreview) {
+        if (elements.period && !state.qaPreview && !state.qaLive) {
             elements.period.addEventListener("change", function () {
                 state.selectedPeriod = elements.period.value;
                 state.selectedComposition = "";
@@ -2024,7 +2482,11 @@
                 loadRating({replaceRequest: true});
             });
         }
-        if (elements.composition && !state.qaPreview) {
+        if (
+            elements.composition
+            && !state.qaPreview
+            && !state.qaLive
+        ) {
             elements.composition.addEventListener("change", function () {
                 state.selectedComposition = elements.composition.value;
                 state.rotationRemaining = state.rotationSeconds;
@@ -2034,6 +2496,10 @@
         }
         if (elements.shiftType) {
             elements.shiftType.addEventListener("change", function () {
+                if (state.qaLive) {
+                    elements.shiftType.value = state.shiftType;
+                    return;
+                }
                 if (state.qaPreview) {
                     if (state.qaReplayKind !== "formula") return;
                     if (
@@ -2162,6 +2628,9 @@
     updateCountdowns();
     if (state.qaPreview) {
         loadQaReplay();
+    } else if (state.qaLive) {
+        loadQaLive();
+        state.timerId = window.setInterval(tick, 1000);
     } else {
         loadRating();
         state.timerId = window.setInterval(tick, 1000);
@@ -2171,6 +2640,7 @@
         formatSeconds: formatSeconds,
         layoutGrid: layoutGrid,
         loadRating: loadRating,
+        loadQaLive: loadQaLive,
         loadQaReplay: loadQaReplay,
         moveGroup: moveGroup,
         pauseQaReplay: pauseQaReplay,

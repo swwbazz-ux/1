@@ -11,7 +11,8 @@ from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
 from core.production_time import production_work_date
-from shifts.models import ShiftType
+from shifts.models import EmployeeShift, ShiftType
+from users.models import WatchComposition
 
 from .driver_rating_materialization import (
     DriverRatingMaterializationError,
@@ -21,9 +22,16 @@ from .driver_rating_materialization import (
     get_materialized_driver_rating_period,
     refresh_driver_rating_group,
 )
+from .driver_rating_scope_membership import (
+    discover_driver_rating_current_scope,
+    discover_driver_rating_group_scope,
+)
 from .models import (
     DriverRatingPeriodMaterializedSnapshot,
     DriverRatingSnapshotRefreshStatus,
+    DriverShiftPassportCaptureRequest,
+    DriverShiftPassportRequestStatus,
+    DriverShiftPassportTrigger,
     RatingPeriod,
 )
 from .test_driver_watch_rating import DriverRatingFixtureMixin
@@ -69,6 +77,27 @@ class DriverRatingMaterializationTests(
             self.rating_period,
             self.composition,
             **kwargs,
+        )
+
+    def _closed_driver_shift(
+        self,
+        employee,
+        *,
+        shift_type=ShiftType.DAY,
+        watch_period=None,
+        equipment=None,
+    ):
+        opened_at = self.now - timedelta(days=1, hours=12)
+        return EmployeeShift.objects.create(
+            employee=employee,
+            shift_type=shift_type,
+            workplace_code='driver',
+            watch_period=watch_period,
+            equipment=equipment,
+            opened_at=opened_at,
+            closed_at=opened_at + timedelta(hours=12),
+            opened_by=employee,
+            closed_by=employee,
         )
 
     def test_publish_and_read_use_one_shared_database_row(self):
@@ -140,6 +169,297 @@ class DriverRatingMaterializationTests(
         self.assertTrue(second.changed)
         self.assertEqual(second.revision, first.revision + 1)
         self.assertEqual(payload['summary']['rated_shift_count'], 2)
+
+    def test_day_and_night_current_and_member_scopes_are_separate(self):
+        day_driver = self.employee('Дневной водитель раздельного состава')
+        night_driver = self.employee('Ночной водитель раздельного состава')
+        self.snapshot(
+            day_driver,
+            ordinal=1,
+            trip_count=20,
+            shift_type=ShiftType.DAY,
+        )
+        self.snapshot(
+            night_driver,
+            ordinal=2,
+            trip_count=20,
+            shift_type=ShiftType.NIGHT,
+        )
+
+        day_scope = discover_driver_rating_current_scope(
+            self.rating_period,
+            self.composition,
+            shift_type=ShiftType.DAY,
+        )
+        night_scope = discover_driver_rating_current_scope(
+            self.rating_period,
+            self.composition,
+            shift_type=ShiftType.NIGHT,
+        )
+        self._refresh(shift_type=ShiftType.DAY)
+        self._refresh(shift_type=ShiftType.NIGHT)
+        day_snapshot = (
+            DriverRatingPeriodMaterializedSnapshot.objects.get(
+                rating_period=self.rating_period,
+                watch_composition=self.composition,
+                shift_type=ShiftType.DAY,
+            )
+        )
+        night_snapshot = (
+            DriverRatingPeriodMaterializedSnapshot.objects.get(
+                rating_period=self.rating_period,
+                watch_composition=self.composition,
+                shift_type=ShiftType.NIGHT,
+            )
+        )
+
+        self.assertEqual(
+            day_scope.expected_employee_ids,
+            (day_driver.id,),
+        )
+        self.assertEqual(
+            night_scope.expected_employee_ids,
+            (night_driver.id,),
+        )
+        self.assertEqual(
+            day_snapshot.member_employee_ids,
+            [day_driver.id],
+        )
+        self.assertEqual(
+            night_snapshot.member_employee_ids,
+            [night_driver.id],
+        )
+        self.assertEqual(
+            [
+                entry['employee_id']
+                for entry in day_snapshot.payload['entries']
+            ],
+            [day_driver.id],
+        )
+        self.assertEqual(
+            [
+                entry['employee_id']
+                for entry in night_snapshot.payload['entries']
+            ],
+            [night_driver.id],
+        )
+
+    def test_pending_closed_shift_is_in_current_expected_scope(self):
+        driver = self.employee('Водитель ожидающего паспорта')
+        shift = self._closed_driver_shift(
+            driver,
+            watch_period=self.watch,
+            equipment=None,
+        )
+        DriverShiftPassportCaptureRequest.objects.create(
+            shift=shift,
+            request_key=f'pending-current-scope-{shift.id}',
+            trigger=DriverShiftPassportTrigger.DRIVER_CLOSE,
+            calculator_version='pending-current-scope-v1',
+            closed_at=shift.closed_at,
+            status=DriverShiftPassportRequestStatus.PENDING,
+        )
+
+        scope = discover_driver_rating_current_scope(
+            self.rating_period,
+            self.composition,
+            shift_type=ShiftType.DAY,
+        )
+        full_scope = discover_driver_rating_group_scope(
+            self.rating_period,
+            self.composition,
+            shift_type=ShiftType.DAY,
+        )
+
+        self.assertEqual(
+            scope.expected_employee_ids,
+            (driver.id,),
+        )
+        self.assertEqual(
+            full_scope.expected_employee_ids,
+            (driver.id,),
+        )
+        self.assertEqual(
+            full_scope.historical_employee_ids,
+            (),
+        )
+        self.assertEqual(
+            full_scope.latest_closed_at[driver.id],
+            shift.closed_at,
+        )
+        self.assertTrue(
+            shift.passport_capture_requests.filter(
+                status=DriverShiftPassportRequestStatus.PENDING,
+            ).exists()
+        )
+
+    def test_linked_shift_stays_with_its_composition_after_transfer(self):
+        driver = self.employee(
+            'Водитель с исторической связью состава',
+        )
+        self._closed_driver_shift(
+            driver,
+            watch_period=self.watch,
+            equipment=None,
+        )
+        current_composition = WatchComposition.objects.create(
+            code='current-composition-after-linked-shift',
+            name='Текущий состав после перевода',
+        )
+        driver.watch_composition = current_composition
+        driver.save(update_fields=['watch_composition'])
+
+        historical_scope = discover_driver_rating_current_scope(
+            self.rating_period,
+            self.composition,
+            shift_type=ShiftType.DAY,
+        )
+        current_scope = discover_driver_rating_current_scope(
+            self.rating_period,
+            current_composition,
+            shift_type=ShiftType.DAY,
+        )
+
+        self.assertEqual(
+            historical_scope.expected_employee_ids,
+            (driver.id,),
+        )
+        self.assertEqual(
+            current_scope.expected_employee_ids,
+            (),
+        )
+
+    def test_command_discovers_pending_old_group_after_transfer(self):
+        driver = self.employee(
+            'Переведённый водитель с ожидающим паспортом',
+        )
+        historical_composition = self.composition
+        shift = self._closed_driver_shift(
+            driver,
+            watch_period=self.watch,
+            equipment=None,
+        )
+        DriverShiftPassportCaptureRequest.objects.create(
+            shift=shift,
+            request_key=f'pending-command-group-{shift.id}',
+            trigger=DriverShiftPassportTrigger.DRIVER_CLOSE,
+            calculator_version='pending-command-group-v1',
+            closed_at=shift.closed_at,
+            status=DriverShiftPassportRequestStatus.PENDING,
+        )
+        current_composition = WatchComposition.objects.create(
+            code='pending-command-current-composition',
+            name='Новый состав переведённого водителя',
+        )
+        driver.watch_composition = current_composition
+        driver.save(update_fields=['watch_composition'])
+
+        call_command(
+            'refresh_driver_rating_snapshots',
+            rating_period=self.rating_period.id,
+            shift_types=[ShiftType.DAY],
+            strict=True,
+            stdout=io.StringIO(),
+            stderr=io.StringIO(),
+            no_color=True,
+            verbosity=0,
+        )
+
+        historical_snapshot = (
+            DriverRatingPeriodMaterializedSnapshot.objects.get(
+                rating_period=self.rating_period,
+                watch_composition=historical_composition,
+                shift_type=ShiftType.DAY,
+            )
+        )
+        self.assertEqual(
+            historical_snapshot.member_employee_ids,
+            [driver.id],
+        )
+        self.assertEqual(
+            historical_snapshot.member_latest_closed_at[
+                str(driver.id)
+            ],
+            shift.closed_at.isoformat(),
+        )
+        self.assertTrue(
+            shift.passport_capture_requests.filter(
+                status=DriverShiftPassportRequestStatus.PENDING,
+                snapshot__isnull=True,
+            ).exists()
+        )
+
+    def test_no_shift_colleague_is_not_expected_member_or_entry(self):
+        driver = self.employee('Водитель со сменой для текущей группы')
+        colleague = self.employee('Коллега состава без закрытой смены')
+        self.snapshot(driver, ordinal=1, trip_count=20)
+
+        scope = discover_driver_rating_current_scope(
+            self.rating_period,
+            self.composition,
+            shift_type=ShiftType.DAY,
+        )
+        result = self._refresh()
+        snapshot = (
+            DriverRatingPeriodMaterializedSnapshot.objects.get(
+                pk=result.snapshot_id,
+            )
+        )
+
+        self.assertIn(colleague.id, scope.allowed_employee_ids)
+        self.assertEqual(
+            scope.expected_employee_ids,
+            (driver.id,),
+        )
+        self.assertEqual(
+            snapshot.member_employee_ids,
+            [driver.id],
+        )
+        self.assertEqual(
+            [
+                entry['employee_id']
+                for entry in snapshot.payload['entries']
+            ],
+            [driver.id],
+        )
+
+    def test_unlinked_current_candidate_is_withheld_fail_closed(self):
+        linked_driver = self.employee(
+            'Связанный водитель текущего состава',
+        )
+        driver = self.employee('Водитель текущего состава без вахты')
+        self.snapshot(linked_driver, ordinal=2, trip_count=20)
+        self._closed_driver_shift(
+            driver,
+            watch_period=None,
+            equipment=self.truck,
+        )
+
+        scope = discover_driver_rating_current_scope(
+            self.rating_period,
+            self.composition,
+            shift_type=ShiftType.DAY,
+        )
+        result = self._refresh()
+        snapshot = (
+            DriverRatingPeriodMaterializedSnapshot.objects.get(
+                pk=result.snapshot_id,
+            )
+        )
+
+        self.assertEqual(
+            scope.expected_employee_ids,
+            (linked_driver.id, driver.id),
+        )
+        self.assertFalse(snapshot.payload['available'])
+        self.assertEqual(
+            snapshot.payload['linkage_audit']['unlinked_shift_count'],
+            1,
+        )
+        self.assertEqual(
+            snapshot.payload['summary']['withheld_reasons'],
+            {'rating_period_unlinked_shift': 1},
+        )
 
     def test_missing_scope_and_integrity_fail_closed_without_calculation(self):
         with self.assertRaises(DriverRatingSnapshotUnavailable) as missing:

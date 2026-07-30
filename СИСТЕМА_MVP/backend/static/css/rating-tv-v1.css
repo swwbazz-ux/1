@@ -61,6 +61,24 @@ button {
     grid-template-rows: auto auto minmax(0, 1fr) auto auto;
 }
 
+.is-qa-live .rating-tv {
+    grid-template-rows: auto auto auto minmax(0, 1fr) auto auto;
+}
+
+.rating-tv__qa-live-warning {
+    min-width: 0;
+    padding: 7px 16px;
+    border: 1px solid #f0a24d;
+    border-radius: 6px;
+    background: #5b2a0b;
+    color: #fff2df;
+    font-size: clamp(12px, 0.9vw, 18px);
+    font-weight: 900;
+    letter-spacing: 0.08em;
+    line-height: 1.2;
+    text-align: center;
+}
+
 .rating-tv__header {
     min-width: 0;
     display: grid;
@@ -219,7 +237,8 @@ button {
     overflow: hidden;
 }
 
-.is-qa-preview .rating-tv__statusbar {
+.is-qa-preview .rating-tv__statusbar,
+.is-qa-live .rating-tv__statusbar {
     grid-template-columns:
         minmax(300px, 1.5fr)
         minmax(220px, 0.85fr)
@@ -689,6 +708,65 @@ button {
     gap: 8px;
     color: var(--rating-muted);
     font-size: 11px;
+}
+
+.rating-tv__qa-live {
+    min-width: 0;
+    min-height: 52px;
+    display: grid;
+    grid-template-columns:
+        minmax(100px, 0.45fr)
+        minmax(205px, 0.9fr)
+        minmax(125px, 0.55fr)
+        minmax(115px, 0.5fr)
+        minmax(250px, 1.1fr)
+        minmax(220px, 1fr);
+    align-items: center;
+    gap: 0;
+    border: 1px solid rgba(240, 162, 77, 0.55);
+    border-radius: 7px;
+    background: #111619;
+    overflow: hidden;
+}
+
+.rating-tv__qa-live > div {
+    min-width: 0;
+    display: grid;
+    gap: 2px;
+    padding: 7px 14px;
+    border-right: 1px solid var(--rating-line);
+}
+
+.rating-tv__qa-live span {
+    color: var(--rating-muted);
+    font-size: clamp(9px, 0.62vw, 12px);
+}
+
+.rating-tv__qa-live strong {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--rating-text);
+    font-size: clamp(12px, 0.82vw, 16px);
+    font-variant-numeric: tabular-nums;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.rating-tv__qa-live strong b {
+    color: var(--rating-copper-soft);
+    font: inherit;
+}
+
+.rating-tv__qa-live p {
+    min-width: 0;
+    margin: 0;
+    padding: 7px 14px;
+    overflow: hidden;
+    color: #f2c08d;
+    font-size: clamp(10px, 0.7vw, 13px);
+    font-weight: 750;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .rating-tv__footer {

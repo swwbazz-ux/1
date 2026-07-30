@@ -4,12 +4,13 @@ from dataclasses import dataclass
 
 from core.production_time import (
     business_localtime,
+    production_day_bounds,
     production_work_date,
 )
-from django.db.models import F, OuterRef, Subquery
+from django.db.models import F, OuterRef, Q, Subquery
 from django.utils.dateparse import parse_datetime
 
-from shifts.models import ShiftType
+from shifts.models import EmployeeShift, ShiftType
 from users.models import Employee
 
 from .models import DriverShiftPassportSnapshot
@@ -21,6 +22,189 @@ class DriverRatingGroupScope:
     expected_employee_ids: tuple[int, ...]
     historical_employee_ids: tuple[int, ...]
     latest_closed_at: dict[int, object]
+
+
+@dataclass(frozen=True)
+class DriverRatingCurrentGroupScope:
+    allowed_employee_ids: tuple[int, ...]
+    expected_employee_ids: tuple[int, ...]
+    latest_closed_at: dict[int, object]
+
+
+def _active_site_driver_rows():
+    from portal.services import active_employees
+
+    return tuple(
+        active_employees()
+        .filter(work_category=Employee.WorkCategory.DRIVER)
+        .values_list('id', 'watch_composition_id')
+    )
+
+
+def _closed_driver_shift_rows(
+    rating_period,
+    *,
+    employee_ids,
+    shift_types,
+):
+    employee_ids = tuple(sorted({
+        int(employee_id)
+        for employee_id in employee_ids
+    }))
+    shift_types = tuple(dict.fromkeys(shift_types))
+    if not employee_ids or not shift_types:
+        return ()
+    if any(
+        shift_type not in {ShiftType.DAY, ShiftType.NIGHT}
+        for shift_type in shift_types
+    ):
+        raise ValueError(
+            'Для текущего состава рейтинга допустимы только '
+            'shift_type day и night.'
+        )
+    period_start = production_day_bounds(
+        rating_period.starts_on
+    )[0]
+    period_end = production_day_bounds(
+        rating_period.ends_before
+    )[0]
+    return tuple(
+        EmployeeShift.objects
+        .filter(
+            employee_id__in=employee_ids,
+            shift_type__in=shift_types,
+            closed_at__isnull=False,
+            opened_at__gte=period_start,
+            opened_at__lt=period_end,
+        )
+        .filter(
+            Q(workplace_code='driver')
+            | Q(
+                workplace_code='',
+                equipment__equipment_type__name__contains='Самосвал',
+            )
+        )
+        .values_list(
+            'employee_id',
+            'watch_period__watch_composition_id',
+            'shift_type',
+            'closed_at',
+        )
+        .order_by('employee_id', 'closed_at', 'id')
+    )
+
+
+def linked_driver_closed_shift_groups(
+    rating_period,
+    *,
+    employee_ids,
+    shift_types,
+):
+    """Discover immutable linked groups without requiring a passport."""
+
+    return tuple(sorted({
+        (int(composition_id), shift_type)
+        for (
+            _employee_id,
+            composition_id,
+            shift_type,
+            _closed_at,
+        ) in _closed_driver_shift_rows(
+            rating_period,
+            employee_ids=employee_ids,
+            shift_types=shift_types,
+        )
+        if composition_id is not None
+    }))
+
+
+def _current_group_scope_from_driver_rows(
+    rating_period,
+    watch_composition,
+    *,
+    shift_type,
+    driver_rows,
+):
+    if shift_type not in {ShiftType.DAY, ShiftType.NIGHT}:
+        raise ValueError(
+            'Для текущего состава рейтинга требуется shift_type: '
+            'day или night.'
+        )
+    if rating_period.ends_before <= rating_period.starts_on:
+        raise ValueError(
+            'Конец периода рейтинга должен быть позже даты начала.'
+        )
+
+    current_composition_by_employee = {
+        int(employee_id): composition_id
+        for employee_id, composition_id in driver_rows
+    }
+    site_employee_ids = tuple(sorted(
+        current_composition_by_employee
+    ))
+    if not site_employee_ids:
+        return DriverRatingCurrentGroupScope(
+            allowed_employee_ids=(),
+            expected_employee_ids=(),
+            latest_closed_at={},
+        )
+
+    closed_shift_rows = _closed_driver_shift_rows(
+        rating_period,
+        employee_ids=site_employee_ids,
+        shift_types=(shift_type,),
+    )
+    expected_employee_ids = tuple(sorted({
+        int(employee_id)
+        for (
+            employee_id,
+            shift_composition_id,
+            _shift_type,
+            _closed_at,
+        ) in closed_shift_rows
+        if (
+            shift_composition_id == watch_composition.id
+            or (
+                shift_composition_id is None
+                and current_composition_by_employee[int(employee_id)]
+                == watch_composition.id
+            )
+        )
+    }))
+    latest_closed_at = {}
+    for (
+        employee_id,
+        shift_composition_id,
+        _shift_type,
+        closed_at,
+    ) in closed_shift_rows:
+        employee_id = int(employee_id)
+        if shift_composition_id != watch_composition.id:
+            continue
+        previous = latest_closed_at.get(employee_id)
+        if previous is None or closed_at > previous:
+            latest_closed_at[employee_id] = closed_at
+    return DriverRatingCurrentGroupScope(
+        allowed_employee_ids=site_employee_ids,
+        expected_employee_ids=expected_employee_ids,
+        latest_closed_at=latest_closed_at,
+    )
+
+
+def discover_driver_rating_current_scope(
+    rating_period,
+    watch_composition,
+    *,
+    shift_type,
+):
+    """Return current active/site scope without reading passports."""
+
+    return _current_group_scope_from_driver_rows(
+        rating_period,
+        watch_composition,
+        shift_type=shift_type,
+        driver_rows=_active_site_driver_rows(),
+    )
 
 
 def linked_driver_snapshot_scopes(rating_period, *, employee_ids):
@@ -159,30 +343,31 @@ def discover_driver_rating_group_scope(
 ):
     """Читает полный состав расчёта внутри транзакции материализации."""
 
-    from portal.services import active_employees
-
-    driver_rows = tuple(
-        active_employees()
-        .filter(work_category=Employee.WorkCategory.DRIVER)
-        .values_list('id', 'watch_composition_id')
+    driver_rows = _active_site_driver_rows()
+    current = _current_group_scope_from_driver_rows(
+        rating_period,
+        watch_composition,
+        shift_type=shift_type,
+        driver_rows=driver_rows,
     )
-    allowed_employee_ids = tuple(
-        sorted(employee_id for employee_id, _ in driver_rows)
-    )
-    expected_employee_ids = tuple(sorted(
-        employee_id
-        for employee_id, composition_id in driver_rows
-        if composition_id == watch_composition.id
-    ))
     historical = driver_rating_group_membership(
         rating_period,
-        employee_ids=allowed_employee_ids,
+        employee_ids=tuple(
+            sorted(employee_id for employee_id, _ in driver_rows)
+        ),
         watch_composition_id=watch_composition.id,
         shift_type=shift_type,
     )
+    latest_closed_at = dict(current.latest_closed_at)
+    for employee_id, closed_at in historical[
+        'latest_closed_at'
+    ].items():
+        previous = latest_closed_at.get(employee_id)
+        if previous is None or closed_at > previous:
+            latest_closed_at[employee_id] = closed_at
     return DriverRatingGroupScope(
-        allowed_employee_ids=allowed_employee_ids,
-        expected_employee_ids=expected_employee_ids,
+        allowed_employee_ids=current.allowed_employee_ids,
+        expected_employee_ids=current.expected_employee_ids,
         historical_employee_ids=historical['employee_ids'],
-        latest_closed_at=historical['latest_closed_at'],
+        latest_closed_at=latest_closed_at,
     )
