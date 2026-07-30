@@ -1931,7 +1931,7 @@
 
     function qaReplayHiddenByViewport() {
         return (
-            Number(window.innerWidth) <= 1100
+            Number(window.innerWidth) <= 1180
             || Number(window.innerHeight) <= 650
         );
     }

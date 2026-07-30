@@ -1351,6 +1351,16 @@ test("keyboard visibility and mobile state pause replay safely", async () => {
     assert.equal(runtime.window.RatingTvScreen.state.qaReplayPhase, "PAUSED");
     runtime.clock.advance(10000);
     assert.equal(runtime.window.RatingTvScreen.state.qaReplayDay, 2);
+
+    runtime.window.innerWidth = 1280;
+    runtime.elements.qaForward.dispatch("click");
+    assert.equal(
+        runtime.window.RatingTvScreen.state.qaReplayPhase,
+        "PLAYING_FORWARD"
+    );
+    runtime.window.innerWidth = 1152;
+    runtime.window.dispatch("resize");
+    assert.equal(runtime.window.RatingTvScreen.state.qaReplayPhase, "PAUSED");
 });
 
 
