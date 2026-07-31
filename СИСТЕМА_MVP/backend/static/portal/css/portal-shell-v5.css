@@ -260,6 +260,7 @@ h3 { font-size: 1.16rem; }
 .employee-mini small { margin-top: 4px; color: #aaa8a4; font-size: .66rem; }
 .internal-main { padding-block: 28px 104px; }
 .mobile-tabbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 90; display: grid; min-height: 68px; padding: 4px max(5px, env(safe-area-inset-left)) max(5px, env(safe-area-inset-bottom)); grid-template-columns: repeat(4, 1fr); background: #fff; border-top: 1px solid var(--line); box-shadow: 0 -5px 20px rgba(0,0,0,.08); }
+.mobile-tabbar--rating-hidden { grid-template-columns: repeat(3, 1fr); }
 .mobile-tabbar a { display: grid; min-width: 0; place-items: center; align-content: center; gap: 2px; color: var(--gray); font-size: .63rem; font-weight: 750; }
 .mobile-tabbar svg { width: 23px; height: 23px; fill: currentColor; }
 .mobile-tabbar a.is-active { color: var(--copper-dark); }
@@ -631,6 +632,7 @@ h3 { font-size: 1.16rem; }
     .internal-main { padding-block: 38px 54px; }
     .mobile-tabbar { display: none; }
     .dashboard-grid--status { grid-template-columns: repeat(2, 1fr); }
+    .dashboard-grid--status.dashboard-grid--rating-hidden { grid-template-columns: minmax(0, 1fr); }
     .dashboard-grid:not(.dashboard-grid--status) { grid-template-columns: minmax(0, 1.55fr) minmax(280px, .65fr); }
     .quick-actions { grid-template-columns: repeat(3, 1fr); }
     .employee-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }

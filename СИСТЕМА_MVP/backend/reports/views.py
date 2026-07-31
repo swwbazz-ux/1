@@ -692,6 +692,27 @@ def _private_rating_json(payload, *, status=200):
     return response
 
 
+def _driver_period_rating_site_scope(request):
+    access = get_rating_observation_access(request)
+    if not access:
+        return None, _private_rating_json(
+            {'error': 'Требуется авторизация.'},
+            status=401,
+        )
+    if access.role.code not in {'dispatcher', 'admin', 'manager'}:
+        return None, _private_rating_json(
+            {'error': 'Недостаточно прав.'},
+            status=403,
+        )
+    site_scope = get_rating_site_scope(access)
+    if site_scope is None:
+        return None, _private_rating_json(
+            {'error': 'Недостаточно прав.'},
+            status=403,
+        )
+    return site_scope, None
+
+
 def _rating_tv_access_or_redirect(request):
     access = get_rating_observation_access(request)
     if not access:
@@ -710,17 +731,12 @@ def driver_rating_tv_view(request):
     if access_response:
         return access_response
 
-    rating_enabled = getattr(
-        settings,
-        'PORTAL_WORKING_DRIVER_RATING_ENABLED',
-        False,
-    )
     screen_enabled = getattr(
         settings,
         'RATING_TV_SCREEN_ENABLED',
         False,
     )
-    if not rating_enabled or not screen_enabled:
+    if not screen_enabled:
         raise Http404
     return _render_driver_rating_tv(
         request,
@@ -910,15 +926,15 @@ def _render_driver_rating_tv(
 @never_cache
 @require_GET
 def driver_rating_tv_data_api(request):
-    if not (
-        getattr(settings, 'PORTAL_WORKING_DRIVER_RATING_ENABLED', False)
-        and getattr(settings, 'RATING_TV_SCREEN_ENABLED', False)
-    ):
+    if not getattr(settings, 'RATING_TV_SCREEN_ENABLED', False):
         return _private_rating_json(
             {'error': 'TV-экран рейтинга не включён.'},
             status=404,
         )
-    return driver_period_rating_api(request)
+    site_scope, access_response = _driver_period_rating_site_scope(request)
+    if access_response:
+        return access_response
+    return _resolve_driver_period_rating(request, site_scope)
 
 
 def _rating_tv_qa_live_api_access(request):
@@ -1042,7 +1058,10 @@ def _resolve_rating_tv_qa_live_data(request, site_scope):
             status=409,
         )
 
-    materialized_response = driver_period_rating_api(request)
+    materialized_response = _resolve_driver_period_rating(
+        request,
+        site_scope,
+    )
     try:
         state_after = _rating_tv_qa_live_state_for_scope(site_scope)
     except RatingTvLiveQaStateError:
@@ -1260,10 +1279,7 @@ def driver_rating_tv_formula_qa_replay_api(request):
 @never_cache
 @require_GET
 def driver_rating_employee_photo(request, pk):
-    if not (
-        getattr(settings, 'PORTAL_WORKING_DRIVER_RATING_ENABLED', False)
-        and getattr(settings, 'RATING_TV_SCREEN_ENABLED', False)
-    ):
+    if not getattr(settings, 'RATING_TV_SCREEN_ENABLED', False):
         raise Http404
     access = get_rating_observation_access(request)
     if (
@@ -1302,24 +1318,9 @@ def driver_rating_employee_photo(request, pk):
 @never_cache
 @require_GET
 def driver_period_rating_api(request):
-    access = get_rating_observation_access(request)
-    if not access:
-        return _private_rating_json(
-            {'error': 'Требуется авторизация.'},
-            status=401,
-        )
-    if access.role.code not in {'dispatcher', 'admin', 'manager'}:
-        return _private_rating_json(
-            {'error': 'Недостаточно прав.'},
-            status=403,
-        )
-    site_scope = get_rating_site_scope(access)
-    if site_scope is None:
-        return _private_rating_json(
-            {'error': 'Недостаточно прав.'},
-            status=403,
-        )
-    employee_ids, watch_composition_ids = site_scope
+    site_scope, access_response = _driver_period_rating_site_scope(request)
+    if access_response:
+        return access_response
     if not getattr(
         settings,
         'PORTAL_WORKING_DRIVER_RATING_ENABLED',
@@ -1329,6 +1330,11 @@ def driver_period_rating_api(request):
             {'error': 'Рабочий рейтинг Водителей не включён.'},
             status=404,
         )
+    return _resolve_driver_period_rating(request, site_scope)
+
+
+def _resolve_driver_period_rating(request, site_scope):
+    _employee_ids, watch_composition_ids = site_scope
 
     shift_type = request.GET.get('shift_type')
     if shift_type not in {ShiftType.DAY, ShiftType.NIGHT}:

@@ -70,6 +70,7 @@ from .services import (
     internal_publications_for,
     log_portal_action,
     poll_is_visible_to,
+    portal_working_driver_rating_enabled,
     public_publications,
     publication_recipients,
     publication_is_visible_to,
@@ -415,6 +416,8 @@ def employee_profile(request, pk):
 
 @portal_login_required
 def rating(request):
+    if not portal_working_driver_rating_enabled():
+        raise Http404
     snapshot = get_ranking_snapshot(request.portal_employee)
     return render(
         request,

@@ -34,6 +34,7 @@ from .services import (
     RankingSnapshot,
     ShiftResultSnapshot,
     get_personal_kpi_snapshot,
+    get_public_ranking_snapshot,
     get_ranking_snapshot,
     get_shift_result_snapshot,
     publication_is_visible_to,
@@ -67,6 +68,23 @@ class PublicRankingDataProvider:
                 ),
             ),
         )
+
+
+class FlagBoundaryProductionDataProvider:
+    def ranking(self, employee=None):
+        raise AssertionError('rating provider must stay disabled')
+
+    def public_ranking(self):
+        raise AssertionError('public rating provider must stay disabled')
+
+    def shift_results(self):
+        return ShiftResultSnapshot(
+            available=True,
+            status='Итоги смены доступны независимо от рейтинга.',
+        )
+
+    def personal_kpis(self, employee):
+        raise AssertionError('rating KPI provider must stay disabled')
 
 
 def failing_employee_scope_provider(*, queryset, site_code):
@@ -629,7 +647,12 @@ class PortalProductionBoundaryTests(PortalTestCase):
         publication.refresh_from_db()
         self.assertEqual(publication.status, Publication.Status.DRAFT)
 
-    @override_settings(PORTAL_PRODUCTION_DATA_PROVIDER='portal.tests.FailingProductionDataProvider')
+    @override_settings(
+        PORTAL_WORKING_DRIVER_RATING_ENABLED=True,
+        PORTAL_PRODUCTION_DATA_PROVIDER=(
+            'portal.tests.FailingProductionDataProvider'
+        ),
+    )
     def test_provider_failure_returns_safe_empty_snapshots_and_pages_stay_available(self):
         with self.assertLogs('portal.services', level='ERROR'):
             ranking = get_ranking_snapshot(self.driver)
@@ -646,6 +669,101 @@ class PortalProductionBoundaryTests(PortalTestCase):
             self.portal_session()
             self.assertEqual(self.client.get(reverse('portal:dashboard')).status_code, 200)
             self.assertEqual(self.client.get(reverse('portal:rating')).status_code, 200)
+
+    def test_portal_rating_interface_matrix_depends_only_on_portal_flag(self):
+        self.portal_session()
+
+        for tv_enabled, portal_enabled in (
+            (False, False),
+            (True, False),
+            (False, True),
+            (True, True),
+        ):
+            with (
+                self.subTest(
+                    tv_enabled=tv_enabled,
+                    portal_enabled=portal_enabled,
+                ),
+                override_settings(
+                    RATING_TV_SCREEN_ENABLED=tv_enabled,
+                    PORTAL_WORKING_DRIVER_RATING_ENABLED=portal_enabled,
+                ),
+            ):
+                dashboard = self.client.get(reverse('portal:dashboard'))
+                rating = self.client.get(reverse('portal:rating'))
+                dashboard_content = dashboard.content.decode('utf-8')
+                rating_url = reverse('portal:rating')
+
+                self.assertEqual(dashboard.status_code, 200)
+                self.assertEqual(
+                    rating.status_code,
+                    200 if portal_enabled else 404,
+                )
+                self.assertEqual(
+                    dashboard.context['portal_rating_enabled'],
+                    portal_enabled,
+                )
+                if portal_enabled:
+                    self.assertIn('Личный рейтинг', dashboard_content)
+                    self.assertIn('Моё место', dashboard_content)
+                    self.assertIn('Пятёрка лидеров', dashboard_content)
+                    self.assertEqual(
+                        dashboard_content.count(rating_url),
+                        4,
+                    )
+                    self.assertNotIn(
+                        'mobile-tabbar--rating-hidden',
+                        dashboard_content,
+                    )
+                    self.assertNotIn(
+                        'dashboard-grid--rating-hidden',
+                        dashboard_content,
+                    )
+                else:
+                    self.assertNotIn('Личный рейтинг', dashboard_content)
+                    self.assertNotIn('Моё место', dashboard_content)
+                    self.assertNotIn('Пятёрка лидеров', dashboard_content)
+                    self.assertNotIn(rating_url, dashboard_content)
+                    self.assertIn(
+                        'mobile-tabbar--rating-hidden',
+                        dashboard_content,
+                    )
+                    self.assertIn(
+                        'dashboard-grid--rating-hidden',
+                        dashboard_content,
+                    )
+
+    @override_settings(
+        PORTAL_WORKING_DRIVER_RATING_ENABLED=False,
+        PORTAL_PRODUCTION_DATA_PROVIDER=(
+            'portal.tests.FlagBoundaryProductionDataProvider'
+        ),
+    )
+    def test_disabled_rating_flag_cannot_be_bypassed_by_provider(self):
+        ranking = get_ranking_snapshot(self.driver)
+        public_ranking = get_public_ranking_snapshot()
+        shift_result = get_shift_result_snapshot()
+        kpis = get_personal_kpi_snapshot(self.driver)
+
+        self.assertFalse(ranking.available)
+        self.assertEqual(ranking.entries, ())
+        self.assertFalse(public_ranking.available)
+        self.assertTrue(shift_result.available)
+        self.assertIn('независимо от рейтинга', shift_result.status)
+        self.assertFalse(kpis.available)
+
+        self.portal_session()
+        with (
+            patch('portal.views.get_ranking_snapshot') as ranking_reader,
+            patch(
+                'portal.views.get_personal_kpi_snapshot',
+            ) as kpi_reader,
+        ):
+            response = self.client.get(reverse('portal:rating'))
+
+        self.assertEqual(response.status_code, 404)
+        ranking_reader.assert_not_called()
+        kpi_reader.assert_not_called()
 
 
 class PortalPublicHomeTests(PortalTestCase):
@@ -687,7 +805,12 @@ class PortalPublicHomeTests(PortalTestCase):
         self.assertContains(response, 'Четыре направления')
         self.assertNotContains(response, 'На связи')
 
-    @override_settings(PORTAL_PRODUCTION_DATA_PROVIDER='portal.tests.PublicRankingDataProvider')
+    @override_settings(
+        PORTAL_WORKING_DRIVER_RATING_ENABLED=True,
+        PORTAL_PRODUCTION_DATA_PROVIDER=(
+            'portal.tests.PublicRankingDataProvider'
+        ),
+    )
     def test_home_renders_public_ranking_from_server_contract_without_kpis(self):
         response = self.client.get(reverse('portal:public_home'))
 
@@ -742,6 +865,7 @@ class PortalPageRenderTests(PortalTestCase):
             ]
         )
 
+    @override_settings(PORTAL_WORKING_DRIVER_RATING_ENABLED=True)
     def test_employee_pages_render(self):
         self.portal_session()
         self.assert_pages_render(

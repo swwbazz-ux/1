@@ -91,7 +91,6 @@ def is_loopback_request(request):
 def rating_tv_live_qa_gate_enabled(request):
     return bool(
         settings.DEBUG
-        and getattr(settings, 'PORTAL_WORKING_DRIVER_RATING_ENABLED', False)
         and getattr(settings, 'RATING_TV_SCREEN_ENABLED', False)
         and getattr(settings, 'RATING_TV_QA_LIVE_ENABLED', False)
         and str(

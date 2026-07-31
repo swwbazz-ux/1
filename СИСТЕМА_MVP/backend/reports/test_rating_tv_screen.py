@@ -53,6 +53,7 @@ QA_REPLAY_SETTINGS = {
 }
 QA_LIVE_SETTINGS = {
     **LIVE_TV_SETTINGS,
+    'PORTAL_WORKING_DRIVER_RATING_ENABLED': False,
     'DEBUG': True,
     'RATING_TV_QA_LIVE_ENABLED': True,
     'RATING_TV_QA_LIVE_RUN_ID': 'rating-live-test-run',
@@ -431,6 +432,101 @@ class DriverRatingTvScreenTests(TestCase):
             qa_live_data_response['Cache-Control'],
         )
 
+    def test_tv_interface_flag_matrix_is_independent_from_portal_flag(self):
+        self._login_as(self.dispatcher_access)
+        image_bytes = (
+            b'GIF89a\x01\x00\x01\x00\x00\x00\x00\x00\x00'
+            b'!\xf9\x04\x01\x00\x00\x00\x00,\x00\x00\x00'
+            b'\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;'
+        )
+
+        with TemporaryDirectory(prefix='rating-tv-flag-matrix-') as media_root:
+            with override_settings(MEDIA_ROOT=media_root):
+                self.driver.photo.save(
+                    'rating-tv-flag-matrix.gif',
+                    ContentFile(image_bytes),
+                    save=True,
+                )
+                for tv_enabled, portal_enabled in (
+                    (False, False),
+                    (True, False),
+                    (False, True),
+                    (True, True),
+                ):
+                    with (
+                        self.subTest(
+                            tv_enabled=tv_enabled,
+                            portal_enabled=portal_enabled,
+                        ),
+                        override_settings(
+                            RATING_TV_SCREEN_ENABLED=tv_enabled,
+                            PORTAL_WORKING_DRIVER_RATING_ENABLED=(
+                                portal_enabled
+                            ),
+                        ),
+                    ):
+                        page_response = self.client.get(
+                            reverse('driver_rating_tv'),
+                        )
+                        data_response = self.client.get(
+                            reverse('driver_rating_tv_data_api'),
+                            {'shift_type': 'night'},
+                        )
+                        photo_response = self.client.get(
+                            reverse(
+                                'driver_rating_employee_photo',
+                                args=[self.driver.pk],
+                            ),
+                        )
+
+                        expected_status = 200 if tv_enabled else 404
+                        self.assertEqual(
+                            page_response.status_code,
+                            expected_status,
+                        )
+                        self.assertEqual(
+                            data_response.status_code,
+                            expected_status,
+                        )
+                        self.assertEqual(
+                            photo_response.status_code,
+                            expected_status,
+                        )
+                        self.assertIn(
+                            'no-store',
+                            data_response['Cache-Control'],
+                        )
+                        self.assertEqual(
+                            data_response['X-Content-Type-Options'],
+                            'nosniff',
+                        )
+                        if not tv_enabled:
+                            continue
+
+                        try:
+                            body = b''.join(
+                                photo_response.streaming_content,
+                            )
+                        finally:
+                            for resource_closer in (
+                                photo_response._resource_closers
+                            ):
+                                resource_closer()
+                            photo_response._resource_closers.clear()
+                        self.assertEqual(body, image_bytes)
+                        self.assertIn(
+                            'private',
+                            photo_response['Cache-Control'],
+                        )
+                        self.assertIn(
+                            'no-store',
+                            photo_response['Cache-Control'],
+                        )
+                        self.assertEqual(
+                            photo_response['X-Content-Type-Options'],
+                            'nosniff',
+                        )
+
     @override_settings(**QA_LIVE_SETTINGS)
     def test_qa_live_screen_is_separate_loopback_only_and_never_query_enabled(
         self,
@@ -775,7 +871,7 @@ class DriverRatingTvScreenTests(TestCase):
                     'nosniff'
                 )
                 with patch(
-                    'reports.views.driver_period_rating_api',
+                    'reports.views._resolve_driver_period_rating',
                     return_value=materialized_response,
                 ) as materialized_api:
                     success = self.client.get(
@@ -828,7 +924,7 @@ class DriverRatingTvScreenTests(TestCase):
                 side_effect=[state_before, state_after],
             ) as state_reader,
             patch(
-                'reports.views.driver_period_rating_api',
+                'reports.views._resolve_driver_period_rating',
                 return_value=materialized_response,
             ) as materialized_reader,
         ):
@@ -882,7 +978,7 @@ class DriverRatingTvScreenTests(TestCase):
                 ],
             ) as state_reader,
             patch(
-                'reports.views.driver_period_rating_api',
+                'reports.views._resolve_driver_period_rating',
                 return_value=materialized_response,
             ) as materialized_reader,
         ):

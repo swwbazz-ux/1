@@ -21,7 +21,8 @@
 </section>
 {% endif %}
 
-<section class="dashboard-grid dashboard-grid--status">
+<section class="dashboard-grid dashboard-grid--status{% if not portal_rating_enabled %} dashboard-grid--rating-hidden{% endif %}">
+    {% if portal_rating_enabled %}
     <article class="status-panel status-panel--rank">
         <div class="status-panel__heading"><div><span class="screen-kicker">Личный рейтинг</span><h2>Моё место</h2></div><a href="{% url 'portal:rating' %}">Весь рейтинг →</a></div>
         {% if my_rank %}
@@ -34,6 +35,7 @@
             <div class="inline-empty"><strong>Место ещё не определено</strong><span>{{ ranking.status }}</span></div>
         {% endif %}
     </article>
+    {% endif %}
     <article class="status-panel status-panel--shift">
         <div class="status-panel__heading"><div><span class="screen-kicker">Последняя смена</span><h2>День и ночь</h2></div></div>
         {% if shift_result.available %}
@@ -49,6 +51,7 @@
     </article>
 </section>
 
+{% if portal_rating_enabled %}
 <section class="dashboard-section">
     <div class="section-title-row"><h2>Пятёрка лидеров</h2><a href="{% url 'portal:rating' %}">Показать всех</a></div>
     {% if top_five %}
@@ -65,6 +68,7 @@
         <div class="inline-empty inline-empty--panel"><strong>Рейтинг пока не получен</strong><span>{{ ranking.status }}</span></div>
     {% endif %}
 </section>
+{% endif %}
 
 <div class="dashboard-grid">
     <section class="dashboard-section dashboard-section--plain">

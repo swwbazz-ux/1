@@ -7,7 +7,7 @@
     <meta name="theme-color" content="#1e1e1e">
     <meta name="robots" content="noindex,nofollow">
     <title>{% block title %}Портал сотрудника{% endblock %} — Коппер Рисорсез</title>
-    <link rel="stylesheet" href="{% static 'portal/css/portal-shell-v5.css' %}">
+    <link rel="stylesheet" href="{% static 'portal/css/portal-shell-v5.css' %}?v=6">
     {% block extra_head %}{% endblock %}
 </head>
 <body class="internal-shell {% block body_class %}{% endblock %}">
@@ -28,7 +28,7 @@
             <nav class="internal-nav js-menu" id="internal-navigation" aria-label="Разделы портала">
                 <a href="{% url 'portal:dashboard' %}">Главная</a>
                 <a href="{% url 'portal:publications' %}">Новости</a>
-                <a href="{% url 'portal:rating' %}">Рейтинг</a>
+                {% if portal_rating_enabled %}<a href="{% url 'portal:rating' %}">Рейтинг</a>{% endif %}
                 <a href="{% url 'portal:people' %}">Коллеги</a>
                 <a href="{% url 'portal:polls' %}">Опросы</a>
                 <a href="{% url 'portal:apps' %}">Мои приложения</a>
@@ -55,13 +55,13 @@
         </div>
     </main>
 
-    <nav class="mobile-tabbar" aria-label="Быстрая навигация">
+    <nav class="mobile-tabbar{% if not portal_rating_enabled %} mobile-tabbar--rating-hidden{% endif %}" aria-label="Быстрая навигация">
         <a href="{% url 'portal:dashboard' %}"{% if request.resolver_match.url_name == 'dashboard' %} class="is-active" aria-current="page"{% endif %}>
             <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M3 11.5 12 4l9 7.5V21h-6v-6H9v6H3z"/></svg><span>Главная</span>
         </a>
-        <a href="{% url 'portal:rating' %}"{% if request.resolver_match.url_name == 'rating' %} class="is-active" aria-current="page"{% endif %}>
+        {% if portal_rating_enabled %}<a href="{% url 'portal:rating' %}"{% if request.resolver_match.url_name == 'rating' %} class="is-active" aria-current="page"{% endif %}>
             <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 3h14v4c0 3.5-2.4 6.4-5.7 7.2V17H17v4H7v-4h3.7v-2.8C7.4 13.4 5 10.5 5 7zm-3 2h3v2a7 7 0 0 0 .6 2.9C3.6 9.4 2 7.4 2 5m20 0c0 2.4-1.6 4.4-3.6 4.9A7 7 0 0 0 19 7V5z"/></svg><span>Рейтинг</span>
-        </a>
+        </a>{% endif %}
         <a href="{% url 'portal:publications' %}"{% if request.resolver_match.url_name == 'publications' %} class="is-active" aria-current="page"{% endif %}>
             <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 3h16v18H4zm4 4v2h8V7zm0 4v2h8v-2zm0 4v2h6v-2z"/></svg><span>Новости</span>
         </a>
