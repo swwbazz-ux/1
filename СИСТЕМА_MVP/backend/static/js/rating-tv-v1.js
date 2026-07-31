@@ -15,6 +15,12 @@
     var previewPayload = readJson("rating-tv-preview-payload", null);
     var root = document.querySelector("[data-rating-tv]");
     if (!root) return;
+    var reserveThreeColumnLayout = /(?:^|[?&])layout=three(?:&|$)/.test(
+        String(window.location && window.location.search || "")
+    );
+    root.dataset.ratingLayout = reserveThreeColumnLayout
+        ? "three-reserve"
+        : "four";
 
     var elements = {
         grid: root.querySelector("[data-rating-grid]"),
@@ -346,11 +352,11 @@
         movement.className = "rating-tv__movement";
         movement.setAttribute(
             "aria-hidden",
-            delta == null ? "true" : "false"
+            "false"
         );
         if (delta == null) {
             movement.classList.add("is-unranked");
-            movement.textContent = "";
+            movement.textContent = "—";
         } else if (delta > 0) {
             movement.classList.add("is-up");
             movement.textContent = "↑ " + delta;
@@ -365,8 +371,8 @@
 
     function createAvatar(entry) {
         var avatar = document.createElement("span");
-        avatar.className = "rating-tv__avatar";
-        avatar.textContent = initials(entry.full_name);
+        avatar.className = "rating-tv__avatar is-placeholder";
+        avatar.setAttribute("aria-hidden", "true");
         var url = photoUrl(entry.employee_id);
         if (!url) return avatar;
 
@@ -376,6 +382,7 @@
         image.decoding = "async";
         image.addEventListener("load", function () {
             avatar.textContent = "";
+            avatar.classList.remove("is-placeholder");
             avatar.appendChild(image);
         });
         image.addEventListener("error", function () {
@@ -383,6 +390,46 @@
         });
         image.src = url;
         return avatar;
+    }
+
+    function ratingDisplayName(entry) {
+        return String(
+            entry.display_name
+            || entry.full_name
+            || "Сотрудник не указан"
+        ).trim();
+    }
+
+    function ratingTruckLabel(entry) {
+        var equipment = Array.isArray(entry.equipment)
+            ? entry.equipment[0]
+            : entry.equipment;
+        var normalized = String(equipment || "").trim();
+        if (!normalized) return "№ —";
+        var truckMatch = normalized.match(/(?:№\s*|\s)(\d[\w-]*)\s*$/i);
+        return truckMatch ? "№ " + truckMatch[1] : "№ —";
+    }
+
+    function createTruckIcon() {
+        var namespace = "http://www.w3.org/2000/svg";
+        var icon = document.createElementNS(namespace, "svg");
+        icon.classList.add("rating-tv__truck-icon");
+        icon.setAttribute("viewBox", "0 0 24 16");
+        icon.setAttribute("aria-hidden", "true");
+        icon.setAttribute("focusable", "false");
+
+        var body = document.createElementNS(namespace, "path");
+        body.setAttribute(
+            "d",
+            "M1.5 3.5h10.2l2.2 6H4.4L1.5 3.5Zm12.4 2h4l3.1 3V12h-7.1V5.5ZM3.7 12h17.6"
+        );
+        var wheels = document.createElementNS(namespace, "path");
+        wheels.setAttribute(
+            "d",
+            "M7.3 12.2a2 2 0 1 1-4 0m16.7 0a2 2 0 1 1-4 0"
+        );
+        icon.append(body, wheels);
+        return icon;
     }
 
     function updateRatingRow(row, entry) {
@@ -414,61 +461,68 @@
             row._ratingPlaceNode = placeNode;
         }
         placeNode.replaceChildren();
-        if (!isUnranked) {
-            var gem = document.createElement("b");
-            gem.textContent = "◆";
-            gem.setAttribute("aria-hidden", "true");
-            placeNode.appendChild(gem);
-        }
-        placeNode.appendChild(
-            document.createTextNode(String(entry.place == null ? "—" : entry.place))
+        placeNode.setAttribute(
+            "aria-label",
+            entry.place == null
+                ? "Место не определено"
+                : "Место " + String(entry.place)
         );
+        placeNode.appendChild(
+            document.createTextNode(
+                entry.place == null ? "—" : String(entry.place)
+            )
+        );
+
+        var identity = document.createElement("span");
+        identity.className = "rating-tv__identity";
 
         var name = document.createElement("strong");
         name.className = "rating-tv__name";
-        name.textContent = entry.full_name || "Сотрудник не указан";
+        name.textContent = ratingDisplayName(entry);
         name.title = name.textContent;
 
         var equipment = document.createElement("span");
         equipment.className = "rating-tv__equipment";
-        equipment.textContent = Array.isArray(entry.equipment)
-            ? (entry.equipment.join(", ") || "Техника не указана")
-            : (entry.equipment || "Техника не указана");
+        equipment.textContent = ratingTruckLabel(entry);
         equipment.title = equipment.textContent;
+        equipment.setAttribute("aria-label", equipment.textContent);
+        equipment.prepend(createTruckIcon());
 
-        var score = document.createElement("span");
-        score.className = "rating-tv__score";
-        var scoreValue = document.createElement("b");
-        var scoreLabel = document.createElement("small");
+        var score = null;
         if (isWithheld) {
+            score = document.createElement("span");
+            score.className = "rating-tv__score";
             score.classList.add("is-status", "is-withheld");
+            var scoreValue = document.createElement("b");
             scoreValue.textContent = "Удержан";
+            var scoreLabel = document.createElement("small");
             scoreLabel.textContent = "проверка данных";
+            score.append(scoreValue, scoreLabel);
         } else if (isNotObserved) {
+            score = document.createElement("span");
+            score.className = "rating-tv__score";
             score.classList.add("is-status", "is-not-observed");
-            scoreValue.textContent = "Нет смен";
-            scoreLabel.textContent = "за период";
-        } else {
-            scoreValue.textContent = (
-                entry.score == null || entry.score === ""
-                    ? "—"
-                    : String(entry.score)
-            );
-            scoreLabel.textContent = "балл";
+            var noShiftValue = document.createElement("b");
+            noShiftValue.textContent = "Нет смен";
+            var noShiftLabel = document.createElement("small");
+            noShiftLabel.textContent = "за период";
+            score.append(noShiftValue, noShiftLabel);
         }
-        score.append(scoreValue, scoreLabel);
 
         var movement = document.createElement("span");
         setMovementContent(movement, movementFor(entry));
 
-        row.replaceChildren(
-            placeNode,
-            createAvatar(entry),
-            name,
-            equipment,
-            score,
-            movement
-        );
+        var service = document.createElement("span");
+        service.className = "rating-tv__service";
+        if (score) {
+            row.classList.add("has-service-status");
+            service.classList.add("has-status");
+            service.appendChild(score);
+        }
+        service.appendChild(movement);
+
+        identity.append(createAvatar(entry), name, equipment, service);
+        row.replaceChildren(placeNode, identity);
         return row;
     }
 
@@ -476,13 +530,14 @@
         return updateRatingRow(document.createElement("li"), entry);
     }
 
-    function layoutGrid() {
-        if (!elements.grid || elements.grid.hidden) return;
-        var count = elements.grid.children.length;
-        if (!count) return;
-        var boardHeight = elements.grid.clientHeight
-            || elements.grid.parentElement.clientHeight
-            || window.innerHeight;
+    function clearGridPlacement() {
+        Array.from(elements.grid.children).forEach(function (row) {
+            row.style.setProperty("grid-column", "");
+            row.style.setProperty("grid-row", "");
+        });
+    }
+
+    function layoutThreeColumnReserve(count, boardHeight) {
         var minimumRowHeight = window.innerHeight < 850 ? 34 : 44;
         var rowLimit = window.innerWidth >= 1700 ? 18 : 14;
         var maximumRows = Math.max(
@@ -494,12 +549,77 @@
         );
         var columns = Math.max(1, Math.ceil(count / maximumRows));
         var rows = Math.max(1, Math.ceil(count / columns));
+        clearGridPlacement();
         elements.grid.style.setProperty("--rating-columns", String(columns));
         elements.grid.style.setProperty("--rating-rows", String(rows));
+        elements.grid.classList.remove("is-four-column-layout");
+        elements.grid.classList.add("is-three-column-reserve");
         elements.grid.classList.toggle(
             "is-dense",
             boardHeight / rows < 42
         );
+    }
+
+    function layoutFourColumns(count, boardHeight) {
+        var columns = Math.min(4, count);
+        var baseSize = Math.floor(count / columns);
+        var remainder = count % columns;
+        var columnSizes = Array.from(
+            {length: columns},
+            function (_unused, index) {
+                return baseSize + (index < remainder ? 1 : 0);
+            }
+        );
+        var rows = Math.max.apply(null, columnSizes);
+        var entryIndex = 0;
+
+        columnSizes.forEach(function (columnSize, columnIndex) {
+            for (var rowIndex = 0; rowIndex < columnSize; rowIndex += 1) {
+                var row = elements.grid.children[entryIndex];
+                row.style.setProperty(
+                    "grid-column",
+                    String(columnIndex + 1)
+                );
+                row.style.setProperty("grid-row", String(rowIndex + 1));
+                entryIndex += 1;
+            }
+        });
+
+        elements.grid.style.setProperty("--rating-columns", String(columns));
+        elements.grid.style.setProperty("--rating-rows", String(rows));
+        elements.grid.classList.remove("is-three-column-reserve");
+        elements.grid.classList.add("is-four-column-layout");
+        elements.grid.classList.toggle(
+            "is-dense",
+            boardHeight / rows < 42
+        );
+    }
+
+    function layoutGrid() {
+        if (!elements.grid || elements.grid.hidden) return;
+        var count = elements.grid.children.length;
+        if (!count) return;
+        var boardHeight = elements.grid.clientHeight
+            || elements.grid.parentElement.clientHeight
+            || window.innerHeight;
+
+        if (window.innerWidth <= 600) {
+            clearGridPlacement();
+            elements.grid.style.setProperty("--rating-columns", "1");
+            elements.grid.style.setProperty("--rating-rows", String(count));
+            elements.grid.classList.remove(
+                "is-four-column-layout",
+                "is-three-column-reserve",
+                "is-dense"
+            );
+            return;
+        }
+
+        if (reserveThreeColumnLayout) {
+            layoutThreeColumnReserve(count, boardHeight);
+            return;
+        }
+        layoutFourColumns(count, boardHeight);
     }
 
     function renderEntries(entries) {

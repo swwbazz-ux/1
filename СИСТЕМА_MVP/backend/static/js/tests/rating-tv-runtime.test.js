@@ -147,6 +147,13 @@ class FakeElement {
         children.forEach((child) => this.appendChild(child));
     }
 
+    prepend(child) {
+        if (child == null) return;
+        child.parentElement = this;
+        child.parentNode = this;
+        this.children.unshift(child);
+    }
+
     replaceChildren(...children) {
         this.children.forEach((child) => {
             child.parentElement = null;
@@ -227,6 +234,10 @@ class FakeDocument {
     }
 
     createElement(tagName) {
+        return new FakeElement(tagName);
+    }
+
+    createElementNS(_namespace, tagName) {
         return new FakeElement(tagName);
     }
 
@@ -361,14 +372,14 @@ class FakeAbortController {
 }
 
 
-function buildScreen() {
+function buildScreen(gridHeight = 680) {
     const root = new FakeElement("main");
     const board = new FakeElement("section");
-    board.clientHeight = 680;
+    board.clientHeight = gridHeight;
 
     const grid = new FakeElement("ol");
     grid.hidden = true;
-    grid.clientHeight = 680;
+    grid.clientHeight = gridHeight;
     board.appendChild(grid);
 
     const message = new FakeElement("div");
@@ -970,6 +981,8 @@ function createRuntime({
     qaLive = false,
     qaReplayEnabled = false,
     qaReplayKind = "visual",
+    layoutSearch = "",
+    gridHeight = 680,
     qaFormulaEnabledShiftTypes = (
         qaReplayKind === "formula" ? ["day", "night"] : []
     ),
@@ -978,7 +991,7 @@ function createRuntime({
     responses = []
 } = {}) {
     const clock = new FakeClock();
-    const {root, elements} = buildScreen();
+    const {root, elements} = buildScreen(gridHeight);
     const document = new FakeDocument(root);
     const fetchCalls = [];
     const responseQueue = responses.slice();
@@ -1047,7 +1060,10 @@ function createRuntime({
 
     const windowObject = {
         document,
-        location: {origin: "https://driverform.test"},
+        location: {
+            origin: "https://driverform.test",
+            search: layoutSearch
+        },
         innerWidth: 1920,
         innerHeight: 1080,
         fetch: fetchStub,
@@ -1136,6 +1152,36 @@ test("QA preview renders all 53 sorted rows and premium five without fetch", asy
     assert.equal(runtime.elements.grid.children.length, 53);
     assert.equal(runtime.elements.grid.children[0].dataset.displayOrder, "1");
     assert.equal(runtime.elements.grid.children[52].dataset.displayOrder, "53");
+    assert.equal(runtime.document.root.dataset.ratingLayout, "four");
+    assert.equal(
+        runtime.elements.grid.classList.contains("is-four-column-layout"),
+        true
+    );
+    assert.equal(
+        runtime.elements.grid.style.getPropertyValue("--rating-columns"),
+        "4"
+    );
+    assert.equal(
+        runtime.elements.grid.style.getPropertyValue("--rating-rows"),
+        "14"
+    );
+    [
+        [0, "1", "1"],
+        [13, "1", "14"],
+        [14, "2", "1"],
+        [26, "2", "13"],
+        [27, "3", "1"],
+        [39, "3", "13"],
+        [40, "4", "1"],
+        [52, "4", "13"]
+    ].forEach(([index, column, row]) => {
+        const entry = runtime.elements.grid.children[index];
+        assert.equal(
+            entry.style.getPropertyValue("grid-column"),
+            column
+        );
+        assert.equal(entry.style.getPropertyValue("grid-row"), row);
+    });
 
     runtime.elements.grid.children.slice(0, 5).forEach((row, index) => {
         assert.equal(row.classList.contains("is-premium"), true);
@@ -1144,6 +1190,108 @@ test("QA preview renders all 53 sorted rows and premium five without fetch", asy
     assert.equal(
         runtime.elements.grid.children[5].classList.contains("is-premium"),
         false
+    );
+});
+
+test("three-column desktop layout remains available as a reserve", async () => {
+    const runtime = createRuntime({
+        qaPreview: true,
+        layoutSearch: "?layout=three",
+        gridHeight: 812,
+        previewPayload: buildPayload({
+            entries: buildEntries(53),
+            fingerprint: "qa-preview-three-reserve"
+        })
+    });
+    await runtime.flush();
+
+    assert.equal(runtime.document.root.dataset.ratingLayout, "three-reserve");
+    assert.equal(
+        runtime.elements.grid.classList.contains("is-three-column-reserve"),
+        true
+    );
+    assert.equal(
+        runtime.elements.grid.classList.contains("is-four-column-layout"),
+        false
+    );
+    assert.equal(
+        runtime.elements.grid.style.getPropertyValue("--rating-columns"),
+        "3"
+    );
+    assert.equal(
+        runtime.elements.grid.style.getPropertyValue("--rating-rows"),
+        "18"
+    );
+    runtime.elements.grid.children.forEach((row) => {
+        assert.equal(row.style.getPropertyValue("grid-column"), "");
+        assert.equal(row.style.getPropertyValue("grid-row"), "");
+    });
+});
+
+test("rating row keeps explicit place and one photo-name-truck-movement badge", async () => {
+    const entries = buildEntries(2, {prefix: "Иванов Иван"});
+    entries[0].display_name = "Иванов Иван";
+    entries[0].equipment = ["Самосвал 17"];
+    entries[0].position_delta = 2;
+    entries[0].score = "84.5000";
+    entries[0].display_score = 85;
+    entries[0].level = "T0";
+    entries[1].equipment = ["Самосвал 123"];
+    const runtime = createRuntime({
+        qaPreview: true,
+        previewPayload: buildPayload({entries, fingerprint: "row-contract"})
+    });
+    await runtime.flush();
+
+    const row = runtime.elements.grid.children[0];
+    const place = row.querySelector(".rating-tv__place");
+    const identity = row.querySelector(".rating-tv__identity");
+    const avatar = identity.querySelector(".rating-tv__avatar");
+    const name = identity.querySelector(".rating-tv__name");
+    const truck = identity.querySelector(".rating-tv__equipment");
+    const service = row.querySelector(".rating-tv__service");
+    const movement = row.querySelector(".rating-tv__movement");
+
+    assert.equal(place.children.length, 1);
+    assert.equal(place.children[0].textContent, "1");
+    assert.equal(place.getAttribute("aria-label"), "Место 1");
+    assert.equal(avatar !== null, true);
+    assert.equal(avatar.textContent, "");
+    assert.equal(avatar.classList.contains("is-placeholder"), true);
+    assert.equal(name.textContent, "Иванов Иван");
+    assert.equal(truck.textContent, "№ 17");
+    assert.equal(truck.getAttribute("aria-label"), "№ 17");
+    assert.equal(
+        truck.querySelector(".rating-tv__truck-icon") !== null,
+        true
+    );
+    assert.equal(row.querySelector(".rating-tv__score"), null);
+    assert.equal(row.textContent.includes("85"), false);
+    assert.equal(movement.textContent, "↑ 2");
+    assert.equal(identity.children.length, 4);
+    assert.equal(row.children.length, 2);
+    assert.equal(row.children[0], place);
+    assert.equal(row.children[1], identity);
+    assert.equal(service.parentElement, identity);
+    assert.equal(service.children.length, 1);
+    assert.equal(service.children[0], movement);
+    assert.equal(identity.children[0], avatar);
+    assert.equal(identity.children[1], name);
+    assert.equal(identity.children[2], truck);
+    assert.equal(identity.children[3], service);
+    assert.equal(row.querySelector(".rating-tv__place").textContent.includes("◆"), false);
+    assert.equal(row.textContent.includes("Самосвал"), false);
+    assert.equal(row.textContent.toLocaleUpperCase("ru-RU").includes("БАЛЛ"), false);
+    assert.equal(row.textContent.includes("T0"), false);
+    assert.equal(
+        runtime.elements.grid.children[1]
+            .querySelector(".rating-tv__movement").textContent,
+        "—"
+    );
+    assert.equal(
+        runtime.elements.grid.children[1]
+            .querySelector(".rating-tv__equipment").textContent,
+        "№ 123"
     );
 });
 
@@ -1472,12 +1620,14 @@ test("formula replay uses its pinned schema and preserves exact nullable KPI row
     );
     assert.equal(runtime.elements.grid.children.length, 53);
 
-    const firstScore = runtime.elements.grid.children[0]
-        .querySelector(".rating-tv__score").children[0].textContent;
-    const secondScore = runtime.elements.grid.children[1]
-        .querySelector(".rating-tv__score").children[0].textContent;
-    assert.equal(firstScore, "99.0001");
-    assert.equal(secondScore, "99.0000");
+    assert.equal(
+        runtime.elements.grid.children[0].querySelector(".rating-tv__score"),
+        null
+    );
+    assert.equal(
+        runtime.elements.grid.children[1].querySelector(".rating-tv__score"),
+        null
+    );
 
     for (const row of runtime.elements.grid.children) {
         const avatar = row.querySelector(".rating-tv__avatar");
@@ -1510,7 +1660,17 @@ test("formula replay uses its pinned schema and preserves exact nullable KPI row
         const place = row.querySelector(".rating-tv__place");
         assert.equal(place.children.length, 1);
         assert.equal(place.children[0].textContent, "—");
+        assert.equal(
+            place.getAttribute("aria-label"),
+            "Место не определено"
+        );
         const score = row.querySelector(".rating-tv__score");
+        const service = row.querySelector(".rating-tv__service");
+        assert.equal(row.children.length, 2);
+        assert.equal(row.children[1], row.querySelector(".rating-tv__identity"));
+        assert.equal(service.classList.contains("has-status"), true);
+        assert.equal(service.parentElement, row.querySelector(".rating-tv__identity"));
+        assert.equal(score.parentElement, service);
         assert.equal(
             score.children[0].textContent,
             expected.statusText
@@ -1524,9 +1684,9 @@ test("formula replay uses its pinned schema and preserves exact nullable KPI row
             false
         );
         const movement = row.querySelector(".rating-tv__movement");
-        assert.equal(movement.textContent, "");
+        assert.equal(movement.textContent, "—");
         assert.equal(movement.classList.contains("is-unranked"), true);
-        assert.equal(movement.getAttribute("aria-hidden"), "true");
+        assert.equal(movement.getAttribute("aria-hidden"), "false");
         for (const field of [
             "score",
             "place",

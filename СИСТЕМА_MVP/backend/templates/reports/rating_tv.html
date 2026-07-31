@@ -7,7 +7,7 @@
     <meta name="robots" content="noindex,nofollow">
     <title>Рейтинг — ООО «Коппер Рисорсез»</title>
     <link rel="icon" href="{% static 'favicon.ico' %}">
-    <link rel="stylesheet" href="{% static 'css/rating-tv-v1.css' %}?v=20260730-5">
+    <link rel="stylesheet" href="{% static 'css/rating-tv-v1.css' %}?v=20260731-9">
 </head>
 <body class="rating-tv-body{% if rating_tv_qa_preview %} is-qa-preview{% endif %}{% if rating_tv_qa_live %} is-qa-live{% endif %}{% if rating_tv_qa_replay_kind == 'formula' %} is-formula-replay{% endif %}">
     <main class="rating-tv" data-rating-tv>
@@ -269,6 +269,6 @@
     {% if rating_tv_preview_payload %}
         {{ rating_tv_preview_payload|json_script:"rating-tv-preview-payload" }}
     {% endif %}
-    <script src="{% static 'js/rating-tv-v1.js' %}?v=20260730-6" defer></script>
+    <script src="{% static 'js/rating-tv-v1.js' %}?v=20260731-9" defer></script>
 </body>
 </html>
