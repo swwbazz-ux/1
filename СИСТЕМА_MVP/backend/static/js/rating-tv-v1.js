@@ -433,7 +433,7 @@
     }
 
     function updateRatingRow(row, entry) {
-        var place = Number(entry.place);
+        var displayOrder = Number(entry.display_order);
         var rowStatus = entry.row_status || "";
         var isWithheld = rowStatus === "withheld";
         var isNotObserved = rowStatus === "not_observed";
@@ -450,8 +450,11 @@
         } else if (isNotObserved) {
             row.classList.add("is-not-observed");
         }
-        if (!isUnranked && place >= 1 && place <= 5) {
-            row.classList.add("is-premium", "is-place-" + place);
+        if (!isUnranked && displayOrder >= 1 && displayOrder <= 5) {
+            row.classList.add(
+                "is-premium",
+                "is-place-" + displayOrder
+            );
         }
 
         var placeNode = row._ratingPlaceNode;
@@ -463,13 +466,15 @@
         placeNode.replaceChildren();
         placeNode.setAttribute(
             "aria-label",
-            entry.place == null
+            !Number.isInteger(displayOrder) || displayOrder < 1
                 ? "Место не определено"
-                : "Место " + String(entry.place)
+                : "Место " + String(displayOrder)
         );
         placeNode.appendChild(
             document.createTextNode(
-                entry.place == null ? "—" : String(entry.place)
+                !Number.isInteger(displayOrder) || displayOrder < 1
+                    ? "—"
+                    : String(displayOrder)
             )
         );
 
@@ -798,7 +803,7 @@
     }
 
     function decoratePayloadWithDeltas(payload, previousPayload) {
-        var previousPlaces = new Map();
+        var previousDisplayOrders = new Map();
         var previousEntries = (
             previousPayload
             && Array.isArray(previousPayload.entries)
@@ -806,26 +811,20 @@
             ? previousPayload.entries
             : [];
         previousEntries.forEach(function (entry) {
-            previousPlaces.set(
+            previousDisplayOrders.set(
                 String(entry.employee_id),
-                Number(entry.place)
+                Number(entry.display_order)
             );
         });
         var entries = Array.isArray(payload.entries)
             ? payload.entries.map(function (entry) {
                 var decorated = Object.assign({}, entry);
-                if (
-                    decorated.position_delta == null
-                    || decorated.position_delta === ""
-                    || !Number.isFinite(Number(decorated.position_delta))
-                ) {
-                    var previous = previousPlaces.get(
-                        String(decorated.employee_id)
-                    );
-                    decorated.position_delta = previous == null
-                        ? 0
-                        : Number(previous) - Number(decorated.place);
-                }
+                var previous = previousDisplayOrders.get(
+                    String(decorated.employee_id)
+                );
+                decorated.position_delta = previous == null
+                    ? 0
+                    : Number(previous) - Number(decorated.display_order);
                 return decorated;
             })
             : [];

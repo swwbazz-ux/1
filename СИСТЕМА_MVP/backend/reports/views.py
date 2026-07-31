@@ -692,6 +692,13 @@ def _private_rating_json(payload, *, status=200):
     return response
 
 
+def _private_rating_not_found():
+    response = HttpResponse(status=404)
+    response.headers['Cache-Control'] = 'private, no-store'
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    return response
+
+
 def _driver_period_rating_site_scope(request):
     access = get_rating_observation_access(request)
     if not access:
@@ -1280,16 +1287,16 @@ def driver_rating_tv_formula_qa_replay_api(request):
 @require_GET
 def driver_rating_employee_photo(request, pk):
     if not getattr(settings, 'RATING_TV_SCREEN_ENABLED', False):
-        raise Http404
+        return _private_rating_not_found()
     access = get_rating_observation_access(request)
     if (
         access is None
         or access.role.code not in {'dispatcher', 'admin', 'manager'}
     ):
-        raise Http404
+        return _private_rating_not_found()
     site_scope = get_rating_site_scope(access)
     if site_scope is None or pk not in set(site_scope[0]):
-        raise Http404
+        return _private_rating_not_found()
     employee = (
         Employee.objects
         .filter(
@@ -1300,11 +1307,11 @@ def driver_rating_employee_photo(request, pk):
         .first()
     )
     if employee is None or not employee.photo:
-        raise Http404
+        return _private_rating_not_found()
     try:
         photo_file = employee.photo.open('rb')
     except (FileNotFoundError, OSError, ValueError):
-        raise Http404
+        return _private_rating_not_found()
     content_type, _encoding = mimetypes.guess_type(employee.photo.name)
     response = FileResponse(
         photo_file,

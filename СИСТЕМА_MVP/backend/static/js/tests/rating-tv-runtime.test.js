@@ -1193,6 +1193,51 @@ test("QA preview renders all 53 sorted rows and premium five without fetch", asy
     );
 });
 
+
+test("display order keeps 53 unique visible positions and exactly five premium rows across ties", async () => {
+    const entries = buildEntries(53, {prefix: "Участник с ничьёй"});
+    entries.forEach((entry, index) => {
+        entry.place = Math.floor(index / 4) + 1;
+        entry.shared_score_place = entry.place;
+        entry.display_order = index + 1;
+    });
+    const runtime = createRuntime({
+        qaPreview: true,
+        previewPayload: buildPayload({
+            entries,
+            fingerprint: "display-order-ties"
+        })
+    });
+    await runtime.flush();
+
+    const rows = runtime.elements.grid.children;
+    assert.deepEqual(
+        rows.map((row) => (
+            row.querySelector(".rating-tv__place").children[0].textContent
+        )),
+        Array.from({length: 53}, (_, index) => String(index + 1))
+    );
+    assert.deepEqual(
+        rows.map((row) => row.dataset.displayOrder),
+        Array.from({length: 53}, (_, index) => String(index + 1))
+    );
+    assert.equal(rows[0].dataset.place, "1");
+    assert.equal(rows[1].dataset.place, "1");
+    assert.equal(rows[4].dataset.place, "2");
+    assert.equal(
+        rows.filter((row) => row.classList.contains("is-premium")).length,
+        5
+    );
+    rows.slice(0, 5).forEach((row, index) => {
+        assert.equal(row.classList.contains(`is-place-${index + 1}`), true);
+    });
+    assert.equal(rows[5].classList.contains("is-premium"), false);
+    assert.deepEqual(
+        entries.map((entry) => entry.place),
+        Array.from({length: 53}, (_, index) => Math.floor(index / 4) + 1)
+    );
+});
+
 test("three-column desktop layout remains available as a reserve", async () => {
     const runtime = createRuntime({
         qaPreview: true,
@@ -1659,10 +1704,13 @@ test("formula replay uses its pinned schema and preserves exact nullable KPI row
         assert.equal(row.classList.contains("is-premium"), false);
         const place = row.querySelector(".rating-tv__place");
         assert.equal(place.children.length, 1);
-        assert.equal(place.children[0].textContent, "—");
+        assert.equal(
+            place.children[0].textContent,
+            String(sourceEntry.display_order)
+        );
         assert.equal(
             place.getAttribute("aria-label"),
-            "Место не определено"
+            `Место ${sourceEntry.display_order}`
         );
         const score = row.querySelector(".rating-tv__score");
         const service = row.querySelector(".rating-tv__service");
@@ -2234,6 +2282,68 @@ test("the active group is refreshed once after 300 seconds", async () => {
         runtime.elements.grid.children[0]._ratingPlaceNode,
         firstPlaceNode
     );
+});
+
+
+test("screen movement follows display order while shared server places stay unchanged", async () => {
+    const initialEntries = buildEntries(2, {prefix: "До перестановки"});
+    initialEntries[0].employee_id = 101;
+    initialEntries[0].place = 1;
+    initialEntries[0].shared_score_place = 1;
+    initialEntries[0].display_order = 1;
+    initialEntries[0].position_delta = 99;
+    initialEntries[1].employee_id = 202;
+    initialEntries[1].place = 1;
+    initialEntries[1].shared_score_place = 1;
+    initialEntries[1].display_order = 2;
+    initialEntries[1].position_delta = -99;
+
+    const refreshedEntries = [
+        Object.assign({}, initialEntries[1], {
+            display_order: 1,
+            position_delta: -50
+        }),
+        Object.assign({}, initialEntries[0], {
+            display_order: 2,
+            position_delta: 50
+        })
+    ];
+    const runtime = createRuntime({
+        responses: [queuedResponse(buildPayload({
+            fingerprint: "display-order-movement-1",
+            entries: initialEntries
+        }))]
+    });
+    await runtime.flush();
+
+    assert.deepEqual(
+        runtime.elements.grid.children.map((row) => (
+            row.querySelector(".rating-tv__movement").textContent
+        )),
+        ["—", "—"]
+    );
+
+    runtime.enqueueResponse(buildPayload({
+        fingerprint: "display-order-movement-2",
+        entries: refreshedEntries
+    }));
+    runtime.clock.advance(300000);
+    await runtime.flush();
+
+    const rows = runtime.elements.grid.children;
+    assert.deepEqual(rows.map((row) => row.dataset.employeeId), ["202", "101"]);
+    assert.deepEqual(
+        rows.map((row) => (
+            row.querySelector(".rating-tv__place").children[0].textContent
+        )),
+        ["1", "2"]
+    );
+    assert.deepEqual(rows.map((row) => row.dataset.place), ["1", "1"]);
+    assert.deepEqual(
+        rows.map((row) => row.querySelector(".rating-tv__movement").textContent),
+        ["↑ 1", "↓ 1"]
+    );
+    assert.deepEqual(initialEntries.map((entry) => entry.position_delta), [99, -99]);
 });
 
 

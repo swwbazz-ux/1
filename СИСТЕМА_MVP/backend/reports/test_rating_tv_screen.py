@@ -110,6 +110,15 @@ class DriverRatingTvScreenTests(TestCase):
         session.save()
         return login_at
 
+    def _assert_private_photo_not_found(self, response):
+        self.assertEqual(response.status_code, 404)
+        self.assertIn('private', response.headers['Cache-Control'])
+        self.assertIn('no-store', response.headers['Cache-Control'])
+        self.assertEqual(
+            response.headers['X-Content-Type-Options'],
+            'nosniff',
+        )
+
     def _qa_live_state(self, **overrides):
         if not hasattr(self, '_qa_live_rating_period'):
             work_date = production_work_date()
@@ -394,7 +403,7 @@ class DriverRatingTvScreenTests(TestCase):
 
         self.assertEqual(live_response.status_code, 404)
         self.assertEqual(qa_response.status_code, 404)
-        self.assertEqual(photo_response.status_code, 404)
+        self._assert_private_photo_not_found(photo_response)
         data_response = self.client.get(
             reverse('driver_rating_tv_data_api'),
             {'shift_type': 'night'},
@@ -501,6 +510,9 @@ class DriverRatingTvScreenTests(TestCase):
                             'nosniff',
                         )
                         if not tv_enabled:
+                            self._assert_private_photo_not_found(
+                                photo_response,
+                            )
                             continue
 
                         try:
@@ -1397,7 +1409,7 @@ class DriverRatingTvScreenTests(TestCase):
         )
 
         unauthenticated = self.client.get(scoped_url)
-        self.assertEqual(unauthenticated.status_code, 404)
+        self._assert_private_photo_not_found(unauthenticated)
 
         driver_access = self._create_access(
             'driver',
@@ -1405,7 +1417,7 @@ class DriverRatingTvScreenTests(TestCase):
         )
         self._login_as(driver_access)
         wrong_role = self.client.get(scoped_url)
-        self.assertEqual(wrong_role.status_code, 404)
+        self._assert_private_photo_not_found(wrong_role)
 
         self.client = Client()
         login_at = self._login_as(self.dispatcher_access)
@@ -1413,12 +1425,22 @@ class DriverRatingTvScreenTests(TestCase):
             pk=self.dispatcher_access.pk,
         ).update(last_login_at=login_at + timedelta(seconds=1))
         stale_generation = self.client.get(scoped_url)
-        self.assertEqual(stale_generation.status_code, 404)
+        self._assert_private_photo_not_found(stale_generation)
 
         self.client = Client()
         self._login_as(self.dispatcher_access)
+        no_photo = self.client.get(scoped_url)
+        self._assert_private_photo_not_found(no_photo)
+
+        with TemporaryDirectory(prefix='rating-tv-missing-photo-') as media_root:
+            with override_settings(MEDIA_ROOT=media_root):
+                self.driver.photo = 'employee_photos/missing.gif'
+                self.driver.save(update_fields=['photo'])
+                missing_file = self.client.get(scoped_url)
+        self._assert_private_photo_not_found(missing_file)
+
         outside_scope = self.client.get(outside_url)
-        self.assertEqual(outside_scope.status_code, 404)
+        self._assert_private_photo_not_found(outside_scope)
 
 
 class DriverRatingTvReplayContractTests(SimpleTestCase):
