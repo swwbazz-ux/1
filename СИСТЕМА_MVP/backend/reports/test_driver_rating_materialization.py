@@ -10,9 +10,11 @@ from django.test import TransactionTestCase, override_settings
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
+from assignments.models import AssignmentStatus, EquipmentAssignment
 from core.production_time import production_work_date
+from references.models import Equipment
 from shifts.models import EmployeeShift, ShiftType
-from users.models import WatchComposition
+from users.models import WatchComposition, WorkSchedule
 
 from .driver_rating_materialization import (
     DriverRatingMaterializationError,
@@ -100,6 +102,30 @@ class DriverRatingMaterializationTests(
             closed_by=employee,
         )
 
+    def _participant_group_context(
+        self,
+        employee,
+        *,
+        shift_type=ShiftType.DAY,
+    ):
+        work_schedule = WorkSchedule.objects.create(
+            code=f'rating-materialized-{employee.id}',
+            name=f'График materialized {employee.id}',
+            brigade_count=4,
+        )
+        employee.work_schedule = work_schedule
+        employee.brigade_number = 2
+        employee.save(update_fields=['work_schedule', 'brigade_number'])
+        assignment = EquipmentAssignment.objects.create(
+            employee=employee,
+            role=self.driver_role,
+            equipment=self.truck,
+            shift_type=shift_type,
+            status=AssignmentStatus.ACCEPTED,
+            accepted_at=self.now,
+        )
+        return work_schedule, assignment
+
     def test_publish_and_read_use_one_shared_database_row(self):
         self.snapshot(self.driver, ordinal=1, trip_count=20)
 
@@ -123,6 +149,119 @@ class DriverRatingMaterializationTests(
             [entry['employee_id'] for entry in payload['entries']],
             [self.driver.id],
         )
+
+    def test_publish_captures_participant_group_fields(self):
+        work_schedule, _assignment = self._participant_group_context(
+            self.driver
+        )
+        self.snapshot(self.driver, ordinal=1, trip_count=20)
+
+        result = self._refresh()
+        snapshot = DriverRatingPeriodMaterializedSnapshot.objects.get(
+            pk=result.snapshot_id,
+        )
+
+        self.assertEqual(
+            snapshot.participant_group_snapshots,
+            [{
+                'employee_id': self.driver.id,
+                'work_schedule_id': work_schedule.id,
+                'brigade_number': 2,
+                'shift_type': ShiftType.DAY,
+                'equipment_id': self.truck.id,
+            }],
+        )
+
+    def test_published_participant_group_survives_source_changes(self):
+        _work_schedule, assignment = self._participant_group_context(
+            self.driver
+        )
+        self.snapshot(self.driver, ordinal=1, trip_count=20)
+        first = self._refresh()
+        snapshot = DriverRatingPeriodMaterializedSnapshot.objects.get(
+            pk=first.snapshot_id,
+        )
+        historical_group = [
+            dict(value) for value in snapshot.participant_group_snapshots
+        ]
+        historical_payload = snapshot.payload
+        historical_revision = snapshot.revision
+
+        replacement_schedule = WorkSchedule.objects.create(
+            code='rating-materialized-replacement',
+            name='Другой график materialized',
+            brigade_count=4,
+        )
+        self.driver.work_schedule = replacement_schedule
+        self.driver.brigade_number = 4
+        self.driver.save(update_fields=['work_schedule', 'brigade_number'])
+        assignment.ended_at = self.now
+        assignment.save(update_fields=['ended_at'])
+        replacement_truck = Equipment.objects.create(
+            equipment_type=self.truck.equipment_type,
+            model=self.model,
+            garage_number='RATING-02',
+        )
+        EquipmentAssignment.objects.create(
+            employee=self.driver,
+            role=self.driver_role,
+            equipment=replacement_truck,
+            shift_type=ShiftType.NIGHT,
+            status=AssignmentStatus.ACCEPTED,
+            accepted_at=self.now,
+        )
+
+        second = self._refresh()
+        snapshot.refresh_from_db()
+
+        self.assertEqual(second.status, 'verified')
+        self.assertFalse(second.changed)
+        self.assertEqual(snapshot.revision, historical_revision)
+        self.assertEqual(snapshot.payload, historical_payload)
+        self.assertEqual(
+            snapshot.participant_group_snapshots,
+            historical_group,
+        )
+
+        self.snapshot(self.driver, ordinal=2, trip_count=23)
+        third = self._refresh()
+        snapshot.refresh_from_db()
+
+        self.assertEqual(third.status, 'published')
+        self.assertTrue(third.changed)
+        self.assertEqual(snapshot.revision, historical_revision + 1)
+        self.assertNotEqual(snapshot.payload, historical_payload)
+        self.assertEqual(
+            snapshot.participant_group_snapshots,
+            historical_group,
+        )
+
+    def test_legacy_snapshot_is_not_backfilled_from_current_sources(self):
+        self._participant_group_context(self.driver)
+        self.snapshot(self.driver, ordinal=1, trip_count=20)
+        first = self._refresh()
+        DriverRatingPeriodMaterializedSnapshot.objects.filter(
+            pk=first.snapshot_id,
+        ).update(participant_group_snapshots=None)
+
+        replacement_schedule = WorkSchedule.objects.create(
+            code='rating-materialized-legacy-replacement',
+            name='Новый график для старого снимка',
+            brigade_count=4,
+        )
+        self.driver.work_schedule = replacement_schedule
+        self.driver.brigade_number = 4
+        self.driver.save(update_fields=['work_schedule', 'brigade_number'])
+        self.snapshot(self.driver, ordinal=2, trip_count=23)
+
+        second = self._refresh()
+        snapshot = DriverRatingPeriodMaterializedSnapshot.objects.get(
+            pk=first.snapshot_id,
+        )
+
+        self.assertEqual(second.status, 'published')
+        self.assertTrue(second.changed)
+        self.assertIsNone(snapshot.participant_group_snapshots)
 
     def test_unchanged_refresh_only_moves_success_heartbeat(self):
         self.snapshot(self.driver, ordinal=1, trip_count=20)
@@ -329,11 +468,10 @@ class DriverRatingMaterializationTests(
             (),
         )
 
-    def test_command_discovers_pending_old_group_after_transfer(self):
+    def test_command_does_not_create_group_from_watch_only_pending_shift(self):
         driver = self.employee(
             'Переведённый водитель с ожидающим паспортом',
         )
-        historical_composition = self.composition
         shift = self._closed_driver_shift(
             driver,
             watch_period=self.watch,
@@ -365,22 +503,10 @@ class DriverRatingMaterializationTests(
             verbosity=0,
         )
 
-        historical_snapshot = (
-            DriverRatingPeriodMaterializedSnapshot.objects.get(
+        self.assertFalse(
+            DriverRatingPeriodMaterializedSnapshot.objects.filter(
                 rating_period=self.rating_period,
-                watch_composition=historical_composition,
-                shift_type=ShiftType.DAY,
-            )
-        )
-        self.assertEqual(
-            historical_snapshot.member_employee_ids,
-            [driver.id],
-        )
-        self.assertEqual(
-            historical_snapshot.member_latest_closed_at[
-                str(driver.id)
-            ],
-            shift.closed_at.isoformat(),
+            ).exists()
         )
         self.assertTrue(
             shift.passport_capture_requests.filter(
@@ -646,6 +772,16 @@ class DriverRatingMaterializationTests(
 
     def test_management_command_builds_day_and_night_rows(self):
         self.snapshot(self.driver, ordinal=1, trip_count=20)
+        day_schedule, _day_assignment = self._participant_group_context(
+            self.driver,
+        )
+        night_driver = self.employee('Водитель ночного общего снимка')
+        night_schedule, _night_assignment = (
+            self._participant_group_context(
+                night_driver,
+                shift_type=ShiftType.NIGHT,
+            )
+        )
         first_output = io.StringIO()
 
         call_command(
@@ -659,7 +795,7 @@ class DriverRatingMaterializationTests(
 
         rows = DriverRatingPeriodMaterializedSnapshot.objects.filter(
             rating_period=self.rating_period,
-            watch_composition=self.composition,
+            watch_composition__isnull=True,
         )
         self.assertEqual(rows.count(), 2)
         self.assertEqual(
@@ -670,9 +806,12 @@ class DriverRatingMaterializationTests(
             row.shift_type: (row.revision, row.published_at)
             for row in rows
         }
-        self.assertIn('/day: published, revision=1', first_output.getvalue())
         self.assertIn(
-            '/night: published, revision=1',
+            f'{day_schedule.code}/2/day: published, revision=1',
+            first_output.getvalue(),
+        )
+        self.assertIn(
+            f'{night_schedule.code}/2/night: published, revision=1',
             first_output.getvalue(),
         )
 
@@ -689,13 +828,16 @@ class DriverRatingMaterializationTests(
             row.shift_type: (row.revision, row.published_at)
             for row in DriverRatingPeriodMaterializedSnapshot.objects.filter(
                 rating_period=self.rating_period,
-                watch_composition=self.composition,
+                watch_composition__isnull=True,
             )
         }
         self.assertEqual(after, before)
-        self.assertIn('/day: verified, revision=1', second_output.getvalue())
         self.assertIn(
-            '/night: verified, revision=1',
+            f'{day_schedule.code}/2/day: verified, revision=1',
+            second_output.getvalue(),
+        )
+        self.assertIn(
+            f'{night_schedule.code}/2/night: verified, revision=1',
             second_output.getvalue(),
         )
 

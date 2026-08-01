@@ -296,11 +296,32 @@ class DriverRatingPeriodMaterializedSnapshot(models.Model):
         on_delete=models.PROTECT,
         related_name='driver_rating_materialized_snapshots',
     )
+    work_schedule = models.ForeignKey(
+        'users.WorkSchedule',
+        verbose_name='График работы',
+        on_delete=models.PROTECT,
+        related_name='driver_rating_materialized_snapshots',
+        null=True,
+        blank=True,
+    )
+    brigade_number = models.PositiveSmallIntegerField(
+        'Бригада',
+        choices=(
+            (1, 'Бригада №1'),
+            (2, 'Бригада №2'),
+            (3, 'Бригада №3'),
+            (4, 'Бригада №4'),
+        ),
+        null=True,
+        blank=True,
+    )
     watch_composition = models.ForeignKey(
         'users.WatchComposition',
         verbose_name='Состав вахты',
         on_delete=models.PROTECT,
         related_name='driver_rating_materialized_snapshots',
+        null=True,
+        blank=True,
     )
     shift_type = models.CharField(
         'Тип смены',
@@ -360,6 +381,18 @@ class DriverRatingPeriodMaterializedSnapshot(models.Model):
         default=dict,
         blank=True,
     )
+    participant_group_snapshots = models.JSONField(
+        'Исторические данные группы участников',
+        encoder=DjangoJSONEncoder,
+        default=None,
+        blank=True,
+        null=True,
+    )
+    participant_group_fingerprint = models.CharField(
+        'Fingerprint исторических данных группы',
+        max_length=64,
+        blank=True,
+    )
     revision = models.PositiveIntegerField('Ревизия', default=0)
     published_at = models.DateTimeField(
         'Содержимое опубликовано',
@@ -411,10 +444,27 @@ class DriverRatingPeriodMaterializedSnapshot(models.Model):
         )
         ordering = [
             '-rating_period__starts_on',
+            'work_schedule_id',
+            'brigade_number',
             'watch_composition_id',
             'shift_type',
         ]
         constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        watch_composition__isnull=False,
+                        work_schedule__isnull=True,
+                        brigade_number__isnull=True,
+                    )
+                    | models.Q(
+                        watch_composition__isnull=True,
+                        work_schedule__isnull=False,
+                        brigade_number__isnull=False,
+                    )
+                ),
+                name='drv_rating_group_key_shape',
+            ),
             models.UniqueConstraint(
                 fields=[
                     'scope_code',
@@ -423,6 +473,21 @@ class DriverRatingPeriodMaterializedSnapshot(models.Model):
                     'shift_type',
                 ],
                 name='uniq_drv_rating_mat_group',
+            ),
+            models.UniqueConstraint(
+                fields=[
+                    'scope_code',
+                    'rating_period',
+                    'work_schedule',
+                    'brigade_number',
+                    'shift_type',
+                ],
+                condition=models.Q(
+                    work_schedule__isnull=False,
+                    brigade_number__isnull=False,
+                    watch_composition__isnull=True,
+                ),
+                name='uniq_drv_rating_mat_ws_brig',
             ),
         ]
         indexes = [
@@ -437,9 +502,20 @@ class DriverRatingPeriodMaterializedSnapshot(models.Model):
         ]
 
     def __str__(self):
+        if self.watch_composition_id:
+            group_label = str(self.watch_composition)
+        elif self.work_schedule_id:
+            group_label = str(self.work_schedule)
+            if self.brigade_number is not None:
+                group_label = f'{group_label} / Бригада №{self.brigade_number}'
+        elif self.brigade_number is not None:
+            group_label = f'Бригада №{self.brigade_number}'
+        else:
+            group_label = 'Группа не определена'
+
         return (
             f'{self.scope_code}: {self.rating_period} / '
-            f'{self.watch_composition} / {self.get_shift_type_display()}'
+            f'{group_label} / {self.get_shift_type_display()}'
         )
 
 

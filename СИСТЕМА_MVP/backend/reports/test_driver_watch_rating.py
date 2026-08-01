@@ -75,6 +75,7 @@ def refresh_test_rating_materialization(rating_period):
     call_command(
         'refresh_driver_rating_snapshots',
         rating_period=rating_period.id,
+        legacy_watch_groups=True,
         strict=True,
         stdout=StringIO(),
         stderr=StringIO(),
