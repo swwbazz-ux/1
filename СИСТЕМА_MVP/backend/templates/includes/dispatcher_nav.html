@@ -18,5 +18,10 @@
         <a class="{% if dispatcher_nav_active == 'reports' %}is-active{% endif %}" href="{% url 'dispatcher_reports' %}">
             <span>Отчеты</span>
         </a>
+        {% if access.role.code == 'dispatcher' %}
+            <a href="{% url 'driver_rating_tv' %}" target="_blank" rel="noopener">
+                <span>Рейтинг водителей</span>
+            </a>
+        {% endif %}
     {% endif %}
 </nav>

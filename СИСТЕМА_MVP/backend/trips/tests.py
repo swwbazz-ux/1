@@ -1,9 +1,11 @@
 ﻿import json
 from datetime import datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 from django.core.exceptions import ValidationError
+from django.template.loader import render_to_string
 from django.test import Client, TestCase
 from django.urls import reverse
 from django.utils import timezone
@@ -38,6 +40,35 @@ from trips.dispatcher_header import open_dispatcher_shift
 from trips.models import DispatcherActionLog, DispatcherActionType, Trip, TripClientAction, TripStatus
 from trips.views import build_dispatcher_dashboard_context, dispatcher_empty_snapshot_progress, finalize_trip_unloaded
 from users.models import DriverPrimaryRegistration, Employee, EmployeeAccess, Role
+
+
+class DispatcherRatingNavigationTests(TestCase):
+    @staticmethod
+    def render_navigation(role_code):
+        return render_to_string(
+            'includes/dispatcher_nav.html',
+            {
+                'access': SimpleNamespace(role=SimpleNamespace(code=role_code)),
+                'dispatcher_nav_active': 'control',
+            },
+        )
+
+    def test_dispatcher_sees_driver_rating_link_opened_in_new_tab(self):
+        html = self.render_navigation('dispatcher')
+
+        self.assertIn('Рейтинг водителей', html)
+        self.assertIn(f'href="{reverse("driver_rating_tv")}"', html)
+        self.assertIn('target="_blank"', html)
+        self.assertIn('rel="noopener"', html)
+
+    def test_other_roles_do_not_see_driver_rating_link(self):
+        rating_url = reverse('driver_rating_tv')
+
+        for role_code in ('admin', 'manager', 'mining_master'):
+            with self.subTest(role_code=role_code):
+                html = self.render_navigation(role_code)
+                self.assertNotIn('Рейтинг водителей', html)
+                self.assertNotIn(f'href="{rating_url}"', html)
 
 
 class DispatcherSharedShiftStartTests(TestCase):
