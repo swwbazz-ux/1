@@ -17,7 +17,22 @@
         <span class="dispatcher-shift-slot">
             {% include "includes/dispatcher_shift_action.html" %}
         </span>
-        <div class="dispatcher-command-utility">
+        <div class="dispatcher-command-utility"{% if access.role.code == 'dispatcher' %} style="position: relative;"{% endif %}>
+            {% if access.role.code == 'dispatcher' %}
+                <a
+                    class="dispatcher-theme-button"
+                    href="{% url 'driver_rating_tv' %}"
+                    target="_blank"
+                    rel="noopener"
+                    aria-label="Рейтинг водителей"
+                    title="Рейтинг водителей"
+                    style="position: absolute; top: 0; right: auto; bottom: auto; left: -48px;"
+                >
+                    <svg width="19" height="19" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
+                        <path d="M4 19V13H9V19M9.5 19V9H14.5V19M15 19V5H20V19M3 19.5H21" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path>
+                    </svg>
+                </a>
+            {% endif %}
             <button type="button" class="dispatcher-theme-button" data-dispatcher-theme-toggle title="День / Ночь">Д/Н</button>
             <a class="dispatcher-utility-link dispatcher-utility-back" href="{% url 'role_home' %}"><span aria-hidden="true"></span>Назад</a>
             <a class="dispatcher-utility-link dispatcher-utility-exit" href="{% url 'logout' %}"><span aria-hidden="true"></span>Выйти</a>
