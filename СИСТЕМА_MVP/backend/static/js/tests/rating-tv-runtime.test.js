@@ -515,6 +515,31 @@ function buildEntries(count, {prefix = "Водитель", reverse = false} = {}
 }
 
 
+function buildNoResultEntry({
+    employeeId = 901,
+    displayOrder = 1,
+    fullName = "Водитель Без Результата",
+    equipmentNumber = "10"
+} = {}) {
+    return {
+        employee_id: employeeId,
+        full_name: fullName,
+        equipment: [`БелАЗ №${equipmentNumber}`],
+        row_status: "not_observed",
+        status_label: "Нет результата",
+        ranking_eligible: false,
+        shift_count: 0,
+        withheld_shift_count: 0,
+        score: null,
+        place: null,
+        shared_score_place: null,
+        display_order: displayOrder,
+        position_delta: null,
+        level: ""
+    };
+}
+
+
 function buildPayload({
     periodId = 10,
     compositionId = 20,
@@ -1194,6 +1219,57 @@ test("QA preview renders all 53 sorted rows and premium five without fetch", asy
 });
 
 
+test("compact desktop columns follow participant thresholds without padding rows", async () => {
+    const cases = [
+        {count: 1, columns: 1, lastColumn: 1, lastRow: 1},
+        {count: 2, columns: 1, lastColumn: 1, lastRow: 2},
+        {count: 14, columns: 1, rows: 14},
+        {count: 15, columns: 2, lastColumn: 2, lastRow: 1},
+        {count: 28, columns: 3, lastColumn: 3, lastRow: 1},
+        {count: 40, columns: 3, lastColumn: 3, lastRow: 13},
+        {count: 41, columns: 4, lastColumn: 4, lastRow: 1},
+        {count: 53, columns: 4, lastColumn: 4, lastRow: 13}
+    ];
+
+    for (const expected of cases) {
+        const runtime = createRuntime({
+            qaPreview: true,
+            gridHeight: 700,
+            previewPayload: buildPayload({
+                entries: buildEntries(expected.count),
+                fingerprint: `compact-${expected.count}`
+            })
+        });
+        await runtime.flush();
+
+        const rows = runtime.elements.grid.children;
+        assert.equal(rows.length, expected.count);
+        assert.equal(
+            runtime.elements.grid.style.getPropertyValue("--rating-columns"),
+            String(expected.columns)
+        );
+        assert.equal(
+            runtime.elements.grid.style.getPropertyValue("--rating-rows"),
+            "14"
+        );
+        assert.equal(
+            rows[0].style.getPropertyValue("grid-column"),
+            "1"
+        );
+        assert.equal(rows[0].style.getPropertyValue("grid-row"), "1");
+        const lastRow = rows[rows.length - 1];
+        assert.equal(
+            lastRow.style.getPropertyValue("grid-column"),
+            String(expected.lastColumn || expected.columns)
+        );
+        assert.equal(
+            lastRow.style.getPropertyValue("grid-row"),
+            String(expected.lastRow || expected.rows)
+        );
+    }
+});
+
+
 test("display order keeps 53 unique visible positions and exactly five premium rows across ties", async () => {
     const entries = buildEntries(53, {prefix: "Участник с ничьёй"});
     entries.forEach((entry, index) => {
@@ -1235,6 +1311,122 @@ test("display order keeps 53 unique visible positions and exactly five premium r
     assert.deepEqual(
         entries.map((entry) => entry.place),
         Array.from({length: 53}, (_, index) => Math.floor(index / 4) + 1)
+    );
+});
+
+test("one assigned participant without closed shifts stays visible without a place or score", async () => {
+    const noResult = buildNoResultEntry();
+    const runtime = createRuntime({
+        qaPreview: true,
+        previewPayload: buildPayload({
+            entries: [noResult],
+            fingerprint: "one-no-result"
+        })
+    });
+    await runtime.flush();
+
+    assert.equal(runtime.elements.grid.children.length, 1);
+    const row = runtime.elements.grid.children[0];
+    assert.equal(row.dataset.employeeId, String(noResult.employee_id));
+    assert.equal(row.dataset.displayOrder, "1");
+    assert.equal(row.dataset.place, "");
+    assert.equal(
+        row.querySelector(".rating-tv__place").children[0].textContent,
+        "—"
+    );
+    assert.equal(
+        row.querySelector(".rating-tv__place").getAttribute("aria-label"),
+        "Место не определено"
+    );
+    assert.equal(
+        row.querySelector(".rating-tv__score").children[0].textContent,
+        "Нет результата"
+    );
+    assert.equal(noResult.place, null);
+    assert.equal(noResult.score, null);
+});
+
+test("a participant without a result does not affect the rated participant place", async () => {
+    const rated = buildEntries(1, {prefix: "Водитель с результатом"})[0];
+    rated.row_status = "rated";
+    rated.ranking_eligible = true;
+    const noResult = buildNoResultEntry({
+        employeeId: 902,
+        displayOrder: 2
+    });
+    const runtime = createRuntime({
+        qaPreview: true,
+        previewPayload: buildPayload({
+            entries: [rated, noResult],
+            fingerprint: "rated-and-no-result"
+        })
+    });
+    await runtime.flush();
+
+    assert.equal(runtime.elements.grid.children.length, 2);
+    const ratedRow = runtime.elements.grid.children[0];
+    const noResultRow = runtime.elements.grid.children[1];
+    assert.equal(ratedRow.dataset.place, "1");
+    assert.equal(
+        ratedRow.querySelector(".rating-tv__place").children[0].textContent,
+        "1"
+    );
+    assert.equal(ratedRow.classList.contains("is-place-1"), true);
+    assert.equal(noResultRow.dataset.place, "");
+    assert.equal(
+        noResultRow.querySelector(".rating-tv__place").children[0].textContent,
+        "—"
+    );
+    assert.equal(noResultRow.classList.contains("is-premium"), false);
+    assert.equal(rated.place, 1);
+    assert.equal(noResult.place, null);
+});
+
+test("two participants without closed shifts remain listed without visible places", async () => {
+    const entries = [
+        buildNoResultEntry({employeeId: 903, displayOrder: 1}),
+        buildNoResultEntry({employeeId: 904, displayOrder: 2})
+    ];
+    const runtime = createRuntime({
+        qaPreview: true,
+        previewPayload: buildPayload({
+            entries,
+            fingerprint: "two-no-results"
+        })
+    });
+    await runtime.flush();
+
+    assert.equal(runtime.elements.grid.children.length, 2);
+    runtime.elements.grid.children.forEach((row, index) => {
+        assert.equal(row.dataset.displayOrder, String(index + 1));
+        assert.equal(row.dataset.place, "");
+        assert.equal(
+            row.querySelector(".rating-tv__place").children[0].textContent,
+            "—"
+        );
+        assert.equal(
+            row.querySelector(".rating-tv__score").children[0].textContent,
+            "Нет результата"
+        );
+    });
+});
+
+test("a no-result row never receives premium styling from display order", async () => {
+    const runtime = createRuntime({
+        qaPreview: true,
+        previewPayload: buildPayload({
+            entries: [buildNoResultEntry({displayOrder: 1})],
+            fingerprint: "no-result-no-premium"
+        })
+    });
+    await runtime.flush();
+
+    const row = runtime.elements.grid.children[0];
+    assert.equal(row.classList.contains("is-premium"), false);
+    assert.equal(row.classList.contains("is-place-1"), false);
+    assert.equal(
+        row.querySelector(".rating-tv__place").children[0].textContent,
+        "—"
     );
 });
 
@@ -1690,7 +1882,7 @@ test("formula replay uses its pinned schema and preserves exact nullable KPI row
             rowIndex: 52,
             rowStatus: "not_observed",
             rowClass: "is-not-observed",
-            statusText: "Нет смен",
+            statusText: "Нет результата",
             statusLabel: "за период"
         }
     ];
@@ -1704,14 +1896,8 @@ test("formula replay uses its pinned schema and preserves exact nullable KPI row
         assert.equal(row.classList.contains("is-premium"), false);
         const place = row.querySelector(".rating-tv__place");
         assert.equal(place.children.length, 1);
-        assert.equal(
-            place.children[0].textContent,
-            String(sourceEntry.display_order)
-        );
-        assert.equal(
-            place.getAttribute("aria-label"),
-            `Место ${sourceEntry.display_order}`
-        );
+        assert.equal(place.children[0].textContent, "—");
+        assert.equal(place.getAttribute("aria-label"), "Место не определено");
         const score = row.querySelector(".rating-tv__score");
         const service = row.querySelector(".rating-tv__service");
         assert.equal(row.children.length, 2);

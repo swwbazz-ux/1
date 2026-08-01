@@ -466,10 +466,18 @@
 
     function updateRatingRow(row, entry) {
         var displayOrder = Number(entry.display_order);
+        var place = Number(entry.place);
         var rowStatus = entry.row_status || "";
         var isWithheld = rowStatus === "withheld";
         var isNotObserved = rowStatus === "not_observed";
         var isUnranked = isWithheld || isNotObserved;
+        var hasVisiblePlace = (
+            !isUnranked
+            && Number.isInteger(place)
+            && place >= 1
+            && Number.isInteger(displayOrder)
+            && displayOrder >= 1
+        );
         row.className = "rating-tv__row";
         row.dataset.employeeId = String(entry.employee_id || "");
         row.dataset.place = String(entry.place == null ? "" : entry.place);
@@ -482,7 +490,7 @@
         } else if (isNotObserved) {
             row.classList.add("is-not-observed");
         }
-        if (!isUnranked && displayOrder >= 1 && displayOrder <= 5) {
+        if (hasVisiblePlace && displayOrder <= 5) {
             row.classList.add(
                 "is-premium",
                 "is-place-" + displayOrder
@@ -498,15 +506,13 @@
         placeNode.replaceChildren();
         placeNode.setAttribute(
             "aria-label",
-            !Number.isInteger(displayOrder) || displayOrder < 1
-                ? "Место не определено"
-                : "Место " + String(displayOrder)
+            hasVisiblePlace
+                ? "Место " + String(displayOrder)
+                : "Место не определено"
         );
         placeNode.appendChild(
             document.createTextNode(
-                !Number.isInteger(displayOrder) || displayOrder < 1
-                    ? "—"
-                    : String(displayOrder)
+                hasVisiblePlace ? String(displayOrder) : "—"
             )
         );
 
@@ -540,7 +546,10 @@
             score.className = "rating-tv__score";
             score.classList.add("is-status", "is-not-observed");
             var noShiftValue = document.createElement("b");
-            noShiftValue.textContent = "Нет смен";
+            noShiftValue.textContent = (
+                String(entry.status_label || "").trim()
+                || "Нет результата"
+            );
             var noShiftLabel = document.createElement("small");
             noShiftLabel.textContent = "за период";
             score.append(noShiftValue, noShiftLabel);
@@ -598,20 +607,27 @@
     }
 
     function layoutFourColumns(count, boardHeight) {
-        var columns = Math.min(4, count);
-        var baseSize = Math.floor(count / columns);
-        var remainder = count % columns;
-        var columnSizes = Array.from(
-            {length: columns},
-            function (_unused, index) {
-                return baseSize + (index < remainder ? 1 : 0);
-            }
-        );
-        var rows = Math.max.apply(null, columnSizes);
+        var columns = count <= 14
+            ? 1
+            : count <= 27
+                ? 2
+                : count <= 40
+                    ? 3
+                    : 4;
+        var rows = 14;
+        var columnSizes = [14, 13, 13, 13].slice(0, columns);
         var entryIndex = 0;
 
         columnSizes.forEach(function (columnSize, columnIndex) {
-            for (var rowIndex = 0; rowIndex < columnSize; rowIndex += 1) {
+            var populatedRows = Math.min(
+                columnSize,
+                count - entryIndex
+            );
+            for (
+                var rowIndex = 0;
+                rowIndex < populatedRows;
+                rowIndex += 1
+            ) {
                 var row = elements.grid.children[entryIndex];
                 row.style.setProperty(
                     "grid-column",
