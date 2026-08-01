@@ -1,4 +1,4 @@
-<nav class="dispatcher-nav" aria-label="{% if dispatcher_nav_label %}{{ dispatcher_nav_label }}{% else %}Навигация диспетчера{% endif %}">
+<nav class="dispatcher-nav{% if access.role.code == 'dispatcher' %} dispatcher-nav--with-rating{% endif %}" aria-label="{% if dispatcher_nav_label %}{{ dispatcher_nav_label }}{% else %}Навигация диспетчера{% endif %}">
     {% if dispatcher_nav_items %}
         {% for item in dispatcher_nav_items %}
             <a class="{% if item.active %}is-active{% endif %}" href="{{ item.href|default:'#' }}"{% if item.data_tab %} data-mm-tab="{{ item.data_tab }}"{% endif %}>
@@ -20,7 +20,7 @@
         </a>
         {% if access.role.code == 'dispatcher' %}
             <a href="{% url 'driver_rating_tv' %}" target="_blank" rel="noopener">
-                <span>Рейтинг водителей</span>
+                <span>Рейтинг</span>
             </a>
         {% endif %}
     {% endif %}

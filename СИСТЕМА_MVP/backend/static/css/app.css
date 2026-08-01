@@ -19081,6 +19081,15 @@ body.system-admin-reference-detail-screen .admin-page {
     padding-top: 7px;
 }
 
+.dispatcher-header-row .dispatcher-nav.dispatcher-nav--with-rating {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: clamp(6px, .5vw, 10px);
+}
+
+.dispatcher-header-row .dispatcher-nav.dispatcher-nav--with-rating a {
+    font-size: clamp(11px, .62vw, 12px);
+}
+
 .dispatcher-header-row .dispatcher-nav a {
     position: relative;
     display: flex;

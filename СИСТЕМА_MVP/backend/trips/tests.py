@@ -55,11 +55,23 @@ class DispatcherRatingNavigationTests(TestCase):
 
     def test_dispatcher_sees_driver_rating_link_opened_in_new_tab(self):
         html = self.render_navigation('dispatcher')
+        stylesheet = (
+            Path(__file__).resolve().parents[1] / 'static' / 'css' / 'app.css'
+        ).read_text(encoding='utf-8')
 
-        self.assertIn('Рейтинг водителей', html)
+        self.assertIn('<span>Рейтинг</span>', html)
         self.assertIn(f'href="{reverse("driver_rating_tv")}"', html)
         self.assertIn('target="_blank"', html)
         self.assertIn('rel="noopener"', html)
+        self.assertIn('dispatcher-nav--with-rating', html)
+        self.assertIn(
+            '.dispatcher-header-row .dispatcher-nav.dispatcher-nav--with-rating {',
+            stylesheet,
+        )
+        self.assertIn(
+            'grid-template-columns: repeat(5, minmax(0, 1fr));',
+            stylesheet,
+        )
 
     def test_other_roles_do_not_see_driver_rating_link(self):
         rating_url = reverse('driver_rating_tv')
@@ -67,8 +79,9 @@ class DispatcherRatingNavigationTests(TestCase):
         for role_code in ('admin', 'manager', 'mining_master'):
             with self.subTest(role_code=role_code):
                 html = self.render_navigation(role_code)
-                self.assertNotIn('Рейтинг водителей', html)
+                self.assertNotIn('<span>Рейтинг</span>', html)
                 self.assertNotIn(f'href="{rating_url}"', html)
+                self.assertNotIn('dispatcher-nav--with-rating', html)
 
 
 class DispatcherSharedShiftStartTests(TestCase):
