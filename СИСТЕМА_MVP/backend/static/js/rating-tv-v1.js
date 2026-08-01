@@ -226,10 +226,33 @@
         state.availablePeriods = Array.isArray(payload.available_rating_periods)
             ? payload.available_rating_periods
             : [];
+        var assignmentGroupContract = (
+            !state.qaPreview
+            && !state.qaLive
+            && (
+                Object.prototype.hasOwnProperty.call(
+                    payload,
+                    "available_rating_groups"
+                )
+                || Object.prototype.hasOwnProperty.call(
+                    payload,
+                    "rating_group"
+                )
+            )
+        );
+        var availableGroups = assignmentGroupContract
+            ? payload.available_rating_groups
+            : payload.available_watch_compositions;
+        var selectedGroup = assignmentGroupContract
+            ? payload.rating_group
+            : payload.watch_composition;
+        var selectedGroupProperty = assignmentGroupContract
+            ? "rating_group"
+            : "watch_composition";
         state.availableCompositions = Array.isArray(
-            payload.available_watch_compositions
+            availableGroups
         )
-            ? payload.available_watch_compositions
+            ? availableGroups
             : [];
 
         if (payload.rating_period && payload.rating_period.id != null) {
@@ -239,27 +262,36 @@
         ) {
             state.selectedPeriod = "";
         }
+        var hasSelectedGroupProperty = Object.prototype.hasOwnProperty.call(
+            payload,
+            selectedGroupProperty
+        );
         if (
-            payload.watch_composition
-            && payload.watch_composition.id != null
+            selectedGroup
+            && selectedGroup.id != null
         ) {
             state.selectedComposition = String(
-                payload.watch_composition.id
+                selectedGroup.id
             );
-        } else if (
-            Object.prototype.hasOwnProperty.call(
-                payload,
-                "watch_composition"
-            )
-        ) {
+        } else if (hasSelectedGroupProperty) {
             state.selectedComposition = "";
-        } else if (
-            !state.selectedComposition
-            && state.availableCompositions.length
-        ) {
-            state.selectedComposition = String(
-                state.availableCompositions[0].id
-            );
+        } else {
+            if (
+                state.selectedComposition
+                && !state.availableCompositions.some(function (item) {
+                    return String(item.id) === state.selectedComposition;
+                })
+            ) {
+                state.selectedComposition = "";
+            }
+            if (
+                !state.selectedComposition
+                && state.availableCompositions.length
+            ) {
+                state.selectedComposition = String(
+                    state.availableCompositions[0].id
+                );
+            }
         }
         if (payload.shift_type === "day" || payload.shift_type === "night") {
             state.shiftType = payload.shift_type;
@@ -789,11 +821,21 @@
         )
             ? payload.rating_period.id
             : state.selectedPeriod;
-        var compositionId = (
-            payload.watch_composition
-            && payload.watch_composition.id != null
+        var payloadGroup = (
+            !state.qaPreview
+            && !state.qaLive
+            && Object.prototype.hasOwnProperty.call(
+                payload,
+                "rating_group"
+            )
         )
-            ? payload.watch_composition.id
+            ? payload.rating_group
+            : payload.watch_composition;
+        var compositionId = (
+            payloadGroup
+            && payloadGroup.id != null
+        )
+            ? payloadGroup.id
             : state.selectedComposition;
         return groupKey(
             periodId,
@@ -1014,11 +1056,37 @@
         if (state.selectedPeriod) {
             url.searchParams.set("rating_period", state.selectedPeriod);
         }
-        if (state.selectedComposition) {
+        if (state.qaLive && state.selectedComposition) {
             url.searchParams.set(
                 "watch_composition",
                 state.selectedComposition
             );
+        } else if (state.selectedComposition) {
+            var selectedGroup = state.availableCompositions.find(
+                function (item) {
+                    return String(item.id) === state.selectedComposition;
+                }
+            );
+            if (
+                selectedGroup
+                && selectedGroup.work_schedule
+                && selectedGroup.work_schedule.id != null
+                && selectedGroup.brigade_number != null
+            ) {
+                url.searchParams.set(
+                    "work_schedule",
+                    String(selectedGroup.work_schedule.id)
+                );
+                url.searchParams.set(
+                    "brigade_number",
+                    String(selectedGroup.brigade_number)
+                );
+            } else {
+                url.searchParams.set(
+                    "watch_composition",
+                    state.selectedComposition
+                );
+            }
         }
         if (state.qaLive && state.qaLiveState) {
             url.searchParams.set(
@@ -1034,10 +1102,11 @@
     }
 
     function bootstrapSelection(payload) {
+        var previousSelection = state.selectedComposition;
         updateScopeControls(payload);
         return (
             state.selectedComposition
-            && state.availableCompositions.length > 1
+            && state.selectedComposition !== previousSelection
         );
     }
 
