@@ -13,6 +13,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from users.access_auth import find_employee_access_by_credentials
+from users.active_role import activate_role_session
 from users.models import Employee, EmployeeAccess
 from users.views import get_current_access
 
@@ -228,10 +229,17 @@ def portal_login(request):
                 and access.status == EmployeeAccess.Status.ACTIVATED
                 and active_employees().filter(pk=access.employee_id).exists()
             ):
+                try:
+                    access = activate_role_session(request, access)
+                except ValidationError as error:
+                    messages.error(request, '; '.join(error.messages))
+                    return render(
+                        request,
+                        'portal/portal_login.html',
+                        {'form': form, 'company': COMPANY_PROFILE},
+                    )
                 clear_login_failures(request, phone)
                 start_portal_session(request, access)
-                access.last_login_at = timezone.now()
-                access.save(update_fields=['last_login_at'])
                 log_portal_action(access.employee, 'Вход в корпоративный портал')
                 return redirect(safe_next_url(request, reverse('portal:dashboard')))
             failure = record_login_failure(request, phone)

@@ -8,6 +8,7 @@ from decimal import Decimal
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
+from urllib.parse import urlencode
 
 from core.production_time import production_work_date
 from django.conf import settings
@@ -366,19 +367,135 @@ class DriverRatingTvScreenTests(TestCase):
         )
 
     @override_settings(**LIVE_TV_SETTINGS)
-    def test_tv_screen_rejects_stale_active_role_generation(self):
+    def test_stale_dispatcher_reauthenticates_for_tv_and_portal_stays_synced(
+        self,
+    ):
+        self.dispatcher_access.employee.phone = '+7 900 000-00-01'
+        self.dispatcher_access.employee.save(update_fields=['phone'])
         login_at = self._login_as(self.dispatcher_access)
         EmployeeAccess.objects.filter(
             pk=self.dispatcher_access.pk,
         ).update(last_login_at=login_at + timedelta(seconds=1))
 
-        response = self.client.get(reverse('driver_rating_tv'))
+        dispatcher_response = self.client.get(reverse('dispatcher_control'))
+        self.assertEqual(dispatcher_response.status_code, 200)
+        self.assertContains(
+            dispatcher_response,
+            'Роль неактивна — доступен только просмотр',
+        )
+
+        tv_url = reverse('driver_rating_tv')
+        data_url = f'{reverse("driver_rating_tv_data_api")}?shift_type=day'
+        login_url = (
+            f'{reverse("login")}?{urlencode({"next": tv_url})}'
+        )
+        tv_response = self.client.get(tv_url)
+        data_response = self.client.get(data_url)
 
         self.assertRedirects(
-            response,
-            reverse('login'),
+            tv_response,
+            login_url,
             fetch_redirect_response=False,
         )
+        self.assertEqual(data_response.status_code, 401)
+
+        login_page = self.client.get(login_url)
+        self.assertEqual(login_page.status_code, 200)
+        self.assertTemplateUsed(login_page, 'users/login.html')
+        self.assertEqual(login_page.context['next_url'], tv_url)
+
+        login_response = self.client.post(
+            reverse('login'),
+            {
+                'phone': self.dispatcher_access.employee.phone,
+                'access_code': self.dispatcher_access.access_code,
+                'device_kind': 'personal',
+                'next': tv_url,
+            },
+        )
+        self.assertRedirects(
+            login_response,
+            tv_url,
+            fetch_redirect_response=False,
+        )
+
+        self.dispatcher_access.refresh_from_db()
+        session = self.client.session
+        self.assertEqual(
+            session[ACTIVE_ROLE_SESSION_KEY],
+            self.dispatcher_access.id,
+        )
+        self.assertEqual(
+            session[ACTIVE_ROLE_GENERATION_SESSION_KEY],
+            self.dispatcher_access.last_login_at.isoformat(),
+        )
+        self.assertEqual(
+            session[ACTIVE_ROLE_CODE_SESSION_KEY],
+            'dispatcher',
+        )
+        self.assertEqual(self.client.get(tv_url).status_code, 200)
+        self.assertEqual(self.client.get(data_url).status_code, 200)
+
+        session = self.client.session
+        session.pop(ACTIVE_ROLE_GENERATION_SESSION_KEY)
+        session.save()
+        self.assertRedirects(
+            self.client.get(tv_url),
+            login_url,
+            fetch_redirect_response=False,
+        )
+        self.assertEqual(self.client.get(login_url).status_code, 200)
+        self.assertEqual(self.client.get(data_url).status_code, 401)
+        missing_generation_login = self.client.post(
+            reverse('login'),
+            {
+                'phone': self.dispatcher_access.employee.phone,
+                'access_code': self.dispatcher_access.access_code,
+                'device_kind': 'personal',
+                'next': tv_url,
+            },
+        )
+        self.assertRedirects(
+            missing_generation_login,
+            tv_url,
+            fetch_redirect_response=False,
+        )
+
+        self.dispatcher_access.refresh_from_db()
+        generation_before_portal_login = self.dispatcher_access.last_login_at
+        portal_response = self.client.post(
+            reverse('portal:login'),
+            {
+                'phone': self.dispatcher_access.employee.phone,
+                'access_code': self.dispatcher_access.access_code,
+            },
+        )
+        self.assertRedirects(
+            portal_response,
+            reverse('portal:dashboard'),
+            fetch_redirect_response=False,
+        )
+
+        self.dispatcher_access.refresh_from_db()
+        session = self.client.session
+        self.assertGreater(
+            self.dispatcher_access.last_login_at,
+            generation_before_portal_login,
+        )
+        self.assertEqual(
+            session[ACTIVE_ROLE_SESSION_KEY],
+            self.dispatcher_access.id,
+        )
+        self.assertEqual(
+            session[ACTIVE_ROLE_GENERATION_SESSION_KEY],
+            self.dispatcher_access.last_login_at.isoformat(),
+        )
+        self.assertEqual(
+            session[ACTIVE_ROLE_CODE_SESSION_KEY],
+            'dispatcher',
+        )
+        self.assertEqual(self.client.get(tv_url).status_code, 200)
+        self.assertEqual(self.client.get(data_url).status_code, 200)
 
     @override_settings(
         PORTAL_WORKING_DRIVER_RATING_ENABLED=False,

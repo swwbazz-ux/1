@@ -2,6 +2,7 @@ import mimetypes
 from collections import defaultdict
 from datetime import datetime, timedelta
 from decimal import Decimal
+from urllib.parse import urlencode
 
 from django.conf import settings
 from django.contrib import messages
@@ -392,11 +393,11 @@ def require_dispatcher_report_access(request):
     return access, None
 
 
-def get_rating_observation_access(request):
+def _get_rating_observation_access_candidate(request):
     access_id = request.session.get('employee_access_id')
     if not access_id:
         return None
-    access = (
+    return (
         EmployeeAccess.objects
         .select_related('employee', 'role')
         .filter(
@@ -409,6 +410,10 @@ def get_rating_observation_access(request):
         )
         .first()
     )
+
+
+def get_rating_observation_access(request):
+    access = _get_rating_observation_access_candidate(request)
     if not access:
         return None
     state = role_session_state(request, access)
@@ -763,6 +768,19 @@ def _rating_tv_assignment_site_scope(request):
 def _rating_tv_assignment_access_or_redirect(request):
     access = get_rating_observation_access(request)
     if not access:
+        reauthentication_access = _get_rating_observation_access_candidate(
+            request,
+        )
+        if (
+            reauthentication_access
+            and reauthentication_access.role.code
+            in {'dispatcher', 'admin', 'manager'}
+        ):
+            login_url = reverse('login')
+            next_url = reverse('driver_rating_tv')
+            return None, redirect(
+                f'{login_url}?{urlencode({"next": next_url})}',
+            )
         return None, redirect('login')
     if access.role.code not in {'dispatcher', 'admin', 'manager'}:
         return None, redirect('role_home')

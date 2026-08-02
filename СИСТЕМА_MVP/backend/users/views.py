@@ -61,7 +61,13 @@ from shifts.services import (
 from trips.models import DispatcherActionLog, OPEN_TRIP_STATUSES, Trip, TripClientAction, TripStatus
 
 from .access_auth import find_employee_access_by_credentials
-from .active_role import activate_role_session, role_session_state
+from .active_role import (
+    ACTIVE_ROLE_CODE_SESSION_KEY,
+    ACTIVE_ROLE_GENERATION_SESSION_KEY,
+    ACTIVE_ROLE_SESSION_KEY,
+    activate_role_session,
+    role_session_state,
+)
 from .forms import (
     AdminAccessBlockForm,
     AccessActivationForm,
@@ -431,6 +437,22 @@ def _validated_next_url(request, value):
         return value
     return ''
 
+
+def _active_role_session_matches_access(request, access):
+    state = role_session_state(request, access)
+    active_access = state.get('active_access')
+    return bool(
+        state['authenticated']
+        and state['is_active']
+        and active_access is not None
+        and active_access.id == access.id
+        and active_access.last_login_at is not None
+        and request.session.get(ACTIVE_ROLE_SESSION_KEY) == access.id
+        and request.session.get(ACTIVE_ROLE_GENERATION_SESSION_KEY)
+        and request.session.get(ACTIVE_ROLE_CODE_SESSION_KEY)
+        == access.role.code
+    )
+
 def build_workbook_response(workbook, filename):
     output = BytesIO()
     workbook.save(output)
@@ -480,7 +502,17 @@ def login_view(request):
         request,
         request.POST.get('next') if request.method == 'POST' else request.GET.get('next'),
     )
-    if request.method == 'GET' and get_current_access(request):
+    current_access = get_current_access(request) if request.method == 'GET' else None
+    rating_tv_reauthentication_required = bool(
+        current_access
+        and next_url == reverse('driver_rating_tv')
+        and not _active_role_session_matches_access(request, current_access)
+    )
+    if (
+        request.method == 'GET'
+        and current_access
+        and not rating_tv_reauthentication_required
+    ):
         return redirect(next_url or 'role_home')
     if request.method == 'GET' and role_app and request.session.get('employee_access_id'):
         request.session.flush()
