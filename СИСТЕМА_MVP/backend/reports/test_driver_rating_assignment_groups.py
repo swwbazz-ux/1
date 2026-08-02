@@ -284,26 +284,130 @@ class DriverRatingAssignmentGroupTests(
             legacy['shift_score_fingerprint'],
         )
 
-    def test_published_group_is_frozen_after_card_and_assignment_change(self):
-        frozen = self._employee('Зафиксированный водитель')
-        colleague = self._employee('Неизменный водитель')
-        frozen_assignment = self._assignment(frozen)
-        self._assignment(colleague)
-        self.snapshot(frozen, ordinal=1, trip_count=20)
-        self.snapshot(colleague, ordinal=2, trip_count=18)
+    def test_existing_snapshot_adds_new_current_assignment(self):
+        first_driver = self._employee('Первый водитель')
+        self._assignment(first_driver)
+        first = self._refresh()
+        before = DriverRatingPeriodMaterializedSnapshot.objects.get(
+            pk=first.snapshot_id,
+        )
+        second_driver = self._employee('Второй водитель')
+        second_assignment = self._assignment(second_driver)
+
+        second = self._refresh()
+        after = DriverRatingPeriodMaterializedSnapshot.objects.get(
+            pk=first.snapshot_id,
+        )
+
+        self.assertEqual(second.status, 'published')
+        self.assertTrue(second.changed)
+        self.assertEqual(second.revision, first.revision + 1)
+        self.assertNotEqual(
+            after.participant_group_fingerprint,
+            before.participant_group_fingerprint,
+        )
+        self.assertNotEqual(
+            after.scope_fingerprint,
+            before.scope_fingerprint,
+        )
+        self.assertNotEqual(
+            after.source_fingerprint,
+            before.source_fingerprint,
+        )
+        self.assertNotEqual(
+            after.payload_fingerprint,
+            before.payload_fingerprint,
+        )
+        self.assertEqual(
+            after.payload['scope_fingerprint'],
+            after.scope_fingerprint,
+        )
+        self.assertEqual(
+            {
+                row['employee_id']
+                for row in after.participant_group_snapshots
+            },
+            {first_driver.id, second_driver.id},
+        )
+        self.assertEqual(
+            {row['employee_id'] for row in after.payload['entries']},
+            {first_driver.id, second_driver.id},
+        )
+        self.assertEqual(
+            next(
+                row['equipment_id']
+                for row in after.participant_group_snapshots
+                if row['employee_id'] == second_driver.id
+            ),
+            second_assignment.equipment_id,
+        )
+
+    def test_existing_snapshot_removes_ended_assignment(self):
+        remaining = self._employee('Остающийся водитель')
+        ended = self._employee('Завершённое назначение')
+        self._assignment(remaining)
+        ended_assignment = self._assignment(ended)
+        first = self._refresh()
+        before = DriverRatingPeriodMaterializedSnapshot.objects.get(
+            pk=first.snapshot_id,
+        )
+
+        ended_assignment.ended_at = self.now
+        ended_assignment.save(update_fields=['ended_at'])
+
+        second = self._refresh()
+        after = DriverRatingPeriodMaterializedSnapshot.objects.get(
+            pk=first.snapshot_id,
+        )
+
+        self.assertEqual(second.status, 'published')
+        self.assertTrue(second.changed)
+        self.assertEqual(second.revision, first.revision + 1)
+        self.assertNotEqual(
+            after.participant_group_fingerprint,
+            before.participant_group_fingerprint,
+        )
+        self.assertNotEqual(
+            after.scope_fingerprint,
+            before.scope_fingerprint,
+        )
+        self.assertNotEqual(
+            after.source_fingerprint,
+            before.source_fingerprint,
+        )
+        self.assertNotEqual(
+            after.payload_fingerprint,
+            before.payload_fingerprint,
+        )
+        self.assertEqual(
+            [
+                row['employee_id']
+                for row in after.participant_group_snapshots
+            ],
+            [remaining.id],
+        )
+        self.assertEqual(
+            [row['employee_id'] for row in after.payload['entries']],
+            [remaining.id],
+        )
+
+    def test_unchanged_assignment_group_keeps_revision(self):
+        driver = self._employee('Неизменный водитель')
+        self._assignment(driver)
         first = self._refresh()
         before = DriverRatingPeriodMaterializedSnapshot.objects.get(
             pk=first.snapshot_id,
         )
         before_payload = before.payload
-        before_participants = before.participant_group_snapshots
-
-        frozen.work_schedule = self.schedule_b
-        frozen.brigade_number = 3
-        frozen.save(update_fields=['work_schedule', 'brigade_number'])
-        frozen_assignment.equipment = self._equipment()
-        frozen_assignment.shift_type = ShiftType.NIGHT
-        frozen_assignment.save(update_fields=['equipment', 'shift_type'])
+        before_published_at = before.published_at
+        before_fingerprints = (
+            before.scope_fingerprint,
+            before.source_fingerprint,
+            before.shift_score_fingerprint,
+            before.payload_fingerprint,
+            before.member_fingerprint,
+            before.participant_group_fingerprint,
+        )
 
         second = self._refresh()
         after = DriverRatingPeriodMaterializedSnapshot.objects.get(
@@ -313,30 +417,217 @@ class DriverRatingAssignmentGroupTests(
         self.assertEqual(second.status, 'verified')
         self.assertFalse(second.changed)
         self.assertEqual(second.revision, first.revision)
+        self.assertEqual(after.published_at, before_published_at)
         self.assertEqual(after.payload, before_payload)
         self.assertEqual(
-            after.participant_group_snapshots,
-            before_participants,
+            (
+                after.scope_fingerprint,
+                after.source_fingerprint,
+                after.shift_score_fingerprint,
+                after.payload_fingerprint,
+                after.member_fingerprint,
+                after.participant_group_fingerprint,
+            ),
+            before_fingerprints,
+        )
+
+    def test_equipment_change_updates_group_fingerprints_and_snapshot(self):
+        driver = self._employee('Водитель со сменой техники')
+        assignment = self._assignment(driver)
+        first = self._refresh()
+        before = DriverRatingPeriodMaterializedSnapshot.objects.get(
+            pk=first.snapshot_id,
+        )
+        replacement_equipment = self._equipment()
+
+        assignment.equipment = replacement_equipment
+        assignment.save(update_fields=['equipment'])
+
+        second = self._refresh()
+        after = DriverRatingPeriodMaterializedSnapshot.objects.get(
+            pk=first.snapshot_id,
+        )
+
+        self.assertEqual(second.status, 'published')
+        self.assertTrue(second.changed)
+        self.assertEqual(second.revision, first.revision + 1)
+        self.assertNotEqual(
+            after.participant_group_fingerprint,
+            before.participant_group_fingerprint,
+        )
+        self.assertNotEqual(
+            after.scope_fingerprint,
+            before.scope_fingerprint,
+        )
+        self.assertNotEqual(
+            after.source_fingerprint,
+            before.source_fingerprint,
+        )
+        self.assertNotEqual(
+            after.payload_fingerprint,
+            before.payload_fingerprint,
         )
         self.assertEqual(
-            {row['employee_id'] for row in after.payload['entries']},
-            {frozen.id, colleague.id},
+            after.payload['scope_fingerprint'],
+            after.scope_fingerprint,
         )
-        with self.assertRaises(DriverRatingMaterializationError):
+        self.assertEqual(
+            after.participant_group_snapshots[0]['equipment_id'],
+            replacement_equipment.id,
+        )
+        self.assertEqual(
+            after.payload['entries'][0]['equipment_id'],
+            replacement_equipment.id,
+        )
+
+    def test_refresh_command_adds_four_new_assignments_to_existing_groups(self):
+        group_specs = (
+            (self.schedule_a, 4, ShiftType.DAY),
+            (self.schedule_a, 3, ShiftType.NIGHT),
+            (self.schedule_a, 2, ShiftType.DAY),
+            (self.schedule_a, 2, ShiftType.NIGHT),
+        )
+        expected_employee_ids = {}
+        for index, (schedule, brigade, shift_type) in enumerate(
+            group_specs,
+            start=1,
+        ):
+            driver = self._employee(
+                f'Исходный водитель группы {index}',
+                schedule=schedule,
+                brigade=brigade,
+            )
+            self._assignment(driver, shift_type=shift_type)
             self._refresh(
-                schedule=self.schedule_b,
-                brigade=3,
-                shift_type=ShiftType.NIGHT,
+                schedule=schedule,
+                brigade=brigade,
+                shift_type=shift_type,
             )
-        published_rows = (
-            DriverRatingPeriodMaterializedSnapshot.objects
-            .filter(
-                rating_period=self.rating_period,
-                revision__gt=0,
-                participant_group_snapshots__isnull=False,
+            expected_employee_ids[(schedule.id, brigade, shift_type)] = {
+                driver.id,
+            }
+
+        for index, (schedule, brigade, shift_type) in enumerate(
+            group_specs,
+            start=1,
+        ):
+            driver = self._employee(
+                f'Новый водитель группы {index}',
+                schedule=schedule,
+                brigade=brigade,
             )
+            self._assignment(driver, shift_type=shift_type)
+            expected_employee_ids[(schedule.id, brigade, shift_type)].add(
+                driver.id
+            )
+
+        output = io.StringIO()
+        call_command(
+            'refresh_driver_rating_snapshots',
+            rating_period=self.rating_period.id,
+            strict=True,
+            stdout=output,
+            no_color=True,
+            verbosity=0,
         )
-        self.assertEqual(published_rows.count(), 1)
+
+        for schedule, brigade, shift_type in group_specs:
+            snapshot = DriverRatingPeriodMaterializedSnapshot.objects.get(
+                rating_period=self.rating_period,
+                work_schedule=schedule,
+                brigade_number=brigade,
+                watch_composition__isnull=True,
+                shift_type=shift_type,
+            )
+            self.assertEqual(snapshot.revision, 2)
+            self.assertEqual(
+                {
+                    row['employee_id']
+                    for row in snapshot.participant_group_snapshots
+                },
+                expected_employee_ids[(
+                    schedule.id,
+                    brigade,
+                    shift_type,
+                )],
+            )
+            self.assertEqual(
+                {row['employee_id'] for row in snapshot.payload['entries']},
+                expected_employee_ids[(
+                    schedule.id,
+                    brigade,
+                    shift_type,
+                )],
+            )
+        self.assertIn(
+            'Групп: 4; опубликовано: 4;',
+            output.getvalue(),
+        )
+
+    def test_refresh_current_period_does_not_change_older_period_snapshot(self):
+        driver = self._employee('Водитель исторического периода')
+        self._assignment(driver)
+        older_period = RatingPeriod.objects.create(
+            name='Завершённый период рейтинга',
+            starts_on=self.rating_period.starts_on - timedelta(days=31),
+            ends_before=self.rating_period.starts_on,
+            comment='Проверка неизменности другого периода.',
+            is_active=False,
+        )
+        older_result = refresh_driver_rating_assignment_group(
+            older_period,
+            self.schedule_a,
+            brigade_number=1,
+            shift_type=ShiftType.DAY,
+        )
+        older_before = DriverRatingPeriodMaterializedSnapshot.objects.get(
+            pk=older_result.snapshot_id,
+        )
+        older_state = {
+            'revision': older_before.revision,
+            'published_at': older_before.published_at,
+            'payload': older_before.payload,
+            'participant_group_snapshots': (
+                older_before.participant_group_snapshots
+            ),
+            'fingerprints': (
+                older_before.scope_fingerprint,
+                older_before.source_fingerprint,
+                older_before.shift_score_fingerprint,
+                older_before.payload_fingerprint,
+                older_before.member_fingerprint,
+                older_before.participant_group_fingerprint,
+            ),
+        }
+        self._refresh()
+        new_driver = self._employee('Новый водитель текущего периода')
+        self._assignment(new_driver)
+
+        current_result = self._refresh()
+        older_after = DriverRatingPeriodMaterializedSnapshot.objects.get(
+            pk=older_result.snapshot_id,
+        )
+
+        self.assertEqual(current_result.status, 'published')
+        self.assertEqual(
+            {
+                'revision': older_after.revision,
+                'published_at': older_after.published_at,
+                'payload': older_after.payload,
+                'participant_group_snapshots': (
+                    older_after.participant_group_snapshots
+                ),
+                'fingerprints': (
+                    older_after.scope_fingerprint,
+                    older_after.source_fingerprint,
+                    older_after.shift_score_fingerprint,
+                    older_after.payload_fingerprint,
+                    older_after.member_fingerprint,
+                    older_after.participant_group_fingerprint,
+                ),
+            },
+            older_state,
+        )
 
     def test_tampered_frozen_participant_context_is_rejected(self):
         driver = self._employee('Водитель проверки frozen fingerprint')

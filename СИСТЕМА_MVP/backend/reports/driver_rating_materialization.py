@@ -19,7 +19,6 @@ from users.models import Employee, WatchComposition, WorkSchedule
 from .driver_rating_scope_membership import (
     discover_driver_rating_assignment_group_scope,
     discover_driver_rating_group_scope,
-    driver_rating_assignment_group_latest_closed_at,
 )
 from .driver_shift_passport_snapshots import _fingerprint
 from .driver_watch_rating import (
@@ -250,69 +249,6 @@ def _frozen_assignment_group_participant_records(
             'Исторический состав не соответствует ключу группы.'
         )
     return sorted(records, key=lambda record: record['employee_id'])
-
-
-def _assert_participants_not_frozen_in_another_group(
-    *,
-    scope_code,
-    rating_period,
-    row_identity,
-    participant_records,
-):
-    participant_ids = {
-        record['employee_id']
-        for record in participant_records
-    }
-    snapshots = (
-        DriverRatingPeriodMaterializedSnapshot.objects
-        .select_for_update()
-        .filter(
-            scope_code=scope_code,
-            rating_period=rating_period,
-            watch_composition__isnull=True,
-            revision__gt=0,
-        )
-        .exclude(
-            work_schedule=row_identity['work_schedule'],
-            brigade_number=row_identity['brigade_number'],
-            shift_type=row_identity['shift_type'],
-        )
-        .only(
-            'id',
-            'work_schedule_id',
-            'brigade_number',
-            'shift_type',
-            'participant_group_snapshots',
-            'participant_group_fingerprint',
-        )
-    )
-    conflicts = set()
-    for other_snapshot in snapshots:
-        other_records = _frozen_assignment_group_participant_records(
-            other_snapshot,
-            work_schedule_id=other_snapshot.work_schedule_id,
-            brigade_number=other_snapshot.brigade_number,
-            shift_type=other_snapshot.shift_type,
-        )
-        if (
-            not other_snapshot.participant_group_fingerprint
-            or other_snapshot.participant_group_fingerprint
-            != driver_rating_participant_group_fingerprint(other_records)
-        ):
-            raise DriverRatingMaterializationError(
-                'Исторический состав соседней группы не прошёл '
-                'проверку целостности.'
-            )
-        conflicts.update(
-            participant_ids
-            & {record['employee_id'] for record in other_records}
-        )
-    if conflicts:
-        raise DriverRatingMaterializationError(
-            'Сотрудник уже зафиксирован в другой группе этого периода: '
-            + ', '.join(str(value) for value in sorted(conflicts))
-            + '.'
-        )
 
 
 def driver_rating_participant_group_fingerprint(participants):
@@ -1157,7 +1093,7 @@ def refresh_driver_rating_assignment_group(
                     .first()
                 )
                 if snapshot is not None and snapshot.revision > 0:
-                    participant_group_snapshots = (
+                    published_participant_group_snapshots = (
                         _frozen_assignment_group_participant_records(
                             snapshot,
                             work_schedule_id=work_schedule.id,
@@ -1167,7 +1103,7 @@ def refresh_driver_rating_assignment_group(
                     )
                     frozen_participant_fingerprint = (
                         driver_rating_participant_group_fingerprint(
-                            participant_group_snapshots
+                            published_participant_group_snapshots
                         )
                     )
                     if (
@@ -1182,45 +1118,21 @@ def refresh_driver_rating_assignment_group(
                             'Исторический состав опубликованного снимка '
                             'не прошёл проверку целостности.'
                         )
-                    expected_employee_ids = tuple(
-                        record['employee_id']
-                        for record in participant_group_snapshots
+                group_scope = (
+                    discover_driver_rating_assignment_group_scope(
+                        rating_period,
+                        work_schedule_id=work_schedule.id,
+                        brigade_number=brigade_number,
+                        shift_type=shift_type,
                     )
-                    member_latest_closed_at = (
-                        driver_rating_assignment_group_latest_closed_at(
-                            rating_period,
-                            employee_ids=expected_employee_ids,
-                            shift_type=shift_type,
-                        )
+                )
+                participant_group_snapshots = (
+                    _assignment_group_participant_records(
+                        group_scope.participants
                     )
-                else:
-                    group_scope = (
-                        discover_driver_rating_assignment_group_scope(
-                            rating_period,
-                            work_schedule_id=work_schedule.id,
-                            brigade_number=brigade_number,
-                            shift_type=shift_type,
-                        )
-                    )
-                    participant_group_snapshots = (
-                        _assignment_group_participant_records(
-                            group_scope.participants
-                        )
-                    )
-                    _assert_participants_not_frozen_in_another_group(
-                        scope_code=scope_code,
-                        rating_period=rating_period,
-                        row_identity=row_identity,
-                        participant_records=(
-                            participant_group_snapshots
-                        ),
-                    )
-                    expected_employee_ids = (
-                        group_scope.expected_employee_ids
-                    )
-                    member_latest_closed_at = (
-                        group_scope.latest_closed_at
-                    )
+                )
+                expected_employee_ids = group_scope.expected_employee_ids
+                member_latest_closed_at = group_scope.latest_closed_at
                 scope_fingerprint = (
                     driver_rating_assignment_group_scope_fingerprint(
                         scope_code=scope_code,
