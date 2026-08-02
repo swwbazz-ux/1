@@ -184,7 +184,30 @@ button {
 }
 
 .rating-tv__scope select {
+    color-scheme: dark;
     cursor: pointer;
+}
+
+.rating-tv__scope select option {
+    background: var(--rating-panel-strong);
+    color: var(--rating-text);
+}
+
+.rating-tv__scope select option:hover,
+.rating-tv__scope select option:focus,
+.rating-tv__scope select option:checked {
+    background: #5b3522;
+    color: #ffffff;
+}
+
+.rating-tv__scope select option:disabled {
+    background: var(--rating-panel);
+    color: #747f85;
+}
+
+.rating-tv__scope select:disabled {
+    cursor: not-allowed;
+    color: #747f85;
 }
 
 .rating-tv__scope select:focus-visible {
