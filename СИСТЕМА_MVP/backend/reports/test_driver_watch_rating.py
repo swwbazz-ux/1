@@ -12,6 +12,7 @@ from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone
 
+from assignments.models import AssignmentStatus, EquipmentAssignment
 from portal.auth import PORTAL_EMPLOYEE_SESSION_KEY
 from references.models import (
     DumpPoint,
@@ -31,6 +32,7 @@ from users.models import (
     EmployeeAccess,
     Role,
     WatchComposition,
+    WorkSchedule,
 )
 
 from .driver_watch_rating import (
@@ -46,6 +48,9 @@ from .models import (
     DriverRatingPeriodMaterializedSnapshot,
     DriverShiftPassportSnapshot,
     RatingPeriod,
+)
+from .driver_rating_materialization import (
+    refresh_driver_rating_assignment_group,
 )
 from .portal_rating_provider import DriverRatingProductionDataProvider
 from .driver_shift_passport_snapshots import _fingerprint
@@ -1920,10 +1925,87 @@ class DriverRatingPortalProviderTests(
             ends_before=self.watch.ends_on + timedelta(days=1),
             comment='Технический период проверки портала.',
         )
+        self.work_schedule = WorkSchedule.objects.create(
+            code='portal-rating-assignment-group',
+            name='График портального рейтинга',
+            brigade_count=4,
+        )
+        self._portal_equipment_ordinal = 0
+
+    def employee(
+        self,
+        name,
+        *,
+        brigade_number=1,
+        work_schedule=None,
+        shift_type=ShiftType.DAY,
+    ):
+        employee = super().employee(name)
+        employee.work_schedule = work_schedule or self.work_schedule
+        employee.brigade_number = brigade_number
+        employee.save(update_fields=['work_schedule', 'brigade_number'])
+        self._portal_equipment_ordinal += 1
+        equipment = Equipment.objects.create(
+            equipment_type=self.truck.equipment_type,
+            model=self.model,
+            garage_number=(
+                f'PORTAL-RATING-{self._portal_equipment_ordinal:03d}'
+            ),
+        )
+        EquipmentAssignment.objects.create(
+            employee=employee,
+            role=self.driver_role,
+            equipment=equipment,
+            shift_type=shift_type,
+            status=AssignmentStatus.ACCEPTED,
+            accepted_at=self.now,
+        )
+        return employee
+
+    def employee_without_assignment(
+        self,
+        name,
+        *,
+        brigade_number=1,
+        work_schedule=None,
+    ):
+        employee = super().employee(name)
+        employee.work_schedule = work_schedule or self.work_schedule
+        employee.brigade_number = brigade_number
+        employee.save(update_fields=['work_schedule', 'brigade_number'])
+        return employee
+
+    def refresh_group(
+        self,
+        *,
+        work_schedule=None,
+        brigade_number=1,
+        shift_type=ShiftType.DAY,
+    ):
+        return refresh_driver_rating_assignment_group(
+            self.rating_period,
+            work_schedule or self.work_schedule,
+            brigade_number=brigade_number,
+            shift_type=shift_type,
+        )
 
     def snapshot(self, *args, **kwargs):
         snapshot = super().snapshot(*args, **kwargs)
-        refresh_test_rating_materialization(self.rating_period)
+        employee = args[0]
+        shift_type = kwargs.get('shift_type', ShiftType.DAY)
+        assignment = EquipmentAssignment.objects.get(
+            employee=employee,
+            status=AssignmentStatus.ACCEPTED,
+            ended_at__isnull=True,
+        )
+        if assignment.shift_type != shift_type:
+            assignment.shift_type = shift_type
+            assignment.save(update_fields=['shift_type'])
+        self.refresh_group(
+            work_schedule=employee.work_schedule,
+            brigade_number=employee.brigade_number,
+            shift_type=shift_type,
+        )
         return snapshot
 
     def test_internal_portal_shows_places_and_only_personal_score(self):
@@ -1984,29 +2066,15 @@ class DriverRatingPortalProviderTests(
             patch(
                 (
                     'reports.driver_rating_materialization.'
-                    'build_driver_rating_period'
+                    'build_driver_rating_assignment_group_period'
                 )
             ) as calculator,
-            patch(
-                (
-                    'reports.portal_rating_provider.'
-                    'linked_driver_snapshot_scopes'
-                )
-            ) as passport_scan,
-            patch(
-                (
-                    'reports.driver_rating_scope_membership.'
-                    'driver_rating_group_membership'
-                )
-            ) as historical_membership_scan,
             CaptureQueriesContext(connection) as queries,
         ):
             ranking = provider.ranking(employee)
 
         self.assertTrue(ranking.available)
         calculator.assert_not_called()
-        passport_scan.assert_not_called()
-        historical_membership_scan.assert_not_called()
         materialized_table = (
             DriverRatingPeriodMaterializedSnapshot._meta.db_table
         )
@@ -2015,14 +2083,10 @@ class DriverRatingPortalProviderTests(
             for query in queries.captured_queries
             if materialized_table in query['sql']
         ]
-        self.assertEqual(len(metadata_queries), 2)
-        self.assertNotIn(
-            f'"{materialized_table}"."payload"',
-            metadata_queries[0],
-        )
+        self.assertEqual(len(metadata_queries), 1)
         self.assertIn(
             f'"{materialized_table}"."payload"',
-            metadata_queries[1],
+            metadata_queries[0],
         )
         passport_table = DriverShiftPassportSnapshot._meta.db_table
         self.assertFalse(
@@ -2037,7 +2101,9 @@ class DriverRatingPortalProviderTests(
         self.snapshot(employee, ordinal=1, trip_count=20)
         snapshot = DriverRatingPeriodMaterializedSnapshot.objects.get(
             rating_period=self.rating_period,
-            watch_composition=self.composition,
+            watch_composition__isnull=True,
+            work_schedule=self.work_schedule,
+            brigade_number=1,
             shift_type=ShiftType.DAY,
         )
         DriverRatingPeriodMaterializedSnapshot.objects.filter(
@@ -2051,12 +2117,6 @@ class DriverRatingPortalProviderTests(
         )
         provider = DriverRatingProductionDataProvider()
 
-        self.assertIsNone(
-            provider._latest_snapshot_scope(
-                self.rating_period,
-                employee,
-            )
-        )
         self.assertFalse(provider.ranking(employee).available)
 
     def test_home_preview_is_limited_to_five_rows_even_with_ties(self):
@@ -2076,118 +2136,178 @@ class DriverRatingPortalProviderTests(
             {1},
         )
 
-    def test_provider_uses_employee_watch_not_global_latest_watch(self):
-        employee = self.employee('Водитель своей вахты')
+    def test_provider_uses_only_employee_assignment_group(self):
+        employee = self.employee('Водитель своей группы')
+        teammate = self.employee('Коллега своей группы')
         self.snapshot(employee, ordinal=1, trip_count=20)
-        employee_watch = self.watch
-
-        other_composition = WatchComposition.objects.create(
-            code='rating-other-watch',
-            name='Другой состав рейтинга',
+        self.snapshot(teammate, ordinal=4, trip_count=19)
+        other_brigade = self.employee(
+            'Водитель другой бригады',
+            brigade_number=2,
         )
-        self.composition = other_composition
-        self.watch = WatchPeriod.objects.create(
-            name='Более поздняя чужая вахта',
-            watch_composition=other_composition,
-            starts_on=employee_watch.starts_on,
-            ends_on=employee_watch.ends_on + timedelta(days=1),
-            is_active=True,
+        other_shift = self.employee(
+            'Водитель другой смены',
+            shift_type=ShiftType.NIGHT,
         )
-        other_employee = self.employee('Водитель чужой вахты')
-        self.snapshot(other_employee, ordinal=2, trip_count=23)
+        self.snapshot(other_brigade, ordinal=2, trip_count=23)
+        self.snapshot(
+            other_shift,
+            ordinal=3,
+            trip_count=21,
+            shift_type=ShiftType.NIGHT,
+        )
 
         ranking = DriverRatingProductionDataProvider().ranking(employee)
 
         self.assertTrue(ranking.available)
         self.assertIn(self.rating_period.name, ranking.period_label)
-        self.assertNotIn(employee_watch.name, ranking.period_label)
         self.assertEqual(
-            [entry.employee_id for entry in ranking.entries],
-            [employee.id],
+            {entry.employee_id for entry in ranking.entries},
+            {employee.id, teammate.id},
         )
 
-    def test_provider_keeps_historical_composition_after_employee_transfer(self):
-        employee = self.employee('Водитель с историческим составом')
+    def test_missing_group_fields_or_assignment_returns_empty_state(self):
+        missing_group = super().employee('Водитель без графика и бригады')
+        no_assignment = self.employee_without_assignment(
+            'Водитель без назначения',
+        )
+        expected_status = (
+            'Смена или техника ещё не назначены. '
+            'Рейтинг появится после назначения.'
+        )
+
+        for employee in (missing_group, no_assignment):
+            with self.subTest(employee=employee.full_name):
+                ranking = DriverRatingProductionDataProvider().ranking(
+                    employee,
+                )
+
+                self.assertFalse(ranking.available)
+                self.assertEqual(ranking.entries, ())
+                self.assertEqual(ranking.status, expected_status)
+
+        self.rating_period.is_active = False
+        self.rating_period.save(update_fields=['is_active'])
+        ranking_without_period = (
+            DriverRatingProductionDataProvider().ranking(no_assignment)
+        )
+        self.assertEqual(ranking_without_period.status, expected_status)
+
+    def test_ambiguous_active_assignments_return_empty_state(self):
+        employee = self.employee('Водитель с конфликтом назначений')
+        assignment = EquipmentAssignment.objects.get(employee=employee)
+        provider = DriverRatingProductionDataProvider()
+
+        with patch.object(
+            provider,
+            '_active_assignments',
+            return_value=(assignment, assignment),
+        ):
+            ranking = provider.ranking(employee)
+
+        self.assertFalse(ranking.available)
+        self.assertEqual(ranking.entries, ())
+        self.assertEqual(
+            ranking.status,
+            (
+                'Смена или техника ещё не назначены. '
+                'Рейтинг появится после назначения.'
+            ),
+        )
+
+    def test_unrated_current_driver_has_no_place_score_or_premium(self):
+        rated = self.employee('Водитель с результатом портала')
+        current = self.employee('Водитель без результата портала')
+        self.snapshot(rated, ordinal=1, trip_count=20)
+        provider = DriverRatingProductionDataProvider()
+
+        ranking = provider.ranking(current)
+        personal = provider.personal_kpis(current)
+        current_entry = next(
+            entry
+            for entry in ranking.entries
+            if entry.employee_id == current.id
+        )
+
+        self.assertTrue(ranking.available)
+        self.assertIsNone(current_entry.place)
+        self.assertFalse(current_entry.has_result)
+        self.assertEqual(current_entry.status_label, 'Нет результата')
+        self.assertEqual(current_entry.premium_level, '')
+        self.assertEqual(
+            [entry.employee_id for entry in ranking.top_five],
+            [rated.id],
+        )
+        self.assertIsNone(ranking.employee_entry)
+        self.assertFalse(personal.available)
+        self.assertEqual(personal.metrics, ())
+        self.assertEqual(personal.status, 'Нет результата')
+
+    def test_unrated_current_driver_row_stays_highlighted(self):
+        employee = self.employee('Водитель своей строки без результата')
+        self.refresh_group()
+        session = self.client.session
+        session[PORTAL_EMPLOYEE_SESSION_KEY] = employee.id
+        session.save()
+
+        response = self.client.get(reverse('portal:rating'))
+        dashboard = self.client.get(reverse('portal:dashboard'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, employee.full_name)
+        self.assertContains(response, 'Нет результата')
+        self.assertContains(response, 'is-current-employee')
+        self.assertContains(response, 'Это вы')
+        self.assertNotContains(response, 'rank-tier--None')
+        self.assertNotContains(response, 'personal-rank-card__place')
+        self.assertNotContains(response, 'Рабочий балл')
+        self.assertEqual(dashboard.status_code, 200)
+        self.assertContains(dashboard, 'Место ещё не определено')
+        self.assertNotContains(dashboard, 'my-rank__number')
+
+    def test_provider_does_not_depend_on_employee_watch_composition(self):
+        employee = self.employee('Водитель без зависимости от состава')
         self.snapshot(employee, ordinal=1, trip_count=20)
-        historical_composition = self.composition
         current_composition = WatchComposition.objects.create(
             code='rating-provider-current-watch',
             name='Новый текущий состав водителя',
         )
         employee.watch_composition = current_composition
         employee.save(update_fields=['watch_composition'])
-        historical_composition.is_active = False
-        historical_composition.save(update_fields=['is_active'])
-        refresh_test_rating_materialization(self.rating_period)
-        provider = DriverRatingProductionDataProvider()
+        ranking = DriverRatingProductionDataProvider().ranking(employee)
 
-        snapshot_scope = provider._latest_snapshot_scope(
-            self.rating_period,
-            employee,
-        )
-        ranking = provider.ranking(employee)
-
-        self.assertEqual(
-            snapshot_scope['watch_composition_id'],
-            historical_composition.id,
-        )
         self.assertTrue(ranking.available)
         self.assertEqual(
             [entry.employee_id for entry in ranking.entries],
             [employee.id],
         )
 
-    def test_provider_discovers_manifest_after_live_watch_link_is_lost(self):
+    def test_provider_does_not_depend_on_live_watch_link(self):
         employee = self.employee('Водитель с потерянной живой вахтой')
         snapshot = self.snapshot(employee, ordinal=1, trip_count=20)
-        historical_composition = self.composition
         EmployeeShift.objects.filter(pk=snapshot.shift_id).update(
             watch_period=None,
         )
-        refresh_test_rating_materialization(self.rating_period)
-        provider = DriverRatingProductionDataProvider()
+        ranking = DriverRatingProductionDataProvider().ranking(employee)
 
-        snapshot_scope = provider._latest_snapshot_scope(
-            self.rating_period,
-            employee,
-        )
-        ranking = provider.ranking(employee)
+        self.assertTrue(ranking.available)
 
-        self.assertEqual(
-            snapshot_scope['watch_composition_id'],
-            historical_composition.id,
-        )
-        self.assertFalse(ranking.available)
-
-    def test_provider_discovers_manifest_after_live_watch_dates_move(self):
+    def test_provider_does_not_depend_on_watch_period_dates(self):
         employee = self.employee('Водитель со сдвинутой живой вахтой')
         self.snapshot(employee, ordinal=1, trip_count=20)
-        historical_composition = self.composition
         WatchPeriod.objects.filter(pk=self.watch.pk).update(
             starts_on=self.rating_period.ends_before + timedelta(days=10),
             ends_on=self.rating_period.ends_before + timedelta(days=40),
         )
-        refresh_test_rating_materialization(self.rating_period)
-        provider = DriverRatingProductionDataProvider()
+        ranking = DriverRatingProductionDataProvider().ranking(employee)
 
-        snapshot_scope = provider._latest_snapshot_scope(
-            self.rating_period,
-            employee,
-        )
-        ranking = provider.ranking(employee)
+        self.assertTrue(ranking.available)
 
-        self.assertEqual(
-            snapshot_scope['watch_composition_id'],
-            historical_composition.id,
-        )
-        self.assertFalse(ranking.available)
-
-    def test_provider_discovers_manifest_after_shift_and_watch_dates_move(self):
+    def test_published_portal_snapshot_is_not_rebuilt_from_live_watch_data(self):
         employee = self.employee(
             'Водитель с одновременным сдвигом смены и вахты',
         )
         snapshot = self.snapshot(employee, ordinal=1, trip_count=20)
-        historical_composition = self.composition
         shift = EmployeeShift.objects.get(pk=snapshot.shift_id)
         live_shift_offset = timedelta(days=90)
         EmployeeShift.objects.filter(pk=shift.pk).update(
@@ -2198,22 +2318,11 @@ class DriverRatingPortalProviderTests(
             starts_on=self.rating_period.ends_before + timedelta(days=10),
             ends_on=self.rating_period.ends_before + timedelta(days=40),
         )
-        refresh_test_rating_materialization(self.rating_period)
-        provider = DriverRatingProductionDataProvider()
+        ranking = DriverRatingProductionDataProvider().ranking(employee)
 
-        snapshot_scope = provider._latest_snapshot_scope(
-            self.rating_period,
-            employee,
-        )
-        ranking = provider.ranking(employee)
+        self.assertTrue(ranking.available)
 
-        self.assertEqual(
-            snapshot_scope['watch_composition_id'],
-            historical_composition.id,
-        )
-        self.assertFalse(ranking.available)
-
-    def test_provider_withholds_malformed_manifest_instead_of_http_500(self):
+    def test_portal_reads_published_snapshot_after_source_payload_changes(self):
         malformed_payloads = (
             [],
             {'source_manifest': []},
@@ -2235,7 +2344,6 @@ class DriverRatingPortalProviderTests(
                     trip_count=20,
                 )
                 force_snapshot_payload_update(snapshot, malformed_payload)
-                refresh_test_rating_materialization(self.rating_period)
 
                 ranking = provider.ranking(employee)
                 session = self.client.session
@@ -2243,7 +2351,7 @@ class DriverRatingPortalProviderTests(
                 session.save()
                 response = self.client.get(reverse('portal:rating'))
 
-                self.assertFalse(ranking.available)
+                self.assertTrue(ranking.available)
                 self.assertEqual(response.status_code, 200)
 
     def test_provider_current_period_uses_inclusive_exclusive_boundaries(self):

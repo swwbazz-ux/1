@@ -36,12 +36,18 @@ DEFAULT_PORTAL_PRODUCTION_DATA_PROVIDER = (
 
 @dataclass(frozen=True)
 class RankingEntry:
-    place: int
+    place: int | None
     employee_id: int
     full_name: str
     equipment_name: str = ''
     photo_url: str = ''
     premium_level: str = ''
+    row_status: str = 'rated'
+    status_label: str = ''
+
+    @property
+    def has_result(self):
+        return self.row_status == 'rated' and self.place is not None
 
 
 @dataclass(frozen=True)

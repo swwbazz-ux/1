@@ -5,7 +5,7 @@
 
 {% if ranking.available %}<div class="attention-strip attention-strip--neutral"><strong>{{ ranking.status }}</strong><span>Результат обновляется по закрытым сменам. м³·км и т·км пока не учитываются.</span></div>{% endif %}
 
-{% if my_rank %}
+{% if my_rank and my_rank.has_result %}
 <section class="personal-rank-card rank-tier rank-tier--{{ my_rank.place }}">
     <span class="personal-rank-card__label">Моё место</span><strong class="personal-rank-card__place">{{ my_rank.place }}</strong><span><b>{{ my_rank.premium_level|default:'Текущая позиция' }}</b>{% if my_rank.equipment_name %}<small>{{ my_rank.equipment_name }}</small>{% endif %}</span>
 </section>
@@ -30,11 +30,11 @@
 {% if entries %}
 <ol class="full-ranking">
     {% for item in entries %}
-    <li class="rank-tier rank-tier--{{ item.place }}{% if item.employee_id == current_employee.pk %} is-current-employee{% endif %}">
-        <span class="full-ranking__place">{{ item.place }}</span>
+    <li class="rank-row{% if item.has_result %} rank-tier rank-tier--{{ item.place }}{% endif %}{% if item.employee_id == current_employee.pk %} is-current-employee{% endif %}">
+        {% if item.has_result %}<span class="full-ranking__place">{{ item.place }}</span>{% else %}<span class="full-ranking__place" aria-hidden="true"></span>{% endif %}
         {% if item.photo_url %}<img src="{{ item.photo_url }}" alt="">{% else %}<span class="avatar-fallback avatar-fallback--rank">{{ item.full_name|first }}</span>{% endif %}
         <span class="full-ranking__person"><strong>{{ item.full_name }}</strong><small>{% if item.equipment_name %}{{ item.equipment_name }}{% else %}Техника не указана{% endif %}</small></span>
-        {% if item.premium_level %}<span class="full-ranking__tier">{{ item.premium_level }}</span>{% endif %}
+        {% if item.has_result and item.premium_level %}<span class="full-ranking__tier">{{ item.premium_level }}</span>{% elif not item.has_result %}<span class="full-ranking__tier">{{ item.status_label|default:'Нет результата' }}</span>{% endif %}
         {% if item.employee_id == current_employee.pk %}<span class="you-label">Это вы</span>{% endif %}
     </li>
     {% endfor %}

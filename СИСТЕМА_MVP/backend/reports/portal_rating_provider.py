@@ -4,8 +4,9 @@ from core.production_time import production_work_date
 from django.urls import reverse
 from django.utils.dateparse import parse_datetime
 
+from assignments.models import AssignmentStatus, EquipmentAssignment
 from shifts.models import ShiftType
-from users.models import Employee, WatchComposition
+from users.models import Employee
 
 from portal import services as portal_services
 from portal.services import (
@@ -17,14 +18,7 @@ from portal.services import (
 
 from .driver_rating_materialization import (
     DriverRatingSnapshotUnavailable,
-    driver_rating_member_fingerprint,
-    get_materialized_driver_rating_period,
-    materialized_driver_rating_rows,
-)
-from .driver_watch_rating import DRIVER_RATING_FORMULA_VERSION
-from .driver_rating_scope_membership import (
-    discover_driver_rating_current_scope,
-    linked_driver_snapshot_scopes,
+    get_materialized_driver_rating_assignment_group,
 )
 from .models import RatingPeriod
 
@@ -36,6 +30,11 @@ BLOCK_LABELS = {
     'assignments': 'Соблюдение назначений',
     'digital_accounting': 'Учёт, закрытие и передача смены',
 }
+
+MISSING_ASSIGNMENT_STATUS = (
+    'Смена или техника ещё не назначены. '
+    'Рейтинг появится после назначения.'
+)
 
 
 def _display_decimal(value):
@@ -69,123 +68,90 @@ class DriverRatingProductionDataProvider:
         )
         return periods[0] if len(periods) == 1 else None
 
-    def _latest_snapshot_scope(self, rating_period, employee=None):
-        if employee is None:
-            return None
-        scopes = []
-        for snapshot in (
-            materialized_driver_rating_rows(rating_period)
+    @staticmethod
+    def _active_assignments(employee):
+        return tuple(
+            EquipmentAssignment.objects
+            .select_related('equipment')
             .filter(
-                formula_version=DRIVER_RATING_FORMULA_VERSION,
-                last_success_at__isnull=False,
+                employee_id=employee.id,
+                role__code='driver',
+                role__is_active=True,
+                status=AssignmentStatus.ACCEPTED,
+                ended_at__isnull=True,
+                shift__isnull=True,
+                shift_type__in=(ShiftType.DAY, ShiftType.NIGHT),
+                equipment_id__isnull=False,
             )
-            .values(
-                'id',
-                'watch_composition_id',
-                'shift_type',
-                'member_employee_ids',
-                'member_latest_closed_at',
-                'member_fingerprint',
-            )
-        ):
-            try:
-                member_ids = {
-                    int(value)
-                    for value in snapshot['member_employee_ids']
-                }
-            except (TypeError, ValueError):
-                continue
-            member_latest_closed_at = (
-                snapshot['member_latest_closed_at']
-                if isinstance(
-                    snapshot['member_latest_closed_at'],
-                    dict,
-                )
-                else {}
-            )
-            if (
-                not snapshot['member_fingerprint']
-                or driver_rating_member_fingerprint(
-                    member_ids,
-                    member_latest_closed_at,
-                ) != snapshot['member_fingerprint']
-            ):
-                continue
-            if employee.id not in member_ids:
-                continue
-            closed_at = parse_datetime(
-                str(
-                    member_latest_closed_at.get(str(employee.id), '')
-                )
-            )
-            if closed_at is None:
-                continue
-            scopes.append({
-                'snapshot_id': snapshot['id'],
-                'shift_id': 0,
-                'employee_id': employee.id,
-                'watch_composition_id': snapshot[
-                    'watch_composition_id'
-                ],
-                'shift_type': snapshot['shift_type'],
-                'closed_at': closed_at,
-            })
-        return max(
-            scopes,
-            key=lambda item: (
-                item['closed_at'],
-                item['shift_id'],
-                item['snapshot_id'],
-            ),
-            default=None,
+            .order_by('id')[:2]
         )
+
+    @staticmethod
+    def _unassigned_rating():
+        return {
+            'available': False,
+            'status': MISSING_ASSIGNMENT_STATUS,
+            'entries': [],
+        }
+
+    @staticmethod
+    def _period_label(rating_period, shift_type=None):
+        if rating_period is None:
+            return ''
+        shift_label = dict(ShiftType.choices).get(shift_type)
+        if not shift_label:
+            return rating_period.name
+        return f'{rating_period.name} · {shift_label} смена'
 
     def _rating(self, employee=None):
         if employee is None:
-            return None, None, None
-        if not self._active_driver_scope().filter(pk=employee.pk).exists():
-            return None, None, None
-        rating_period = self._current_rating_period()
-        if rating_period is None:
-            return None, None, None
-        snapshot_scope = self._latest_snapshot_scope(
-            rating_period,
-            employee,
-        )
-        if snapshot_scope is None:
-            return rating_period, None, None
-        shift_type = snapshot_scope['shift_type']
-        watch_composition = WatchComposition.objects.filter(
-            pk=snapshot_scope['watch_composition_id'],
-        ).first()
-        if watch_composition is None:
-            return rating_period, shift_type, None
-        current_scope = discover_driver_rating_current_scope(
-            rating_period,
-            watch_composition,
-            shift_type=shift_type,
+            return None, None, self._unassigned_rating()
+        employee = (
+            self._active_driver_scope()
+            .select_related('work_schedule')
+            .filter(pk=employee.pk)
+            .first()
         )
         if (
-            employee.id
-            not in current_scope.allowed_employee_ids
+            employee is None
+            or employee.work_schedule_id is None
+            or employee.brigade_number is None
         ):
-            return rating_period, shift_type, None
+            return None, None, self._unassigned_rating()
+        assignments = self._active_assignments(employee)
+        if len(assignments) != 1:
+            return None, None, self._unassigned_rating()
+        assignment = assignments[0]
+        shift_type = assignment.shift_type
+        rating_period = self._current_rating_period()
+        if rating_period is None:
+            return None, shift_type, None
         try:
-            rating = get_materialized_driver_rating_period(
+            rating = get_materialized_driver_rating_assignment_group(
                 rating_period,
-                watch_composition,
+                employee.work_schedule,
+                brigade_number=employee.brigade_number,
                 shift_type=shift_type,
-                allowed_employee_ids=(
-                    current_scope.allowed_employee_ids
-                ),
-                expected_employee_ids=(
-                    current_scope.expected_employee_ids
-                ),
             )
         except DriverRatingSnapshotUnavailable as error:
             rating = {
                 'available': False,
                 'status': error.public_status,
+                'entries': [],
+            }
+        if (
+            rating.get('available')
+            and employee.id not in {
+                item.get('employee_id')
+                for item in rating.get('entries', ())
+            }
+        ):
+            rating = {
+                'available': False,
+                'status': (
+                    'Состав рейтинговой группы обновляется после '
+                    'изменения назначения.'
+                ),
                 'entries': [],
             }
         return rating_period, shift_type, rating
@@ -211,37 +177,42 @@ class DriverRatingProductionDataProvider:
                 if employee.photo
                 else ''
             )
-            result.append(
-                RankingEntry(
-                    place=item['place'],
-                    employee_id=item['employee_id'],
-                    full_name=employee.full_name,
-                    equipment_name=', '.join(item.get('equipment') or ()),
-                    photo_url=photo_url,
-                    premium_level=item.get('level', ''),
-                )
+            row_status = item.get('row_status') or (
+                'rated' if item.get('place') is not None else 'not_observed'
             )
+            entry = RankingEntry(
+                place=item.get('place'),
+                employee_id=item['employee_id'],
+                full_name=employee.full_name,
+                equipment_name=', '.join(item.get('equipment') or ()),
+                photo_url=photo_url,
+                premium_level=(
+                    item.get('level', '')
+                    if row_status == 'rated'
+                    else ''
+                ),
+                row_status=row_status,
+                status_label=item.get('status_label', ''),
+            )
+            result.append(entry)
         return tuple(result)
 
     def ranking(self, employee=None):
         rating_period, shift_type, rating = self._rating(employee)
+        if rating is not None and not rating.get('available'):
+            return RankingSnapshot(
+                status=rating.get(
+                    'status',
+                    'Рабочий рейтинг пока не рассчитан.',
+                ),
+                period_label=self._period_label(rating_period, shift_type),
+            )
         if rating_period is None or rating is None:
             return RankingSnapshot(
                 status=(
                     'На текущую производственную дату период рейтинга '
                     'не задан либо закрытые водительские смены ещё не накоплены.'
                 )
-            )
-        if not rating.get('available'):
-            return RankingSnapshot(
-                status=rating.get(
-                    'status',
-                    'Рабочий рейтинг пока не рассчитан.',
-                ),
-                period_label=(
-                    f'{rating_period.name} · '
-                    f'{dict(ShiftType.choices)[shift_type]} смена'
-                ),
             )
 
         entries = self._ranking_entries(rating)
@@ -251,6 +222,7 @@ class DriverRatingProductionDataProvider:
                 for entry in entries
                 if employee is not None
                 and entry.employee_id == employee.id
+                and entry.has_result
             ),
             None,
         )
@@ -260,12 +232,11 @@ class DriverRatingProductionDataProvider:
                 'Рабочий рейтинг v2. '
                 'м³·км и т·км пока не учитываются.'
             ),
-            period_label=(
-                f'{rating_period.name} · '
-                f'{dict(ShiftType.choices)[shift_type]} смена'
-            ),
+            period_label=self._period_label(rating_period, shift_type),
             updated_at=parse_datetime(rating.get('generated_at') or ''),
-            top_five=entries[:5],
+            top_five=tuple(
+                entry for entry in entries if entry.has_result
+            )[:5],
             entries=entries,
             employee_entry=employee_entry,
         )
@@ -283,6 +254,14 @@ class DriverRatingProductionDataProvider:
 
     def personal_kpis(self, employee):
         rating_period, shift_type, rating = self._rating(employee)
+        if rating is not None and not rating.get('available'):
+            return PersonalKpiSnapshot(
+                status=(
+                    rating.get('status')
+                    or 'Для выбранной сменной группы результата пока нет.'
+                ),
+                watch_label=self._period_label(rating_period, shift_type),
+            )
         if rating_period is None or rating is None:
             return PersonalKpiSnapshot(
                 status=(
@@ -298,16 +277,19 @@ class DriverRatingProductionDataProvider:
             ),
             None,
         )
-        if not rating.get('available') or item is None:
+        if item is None:
             return PersonalKpiSnapshot(
-                status=(
-                    rating.get('status')
-                    or 'Для выбранной сменной группы результата пока нет.'
-                ),
-                watch_label=(
-                    f'{rating_period.name} · '
-                    f'{dict(ShiftType.choices)[shift_type]} смена'
-                ),
+                status='Для выбранной сменной группы результата пока нет.',
+                watch_label=self._period_label(rating_period, shift_type),
+            )
+        if (
+            item.get('row_status') != 'rated'
+            or item.get('place') is None
+            or item.get('score') is None
+        ):
+            return PersonalKpiSnapshot(
+                status=item.get('status_label') or 'Нет результата',
+                watch_label=self._period_label(rating_period, shift_type),
             )
 
         metrics = [
@@ -361,10 +343,7 @@ class DriverRatingProductionDataProvider:
                 'м³·км и т·км пока не учитываются; '
                 'показатели сохранены для будущего расчёта.'
             ),
-            watch_label=(
-                f'{rating_period.name} · '
-                f'{dict(ShiftType.choices)[shift_type]} смена'
-            ),
+            watch_label=self._period_label(rating_period, shift_type),
             metrics=tuple(metrics),
             career_metrics=(),
         )
