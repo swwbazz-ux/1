@@ -124,6 +124,7 @@ ROLE_INTERFACE_NAMES = {
     'dispatcher': 'Диспетчерский экран',
     'mechanic': 'Интерфейс механика',
     'manager': 'Витрина руководства',
+    'settlement_clerk': 'Рабочее место делопроизводителя',
 }
 
 
@@ -669,6 +670,8 @@ def role_home_view(request):
         return redirect('mechanic_dashboard')
     if access.role.code == 'manager':
         return redirect('management_dashboard')
+    if access.role.code == 'settlement_clerk':
+        return redirect('settlement_map')
     if access.role.code == 'admin':
         return redirect('system_admin_dashboard')
     interface_name = ROLE_INTERFACE_NAMES.get(access.role.code, f'Интерфейс роли: {access.role.name}')

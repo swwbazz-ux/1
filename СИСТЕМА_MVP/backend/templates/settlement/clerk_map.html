@@ -1,0 +1,163 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Расселение · Делопроизводитель{% endblock %}
+{% block body_class %}settlement-clerk-screen{% endblock %}
+{% block extra_head %}
+<link rel="stylesheet" href="{% static 'css/settlement-clerk.css' %}?v={{ static_asset_release }}">
+{% endblock %}
+
+{% block body %}
+<div class="admin-shell admin-exports-shell settlement-shell admin-day" data-admin-theme data-settlement-root>
+    {% include "includes/settlement_clerk_header.html" %}
+
+    <main class="admin-console-page settlement-page">
+        <section class="settlement-toolbar" aria-label="Фильтры физической карты">
+            <time class="settlement-current-date" datetime="{{ current_date|date:'Y-m-d' }}">
+                <span>Дата проверки</span>
+                <strong>{{ current_date|date:"d.m.Y" }}</strong>
+            </time>
+
+            <fieldset class="settlement-filter-group">
+                <legend>Общежитие</legend>
+                <div class="settlement-filter-buttons">
+                    <button type="button" class="is-active" data-dorm-filter="all" aria-pressed="true">Все</button>
+                    <button type="button" data-dorm-filter="5" aria-pressed="false">КИС-5</button>
+                    <button type="button" data-dorm-filter="6" aria-pressed="false">КИС-6</button>
+                </div>
+            </fieldset>
+
+            <fieldset class="settlement-filter-group">
+                <legend>Этаж</legend>
+                <div class="settlement-filter-buttons compact">
+                    <button type="button" class="is-active" data-floor-filter="all" aria-pressed="true">Все</button>
+                    <button type="button" data-floor-filter="1" aria-pressed="false">1</button>
+                    <button type="button" data-floor-filter="2" aria-pressed="false">2</button>
+                </div>
+            </fieldset>
+
+            <fieldset class="settlement-filter-group">
+                <legend>Статус комнаты</legend>
+                <div class="settlement-filter-buttons">
+                    <button type="button" class="is-active" data-status-filter="all" aria-pressed="true">Все</button>
+                    <button type="button" data-status-filter="transferred" aria-pressed="false">Передана</button>
+                    <button type="button" data-status-filter="not_transferred" aria-pressed="false">Не передана</button>
+                </div>
+            </fieldset>
+
+            <label class="settlement-search-field" for="settlement-search">
+                <span>Поиск</span>
+                <input id="settlement-search"
+                       type="search"
+                       autocomplete="off"
+                       placeholder="Комната или ID койки"
+                       data-settlement-search>
+            </label>
+
+            <span class="settlement-readonly-badge">
+                <i aria-hidden="true"></i>
+                Только просмотр
+            </span>
+        </section>
+
+        <section class="settlement-summary" aria-label="Сводка физического фонда">
+            <article>
+                <span>Физические комнаты</span>
+                <strong>{{ summary.rooms }}</strong>
+                <small><b data-visible-room-count>{{ summary.rooms }}</b> соответствуют фильтру</small>
+            </article>
+            <article class="is-primary">
+                <span>Передано</span>
+                <strong>{{ summary.transferred_rooms }}</strong>
+                <small>{{ summary.transferred_beds }} доступных мест</small>
+            </article>
+            <article>
+                <span>Не передано</span>
+                <strong>{{ summary.not_transferred_rooms }}</strong>
+                <small>{{ summary.not_transferred_beds }} недоступных мест</small>
+            </article>
+            <article>
+                <span>Все койко-места</span>
+                <strong>{{ summary.beds }}</strong>
+                <small>физический контур КИС-5 и КИС-6</small>
+            </article>
+        </section>
+
+        <section class="settlement-selection" aria-live="polite" aria-label="Выбранное койко-место">
+            <div class="settlement-selection-place">
+                <span>Выбранное место</span>
+                <strong data-selection-place>Койко-место не выбрано</strong>
+            </div>
+            <div class="settlement-selection-detail">
+                <strong data-selection-title>Нажмите на квадрат доступной койки</strong>
+                <span data-selection-meta>Карта работает только на чтение</span>
+            </div>
+            <div class="settlement-selection-code">
+                <span>Стабильный ID</span>
+                <strong data-selection-code>—</strong>
+            </div>
+        </section>
+
+        {% if dormitories %}
+            <section class="settlement-map-list" aria-label="Физическая карта общежитий">
+                {% for dormitory in dormitories %}
+                    <article class="settlement-dormitory" data-dormitory-section="{{ dormitory.model.number }}">
+                        <header class="settlement-dormitory-header">
+                            <div>
+                                <span>Общежитие</span>
+                                <h2>{{ dormitory.label }}</h2>
+                            </div>
+                            <dl>
+                                <div><dt>Физических комнат</dt><dd>{{ dormitory.room_count }}</dd></div>
+                                <div><dt>Передано</dt><dd>{{ dormitory.transferred_rooms }}</dd></div>
+                                <div><dt>Доступных мест</dt><dd>{{ dormitory.transferred_beds }}</dd></div>
+                                <div><dt>Всего мест</dt><dd>{{ dormitory.bed_count }}</dd></div>
+                            </dl>
+                        </header>
+
+                        <div class="settlement-floors">
+                            {% for floor in dormitory.floors %}
+                                <section class="settlement-floor" data-floor-section="{{ floor.number }}">
+                                    <header>
+                                        <div>
+                                            <span>Физический контур</span>
+                                            <h3>{{ floor.number }} этаж</h3>
+                                        </div>
+                                        <p>{{ floor.transferred_count }} из {{ floor.room_count }} комнат передано</p>
+                                    </header>
+                                    <div class="settlement-floor-scroll">
+                                        <div class="settlement-floor-plan">
+                                            <div class="settlement-side settlement-side-left">
+                                                {% for row in floor.rows %}
+                                                    {% include "settlement/_room_card.html" with room=row.left side="left" only %}
+                                                {% endfor %}
+                                            </div>
+                                            <div class="settlement-corridor">
+                                                <span>Коридор</span>
+                                            </div>
+                                            <div class="settlement-side settlement-side-right">
+                                                {% for row in floor.rows %}
+                                                    {% include "settlement/_room_card.html" with room=row.right side="right" only %}
+                                                {% endfor %}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </section>
+                            {% endfor %}
+                        </div>
+                        <p class="settlement-layout-note">
+                            Контур этажей показан в единой геометрии. Семантическое соответствие номеров комнат между этажами не задано.
+                        </p>
+                    </article>
+                {% endfor %}
+            </section>
+        {% else %}
+            <section class="settlement-empty-state">
+                <strong>Физическая карта пока не заполнена</strong>
+                <p>Запустите подготовку подтверждённого фонда КИС-5 и КИС-6.</p>
+            </section>
+        {% endif %}
+    </main>
+</div>
+<script src="{% static 'js/settlement-clerk.js' %}?v={{ static_asset_release }}"></script>
+{% endblock %}

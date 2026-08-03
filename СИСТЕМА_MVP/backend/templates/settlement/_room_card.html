@@ -1,0 +1,40 @@
+{% if room %}
+<article class="settlement-room settlement-room-{{ side }} status-{{ room.transfer_status }}"
+         data-room-card
+         data-dormitory="{{ room.dormitory.number }}"
+         data-floor="{{ room.floor }}"
+         data-transfer-status="{{ room.transfer_status }}"
+         data-search="{{ room.search_text }}"
+         aria-label="КИС-{{ room.dormitory.number }}, этаж {{ room.floor }}, комната {{ room.number }}, {{ room.get_transfer_status_display|lower }}">
+    <span class="settlement-room-number" aria-hidden="true">{{ room.number }}</span>
+    <span class="settlement-room-content">
+        {% for block in room.view_blocks %}
+            <span class="settlement-bed-block">
+                <b>{{ block.label }}</b>
+                <span class="settlement-bed-row">
+                    {% for bed in block.beds %}
+                        <button type="button"
+                                class="settlement-bed"
+                                data-bed
+                                data-bed-id="{{ bed.stable_id }}"
+                                data-dormitory-label="КИС-{{ room.dormitory.number }}"
+                                data-floor-label="{{ room.floor }} этаж"
+                                data-room-label="Комната {{ room.number }}"
+                                data-block-label="{{ block.label }}"
+                                data-position-label="Место {{ bed.position }}"
+                                aria-label="КИС-{{ room.dormitory.number }}, этаж {{ room.floor }}, комната {{ room.number }}, {{ block.label }}, место {{ bed.position }}{% if room.is_transferred %}, доступно{% else %}, комната не передана{% endif %}"
+                                {% if not room.is_transferred %}disabled{% endif %}>
+                            <span>{{ bed.position }}</span>
+                        </button>
+                    {% endfor %}
+                </span>
+            </span>
+        {% endfor %}
+    </span>
+    <span class="settlement-room-state">
+        {% if room.is_transferred %}Передана{% else %}Не передана{% endif %}
+    </span>
+</article>
+{% else %}
+<div class="settlement-room-placeholder" aria-hidden="true"></div>
+{% endif %}

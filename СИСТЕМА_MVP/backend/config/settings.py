@@ -89,6 +89,7 @@ INSTALLED_APPS = [
     'reports',
     'portal.apps.PortalConfig',
     'rotations.apps.RotationsConfig',
+    'settlement.apps.SettlementConfig',
 ]
 
 MIDDLEWARE = [

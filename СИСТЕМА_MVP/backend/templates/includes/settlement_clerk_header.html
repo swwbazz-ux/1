@@ -1,0 +1,30 @@
+<header class="admin-console-header settlement-console-header" aria-label="Рабочая шапка делопроизводителя">
+    <section class="admin-console-identity">
+        <span class="admin-console-avatar" aria-hidden="true">{{ access.employee.full_name|default:"Д"|first }}</span>
+        <span>
+            <strong>{{ access.employee.full_name|default:"Делопроизводитель" }}</strong>
+            <em>Делопроизводитель</em>
+        </span>
+    </section>
+
+    <section class="admin-console-main">
+        <div class="admin-console-title">
+            <span>Вахтовый контур</span>
+            <h1>Расселение</h1>
+            <p>Физическая карта общежитий и койко-мест.</p>
+        </div>
+        <nav class="admin-console-nav" aria-label="Разделы расселения">
+            <a class="is-active" href="{% url 'settlement_map' %}" aria-current="page">Карта</a>
+        </nav>
+    </section>
+
+    <section class="admin-console-actions settlement-console-actions" aria-label="Тема и выход">
+        <button type="button"
+                class="admin-theme-button"
+                data-admin-theme-toggle
+                data-theme-icon="sun"
+                aria-label="Переключить дневной и ночной режим"
+                title="Переключить дневной и ночной режим"></button>
+        <a class="admin-utility-link" href="{% url 'logout' %}">Выйти</a>
+    </section>
+</header>
