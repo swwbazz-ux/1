@@ -1,6 +1,6 @@
 ﻿import secrets
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from io import BytesIO
 from urllib.parse import urlencode
@@ -33,7 +33,9 @@ from core.models import OperationalStateEvent, OperationalStateVersion, bump_ope
 from core.operational_fragments import operational_fragment_response
 from downtimes.models import DowntimeEvent, DowntimeReason
 from references.models import Dormitory, DormitorySection, DumpPoint, Equipment, EquipmentState, EquipmentType, RockType
-from reports.models import ReportTemplate
+from reports.forms import RatingPeriodReferenceForm
+from reports.models import RatingPeriod, ReportTemplate
+from reports.rating_period_generation import inspect_rating_period_calendar
 from shifts.forms import EquipmentPlanGroupForm
 from shifts.models import (
     AchievementPrize,
@@ -702,6 +704,7 @@ def system_admin_dashboard_view(request):
         ('Подразделения', PersonnelDepartment.objects.count(), '/system-admin/references/personnel-departments/'),
         ('Графики работы', WorkSchedule.objects.count(), '/system-admin/references/work-schedules/'),
         ('Утверждённые составы вахт', WatchComposition.objects.count(), '/system-admin/references/watch-compositions/'),
+        ('Периоды рейтинга', RatingPeriod.objects.count(), '/system-admin/references/rating-periods/'),
         ('Кадровые должности', PersonnelPosition.objects.count(), '/system-admin/references/personnel-positions/'),
         ('Производственные специализации', ProductionSpecialization.objects.count(), '/system-admin/references/production-specializations/'),
         ('Виды техники', EquipmentType.objects.count(), '/admin/references/equipmenttype/'),
@@ -815,6 +818,18 @@ def system_admin_references_view(request):
             ],
         },
         {
+            'title': 'Рейтинг',
+            'items': [
+                {
+                    'name': 'Периоды рейтинга',
+                    'count': RatingPeriod.objects.count(),
+                    'url': '',
+                    'external_url': '/admin/reports/ratingperiod/',
+                    'detail_code': 'rating-periods',
+                },
+            ],
+        },
+        {
             'title': 'Простои',
             'items': [
                 {'name': 'Общий список простоев', 'count': DowntimeReason.objects.count(), 'url': '', 'external_url': '/admin/downtimes/downtimereason/', 'detail_code': 'downtime-reasons'},
@@ -903,6 +918,39 @@ def get_system_admin_reference_configs():
             'preview_fields': ['code', 'is_active'],
             'initial': {'is_active': True},
             'admin_url': '/admin/users/watchcomposition/',
+        },
+        'rating-periods': {
+            'title': 'Периоды рейтинга',
+            'section': 'Рейтинг',
+            'model': RatingPeriod,
+            'form_class': RatingPeriodReferenceForm,
+            'description': (
+                'Обычные периоды создаются автоматически по правилу '
+                '14-е → 14-е: текущий и 12 следующих. Существующие записи '
+                'система не изменяет. Вручную корректируйте только исключения '
+                'и обязательно указывайте причину изменения дат.'
+            ),
+            'fields': [
+                'name',
+                'starts_on',
+                'ends_before',
+                'comment',
+                'is_active',
+            ],
+            'search_fields': ['name', 'comment'],
+            'preview_fields': [
+                'starts_on',
+                'ends_before',
+                'generation_source_label',
+                'manual_override_label',
+                'is_active',
+            ],
+            'preview_labels': {
+                'generation_source_label': 'Создание',
+                'manual_override_label': 'Режим дат',
+            },
+            'initial': {'is_active': True},
+            'admin_url': '/admin/reports/ratingperiod/',
         },
         'personnel-positions': {
             'title': 'Кадровые должности',
@@ -1194,7 +1242,10 @@ def get_reference_record_preview(record, config):
     for field_name in config.get('preview_fields', []):
         try:
             field = record._meta.get_field(field_name)
-            label = field.verbose_name
+            label = config.get('preview_labels', {}).get(
+                field_name,
+                field.verbose_name,
+            )
             value = getattr(record, field_name)
             if getattr(field, 'many_to_many', False):
                 value = ', '.join(str(item) for item in value.all()) or 'Не указано'
@@ -1205,7 +1256,10 @@ def get_reference_record_preview(record, config):
             elif value in (None, ''):
                 value = 'Не указано'
         except FieldDoesNotExist:
-            label = field_name.replace('_', ' ')
+            label = config.get('preview_labels', {}).get(
+                field_name,
+                field_name.replace('_', ' '),
+            )
             value = getattr(record, field_name, '')
             if callable(value):
                 value = value()
@@ -1213,6 +1267,48 @@ def get_reference_record_preview(record, config):
                 value = 'Не указано'
         preview.append({'label': label, 'value': value})
     return preview
+
+
+def _add_validation_error_to_form(form, error):
+    if hasattr(error, 'message_dict'):
+        for field_name, field_messages in error.message_dict.items():
+            target_field = field_name if field_name in form.fields else None
+            for field_message in field_messages:
+                form.add_error(target_field, field_message)
+        return
+    for message in error.messages:
+        form.add_error(None, message)
+
+
+def _rating_period_automation_context():
+    inspection = inspect_rating_period_calendar()
+    prepared = inspection.prepared_through
+    current_start = inspection.current_nominal_start
+    return {
+        'rule_label': '14-е → 14-е',
+        'horizon_label': (
+            f'{current_start:%d.%m.%Y}–'
+            f'{inspection.horizon_end - timedelta(days=1):%d.%m.%Y}'
+        ),
+        'prepared_through_label': (
+            f'{prepared - timedelta(days=1):%d.%m.%Y}'
+            if prepared > current_start
+            else 'не сформирован'
+        ),
+        'automatic_count': inspection.automatic_count,
+        'manual_count': inspection.manual_count,
+        'override_count': inspection.override_count,
+        'gap_count': len(inspection.gap_ranges),
+        'overlap_count': len(inspection.overlap_pairs),
+        'is_ready': inspection.is_ready,
+        'gaps': [
+            (
+                f'{starts_on:%d.%m.%Y}–'
+                f'{ends_before - timedelta(days=1):%d.%m.%Y}'
+            )
+            for starts_on, ends_before in inspection.gap_ranges[:3]
+        ],
+    }
 
 
 def system_admin_reference_detail_view(request, reference_code):
@@ -1255,11 +1351,60 @@ def system_admin_reference_detail_view(request, reference_code):
             record = get_object_or_404(model, id=record_id)
 
         if action in {'disable', 'enable'} and record and hasattr(record, 'is_active'):
-            old_value = 'Активен' if record.is_active else 'Отключен'
-            record.is_active = action == 'enable'
-            record.save(update_fields=['is_active'])
-            new_value = 'Активен' if record.is_active else 'Отключен'
-            log_admin_action(access.employee, f'Справочник: {config["title"]}', record, old_value, new_value)
+            try:
+                if reference_code == 'rating-periods':
+                    with transaction.atomic():
+                        RatingPeriod.lock_catalog()
+                        record = (
+                            RatingPeriod._base_manager
+                            .select_for_update()
+                            .get(pk=record.pk)
+                        )
+                        old_value = record.audit_value()
+                        record.is_active = action == 'enable'
+                        record.save(update_fields=['is_active'])
+                        new_value = record.audit_value()
+                        action_label = (
+                            'Период рейтинга включён'
+                            if record.is_active
+                            else 'Период рейтинга отключён'
+                        )
+                        log_admin_action(
+                            access.employee,
+                            action_label,
+                            record,
+                            old_value,
+                            new_value,
+                        )
+                else:
+                    old_value = (
+                        'Активен' if record.is_active else 'Отключен'
+                    )
+                    record.is_active = action == 'enable'
+                    record.save(update_fields=['is_active'])
+                    new_value = (
+                        'Активен' if record.is_active else 'Отключен'
+                    )
+                    log_admin_action(
+                        access.employee,
+                        f'Справочник: {config["title"]}',
+                        record,
+                        old_value,
+                        new_value,
+                    )
+            except ValidationError as error:
+                error_messages = []
+                if hasattr(error, 'message_dict'):
+                    for field_messages in error.message_dict.values():
+                        error_messages.extend(field_messages)
+                else:
+                    error_messages.extend(error.messages)
+                messages.error(
+                    request,
+                    'Состояние записи не изменено. '
+                    + ' '.join(str(message) for message in error_messages),
+                )
+                return redirect(reference_detail_redirect_url(record.id))
             messages.success(request, 'Состояние записи обновлено.')
             return redirect(reference_detail_redirect_url(record.id))
 
@@ -1267,11 +1412,46 @@ def system_admin_reference_detail_view(request, reference_code):
         if form.is_valid():
             saved_record = form.save(commit=False)
             saved_record = prepare_reference_record_for_save(reference_code, saved_record, access)
-            saved_record.save()
-            form.save_m2m()
-            log_admin_action(access.employee, f'Справочник: {config["title"]}', saved_record, '', 'Сохранено')
-            messages.success(request, 'Запись справочника сохранена.')
-            return redirect(reference_detail_redirect_url(saved_record.id))
+            try:
+                if reference_code == 'rating-periods':
+                    with transaction.atomic():
+                        RatingPeriod.lock_catalog()
+                        old_audit_value = ''
+                        if saved_record.pk:
+                            stored_record = (
+                                RatingPeriod._base_manager
+                                .select_for_update()
+                                .get(pk=saved_record.pk)
+                            )
+                            old_audit_value = stored_record.audit_value()
+                        saved_record.save()
+                        form.save_m2m()
+                        log_admin_action(
+                            access.employee,
+                            (
+                                'Период рейтинга изменён'
+                                if record is not None
+                                else 'Период рейтинга создан вручную'
+                            ),
+                            saved_record,
+                            old_audit_value,
+                            saved_record.audit_value(),
+                        )
+                else:
+                    saved_record.save()
+                    form.save_m2m()
+                    log_admin_action(
+                        access.employee,
+                        f'Справочник: {config["title"]}',
+                        saved_record,
+                        '',
+                        'Сохранено',
+                    )
+            except ValidationError as error:
+                _add_validation_error_to_form(form, error)
+            else:
+                messages.success(request, 'Запись справочника сохранена.')
+                return redirect(reference_detail_redirect_url(saved_record.id))
     else:
         form_initial = None if selected_record else config.get('initial')
         form = form_class(instance=selected_record, initial=form_initial)
@@ -1313,6 +1493,11 @@ def system_admin_reference_detail_view(request, reference_code):
             'query': query,
             'status_filter': status_filter,
             'has_active_status': hasattr(model, 'is_active'),
+            'rating_period_automation': (
+                _rating_period_automation_context()
+                if reference_code == 'rating-periods'
+                else None
+            ),
         },
     )
 

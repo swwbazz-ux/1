@@ -1,0 +1,2 @@
+/СИСТЕМА_MVP/backend/reports/qa_artifacts/*.json -text
+/СИСТЕМА_MVP/backend/reports/qa_artifacts/driver_rating_30d_formula_replay_v1/*.json -text

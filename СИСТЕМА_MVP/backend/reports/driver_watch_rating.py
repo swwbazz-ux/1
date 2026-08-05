@@ -13,17 +13,25 @@ from django.db.models.functions import Cast, MD5
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
+from core.production_time import production_day_bounds, production_work_date
 from shifts.models import EmployeeShift, ShiftType, WatchPeriod
+from users.models import WatchComposition
 
-from .driver_watch_observation import build_driver_watch_linkage_audit
+from .driver_watch_observation import (
+    _driver_rating_period_queryset,
+    build_driver_rating_period_linkage_audit,
+    build_driver_watch_linkage_audit,
+)
 from .driver_shift_passport_snapshots import _fingerprint
-from .models import DriverShiftPassportSnapshot
+from .models import DriverShiftPassportSnapshot, RatingPeriod
 
 
 logger = logging.getLogger(__name__)
 
 
-DRIVER_RATING_FORMULA_VERSION = 'DRIVER_WATCH_V2_NO_DISTANCE'
+DRIVER_RATING_FORMULA_VERSION = (
+    'DRIVER_WATCH_V3_NO_DISTANCE_TIME_POLICY_NEUTRAL'
+)
 DRIVER_RATING_CACHE_SECONDS = 300
 DRIVER_RATING_MIN_COMPARABLE_CYCLES = 5
 DRIVER_RATING_WEIGHTS = {
@@ -208,6 +216,7 @@ def _latest_shift_snapshots(
             'shift__employee',
             'shift__equipment__equipment_type',
             'shift__equipment__model',
+            'shift__watch_period__watch_composition',
         )
         .order_by('shift_id')
     )
@@ -222,6 +231,141 @@ def _latest_shift_snapshots(
             ),
         )
     return list(snapshots)
+
+
+def _rating_period_bounds(rating_period):
+    return (
+        production_day_bounds(rating_period.starts_on)[0],
+        production_day_bounds(rating_period.ends_before)[0],
+    )
+
+
+def _snapshot_manifest_shift(snapshot):
+    payload = snapshot.payload if isinstance(snapshot.payload, dict) else {}
+    manifest = payload.get('source_manifest')
+    if not isinstance(manifest, dict):
+        return None
+    shift_manifest = manifest.get('shift')
+    return shift_manifest if isinstance(shift_manifest, dict) else None
+
+
+def _manifest_datetime(value):
+    if value in (None, ''):
+        return None
+    return parse_datetime(str(value))
+
+
+def _snapshot_manifest_is_in_rating_period(snapshot, rating_period):
+    shift_manifest = _snapshot_manifest_shift(snapshot)
+    opened_at = (
+        _manifest_datetime(shift_manifest.get('opened_at'))
+        if shift_manifest is not None
+        else None
+    )
+    if opened_at is None:
+        # Invalid manifests never become usable. Retaining a live in-period
+        # candidate lets strict validation withhold it instead of losing it.
+        opened_at = snapshot.shift.opened_at
+    if opened_at is None:
+        return False
+    work_date = production_work_date(opened_at)
+    return rating_period.starts_on <= work_date < rating_period.ends_before
+
+
+def _rating_period_closed_shifts(
+    rating_period,
+    watch_composition,
+    shift_type,
+    *,
+    allowed_employee_ids=None,
+):
+    period_start, period_end = _rating_period_bounds(rating_period)
+    shifts = (
+        EmployeeShift.objects
+        .filter(
+            opened_at__gte=period_start,
+            opened_at__lt=period_end,
+            watch_period__watch_composition=watch_composition,
+            shift_type=shift_type,
+            closed_at__isnull=False,
+        )
+        .filter(
+            Q(workplace_code='driver')
+            | Q(
+                workplace_code='',
+                equipment__equipment_type__name__contains='Самосвал',
+            ),
+        )
+    )
+    allowed_employee_ids = _normalize_employee_ids(allowed_employee_ids)
+    if allowed_employee_ids is not None:
+        shifts = shifts.filter(
+            Q(employee_id__in=allowed_employee_ids)
+            | Q(
+                passport_snapshots__payload__source_manifest__shift__employee_id__in=(
+                    allowed_employee_ids
+                ),
+            ),
+        ).distinct()
+    return shifts
+
+
+def _latest_rating_period_snapshots(
+    rating_period,
+    watch_composition,
+    shift_type,
+    *,
+    allowed_employee_ids=None,
+):
+    latest_snapshot_id = (
+        DriverShiftPassportSnapshot.objects
+        .filter(shift_id=OuterRef('shift_id'))
+        .order_by('-revision', '-id')
+        .values('id')[:1]
+    )
+    snapshots = (
+        DriverShiftPassportSnapshot.objects
+        .filter(
+            id=Subquery(latest_snapshot_id),
+        )
+        .filter(
+            Q(
+                shift__watch_period__watch_composition=watch_composition,
+                shift__shift_type=shift_type,
+            )
+            | Q(
+                payload__source_manifest__shift__watch_period__watch_composition__id=(
+                    watch_composition.id
+                ),
+                payload__source_manifest__shift__shift_type=shift_type,
+            )
+        )
+        .select_related(
+            'shift__employee',
+            'shift__equipment__equipment_type',
+            'shift__equipment__model',
+            'shift__watch_period__watch_composition',
+        )
+        .order_by('shift_id')
+    )
+    allowed_employee_ids = _normalize_employee_ids(allowed_employee_ids)
+    if allowed_employee_ids is not None:
+        snapshots = snapshots.filter(
+            Q(shift__employee_id__in=allowed_employee_ids)
+            | Q(
+                payload__source_manifest__shift__employee_id__in=(
+                    allowed_employee_ids
+                ),
+            ),
+        )
+    return [
+        snapshot
+        for snapshot in snapshots
+        if _snapshot_manifest_is_in_rating_period(
+            snapshot,
+            rating_period,
+        )
+    ]
 
 
 def _source_signature(
@@ -409,6 +553,129 @@ def _source_signature(
     )
 
 
+def _rating_period_source_signature(
+    rating_period,
+    watch_composition,
+    shift_type,
+    *,
+    allowed_employee_ids=None,
+    expected_employee_ids=None,
+):
+    allowed_employee_ids = _normalize_employee_ids(allowed_employee_ids)
+    expected_employee_ids = _normalize_employee_ids(
+        expected_employee_ids
+    ) or ()
+    snapshots = _latest_rating_period_snapshots(
+        rating_period,
+        watch_composition,
+        shift_type,
+        allowed_employee_ids=allowed_employee_ids,
+    )
+    selected_shifts = list(
+        _rating_period_closed_shifts(
+            rating_period,
+            watch_composition,
+            shift_type,
+            allowed_employee_ids=allowed_employee_ids,
+        )
+        .select_related('watch_period')
+        .order_by('id')
+    )
+    cohort_shifts = _driver_rating_period_queryset(
+        rating_period,
+        shift_type=shift_type,
+        employee_ids=allowed_employee_ids,
+    )
+    cohort_employee_ids = {
+        shift.employee_id
+        for shift in selected_shifts
+    } | set(expected_employee_ids)
+    if allowed_employee_ids is not None:
+        cohort_employee_ids &= set(allowed_employee_ids)
+    cohort_shifts = cohort_shifts.filter(
+        employee_id__in=cohort_employee_ids,
+    )
+    cohort_shift_rows = list(
+        cohort_shifts
+        .select_related('watch_period')
+        .order_by('id')
+    )
+    shifts_by_id = {
+        shift.id: shift
+        for shift in cohort_shift_rows
+    }
+    for snapshot in snapshots:
+        shifts_by_id[snapshot.shift_id] = snapshot.shift
+    shifts = [
+        shifts_by_id[shift_id]
+        for shift_id in sorted(shifts_by_id)
+    ]
+    watch_periods = {
+        shift.watch_period_id: {
+            'id': shift.watch_period_id,
+            'name': shift.watch_period.name,
+            'starts_on': shift.watch_period.starts_on,
+            'ends_on': shift.watch_period.ends_on,
+            'watch_composition_id': (
+                shift.watch_period.watch_composition_id
+            ),
+        }
+        for shift in shifts
+        if shift.watch_period_id
+    }
+    return _fingerprint({
+        'scope_version': 'driver-rating-period-v1',
+        'rating_period': {
+            'id': rating_period.id,
+            'name': rating_period.name,
+            'starts_on': rating_period.starts_on,
+            'ends_before': rating_period.ends_before,
+            'updated_at': rating_period.updated_at,
+        },
+        'watch_composition': {
+            'id': watch_composition.id,
+            'code': watch_composition.code,
+            'name': watch_composition.name,
+            'is_active': watch_composition.is_active,
+        },
+        'shift_type': shift_type,
+        'allowed_employee_ids': allowed_employee_ids,
+        'expected_employee_ids': expected_employee_ids,
+        'watch_periods': [
+            watch_periods[watch_period_id]
+            for watch_period_id in sorted(watch_periods)
+        ],
+        'shifts': [
+            {
+                'id': shift.id,
+                'employee_id': shift.employee_id,
+                'watch_period_id': shift.watch_period_id,
+                'shift_type': shift.shift_type,
+                'workplace_code': shift.workplace_code,
+                'equipment_id': shift.equipment_id,
+                'opened_at': shift.opened_at,
+                'closed_at': shift.closed_at,
+                'is_service_closed': shift.is_service_closed,
+            }
+            for shift in shifts
+        ],
+        'snapshots': [
+            {
+                'id': snapshot.id,
+                'shift_id': snapshot.shift_id,
+                'revision': snapshot.revision,
+                'source_fingerprint': snapshot.source_fingerprint,
+                'payload_fingerprint': snapshot.payload_fingerprint,
+                'stored_payload_fingerprint': _fingerprint(
+                    snapshot.payload
+                ),
+                'captured_at': snapshot.captured_at,
+            }
+            for snapshot in snapshots
+        ],
+    })
+
+
 def _empty_rating(
     watch_period,
     shift_type,
@@ -433,7 +700,10 @@ def _empty_rating(
         'official': False,
         'rating_mode': 'working',
         'formula_version': DRIVER_RATING_FORMULA_VERSION,
-        'formula_label': 'Рабочая формула без м³·км и т·км',
+        'formula_label': (
+            'Рабочая формула без м³·км и т·км; '
+            'рабочее время нейтрально'
+        ),
         'status': status,
         'generated_at': timezone.now().isoformat(),
         'source_fingerprint': '',
@@ -469,7 +739,37 @@ def _empty_rating(
     }
 
 
-def _validate_snapshot(snapshot):
+def _snapshot_datetime_equal(manifest_value, live_value):
+    if manifest_value in (None, ''):
+        return live_value is None
+    parsed = _manifest_datetime(manifest_value)
+    if parsed is None or live_value is None:
+        return False
+    # DjangoJSONEncoder preserves milliseconds, not arbitrary microseconds.
+    live_value = live_value.replace(
+        microsecond=(live_value.microsecond // 1000) * 1000,
+    )
+    return parsed == live_value
+
+
+def _snapshot_shift_structure_matches(snapshot, shift_manifest):
+    return all((
+        _snapshot_datetime_equal(
+            shift_manifest.get('opened_at'),
+            snapshot.shift.opened_at,
+        ),
+        _snapshot_datetime_equal(
+            shift_manifest.get('closed_at'),
+            snapshot.shift.closed_at,
+        ),
+        shift_manifest.get('workplace_code')
+        == snapshot.shift.workplace_code,
+        shift_manifest.get('equipment_id')
+        == snapshot.shift.equipment_id,
+    ))
+
+
+def _validate_snapshot(snapshot, *, strict_shift_structure=False):
     payload = snapshot.payload
     passport = payload.get('passport') if isinstance(payload, dict) else None
     manifest = (
@@ -505,8 +805,28 @@ def _validate_snapshot(snapshot):
         return None, 'source_fingerprint_mismatch'
     if snapshot.payload_fingerprint != _fingerprint(payload):
         return None, 'payload_fingerprint_mismatch'
+    if (
+        strict_shift_structure
+        and not _snapshot_shift_structure_matches(
+            snapshot,
+            shift_manifest,
+        )
+    ):
+        return None, 'snapshot_shift_structural_mismatch'
     if watch_manifest.get('id') != snapshot.shift.watch_period_id:
         return None, 'watch_period_snapshot_mismatch'
+    watch_composition_manifest = watch_manifest.get('watch_composition')
+    live_watch_composition_id = (
+        snapshot.shift.watch_period.watch_composition_id
+        if snapshot.shift.watch_period_id
+        else None
+    )
+    if (
+        not isinstance(watch_composition_manifest, dict)
+        or watch_composition_manifest.get('id')
+        != live_watch_composition_id
+    ):
+        return None, 'watch_composition_snapshot_mismatch'
 
     quality = passport.get('quality')
     quality_flags = set(
@@ -907,22 +1227,34 @@ def _stability_scores(records, cycle_samples, cycle_medians):
 
 def _work_time_score(record):
     time_data = record['time']
-    if (
-        time_data.get('scheduled_window_status')
-        == 'schedule_snapshot_unavailable'
-    ):
+    if not _work_time_rating_is_available(time_data):
         return FIFTY
     unjustified_seconds = _decimal(
         time_data.get('unjustified_short_shift_seconds')
     )
     if unjustified_seconds is None:
-        return HUNDRED
+        return FIFTY
     penalty = _clip(
         unjustified_seconds / Decimal('3600'),
         ZERO,
         Decimal('1'),
     )
     return HUNDRED * (Decimal('1') - penalty)
+
+
+def _work_time_rating_is_available(time_data):
+    """Fail closed until both schedule and reason policy are auditable."""
+    return bool(
+        time_data.get('work_time_rating_available') is True
+        and time_data.get('scheduled_window_status')
+        == 'structural_schedule_observed'
+        and time_data.get('work_time_rating_status')
+        == 'assessed_structural_schedule_and_reason_policy'
+        and _decimal(
+            time_data.get('unjustified_short_shift_seconds')
+        )
+        is not None
+    )
 
 
 def _assignments_score(record):
@@ -1006,12 +1338,9 @@ def _confidence_score(record, assignments, digital):
     )
     source_core = (assignments + digital) / Decimal('2')
     schedule_component = (
-        ZERO
-        if (
-            record['time'].get('scheduled_window_status')
-            == 'schedule_snapshot_unavailable'
-        )
-        else HUNDRED
+        HUNDRED
+        if _work_time_rating_is_available(record['time'])
+        else ZERO
     )
     return (
         Decimal('0.50') * coverage
@@ -1355,7 +1684,10 @@ def build_driver_watch_rating(
         'official': False,
         'rating_mode': 'working',
         'formula_version': DRIVER_RATING_FORMULA_VERSION,
-        'formula_label': 'Рабочая формула без м³·км и т·км',
+        'formula_label': (
+            'Рабочая формула без м³·км и т·км; '
+            'рабочее время нейтрально'
+        ),
         'status': (
             'Рабочий рейтинг рассчитан. '
             'м³·км и т·км пока не учитываются.'
@@ -1369,6 +1701,398 @@ def build_driver_watch_rating(
             'starts_on': watch_period.starts_on.isoformat(),
             'ends_on': watch_period.ends_on.isoformat(),
         },
+        'shift_type': shift_type,
+        'shift_type_label': dict(ShiftType.choices)[shift_type],
+        'weights': {
+            key: str(value)
+            for key, value in DRIVER_RATING_WEIGHTS.items()
+        },
+        'distance_metrics': {
+            'weight': '0',
+            'status': 'planned',
+            'label': 'м³·км и т·км пока не учитываются',
+        },
+        'linkage_audit': linkage_audit,
+        'summary': {
+            'employee_count': len(entries),
+            'rated_shift_count': len(records),
+            'withheld_shift_count': len(closed_shift_rows) - len(records),
+            'withheld_reasons': dict(sorted(withheld_reasons.items())),
+            'trip_count': sum(
+                entry['trip_count']
+                for entry in entries
+            ),
+            'volume_m3': str(
+                _quantize(
+                    sum(
+                        (
+                            _decimal(entry['volume_m3'], ZERO)
+                            for entry in entries
+                        ),
+                        ZERO,
+                    ),
+                    Decimal('0.01'),
+                )
+            ),
+            'tonnage_t': str(
+                _quantize(
+                    sum(
+                        (
+                            _decimal(entry['tonnage_t'], ZERO)
+                            for entry in entries
+                        ),
+                        ZERO,
+                    ),
+                    Decimal('0.01'),
+                )
+            ),
+        },
+        'entries': entries,
+    }
+
+
+def _rating_period_payload(rating_period):
+    return {
+        'id': rating_period.id,
+        'name': rating_period.name,
+        'starts_on': rating_period.starts_on.isoformat(),
+        'ends_before': rating_period.ends_before.isoformat(),
+    }
+
+
+def _watch_composition_payload(watch_composition):
+    return {
+        'id': watch_composition.id,
+        'code': watch_composition.code,
+        'name': watch_composition.name,
+    }
+
+
+def _empty_rating_period(
+    rating_period,
+    watch_composition,
+    shift_type,
+    status,
+    *,
+    withheld_reasons=(),
+    linkage_audit=None,
+):
+    payload = _empty_rating(
+        None,
+        shift_type,
+        status,
+        withheld_reasons=withheld_reasons,
+        linkage_audit=linkage_audit,
+    )
+    payload.pop('watch_period', None)
+    payload.update({
+        'scope_type': 'rating_period',
+        'rating_period': _rating_period_payload(rating_period),
+        'watch_composition': _watch_composition_payload(
+            watch_composition
+        ),
+    })
+    return payload
+
+
+def _rating_period_linkage_withheld_reasons(linkage_audit):
+    reasons = {}
+    for audit_key, reason in (
+        ('unlinked_shift_count', 'rating_period_unlinked_shift'),
+        (
+            'linked_to_other_composition_count',
+            'rating_period_other_composition_shift',
+        ),
+        (
+            'selected_watch_date_mismatch_count',
+            'watch_period_date_mismatch',
+        ),
+    ):
+        count = int(linkage_audit.get(audit_key) or 0)
+        if count:
+            reasons[reason] = count
+    return reasons
+
+
+def build_driver_rating_period(
+    rating_period,
+    watch_composition,
+    *,
+    shift_type,
+    allowed_employee_ids=None,
+    expected_employee_ids=None,
+):
+    """Строит рабочий рейтинг для независимого календарного окна.
+
+    RatingPeriod задаёт только даты отбора. Структурная принадлежность
+    каждой смены по-прежнему берётся из неизменяемой связи
+    EmployeeShift.watch_period -> WatchComposition.
+    """
+
+    if not isinstance(rating_period, RatingPeriod):
+        raise TypeError(
+            'rating_period должен быть экземпляром RatingPeriod.'
+        )
+    if not isinstance(watch_composition, WatchComposition):
+        raise TypeError(
+            'watch_composition должен быть экземпляром WatchComposition.'
+        )
+    if rating_period.ends_before <= rating_period.starts_on:
+        raise ValueError(
+            'Конец периода рейтинга должен быть позже даты начала.'
+        )
+    if shift_type not in {ShiftType.DAY, ShiftType.NIGHT}:
+        raise ValueError('Для рейтинга укажите shift_type: day или night.')
+    allowed_employee_ids = _normalize_employee_ids(allowed_employee_ids)
+    expected_employee_ids = _normalize_employee_ids(
+        expected_employee_ids
+    )
+
+    snapshots = _latest_rating_period_snapshots(
+        rating_period,
+        watch_composition,
+        shift_type,
+        allowed_employee_ids=allowed_employee_ids,
+    )
+    linkage_audit = build_driver_rating_period_linkage_audit(
+        rating_period,
+        watch_composition,
+        shift_type=shift_type,
+        employee_ids=allowed_employee_ids,
+        expected_employee_ids=expected_employee_ids,
+    )
+    if (
+        not linkage_audit['linked_to_selected_composition_count']
+        and not snapshots
+    ):
+        return _empty_rating_period(
+            rating_period,
+            watch_composition,
+            shift_type,
+            'В выбранном периоде нет связанных закрытых смен этого состава.',
+            withheld_reasons=(
+                'rating_period_has_no_linked_driver_shifts',
+            ),
+            linkage_audit=linkage_audit,
+        )
+    linkage_withheld_reasons = _rating_period_linkage_withheld_reasons(
+        linkage_audit
+    )
+    if linkage_withheld_reasons:
+        return _empty_rating_period(
+            rating_period,
+            watch_composition,
+            shift_type,
+            (
+                'Связи смен внутри периода рейтинга требуют проверки; '
+                'расчёт удержан.'
+            ),
+            withheld_reasons=linkage_withheld_reasons,
+            linkage_audit=linkage_audit,
+        )
+
+    closed_shifts = _rating_period_closed_shifts(
+        rating_period,
+        watch_composition,
+        shift_type,
+        allowed_employee_ids=allowed_employee_ids,
+    )
+    closed_shift_rows = dict(
+        closed_shifts.values_list('id', 'employee_id')
+    )
+    for snapshot in snapshots:
+        closed_shift_rows.setdefault(
+            snapshot.shift_id,
+            (
+                _snapshot_manifest_employee_id(snapshot)
+                or snapshot.shift.employee_id
+            ),
+        )
+
+    records = []
+    withheld_reasons = defaultdict(int)
+    excluded_employee_ids = set()
+    snapshot_shift_ids = {
+        snapshot.shift_id
+        for snapshot in snapshots
+    }
+    missing_snapshot_shift_ids = (
+        set(closed_shift_rows) - snapshot_shift_ids
+    )
+    if missing_snapshot_shift_ids:
+        withheld_reasons['passport_coverage_incomplete'] += len(
+            missing_snapshot_shift_ids
+        )
+        excluded_employee_ids.update(
+            closed_shift_rows[shift_id]
+            for shift_id in missing_snapshot_shift_ids
+        )
+
+    for snapshot in snapshots:
+        record, reason = _validate_snapshot(
+            snapshot,
+            strict_shift_structure=True,
+        )
+        if record is None:
+            withheld_reasons[reason] += 1
+            excluded_employee_ids.add(snapshot.shift.employee_id)
+            manifest_employee_id = _snapshot_manifest_employee_id(snapshot)
+            if manifest_employee_id is not None:
+                excluded_employee_ids.add(manifest_employee_id)
+            continue
+        record['credited_trips'] = _credited_trips(record)
+        if (
+            len(record['credited_trips'])
+            != int(record['production'].get('completed_trip_count', 0))
+        ):
+            withheld_reasons['trip_attribution_mismatch'] += 1
+            excluded_employee_ids.add(snapshot.shift.employee_id)
+            manifest_employee_id = _snapshot_manifest_employee_id(snapshot)
+            if manifest_employee_id is not None:
+                excluded_employee_ids.add(manifest_employee_id)
+            continue
+        records.append(record)
+
+    partially_covered_records = [
+        record
+        for record in records
+        if record['snapshot'].shift.employee_id in excluded_employee_ids
+    ]
+    if partially_covered_records:
+        withheld_reasons['employee_partial_coverage'] += len(
+            partially_covered_records
+        )
+        records = [
+            record
+            for record in records
+            if record['snapshot'].shift.employee_id
+            not in excluded_employee_ids
+        ]
+
+    if not records:
+        return _empty_rating_period(
+            rating_period,
+            watch_composition,
+            shift_type,
+            'Нет смен, пригодных для рабочего расчёта.',
+            withheld_reasons=withheld_reasons,
+            linkage_audit=linkage_audit,
+        )
+
+    (
+        volume_samples,
+        cycle_samples,
+        cycle_medians,
+    ) = _calibration(records)
+    for record in records:
+        record['work_units'] = _shift_work_units(
+            record,
+            volume_samples,
+            cycle_samples,
+            cycle_medians,
+        )
+        record['production_rate'] = (
+            record['work_units']
+            * Decimal('3600')
+            / record['available_seconds']
+        )
+
+    production_scores = _midrank_percentiles(records)
+    stability_scores = _stability_scores(
+        records,
+        cycle_samples,
+        cycle_medians,
+    )
+    shift_score_lines = []
+    for record in records:
+        shift_id = record['snapshot'].shift_id
+        blocks = {
+            'production': production_scores[shift_id],
+            'work_time': _work_time_score(record),
+            'stability': stability_scores[shift_id],
+            'assignments': _assignments_score(record),
+            'digital_accounting': _digital_accounting_score(record),
+        }
+        raw_score = sum(
+            (
+                blocks[key] * DRIVER_RATING_WEIGHTS[key]
+                for key in DRIVER_RATING_WEIGHTS
+            ),
+            ZERO,
+        )
+        record['blocks'] = blocks
+        record['shift_score'] = _quantize(raw_score)
+        record['confidence'] = _confidence_score(
+            record,
+            blocks['assignments'],
+            blocks['digital_accounting'],
+        )
+        shift_score_lines.append(
+            f'{shift_id}:{record["shift_score"]:.4f}'
+        )
+
+    shift_score_fingerprint = hashlib.sha256(
+        '\n'.join(
+            line
+            for _, line in sorted(
+                (
+                    int(line.split(':', 1)[0]),
+                    line,
+                )
+                for line in shift_score_lines
+            )
+        ).encode('utf-8')
+    ).hexdigest().upper()
+    source_fingerprint = hashlib.sha256(
+        '|'.join(
+            (
+                DRIVER_RATING_FORMULA_VERSION,
+                'driver-rating-period-v1',
+                str(rating_period.id),
+                rating_period.name,
+                rating_period.starts_on.isoformat(),
+                rating_period.ends_before.isoformat(),
+                str(watch_composition.id),
+                watch_composition.code,
+                watch_composition.name,
+                shift_type,
+                *sorted(
+                    (
+                        f'{snapshot.payload_fingerprint}:'
+                        f'{_fingerprint(snapshot.payload)}'
+                    )
+                    for snapshot in snapshots
+                ),
+                *(
+                    f'shift:{shift_id}:employee:{closed_shift_rows[shift_id]}'
+                    for shift_id in sorted(closed_shift_rows)
+                ),
+            )
+        ).encode('utf-8')
+    ).hexdigest()
+
+    entries = _employee_entries(records)
+    return {
+        'available': True,
+        'official': False,
+        'rating_mode': 'working',
+        'scope_type': 'rating_period',
+        'formula_version': DRIVER_RATING_FORMULA_VERSION,
+        'formula_label': (
+            'Рабочая формула без м³·км и т·км; '
+            'рабочее время нейтрально'
+        ),
+        'status': (
+            'Рабочий рейтинг рассчитан. '
+            'м³·км и т·км пока не учитываются.'
+        ),
+        'generated_at': timezone.now().isoformat(),
+        'source_fingerprint': source_fingerprint,
+        'shift_score_fingerprint': shift_score_fingerprint,
+        'rating_period': _rating_period_payload(rating_period),
+        'watch_composition': _watch_composition_payload(
+            watch_composition
+        ),
         'shift_type': shift_type,
         'shift_type_label': dict(ShiftType.choices)[shift_type],
         'weights': {
@@ -1464,6 +2188,75 @@ def get_cached_driver_watch_rating(
     except Exception:
         logger.exception(
             'Не удалось сохранить рабочий рейтинг в кэш; '
+            'рассчитанный результат возвращён без кэширования.',
+        )
+    return rating
+
+
+def get_cached_driver_rating_period(
+    rating_period,
+    watch_composition,
+    *,
+    shift_type,
+    allowed_employee_ids=None,
+    expected_employee_ids=None,
+):
+    allowed_employee_ids = _normalize_employee_ids(allowed_employee_ids)
+    expected_employee_ids = _normalize_employee_ids(
+        expected_employee_ids
+    )
+    signature = _rating_period_source_signature(
+        rating_period,
+        watch_composition,
+        shift_type,
+        allowed_employee_ids=allowed_employee_ids,
+        expected_employee_ids=expected_employee_ids,
+    )
+    scope_fingerprint = (
+        'all'
+        if allowed_employee_ids is None
+        else hashlib.sha256(
+            ','.join(map(str, allowed_employee_ids)).encode('utf-8')
+        ).hexdigest()
+    )
+    expected_fingerprint = hashlib.sha256(
+        ','.join(map(str, expected_employee_ids or ())).encode('utf-8')
+    ).hexdigest()
+    cache_identity = '|'.join((
+        str(rating_period.id),
+        str(watch_composition.id),
+        shift_type,
+        scope_fingerprint,
+        expected_fingerprint,
+        signature,
+    ))
+    cache_key = (
+        'driver-rating-period:'
+        f'{DRIVER_RATING_FORMULA_VERSION}:'
+        f'{hashlib.sha256(cache_identity.encode("utf-8")).hexdigest()}'
+    )
+    try:
+        cached = cache.get(cache_key)
+    except Exception:
+        logger.exception(
+            'Не удалось прочитать рейтинг периода из кэша; '
+            'выполняется прямой расчёт.',
+        )
+        cached = None
+    if cached is not None:
+        return cached
+    rating = build_driver_rating_period(
+        rating_period,
+        watch_composition,
+        shift_type=shift_type,
+        allowed_employee_ids=allowed_employee_ids,
+        expected_employee_ids=expected_employee_ids,
+    )
+    try:
+        cache.set(cache_key, rating, DRIVER_RATING_CACHE_SECONDS)
+    except Exception:
+        logger.exception(
+            'Не удалось сохранить рейтинг периода в кэш; '
             'рассчитанный результат возвращён без кэширования.',
         )
     return rating

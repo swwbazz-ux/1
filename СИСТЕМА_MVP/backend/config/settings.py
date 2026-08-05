@@ -33,6 +33,23 @@ def _env_bool(name: str, default: bool = False) -> bool:
     raise ValueError(f'{name} must be a boolean value, got {value!r}')
 
 
+def _env_positive_int(name: str, default: int) -> int:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        parsed = int(value.strip())
+    except (TypeError, ValueError) as error:
+        raise ValueError(
+            f'{name} must be a positive integer, got {value!r}'
+        ) from error
+    if parsed <= 0:
+        raise ValueError(
+            f'{name} must be a positive integer, got {value!r}'
+        )
+    return parsed
+
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / '.env')
@@ -229,6 +246,89 @@ PORTAL_WORKING_DRIVER_RATING_ENABLED = _env_bool(
     'PORTAL_WORKING_DRIVER_RATING_ENABLED',
     default=False,
 )
+DRIVER_WATCH_RATING_DIAGNOSTIC_API_ENABLED = _env_bool(
+    'DRIVER_WATCH_RATING_DIAGNOSTIC_API_ENABLED',
+    default=False,
+)
+DRIVER_RATING_SNAPSHOT_REFRESH_SECONDS = _env_positive_int(
+    'DRIVER_RATING_SNAPSHOT_REFRESH_SECONDS',
+    300,
+)
+DRIVER_RATING_SNAPSHOT_SOFT_STALE_SECONDS = _env_positive_int(
+    'DRIVER_RATING_SNAPSHOT_SOFT_STALE_SECONDS',
+    600,
+)
+DRIVER_RATING_SNAPSHOT_HARD_EXPIRE_SECONDS = _env_positive_int(
+    'DRIVER_RATING_SNAPSHOT_HARD_EXPIRE_SECONDS',
+    1800,
+)
+RATING_TV_SCREEN_ENABLED = _env_bool(
+    'RATING_TV_SCREEN_ENABLED',
+    default=False,
+)
+RATING_TV_QA_PREVIEW_ENABLED = _env_bool(
+    'RATING_TV_QA_PREVIEW_ENABLED',
+    default=False,
+)
+RATING_TV_QA_REPLAY_ENABLED = _env_bool(
+    'RATING_TV_QA_REPLAY_ENABLED',
+    default=False,
+)
+RATING_TV_QA_REPLAY_ARTIFACT = Path(
+    os.getenv(
+        'RATING_TV_QA_REPLAY_ARTIFACT',
+        str(
+            BASE_DIR
+            / 'reports'
+            / 'qa_artifacts'
+            / 'driver_rating_tv_visual_replay_v1.json'
+        ),
+    ),
+)
+RATING_TV_QA_REPLAY_SHA256 = os.getenv(
+    'RATING_TV_QA_REPLAY_SHA256',
+    'D48D515AA3CC9341AA31357D48C49982A4C3056E3D0E1A4D141DB1A4BA9C5106',
+).strip().upper()
+RATING_TV_QA_FORMULA_REPLAY_DAY_ENABLED = _env_bool(
+    'RATING_TV_QA_FORMULA_REPLAY_DAY_ENABLED',
+    default=False,
+)
+RATING_TV_QA_FORMULA_REPLAY_DAY_ARTIFACT = Path(
+    os.getenv(
+        'RATING_TV_QA_FORMULA_REPLAY_DAY_ARTIFACT',
+        str(
+            BASE_DIR
+            / 'reports'
+            / 'qa_artifacts'
+            / 'driver_rating_30d_formula_replay_v1'
+            / 'driver_rating_30d_formula_replay_day_v1.json'
+        ),
+    ),
+)
+RATING_TV_QA_FORMULA_REPLAY_DAY_SHA256 = os.getenv(
+    'RATING_TV_QA_FORMULA_REPLAY_DAY_SHA256',
+    '2B84F8044E7C89B13AED5CE19C18D7A57EDCDBB042DD73F94419CFA934AA9DBC',
+).strip().upper()
+RATING_TV_QA_FORMULA_REPLAY_NIGHT_ENABLED = _env_bool(
+    'RATING_TV_QA_FORMULA_REPLAY_NIGHT_ENABLED',
+    default=False,
+)
+RATING_TV_QA_FORMULA_REPLAY_NIGHT_ARTIFACT = Path(
+    os.getenv(
+        'RATING_TV_QA_FORMULA_REPLAY_NIGHT_ARTIFACT',
+        str(
+            BASE_DIR
+            / 'reports'
+            / 'qa_artifacts'
+            / 'driver_rating_30d_formula_replay_v1'
+            / 'driver_rating_30d_formula_replay_night_v1.json'
+        ),
+    ),
+)
+RATING_TV_QA_FORMULA_REPLAY_NIGHT_SHA256 = os.getenv(
+    'RATING_TV_QA_FORMULA_REPLAY_NIGHT_SHA256',
+    '2E990192D581A6C9A50F9C935797B672D3F39E86FD79F6E1017587EDACB02337',
+).strip().upper()
 # До появления других участков весь действующий кадровый состав относится к участку № 2.
 # Перед подключением второго участка здесь должен быть указан серверный провайдер
 # членства, возвращающий строго ограниченный Employee QuerySet.

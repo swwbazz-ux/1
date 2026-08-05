@@ -7,14 +7,19 @@ from django.utils import timezone
 
 from core.production_time import production_day_bounds, production_work_date
 from shifts.models import EmployeeShift, ShiftType
+from users.models import WatchComposition
 
 from .driver_shift_timeline import (
     DOWNTIME_CATEGORIES,
+    SCHEDULE_WINDOW_STATUS_INFERRED,
+    SCHEDULE_WINDOW_STATUS_UNAVAILABLE,
     TimelineCategory,
+    WORK_TIME_RATING_STATUS_NEUTRAL,
     build_driver_shift_timelines,
     cycle_aggregation_inputs_from_samples,
     cycle_statistics_from_samples,
 )
+from .models import RatingPeriod
 
 
 OBSERVATION_CATEGORIES = (
@@ -194,6 +199,51 @@ def _aggregate_shift_passports(passports, cycle_sample_groups):
         key: sum(passport['time'][key] for passport in passports)
         for key in PASSPORT_TIME_SUM_KEYS
     }
+    schedule_statuses = {
+        passport['time'].get('scheduled_window_status')
+        for passport in passports
+    }
+    if schedule_statuses == {SCHEDULE_WINDOW_STATUS_INFERRED}:
+        aggregate_schedule_status = SCHEDULE_WINDOW_STATUS_INFERRED
+    elif schedule_statuses == {SCHEDULE_WINDOW_STATUS_UNAVAILABLE}:
+        aggregate_schedule_status = SCHEDULE_WINDOW_STATUS_UNAVAILABLE
+    elif schedule_statuses and schedule_statuses <= {
+        SCHEDULE_WINDOW_STATUS_INFERRED,
+        SCHEDULE_WINDOW_STATUS_UNAVAILABLE,
+    }:
+        aggregate_schedule_status = 'mixed_schedule_sources_unavailable'
+    else:
+        aggregate_schedule_status = 'unknown_schedule_status'
+
+    def optional_schedule_sum(key):
+        values = [
+            passport['time'].get(key)
+            for passport in passports
+        ]
+        if not values or any(value is None for value in values):
+            return None
+        return sum(int(value) for value in values)
+
+    schedule_sums = {
+        key: optional_schedule_sum(key)
+        for key in (
+            'scheduled_duration_seconds',
+            'extra_presence_seconds',
+            'confirmed_extra_productive_seconds',
+            'inferred_schedule_gap_seconds',
+            'observed_short_shift_seconds',
+        )
+    }
+    unjustified_values = [
+        passport['time'].get('unjustified_short_shift_seconds')
+        for passport in passports
+    ]
+    unjustified_short_shift_seconds = (
+        sum(int(value) for value in unjustified_values)
+        if unjustified_values
+        and all(value is not None for value in unjustified_values)
+        else None
+    )
     formula_ready = bool(passports) and all(
         passport['rates_per_available_hour']['is_formula_ready']
         for passport in passports
@@ -285,7 +335,7 @@ def _aggregate_shift_passports(passports, cycle_sample_groups):
     ).hexdigest()
     merged_cycle_samples = _merge_cycle_samples(cycle_sample_groups)
     return {
-        'passport_schema_version': 1,
+        'passport_schema_version': 2,
         'source_fingerprint': aggregate_fingerprint,
         'scope': 'employee_period',
         'shift_count': len(passports),
@@ -321,12 +371,28 @@ def _aggregate_shift_passports(passports, cycle_sample_groups):
             **time,
             'scheduled_start_at': None,
             'scheduled_end_at': None,
-            'scheduled_window_status': 'schedule_snapshot_unavailable',
+            **schedule_sums,
+            'scheduled_window_status': aggregate_schedule_status,
+            'schedule_source': (
+                'production_shift_default'
+                if aggregate_schedule_status
+                == SCHEDULE_WINDOW_STATUS_INFERRED
+                else None
+            ),
+            'schedule_confidence_percent': 0,
             'start_deviation_seconds': None,
             'end_deviation_seconds': None,
-            'confirmed_extra_productive_seconds': None,
-            'unjustified_short_shift_seconds': None,
-            'short_shift_status': 'policy_unavailable',
+            'unjustified_short_shift_seconds': (
+                unjustified_short_shift_seconds
+            ),
+            'short_shift_status': (
+                'inferred_comparison_only'
+                if aggregate_schedule_status
+                == SCHEDULE_WINDOW_STATUS_INFERRED
+                else 'policy_unavailable'
+            ),
+            'work_time_rating_available': False,
+            'work_time_rating_status': WORK_TIME_RATING_STATUS_NEUTRAL,
         },
         'cycles': cycle_statistics_from_samples(merged_cycle_samples),
         'aggregation_inputs': {
@@ -701,3 +767,217 @@ def build_driver_watch_linkage_audit(
         and counts['selected_watch_outside_period_count'] == 0
     )
     return counts
+
+
+def _validate_rating_period_scope(
+    rating_period,
+    watch_composition,
+    shift_type,
+):
+    if not isinstance(rating_period, RatingPeriod):
+        raise TypeError(
+            'rating_period должен быть экземпляром RatingPeriod.'
+        )
+    if not isinstance(watch_composition, WatchComposition):
+        raise TypeError(
+            'watch_composition должен быть экземпляром WatchComposition.'
+        )
+    if rating_period.ends_before <= rating_period.starts_on:
+        raise ValueError(
+            'Конец периода рейтинга должен быть позже даты начала.'
+        )
+    if shift_type not in {None, ShiftType.DAY, ShiftType.NIGHT}:
+        raise ValueError('Допустимые значения смены: day или night.')
+
+
+def _driver_rating_period_queryset(
+    rating_period,
+    *,
+    shift_type=None,
+    employee_ids=None,
+):
+    period_start = production_day_bounds(rating_period.starts_on)[0]
+    period_end = production_day_bounds(rating_period.ends_before)[0]
+    shifts = _driver_closed_shift_queryset().filter(
+        opened_at__gte=period_start,
+        opened_at__lt=period_end,
+    )
+    if employee_ids is not None:
+        shifts = shifts.filter(employee_id__in=employee_ids)
+    if shift_type:
+        shifts = shifts.filter(shift_type=shift_type)
+    return shifts
+
+
+def build_driver_rating_period_linkage_audit(
+    rating_period,
+    watch_composition,
+    *,
+    shift_type=None,
+    employee_ids=None,
+    expected_employee_ids=None,
+):
+    """Проверяет полноту связей внутри одной группы периода рейтинга.
+
+    employee_ids ограничивает доступный участок, но не определяет состав.
+    Историческая группа берётся из фактически связанных смен. Отдельный
+    expected_employee_ids позволяет проверить solely-unlinked смены текущего
+    утверждённого состава, не смешивая с ним другие составы участка.
+    """
+
+    _validate_rating_period_scope(
+        rating_period,
+        watch_composition,
+        shift_type,
+    )
+    base_shifts = _driver_rating_period_queryset(
+        rating_period,
+        shift_type=shift_type,
+        employee_ids=employee_ids,
+    )
+    selected_shifts = (
+        base_shifts
+        .filter(
+            watch_period__watch_composition=watch_composition,
+        )
+        .select_related('watch_period')
+    )
+    selected_employee_ids = set(
+        selected_shifts
+        .values_list('employee_id', flat=True)
+        .distinct()
+    )
+    expected_employee_ids = {
+        int(employee_id)
+        for employee_id in (expected_employee_ids or ())
+    }
+    if employee_ids is not None:
+        expected_employee_ids &= {
+            int(employee_id)
+            for employee_id in employee_ids
+        }
+    cohort_employee_ids = (
+        selected_employee_ids | expected_employee_ids
+    )
+    cohort_shifts = base_shifts.filter(
+        employee_id__in=cohort_employee_ids,
+    )
+    counts = cohort_shifts.aggregate(
+        candidate_closed_shift_count=Count('id'),
+        linked_to_selected_composition_count=Count(
+            'id',
+            filter=Q(
+                watch_period__watch_composition=watch_composition,
+            ),
+        ),
+        unlinked_shift_count=Count(
+            'id',
+            filter=Q(watch_period__isnull=True),
+        ),
+        linked_to_other_composition_count=Count(
+            'id',
+            filter=(
+                Q(watch_period__isnull=False)
+                & ~Q(
+                    watch_period__watch_composition=watch_composition,
+                )
+            ),
+        ),
+    )
+    counts['selected_watch_date_mismatch_count'] = sum(
+        1
+        for shift in selected_shifts
+        if not (
+            shift.watch_period.starts_on
+            <= production_work_date(shift.opened_at)
+            <= shift.watch_period.ends_on
+        )
+    )
+    counts['covered_watch_period_count'] = (
+        selected_shifts
+        .values('watch_period_id')
+        .distinct()
+        .count()
+    )
+    counts['linkage_ready'] = (
+        counts['linked_to_selected_composition_count'] > 0
+        and counts['unlinked_shift_count'] == 0
+        and counts['linked_to_other_composition_count'] == 0
+        and counts['selected_watch_date_mismatch_count'] == 0
+    )
+    return counts
+
+
+def build_driver_rating_period_observation(
+    rating_period,
+    watch_composition,
+    *,
+    shift_type=None,
+    as_of=None,
+    employee_ids=None,
+    expected_employee_ids=None,
+):
+    _validate_rating_period_scope(
+        rating_period,
+        watch_composition,
+        shift_type,
+    )
+    now = as_of or timezone.now()
+    shifts = tuple(
+        _driver_rating_period_queryset(
+            rating_period,
+            shift_type=shift_type,
+            employee_ids=employee_ids,
+        )
+        .filter(
+            watch_period__watch_composition=watch_composition,
+            opened_at__lt=now,
+        )
+        .select_related('watch_period')
+    )
+    date_mismatch_ids = {
+        shift.id
+        for shift in shifts
+        if not (
+            shift.watch_period.starts_on
+            <= production_work_date(shift.opened_at)
+            <= shift.watch_period.ends_on
+        )
+    }
+    observation = _build_driver_closed_shift_observation(
+        shifts,
+        now=now,
+        extra_quality_flags_by_shift={
+            shift_id: {'watch_period_date_mismatch'}
+            for shift_id in date_mismatch_ids
+        },
+    )
+    linkage_audit = build_driver_rating_period_linkage_audit(
+        rating_period,
+        watch_composition,
+        shift_type=shift_type,
+        employee_ids=employee_ids,
+        expected_employee_ids=expected_employee_ids,
+    )
+    observation.update({
+        'scope_type': 'rating_period',
+        'official_rating_eligible': False,
+        'rating_period': {
+            'id': rating_period.id,
+            'name': rating_period.name,
+            'starts_on': rating_period.starts_on.isoformat(),
+            'ends_before': rating_period.ends_before.isoformat(),
+        },
+        'watch_composition': {
+            'id': watch_composition.id,
+            'code': watch_composition.code,
+            'name': watch_composition.name,
+        },
+        'shift_type': shift_type,
+        'linkage_audit': linkage_audit,
+    })
+    observation['summary']['data_ready_for_formula_review'] = (
+        observation['summary']['data_ready_for_formula_review']
+        and linkage_audit['linkage_ready']
+    )
+    return observation

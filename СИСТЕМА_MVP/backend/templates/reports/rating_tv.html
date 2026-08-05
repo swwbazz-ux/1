@@ -1,0 +1,233 @@
+{% load static %}
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="robots" content="noindex,nofollow">
+    <title>Рейтинг — ООО «Коппер Рисорсез»</title>
+    <link rel="icon" href="{% static 'favicon.ico' %}">
+    <link rel="stylesheet" href="{% static 'css/rating-tv-v1.css' %}?v=20260730-3">
+</head>
+<body class="rating-tv-body{% if rating_tv_qa_preview %} is-qa-preview{% endif %}{% if rating_tv_qa_replay_kind == 'formula' %} is-formula-replay{% endif %}">
+    <main class="rating-tv" data-rating-tv>
+        <header class="rating-tv__header">
+            <div class="rating-tv__brand">
+                <img src="{% static 'portal/img/kopper-mark-v1.svg' %}" alt="">
+                <div>
+                    <strong>ООО «Коппер Рисорсез»</strong>
+                    <span>Добываем с уважением</span>
+                </div>
+            </div>
+
+            <h1>Рейтинг</h1>
+
+            <div class="rating-tv__scope">
+                <label>
+                    <span>Расчётный период</span>
+                    <select data-rating-period aria-label="Расчётный период">
+                        <option value="">Текущий период</option>
+                    </select>
+                </label>
+                <label>
+                    <span>Состав вахты</span>
+                    <select data-watch-composition aria-label="Состав вахты">
+                        <option value="">Выбранный состав</option>
+                    </select>
+                </label>
+                <label>
+                    <span>Смена</span>
+                    <select data-shift-type aria-label="Смена">
+                        <option value="day">Дневная</option>
+                        <option value="night" selected>Ночная</option>
+                    </select>
+                </label>
+                <div class="rating-tv__profession">
+                    <span>Профессия</span>
+                    <strong>Водитель самосвала</strong>
+                </div>
+            </div>
+
+            <nav class="rating-tv__tabs" aria-label="Вид рейтинга">
+                <button type="button" class="is-active" aria-current="page">
+                    Сотрудники
+                </button>
+                <button type="button" disabled title="Рейтинг экипажей готовится">
+                    Экипажи
+                </button>
+                <button type="button" disabled title="Рейтинг техники готовится">
+                    Техника
+                </button>
+            </nav>
+        </header>
+
+        <section class="rating-tv__statusbar" aria-label="Состояние рейтинга">
+            <div class="rating-tv__status">
+                <span>Статус</span>
+                <strong data-rating-status>Загрузка рейтинга</strong>
+            </div>
+            <div class="rating-tv__timestamp">
+                <span>Последнее обновление</span>
+                <strong data-updated-at>—</strong>
+            </div>
+            <div class="rating-tv__countdown">
+                {% if rating_tv_qa_preview %}
+                    <span>Источник данных</span>
+                    <strong data-refresh-countdown>
+                        {% if rating_tv_qa_replay_kind == 'formula' %}
+                            Формульный снимок
+                        {% else %}
+                            Сохранённый снимок
+                        {% endif %}
+                    </strong>
+                {% else %}
+                    <span>Следующее обновление через</span>
+                    <strong data-refresh-countdown>05:00</strong>
+                {% endif %}
+            </div>
+            {% if not rating_tv_qa_preview %}
+            <div class="rating-tv__presentation-controls">
+                <button type="button" data-rotation-toggle>
+                    <span aria-hidden="true">Ⅱ</span>
+                    <b>Пауза</b>
+                </button>
+                <button type="button" data-group-previous>
+                    <span aria-hidden="true">◀</span>
+                    <b>Назад</b>
+                </button>
+                <button type="button" data-group-next>
+                    <span aria-hidden="true">▶</span>
+                    <b>Далее</b>
+                </button>
+                <button type="button" data-program-toggle>
+                    <span aria-hidden="true">＋</span>
+                    <b>В показ</b>
+                </button>
+                <button type="button" data-fullscreen-toggle>
+                    <span aria-hidden="true">⛶</span>
+                    <b>Полный экран</b>
+                </button>
+            </div>
+            <div class="rating-tv__rotation-countdown">
+                <span>
+                    Автопоказ:
+                    <b data-program-count>1 группа</b>
+                </span>
+                <strong data-rotation-countdown>00:15</strong>
+            </div>
+            {% else %}
+            <div class="rating-tv__presentation-controls is-qa-fullscreen">
+                <button type="button" data-fullscreen-toggle>
+                    <span aria-hidden="true">⛶</span>
+                    <b>Полный экран</b>
+                </button>
+            </div>
+            {% endif %}
+        </section>
+
+        <section class="rating-tv__board" aria-label="Полный рейтинг">
+            <div class="rating-tv__message" data-rating-message>
+                <strong>Получаем серверный снимок</strong>
+                <span>На экране появится весь выбранный рейтинг.</span>
+            </div>
+            <ol class="rating-tv__grid" data-rating-grid hidden></ol>
+        </section>
+
+        {% if rating_tv_qa_preview %}
+        <section class="rating-tv__qa" aria-label="Тестовое моделирование">
+            <div class="rating-tv__qa-label">
+                <strong>
+                    {% if rating_tv_qa_replay_kind == 'formula' %}
+                        Синтетический формульный QA-прогон
+                    {% else %}
+                        Тестовое моделирование
+                    {% endif %}
+                </strong>
+                <span data-qa-replay-status>
+                    {% if rating_tv_qa_replay_kind == 'formula' %}
+                        Синтетические данные · формула рассчитана · результат неофициальный · не для премирования
+                    {% else %}
+                        Загружаем сохранённые снимки — это не расчёт KPI
+                    {% endif %}
+                </span>
+            </div>
+            <label class="rating-tv__qa-day">
+                День
+                <select
+                    data-qa-day-select
+                    aria-label="День тестового воспроизведения"
+                    disabled
+                >
+                    <option value="1">1</option>
+                </select>
+                <strong data-qa-day hidden>1</strong>
+                из
+                <span data-qa-day-count>30</span>
+            </label>
+            <div class="rating-tv__qa-controls">
+                <button type="button" data-qa-backward disabled>
+                    <span aria-hidden="true">◀◀</span>
+                    <b>Назад</b>
+                </button>
+                <button type="button" data-qa-pause disabled>
+                    <span aria-hidden="true">▶</span>
+                    <b>Запуск</b>
+                </button>
+                <button type="button" data-qa-step disabled>
+                    <span aria-hidden="true">▶</span>
+                    <b>Шаг</b>
+                </button>
+                <button type="button" data-qa-forward disabled>
+                    <b>Вперёд</b>
+                    <span aria-hidden="true">▶▶</span>
+                </button>
+            </div>
+            <label class="rating-tv__qa-speed">
+                <span>Скорость</span>
+                <select
+                    data-qa-speed
+                    disabled
+                    aria-label="Скорость тестового воспроизведения"
+                >
+                    <option value="0.5">0.5×</option>
+                    <option value="1" selected>1.0×</option>
+                    <option value="2">2.0×</option>
+                    <option value="4">4.0×</option>
+                </select>
+            </label>
+        </section>
+        {% endif %}
+
+        <footer class="rating-tv__footer">
+            <div class="rating-tv__legend" aria-label="Премиальные уровни">
+                <span class="is-diamond">◆ 1 Алмазный</span>
+                <span class="is-platinum">◆ 2 Платиновый</span>
+                <span class="is-gold">◆ 3 Золотой</span>
+                <span class="is-silver">◆ 4 Серебряный</span>
+                <span class="is-copper">◆ 5 Медный</span>
+            </div>
+            {% if rating_tv_qa_preview %}
+                {% if rating_tv_qa_replay_kind == 'formula' %}
+                    <span>Формула рассчитана заранее на синтетических данных; результат неофициальный и не для премирования</span>
+                {% else %}
+                    <span>Серверный перерасчёт при воспроизведении не выполняется</span>
+                {% endif %}
+            {% else %}
+                <span>Серверный снимок обновляется раз в 5 минут</span>
+            {% endif %}
+        </footer>
+    </main>
+
+    <section class="rating-tv-mobile-note" aria-label="Ограничение экрана">
+        <img src="{% static 'portal/img/kopper-mark-v1.svg' %}" alt="">
+        <strong>Это экран для телевизора и desktop-монитора</strong>
+        <span>Мобильная версия рейтинга будет отдельным вертикальным списком.</span>
+    </section>
+
+    {{ rating_tv_config|json_script:"rating-tv-config" }}
+    {% if rating_tv_preview_payload %}
+        {{ rating_tv_preview_payload|json_script:"rating-tv-preview-payload" }}
+    {% endif %}
+    <script src="{% static 'js/rating-tv-v1.js' %}?v=20260730-4" defer></script>
+</body>
+</html>

@@ -1,3 +1,4 @@
+import mimetypes
 from collections import defaultdict
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -6,7 +7,7 @@ from django.conf import settings
 from django.contrib import messages
 from django.db import transaction
 from django.db.models import Count, Q, Sum
-from django.http import HttpResponse, JsonResponse
+from django.http import FileResponse, Http404, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -43,7 +44,7 @@ from users.active_role import (
     ACTIVE_ROLE_SESSION_KEY,
     role_session_state,
 )
-from users.models import Employee, EmployeeAccess
+from users.models import Employee, EmployeeAccess, WatchComposition
 
 from portal.services import active_employees
 
@@ -55,10 +56,31 @@ from .driver_watch_observation import (
 from .driver_watch_rating import (
     DRIVER_RATING_FORMULA_VERSION,
     DRIVER_RATING_WEIGHTS,
-    get_cached_driver_watch_rating,
+)
+from .driver_rating_materialization import (
+    DriverRatingSnapshotUnavailable,
+    get_materialized_driver_rating_period,
+    materialized_driver_rating_rows,
 )
 from .forms import PilotFeedbackForm
-from .models import PilotFeedback, ReportTemplate, ReportType
+from .models import PilotFeedback, RatingPeriod, ReportTemplate, ReportType
+from .rating_tv import (
+    RATING_TV_QA_DAY_COUNT,
+    RATING_TV_REFRESH_SECONDS,
+    RATING_TV_ROTATION_SECONDS,
+    build_rating_tv_qa_preview,
+)
+from .rating_tv_formula_replay import (
+    RATING_TV_FORMULA_REPLAY_DAY_COUNT,
+    RATING_TV_FORMULA_REPLAY_SCHEMA,
+    RatingTvFormulaReplayError,
+    load_rating_tv_formula_replay,
+)
+from .rating_tv_replay import (
+    RATING_TV_REPLAY_SCHEMA,
+    RatingTvReplayError,
+    load_rating_tv_replay,
+)
 from .shift_analytics import (
     build_excavator_dynamics,
     build_shift_analytics,
@@ -534,14 +556,22 @@ def driver_watch_rating_api(request):
     site_scope = get_rating_site_scope(access)
     if site_scope is None:
         return JsonResponse({'error': 'Недостаточно прав.'}, status=403)
-    employee_ids, watch_composition_ids = site_scope
     if not getattr(
         settings,
         'PORTAL_WORKING_DRIVER_RATING_ENABLED',
         False,
+    ) or not getattr(
+        settings,
+        'DRIVER_WATCH_RATING_DIAGNOSTIC_API_ENABLED',
+        False,
     ):
         return JsonResponse(
-            {'error': 'Рабочий рейтинг Водителей не включён.'},
+            {
+                'error': (
+                    'Диагностический расчёт рейтинга по одной вахте '
+                    'не включён.'
+                ),
+            },
             status=404,
         )
 
@@ -551,86 +581,779 @@ def driver_watch_rating_api(request):
             {'error': 'Для рейтинга укажите shift_type: day или night.'},
             status=400,
         )
-
-    watch_periods = list(
-        WatchPeriod.objects
-        .filter(watch_composition_id__in=watch_composition_ids)
-        .order_by('-is_active', '-starts_on', '-id')
+    return JsonResponse(
+        {
+            'error': (
+                'HTTP-пересчёт рейтинга по одной вахте выведен из '
+                'эксплуатации. Используйте общий фоновый снимок периода '
+                'рейтинга.'
+            ),
+            'snapshot_status': 'diagnostic_http_calculation_retired',
+        },
+        status=410,
     )
-    watch_period_id = request.GET.get('watch_period')
-    if watch_period_id:
+
+
+def _rating_period_payload(period):
+    return {
+        'id': period.id,
+        'name': period.name,
+        'starts_on': period.starts_on.isoformat(),
+        'ends_before': period.ends_before.isoformat(),
+        'is_active': period.is_active,
+    }
+
+
+def _watch_composition_payload(composition):
+    return {
+        'id': composition.id,
+        'code': composition.code,
+        'name': composition.name,
+        'is_active': composition.is_active,
+    }
+
+
+def _driver_period_rating_empty(
+    *,
+    shift_type,
+    status,
+    rating_period,
+    watch_composition,
+    available_rating_periods,
+    available_watch_compositions,
+):
+    return {
+        'available': False,
+        'official': False,
+        'official_rating_eligible': False,
+        'rating_mode': 'working',
+        'scope_type': 'rating_period',
+        'formula_version': DRIVER_RATING_FORMULA_VERSION,
+        'formula_label': 'Рабочая формула без м³·км и т·км',
+        'status': status,
+        'generated_at': timezone.now().isoformat(),
+        'source_fingerprint': '',
+        'rating_period': (
+            _rating_period_payload(rating_period)
+            if rating_period is not None
+            else None
+        ),
+        'watch_composition': (
+            _watch_composition_payload(watch_composition)
+            if watch_composition is not None
+            else None
+        ),
+        'shift_type': shift_type,
+        'shift_type_label': dict(ShiftType.choices)[shift_type],
+        'weights': {
+            key: str(value)
+            for key, value in DRIVER_RATING_WEIGHTS.items()
+        },
+        'distance_metrics': {
+            'weight': '0',
+            'status': 'planned',
+            'label': 'м³·км и т·км пока не учитываются',
+        },
+        'linkage_audit': {
+            'candidate_closed_shift_count': 0,
+            'linked_to_selected_composition_count': 0,
+            'unlinked_shift_count': 0,
+            'linked_to_other_composition_count': 0,
+            'selected_watch_date_mismatch_count': 0,
+            'covered_watch_period_count': 0,
+            'linkage_ready': False,
+        },
+        'available_rating_periods': available_rating_periods,
+        'available_watch_compositions': available_watch_compositions,
+        'summary': {
+            'employee_count': 0,
+            'rated_shift_count': 0,
+            'withheld_shift_count': 0,
+            'withheld_reasons': {},
+        },
+        'entries': [],
+    }
+
+
+def _private_rating_json(payload, *, status=200):
+    response = JsonResponse(payload, status=status)
+    response.headers['Cache-Control'] = 'private, no-store'
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    return response
+
+
+def _rating_tv_access_or_redirect(request):
+    access = get_rating_observation_access(request)
+    if not access:
+        return None, redirect('login')
+    if access.role.code not in {'dispatcher', 'admin', 'manager'}:
+        return None, redirect('role_home')
+    if get_rating_site_scope(access) is None:
+        return None, redirect('role_home')
+    return access, None
+
+
+@never_cache
+@require_GET
+def driver_rating_tv_view(request):
+    access, access_response = _rating_tv_access_or_redirect(request)
+    if access_response:
+        return access_response
+
+    rating_enabled = getattr(
+        settings,
+        'PORTAL_WORKING_DRIVER_RATING_ENABLED',
+        False,
+    )
+    screen_enabled = getattr(
+        settings,
+        'RATING_TV_SCREEN_ENABLED',
+        False,
+    )
+    if not rating_enabled or not screen_enabled:
+        raise Http404
+    return _render_driver_rating_tv(
+        request,
+        access=access,
+        qa_preview=False,
+    )
+
+
+@never_cache
+@require_GET
+def driver_rating_tv_qa_preview_view(request):
+    access, access_response = _rating_tv_access_or_redirect(request)
+    if access_response:
+        return access_response
+    if not (
+        settings.DEBUG
+        and getattr(
+            settings,
+            'RATING_TV_QA_PREVIEW_ENABLED',
+            False,
+        )
+    ):
+        raise Http404
+    return _render_driver_rating_tv(
+        request,
+        access=access,
+        qa_preview=True,
+    )
+
+
+def _rating_tv_formula_enabled_shift_types():
+    return [
+        shift_type
+        for shift_type, setting_name in (
+            ('day', 'RATING_TV_QA_FORMULA_REPLAY_DAY_ENABLED'),
+            ('night', 'RATING_TV_QA_FORMULA_REPLAY_NIGHT_ENABLED'),
+        )
+        if getattr(settings, setting_name, False)
+    ]
+
+
+@never_cache
+@require_GET
+def driver_rating_tv_formula_qa_preview_view(request):
+    access, access_response = _rating_tv_access_or_redirect(request)
+    if access_response:
+        return access_response
+    enabled_shift_types = _rating_tv_formula_enabled_shift_types()
+    if not (
+        settings.DEBUG
+        and getattr(
+            settings,
+            'RATING_TV_QA_PREVIEW_ENABLED',
+            False,
+        )
+        and enabled_shift_types
+    ):
+        raise Http404
+    initial_shift_type = (
+        'night'
+        if 'night' in enabled_shift_types
+        else enabled_shift_types[0]
+    )
+    return _render_driver_rating_tv(
+        request,
+        access=access,
+        qa_preview=True,
+        qa_replay_kind='formula',
+        initial_shift_type=initial_shift_type,
+        formula_enabled_shift_types=enabled_shift_types,
+    )
+
+
+def _render_driver_rating_tv(
+    request,
+    *,
+    access,
+    qa_preview,
+    qa_replay_kind='visual',
+    initial_shift_type='night',
+    formula_enabled_shift_types=None,
+):
+    formula_enabled_shift_types = formula_enabled_shift_types or []
+    formula_replay = qa_preview and qa_replay_kind == 'formula'
+    photo_url_template = reverse(
+        'driver_rating_employee_photo',
+        args=[0],
+    ).replace('/0/', '/__employee_id__/')
+    context = {
+        'rating_tv_config': {
+            'apiUrl': reverse('driver_rating_tv_data_api'),
+            'qaReplayKind': qa_replay_kind,
+            'qaReplayUrl': reverse(
+                'driver_rating_tv_formula_qa_replay_api'
+                if formula_replay
+                else 'driver_rating_tv_qa_replay_api'
+            ),
+            'qaReplaySchema': (
+                RATING_TV_FORMULA_REPLAY_SCHEMA
+                if formula_replay
+                else RATING_TV_REPLAY_SCHEMA
+            ),
+            'qaReplayEnabled': bool(
+                qa_preview
+                and settings.DEBUG
+                and (
+                    bool(formula_enabled_shift_types)
+                    if formula_replay
+                    else getattr(
+                        settings,
+                        'RATING_TV_QA_REPLAY_ENABLED',
+                        False,
+                    )
+                )
+            ),
+            'qaFormulaEnabledShiftTypes': formula_enabled_shift_types,
+            'photoUrlTemplate': photo_url_template,
+            'refreshSeconds': RATING_TV_REFRESH_SECONDS,
+            'rotationSeconds': RATING_TV_ROTATION_SECONDS,
+            'qaDayCount': (
+                RATING_TV_FORMULA_REPLAY_DAY_COUNT
+                if formula_replay
+                else RATING_TV_QA_DAY_COUNT
+            ),
+            'qaPreview': qa_preview,
+            'initialShiftType': initial_shift_type,
+        },
+        'rating_tv_preview_payload': (
+            build_rating_tv_qa_preview()
+            if qa_preview and not formula_replay
+            else None
+        ),
+        'rating_tv_qa_preview': qa_preview,
+        'rating_tv_qa_replay_kind': qa_replay_kind,
+        'rating_tv_access': access,
+    }
+    response = render(request, 'reports/rating_tv.html', context)
+    response.headers['Cache-Control'] = 'private, no-store'
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    return response
+
+
+@never_cache
+@require_GET
+def driver_rating_tv_data_api(request):
+    if not (
+        getattr(settings, 'PORTAL_WORKING_DRIVER_RATING_ENABLED', False)
+        and getattr(settings, 'RATING_TV_SCREEN_ENABLED', False)
+    ):
+        return _private_rating_json(
+            {'error': 'TV-экран рейтинга не включён.'},
+            status=404,
+        )
+    return driver_period_rating_api(request)
+
+
+@never_cache
+@require_GET
+def driver_rating_tv_qa_replay_api(request):
+    if not (
+        settings.DEBUG
+        and getattr(
+            settings,
+            'RATING_TV_QA_REPLAY_ENABLED',
+            False,
+        )
+        and getattr(
+            settings,
+            'RATING_TV_QA_PREVIEW_ENABLED',
+            False,
+        )
+    ):
+        return _private_rating_json(
+            {'error': 'QA-воспроизведение рейтинга не включено.'},
+            status=404,
+        )
+    access = get_rating_observation_access(request)
+    if access is None:
+        return _private_rating_json(
+            {'error': 'Требуется авторизация.'},
+            status=401,
+        )
+    if access.role.code not in {'dispatcher', 'admin', 'manager'}:
+        return _private_rating_json(
+            {'error': 'Недостаточно прав.'},
+            status=403,
+        )
+    if get_rating_site_scope(access) is None:
+        return _private_rating_json(
+            {'error': 'Недостаточно прав.'},
+            status=403,
+        )
+    try:
+        replay, artifact_sha256 = load_rating_tv_replay(
+            settings.RATING_TV_QA_REPLAY_ARTIFACT,
+            expected_sha256=settings.RATING_TV_QA_REPLAY_SHA256,
+        )
+    except RatingTvReplayError:
+        return _private_rating_json(
+            {
+                'error': (
+                    'Сохранённое QA-воспроизведение отсутствует '
+                    'или не прошло проверку целостности.'
+                ),
+            },
+            status=409,
+        )
+    response = _private_rating_json(replay)
+    response.headers['X-Rating-Replay-SHA256'] = artifact_sha256
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    return response
+
+
+def _formula_replay_source(shift_type):
+    if shift_type == 'day':
+        return (
+            getattr(
+                settings,
+                'RATING_TV_QA_FORMULA_REPLAY_DAY_ENABLED',
+                False,
+            ),
+            getattr(
+                settings,
+                'RATING_TV_QA_FORMULA_REPLAY_DAY_ARTIFACT',
+                '',
+            ),
+            getattr(
+                settings,
+                'RATING_TV_QA_FORMULA_REPLAY_DAY_SHA256',
+                '',
+            ),
+        )
+    if shift_type == 'night':
+        return (
+            getattr(
+                settings,
+                'RATING_TV_QA_FORMULA_REPLAY_NIGHT_ENABLED',
+                False,
+            ),
+            getattr(
+                settings,
+                'RATING_TV_QA_FORMULA_REPLAY_NIGHT_ARTIFACT',
+                '',
+            ),
+            getattr(
+                settings,
+                'RATING_TV_QA_FORMULA_REPLAY_NIGHT_SHA256',
+                '',
+            ),
+        )
+    return False, '', ''
+
+
+@never_cache
+@require_GET
+def driver_rating_tv_formula_qa_replay_api(request):
+    if not (
+        settings.DEBUG
+        and getattr(
+            settings,
+            'RATING_TV_QA_PREVIEW_ENABLED',
+            False,
+        )
+    ):
+        return _private_rating_json(
+            {'error': 'Формульное QA-воспроизведение рейтинга не включено.'},
+            status=404,
+        )
+
+    shift_type_values = request.GET.getlist('shift_type')
+    if (
+        set(request.GET.keys()) != {'shift_type'}
+        or len(shift_type_values) != 1
+        or shift_type_values[0] not in {ShiftType.DAY, ShiftType.NIGHT}
+    ):
+        return _private_rating_json(
+            {
+                'error': (
+                    'Нужно передать ровно один shift_type: day или night.'
+                ),
+            },
+            status=400,
+        )
+    shift_type = shift_type_values[0]
+    enabled, artifact_path, artifact_sha256 = _formula_replay_source(
+        shift_type,
+    )
+    if not enabled:
+        return _private_rating_json(
+            {
+                'error': (
+                    'Формульное QA-воспроизведение для выбранной смены '
+                    'не включено.'
+                ),
+            },
+            status=404,
+        )
+
+    access = get_rating_observation_access(request)
+    if access is None:
+        return _private_rating_json(
+            {'error': 'Требуется авторизация.'},
+            status=401,
+        )
+    if access.role.code not in {'dispatcher', 'admin', 'manager'}:
+        return _private_rating_json(
+            {'error': 'Недостаточно прав.'},
+            status=403,
+        )
+    if get_rating_site_scope(access) is None:
+        return _private_rating_json(
+            {'error': 'Недостаточно прав.'},
+            status=403,
+        )
+
+    try:
+        replay, loaded_sha256 = load_rating_tv_formula_replay(
+            artifact_path,
+            expected_sha256=artifact_sha256,
+        )
+        replay_shift_type = (
+            replay.get('scope', {}).get('shift_type')
+            if isinstance(replay, dict)
+            else None
+        )
+        if replay_shift_type != shift_type:
+            raise RatingTvFormulaReplayError(
+                'Formula replay не соответствует выбранной смене.',
+            )
+    except RatingTvFormulaReplayError:
+        return _private_rating_json(
+            {
+                'error': (
+                    'Формульное QA-воспроизведение отсутствует, '
+                    'не соответствует смене или не прошло проверку '
+                    'целостности.'
+                ),
+            },
+            status=409,
+        )
+
+    response = _private_rating_json(replay)
+    response.headers['X-Rating-Replay-SHA256'] = loaded_sha256
+    response.headers['X-Rating-Replay-Kind'] = 'formula'
+    return response
+
+
+@never_cache
+@require_GET
+def driver_rating_employee_photo(request, pk):
+    if not (
+        getattr(settings, 'PORTAL_WORKING_DRIVER_RATING_ENABLED', False)
+        and getattr(settings, 'RATING_TV_SCREEN_ENABLED', False)
+    ):
+        raise Http404
+    access = get_rating_observation_access(request)
+    if (
+        access is None
+        or access.role.code not in {'dispatcher', 'admin', 'manager'}
+    ):
+        raise Http404
+    site_scope = get_rating_site_scope(access)
+    if site_scope is None or pk not in set(site_scope[0]):
+        raise Http404
+    employee = (
+        Employee.objects
+        .filter(
+            pk=pk,
+            is_active=True,
+            status=Employee.Status.ACTIVE,
+        )
+        .first()
+    )
+    if employee is None or not employee.photo:
+        raise Http404
+    try:
+        photo_file = employee.photo.open('rb')
+    except (FileNotFoundError, OSError, ValueError):
+        raise Http404
+    content_type, _encoding = mimetypes.guess_type(employee.photo.name)
+    response = FileResponse(
+        photo_file,
+        content_type=content_type or 'application/octet-stream',
+    )
+    response.headers['Cache-Control'] = 'private, no-store'
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    return response
+
+
+@never_cache
+@require_GET
+def driver_period_rating_api(request):
+    access = get_rating_observation_access(request)
+    if not access:
+        return _private_rating_json(
+            {'error': 'Требуется авторизация.'},
+            status=401,
+        )
+    if access.role.code not in {'dispatcher', 'admin', 'manager'}:
+        return _private_rating_json(
+            {'error': 'Недостаточно прав.'},
+            status=403,
+        )
+    site_scope = get_rating_site_scope(access)
+    if site_scope is None:
+        return _private_rating_json(
+            {'error': 'Недостаточно прав.'},
+            status=403,
+        )
+    employee_ids, watch_composition_ids = site_scope
+    if not getattr(
+        settings,
+        'PORTAL_WORKING_DRIVER_RATING_ENABLED',
+        False,
+    ):
+        return _private_rating_json(
+            {'error': 'Рабочий рейтинг Водителей не включён.'},
+            status=404,
+        )
+
+    shift_type = request.GET.get('shift_type')
+    if shift_type not in {ShiftType.DAY, ShiftType.NIGHT}:
+        return _private_rating_json(
+            {'error': 'Для рейтинга укажите shift_type: day или night.'},
+            status=400,
+        )
+
+    rating_periods = list(
+        RatingPeriod.objects
+        .filter(is_active=True)
+        .order_by('-starts_on', '-id')
+    )
+    current_watch_compositions = list(
+        WatchComposition.objects
+        .filter(
+            id__in=watch_composition_ids,
+            is_active=True,
+        )
+        .order_by('name', 'id')
+    )
+    available_rating_periods = [
+        _rating_period_payload(period)
+        for period in rating_periods
+    ]
+
+    rating_period_id = request.GET.get('rating_period')
+    if rating_period_id:
         try:
-            watch_period_id = int(watch_period_id)
+            rating_period_id = int(rating_period_id)
         except (TypeError, ValueError):
-            return JsonResponse(
-                {'error': 'watch_period должен быть числом.'},
+            return _private_rating_json(
+                {'error': 'rating_period должен быть числом.'},
                 status=400,
             )
-        watch_period = next(
+        rating_period = next(
             (
                 period
-                for period in watch_periods
-                if period.id == watch_period_id
+                for period in rating_periods
+                if period.id == rating_period_id
             ),
             None,
         )
-        if watch_period is None:
-            return JsonResponse({'error': 'Вахта не найдена.'}, status=404)
+        if rating_period is None:
+            return _private_rating_json(
+                {'error': 'Период рейтинга не найден.'},
+                status=404,
+            )
     else:
-        watch_period = watch_periods[0] if watch_periods else None
-
-    available_watch_periods = [
-        {
-            'id': period.id,
-            'name': period.name,
-            'starts_on': period.starts_on.isoformat(),
-            'ends_on': period.ends_on.isoformat(),
-            'is_active': period.is_active,
-        }
-        for period in watch_periods
-    ]
-    if watch_period is None:
-        return JsonResponse({
-            'available': False,
-            'official': False,
-            'rating_mode': 'working',
-            'formula_version': DRIVER_RATING_FORMULA_VERSION,
-            'formula_label': 'Рабочая формула без м³·км и т·км',
-            'status': 'Нет структурной вахты с закрытыми сменами.',
-            'generated_at': timezone.now().isoformat(),
-            'source_fingerprint': '',
-            'watch_period': None,
-            'shift_type': shift_type,
-            'shift_type_label': dict(ShiftType.choices)[shift_type],
-            'weights': {
-                key: str(value)
-                for key, value in DRIVER_RATING_WEIGHTS.items()
-            },
-            'distance_metrics': {
-                'weight': '0',
-                'status': 'planned',
-                'label': 'м³·км и т·км пока не учитываются',
-            },
-            'linkage_audit': {},
-            'available_watch_periods': [],
-            'summary': {
-                'employee_count': 0,
-                'rated_shift_count': 0,
-                'withheld_shift_count': 0,
-                'withheld_reasons': {},
-            },
-            'entries': [],
-        })
-
-    rating = dict(
-        get_cached_driver_watch_rating(
-            watch_period,
-            shift_type=shift_type,
-            allowed_employee_ids=employee_ids,
+        work_date = production_work_date()
+        current_periods = [
+            period
+            for period in rating_periods
+            if period.starts_on <= work_date < period.ends_before
+        ]
+        if len(current_periods) > 1:
+            return _private_rating_json(
+                {
+                    'error': (
+                        'На текущую производственную дату найдено несколько '
+                        'активных периодов рейтинга. Расчёт остановлен.'
+                    ),
+                    'available_rating_periods': available_rating_periods,
+                    'available_watch_compositions': [
+                        _watch_composition_payload(composition)
+                        for composition in current_watch_compositions
+                    ],
+                },
+                status=409,
+            )
+        rating_period = (
+            current_periods[0]
+            if len(current_periods) == 1
+            else None
         )
+
+    historical_composition_ids = set()
+    if rating_period is not None:
+        historical_composition_ids = set(
+            materialized_driver_rating_rows(rating_period)
+            .filter(
+                formula_version=DRIVER_RATING_FORMULA_VERSION,
+                last_success_at__isnull=False,
+            )
+            .values_list('watch_composition_id', flat=True)
+        )
+    available_composition_ids = (
+        historical_composition_ids
+        | {
+            composition.id
+            for composition in current_watch_compositions
+        }
     )
-    rating['available_watch_periods'] = available_watch_periods
-    return JsonResponse(rating)
+    watch_compositions = list(
+        WatchComposition.objects
+        .filter(id__in=available_composition_ids)
+        .order_by('name', 'id')
+    )
+    available_watch_compositions = [
+        _watch_composition_payload(composition)
+        for composition in watch_compositions
+    ]
+
+    if rating_period is None:
+        return _private_rating_json(
+            _driver_period_rating_empty(
+                shift_type=shift_type,
+                status=(
+                    'На текущую производственную дату активный период '
+                    'рейтинга не задан.'
+                ),
+                rating_period=None,
+                watch_composition=(
+                    watch_compositions[0]
+                    if len(watch_compositions) == 1
+                    else None
+                ),
+                available_rating_periods=available_rating_periods,
+                available_watch_compositions=(
+                    available_watch_compositions
+                ),
+            )
+        )
+
+    watch_composition_id = request.GET.get('watch_composition')
+    if watch_composition_id:
+        try:
+            watch_composition_id = int(watch_composition_id)
+        except (TypeError, ValueError):
+            return _private_rating_json(
+                {'error': 'watch_composition должен быть числом.'},
+                status=400,
+            )
+        watch_composition = next(
+            (
+                composition
+                for composition in watch_compositions
+                if composition.id == watch_composition_id
+            ),
+            None,
+        )
+        if watch_composition is None:
+            return _private_rating_json(
+                {'error': 'Состав вахты не найден в доступной области.'},
+                status=404,
+            )
+    elif len(watch_compositions) == 1:
+        watch_composition = watch_compositions[0]
+    elif len(watch_compositions) > 1:
+        return _private_rating_json(
+            {
+                'error': 'Укажите watch_composition для рейтинга.',
+                'rating_period': (
+                    _rating_period_payload(rating_period)
+                    if rating_period is not None
+                    else None
+                ),
+                'available_rating_periods': available_rating_periods,
+                'available_watch_compositions': (
+                    available_watch_compositions
+                ),
+            },
+            status=400,
+        )
+    else:
+        watch_composition = None
+
+    if watch_composition is None:
+        return _private_rating_json(
+            _driver_period_rating_empty(
+                shift_type=shift_type,
+                status='Нет доступного утверждённого состава вахты.',
+                rating_period=rating_period,
+                watch_composition=None,
+                available_rating_periods=available_rating_periods,
+                available_watch_compositions=(
+                    available_watch_compositions
+                ),
+            )
+        )
+
+    expected_employee_ids = tuple(
+        Employee.objects
+        .filter(
+            id__in=employee_ids,
+            watch_composition=watch_composition,
+        )
+        .values_list('id', flat=True)
+    )
+    try:
+        rating = dict(
+            get_materialized_driver_rating_period(
+                rating_period,
+                watch_composition,
+                shift_type=shift_type,
+                allowed_employee_ids=employee_ids,
+                expected_employee_ids=expected_employee_ids,
+            )
+        )
+    except DriverRatingSnapshotUnavailable as error:
+        unavailable = _driver_period_rating_empty(
+            shift_type=shift_type,
+            status=error.public_status,
+            rating_period=rating_period,
+            watch_composition=watch_composition,
+            available_rating_periods=available_rating_periods,
+            available_watch_compositions=available_watch_compositions,
+        )
+        unavailable.update({
+            'error': error.public_status,
+            'snapshot_status': error.code,
+        })
+        return _private_rating_json(
+            unavailable,
+            status=error.http_status,
+        )
+    rating.update({
+        'official': False,
+        'official_rating_eligible': False,
+        'scope_type': 'rating_period',
+        'available_rating_periods': available_rating_periods,
+        'available_watch_compositions': available_watch_compositions,
+    })
+    return _private_rating_json(rating)
 
 
 @never_cache

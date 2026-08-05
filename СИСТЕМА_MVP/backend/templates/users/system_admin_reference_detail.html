@@ -5,6 +5,15 @@
 
 {% block body %}
 <style>
+[data-rating-period-automation] .reference-message {
+    display: grid;
+    gap: 4px;
+}
+
+[data-rating-period-automation] .reference-message span {
+    font-weight: 600;
+}
+
 @media (min-width: 1041px) {
     body.system-admin-reference-detail-screen .admin-reference-detail-shell {
         display: grid;
@@ -112,6 +121,45 @@
                     </div>
                     <span class="badge">{{ records_total }} записей</span>
                 </div>
+                {% if rating_period_automation %}
+                    <div class="reference-messages" data-rating-period-automation>
+                        <div class="reference-message {% if rating_period_automation.is_ready %}reference-message-success{% endif %}">
+                            <strong>Вводить новый период каждый месяц не нужно.</strong>
+                            <span>
+                                Система ежедневно дополняет календарь по правилу
+                                {{ rating_period_automation.rule_label }} и никогда
+                                не меняет уже существующие записи.
+                            </span>
+                            <span>
+                                Горизонт: {{ rating_period_automation.horizon_label }}.
+                                Подготовлено до:
+                                {{ rating_period_automation.prepared_through_label }}.
+                            </span>
+                            <span>
+                                Автоматических периодов:
+                                {{ rating_period_automation.automatic_count }};
+                                ручных записей:
+                                {{ rating_period_automation.manual_count }};
+                                исключений с изменёнными датами:
+                                {{ rating_period_automation.override_count }}.
+                            </span>
+                            {% if rating_period_automation.overlap_count %}
+                                <span>
+                                    Внимание: найдено пересечений:
+                                    {{ rating_period_automation.overlap_count }}.
+                                    Автоматическое дополнение будет остановлено.
+                                </span>
+                            {% elif rating_period_automation.gap_count %}
+                                <span>
+                                    Требуют проверки разрывы:
+                                    {{ rating_period_automation.gaps|join:", " }}.
+                                </span>
+                            {% else %}
+                                <span>Разрывов и пересечений нет.</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                {% endif %}
                 <form class="reference-detail-filter-bar" method="get">
                     <div class="field">
                         <label for="reference-detail-search">Поиск</label>
