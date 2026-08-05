@@ -55,7 +55,6 @@
 
 .settlement-toolbar,
 .settlement-summary,
-.settlement-selection,
 .settlement-dormitory,
 .settlement-empty-state {
     border: 1px solid var(--admin-line);
@@ -89,8 +88,6 @@
 .settlement-current-date span,
 .settlement-filter-group legend,
 .settlement-search-field span,
-.settlement-selection-place > span,
-.settlement-selection-code > span,
 .settlement-dormitory-header > div > span,
 .settlement-floor > header span {
     color: var(--admin-muted);
@@ -191,7 +188,7 @@
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--settlement-accent) 18%, transparent);
 }
 
-.settlement-readonly-badge {
+.settlement-work-badge {
     display: inline-flex;
     min-height: 34px;
     gap: 7px;
@@ -209,7 +206,7 @@
     white-space: nowrap;
 }
 
-.settlement-readonly-badge i {
+.settlement-work-badge i {
     width: 8px;
     height: 8px;
     border-radius: 50%;
@@ -264,54 +261,6 @@
     font-weight: 700;
     text-overflow: ellipsis;
     white-space: nowrap;
-}
-
-.settlement-selection {
-    display: grid;
-    grid-template-columns: minmax(270px, .75fr) minmax(360px, 1.4fr) minmax(240px, .75fr);
-    min-height: 62px;
-    overflow: hidden;
-}
-
-.settlement-selection > div {
-    display: grid;
-    min-width: 0;
-    align-content: center;
-    padding: 8px 12px;
-    border-left: 1px solid var(--admin-line-soft);
-}
-
-.settlement-selection > div:first-child {
-    border-left: 0;
-}
-
-.settlement-selection strong,
-.settlement-selection span {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.settlement-selection-place strong,
-.settlement-selection-detail strong {
-    margin-top: 3px;
-    color: var(--admin-ink);
-    font-size: 14px;
-    font-weight: 900;
-}
-
-.settlement-selection-detail span {
-    margin-top: 3px;
-    color: var(--admin-muted);
-    font-size: 11px;
-    font-weight: 700;
-}
-
-.settlement-selection-code strong {
-    margin-top: 4px;
-    color: var(--settlement-accent);
-    font-family: Consolas, "Courier New", monospace;
-    font-size: 12px;
 }
 
 .settlement-map-list {
@@ -503,10 +452,21 @@
     min-width: 24px;
     place-items: center;
     border-radius: 4px;
+    border: 0;
     background: var(--admin-panel-soft);
     color: var(--admin-ink);
+    cursor: pointer;
+    font: inherit;
     font-size: 13px;
     font-weight: 900;
+}
+
+.settlement-room-number:hover,
+.settlement-room-number:focus-visible {
+    outline: 0;
+    background: var(--settlement-accent-soft);
+    color: var(--settlement-accent);
+    box-shadow: inset 0 0 0 1px var(--settlement-accent);
 }
 
 .settlement-room-content {
@@ -599,6 +559,18 @@
     box-shadow: 0 0 0 2px color-mix(in srgb, var(--settlement-accent) 24%, transparent);
 }
 
+.settlement-bed.is-occupied {
+    border-color: color-mix(in srgb, var(--admin-cyan) 55%, var(--admin-line));
+    background: color-mix(in srgb, var(--admin-cyan-soft) 72%, var(--admin-panel));
+    color: var(--admin-cyan);
+}
+
+.settlement-bed.is-occupied.is-selected {
+    border-color: var(--admin-cyan);
+    background: var(--admin-cyan);
+    color: #fff;
+}
+
 .settlement-bed:disabled {
     border-color: var(--admin-line);
     background: var(--admin-gray-soft);
@@ -625,6 +597,373 @@
     color: var(--admin-muted);
     font-size: 9px;
     font-weight: 700;
+}
+
+.settlement-room-panel-backdrop,
+.settlement-room-panel {
+    position: fixed;
+    inset: 0;
+    z-index: 1250;
+}
+
+.settlement-clerk-screen .app-confirm-modal {
+    z-index: 1300;
+}
+
+.settlement-room-panel-backdrop {
+    background: rgba(25, 39, 47, .42);
+    backdrop-filter: blur(2px);
+}
+
+.settlement-room-panel {
+    right: 0;
+    left: auto;
+    display: grid;
+    grid-template-rows: auto auto minmax(0, 1fr);
+    width: min(580px, calc(100vw - 24px));
+    border-left: 1px solid var(--admin-line);
+    background: var(--admin-bg);
+    box-shadow: -18px 0 48px rgba(35, 49, 57, .24);
+}
+
+.settlement-room-panel[hidden],
+.settlement-room-panel-backdrop[hidden],
+.settlement-employee-results[hidden],
+.settlement-selected-employee[hidden],
+.settlement-placement-panel form[hidden],
+.settlement-placement-feedback[hidden] {
+    display: none !important;
+}
+
+.settlement-room-panel-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 16px;
+    align-items: start;
+    padding: 18px 20px 15px;
+    border-bottom: 1px solid var(--admin-line);
+    background: var(--admin-panel);
+}
+
+.settlement-room-panel-header span,
+.settlement-room-panel-section-title span,
+.settlement-selected-employee > span,
+.settlement-employee-search > span,
+.settlement-assignment-type > span {
+    color: var(--admin-muted);
+    font-size: 9px;
+    font-weight: 900;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+}
+
+.settlement-room-panel-header h2,
+.settlement-room-panel-section-title h3 {
+    margin: 3px 0 0;
+    color: var(--admin-ink);
+    font-size: 22px;
+    font-weight: 900;
+}
+
+.settlement-room-panel-header p {
+    margin: 4px 0 0;
+    color: var(--admin-muted);
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.settlement-room-panel-close {
+    display: grid;
+    width: 38px;
+    height: 38px;
+    place-items: center;
+    padding: 0;
+    border: 1px solid var(--admin-line);
+    border-radius: 7px;
+    background: var(--admin-panel-soft);
+    color: var(--admin-muted);
+    font: inherit;
+    font-size: 24px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.settlement-room-panel-close:hover,
+.settlement-room-panel-close:focus-visible {
+    outline: 0;
+    border-color: var(--settlement-accent);
+    color: var(--settlement-accent);
+}
+
+.settlement-room-panel-summary {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 20px;
+    border-bottom: 1px solid var(--admin-line);
+    background: color-mix(in srgb, var(--settlement-accent-soft) 48%, var(--admin-panel));
+    color: var(--admin-muted);
+    font-size: 11px;
+    font-weight: 800;
+}
+
+.settlement-room-panel-summary > span {
+    color: var(--settlement-accent);
+    font-weight: 900;
+}
+
+.settlement-room-panel-body {
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+
+.settlement-room-bed-section,
+.settlement-placement-panel {
+    padding: 16px 20px 18px;
+}
+
+.settlement-placement-panel {
+    border-top: 1px solid var(--admin-line);
+    background: var(--admin-panel);
+}
+
+.settlement-room-panel-section-title {
+    display: flex;
+    gap: 12px;
+    align-items: end;
+    justify-content: space-between;
+    margin-bottom: 11px;
+}
+
+.settlement-room-panel-section-title h3 {
+    font-size: 16px;
+}
+
+.settlement-room-panel-section-title small {
+    color: var(--admin-muted);
+    font-size: 10px;
+    font-weight: 700;
+}
+
+.settlement-room-bed-list {
+    display: grid;
+    gap: 7px;
+}
+
+.settlement-room-bed-card {
+    display: grid;
+    grid-template-columns: minmax(112px, .7fr) minmax(0, 1.3fr);
+    gap: 8px 14px;
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--admin-line);
+    border-radius: 8px;
+    outline: 0;
+    background: var(--admin-panel);
+    color: var(--admin-ink);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.settlement-room-bed-card:hover,
+.settlement-room-bed-card:focus-visible,
+.settlement-room-bed-card.is-selected {
+    border-color: var(--settlement-accent);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--settlement-accent) 16%, transparent);
+}
+
+.settlement-room-bed-card.is-occupied {
+    border-left: 4px solid var(--admin-cyan);
+}
+
+.settlement-room-bed-card.is-free {
+    border-left: 4px solid var(--settlement-accent);
+}
+
+.settlement-room-bed-card-main {
+    display: grid;
+    align-content: start;
+}
+
+.settlement-room-bed-card-main strong {
+    font-size: 14px;
+    font-weight: 900;
+}
+
+.settlement-room-bed-card-main span {
+    width: max-content;
+    margin-top: 5px;
+    padding: 3px 6px;
+    border-radius: 999px;
+    background: var(--settlement-accent-soft);
+    color: var(--settlement-accent);
+    font-size: 9px;
+    font-weight: 900;
+    text-transform: uppercase;
+}
+
+.settlement-room-bed-card.is-occupied .settlement-room-bed-card-main span {
+    background: var(--admin-cyan-soft);
+    color: var(--admin-cyan);
+}
+
+.settlement-room-bed-card dl {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px 12px;
+    margin: 0;
+}
+
+.settlement-room-bed-card dl > div {
+    min-width: 0;
+}
+
+.settlement-room-bed-card dt {
+    color: var(--admin-muted);
+    font-size: 9px;
+    font-weight: 800;
+    text-transform: uppercase;
+}
+
+.settlement-room-bed-card dd {
+    overflow: hidden;
+    margin: 2px 0 0;
+    color: var(--admin-ink);
+    font-size: 11px;
+    font-weight: 800;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.settlement-placement-hint,
+.settlement-placement-feedback {
+    margin: 0;
+    padding: 10px 12px;
+    border: 1px solid var(--admin-line);
+    border-radius: 7px;
+    background: var(--admin-panel-soft);
+    color: var(--admin-muted);
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.settlement-placement-feedback {
+    margin-top: 9px;
+    border-color: color-mix(in srgb, var(--settlement-accent) 35%, var(--admin-line));
+    color: var(--settlement-accent);
+}
+
+.settlement-placement-feedback.is-error {
+    border-color: color-mix(in srgb, var(--admin-red) 42%, var(--admin-line));
+    background: var(--admin-red-soft);
+    color: var(--admin-red);
+}
+
+.settlement-placement-panel form {
+    display: grid;
+    gap: 10px;
+}
+
+.settlement-employee-search,
+.settlement-assignment-type {
+    display: grid;
+    gap: 5px;
+}
+
+.settlement-employee-search input,
+.settlement-assignment-type select {
+    width: 100%;
+    min-height: 40px;
+    padding: 0 11px;
+    border: 1px solid var(--admin-line);
+    border-radius: 7px;
+    outline: 0;
+    background: var(--admin-panel-soft);
+    color: var(--admin-ink);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 800;
+}
+
+.settlement-employee-search input:focus,
+.settlement-assignment-type select:focus {
+    border-color: var(--settlement-accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--settlement-accent) 17%, transparent);
+}
+
+.settlement-employee-results {
+    display: grid;
+    max-height: 220px;
+    gap: 5px;
+    overflow-y: auto;
+    padding: 5px;
+    border: 1px solid var(--admin-line);
+    border-radius: 7px;
+    background: var(--admin-bg);
+}
+
+.settlement-employee-result {
+    display: grid;
+    gap: 2px;
+    padding: 8px 9px;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    background: var(--admin-panel);
+    color: var(--admin-ink);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.settlement-employee-result:hover,
+.settlement-employee-result:focus-visible {
+    outline: 0;
+    border-color: var(--settlement-accent);
+}
+
+.settlement-employee-result strong,
+.settlement-selected-employee strong {
+    font-size: 12px;
+    font-weight: 900;
+}
+
+.settlement-employee-result small,
+.settlement-selected-employee small {
+    color: var(--admin-muted);
+    font-size: 10px;
+    font-weight: 700;
+}
+
+.settlement-selected-employee {
+    display: grid;
+    gap: 3px;
+    padding: 9px 11px;
+    border: 1px solid color-mix(in srgb, var(--settlement-accent) 36%, var(--admin-line));
+    border-radius: 7px;
+    background: var(--settlement-accent-soft);
+}
+
+.settlement-place-button {
+    min-height: 42px;
+    padding: 0 16px;
+    border: 1px solid var(--settlement-accent);
+    border-radius: 7px;
+    background: var(--settlement-accent);
+    color: #fff;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 900;
+    cursor: pointer;
+}
+
+.settlement-place-button:disabled {
+    border-color: var(--admin-line);
+    background: var(--admin-gray-soft);
+    color: var(--admin-gray);
+    cursor: not-allowed;
 }
 
 .settlement-empty-state {
@@ -655,7 +994,7 @@
         grid-template-columns: auto minmax(180px, auto) minmax(130px, auto) minmax(260px, auto) minmax(190px, 1fr);
     }
 
-    .settlement-readonly-badge {
+    .settlement-work-badge {
         display: none;
     }
 
@@ -693,16 +1032,6 @@
 
     .settlement-summary article:nth-child(4) {
         border-top: 1px solid var(--admin-line-soft);
-    }
-
-    .settlement-selection {
-        grid-template-columns: 1fr 1fr;
-    }
-
-    .settlement-selection-code {
-        grid-column: 1 / -1;
-        border-top: 1px solid var(--admin-line-soft);
-        border-left: 0 !important;
     }
 
     .settlement-dormitory-header {
@@ -746,25 +1075,6 @@
         font-size: 20px;
     }
 
-    .settlement-selection {
-        grid-template-columns: 1fr;
-        min-height: 166px;
-    }
-
-    .settlement-selection > div {
-        min-height: 52px;
-        border-top: 1px solid var(--admin-line-soft);
-        border-left: 0;
-    }
-
-    .settlement-selection > div:first-child {
-        border-top: 0;
-    }
-
-    .settlement-selection-code {
-        grid-column: auto;
-    }
-
     .settlement-dormitory-header {
         padding: 8px;
     }
@@ -784,6 +1094,21 @@
 
     .settlement-layout-note {
         font-size: 8px;
+    }
+
+    .settlement-room-panel {
+        width: 100vw;
+    }
+
+    .settlement-room-panel-header,
+    .settlement-room-bed-section,
+    .settlement-placement-panel {
+        padding-right: 14px;
+        padding-left: 14px;
+    }
+
+    .settlement-room-bed-card {
+        grid-template-columns: 1fr;
     }
 }
 
@@ -805,5 +1130,9 @@
     .settlement-filter-buttons button {
         padding: 0 6px;
         font-size: 10px;
+    }
+
+    .settlement-room-bed-card dl {
+        grid-template-columns: 1fr;
     }
 }

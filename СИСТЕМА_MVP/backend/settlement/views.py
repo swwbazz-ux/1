@@ -1,14 +1,27 @@
+import json
 from collections import defaultdict
 
-from django.db.models import Prefetch
+from django.core.exceptions import ValidationError
+from django.db.models import Exists, OuterRef, Prefetch, Q
+from django.http import JsonResponse
 from django.shortcuts import redirect, render
 from django.utils import timezone
-from django.views.decorators.http import require_GET
+from django.views.decorators.http import require_GET, require_POST
 
+from assignments.models import AssignmentStatus, EquipmentAssignment
+from shifts.models import EmployeeShift
 from users.active_role import role_session_state
 from users.models import Employee, EmployeeAccess
 
-from .models import PhysicalBed, PhysicalRoom
+from .models import EmployeeBedOccupancy, PhysicalBed, PhysicalRoom
+from .services import effective_occupancy_at_q, settle_employee_on_bed
+
+
+UNKNOWN_LABEL = 'Не указано'
+DAY_NIGHT_LABELS = {
+    'day': 'День',
+    'night': 'Ночь',
+}
 
 
 def settlement_clerk_access_from_request(request):
@@ -25,7 +38,7 @@ def settlement_clerk_access_from_request(request):
             employee__is_active=True,
             employee__status=Employee.Status.ACTIVE,
             role__is_active=True,
-            role__code='settlement_clerk',
+            role__code__in=('settlement_clerk', 'admin'),
         )
         .first()
     )
@@ -35,6 +48,105 @@ def settlement_clerk_access_from_request(request):
     if not session_state['authenticated'] or not session_state['is_active']:
         return None
     return access
+
+
+def _employee_profiles(employees):
+    employees = list(employees)
+    employee_ids = [employee.pk for employee in employees]
+    equipment_by_employee = {}
+    shift_by_employee = {}
+
+    if employee_ids:
+        equipment_assignments = (
+            EquipmentAssignment.objects
+            .filter(
+                employee_id__in=employee_ids,
+                status=AssignmentStatus.ACCEPTED,
+                ended_at__isnull=True,
+                shift__isnull=True,
+                role__isnull=False,
+                shift_type__isnull=False,
+            )
+            .select_related(
+                'equipment',
+                'equipment__equipment_type',
+                'equipment__model',
+            )
+            .order_by('employee_id', '-assigned_at', '-id')
+        )
+        for assignment in equipment_assignments:
+            equipment_by_employee.setdefault(assignment.employee_id, assignment)
+
+        open_shifts = (
+            EmployeeShift.objects
+            .filter(employee_id__in=employee_ids, closed_at__isnull=True)
+            .select_related(
+                'equipment',
+                'equipment__equipment_type',
+                'equipment__model',
+            )
+            .order_by('employee_id', '-opened_at', '-id')
+        )
+        for shift in open_shifts:
+            shift_by_employee.setdefault(shift.employee_id, shift)
+
+    profiles = {}
+    for employee in employees:
+        assignment = equipment_by_employee.get(employee.pk)
+        shift = shift_by_employee.get(employee.pk)
+        shift_type = (
+            assignment.shift_type
+            if assignment is not None
+            else (shift.shift_type if shift is not None else '')
+        )
+        equipment = (
+            assignment.equipment
+            if assignment is not None
+            else (shift.equipment if shift is not None else None)
+        )
+        position_label = (
+            employee.personnel_position.name
+            if employee.personnel_position_id
+            else employee.position.strip()
+        )
+        profiles[employee.pk] = {
+            'shift_label': DAY_NIGHT_LABELS.get(shift_type, UNKNOWN_LABEL),
+            'work_label': str(equipment) if equipment is not None else (position_label or UNKNOWN_LABEL),
+        }
+    return profiles
+
+
+def _attach_occupancy_view(rooms):
+    beds = [bed for room in rooms for bed in room.beds.all()]
+    occupancies = [
+        bed.active_occupancies[0]
+        for bed in beds
+        if bed.active_occupancies
+    ]
+    profiles = _employee_profiles(
+        occupancy.employee
+        for occupancy in occupancies
+    )
+
+    for room in rooms:
+        room.occupied_bed_count = 0
+        for bed in room.beds.all():
+            occupancy = bed.active_occupancies[0] if bed.active_occupancies else None
+            bed.active_occupancy = occupancy
+            if occupancy is None:
+                bed.occupant_name = UNKNOWN_LABEL
+                bed.shift_label = UNKNOWN_LABEL
+                bed.work_label = UNKNOWN_LABEL
+                bed.assignment_type_label = UNKNOWN_LABEL
+                continue
+
+            profile = profiles[occupancy.employee_id]
+            room.occupied_bed_count += 1
+            bed.occupant_name = occupancy.employee.full_name
+            bed.shift_label = profile['shift_label']
+            bed.work_label = profile['work_label']
+            bed.assignment_type_label = occupancy.get_assignment_type_display()
+        room.free_bed_count = len(room.beds.all()) - room.occupied_bed_count
 
 
 def _room_view(room):
@@ -89,6 +201,7 @@ def _floor_view(floor_number, rooms):
         ],
         'transferred_count': sum(room.is_transferred for room in rooms),
         'room_count': len(rooms),
+        'occupied_beds': sum(room.occupied_bed_count for room in rooms),
     }
 
 
@@ -126,6 +239,16 @@ def _dormitory_views(rooms):
                 for room in dormitory_rooms
                 if room.is_transferred
             ),
+            'occupied_beds': sum(
+                room.occupied_bed_count
+                for room in dormitory_rooms
+                if room.is_transferred
+            ),
+            'free_beds': sum(
+                room.free_bed_count
+                for room in dormitory_rooms
+                if room.is_transferred
+            ),
         })
     return result
 
@@ -138,13 +261,28 @@ def settlement_map_view(request):
             return redirect('role_home')
         return redirect('login')
 
+    moment = timezone.now()
     rooms = list(
         PhysicalRoom.objects
         .select_related('dormitory')
         .prefetch_related(
             Prefetch(
                 'beds',
-                queryset=PhysicalBed.objects.order_by('block', 'position'),
+                queryset=(
+                    PhysicalBed.objects
+                    .prefetch_related(
+                        Prefetch(
+                            'occupancies',
+                            queryset=(
+                                EmployeeBedOccupancy.objects
+                                .filter(effective_occupancy_at_q(moment))
+                                .select_related('employee', 'employee__personnel_position')
+                            ),
+                            to_attr='active_occupancies',
+                        )
+                    )
+                    .order_by('block', 'position')
+                ),
             )
         )
         .filter(dormitory__number__in=['5', '6'])
@@ -156,11 +294,17 @@ def settlement_map_view(request):
             'number',
         )
     )
+    _attach_occupancy_view(rooms)
     dormitories = _dormitory_views(rooms)
     total_beds = sum(room.capacity for room in rooms)
     transferred_rooms = sum(room.is_transferred for room in rooms)
     transferred_beds = sum(
         room.capacity
+        for room in rooms
+        if room.is_transferred
+    )
+    occupied_beds = sum(
+        room.occupied_bed_count
         for room in rooms
         if room.is_transferred
     )
@@ -171,14 +315,164 @@ def settlement_map_view(request):
         {
             'access': access,
             'dormitories': dormitories,
-            'current_date': timezone.localdate(),
+            'current_date': timezone.localdate(moment),
             'summary': {
                 'rooms': len(rooms),
                 'beds': total_beds,
                 'transferred_rooms': transferred_rooms,
                 'transferred_beds': transferred_beds,
+                'occupied_beds': occupied_beds,
+                'free_beds': transferred_beds - occupied_beds,
                 'not_transferred_rooms': len(rooms) - transferred_rooms,
                 'not_transferred_beds': total_beds - transferred_beds,
             },
+            'assignment_type_choices': EmployeeBedOccupancy.AssignmentType.choices,
         },
     )
+
+
+@require_GET
+def settlement_employee_search_view(request):
+    if not settlement_clerk_access_from_request(request):
+        return JsonResponse(
+            {'ok': False, 'error': 'Нет доступа к расселению.'},
+            status=403,
+        )
+
+    query = request.GET.get('q', '').strip()
+    if len(query) < 2:
+        return JsonResponse({'ok': True, 'results': []})
+
+    moment = timezone.now()
+    employees = list(
+        Employee.objects
+        .filter(is_active=True, status=Employee.Status.ACTIVE)
+        .annotate(
+            has_active_occupancy=Exists(
+                EmployeeBedOccupancy.objects.filter(
+                    effective_occupancy_at_q(moment),
+                    employee_id=OuterRef('pk'),
+                )
+            )
+        )
+        .filter(has_active_occupancy=False)
+        .filter(
+            Q(full_name__icontains=query)
+            | Q(personnel_number__icontains=query)
+            | Q(position__icontains=query)
+            | Q(personnel_position__name__icontains=query)
+        )
+        .select_related('personnel_position')
+        .order_by('full_name', 'pk')[:12]
+    )
+    profiles = _employee_profiles(employees)
+    return JsonResponse({
+        'ok': True,
+        'results': [
+            {
+                'id': employee.pk,
+                'full_name': employee.full_name,
+                'personnel_number': employee.personnel_number or UNKNOWN_LABEL,
+                'shift_label': profiles[employee.pk]['shift_label'],
+                'work_label': profiles[employee.pk]['work_label'],
+            }
+            for employee in employees
+        ],
+    })
+
+
+def _validation_error_details(error):
+    if hasattr(error, 'error_list') and error.error_list:
+        item = error.error_list[0]
+        return item.message, item.code
+    return str(error), 'settlement_validation_error'
+
+
+def _occupancy_response(occupancy):
+    employee = occupancy.employee
+    profile = _employee_profiles([employee])[employee.pk]
+    bed = occupancy.physical_bed
+    room = bed.room
+    moment = timezone.now()
+    active_in_room = EmployeeBedOccupancy.objects.filter(
+        effective_occupancy_at_q(moment),
+        physical_bed__room=room,
+    ).count()
+    transferred_beds = PhysicalBed.objects.filter(
+        room__dormitory__number__in=['5', '6'],
+        room__transfer_status=PhysicalRoom.TransferStatus.TRANSFERRED,
+    )
+    occupied_beds = EmployeeBedOccupancy.objects.filter(
+        effective_occupancy_at_q(moment),
+        physical_bed__in=transferred_beds,
+    ).count()
+
+    return {
+        'ok': True,
+        'occupancy': {
+            'id': occupancy.pk,
+            'bed_stable_id': bed.stable_id,
+            'occupant_name': employee.full_name,
+            'shift_label': profile['shift_label'],
+            'work_label': profile['work_label'],
+            'assignment_type': occupancy.assignment_type,
+            'assignment_type_label': occupancy.get_assignment_type_display(),
+        },
+        'room': {
+            'id': room.pk,
+            'occupied_beds': active_in_room,
+            'free_beds': room.beds.count() - active_in_room,
+        },
+        'summary': {
+            'occupied_beds': occupied_beds,
+            'free_beds': transferred_beds.count() - occupied_beds,
+        },
+    }
+
+
+@require_POST
+def settlement_occupancy_create_view(request):
+    access = settlement_clerk_access_from_request(request)
+    if not access:
+        return JsonResponse(
+            {'ok': False, 'error': 'Нет доступа к расселению.'},
+            status=403,
+        )
+
+    try:
+        payload = json.loads(request.body or b'{}')
+    except (TypeError, ValueError):
+        return JsonResponse(
+            {'ok': False, 'error': 'Некорректные данные запроса.'},
+            status=400,
+        )
+    if not isinstance(payload, dict):
+        return JsonResponse(
+            {'ok': False, 'error': 'Некорректные данные запроса.'},
+            status=400,
+        )
+
+    try:
+        occupancy = settle_employee_on_bed(
+            bed_stable_id=payload.get('bed_stable_id', ''),
+            employee_id=payload.get('employee_id'),
+            assignment_type=payload.get('assignment_type', ''),
+            settled_by=access.employee,
+        )
+    except ValidationError as error:
+        message, code = _validation_error_details(error)
+        status = 409 if code in {
+            'settlement.bed.interval_overlap',
+            'settlement.employee.interval_overlap',
+            'settlement_bed_occupied',
+            'settlement_employee_already_housed',
+            'settlement_room_not_transferred',
+        } else 400
+        if code in {'settlement_bed_not_found', 'settlement_employee_not_found'}:
+            status = 404
+        return JsonResponse(
+            {'ok': False, 'error': message, 'code': code},
+            status=status,
+        )
+
+    return JsonResponse(_occupancy_response(occupancy), status=201)

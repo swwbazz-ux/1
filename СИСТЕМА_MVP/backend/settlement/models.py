@@ -7,6 +7,7 @@ from django.db.models import sql
 from django.db.models.deletion import ProtectedError
 from django.db.models.signals import pre_delete
 from django.dispatch import receiver
+from django.utils import timezone
 
 
 class StableIdentifierModel(models.Model):
@@ -1317,3 +1318,107 @@ class PhysicalBed(models.Model):
 
     def __str__(self):
         return f'{self.room}, {self.get_block_display()}-{self.position}'
+
+
+class EmployeeBedOccupancy(models.Model):
+    class AssignmentType(models.TextChoices):
+        PERMANENT = 'permanent', 'Постоянное'
+        TEMPORARY = 'temporary', 'Временное'
+        PROPOSED = 'proposed', 'Предложенное'
+
+    employee = models.ForeignKey(
+        'users.Employee',
+        verbose_name='Сотрудник',
+        on_delete=models.PROTECT,
+        related_name='bed_occupancies',
+    )
+    physical_bed = models.ForeignKey(
+        PhysicalBed,
+        verbose_name='Физическое койко-место',
+        on_delete=models.PROTECT,
+        related_name='occupancies',
+    )
+    assignment_type = models.CharField(
+        'Тип закрепления',
+        max_length=16,
+        choices=AssignmentType.choices,
+    )
+    settled_at = models.DateTimeField('Заселён', default=timezone.now)
+    starts_at = models.DateTimeField(
+        'Начало размещения',
+        default=timezone.now,
+    )
+    ends_at = models.DateTimeField(
+        'Плановое окончание размещения',
+        null=True,
+        blank=True,
+    )
+    terminated_at = models.DateTimeField(
+        'Досрочное прекращение размещения',
+        null=True,
+        blank=True,
+    )
+    settled_by = models.ForeignKey(
+        'users.Employee',
+        verbose_name='Кто заселил',
+        on_delete=models.PROTECT,
+        related_name='created_bed_occupancies',
+    )
+    ended_at = models.DateTimeField(
+        'Проживание завершено',
+        null=True,
+        blank=True,
+    )
+
+    class Meta:
+        verbose_name = 'Размещение сотрудника на койко-месте'
+        verbose_name_plural = 'Размещения сотрудников на койко-местах'
+        ordering = ['-settled_at', '-id']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['physical_bed'],
+                condition=models.Q(ended_at__isnull=True),
+                name='unique_active_employee_bed_occupancy',
+            ),
+            models.UniqueConstraint(
+                fields=['employee'],
+                condition=models.Q(ended_at__isnull=True),
+                name='unique_active_employee_occupancy',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(ended_at__isnull=True)
+                    | models.Q(ended_at__gt=models.F('settled_at'))
+                ),
+                name='employee_bed_occupancy_period_valid',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(ends_at__isnull=True)
+                    | models.Q(ends_at__gt=models.F('starts_at'))
+                ),
+                name='occupancy_ends_after_start',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(terminated_at__isnull=True)
+                    | models.Q(terminated_at__gt=models.F('starts_at'))
+                ),
+                name='occupancy_term_after_start',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(ends_at__isnull=True)
+                    | models.Q(terminated_at__isnull=True)
+                    | models.Q(terminated_at__lt=models.F('ends_at'))
+                ),
+                name='occupancy_term_before_end',
+            ),
+        ]
+
+    @property
+    def is_active(self):
+        return self.ended_at is None
+
+    def __str__(self):
+        return f'{self.employee} — {self.physical_bed}'

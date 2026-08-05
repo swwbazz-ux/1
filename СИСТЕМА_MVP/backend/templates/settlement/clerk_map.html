@@ -4,11 +4,15 @@
 {% block title %}Расселение · Делопроизводитель{% endblock %}
 {% block body_class %}settlement-clerk-screen{% endblock %}
 {% block extra_head %}
-<link rel="stylesheet" href="{% static 'css/settlement-clerk.css' %}?v={{ static_asset_release }}">
+<link rel="stylesheet" href="{% static 'css/settlement-clerk.css' %}?v={{ static_asset_release }}-settlement-occupancy-v1">
 {% endblock %}
 
 {% block body %}
-<div class="admin-shell admin-exports-shell settlement-shell admin-day" data-admin-theme data-settlement-root>
+<div class="admin-shell admin-exports-shell settlement-shell admin-day"
+     data-admin-theme
+     data-settlement-root
+     data-employee-search-url="{% url 'settlement_employee_search' %}"
+     data-occupancy-create-url="{% url 'settlement_occupancy_create' %}">
     {% include "includes/settlement_clerk_header.html" %}
 
     <main class="admin-console-page settlement-page">
@@ -54,9 +58,9 @@
                        data-settlement-search>
             </label>
 
-            <span class="settlement-readonly-badge">
+            <span class="settlement-work-badge">
                 <i aria-hidden="true"></i>
-                Только просмотр
+                Расселение сотрудников
             </span>
         </section>
 
@@ -69,7 +73,7 @@
             <article class="is-primary">
                 <span>Передано</span>
                 <strong>{{ summary.transferred_rooms }}</strong>
-                <small>{{ summary.transferred_beds }} доступных мест</small>
+                <small><b data-free-bed-count>{{ summary.free_beds }}</b> свободно из {{ summary.transferred_beds }}</small>
             </article>
             <article>
                 <span>Не передано</span>
@@ -79,23 +83,8 @@
             <article>
                 <span>Все койко-места</span>
                 <strong>{{ summary.beds }}</strong>
-                <small>физический контур КИС-5 и КИС-6</small>
+                <small><b data-occupied-bed-count>{{ summary.occupied_beds }}</b> занято в переданных комнатах</small>
             </article>
-        </section>
-
-        <section class="settlement-selection" aria-live="polite" aria-label="Выбранное койко-место">
-            <div class="settlement-selection-place">
-                <span>Выбранное место</span>
-                <strong data-selection-place>Койко-место не выбрано</strong>
-            </div>
-            <div class="settlement-selection-detail">
-                <strong data-selection-title>Нажмите на квадрат доступной койки</strong>
-                <span data-selection-meta>Карта работает только на чтение</span>
-            </div>
-            <div class="settlement-selection-code">
-                <span>Стабильный ID</span>
-                <strong data-selection-code>—</strong>
-            </div>
         </section>
 
         {% if dormitories %}
@@ -110,7 +99,7 @@
                             <dl>
                                 <div><dt>Физических комнат</dt><dd>{{ dormitory.room_count }}</dd></div>
                                 <div><dt>Передано</dt><dd>{{ dormitory.transferred_rooms }}</dd></div>
-                                <div><dt>Доступных мест</dt><dd>{{ dormitory.transferred_beds }}</dd></div>
+                                <div><dt>Свободно</dt><dd data-dormitory-free-count>{{ dormitory.free_beds }}</dd></div>
                                 <div><dt>Всего мест</dt><dd>{{ dormitory.bed_count }}</dd></div>
                             </dl>
                         </header>
@@ -158,6 +147,82 @@
             </section>
         {% endif %}
     </main>
+
+    <div class="settlement-room-panel-backdrop" data-room-panel-backdrop hidden></div>
+    <aside class="settlement-room-panel"
+           data-room-panel
+           aria-labelledby="settlement-room-panel-title"
+           aria-hidden="true"
+           hidden>
+        <header class="settlement-room-panel-header">
+            <div>
+                <span>Комната</span>
+                <h2 id="settlement-room-panel-title" data-room-panel-title>Не выбрана</h2>
+                <p data-room-panel-location>Выберите комнату или койко-место на карте</p>
+            </div>
+            <button type="button" class="settlement-room-panel-close" data-room-panel-close aria-label="Закрыть панель">×</button>
+        </header>
+
+        <div class="settlement-room-panel-summary">
+            <span data-room-panel-status>Статус не указан</span>
+            <strong><b data-room-occupied-count>0</b> занято · <b data-room-free-count>0</b> свободно</strong>
+        </div>
+
+        <div class="settlement-room-panel-body">
+            <section class="settlement-room-bed-section" aria-labelledby="settlement-room-beds-title">
+                <div class="settlement-room-panel-section-title">
+                    <div>
+                        <span>Физический фонд</span>
+                        <h3 id="settlement-room-beds-title">Койко-места комнаты</h3>
+                    </div>
+                    <small>Выберите свободное место</small>
+                </div>
+                <div class="settlement-room-bed-list" data-room-panel-beds></div>
+            </section>
+
+            <section class="settlement-placement-panel" data-placement-panel aria-live="polite">
+                <div class="settlement-room-panel-section-title">
+                    <div>
+                        <span>Действие</span>
+                        <h3>Заселение сотрудника</h3>
+                    </div>
+                </div>
+                <p class="settlement-placement-hint" data-placement-hint>
+                    Выберите свободное койко-место в переданной комнате.
+                </p>
+                <form data-settlement-form hidden>
+                    {% csrf_token %}
+                    <label class="settlement-employee-search" for="settlement-employee-search">
+                        <span>Активный незаселённый сотрудник</span>
+                        <input id="settlement-employee-search"
+                               type="search"
+                               autocomplete="off"
+                               placeholder="Введите ФИО или табельный номер"
+                               data-employee-search>
+                    </label>
+                    <div class="settlement-employee-results" data-employee-results hidden></div>
+                    <div class="settlement-selected-employee" data-selected-employee hidden>
+                        <span>Выбран сотрудник</span>
+                        <strong data-selected-employee-name></strong>
+                        <small data-selected-employee-meta></small>
+                    </div>
+                    <label class="settlement-assignment-type" for="settlement-assignment-type">
+                        <span>Тип закрепления</span>
+                        <select id="settlement-assignment-type" data-assignment-type required>
+                            <option value="">Выберите тип</option>
+                            {% for value, label in assignment_type_choices %}
+                                <option value="{{ value }}">{{ label }}</option>
+                            {% endfor %}
+                        </select>
+                    </label>
+                    <button type="submit" class="settlement-place-button" data-settle-button disabled>
+                        Заселить
+                    </button>
+                </form>
+                <p class="settlement-placement-feedback" data-placement-feedback hidden></p>
+            </section>
+        </div>
+    </aside>
 </div>
-<script src="{% static 'js/settlement-clerk.js' %}?v={{ static_asset_release }}"></script>
+<script src="{% static 'js/settlement-clerk.js' %}?v={{ static_asset_release }}-settlement-occupancy-v1"></script>
 {% endblock %}

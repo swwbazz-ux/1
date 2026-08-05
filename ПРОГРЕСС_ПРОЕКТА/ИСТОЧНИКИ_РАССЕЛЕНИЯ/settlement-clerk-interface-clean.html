@@ -1,0 +1,1291 @@
+<div id="settlement-clerk-interface">
+  <style>
+    @import url("https://fonts.googleapis.com/css2?family=Roboto+Condensed:wght@400;500&family=Russo+One&display=swap");
+
+    #settlement-clerk-interface {
+      --sci-canvas: color-mix(in srgb, var(--muted) 72%, var(--background));
+      --sci-surface: color-mix(in srgb, var(--card) 96%, var(--green) 4%);
+      --sci-field: color-mix(in srgb, var(--muted) 68%, var(--card));
+      --sci-line: color-mix(in srgb, var(--border) 86%, var(--green) 14%);
+      --sci-accent: color-mix(in srgb, var(--green) 84%, var(--foreground));
+      --sci-accent-soft: color-mix(in srgb, var(--green) 13%, var(--card));
+      color: var(--foreground);
+      background: transparent;
+      font-family: "Roboto Condensed", "Arial Narrow", sans-serif;
+    }
+
+    #settlement-clerk-interface * {
+      box-sizing: border-box;
+    }
+
+    #settlement-clerk-interface button,
+    #settlement-clerk-interface input {
+      font: inherit;
+    }
+
+    #settlement-clerk-interface .sci-app {
+      display: grid;
+      gap: 9px;
+      padding-bottom: 12px;
+      background: var(--sci-canvas);
+    }
+
+    #settlement-clerk-interface .sci-topbar {
+      display: grid;
+      grid-template-columns: 292px minmax(0, 1fr) max-content;
+      min-height: 122px;
+      background: var(--sci-surface);
+      border-bottom: 1px solid var(--sci-line);
+    }
+
+    #settlement-clerk-interface .sci-identity {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+      padding: 14px 17px;
+      border-right: 1px solid var(--sci-line);
+    }
+
+    #settlement-clerk-interface .sci-avatar {
+      display: grid;
+      flex: 0 0 58px;
+      width: 58px;
+      height: 58px;
+      place-items: center;
+      border: 1px solid var(--sci-accent);
+      border-radius: 8px;
+      background: var(--sci-accent-soft);
+      color: var(--sci-accent);
+      font-family: "Russo One", "Arial Black", sans-serif;
+    }
+
+    #settlement-clerk-interface .sci-identity-copy {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      gap: 4px;
+      min-width: 0;
+      width: 100%;
+    }
+
+    #settlement-clerk-interface .sci-identity-copy strong {
+      display: block;
+      min-width: 0;
+      max-width: 100%;
+      overflow: hidden;
+      font-family: "Russo One", "Arial Black", sans-serif;
+      font-weight: 400;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    #settlement-clerk-interface .sci-role {
+      display: block;
+      min-width: 0;
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    #settlement-clerk-interface .sci-role,
+    #settlement-clerk-interface .sci-subtitle,
+    #settlement-clerk-interface .sci-note,
+    #settlement-clerk-interface .sci-legend,
+    #settlement-clerk-interface .sci-selection-meta {
+      color: var(--muted-foreground);
+    }
+
+    #settlement-clerk-interface .sci-role,
+    #settlement-clerk-interface .sci-kicker,
+    #settlement-clerk-interface .sci-control-name,
+    #settlement-clerk-interface .sci-floor-head,
+    #settlement-clerk-interface .sci-section-label {
+      letter-spacing: .075em;
+      text-transform: uppercase;
+    }
+
+    #settlement-clerk-interface .sci-brand {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) max-content;
+      align-content: center;
+      align-items: center;
+      gap: 10px 22px;
+      min-width: 0;
+      padding: 13px 18px;
+    }
+
+    #settlement-clerk-interface .sci-heading {
+      display: grid;
+      gap: 2px;
+      min-width: 0;
+    }
+
+    #settlement-clerk-interface .sci-kicker,
+    #settlement-clerk-interface .sci-section-label {
+      color: var(--sci-accent);
+      font-weight: 500;
+    }
+
+    #settlement-clerk-interface .sci-heading h1 {
+      margin: 0;
+      font-family: "Russo One", "Arial Black", sans-serif;
+      font-weight: 400;
+      letter-spacing: .035em;
+      text-transform: uppercase;
+    }
+
+    #settlement-clerk-interface .sci-nav,
+    #settlement-clerk-interface .sci-actions,
+    #settlement-clerk-interface .sci-choice,
+    #settlement-clerk-interface .sci-toolbar-actions,
+    #settlement-clerk-interface .sci-selection-actions,
+    #settlement-clerk-interface .sci-legend {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 7px;
+    }
+
+    #settlement-clerk-interface .sci-actions {
+      justify-content: flex-end;
+      min-width: 118px;
+      padding: 14px 16px;
+      border-left: 1px solid var(--sci-line);
+    }
+
+    #settlement-clerk-interface .sci-toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 9px;
+      min-height: 69px;
+      margin: 0 12px;
+    }
+
+    #settlement-clerk-interface .sci-date {
+      font-family: "Russo One", "Arial Black", sans-serif;
+      font-weight: 400;
+      letter-spacing: .04em;
+      white-space: nowrap;
+    }
+
+    #settlement-clerk-interface .sci-control,
+    #settlement-clerk-interface .sci-search {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      min-width: 0;
+    }
+
+    #settlement-clerk-interface .sci-control-name {
+      color: var(--muted-foreground);
+      font-weight: 500;
+      white-space: nowrap;
+    }
+
+    #settlement-clerk-interface .sci-choice {
+      gap: 3px;
+      padding: 2px;
+      border: 1px solid var(--sci-line);
+      border-radius: 5px;
+      background: var(--sci-field);
+    }
+
+    #settlement-clerk-interface .sci-search {
+      flex: 1 1 240px;
+    }
+
+    #settlement-clerk-interface .sci-search .form-control {
+      min-width: 145px;
+    }
+
+    #settlement-clerk-interface .sci-status-filter {
+      min-width: 105px;
+    }
+
+    #settlement-clerk-interface .sci-save-state {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-width: max-content;
+      color: var(--muted-foreground);
+      white-space: nowrap;
+    }
+
+    #settlement-clerk-interface .sci-save-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--sci-accent);
+    }
+
+    #settlement-clerk-interface .sci-toolbar-actions {
+      margin-left: auto;
+    }
+
+    #settlement-clerk-interface .sci-stats {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(82px, 1fr));
+      gap: 1px;
+      margin: 0 12px;
+      overflow: hidden;
+      background: var(--sci-line);
+    }
+
+    #settlement-clerk-interface .sci-stat {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 7px;
+      min-width: 0;
+      min-height: 40px;
+      padding: 7px 10px;
+      background: var(--sci-surface);
+      color: var(--muted-foreground);
+    }
+
+    #settlement-clerk-interface .sci-stat.is-active {
+      border: 1px solid var(--sci-accent);
+      background: var(--sci-accent-soft);
+      color: var(--sci-accent);
+    }
+
+    #settlement-clerk-interface .sci-stat span {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    #settlement-clerk-interface .sci-stat strong {
+      min-width: 27px;
+      padding: 1px 5px;
+      border-radius: 4px;
+      background: color-mix(in srgb, var(--card) 80%, transparent);
+      color: var(--foreground);
+      font-family: "Russo One", "Arial Black", sans-serif;
+      font-weight: 400;
+      text-align: center;
+      font-variant-numeric: tabular-nums;
+    }
+
+    #settlement-clerk-interface .sci-selection {
+      display: grid;
+      grid-template-columns: minmax(180px, .9fr) minmax(240px, 1.7fr) auto;
+      align-items: center;
+      gap: 10px 18px;
+      min-height: 54px;
+      margin: 0 12px;
+    }
+
+    #settlement-clerk-interface .sci-selection.is-active {
+      display: grid;
+    }
+
+    #settlement-clerk-interface .sci-selection-place,
+    #settlement-clerk-interface .sci-selection-person {
+      display: grid;
+      gap: 3px;
+      min-width: 0;
+    }
+
+    #settlement-clerk-interface .sci-selection-place strong,
+    #settlement-clerk-interface .sci-selection-person strong {
+      overflow: hidden;
+      font-family: "Russo One", "Arial Black", sans-serif;
+      font-weight: 400;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    #settlement-clerk-interface .sci-selection-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px 13px;
+    }
+
+    #settlement-clerk-interface .sci-selection-actions {
+      justify-content: flex-end;
+    }
+
+    #settlement-clerk-interface .sci-map {
+      display: grid;
+      gap: 9px;
+      margin: 0 12px;
+    }
+
+    #settlement-clerk-interface .sci-empty {
+      display: none;
+      padding: 8px 10px;
+      border-left: 3px solid var(--destructive);
+      background: color-mix(in srgb, var(--destructive) 8%, var(--sci-surface));
+    }
+
+    #settlement-clerk-interface .sci-empty.is-visible {
+      display: block;
+    }
+
+    #settlement-clerk-interface .sci-dorm-list {
+      display: grid;
+      gap: 0;
+      overflow: hidden;
+    }
+
+    #settlement-clerk-interface .sci-dorm {
+      display: grid;
+      gap: 0;
+      min-width: 0;
+      padding: 0;
+    }
+
+    #settlement-clerk-interface .sci-dorm + .sci-dorm {
+      padding-top: 8px;
+      border-top: 1px solid var(--sci-line);
+    }
+
+    #settlement-clerk-interface .sci-dorm[hidden],
+    #settlement-clerk-interface .sci-floor[hidden] {
+      display: none;
+    }
+
+    #settlement-clerk-interface .sci-dorm-head {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 10px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--sci-line);
+    }
+
+    #settlement-clerk-interface .sci-dorm-head strong,
+    #settlement-clerk-interface .sci-floor-head strong {
+      font-family: "Russo One", "Arial Black", sans-serif;
+      font-weight: 400;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+    }
+
+    #settlement-clerk-interface .sci-floors {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      padding-top: 8px;
+    }
+
+    #settlement-clerk-interface .sci-floor {
+      display: grid;
+      align-content: start;
+      gap: 6px;
+      min-width: 0;
+      padding: 7px;
+      background: var(--sci-field);
+    }
+
+    #settlement-clerk-interface .sci-floor-head {
+      display: flex;
+      flex-wrap: wrap;
+      min-height: 26px;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 8px;
+      color: var(--muted-foreground);
+    }
+
+    #settlement-clerk-interface .sci-floor-head strong {
+      color: var(--foreground);
+    }
+
+    #settlement-clerk-interface .sci-plan {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 22px minmax(0, 1fr);
+      gap: 3px;
+      align-items: stretch;
+    }
+
+    #settlement-clerk-interface .sci-side {
+      display: grid;
+      align-content: start;
+      gap: 3px;
+      min-width: 0;
+    }
+
+    #settlement-clerk-interface .sci-corridor {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid var(--sci-line);
+      background: color-mix(in srgb, var(--muted) 84%, var(--card));
+      color: var(--muted-foreground);
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      writing-mode: vertical-rl;
+    }
+
+    #settlement-clerk-interface .sci-room,
+    #settlement-clerk-interface .sci-placeholder {
+      min-height: 64px;
+    }
+
+    #settlement-clerk-interface .sci-room {
+      position: relative;
+      display: grid;
+      grid-template-rows: 1fr 1fr;
+      gap: 3px;
+      min-width: 0;
+      padding: 4px;
+      overflow: hidden;
+      border: 1px solid var(--sci-line);
+      background: color-mix(in srgb, var(--green) 8%, var(--card));
+      transition: opacity 140ms ease, box-shadow 140ms ease;
+    }
+
+    #settlement-clerk-interface .sci-room.sci-left {
+      grid-template-columns: minmax(0, 1fr) 29px;
+    }
+
+    #settlement-clerk-interface .sci-room.sci-right {
+      grid-template-columns: 29px minmax(0, 1fr);
+    }
+
+    #settlement-clerk-interface .sci-room.is-dimmed {
+      opacity: .2;
+    }
+
+    #settlement-clerk-interface .sci-room.is-selected {
+      border-color: var(--sci-accent);
+      box-shadow: 0 0 0 2px color-mix(in srgb, var(--sci-accent) 56%, transparent);
+      opacity: 1;
+    }
+
+    #settlement-clerk-interface .sci-room.is-future {
+      background:
+        repeating-linear-gradient(
+          135deg,
+          color-mix(in srgb, var(--muted) 78%, transparent) 0 5px,
+          color-mix(in srgb, var(--border) 58%, transparent) 5px 9px
+        );
+    }
+
+    #settlement-clerk-interface .sci-room.is-itr {
+      grid-template-rows: 1fr;
+      background: color-mix(in srgb, var(--viz-series-4) 13%, var(--card));
+    }
+
+    #settlement-clerk-interface .sci-room-number {
+      display: grid;
+      width: 29px;
+      min-height: 28px;
+      align-self: center;
+      place-items: center;
+      border: 1px solid var(--sci-line);
+      border-radius: 3px;
+      background: var(--sci-surface);
+      font-family: "Russo One", "Arial Black", sans-serif;
+      font-weight: 400;
+      text-align: center;
+    }
+
+    #settlement-clerk-interface .sci-left .sci-room-number {
+      grid-column: 2;
+      grid-row: 1 / -1;
+    }
+
+    #settlement-clerk-interface .sci-right .sci-room-number {
+      grid-column: 1;
+      grid-row: 1 / -1;
+    }
+
+    #settlement-clerk-interface .sci-block {
+      display: grid;
+      grid-template-columns: 18px repeat(3, 24px);
+      justify-content: space-evenly;
+      gap: 3px;
+      align-items: center;
+      min-width: 0;
+      padding: 1px 4px;
+      border: 1px solid color-mix(in srgb, var(--sci-line) 76%, transparent);
+      border-radius: 3px;
+      background: color-mix(in srgb, var(--sci-surface) 78%, transparent);
+    }
+
+    #settlement-clerk-interface .sci-left .sci-block {
+      grid-column: 1;
+    }
+
+    #settlement-clerk-interface .sci-right .sci-block {
+      grid-column: 2;
+    }
+
+    #settlement-clerk-interface .sci-block b {
+      font-family: "Russo One", "Arial Black", sans-serif;
+      font-weight: 400;
+      text-align: center;
+    }
+
+    #settlement-clerk-interface .sci-bed {
+      width: 24px;
+      height: 24px;
+      min-width: 24px;
+      min-height: 24px;
+      padding: 0;
+      justify-self: center;
+      border: 1px solid color-mix(in srgb, var(--muted-foreground) 68%, var(--sci-line));
+      border-radius: 2px;
+      background: var(--sci-surface);
+      cursor: pointer;
+    }
+
+    #settlement-clerk-interface .sci-bed:hover,
+    #settlement-clerk-interface .sci-bed:focus-visible,
+    #settlement-clerk-interface .sci-bed.is-selected {
+      outline: 2px solid var(--ring);
+      outline-offset: 0;
+    }
+
+    #settlement-clerk-interface .sci-bed.is-occupied {
+      border-color: color-mix(in srgb, var(--green) 72%, var(--sci-line));
+      background: color-mix(in srgb, var(--green) 70%, var(--card));
+    }
+
+    #settlement-clerk-interface .sci-bed.is-reserved {
+      border-color: color-mix(in srgb, var(--viz-series-1) 72%, var(--sci-line));
+      background: color-mix(in srgb, var(--viz-series-1) 68%, var(--card));
+    }
+
+    #settlement-clerk-interface .sci-bed.is-conflict {
+      border-color: color-mix(in srgb, var(--destructive) 78%, var(--sci-line));
+      background: color-mix(in srgb, var(--destructive) 74%, var(--card));
+    }
+
+    #settlement-clerk-interface .sci-room.is-future .sci-bed {
+      opacity: .35;
+      cursor: not-allowed;
+    }
+
+    #settlement-clerk-interface .sci-room.is-itr .sci-block {
+      grid-template-columns: 30px repeat(2, 24px);
+      height: 100%;
+    }
+
+    #settlement-clerk-interface .sci-legend {
+      gap: 8px 15px;
+      padding: 2px 0;
+    }
+
+    #settlement-clerk-interface .sci-legend-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    #settlement-clerk-interface .sci-key {
+      width: 16px;
+      height: 16px;
+      border: 1px solid var(--sci-line);
+      border-radius: 2px;
+      background: var(--sci-surface);
+    }
+
+    #settlement-clerk-interface .sci-key.occupied {
+      background: color-mix(in srgb, var(--green) 70%, var(--card));
+    }
+
+    #settlement-clerk-interface .sci-key.reserved {
+      background: color-mix(in srgb, var(--viz-series-1) 68%, var(--card));
+    }
+
+    #settlement-clerk-interface .sci-key.conflict {
+      background: color-mix(in srgb, var(--destructive) 74%, var(--card));
+    }
+
+    #settlement-clerk-interface .sci-key.future {
+      width: 22px;
+      background:
+        repeating-linear-gradient(
+          135deg,
+          color-mix(in srgb, var(--muted) 78%, transparent) 0 5px,
+          color-mix(in srgb, var(--border) 58%, transparent) 5px 9px
+        );
+    }
+
+    @media (max-width: 1050px) {
+      #settlement-clerk-interface .sci-topbar {
+        grid-template-columns: 230px minmax(300px, 1fr) auto;
+      }
+
+      #settlement-clerk-interface .sci-brand {
+        display: flex;
+        flex-wrap: wrap;
+      }
+
+      #settlement-clerk-interface .sci-avatar {
+        flex-basis: 50px;
+        width: 50px;
+        height: 50px;
+      }
+
+    }
+
+    @media (max-width: 820px) {
+      #settlement-clerk-interface .sci-topbar {
+        grid-template-columns: 220px minmax(280px, 1fr) auto;
+      }
+
+      #settlement-clerk-interface .sci-identity {
+        padding-right: 10px;
+        padding-left: 10px;
+      }
+
+      #settlement-clerk-interface .sci-brand {
+        padding-right: 10px;
+        padding-left: 12px;
+      }
+
+      #settlement-clerk-interface .sci-actions {
+        padding-right: 9px;
+        padding-left: 9px;
+      }
+
+      #settlement-clerk-interface .sci-floor {
+        padding: 5px;
+      }
+
+      #settlement-clerk-interface .sci-plan {
+        grid-template-columns: minmax(0, 1fr) 18px minmax(0, 1fr);
+        gap: 2px;
+      }
+
+      #settlement-clerk-interface .sci-side {
+        gap: 2px;
+      }
+
+      #settlement-clerk-interface .sci-room {
+        gap: 2px;
+        padding: 3px;
+      }
+
+      #settlement-clerk-interface .sci-room.sci-left {
+        grid-template-columns: minmax(0, 1fr) 27px;
+      }
+
+      #settlement-clerk-interface .sci-room.sci-right {
+        grid-template-columns: 27px minmax(0, 1fr);
+      }
+
+      #settlement-clerk-interface .sci-block {
+        grid-template-columns: 15px repeat(3, 24px);
+        gap: 2px;
+        padding-right: 2px;
+        padding-left: 2px;
+      }
+
+      #settlement-clerk-interface .sci-room-number {
+        width: 27px;
+        min-height: 26px;
+      }
+
+      #settlement-clerk-interface .sci-room.is-itr .sci-block {
+        grid-template-columns: 30px repeat(2, 24px);
+      }
+
+      #settlement-clerk-interface .sci-selection {
+        grid-template-columns: minmax(0, .9fr) minmax(0, 1.25fr);
+      }
+
+      #settlement-clerk-interface .sci-selection-actions {
+        grid-column: 1 / -1;
+        justify-content: flex-start;
+      }
+    }
+
+    @media (max-width: 640px) {
+      #settlement-clerk-interface .sci-topbar {
+        grid-template-columns: minmax(180px, 210px) 1fr;
+      }
+
+      #settlement-clerk-interface .sci-brand {
+        border-bottom: 1px solid var(--sci-line);
+      }
+
+      #settlement-clerk-interface .sci-actions {
+        grid-column: 1 / -1;
+        justify-content: flex-end;
+        border-top: 1px solid var(--sci-line);
+        border-left: 0;
+      }
+
+      #settlement-clerk-interface .sci-stats {
+        grid-template-columns: repeat(3, 1fr);
+      }
+
+      #settlement-clerk-interface .sci-selection {
+        grid-template-columns: 1fr 1.35fr;
+      }
+
+      #settlement-clerk-interface .sci-selection-actions {
+        grid-column: 1 / -1;
+        justify-content: flex-start;
+      }
+
+      #settlement-clerk-interface .sci-floors {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 680px) {
+      #settlement-clerk-interface .sci-floors {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 470px) {
+      #settlement-clerk-interface .sci-topbar {
+        grid-template-columns: 1fr;
+      }
+
+      #settlement-clerk-interface .sci-identity,
+      #settlement-clerk-interface .sci-brand {
+        border-right: 0;
+        border-bottom: 1px solid var(--sci-line);
+      }
+
+      #settlement-clerk-interface .sci-toolbar,
+      #settlement-clerk-interface .sci-stats,
+      #settlement-clerk-interface .sci-selection,
+      #settlement-clerk-interface .sci-map {
+        margin-right: 7px;
+        margin-left: 7px;
+      }
+
+      #settlement-clerk-interface .sci-stats {
+        grid-template-columns: repeat(2, 1fr);
+      }
+
+      #settlement-clerk-interface .sci-selection {
+        grid-template-columns: 1fr;
+      }
+
+      #settlement-clerk-interface .sci-selection-actions {
+        grid-column: auto;
+      }
+
+      #settlement-clerk-interface .sci-block {
+        grid-template-columns: 14px repeat(3, 22px);
+      }
+
+      #settlement-clerk-interface .sci-bed {
+        width: 22px;
+        height: 22px;
+        min-width: 22px;
+        min-height: 22px;
+      }
+
+      #settlement-clerk-interface .sci-room.is-itr .sci-block {
+        grid-template-columns: 30px repeat(2, minmax(18px, 22px));
+      }
+    }
+
+    @media (max-width: 360px) {
+      #settlement-clerk-interface .sci-room.sci-left {
+        grid-template-columns: minmax(0, 1fr) 23px;
+      }
+
+      #settlement-clerk-interface .sci-room.sci-right {
+        grid-template-columns: 23px minmax(0, 1fr);
+      }
+
+      #settlement-clerk-interface .sci-room-number {
+        width: 23px;
+        min-height: 24px;
+      }
+
+      #settlement-clerk-interface .sci-block {
+        grid-template-columns: 10px repeat(3, 22px);
+        gap: 1px;
+        padding-right: 1px;
+        padding-left: 1px;
+      }
+
+      #settlement-clerk-interface .sci-bed {
+        width: 22px;
+        height: 22px;
+        min-width: 22px;
+        min-height: 22px;
+      }
+
+      #settlement-clerk-interface .sci-room.is-itr .sci-block {
+        grid-template-columns: 30px repeat(2, 22px);
+      }
+    }
+  </style>
+
+  <div class="sci-app">
+    <header class="sci-topbar">
+      <div class="sci-identity">
+        <span class="sci-avatar" aria-hidden="true">Т</span>
+        <div class="sci-identity-copy">
+          <strong>Тест Делопроизводитель</strong>
+          <span class="sci-role text-small">Делопроизводитель</span>
+        </div>
+      </div>
+
+      <div class="sci-brand">
+        <div class="sci-heading">
+          <span class="sci-kicker text-small">Вахтовый контур</span>
+          <h1>Расселение</h1>
+          <span class="sci-subtitle text-small">Распределение сотрудников по общежитиям и койко-местам.</span>
+        </div>
+        <nav class="sci-nav" aria-label="Разделы вахтового контура">
+          <button type="button" class="btn" aria-selected="true">Расселение</button>
+          <button type="button" class="btn btn-ghost" aria-selected="false" data-placeholder="Отчёты">Отчёты</button>
+        </nav>
+      </div>
+
+      <div class="sci-actions">
+        <button type="button" class="btn btn-ghost" aria-label="Переключить тему" data-tooltip="Переключатель темы основной системы">
+          <i data-lucide="sun" aria-hidden="true"></i>
+        </button>
+        <button type="button" class="btn btn-ghost" data-placeholder="Выход">Выйти</button>
+      </div>
+    </header>
+
+    <section class="card sci-toolbar" aria-label="Управление картой расселения">
+      <time class="sci-date" datetime="2026-07-23">23.07.2026</time>
+
+      <div class="sci-control">
+        <span class="sci-control-name text-small">Общежитие</span>
+        <div class="sci-choice" aria-label="Выбор общежития">
+          <button type="button" class="btn" data-dorm-choice="КИС-5" aria-pressed="true">КИС-5</button>
+          <button type="button" class="btn btn-ghost" data-dorm-choice="КИС-6" aria-pressed="false">КИС-6</button>
+          <button type="button" class="btn btn-ghost" data-dorm-choice="all" aria-pressed="false">Все</button>
+        </div>
+      </div>
+
+      <div class="sci-control">
+        <span class="sci-control-name text-small">Этаж</span>
+        <div class="sci-choice" aria-label="Выбор этажа">
+          <button type="button" class="btn" data-floor-choice="all" aria-pressed="true">Все</button>
+          <button type="button" class="btn btn-ghost" data-floor-choice="1 этаж" aria-pressed="false">1</button>
+          <button type="button" class="btn btn-ghost" data-floor-choice="2 этаж" aria-pressed="false">2</button>
+        </div>
+      </div>
+
+      <label class="sci-control">
+        <span class="sci-control-name text-small">Статус</span>
+        <select id="sci-status-filter" class="form-select sci-status-filter">
+          <option value="all">Все</option>
+          <option value="free">Свободно</option>
+          <option value="occupied">Занято</option>
+          <option value="reserved">Бронь</option>
+          <option value="conflict">Конфликт</option>
+          <option value="future">Не передано</option>
+        </select>
+      </label>
+
+      <label class="sci-search">
+        <span class="sci-control-name text-small">Поиск</span>
+        <input id="sci-search" class="form-control" type="search" placeholder="Сотрудник, техника или комната">
+      </label>
+
+      <span class="sci-save-state text-small" aria-live="polite">
+        <i class="sci-save-dot" aria-hidden="true"></i>
+        <span id="sci-save-message">Сохранено · 17:17</span>
+      </span>
+
+      <div class="sci-toolbar-actions">
+        <button type="button" class="btn" data-placeholder="Выгрузка Excel">
+          <i data-lucide="download" aria-hidden="true"></i>
+          Excel
+        </button>
+        <button type="button" class="btn btn-primary" data-placeholder="Публикация">Опубликовать</button>
+      </div>
+    </section>
+
+    <section class="card sci-stats" aria-label="Сводка и фильтр по статусу">
+      <div class="sci-stat is-active"><span>Все места</span><strong id="sci-total">0</strong></div>
+      <div class="sci-stat"><span>Занято</span><strong id="sci-occupied">0</strong></div>
+      <div class="sci-stat"><span>Свободно</span><strong id="sci-free">0</strong></div>
+      <div class="sci-stat"><span>Бронь</span><strong id="sci-reserved">0</strong></div>
+      <div class="sci-stat"><span>Конфликты</span><strong id="sci-conflict">0</strong></div>
+      <div class="sci-stat"><span>Не передано</span><strong id="sci-future">0</strong></div>
+    </section>
+
+    <section class="card sci-selection" aria-live="polite">
+      <div class="sci-selection-place">
+        <span class="sci-section-label text-small">Выбранное место</span>
+        <strong>Койко-место не выбрано</strong>
+      </div>
+      <div class="sci-selection-person">
+        <strong>Нажмите на квадрат койки</strong>
+        <span class="sci-selection-meta text-small">Сотрудник · техника · смена · период проживания</span>
+      </div>
+    </section>
+
+    <main class="sci-map">
+      <div class="sci-empty" role="status">По выбранным условиям совпадений нет. Планировка сохранена, остальные комнаты приглушены.</div>
+      <div class="card sci-dorm-list"></div>
+      <div class="sci-legend text-small" aria-label="Легенда карты">
+        <span class="sci-legend-item"><i class="sci-key"></i>Свободно</span>
+        <span class="sci-legend-item"><i class="sci-key occupied"></i>Занято</span>
+        <span class="sci-legend-item"><i class="sci-key reserved"></i>Бронь</span>
+        <span class="sci-legend-item"><i class="sci-key conflict"></i>Конфликт</span>
+        <span class="sci-legend-item"><i class="sci-key future"></i>Не передана</span>
+        <span class="sci-legend-item"><strong>А / Б</strong> по 3 койки</span>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    (function () {
+      const root = document.getElementById("settlement-clerk-interface");
+      const dormList = root.querySelector(".sci-dorm-list");
+      const selection = root.querySelector(".sci-selection");
+      const search = root.querySelector("#sci-search");
+      const statusFilter = root.querySelector("#sci-status-filter");
+      const empty = root.querySelector(".sci-empty");
+      const saveMessage = root.querySelector("#sci-save-message");
+      const dormChoices = Array.from(root.querySelectorAll("[data-dorm-choice]"));
+      const floorChoices = Array.from(root.querySelectorAll("[data-floor-choice]"));
+      let selectedDorm = "КИС-5";
+      let selectedFloor = "all";
+      let selectedStatus = "all";
+      let selectedBed = null;
+
+      function range(start, end) {
+        return Array.from({ length: end - start + 1 }, function (_, index) {
+          return start + index;
+        });
+      }
+
+      const dormitories = [
+        {
+          name: "КИС-5",
+          note: "2 этажа · 30 закреплённых комнат · 168 мест",
+          floors: [
+            { name: "1 этаж", physical: range(1, 19), assigned: new Set([].concat(range(1, 17), [19])), itr: new Set() },
+            { name: "2 этаж", physical: range(20, 38), assigned: new Set([].concat(range(20, 28), [36, 37, 38])), itr: new Set([36, 37, 38]) }
+          ]
+        },
+        {
+          name: "КИС-6",
+          note: "2 этажа · 17 закреплённых комнат · 102 места",
+          floors: [
+            { name: "1 этаж", physical: range(1, 11), assigned: new Set([1, 2, 3, 5, 6, 8, 9, 10, 11]), itr: new Set() },
+            { name: "2 этаж", physical: range(40, 50), assigned: new Set(range(40, 47)), itr: new Set() }
+          ]
+        }
+      ];
+
+      const bedRecords = {
+        "КИС-5|1 этаж|7|А|3": {
+          status: "reserved",
+          person: "Петров Алексей Викторович",
+          role: "Машинист экскаватора",
+          equipment: "ЭКГ-12 №3",
+          shift: "Ранняя · 06:00–18:00",
+          period: "14.08.2026–13.09.2026"
+        },
+        "КИС-5|1 этаж|12|А|1": {
+          status: "occupied",
+          person: "Иванов Сергей Петрович",
+          role: "Водитель карьерного самосвала",
+          equipment: "БелАЗ №12",
+          shift: "Ночная · 19:00–07:00",
+          period: "14.07.2026–13.08.2026"
+        },
+        "КИС-5|1 этаж|14|Б|2": {
+          status: "conflict",
+          person: "Сидоров Максим Олегович / Кузнецов Андрей Игоревич",
+          role: "Два назначения на одно место",
+          equipment: "БелАЗ №27 / NHL №8",
+          shift: "Пересечение заселения: 2 дня",
+          period: "12.08.2026–13.08.2026"
+        },
+        "КИС-6|1 этаж|3|Б|1": {
+          status: "occupied",
+          person: "Орлов Денис Сергеевич",
+          role: "Водитель вахтового автобуса",
+          equipment: "Вахтовка №2",
+          shift: "Дневная · 07:00–19:00",
+          period: "14.07.2026–13.08.2026"
+        }
+      };
+
+      function escapeValue(value) {
+        return String(value || "")
+          .replace(/&/g, "&amp;")
+          .replace(/"/g, "&quot;")
+          .replace(/</g, "&lt;");
+      }
+
+      function bedMarkup(dormName, floorName, roomNumber, block, bedNumber, assigned) {
+        const key = [dormName, floorName, roomNumber, block, bedNumber].join("|");
+        const record = bedRecords[key] || { status: assigned ? "free" : "future" };
+        const labels = {
+          free: "свободно",
+          occupied: "занято",
+          reserved: "забронировано",
+          conflict: "конфликт",
+          future: "комната не передана"
+        };
+        const stateClass = ["occupied", "reserved", "conflict"].includes(record.status) ? " is-" + record.status : "";
+
+        return '<button type="button" class="sci-bed' + stateClass + '"' +
+          ' data-dorm="' + escapeValue(dormName) + '"' +
+          ' data-floor="' + escapeValue(floorName) + '"' +
+          ' data-room="' + roomNumber + '"' +
+          ' data-block="' + block + '"' +
+          ' data-bed="' + bedNumber + '"' +
+          ' data-status="' + record.status + '"' +
+          ' data-person="' + escapeValue(record.person) + '"' +
+          ' data-role="' + escapeValue(record.role) + '"' +
+          ' data-equipment="' + escapeValue(record.equipment) + '"' +
+          ' data-shift="' + escapeValue(record.shift) + '"' +
+          ' data-period="' + escapeValue(record.period) + '"' +
+          (assigned ? "" : " disabled") +
+          ' aria-label="' + escapeValue(dormName + ", " + floorName + ", комната " + roomNumber + ", блок " + block + ", койка " + bedNumber + ", " + labels[record.status]) + '"></button>';
+      }
+
+      function bedsMarkup(dormName, floorName, roomNumber, block, count, assigned) {
+        return Array.from({ length: count }, function (_, index) {
+          return bedMarkup(dormName, floorName, roomNumber, block, index + 1, assigned);
+        }).join("");
+      }
+
+      function roomMarkup(dormName, floor, roomNumber, side) {
+        const assigned = floor.assigned.has(roomNumber);
+        const itr = floor.itr.has(roomNumber);
+        const classes = [
+          "sci-room",
+          side === "left" ? "sci-left" : "sci-right",
+          assigned ? "" : "is-future",
+          itr ? "is-itr" : ""
+        ].filter(Boolean).join(" ");
+        const blockA = '<span class="sci-block"><b>' + (itr ? "ИТР" : "А") + '</b>' +
+          bedsMarkup(dormName, floor.name, roomNumber, itr ? "ИТР" : "А", itr ? 2 : 3, assigned) + '</span>';
+        const blockB = itr ? "" : '<span class="sci-block"><b>Б</b>' +
+          bedsMarkup(dormName, floor.name, roomNumber, "Б", 3, assigned) + '</span>';
+
+        return '<div class="' + classes + '" data-dorm="' + dormName + '" data-floor="' + floor.name +
+          '" data-room="' + roomNumber + '" data-assigned="' + assigned + '">' +
+          '<span class="sci-room-number">' + roomNumber + '</span>' + blockA + blockB + '</div>';
+      }
+
+      function floorMarkup(dormName, floor) {
+        const odd = floor.physical.filter(function (number) { return number % 2 === 1; });
+        const even = floor.physical.filter(function (number) { return number % 2 === 0; });
+        const rows = Math.max(odd.length, even.length);
+        const left = [];
+        const right = [];
+
+        for (let index = 0; index < rows; index += 1) {
+          left.push(odd[index] === undefined
+            ? '<div class="sci-placeholder" aria-hidden="true"></div>'
+            : roomMarkup(dormName, floor, odd[index], "left"));
+          right.push(even[index] === undefined
+            ? '<div class="sci-placeholder" aria-hidden="true"></div>'
+            : roomMarkup(dormName, floor, even[index], "right"));
+        }
+
+        return '<section class="sci-floor" data-floor="' + floor.name + '">' +
+          '<div class="sci-floor-head text-small"><strong>' + floor.name + '</strong><span>' +
+          floor.assigned.size + ' закреплено</span></div>' +
+          '<div class="sci-plan"><div class="sci-side">' + left.join("") +
+          '</div><div class="sci-corridor text-small">Коридор</div><div class="sci-side">' +
+          right.join("") + '</div></div></section>';
+      }
+
+      dormitories.forEach(function (dormitory) {
+        const section = document.createElement("section");
+        section.className = "sci-dorm";
+        section.dataset.dorm = dormitory.name;
+        section.innerHTML = '<div class="sci-dorm-head"><strong>' + dormitory.name +
+          '</strong><span class="sci-note text-small">' + dormitory.note + '</span></div>' +
+          '<div class="sci-floors">' + dormitory.floors.map(function (floor) {
+            return floorMarkup(dormitory.name, floor);
+          }).join("") + '</div>';
+        dormList.appendChild(section);
+      });
+
+      function clearSelection() {
+        selectedBed = null;
+        root.querySelectorAll(".sci-room.is-selected, .sci-bed.is-selected").forEach(function (node) {
+          node.classList.remove("is-selected");
+        });
+        selection.innerHTML =
+          '<div class="sci-selection-place"><span class="sci-section-label text-small">Выбранное место</span>' +
+          '<strong>Койко-место не выбрано</strong></div>' +
+          '<div class="sci-selection-person"><strong>Нажмите на квадрат койки</strong>' +
+          '<span class="sci-selection-meta text-small">Сотрудник · техника · смена · период проживания</span></div>';
+      }
+
+      function showBed(bed) {
+        root.querySelectorAll(".sci-room.is-selected, .sci-bed.is-selected").forEach(function (node) {
+          node.classList.remove("is-selected");
+        });
+        selectedBed = bed;
+        bed.closest(".sci-room").classList.add("is-selected");
+        bed.classList.add("is-selected");
+
+        const statusLabels = {
+          free: "Свободно",
+          occupied: "Занято",
+          reserved: "Забронировано",
+          conflict: "Конфликт"
+        };
+        const place = bed.dataset.dorm + " · " + bed.dataset.floor + " · комната №" +
+          bed.dataset.room + " · блок " + bed.dataset.block + " · койка " + bed.dataset.bed;
+        const person = bed.dataset.person || "Свободное койко-место";
+        const role = bed.dataset.role || "Можно назначить сотрудника";
+        const facts = [bed.dataset.equipment, bed.dataset.shift, bed.dataset.period].filter(Boolean);
+        const actions = bed.dataset.status === "free"
+          ? '<button type="button" class="btn btn-primary" data-action="Заселение">Заселить</button>'
+          : bed.dataset.status === "conflict"
+            ? '<button type="button" class="btn btn-primary" data-action="Проверка конфликта">Разрешить конфликт</button>'
+            : bed.dataset.status === "reserved"
+              ? '<button type="button" class="btn btn-primary" data-action="Изменение брони">Изменить бронь</button><button type="button" class="btn btn-ghost" data-action="История">История</button>'
+              : '<button type="button" class="btn" data-action="Переселение">Переселить</button><button type="button" class="btn btn-ghost" data-action="История">История</button>';
+
+        selection.innerHTML =
+          '<div class="sci-selection-place"><span class="sci-section-label text-small">Выбранное место · ' +
+          statusLabels[bed.dataset.status] + '</span><strong>' + place + '</strong></div>' +
+          '<div class="sci-selection-person"><strong>' + person + '</strong>' +
+          '<span class="sci-selection-meta text-small"><span>' + role + '</span>' +
+          facts.map(function (fact) { return "<span>" + fact + "</span>"; }).join("") +
+          '</span></div><div class="sci-selection-actions">' + actions + '</div>';
+      }
+
+      function roomMatchesQuery(room, query) {
+        if (!query) return true;
+        const roomText = [
+          room.dataset.dorm,
+          room.dataset.floor,
+          "комната " + room.dataset.room,
+          room.dataset.room
+        ].join(" ").toLowerCase();
+        const bedText = Array.from(room.querySelectorAll(".sci-bed")).map(function (bed) {
+          return [bed.dataset.person, bed.dataset.role, bed.dataset.equipment, bed.dataset.shift].join(" ");
+        }).join(" ").toLowerCase();
+        return roomText.includes(query) || bedText.includes(query);
+      }
+
+      function roomMatchesStatus(room) {
+        selectedStatus = statusFilter.value;
+        if (selectedStatus === "all") return true;
+        if (selectedStatus === "future") return room.dataset.assigned === "false";
+        return Array.from(room.querySelectorAll(".sci-bed")).some(function (bed) {
+          return bed.dataset.status === selectedStatus;
+        });
+      }
+
+      function applyFilters() {
+        const query = search.value.trim().toLowerCase();
+        const scopeBeds = [];
+        let futureRooms = 0;
+        let matchedRooms = 0;
+
+        root.querySelectorAll(".sci-dorm").forEach(function (dorm) {
+          const dormAllowed = selectedDorm === "all" || dorm.dataset.dorm === selectedDorm;
+          dorm.hidden = !dormAllowed;
+
+          dorm.querySelectorAll(".sci-floor").forEach(function (floor) {
+            const floorAllowed = dormAllowed && (selectedFloor === "all" || floor.dataset.floor === selectedFloor);
+            floor.hidden = !floorAllowed;
+
+            floor.querySelectorAll(".sci-room").forEach(function (room) {
+              const queryMatch = floorAllowed && roomMatchesQuery(room, query);
+              const match = queryMatch && roomMatchesStatus(room);
+              room.classList.toggle("is-dimmed", floorAllowed && !match);
+
+              if (queryMatch) {
+                if (room.dataset.assigned === "false") {
+                  futureRooms += 1;
+                } else {
+                  room.querySelectorAll(".sci-bed").forEach(function (bed) {
+                    scopeBeds.push(bed);
+                  });
+                }
+              }
+              if (match) matchedRooms += 1;
+            });
+          });
+        });
+
+        const counts = { occupied: 0, free: 0, reserved: 0, conflict: 0 };
+        scopeBeds.forEach(function (bed) {
+          if (Object.prototype.hasOwnProperty.call(counts, bed.dataset.status)) {
+            counts[bed.dataset.status] += 1;
+          }
+        });
+
+        root.querySelector("#sci-total").textContent = scopeBeds.length;
+        root.querySelector("#sci-occupied").textContent = counts.occupied;
+        root.querySelector("#sci-free").textContent = counts.free;
+        root.querySelector("#sci-reserved").textContent = counts.reserved;
+        root.querySelector("#sci-conflict").textContent = counts.conflict;
+        root.querySelector("#sci-future").textContent = futureRooms;
+        empty.classList.toggle("is-visible", matchedRooms === 0);
+
+        if (selectedBed) {
+          const room = selectedBed.closest(".sci-room");
+          const dorm = selectedBed.closest(".sci-dorm");
+          const floor = selectedBed.closest(".sci-floor");
+          if (room.classList.contains("is-dimmed") || dorm.hidden || floor.hidden) {
+            clearSelection();
+          }
+        }
+      }
+
+      function selectChoice(buttons, activeButton, callback) {
+        buttons.forEach(function (button) {
+          const active = button === activeButton;
+          button.setAttribute("aria-pressed", String(active));
+          button.classList.toggle("btn-ghost", !active);
+        });
+        callback(activeButton);
+        applyFilters();
+      }
+
+      dormChoices.forEach(function (button) {
+        button.addEventListener("click", function () {
+          selectChoice(dormChoices, button, function (activeButton) {
+            selectedDorm = activeButton.dataset.dormChoice;
+          });
+        });
+      });
+
+      floorChoices.forEach(function (button) {
+        button.addEventListener("click", function () {
+          selectChoice(floorChoices, button, function (activeButton) {
+            selectedFloor = activeButton.dataset.floorChoice;
+          });
+        });
+      });
+
+      search.addEventListener("input", applyFilters);
+      statusFilter.addEventListener("change", applyFilters);
+
+      root.addEventListener("click", function (event) {
+        const bed = event.target.closest(".sci-bed");
+        if (bed && !bed.disabled) {
+          showBed(bed);
+          return;
+        }
+
+        const action = event.target.closest("[data-action]");
+        if (action) {
+          saveMessage.textContent = action.dataset.action + " · действие подготовлено";
+          return;
+        }
+
+        const placeholder = event.target.closest("[data-placeholder]");
+        if (placeholder) {
+          saveMessage.textContent = placeholder.dataset.placeholder + " · раздел будет подключён к системе";
+        }
+      });
+
+      applyFilters();
+    }());
+  </script>
+</div>
