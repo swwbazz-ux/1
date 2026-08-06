@@ -1,16 +1,16 @@
 {% extends "base.html" %}
 {% load static %}
 
-{% block title %}{% if role_app %}Вход · {{ role_app.short_name }}{% else %}Вход в систему{% endif %}{% endblock %}
+{% block title %}{% if login_role_app %}Вход · {{ login_role_app.short_name }}{% else %}Вход в систему{% endif %}{% endblock %}
 {% block extra_head %}
-    {% if role_app %}
-    <link rel="manifest" href="{{ role_app.manifest_url }}">
-    <meta name="theme-color" content="{{ role_app.theme_color }}">
+    {% if login_role_app %}
+    <link rel="manifest" href="{{ login_role_app.manifest_url }}">
+    <meta name="theme-color" content="{{ login_role_app.theme_color }}">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="apple-mobile-web-app-title" content="{{ role_app.short_name }}">
-    <link rel="apple-touch-icon" href="{{ role_app.icon_180_url }}">
+    <meta name="apple-mobile-web-app-title" content="{{ login_role_app.short_name }}">
+    <link rel="apple-touch-icon" href="{{ login_role_app.icon_180_url }}">
     {% endif %}
 {% endblock %}
 {% block body_class %}login-page dispatcher-shell dispatcher-night unified-login-screen{% endblock %}
@@ -21,13 +21,13 @@
     <form method="post" data-validated-login class="app-confirm-content unified-login-form">
         {% csrf_token %}
         {% if next_url %}<input type="hidden" name="next" value="{{ next_url }}">{% endif %}
-        {% if role_app %}
+        {% if login_role_app %}
         <div class="unified-login-role-identity">
-            <img src="{{ role_app.icon_180_url }}" width="72" height="72" alt="">
+            <img src="{{ login_role_app.icon_180_url }}" width="72" height="72" alt="">
             <span>Copper Resources</span>
         </div>
         {% endif %}
-        <h2>{% if role_app %}{{ role_app.name }}{% else %}Единый вход{% endif %}</h2>
+        <h2>{% if login_role_app %}{{ login_role_app.name }}{% else %}Единый вход{% endif %}</h2>
         <p>Телефон и пинкод сотрудника.</p>
         <label class="shared-shift-login-field" for="login-phone">
             <span>Телефон</span>

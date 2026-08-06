@@ -1,16 +1,16 @@
 {% extends "base.html" %}
 {% load static %}
 
-{% block title %}{% if role_app %}Первичный вход · {{ role_app.short_name }}{% else %}Первичный вход{% endif %}{% endblock %}
+{% block title %}{% if activation_role_app %}Первичный вход · {{ activation_role_app.short_name }}{% else %}Первичный вход{% endif %}{% endblock %}
 {% block extra_head %}
-    {% if role_app %}
-    <link rel="manifest" href="{{ role_app.manifest_url }}">
-    <meta name="theme-color" content="{{ role_app.theme_color }}">
+    {% if activation_role_app %}
+    <link rel="manifest" href="{{ activation_role_app.manifest_url }}">
+    <meta name="theme-color" content="{{ activation_role_app.theme_color }}">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="apple-mobile-web-app-title" content="{{ role_app.short_name }}">
-    <link rel="apple-touch-icon" href="{{ role_app.icon_180_url }}">
+    <meta name="apple-mobile-web-app-title" content="{{ activation_role_app.short_name }}">
+    <link rel="apple-touch-icon" href="{{ activation_role_app.icon_180_url }}">
     {% endif %}
     <style>
         .dispatcher-shell .unified-activation-dialog .activation-stage {
@@ -91,9 +91,9 @@
     <div class="shared-shift-accent" aria-hidden="true"></div>
     <form method="post" novalidate data-validated-activation class="app-confirm-content unified-login-form">
         {% csrf_token %}
-        {% if role_app %}
+        {% if activation_role_app %}
         <div class="unified-login-role-identity">
-            <img src="{{ role_app.icon_180_url }}" width="72" height="72" alt="">
+            <img src="{{ activation_role_app.icon_180_url }}" width="72" height="72" alt="">
             <span>Copper Resources</span>
         </div>
         {% endif %}

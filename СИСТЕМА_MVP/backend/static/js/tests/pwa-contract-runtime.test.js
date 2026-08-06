@@ -377,13 +377,18 @@ function createRuntime(options = {}) {
     const htmlContractVersion = options.htmlContractVersion || "contract-v2";
     const htmlShellVersion = options.htmlShellVersion || "driver-shell-v2";
     const roleCode = options.roleCode || "driver";
+    const locationOrigin = options.locationOrigin || "https://driver.localhost";
+    const locationHref = options.locationHref || `${locationOrigin}/driver/`;
+    const locationPathname = options.locationPathname || "/driver/";
+    const serviceWorkerUrl = options.serviceWorkerUrl || "/driver-service-worker.js";
+    const serviceWorkerScope = options.serviceWorkerScope || "/driver/";
     const document = new DocumentStub({
         appContractVersion: htmlContractVersion,
         appShellVersion: htmlShellVersion,
         appRoleCode: roleCode,
         appContractReady: "false",
-        appServiceWorkerUrl: "/driver-service-worker.js",
-        appServiceWorkerScope: "/driver/",
+        appServiceWorkerUrl: serviceWorkerUrl,
+        appServiceWorkerScope: serviceWorkerScope,
     });
     let unfinishedActionActive = Boolean(options.unfinishedAction);
     if (options.unfinishedAction) {
@@ -403,6 +408,7 @@ function createRuntime(options = {}) {
     let reloadCalls = 0;
     let updateCalls = 0;
     let registerCalls = 0;
+    const registerRequests = [];
     let registerFailuresRemaining = Number(options.registerFailures || 0);
     let updateFailuresRemaining = Number(options.updateFailures || 0);
     let registrationAvailable = options.registrationAvailable !== false;
@@ -455,6 +461,10 @@ function createRuntime(options = {}) {
     });
     const activeWorker = {
         state: "activated",
+        scriptURL: new URL(
+            options.registrationWorkerUrl || serviceWorkerUrl,
+            locationHref
+        ).href,
         postMessage(message, transfer) {
             activeWorkerMessages.push(message);
             if (
@@ -501,6 +511,10 @@ function createRuntime(options = {}) {
         },
     };
     const registration = Object.assign(registrationTarget, {
+        scope: new URL(
+            options.registrationScope || serviceWorkerScope,
+            locationHref
+        ).href,
         waiting: options.hasWaitingWorker === false ? null : waitingWorker,
         installing: null,
         active: activeWorker,
@@ -527,8 +541,13 @@ function createRuntime(options = {}) {
         getRegistrations() {
             return Promise.resolve([registration]);
         },
-        register() {
+        register(workerUrl, registerOptions = {}) {
             registerCalls += 1;
+            registerRequests.push({
+                workerUrl: String(workerUrl),
+                scope: String(registerOptions.scope || ""),
+                updateViaCache: String(registerOptions.updateViaCache || ""),
+            });
             if (registerFailuresRemaining > 0) {
                 registerFailuresRemaining -= 1;
                 return Promise.reject(new Error("transient registration failure"));
@@ -541,6 +560,11 @@ function createRuntime(options = {}) {
                     });
                 });
             }
+            registration.scope = new URL(
+                registerOptions.scope || serviceWorkerScope,
+                locationHref
+            ).href;
+            activeWorker.scriptURL = new URL(workerUrl, locationHref).href;
             registrationAvailable = true;
             return Promise.resolve(registration);
         },
@@ -555,9 +579,9 @@ function createRuntime(options = {}) {
         },
     };
     const location = {
-        origin: "https://driver.localhost",
-        href: "https://driver.localhost/driver/",
-        pathname: "/driver/",
+        origin: locationOrigin,
+        href: locationHref,
+        pathname: locationPathname,
         assign(value) {
             this.href = String(value);
         },
@@ -604,6 +628,7 @@ function createRuntime(options = {}) {
         get registerCalls() {
             return registerCalls;
         },
+        registerRequests,
         resolveRegistration() {
             assert.ok(
                 deferredRegistrationResolvers.length,
@@ -2070,6 +2095,42 @@ test(
 );
 
 test(
+    "a broader worker from another role cannot replace the configured scoped worker",
+    {skip: guardUnavailable},
+    async () => {
+        const runtime = createRuntime({
+            htmlShellVersion: "settlement-clerk-shell-v1",
+            workerShellVersion: "settlement-clerk-shell-v1",
+            roleCode: "settlement_clerk",
+            locationOrigin: "https://dispatcher.localhost",
+            locationHref: "https://dispatcher.localhost/settlement/",
+            locationPathname: "/settlement/",
+            serviceWorkerUrl: "/settlement/sw.js",
+            serviceWorkerScope: "/settlement/",
+            registrationScope: "/",
+            registrationWorkerUrl: "/dispatcher-service-worker.js",
+            hasWaitingWorker: false,
+        });
+        await flushRuntime(runtime);
+
+        assert.equal(runtime.registerCalls, 1);
+        assert.deepEqual(runtime.registerRequests, [{
+            workerUrl: "/settlement/sw.js",
+            scope: "/settlement/",
+            updateViaCache: "none",
+        }]);
+        assert.equal(
+            runtime.registration.scope,
+            "https://dispatcher.localhost/settlement/"
+        );
+        assert.equal(
+            runtime.activeWorker.scriptURL,
+            "https://dispatcher.localhost/settlement/sw.js"
+        );
+    }
+);
+
+test(
     "transient registration failure retries once on online and does not storm",
     {skip: guardUnavailable},
     async () => {
@@ -2462,7 +2523,7 @@ test("all role PWA cache prefixes are unique and cleanup stays role-scoped", () 
         ),
         (match) => ({roleCode: match[1], shellVersion: match[2]})
     );
-    assert.equal(roleVersions.length, 11);
+    assert.equal(roleVersions.length, 12);
 
     const prefixes = roleVersions.map(({roleCode, shellVersion}) => {
         const markerIndex = shellVersion.lastIndexOf("-v");

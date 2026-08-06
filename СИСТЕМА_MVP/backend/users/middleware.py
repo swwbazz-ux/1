@@ -54,7 +54,12 @@ class PersonalSessionRenewalMiddleware:
 
 
 class ActiveRoleSessionMiddleware:
-    allowed_unsafe_paths = {'/', '/activate-access/', '/logout/'}
+    allowed_unsafe_paths = {
+        '/',
+        '/activate-access/',
+        '/logout/',
+        '/settlement/login/',
+    }
 
     def __init__(self, get_response):
         self.get_response = get_response

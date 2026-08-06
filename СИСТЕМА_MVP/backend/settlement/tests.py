@@ -10,13 +10,18 @@ from django.core.management import call_command
 from django.db import IntegrityError, connection, models, router, transaction
 from django.db.models.deletion import ProtectedError
 from django.db.utils import NotSupportedError
-from django.test import Client, TestCase, TransactionTestCase
+from django.test import Client, TestCase, TransactionTestCase, override_settings
 from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone
 
 from assignments.models import AssignmentStatus, EquipmentAssignment, WorkShiftType
 from references.models import Dormitory, Equipment, EquipmentType
+from users.active_role import (
+    ACTIVE_ROLE_CODE_SESSION_KEY,
+    ACTIVE_ROLE_GENERATION_SESSION_KEY,
+    ACTIVE_ROLE_SESSION_KEY,
+)
 from users.models import Employee, EmployeeAccess, Role
 
 from .fund import expected_fund_totals
@@ -2756,6 +2761,14 @@ class SettlementMapAccessTests(TestCase):
             code='driver',
             name='Водитель самосвала',
         )
+        cls.dispatcher_role = Role.objects.create(
+            code='dispatcher',
+            name='Горный диспетчер',
+        )
+        cls.admin_role = Role.objects.create(
+            code='admin',
+            name='Системный администратор',
+        )
         cls.clerk_employee = Employee.objects.create(
             full_name='Тестовый делопроизводитель',
             phone='+79000000901',
@@ -2765,6 +2778,18 @@ class SettlementMapAccessTests(TestCase):
         cls.driver_employee = Employee.objects.create(
             full_name='Тестовый водитель',
             phone='+79000000902',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        cls.switch_employee = Employee.objects.create(
+            full_name='Тестовый сотрудник с двумя доступами',
+            phone='+79000000903',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        cls.admin_employee = Employee.objects.create(
+            full_name='Тестовый администратор',
+            phone='+79000000904',
             status=Employee.Status.ACTIVE,
             is_active=True,
         )
@@ -2782,6 +2807,27 @@ class SettlementMapAccessTests(TestCase):
             status=EmployeeAccess.Status.ACTIVATED,
             is_active=True,
         )
+        cls.switch_clerk_access = EmployeeAccess.objects.create(
+            employee=cls.switch_employee,
+            role=cls.clerk_role,
+            access_code='990003',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+        cls.dispatcher_access = EmployeeAccess.objects.create(
+            employee=cls.switch_employee,
+            role=cls.dispatcher_role,
+            access_code='990004',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+        cls.admin_access = EmployeeAccess.objects.create(
+            employee=cls.admin_employee,
+            role=cls.admin_role,
+            access_code='990005',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
 
     @staticmethod
     def authenticate(client, access):
@@ -2789,11 +2835,15 @@ class SettlementMapAccessTests(TestCase):
         session['employee_access_id'] = access.id
         session.save()
 
+    @staticmethod
+    def settlement_login_url():
+        return f"{reverse('settlement_login')}?next=%2Fsettlement%2F"
+
     def test_anonymous_user_is_redirected_to_login(self):
         response = self.client.get(reverse('settlement_map'))
         self.assertRedirects(
             response,
-            reverse('login'),
+            self.settlement_login_url(),
             fetch_redirect_response=False,
         )
 
@@ -2802,8 +2852,248 @@ class SettlementMapAccessTests(TestCase):
         response = self.client.get(reverse('settlement_map'))
         self.assertRedirects(
             response,
-            reverse('role_home'),
+            self.settlement_login_url(),
             fetch_redirect_response=False,
+        )
+
+    def test_admin_opens_settlement_map_under_existing_policy(self):
+        self.authenticate(self.client, self.admin_access)
+
+        response = self.client.get(reverse('settlement_map'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, 'settlement/clerk_map.html')
+
+    def test_dispatcher_session_is_sent_to_targeted_settlement_login(self):
+        self.authenticate(self.client, self.dispatcher_access)
+
+        response = self.client.get(reverse('settlement_map'))
+
+        self.assertRedirects(
+            response,
+            self.settlement_login_url(),
+            fetch_redirect_response=False,
+        )
+        login_response = self.client.get(response['Location'])
+        self.assertEqual(login_response.status_code, 200)
+        self.assertTemplateUsed(login_response, 'users/login.html')
+        self.assertContains(login_response, 'Расселение')
+        self.assertContains(login_response, 'name="next" value="/settlement/"')
+        self.assertContains(
+            login_response,
+            'data-app-role-code="settlement_clerk"',
+        )
+        self.assertContains(
+            login_response,
+            'data-app-service-worker-url="/settlement/sw.js"',
+        )
+        self.assertNotContains(login_response, '/dispatcher.webmanifest')
+        self.assertNotContains(login_response, '/dispatcher-sw.js')
+        self.assertEqual(
+            self.client.session['employee_access_id'],
+            self.dispatcher_access.id,
+        )
+
+    @override_settings(ALLOWED_HOSTS=['localhost', '.localhost'])
+    def test_dispatcher_role_host_uses_settlement_contract_without_flushing_session(self):
+        self.authenticate(self.client, self.dispatcher_access)
+        original_session_key = self.client.session.session_key
+
+        redirect_response = self.client.get(
+            reverse('settlement_map'),
+            HTTP_HOST='dispatcher.localhost',
+        )
+        login_response = self.client.get(
+            redirect_response['Location'],
+            HTTP_HOST='dispatcher.localhost',
+        )
+
+        self.assertEqual(login_response.status_code, 200)
+        self.assertContains(
+            login_response,
+            'data-app-role-code="settlement_clerk"',
+        )
+        self.assertContains(
+            login_response,
+            'data-app-service-worker-url="/settlement/sw.js"',
+        )
+        self.assertContains(
+            login_response,
+            'data-app-service-worker-scope="/settlement/"',
+        )
+        self.assertNotContains(login_response, '/dispatcher.webmanifest')
+        self.assertNotContains(login_response, '/dispatcher-sw.js')
+        self.assertEqual(self.client.session.session_key, original_session_key)
+        self.assertEqual(
+            self.client.session['employee_access_id'],
+            self.dispatcher_access.id,
+        )
+
+    @override_settings(ALLOWED_HOSTS=['localhost', '.localhost'])
+    def test_admin_role_host_map_publishes_settlement_contract(self):
+        self.authenticate(self.client, self.admin_access)
+
+        response = self.client.get(
+            reverse('settlement_map'),
+            HTTP_HOST='admin.localhost',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-app-role-code="settlement_clerk"')
+        self.assertContains(
+            response,
+            'data-app-service-worker-url="/settlement/sw.js"',
+        )
+        self.assertContains(
+            response,
+            'data-app-service-worker-scope="/settlement/"',
+        )
+        self.assertNotContains(response, '/system-admin-sw.js')
+
+    def test_targeted_login_switches_exact_access_and_rotates_session(self):
+        self.authenticate(self.client, self.dispatcher_access)
+        original_session_key = self.client.session.session_key
+
+        response = self.client.post(
+            reverse('settlement_login'),
+            {
+                'phone': self.switch_employee.phone,
+                'access_code': self.switch_clerk_access.access_code,
+                'next': 'https://example.invalid/',
+                'device_kind': 'personal',
+            },
+        )
+
+        self.assertRedirects(
+            response,
+            reverse('settlement_map'),
+            fetch_redirect_response=False,
+        )
+        session = self.client.session
+        self.assertNotEqual(session.session_key, original_session_key)
+        self.assertEqual(
+            session['employee_access_id'],
+            self.switch_clerk_access.id,
+        )
+        self.assertEqual(
+            session[ACTIVE_ROLE_SESSION_KEY],
+            self.switch_clerk_access.id,
+        )
+        self.assertEqual(
+            session[ACTIVE_ROLE_CODE_SESSION_KEY],
+            'settlement_clerk',
+        )
+        self.assertTrue(session[ACTIVE_ROLE_GENERATION_SESSION_KEY])
+
+        map_response = self.client.get(reverse('settlement_map'))
+        self.assertEqual(map_response.status_code, 200)
+        self.assertTemplateUsed(map_response, 'settlement/clerk_map.html')
+
+    @override_settings(ALLOWED_HOSTS=['localhost', '.localhost'])
+    def test_targeted_login_activates_pending_clerk_access_on_other_role_host(self):
+        pending_access = EmployeeAccess.objects.create(
+            employee=self.switch_employee,
+            role=self.clerk_role,
+            access_code='990006',
+            status=EmployeeAccess.Status.NOT_ACTIVATED,
+            primary_code_issued_at=timezone.now(),
+            is_active=True,
+        )
+        self.switch_clerk_access.is_active = False
+        self.switch_clerk_access.save(update_fields=['is_active'])
+        self.authenticate(self.client, self.dispatcher_access)
+        original_session_key = self.client.session.session_key
+
+        login_response = self.client.post(
+            reverse('settlement_login'),
+            {
+                'phone': self.switch_employee.phone,
+                'access_code': '990006',
+                'device_kind': 'personal',
+            },
+            HTTP_HOST='dispatcher.localhost',
+        )
+
+        self.assertRedirects(
+            login_response,
+            reverse('activate_access'),
+            fetch_redirect_response=False,
+        )
+        activation_page = self.client.get(
+            reverse('activate_access'),
+            HTTP_HOST='dispatcher.localhost',
+        )
+        self.assertEqual(activation_page.status_code, 200)
+        self.assertContains(activation_page, 'data-app-role-code="settlement_clerk"')
+        self.assertContains(
+            activation_page,
+            'data-app-service-worker-url="/settlement/sw.js"',
+        )
+        self.assertContains(
+            activation_page,
+            'data-app-service-worker-scope="/settlement/"',
+        )
+        self.assertNotContains(activation_page, '/dispatcher-sw.js')
+
+        activation_response = self.client.post(
+            reverse('activate_access'),
+            {
+                'new_access_code': '880006',
+                'confirm_access_code': '880006',
+            },
+            HTTP_HOST='dispatcher.localhost',
+        )
+
+        self.assertRedirects(
+            activation_response,
+            reverse('settlement_map'),
+            fetch_redirect_response=False,
+        )
+        pending_access.refresh_from_db()
+        session = self.client.session
+        self.assertEqual(pending_access.status, EmployeeAccess.Status.ACTIVATED)
+        self.assertEqual(pending_access.access_code, '880006')
+        self.assertNotEqual(session.session_key, original_session_key)
+        self.assertEqual(session['employee_access_id'], pending_access.id)
+        self.assertEqual(session[ACTIVE_ROLE_SESSION_KEY], pending_access.id)
+        self.assertEqual(
+            session[ACTIVE_ROLE_CODE_SESSION_KEY],
+            'settlement_clerk',
+        )
+        map_response = self.client.get(
+            reverse('settlement_map'),
+            HTTP_HOST='dispatcher.localhost',
+        )
+        self.assertEqual(map_response.status_code, 200)
+        self.assertTemplateUsed(map_response, 'settlement/clerk_map.html')
+
+    def test_credentials_without_settlement_access_are_denied_in_targeted_login(self):
+        self.authenticate(self.client, self.driver_access)
+
+        response = self.client.post(
+            reverse('settlement_login'),
+            {
+                'phone': self.driver_employee.phone,
+                'access_code': self.driver_access.access_code,
+                'device_kind': 'personal',
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            'У этой учетной записи нет доступа к приложению «Расселение».',
+        )
+        self.assertContains(response, 'data-app-role-code="settlement_clerk"')
+        self.assertNotContains(response, '/driver.webmanifest')
+        self.assertNotContains(response, '/driver-sw.js')
+        self.assertEqual(
+            self.client.session['employee_access_id'],
+            self.driver_access.id,
+        )
+        self.assertNotEqual(
+            self.client.session.get(ACTIVE_ROLE_SESSION_KEY),
+            self.switch_clerk_access.id,
         )
 
     def test_role_home_routes_settlement_clerk_to_map(self):
@@ -2830,6 +3120,9 @@ class SettlementMapAccessTests(TestCase):
         self.assertEqual(response.context['summary']['transferred_beds'], 270)
 
         content = response.content.decode('utf-8')
+        self.assertIn('/settlement/manifest.webmanifest', content)
+        self.assertIn('data-app-service-worker-url="/settlement/sw.js"', content)
+        self.assertIn('data-app-service-worker-scope="/settlement/"', content)
         self.assertEqual(content.count('data-room-card'), 60)
         self.assertEqual(content.count('data-bed-id='), 348)
         self.assertEqual(
@@ -2870,6 +3163,92 @@ class SettlementMapAccessTests(TestCase):
             ),
             before,
         )
+
+
+class SettlementPwaContractTests(TestCase):
+    def test_manifest_has_isolated_settlement_start_and_scope(self):
+        response = self.client.get(reverse('settlement_manifest'))
+
+        self.assertEqual(response.status_code, 200)
+        manifest = response.json()
+        self.assertEqual(manifest['start_url'], '/settlement/')
+        self.assertEqual(manifest['scope'], '/settlement/')
+        self.assertEqual(manifest['role_code'], 'settlement_clerk')
+        self.assertEqual(manifest['shell_version'], 'settlement-clerk-shell-v1')
+        self.assertTrue(
+            all(icon['src'].startswith('/static/img/pwa/settlement-') for icon in manifest['icons'])
+        )
+
+    def test_worker_has_narrow_scope_unique_cache_and_old_cache_cleanup(self):
+        response = self.client.get(reverse('settlement_service_worker'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response['Service-Worker-Allowed'], '/settlement/')
+        script = response.content.decode('utf-8')
+        self.assertIn('const CACHE_PREFIX = "settlement-clerk-shell-";', script)
+        self.assertIn('const CACHE_NAME = "settlement-clerk-shell-v1";', script)
+        self.assertIn('key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME', script)
+        self.assertIn('.map(key => caches.delete(key))', script)
+        self.assertNotIn('/dispatcher/control/', script)
+        self.assertNotIn('/driver/', script)
+        self.assertNotIn('/excavator/work/', script)
+        self.assertNotIn('/mining-master/assignments/', script)
+
+    def test_targeted_login_registers_only_settlement_pwa_metadata(self):
+        response = self.client.get(reverse('settlement_login'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, '/settlement/manifest.webmanifest')
+        self.assertContains(response, 'data-app-service-worker-url="/settlement/sw.js"')
+        self.assertContains(response, 'data-app-service-worker-scope="/settlement/"')
+        self.assertNotContains(response, '/dispatcher-sw.js')
+
+        shared_login = self.client.get(reverse('login'))
+        self.assertEqual(shared_login.status_code, 200)
+        self.assertNotContains(shared_login, '/settlement/manifest.webmanifest')
+        self.assertContains(shared_login, 'data-app-service-worker-url=""')
+
+    @override_settings(ALLOWED_HOSTS=['localhost', '.localhost'])
+    def test_isolated_settlement_host_uses_root_scope_for_its_own_worker(self):
+        manifest_response = self.client.get(
+            reverse('settlement_manifest'),
+            HTTP_HOST='settlement.localhost',
+        )
+        worker_response = self.client.get(
+            reverse('settlement_service_worker'),
+            HTTP_HOST='settlement.localhost',
+        )
+        login_response = self.client.get(
+            reverse('settlement_login'),
+            HTTP_HOST='settlement.localhost',
+        )
+
+        self.assertEqual(manifest_response.json()['scope'], '/')
+        self.assertEqual(worker_response['Service-Worker-Allowed'], '/')
+        self.assertContains(
+            login_response,
+            'data-app-service-worker-url="/settlement/sw.js"',
+        )
+        self.assertContains(login_response, 'data-app-service-worker-scope="/"')
+        self.assertNotContains(login_response, '/dispatcher-sw.js')
+
+    def test_other_role_workers_do_not_fallback_to_settlement(self):
+        cases = (
+            ('driver_service_worker', '/driver/'),
+            ('excavator_service_worker', '/excavator/'),
+            ('mining_master_service_worker', '/mining-master/'),
+            ('dispatcher_service_worker', '/dispatcher/'),
+        )
+
+        for url_name, expected_scope in cases:
+            with self.subTest(worker=url_name):
+                response = self.client.get(reverse(url_name))
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response['Service-Worker-Allowed'], expected_scope)
+                self.assertNotIn(
+                    '/settlement/',
+                    response.content.decode('utf-8'),
+                )
 
 
 class SettlementOccupancyWorkflowTests(TestCase):

@@ -2,14 +2,29 @@ from .active_role import role_session_state
 from .role_apps import (
     APP_CONTRACT_VERSION,
     STATIC_ASSET_RELEASE,
+    get_role_app,
     get_role_app_for_path,
     get_role_app_for_request,
 )
 
 
 def role_app(request):
-    app = get_role_app_for_request(request)
-    metadata_app = app or get_role_app_for_path(request.path)
+    host_app = get_role_app_for_request(request)
+    pending_activation_app = None
+    resolver_match = getattr(request, 'resolver_match', None)
+    if resolver_match and resolver_match.url_name == 'activate_access':
+        pending_activation_app = get_role_app(
+            request.session.get('pending_activation_target_app_code', '')
+        )
+    path_app = pending_activation_app or get_role_app_for_path(request.path)
+    app = host_app
+    if (
+        host_app
+        and path_app
+        and host_app.role_code != path_app.role_code
+    ):
+        app = None
+    metadata_app = path_app or host_app
     state = getattr(request, 'role_session_state', None) or role_session_state(request)
     return {
         'role_app': app,

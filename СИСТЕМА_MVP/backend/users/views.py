@@ -101,6 +101,7 @@ from .oup_undo import (
 )
 from .role_apps import (
     APP_CONTRACT_VERSION,
+    get_role_app,
     get_role_app_for_request,
     role_app_manifest_response,
     role_app_service_worker_response,
@@ -497,11 +498,23 @@ def _masked_activation_phone(value):
     return 'Телефон подтвержден'
 
 
-def login_view(request):
+def login_view(
+    request,
+    *,
+    allowed_role_codes=None,
+    target_role_app=None,
+    forced_next_url='',
+):
     role_app = get_role_app_for_request(request)
-    next_url = _validated_next_url(
+    login_role_app = target_role_app or role_app
+    allowed_role_codes = tuple(allowed_role_codes or ())
+    next_url = forced_next_url or _validated_next_url(
         request,
-        request.POST.get('next') if request.method == 'POST' else request.GET.get('next'),
+        (
+            request.POST.get('next')
+            if request.method == 'POST'
+            else request.GET.get('next')
+        ),
     )
     current_access = get_current_access(request) if request.method == 'GET' else None
     rating_tv_reauthentication_required = bool(
@@ -509,13 +522,27 @@ def login_view(request):
         and next_url == reverse('driver_rating_tv')
         and not _active_role_session_matches_access(request, current_access)
     )
+    targeted_role_reauthentication_required = bool(
+        current_access
+        and allowed_role_codes
+        and (
+            current_access.role.code not in allowed_role_codes
+            or not _active_role_session_matches_access(request, current_access)
+        )
+    )
     if (
         request.method == 'GET'
         and current_access
         and not rating_tv_reauthentication_required
+        and not targeted_role_reauthentication_required
     ):
         return redirect(next_url or 'role_home')
-    if request.method == 'GET' and role_app and request.session.get('employee_access_id'):
+    if (
+        request.method == 'GET'
+        and role_app
+        and target_role_app is None
+        and request.session.get('employee_access_id')
+    ):
         request.session.flush()
     selected_device_kind = request.POST.get('device_kind') if request.method == 'POST' else detect_session_device_kind(request)
     if selected_device_kind not in {'personal', 'shared'}:
@@ -526,7 +553,12 @@ def login_view(request):
         access = find_employee_access_by_credentials(
             phone,
             access_code,
-            role_code=role_app.role_code if role_app else None,
+            role_code=(
+                role_app.role_code
+                if role_app and not allowed_role_codes
+                else None
+            ),
+            role_codes=allowed_role_codes,
         )
         if access and not employee_has_effective_access_role(
             access.employee,
@@ -539,6 +571,16 @@ def login_view(request):
                 if access.primary_code_issued_at:
                     request.session.cycle_key()
                     request.session['pending_activation_access_id'] = access.id
+                    request.session['pending_activation_role_code'] = access.role.code
+                    if target_role_app:
+                        request.session['pending_activation_target_app_code'] = (
+                            target_role_app.role_code
+                        )
+                    else:
+                        request.session.pop(
+                            'pending_activation_target_app_code',
+                            None,
+                        )
                     if next_url:
                         request.session['post_activation_next'] = next_url
                     set_session_device_kind(request, selected_device_kind)
@@ -566,22 +608,38 @@ def login_view(request):
                 return render(
                     request,
                     'users/login.html',
-                    {'selected_device_kind': selected_device_kind, 'next_url': next_url},
+                    {
+                        'selected_device_kind': selected_device_kind,
+                        'next_url': next_url,
+                        'login_role_app': login_role_app,
+                    },
                 )
             request.session.cycle_key()
             set_session_device_kind(request, selected_device_kind)
             return redirect(next_url or 'role_home')
-        if role_app:
+        other_access = None
+        if allowed_role_codes:
+            other_access = find_employee_access_by_credentials(phone, access_code)
+        if other_access:
             messages.error(
                 request,
-                f'Телефон или пинкод указаны неверно для приложения «{role_app.short_name}».',
+                f'У этой учетной записи нет доступа к приложению «{login_role_app.short_name}».',
+            )
+        elif login_role_app:
+            messages.error(
+                request,
+                f'Телефон или пинкод указаны неверно для приложения «{login_role_app.short_name}».',
             )
         else:
             messages.error(request, 'Телефон или пинкод указаны неверно.')
     return render(
         request,
         'users/login.html',
-        {'selected_device_kind': selected_device_kind, 'next_url': next_url},
+        {
+            'selected_device_kind': selected_device_kind,
+            'next_url': next_url,
+            'login_role_app': login_role_app,
+        },
     )
 
 
@@ -589,14 +647,20 @@ def activate_access_view(request):
     access_id = request.session.get('pending_activation_access_id')
     if not access_id:
         return redirect('login')
+    pending_role_code = request.session.get('pending_activation_role_code')
+    target_app = get_role_app(
+        request.session.get('pending_activation_target_app_code', '')
+    )
     access_queryset = (
         EmployeeAccess.objects
         .select_related('employee', 'role')
         .filter(id=access_id, is_active=True, status=EmployeeAccess.Status.NOT_ACTIVATED)
     )
-    role_app = get_role_app_for_request(request)
-    if role_app:
-        access_queryset = access_queryset.filter(role__code=role_app.role_code)
+    host_role_app = get_role_app_for_request(request)
+    if pending_role_code:
+        access_queryset = access_queryset.filter(role__code=pending_role_code)
+    elif host_role_app:
+        access_queryset = access_queryset.filter(role__code=host_role_app.role_code)
     access = access_queryset.first()
     if access and not employee_has_effective_access_role(
         access.employee,
@@ -605,8 +669,16 @@ def activate_access_view(request):
     ):
         access = None
     if not access:
-        request.session.pop('pending_activation_access_id', None)
+        for key in (
+            'pending_activation_access_id',
+            'pending_activation_role_code',
+            'pending_activation_target_app_code',
+            'post_activation_next',
+        ):
+            request.session.pop(key, None)
         return redirect('login')
+
+    activation_role_app = target_app or host_role_app
 
     if request.method == 'POST':
         form = AccessActivationForm(request.POST, access=access)
@@ -642,10 +714,15 @@ def activate_access_view(request):
                         'access': access,
                         'activation_phone': _masked_activation_phone(access.employee.phone),
                         'form': form,
-                        'role_app': role_app,
+                        'activation_role_app': activation_role_app,
                     },
                 )
-            request.session.pop('pending_activation_access_id', None)
+            for key in (
+                'pending_activation_access_id',
+                'pending_activation_role_code',
+                'pending_activation_target_app_code',
+            ):
+                request.session.pop(key, None)
             request.session.cycle_key()
             set_session_device_kind(request, get_session_device_kind(request))
             if access.role.code != 'oup':
@@ -665,7 +742,7 @@ def activate_access_view(request):
             'access': access,
             'activation_phone': _masked_activation_phone(access.employee.phone),
             'form': form,
-            'role_app': role_app,
+            'activation_role_app': activation_role_app,
         },
     )
 

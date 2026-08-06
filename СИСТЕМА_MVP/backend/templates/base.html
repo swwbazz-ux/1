@@ -292,6 +292,22 @@
             return appContractVersion + ":" + roleCode + ":" + shellVersion;
         }
 
+        function registrationWorker(candidate) {
+            if (!candidate) return null;
+            return candidate.active || candidate.waiting || candidate.installing || null;
+        }
+
+        function registrationMatchesConfiguration(candidate, scope, workerUrl) {
+            if (!candidate || !workerUrl) return false;
+            var expectedScope = new URL(scope, window.location.origin).href;
+            var expectedWorkerUrl = new URL(workerUrl, window.location.origin).href;
+            var workers = [candidate.active, candidate.waiting, candidate.installing];
+            return candidate.scope === expectedScope && workers.some(function (worker) {
+                return worker
+                    && new URL(worker.scriptURL, window.location.origin).href === expectedWorkerUrl;
+            });
+        }
+
         function configuredRegistration() {
             if (registration) return Promise.resolve(registration);
             if (registrationPromise) return registrationPromise;
@@ -309,12 +325,11 @@
                     ? Promise.resolve(null)
                     : serviceWorker.ready;
             registrationPromise = Promise.resolve(source).then(function (currentRegistration) {
-                if (
-                    currentRegistration
-                    || !workerUrl
-                    || !serviceWorker.register
-                ) {
+                if (!workerUrl || !serviceWorker.register) {
                     return currentRegistration || null;
+                }
+                if (registrationMatchesConfiguration(currentRegistration, scope, workerUrl)) {
+                    return currentRegistration;
                 }
                 return serviceWorker.register(workerUrl, {
                     scope: scope,
@@ -329,11 +344,7 @@
                 registration = currentRegistration;
                 registrationNeedsRecovery = false;
                 watchRegistration(currentRegistration);
-                requestWorkerVersion(
-                    serviceWorker.controller
-                    || currentRegistration.active
-                    || currentRegistration.waiting
-                );
+                requestWorkerVersion(registrationWorker(currentRegistration));
                 return currentRegistration;
             }).catch(function () {
                 registrationNeedsRecovery = true;

@@ -19,6 +19,7 @@ ROLE_ICONS = {
     "mining-master": ("#2366A8", "Горный мастер"),
     "deputy-mining-manager": ("#2E7D52", "Заместитель начальника участка"),
     "dispatcher": ("#B33A4C", "Диспетчер"),
+    "settlement": ("#2E7D52", "Расселение"),
     "oup": ("#A64778", "ОУП"),
     "mechanic": ("#C65C2E", "Механик"),
     "management": ("#5058A4", "Руководство"),
@@ -111,6 +112,16 @@ def draw_dispatcher(draw: ImageDraw.ImageDraw) -> None:
     draw.arc(box((344, 338, 680, 674)), start=205, end=335, fill=COPPER, width=s(24))
 
 
+def draw_settlement(draw: ImageDraw.ImageDraw) -> None:
+    rounded(draw, (282, 430, 742, 674), radius=34, fill=INK)
+    rounded(draw, (326, 478, 470, 574), radius=24, fill=GRAPHITE)
+    rounded(draw, (494, 478, 698, 574), radius=24, fill=GRAPHITE)
+    line(draw, [(302, 388), (302, 724)], fill=COPPER, width=34)
+    line(draw, [(722, 388), (722, 724)], fill=COPPER, width=34)
+    line(draw, [(302, 625), (722, 625)], fill=COPPER, width=26)
+    draw.polygon(points([(512, 276), (756, 410), (708, 448), (512, 340), (316, 448), (268, 410)]), fill=INK)
+
+
 def draw_oup(draw: ImageDraw.ImageDraw) -> None:
     for x, y, radius in ((390, 402, 80), (584, 402, 80), (487, 330, 88)):
         draw.ellipse(box((x - radius, y - radius, x + radius, y + radius)), fill=INK)
@@ -165,6 +176,7 @@ DRAWERS = {
     "mining-master": draw_mining_master,
     "deputy-mining-manager": draw_deputy,
     "dispatcher": draw_dispatcher,
+    "settlement": draw_settlement,
     "oup": draw_oup,
     "mechanic": draw_mechanic,
     "management": draw_management,

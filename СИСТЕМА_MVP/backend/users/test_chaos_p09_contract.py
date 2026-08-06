@@ -91,7 +91,7 @@ class PwaContractVersionMatrixRegressionTests(TestCase):
             '__missing_app_contract_version__',
         )
 
-        self.assertEqual(len(ROLE_APPS), 11)
+        self.assertEqual(len(ROLE_APPS), 12)
         for app in ROLE_APPS:
             host = f'{app.subdomain}.localhost'
             access = self.accesses[app.role_code]

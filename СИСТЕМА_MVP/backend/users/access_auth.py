@@ -2,7 +2,12 @@ from .forms import is_valid_russian_mobile_phone, normalize_phone
 from .models import EmployeeAccess
 
 
-def find_employee_access_by_credentials(phone, access_code, role_code=None):
+def find_employee_access_by_credentials(
+    phone,
+    access_code,
+    role_code=None,
+    role_codes=None,
+):
     phone = (phone or '').strip()
     normalized_phone = normalize_phone(phone)
     access_code = (access_code or '').strip()
@@ -16,6 +21,8 @@ def find_employee_access_by_credentials(phone, access_code, role_code=None):
     )
     if role_code:
         access_candidates = access_candidates.filter(role__code=role_code)
+    elif role_codes:
+        access_candidates = access_candidates.filter(role__code__in=tuple(role_codes))
 
     for candidate in access_candidates:
         employee_phone = normalize_phone(candidate.employee.phone)

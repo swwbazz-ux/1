@@ -1,10 +1,12 @@
 import json
 from collections import defaultdict
+from urllib.parse import urlencode
 
 from django.core.exceptions import ValidationError
 from django.db.models import Exists, OuterRef, Prefetch, Q
 from django.http import JsonResponse
 from django.shortcuts import redirect, render
+from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_GET, require_POST
 
@@ -12,6 +14,11 @@ from assignments.models import AssignmentStatus, EquipmentAssignment
 from shifts.models import EmployeeShift
 from users.active_role import role_session_state
 from users.models import Employee, EmployeeAccess
+from users.role_apps import (
+    get_role_app,
+    role_app_manifest_response,
+    role_app_service_worker_response,
+)
 
 from .models import EmployeeBedOccupancy, PhysicalBed, PhysicalRoom
 from .services import effective_occupancy_at_q, settle_employee_on_bed
@@ -253,13 +260,31 @@ def _dormitory_views(rooms):
     return result
 
 
+def settlement_login_view(request):
+    from users.views import login_view
+
+    return login_view(
+        request,
+        allowed_role_codes=('settlement_clerk', 'admin'),
+        target_role_app=get_role_app('settlement_clerk'),
+        forced_next_url=reverse('settlement_map'),
+    )
+
+
+def settlement_manifest_view(request):
+    return role_app_manifest_response(request, 'settlement_clerk')
+
+
+def settlement_service_worker_view(request):
+    return role_app_service_worker_response(request, 'settlement_clerk')
+
+
 @require_GET
 def settlement_map_view(request):
     access = settlement_clerk_access_from_request(request)
     if not access:
-        if request.session.get('employee_access_id'):
-            return redirect('role_home')
-        return redirect('login')
+        next_url = urlencode({'next': reverse('settlement_map')})
+        return redirect(f'{reverse("settlement_login")}?{next_url}')
 
     moment = timezone.now()
     rooms = list(

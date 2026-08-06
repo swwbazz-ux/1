@@ -9,7 +9,7 @@ from .role_apps import ROLE_APPS
 @override_settings(ALLOWED_HOSTS=['localhost', '.localhost'])
 class LoginMobileOverflowContractTests(SimpleTestCase):
     def test_all_role_origins_render_the_shared_mobile_login_contract(self):
-        self.assertEqual(len(ROLE_APPS), 11)
+        self.assertEqual(len(ROLE_APPS), 12)
 
         for app in ROLE_APPS:
             with self.subTest(role=app.role_code, host=app.subdomain):
