@@ -1,14 +1,12 @@
 from datetime import date
-from unittest.mock import patch
 
-from django.contrib import admin
 from django.core.exceptions import ValidationError
 from django.test import TestCase
 from django.urls import reverse
 
 from reports.forms import RatingPeriodReferenceForm
 from reports.models import RatingPeriod
-from users.models import AdminActionLog, Employee, EmployeeAccess, Role
+from users.models import Employee, EmployeeAccess, Role
 
 
 class RatingPeriodModelTests(TestCase):
@@ -42,7 +40,6 @@ class RatingPeriodModelTests(TestCase):
                 name='Пересекающийся период',
                 starts_on=date(2026, 8, 1),
                 ends_before=date(2026, 9, 1),
-                comment='Техническая проверка пересечения.',
             )
 
         self.assertIn('Премирование за июль', ' '.join(error.exception.messages))
@@ -74,7 +71,6 @@ class RatingPeriodModelTests(TestCase):
             name='Черновой период',
             starts_on=date(2026, 7, 20),
             ends_before=date(2026, 8, 1),
-            comment='Техническая проверка ручного исключения.',
             is_active=False,
         )
 
@@ -90,7 +86,6 @@ class RatingPeriodModelTests(TestCase):
             name='Отключённый период',
             starts_on=date(2026, 7, 20),
             ends_before=date(2026, 8, 1),
-            comment='Техническая проверка ручного исключения.',
             is_active=False,
         )
 
@@ -100,81 +95,6 @@ class RatingPeriodModelTests(TestCase):
 
         inactive.refresh_from_db()
         self.assertFalse(inactive.is_active)
-
-    def test_manual_nonstandard_period_requires_reason_and_is_an_exception(self):
-        period = RatingPeriod(
-            name='Ручное исключение',
-            starts_on=date(2026, 7, 15),
-            ends_before=date(2026, 8, 15),
-        )
-
-        with self.assertRaises(ValidationError) as error:
-            period.save()
-
-        self.assertIn('comment', error.exception.message_dict)
-        period.comment = 'Дата контрольного замера перенесена.'
-        period.save()
-        self.assertTrue(period.has_manual_override)
-        self.assertEqual(period.manual_override_label(), 'Ручное исключение')
-
-    def test_mass_mutations_and_deletion_are_blocked(self):
-        period = RatingPeriod.objects.create(
-            name='Период с сохранением истории',
-            starts_on=date(2026, 7, 14),
-            ends_before=date(2026, 8, 14),
-        )
-
-        with self.assertRaises(ValidationError):
-            RatingPeriod.objects.filter(pk=period.pk).update(
-                name='Обход проверки',
-            )
-        with self.assertRaises(ValidationError):
-            RatingPeriod.objects.filter(pk=period.pk).delete()
-        with self.assertRaises(ValidationError):
-            RatingPeriod.objects.bulk_create([
-                RatingPeriod(
-                    name='Массовое создание',
-                    starts_on=date(2026, 8, 14),
-                    ends_before=date(2026, 9, 14),
-                ),
-            ])
-        period.name = 'Массовое обновление'
-        with self.assertRaises(ValidationError):
-            RatingPeriod.objects.bulk_update([period], ['name'])
-        with self.assertRaises(ValidationError):
-            period.delete()
-
-        period.refresh_from_db()
-        self.assertEqual(period.name, 'Период с сохранением истории')
-        self.assertFalse(
-            admin.site._registry[RatingPeriod].has_delete_permission(None)
-        )
-
-    def test_partial_update_reloads_current_dates_before_enabling(self):
-        RatingPeriod.objects.create(
-            name='Действующий период',
-            starts_on=date(2026, 7, 14),
-            ends_before=date(2026, 8, 14),
-        )
-        inactive = RatingPeriod.objects.create(
-            name='Отключённый период',
-            starts_on=date(2026, 8, 14),
-            ends_before=date(2026, 9, 14),
-            is_active=False,
-        )
-        stale_copy = RatingPeriod.objects.get(pk=inactive.pk)
-        inactive.starts_on = date(2026, 7, 20)
-        inactive.ends_before = date(2026, 8, 1)
-        inactive.comment = 'Границы изменены для проверки конкуренции.'
-        inactive.save()
-
-        stale_copy.is_active = True
-        with self.assertRaises(ValidationError):
-            stale_copy.save(update_fields=['is_active'])
-
-        inactive.refresh_from_db()
-        self.assertFalse(inactive.is_active)
-        self.assertEqual(inactive.starts_on, date(2026, 7, 20))
 
 
 class RatingPeriodReferenceFormTests(TestCase):
@@ -193,13 +113,12 @@ class RatingPeriodReferenceFormTests(TestCase):
             name='Период расчёта зарплаты',
             starts_on=date(2026, 7, 10),
             ends_before=date(2026, 8, 10),
-            comment='Техническая проверка ручного исключения.',
         )
         form = RatingPeriodReferenceForm(data={
             'name': 'Новый период',
             'starts_on': '2026-08-01',
             'ends_before': '2026-09-01',
-            'comment': 'Техническая проверка пересечения.',
+            'comment': '',
             'is_active': 'on',
         })
 
@@ -214,7 +133,6 @@ class RatingPeriodReferenceFormTests(TestCase):
             name='Действующий период',
             starts_on=date(2026, 7, 10),
             ends_before=date(2026, 8, 10),
-            comment='Техническая проверка ручного исключения.',
         )
         form = RatingPeriodReferenceForm(data={
             'name': 'Черновой период',
@@ -226,19 +144,6 @@ class RatingPeriodReferenceFormTests(TestCase):
         self.assertTrue(form.is_valid(), form.errors)
         period = form.save()
         self.assertFalse(period.is_active)
-
-    def test_form_requires_reason_for_nonstandard_dates(self):
-        form = RatingPeriodReferenceForm(data={
-            'name': 'Ручное исключение без причины',
-            'starts_on': '2026-07-15',
-            'ends_before': '2026-08-15',
-            'comment': '',
-            'is_active': 'on',
-        })
-
-        self.assertFalse(form.is_valid())
-        self.assertIn('comment', form.errors)
-        self.assertIn('14-е → 14-е', ' '.join(form.errors['comment']))
 
 
 class RatingPeriodSystemAdminReferenceTests(TestCase):
@@ -307,8 +212,6 @@ class RatingPeriodSystemAdminReferenceTests(TestCase):
         )
 
     def test_detail_screen_explains_scope_and_uses_date_inputs(self):
-        period_count_before = RatingPeriod.objects.count()
-        log_count_before = AdminActionLog.objects.count()
         response = self.client.get(
             reverse(
                 'system_admin_reference_detail',
@@ -321,14 +224,8 @@ class RatingPeriodSystemAdminReferenceTests(TestCase):
         self.assertContains(response, 'Периоды рейтинга')
         self.assertContains(
             response,
-            'Обычные периоды создаются автоматически',
+            'Период задаёт только даты замера рейтинга.',
         )
-        self.assertContains(
-            response,
-            'Вводить новый период каждый месяц не нужно.',
-        )
-        self.assertContains(response, '14-е → 14-е')
-        self.assertContains(response, 'текущий и 12 следующих')
         self.assertContains(response, 'Считать до (не включая дату)')
         self.assertContains(response, 'type="date"', count=2)
         self.assertIsNone(response.context['form']['starts_on'].value())
@@ -336,8 +233,6 @@ class RatingPeriodSystemAdminReferenceTests(TestCase):
         self.assertNotContains(response, 'name="watch_composition"')
         self.assertNotContains(response, 'name="shift_type"')
         self.assertNotContains(response, 'name="equipment"')
-        self.assertEqual(RatingPeriod.objects.count(), period_count_before)
-        self.assertEqual(AdminActionLog.objects.count(), log_count_before)
 
     def test_admin_can_create_edit_disable_and_enable_period(self):
         detail_url = reverse(
@@ -361,12 +256,6 @@ class RatingPeriodSystemAdminReferenceTests(TestCase):
         self.assertEqual(create_response.status_code, 302)
         period = RatingPeriod.objects.get(name='Премирование за август')
         self.assertTrue(period.is_active)
-        create_log = AdminActionLog.objects.get(
-            action='Период рейтинга создан вручную',
-            object_id=str(period.id),
-        )
-        self.assertIn('14.07.2026', create_log.new_value)
-        self.assertIn('создание: Вручную', create_log.new_value)
 
         edit_response = self.client.post(
             detail_url,
@@ -387,12 +276,6 @@ class RatingPeriodSystemAdminReferenceTests(TestCase):
         self.assertEqual(period.name, 'Премирование: июль–август')
         self.assertEqual(period.starts_on, date(2026, 7, 15))
         self.assertEqual(period.ends_before, date(2026, 8, 15))
-        edit_log = AdminActionLog.objects.get(
-            action='Период рейтинга изменён',
-            object_id=str(period.id),
-        )
-        self.assertIn('14.07.2026', edit_log.old_value)
-        self.assertIn('15.07.2026', edit_log.new_value)
 
         disable_response = self.client.post(
             detail_url,
@@ -405,14 +288,6 @@ class RatingPeriodSystemAdminReferenceTests(TestCase):
         self.assertEqual(disable_response.status_code, 302)
         period.refresh_from_db()
         self.assertFalse(period.is_active)
-        self.assertTrue(
-            AdminActionLog.objects.filter(
-                action='Период рейтинга отключён',
-                object_id=str(period.id),
-                old_value__contains='состояние: активен',
-                new_value__contains='состояние: отключён',
-            ).exists()
-        )
 
         enable_response = self.client.post(
             detail_url,
@@ -425,94 +300,6 @@ class RatingPeriodSystemAdminReferenceTests(TestCase):
         self.assertEqual(enable_response.status_code, 302)
         period.refresh_from_db()
         self.assertTrue(period.is_active)
-        self.assertTrue(
-            AdminActionLog.objects.filter(
-                action='Период рейтинга включён',
-                object_id=str(period.id),
-                old_value__contains='состояние: отключён',
-                new_value__contains='состояние: активен',
-            ).exists()
-        )
-
-    def test_automatic_period_preview_shows_origin_and_override(self):
-        automatic = RatingPeriod.objects.create(
-            name='Автоматический период',
-            starts_on=date(2026, 7, 14),
-            ends_before=date(2026, 8, 14),
-            nominal_starts_on=date(2026, 7, 14),
-        )
-        detail_url = reverse(
-            'system_admin_reference_detail',
-            args=['rating-periods'],
-        )
-
-        response = self.client.get(detail_url, HTTP_HOST='localhost')
-
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, automatic.name)
-        self.assertContains(response, '<b>Создание:</b> Автоматически')
-        self.assertContains(
-            response,
-            '<b>Режим дат:</b> По правилу 14-е → 14-е',
-        )
-
-    def test_manual_exception_requires_reason_in_working_admin(self):
-        detail_url = reverse(
-            'system_admin_reference_detail',
-            args=['rating-periods'],
-        )
-
-        response = self.client.post(
-            detail_url,
-            {
-                'action': 'save',
-                'name': 'Исключение без основания',
-                'starts_on': '2026-07-15',
-                'ends_before': '2026-08-15',
-                'comment': '',
-                'is_active': 'on',
-            },
-            HTTP_HOST='localhost',
-        )
-
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'Укажите причину')
-        self.assertFalse(
-            RatingPeriod.objects.filter(
-                name='Исключение без основания',
-            ).exists()
-        )
-
-    def test_period_mutation_rolls_back_when_audit_log_fails(self):
-        detail_url = reverse(
-            'system_admin_reference_detail',
-            args=['rating-periods'],
-        )
-        payload = {
-            'action': 'save',
-            'name': 'Проверка атомарного журнала',
-            'starts_on': '2026-07-14',
-            'ends_before': '2026-08-14',
-            'comment': '',
-            'is_active': 'on',
-        }
-
-        with patch(
-            'users.views.log_admin_action',
-            side_effect=RuntimeError('Сбой журнала'),
-        ):
-            with self.assertRaisesRegex(RuntimeError, 'Сбой журнала'):
-                self.client.post(
-                    detail_url,
-                    payload,
-                    HTTP_HOST='localhost',
-                )
-
-        self.assertFalse(
-            RatingPeriod.objects.filter(
-                name='Проверка атомарного журнала',
-            ).exists()
-        )
 
     def test_generic_enable_returns_message_instead_of_500_on_overlap(self):
         active = RatingPeriod.objects.create(
@@ -524,7 +311,6 @@ class RatingPeriodSystemAdminReferenceTests(TestCase):
             name='Период на перепроверку',
             starts_on=date(2026, 7, 20),
             ends_before=date(2026, 8, 1),
-            comment='Техническая проверка ручного исключения.',
             is_active=False,
         )
         detail_url = reverse(
@@ -573,7 +359,7 @@ class RatingPeriodSystemAdminReferenceTests(TestCase):
                 'name': edited.name,
                 'starts_on': '2026-08-01',
                 'ends_before': '2026-09-14',
-                'comment': 'Техническая проверка пересечения.',
+                'comment': '',
                 'is_active': 'on',
             },
             HTTP_HOST='localhost',

@@ -147,6 +147,13 @@ class FakeElement {
         children.forEach((child) => this.appendChild(child));
     }
 
+    prepend(child) {
+        if (child == null) return;
+        child.parentElement = this;
+        child.parentNode = this;
+        this.children.unshift(child);
+    }
+
     replaceChildren(...children) {
         this.children.forEach((child) => {
             child.parentElement = null;
@@ -227,6 +234,10 @@ class FakeDocument {
     }
 
     createElement(tagName) {
+        return new FakeElement(tagName);
+    }
+
+    createElementNS(_namespace, tagName) {
         return new FakeElement(tagName);
     }
 
@@ -361,14 +372,14 @@ class FakeAbortController {
 }
 
 
-function buildScreen() {
+function buildScreen(gridHeight = 680) {
     const root = new FakeElement("main");
     const board = new FakeElement("section");
-    board.clientHeight = 680;
+    board.clientHeight = gridHeight;
 
     const grid = new FakeElement("ol");
     grid.hidden = true;
-    grid.clientHeight = 680;
+    grid.clientHeight = gridHeight;
     board.appendChild(grid);
 
     const message = new FakeElement("div");
@@ -429,7 +440,14 @@ function buildScreen() {
         qaPause: replayButton("▶", "Запуск"),
         qaStep: replayButton("▶", "Шаг"),
         qaForward: replayButton("▶▶", "Вперёд"),
-        qaSpeed: new FakeElement("select")
+        qaSpeed: new FakeElement("select"),
+        qaLiveStep: new FakeElement("strong"),
+        qaLiveVirtualAt: new FakeElement("strong"),
+        qaLiveShift: new FakeElement("strong"),
+        qaLiveRevision: new FakeElement("strong"),
+        qaLiveSourceFingerprint: new FakeElement("b"),
+        qaLiveScoreFingerprint: new FakeElement("b"),
+        qaLiveStateStatus: new FakeElement("p")
     };
     elements.status.textContent = "Загрузка рейтинга";
     elements.qaDaySelect.disabled = true;
@@ -459,7 +477,18 @@ function buildScreen() {
         "[data-qa-pause]": elements.qaPause,
         "[data-qa-step]": elements.qaStep,
         "[data-qa-forward]": elements.qaForward,
-        "[data-qa-speed]": elements.qaSpeed
+        "[data-qa-speed]": elements.qaSpeed,
+        "[data-qa-live-step]": elements.qaLiveStep,
+        "[data-qa-live-virtual-at]": elements.qaLiveVirtualAt,
+        "[data-qa-live-shift]": elements.qaLiveShift,
+        "[data-qa-live-revision]": elements.qaLiveRevision,
+        "[data-qa-live-source-fingerprint]": (
+            elements.qaLiveSourceFingerprint
+        ),
+        "[data-qa-live-score-fingerprint]": (
+            elements.qaLiveScoreFingerprint
+        ),
+        "[data-qa-live-state-status]": elements.qaLiveStateStatus
     };
     Object.entries(selectors).forEach(([selector, element]) => {
         root.selectorMap.set(selector, element);
@@ -483,6 +512,31 @@ function buildEntries(count, {prefix = "Водитель", reverse = false} = {}
         };
     });
     return reverse ? entries.reverse() : entries;
+}
+
+
+function buildNoResultEntry({
+    employeeId = 901,
+    displayOrder = 1,
+    fullName = "Водитель Без Результата",
+    equipmentNumber = "10"
+} = {}) {
+    return {
+        employee_id: employeeId,
+        full_name: fullName,
+        equipment: [`БелАЗ №${equipmentNumber}`],
+        row_status: "not_observed",
+        status_label: "Нет результата",
+        ranking_eligible: false,
+        shift_count: 0,
+        withheld_shift_count: 0,
+        score: null,
+        place: null,
+        shared_score_place: null,
+        display_order: displayOrder,
+        position_delta: null,
+        level: ""
+    };
 }
 
 
@@ -525,6 +579,33 @@ function buildPayload({
             name: `Состав ${id}`
         })),
         entries
+    };
+}
+
+function buildQaLiveState({
+    step = 1,
+    periodId = 10,
+    compositionId = 20,
+    shiftType = "night",
+    placeholders = []
+} = {}) {
+    return {
+        schema: "driver-rating-qa-live-state",
+        schema_version: 1,
+        synthetic: true,
+        official: false,
+        official_rating_eligible: false,
+        run_id: "qa-live-runtime-run",
+        site_code: "section_2",
+        rating_period_id: periodId,
+        watch_composition_id: compositionId,
+        step,
+        virtual_at: (
+            "2026-07-30T"
+            + `${String(step % 24).padStart(2, "0")}:00:00+04:00`
+        ),
+        shift_type: shiftType,
+        placeholders
     };
 }
 
@@ -922,8 +1003,11 @@ function deferredResponse() {
 
 function createRuntime({
     qaPreview = false,
+    qaLive = false,
     qaReplayEnabled = false,
     qaReplayKind = "visual",
+    layoutSearch = "",
+    gridHeight = 680,
     qaFormulaEnabledShiftTypes = (
         qaReplayKind === "formula" ? ["day", "night"] : []
     ),
@@ -932,7 +1016,7 @@ function createRuntime({
     responses = []
 } = {}) {
     const clock = new FakeClock();
-    const {root, elements} = buildScreen();
+    const {root, elements} = buildScreen(gridHeight);
     const document = new FakeDocument(root);
     const fetchCalls = [];
     const responseQueue = responses.slice();
@@ -940,11 +1024,19 @@ function createRuntime({
 
     const configNode = new FakeElement("script");
     configNode.textContent = JSON.stringify({
-        apiUrl: "/reports/rating/driver-period-ranking/",
+        apiUrl: qaLive
+            ? "/reports/rating/tv/qa-live/data/"
+            : "/reports/rating/driver-period-ranking/",
         photoUrlTemplate: "/reports/rating/employee/__employee_id__/photo/",
-        refreshSeconds: 300,
+        refreshSeconds: qaLive ? 10 : 300,
         rotationSeconds: 15,
         qaPreview,
+        qaLive,
+        qaLiveRunId: qaLive ? "qa-live-runtime-run" : "",
+        qaLiveSiteCode: qaLive ? "section_2" : "",
+        qaLiveStateUrl: qaLive
+            ? "/reports/rating/tv/qa-live/state/"
+            : "",
         qaReplayEnabled,
         qaReplayKind,
         qaReplayUrl: qaReplayKind === "formula"
@@ -993,7 +1085,10 @@ function createRuntime({
 
     const windowObject = {
         document,
-        location: {origin: "https://driverform.test"},
+        location: {
+            origin: "https://driverform.test",
+            search: layoutSearch
+        },
         innerWidth: 1920,
         innerHeight: 1080,
         fetch: fetchStub,
@@ -1057,7 +1152,7 @@ function createRuntime({
             responseQueue.push(queuedFailure(error));
         },
         async flush() {
-            for (let index = 0; index < 8; index += 1) {
+            for (let index = 0; index < 24; index += 1) {
                 await Promise.resolve();
             }
         }
@@ -1082,6 +1177,36 @@ test("QA preview renders all 53 sorted rows and premium five without fetch", asy
     assert.equal(runtime.elements.grid.children.length, 53);
     assert.equal(runtime.elements.grid.children[0].dataset.displayOrder, "1");
     assert.equal(runtime.elements.grid.children[52].dataset.displayOrder, "53");
+    assert.equal(runtime.document.root.dataset.ratingLayout, "four");
+    assert.equal(
+        runtime.elements.grid.classList.contains("is-four-column-layout"),
+        true
+    );
+    assert.equal(
+        runtime.elements.grid.style.getPropertyValue("--rating-columns"),
+        "4"
+    );
+    assert.equal(
+        runtime.elements.grid.style.getPropertyValue("--rating-rows"),
+        "14"
+    );
+    [
+        [0, "1", "1"],
+        [13, "1", "14"],
+        [14, "2", "1"],
+        [26, "2", "13"],
+        [27, "3", "1"],
+        [39, "3", "13"],
+        [40, "4", "1"],
+        [52, "4", "13"]
+    ].forEach(([index, column, row]) => {
+        const entry = runtime.elements.grid.children[index];
+        assert.equal(
+            entry.style.getPropertyValue("grid-column"),
+            column
+        );
+        assert.equal(entry.style.getPropertyValue("grid-row"), row);
+    });
 
     runtime.elements.grid.children.slice(0, 5).forEach((row, index) => {
         assert.equal(row.classList.contains("is-premium"), true);
@@ -1090,6 +1215,320 @@ test("QA preview renders all 53 sorted rows and premium five without fetch", asy
     assert.equal(
         runtime.elements.grid.children[5].classList.contains("is-premium"),
         false
+    );
+});
+
+
+test("compact desktop columns follow participant thresholds without padding rows", async () => {
+    const cases = [
+        {count: 1, columns: 1, lastColumn: 1, lastRow: 1},
+        {count: 2, columns: 1, lastColumn: 1, lastRow: 2},
+        {count: 14, columns: 1, rows: 14},
+        {count: 15, columns: 2, lastColumn: 2, lastRow: 1},
+        {count: 28, columns: 3, lastColumn: 3, lastRow: 1},
+        {count: 40, columns: 3, lastColumn: 3, lastRow: 13},
+        {count: 41, columns: 4, lastColumn: 4, lastRow: 1},
+        {count: 53, columns: 4, lastColumn: 4, lastRow: 13}
+    ];
+
+    for (const expected of cases) {
+        const runtime = createRuntime({
+            qaPreview: true,
+            gridHeight: 700,
+            previewPayload: buildPayload({
+                entries: buildEntries(expected.count),
+                fingerprint: `compact-${expected.count}`
+            })
+        });
+        await runtime.flush();
+
+        const rows = runtime.elements.grid.children;
+        assert.equal(rows.length, expected.count);
+        assert.equal(
+            runtime.elements.grid.style.getPropertyValue("--rating-columns"),
+            String(expected.columns)
+        );
+        assert.equal(
+            runtime.elements.grid.style.getPropertyValue("--rating-rows"),
+            "14"
+        );
+        assert.equal(
+            rows[0].style.getPropertyValue("grid-column"),
+            "1"
+        );
+        assert.equal(rows[0].style.getPropertyValue("grid-row"), "1");
+        const lastRow = rows[rows.length - 1];
+        assert.equal(
+            lastRow.style.getPropertyValue("grid-column"),
+            String(expected.lastColumn || expected.columns)
+        );
+        assert.equal(
+            lastRow.style.getPropertyValue("grid-row"),
+            String(expected.lastRow || expected.rows)
+        );
+    }
+});
+
+
+test("display order keeps 53 unique visible positions and exactly five premium rows across ties", async () => {
+    const entries = buildEntries(53, {prefix: "Участник с ничьёй"});
+    entries.forEach((entry, index) => {
+        entry.place = Math.floor(index / 4) + 1;
+        entry.shared_score_place = entry.place;
+        entry.display_order = index + 1;
+    });
+    const runtime = createRuntime({
+        qaPreview: true,
+        previewPayload: buildPayload({
+            entries,
+            fingerprint: "display-order-ties"
+        })
+    });
+    await runtime.flush();
+
+    const rows = runtime.elements.grid.children;
+    assert.deepEqual(
+        rows.map((row) => (
+            row.querySelector(".rating-tv__place").children[0].textContent
+        )),
+        Array.from({length: 53}, (_, index) => String(index + 1))
+    );
+    assert.deepEqual(
+        rows.map((row) => row.dataset.displayOrder),
+        Array.from({length: 53}, (_, index) => String(index + 1))
+    );
+    assert.equal(rows[0].dataset.place, "1");
+    assert.equal(rows[1].dataset.place, "1");
+    assert.equal(rows[4].dataset.place, "2");
+    assert.equal(
+        rows.filter((row) => row.classList.contains("is-premium")).length,
+        5
+    );
+    rows.slice(0, 5).forEach((row, index) => {
+        assert.equal(row.classList.contains(`is-place-${index + 1}`), true);
+    });
+    assert.equal(rows[5].classList.contains("is-premium"), false);
+    assert.deepEqual(
+        entries.map((entry) => entry.place),
+        Array.from({length: 53}, (_, index) => Math.floor(index / 4) + 1)
+    );
+});
+
+test("one assigned participant without closed shifts stays visible without a place or score", async () => {
+    const noResult = buildNoResultEntry();
+    const runtime = createRuntime({
+        qaPreview: true,
+        previewPayload: buildPayload({
+            entries: [noResult],
+            fingerprint: "one-no-result"
+        })
+    });
+    await runtime.flush();
+
+    assert.equal(runtime.elements.grid.children.length, 1);
+    const row = runtime.elements.grid.children[0];
+    assert.equal(row.dataset.employeeId, String(noResult.employee_id));
+    assert.equal(row.dataset.displayOrder, "1");
+    assert.equal(row.dataset.place, "");
+    assert.equal(
+        row.querySelector(".rating-tv__place").children[0].textContent,
+        "—"
+    );
+    assert.equal(
+        row.querySelector(".rating-tv__place").getAttribute("aria-label"),
+        "Место не определено"
+    );
+    assert.equal(
+        row.querySelector(".rating-tv__score").children[0].textContent,
+        "Нет результата"
+    );
+    assert.equal(noResult.place, null);
+    assert.equal(noResult.score, null);
+});
+
+test("a participant without a result does not affect the rated participant place", async () => {
+    const rated = buildEntries(1, {prefix: "Водитель с результатом"})[0];
+    rated.row_status = "rated";
+    rated.ranking_eligible = true;
+    const noResult = buildNoResultEntry({
+        employeeId: 902,
+        displayOrder: 2
+    });
+    const runtime = createRuntime({
+        qaPreview: true,
+        previewPayload: buildPayload({
+            entries: [rated, noResult],
+            fingerprint: "rated-and-no-result"
+        })
+    });
+    await runtime.flush();
+
+    assert.equal(runtime.elements.grid.children.length, 2);
+    const ratedRow = runtime.elements.grid.children[0];
+    const noResultRow = runtime.elements.grid.children[1];
+    assert.equal(ratedRow.dataset.place, "1");
+    assert.equal(
+        ratedRow.querySelector(".rating-tv__place").children[0].textContent,
+        "1"
+    );
+    assert.equal(ratedRow.classList.contains("is-place-1"), true);
+    assert.equal(noResultRow.dataset.place, "");
+    assert.equal(
+        noResultRow.querySelector(".rating-tv__place").children[0].textContent,
+        "—"
+    );
+    assert.equal(noResultRow.classList.contains("is-premium"), false);
+    assert.equal(rated.place, 1);
+    assert.equal(noResult.place, null);
+});
+
+test("two participants without closed shifts remain listed without visible places", async () => {
+    const entries = [
+        buildNoResultEntry({employeeId: 903, displayOrder: 1}),
+        buildNoResultEntry({employeeId: 904, displayOrder: 2})
+    ];
+    const runtime = createRuntime({
+        qaPreview: true,
+        previewPayload: buildPayload({
+            entries,
+            fingerprint: "two-no-results"
+        })
+    });
+    await runtime.flush();
+
+    assert.equal(runtime.elements.grid.children.length, 2);
+    runtime.elements.grid.children.forEach((row, index) => {
+        assert.equal(row.dataset.displayOrder, String(index + 1));
+        assert.equal(row.dataset.place, "");
+        assert.equal(
+            row.querySelector(".rating-tv__place").children[0].textContent,
+            "—"
+        );
+        assert.equal(
+            row.querySelector(".rating-tv__score").children[0].textContent,
+            "Нет результата"
+        );
+    });
+});
+
+test("a no-result row never receives premium styling from display order", async () => {
+    const runtime = createRuntime({
+        qaPreview: true,
+        previewPayload: buildPayload({
+            entries: [buildNoResultEntry({displayOrder: 1})],
+            fingerprint: "no-result-no-premium"
+        })
+    });
+    await runtime.flush();
+
+    const row = runtime.elements.grid.children[0];
+    assert.equal(row.classList.contains("is-premium"), false);
+    assert.equal(row.classList.contains("is-place-1"), false);
+    assert.equal(
+        row.querySelector(".rating-tv__place").children[0].textContent,
+        "—"
+    );
+});
+
+test("three-column desktop layout remains available as a reserve", async () => {
+    const runtime = createRuntime({
+        qaPreview: true,
+        layoutSearch: "?layout=three",
+        gridHeight: 812,
+        previewPayload: buildPayload({
+            entries: buildEntries(53),
+            fingerprint: "qa-preview-three-reserve"
+        })
+    });
+    await runtime.flush();
+
+    assert.equal(runtime.document.root.dataset.ratingLayout, "three-reserve");
+    assert.equal(
+        runtime.elements.grid.classList.contains("is-three-column-reserve"),
+        true
+    );
+    assert.equal(
+        runtime.elements.grid.classList.contains("is-four-column-layout"),
+        false
+    );
+    assert.equal(
+        runtime.elements.grid.style.getPropertyValue("--rating-columns"),
+        "3"
+    );
+    assert.equal(
+        runtime.elements.grid.style.getPropertyValue("--rating-rows"),
+        "18"
+    );
+    runtime.elements.grid.children.forEach((row) => {
+        assert.equal(row.style.getPropertyValue("grid-column"), "");
+        assert.equal(row.style.getPropertyValue("grid-row"), "");
+    });
+});
+
+test("rating row keeps explicit place and one photo-name-truck-movement badge", async () => {
+    const entries = buildEntries(2, {prefix: "Иванов Иван"});
+    entries[0].display_name = "Иванов Иван";
+    entries[0].equipment = ["Самосвал 17"];
+    entries[0].position_delta = 2;
+    entries[0].score = "84.5000";
+    entries[0].display_score = 85;
+    entries[0].level = "T0";
+    entries[1].equipment = ["Самосвал 123"];
+    const runtime = createRuntime({
+        qaPreview: true,
+        previewPayload: buildPayload({entries, fingerprint: "row-contract"})
+    });
+    await runtime.flush();
+
+    const row = runtime.elements.grid.children[0];
+    const place = row.querySelector(".rating-tv__place");
+    const identity = row.querySelector(".rating-tv__identity");
+    const avatar = identity.querySelector(".rating-tv__avatar");
+    const name = identity.querySelector(".rating-tv__name");
+    const truck = identity.querySelector(".rating-tv__equipment");
+    const service = row.querySelector(".rating-tv__service");
+    const movement = row.querySelector(".rating-tv__movement");
+
+    assert.equal(place.children.length, 1);
+    assert.equal(place.children[0].textContent, "1");
+    assert.equal(place.getAttribute("aria-label"), "Место 1");
+    assert.equal(avatar !== null, true);
+    assert.equal(avatar.textContent, "");
+    assert.equal(avatar.classList.contains("is-placeholder"), true);
+    assert.equal(name.textContent, "Иванов Иван");
+    assert.equal(truck.textContent, "№ 17");
+    assert.equal(truck.getAttribute("aria-label"), "№ 17");
+    assert.equal(
+        truck.querySelector(".rating-tv__truck-icon") !== null,
+        true
+    );
+    assert.equal(row.querySelector(".rating-tv__score"), null);
+    assert.equal(row.textContent.includes("85"), false);
+    assert.equal(movement.textContent, "↑ 2");
+    assert.equal(identity.children.length, 4);
+    assert.equal(row.children.length, 2);
+    assert.equal(row.children[0], place);
+    assert.equal(row.children[1], identity);
+    assert.equal(service.parentElement, identity);
+    assert.equal(service.children.length, 1);
+    assert.equal(service.children[0], movement);
+    assert.equal(identity.children[0], avatar);
+    assert.equal(identity.children[1], name);
+    assert.equal(identity.children[2], truck);
+    assert.equal(identity.children[3], service);
+    assert.equal(row.querySelector(".rating-tv__place").textContent.includes("◆"), false);
+    assert.equal(row.textContent.includes("Самосвал"), false);
+    assert.equal(row.textContent.toLocaleUpperCase("ru-RU").includes("БАЛЛ"), false);
+    assert.equal(row.textContent.includes("T0"), false);
+    assert.equal(
+        runtime.elements.grid.children[1]
+            .querySelector(".rating-tv__movement").textContent,
+        "—"
+    );
+    assert.equal(
+        runtime.elements.grid.children[1]
+            .querySelector(".rating-tv__equipment").textContent,
+        "№ 123"
     );
 });
 
@@ -1418,12 +1857,14 @@ test("formula replay uses its pinned schema and preserves exact nullable KPI row
     );
     assert.equal(runtime.elements.grid.children.length, 53);
 
-    const firstScore = runtime.elements.grid.children[0]
-        .querySelector(".rating-tv__score").children[0].textContent;
-    const secondScore = runtime.elements.grid.children[1]
-        .querySelector(".rating-tv__score").children[0].textContent;
-    assert.equal(firstScore, "99.0001");
-    assert.equal(secondScore, "99.0000");
+    assert.equal(
+        runtime.elements.grid.children[0].querySelector(".rating-tv__score"),
+        null
+    );
+    assert.equal(
+        runtime.elements.grid.children[1].querySelector(".rating-tv__score"),
+        null
+    );
 
     for (const row of runtime.elements.grid.children) {
         const avatar = row.querySelector(".rating-tv__avatar");
@@ -1441,7 +1882,7 @@ test("formula replay uses its pinned schema and preserves exact nullable KPI row
             rowIndex: 52,
             rowStatus: "not_observed",
             rowClass: "is-not-observed",
-            statusText: "Нет смен",
+            statusText: "Нет результата",
             statusLabel: "за период"
         }
     ];
@@ -1456,7 +1897,14 @@ test("formula replay uses its pinned schema and preserves exact nullable KPI row
         const place = row.querySelector(".rating-tv__place");
         assert.equal(place.children.length, 1);
         assert.equal(place.children[0].textContent, "—");
+        assert.equal(place.getAttribute("aria-label"), "Место не определено");
         const score = row.querySelector(".rating-tv__score");
+        const service = row.querySelector(".rating-tv__service");
+        assert.equal(row.children.length, 2);
+        assert.equal(row.children[1], row.querySelector(".rating-tv__identity"));
+        assert.equal(service.classList.contains("has-status"), true);
+        assert.equal(service.parentElement, row.querySelector(".rating-tv__identity"));
+        assert.equal(score.parentElement, service);
         assert.equal(
             score.children[0].textContent,
             expected.statusText
@@ -1470,9 +1918,9 @@ test("formula replay uses its pinned schema and preserves exact nullable KPI row
             false
         );
         const movement = row.querySelector(".rating-tv__movement");
-        assert.equal(movement.textContent, "");
+        assert.equal(movement.textContent, "—");
         assert.equal(movement.classList.contains("is-unranked"), true);
-        assert.equal(movement.getAttribute("aria-hidden"), "true");
+        assert.equal(movement.getAttribute("aria-hidden"), "false");
         for (const field of [
             "score",
             "place",
@@ -2023,6 +2471,68 @@ test("the active group is refreshed once after 300 seconds", async () => {
 });
 
 
+test("screen movement follows display order while shared server places stay unchanged", async () => {
+    const initialEntries = buildEntries(2, {prefix: "До перестановки"});
+    initialEntries[0].employee_id = 101;
+    initialEntries[0].place = 1;
+    initialEntries[0].shared_score_place = 1;
+    initialEntries[0].display_order = 1;
+    initialEntries[0].position_delta = 99;
+    initialEntries[1].employee_id = 202;
+    initialEntries[1].place = 1;
+    initialEntries[1].shared_score_place = 1;
+    initialEntries[1].display_order = 2;
+    initialEntries[1].position_delta = -99;
+
+    const refreshedEntries = [
+        Object.assign({}, initialEntries[1], {
+            display_order: 1,
+            position_delta: -50
+        }),
+        Object.assign({}, initialEntries[0], {
+            display_order: 2,
+            position_delta: 50
+        })
+    ];
+    const runtime = createRuntime({
+        responses: [queuedResponse(buildPayload({
+            fingerprint: "display-order-movement-1",
+            entries: initialEntries
+        }))]
+    });
+    await runtime.flush();
+
+    assert.deepEqual(
+        runtime.elements.grid.children.map((row) => (
+            row.querySelector(".rating-tv__movement").textContent
+        )),
+        ["—", "—"]
+    );
+
+    runtime.enqueueResponse(buildPayload({
+        fingerprint: "display-order-movement-2",
+        entries: refreshedEntries
+    }));
+    runtime.clock.advance(300000);
+    await runtime.flush();
+
+    const rows = runtime.elements.grid.children;
+    assert.deepEqual(rows.map((row) => row.dataset.employeeId), ["202", "101"]);
+    assert.deepEqual(
+        rows.map((row) => (
+            row.querySelector(".rating-tv__place").children[0].textContent
+        )),
+        ["1", "2"]
+    );
+    assert.deepEqual(rows.map((row) => row.dataset.place), ["1", "1"]);
+    assert.deepEqual(
+        rows.map((row) => row.querySelector(".rating-tv__movement").textContent),
+        ["↑ 1", "↓ 1"]
+    );
+    assert.deepEqual(initialEntries.map((entry) => entry.position_delta), [99, -99]);
+});
+
+
 test("initial 5xx replaces loading state with a terminal server message", async () => {
     const runtime = createRuntime({
         responses: [
@@ -2078,5 +2588,357 @@ test("network failure preserves the last successful rating snapshot", async () =
     assert.equal(
         runtime.elements.status.textContent,
         "Показан последний снимок"
+    );
+});
+
+
+test("QA live reads state then materialized data and renders held placeholders", async () => {
+    const qaState = buildQaLiveState({
+        placeholders: [{
+            employee_id: 99,
+            status: "withheld",
+            reasons: ["blocking_quality:data_conflict"],
+            full_name: "ТЕСТ Удержанный водитель"
+        }]
+    });
+    const payload = buildPayload({
+        fingerprint: "source-materialized-abcdef",
+        entries: buildEntries(2, {prefix: "LIVE водитель"})
+    });
+    payload.snapshot_revision = 7;
+    payload.shift_score_fingerprint = "score-materialized-uvwxyz";
+    const runtime = createRuntime({
+        qaLive: true,
+        responses: [
+            queuedResponse(qaState),
+            queuedResponse(payload)
+        ]
+    });
+    await runtime.flush();
+
+    assert.equal(runtime.fetchCalls.length, 2);
+    assert.equal(
+        new URL(
+            runtime.fetchCalls[0].url,
+            "https://driverform.test"
+        ).pathname,
+        "/reports/rating/tv/qa-live/state/"
+    );
+    const dataUrl = new URL(runtime.fetchCalls[1].url);
+    assert.equal(
+        dataUrl.pathname,
+        "/reports/rating/tv/qa-live/data/"
+    );
+    assert.equal(dataUrl.searchParams.get("rating_period"), "10");
+    assert.equal(dataUrl.searchParams.get("watch_composition"), "20");
+    assert.equal(dataUrl.searchParams.get("shift_type"), "night");
+    assert.equal(
+        dataUrl.searchParams.get("qa_run_id"),
+        "qa-live-runtime-run"
+    );
+    assert.equal(dataUrl.searchParams.get("qa_step"), "1");
+    for (const call of runtime.fetchCalls) {
+        assert.equal(call.options.method, "GET");
+        assert.equal(call.options.credentials, "same-origin");
+        assert.equal(call.options.cache, "no-store");
+    }
+    assert.equal(runtime.elements.period.disabled, true);
+    assert.equal(runtime.elements.composition.disabled, true);
+    assert.equal(runtime.elements.shiftType.disabled, true);
+    assert.equal(runtime.elements.refreshCountdown.textContent, "00:10");
+    assert.equal(runtime.elements.qaLiveStep.textContent, "1");
+    assert.equal(runtime.elements.qaLiveShift.textContent, "Ночная");
+    assert.equal(runtime.elements.qaLiveRevision.textContent, "7");
+    assert.equal(
+        runtime.elements.qaLiveSourceFingerprint.textContent,
+        "source-mat"
+    );
+    assert.equal(
+        runtime.elements.qaLiveScoreFingerprint.textContent,
+        "score-mate"
+    );
+    assert.equal(runtime.elements.grid.children.length, 3);
+    const heldRow = runtime.elements.grid.children[2];
+    assert.equal(heldRow.dataset.rowStatus, "withheld");
+    assert.equal(heldRow.dataset.place, "");
+    assert.equal(
+        heldRow.querySelector(".rating-tv__name").textContent,
+        "ТЕСТ Удержанный водитель"
+    );
+    assert.equal(
+        heldRow.querySelector(".rating-tv__score").children[0].textContent,
+        "Удержан"
+    );
+    assert.equal(
+        runtime.window.RatingTvScreen.state.presentationPlaylist.length,
+        0
+    );
+});
+
+
+test("QA live refreshes the real chain after ten seconds", async () => {
+    const firstPayload = buildPayload({
+        fingerprint: "qa-live-source-1",
+        entries: buildEntries(2, {prefix: "До шага"})
+    });
+    firstPayload.snapshot_revision = 1;
+    firstPayload.shift_score_fingerprint = "qa-live-scores-1";
+    const secondPayload = buildPayload({
+        fingerprint: "qa-live-source-2",
+        entries: buildEntries(2, {prefix: "После шага"})
+    });
+    secondPayload.snapshot_revision = 2;
+    secondPayload.shift_score_fingerprint = "qa-live-scores-2";
+    const runtime = createRuntime({
+        qaLive: true,
+        responses: [
+            queuedResponse(buildQaLiveState({step: 1})),
+            queuedResponse(firstPayload)
+        ]
+    });
+    await runtime.flush();
+
+    runtime.enqueueResponse(buildQaLiveState({step: 2}));
+    runtime.enqueueResponse(secondPayload);
+    runtime.clock.advance(10000);
+    await runtime.flush();
+
+    assert.equal(runtime.fetchCalls.length, 4);
+    assert.equal(runtime.elements.qaLiveStep.textContent, "2");
+    assert.equal(runtime.elements.qaLiveRevision.textContent, "2");
+    assert.match(
+        runtime.elements.grid.children[0]
+            .querySelector(".rating-tv__name")
+            .textContent,
+        /После шага/
+    );
+});
+
+
+test("QA live never keeps another group under a 503 response", async () => {
+    const firstPayload = buildPayload({
+        compositionId: 20,
+        shiftType: "night",
+        fingerprint: "qa-live-night",
+        entries: buildEntries(2, {prefix: "Чужая ночная группа"})
+    });
+    firstPayload.snapshot_revision = 1;
+    firstPayload.shift_score_fingerprint = "night-scores";
+    const runtime = createRuntime({
+        qaLive: true,
+        responses: [
+            queuedResponse(buildQaLiveState({
+                compositionId: 20,
+                shiftType: "night"
+            })),
+            queuedResponse(firstPayload)
+        ]
+    });
+    await runtime.flush();
+    assert.equal(runtime.elements.grid.hidden, false);
+
+    runtime.enqueueResponse(buildQaLiveState({
+        step: 2,
+        compositionId: 21,
+        shiftType: "day"
+    }));
+    runtime.enqueueResponse(
+        {error: "Снимок дневной группы ещё не сформирован."},
+        503
+    );
+    await runtime.window.RatingTvScreen.loadQaLive();
+    await runtime.flush();
+
+    assert.equal(runtime.elements.grid.hidden, true);
+    assert.equal(runtime.elements.message.hidden, false);
+    assert.equal(runtime.window.RatingTvScreen.state.payload, null);
+    assert.equal(runtime.window.RatingTvScreen.state.activeGroupKey, "");
+    assert.doesNotMatch(
+        runtime.elements.messageText.textContent,
+        /Чужая ночная группа/
+    );
+    assert.equal(
+        runtime.elements.messageText.textContent,
+        "Снимок дневной группы ещё не сформирован."
+    );
+});
+
+
+test("QA live rejects a materialized response with another group identity", async () => {
+    const mismatchedPayload = buildPayload({
+        periodId: 10,
+        compositionId: 21,
+        shiftType: "night",
+        fingerprint: "wrong-group",
+        entries: buildEntries(2, {prefix: "Чужой ответ"})
+    });
+    mismatchedPayload.snapshot_revision = 4;
+    mismatchedPayload.shift_score_fingerprint = "wrong-scores";
+    const runtime = createRuntime({
+        qaLive: true,
+        responses: [
+            queuedResponse(buildQaLiveState({
+                periodId: 10,
+                compositionId: 20,
+                shiftType: "night"
+            })),
+            queuedResponse(mismatchedPayload)
+        ]
+    });
+    await runtime.flush();
+
+    assert.equal(runtime.elements.grid.hidden, true);
+    assert.equal(runtime.window.RatingTvScreen.state.payload, null);
+    assert.equal(
+        runtime.elements.messageTitle.textContent,
+        "Снимок другой группы отклонён"
+    );
+    assert.doesNotMatch(
+        runtime.elements.messageText.textContent,
+        /Чужой ответ/
+    );
+});
+
+
+test("QA live clears a same-group frame on 409 or 503 and retries later", async () => {
+    for (const status of [409, 503]) {
+        const firstPayload = buildPayload({
+            fingerprint: `same-group-before-${status}`,
+            entries: buildEntries(2, {prefix: "Старый кадр"})
+        });
+        firstPayload.snapshot_revision = 3;
+        firstPayload.shift_score_fingerprint = `scores-before-${status}`;
+        const runtime = createRuntime({
+            qaLive: true,
+            responses: [
+                queuedResponse(buildQaLiveState({step: 1})),
+                queuedResponse(firstPayload)
+            ]
+        });
+        await runtime.flush();
+        assert.equal(runtime.elements.grid.hidden, false);
+
+        runtime.enqueueResponse(buildQaLiveState({step: 2}));
+        runtime.enqueueResponse(
+            {
+                error: (
+                    status === 409
+                        ? "Состояние шага изменилось."
+                        : "Состояние шага временно недоступно."
+                )
+            },
+            status
+        );
+        await runtime.window.RatingTvScreen.loadQaLive();
+        await runtime.flush();
+
+        assert.equal(runtime.elements.grid.hidden, true);
+        assert.equal(runtime.elements.message.hidden, false);
+        assert.equal(runtime.window.RatingTvScreen.state.payload, null);
+        assert.equal(runtime.window.RatingTvScreen.state.activeGroupKey, "");
+        assert.equal(runtime.elements.qaLiveRevision.textContent, "—");
+        assert.equal(
+            runtime.elements.qaLiveSourceFingerprint.textContent,
+            "—"
+        );
+        assert.equal(
+            runtime.elements.qaLiveScoreFingerprint.textContent,
+            "—"
+        );
+        assert.equal(
+            runtime.elements.messageTitle.textContent,
+            "Ожидаем согласованный QA-live снимок"
+        );
+        assert.equal(
+            runtime.window.RatingTvScreen.state.groupCache.size,
+            0
+        );
+
+        const recoveredPayload = buildPayload({
+            fingerprint: `same-group-after-${status}`,
+            entries: buildEntries(2, {prefix: "Новый кадр"})
+        });
+        recoveredPayload.snapshot_revision = 4;
+        recoveredPayload.shift_score_fingerprint = (
+            `scores-after-${status}`
+        );
+        runtime.enqueueResponse(buildQaLiveState({step: 2}));
+        runtime.enqueueResponse(recoveredPayload);
+        await runtime.window.RatingTvScreen.loadQaLive();
+        await runtime.flush();
+
+        assert.equal(runtime.elements.grid.hidden, false);
+        assert.equal(runtime.elements.qaLiveRevision.textContent, "4");
+        assert.match(
+            runtime.elements.grid.children[0]
+                .querySelector(".rating-tv__name")
+                .textContent,
+            /Новый кадр/
+        );
+    }
+});
+
+
+test("QA live ignores a late materialized response from the previous step", async () => {
+    const lateData = deferredResponse();
+    const runtime = createRuntime({
+        qaLive: true,
+        responses: [
+            queuedResponse(buildQaLiveState({step: 1})),
+            lateData
+        ]
+    });
+    await runtime.flush();
+
+    assert.equal(runtime.fetchCalls.length, 2);
+    const lateSignal = runtime.fetchCalls[1].options.signal;
+    assert.equal(lateSignal.aborted, false);
+    assert.equal(
+        new URL(runtime.fetchCalls[1].url).searchParams.get("qa_step"),
+        "1"
+    );
+
+    const currentPayload = buildPayload({
+        fingerprint: "current-step-source",
+        entries: buildEntries(2, {prefix: "Текущий шаг"})
+    });
+    currentPayload.snapshot_revision = 8;
+    currentPayload.shift_score_fingerprint = "current-step-scores";
+    runtime.enqueueResponse(buildQaLiveState({step: 2}));
+    runtime.enqueueResponse(currentPayload);
+    await runtime.window.RatingTvScreen.loadQaLive();
+    await runtime.flush();
+
+    assert.equal(lateSignal.aborted, true);
+    assert.equal(runtime.fetchCalls.length, 4);
+    assert.equal(
+        new URL(runtime.fetchCalls[3].url).searchParams.get("qa_step"),
+        "2"
+    );
+    assert.equal(runtime.elements.qaLiveStep.textContent, "2");
+    assert.equal(runtime.elements.qaLiveRevision.textContent, "8");
+
+    const stalePayload = buildPayload({
+        fingerprint: "late-step-source",
+        entries: buildEntries(2, {prefix: "Опоздавший шаг"})
+    });
+    stalePayload.snapshot_revision = 7;
+    stalePayload.shift_score_fingerprint = "late-step-scores";
+    lateData.resolve(stalePayload);
+    await runtime.flush();
+
+    assert.equal(runtime.elements.qaLiveStep.textContent, "2");
+    assert.equal(runtime.elements.qaLiveRevision.textContent, "8");
+    assert.match(
+        runtime.elements.grid.children[0]
+            .querySelector(".rating-tv__name")
+            .textContent,
+        /Текущий шаг/
+    );
+    assert.doesNotMatch(
+        runtime.elements.grid.children[0]
+            .querySelector(".rating-tv__name")
+            .textContent,
+        /Опоздавший шаг/
     );
 });

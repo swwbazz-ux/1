@@ -657,6 +657,96 @@ class Rating30dRunner(FullWeekRunner):
             flush=True,
         )
 
+    def run_shift_step(self, shift_index: int) -> ShiftResult:
+        """Execute one complete shift while preserving the weekly QA contract."""
+
+        if shift_index != len(self.shift_results):
+            raise Rating30dQAError(
+                "Смены должны выполняться строго последовательно: "
+                f"ожидалась {len(self.shift_results)}, получена "
+                f"{shift_index}."
+            )
+        shift_started = time.perf_counter()
+        open_time, close_time = self.shift_bounds(shift_index)
+        carry_in_trip_id = self.carryover_trip_id
+        dispatcher, mining_master = self.open_shift_roles(
+            shift_index=shift_index,
+            open_time=open_time,
+        )
+        driver_shifts, operator_shifts = self.open_equipment_shifts(
+            shift_index=shift_index,
+            open_time=open_time,
+        )
+        self.close_transferred_downtimes(
+            shift_index=shift_index,
+            when=open_time + timedelta(minutes=2),
+        )
+        if shift_index == 0:
+            self.establish_initial_complexes(
+                shift_index=shift_index,
+                dispatcher=dispatcher,
+                mining_master=mining_master,
+                when=open_time + timedelta(minutes=3),
+            )
+        else:
+            self.rotate_daily_complexes(
+                shift_index=shift_index,
+                mining_master=mining_master,
+                when=open_time + timedelta(minutes=3),
+            )
+        contexts = self.apply_excavator_settings(
+            shift_index=shift_index,
+            when=open_time + timedelta(minutes=5),
+        )
+        if shift_index == 0:
+            self.probe_missing_capacity_rule(
+                shift_index=shift_index,
+                when=open_time + timedelta(minutes=10),
+                contexts=contexts,
+            )
+        carry_out_trip_id, carry_out_truck_id = self.execute_trip_cycle(
+            shift_index=shift_index,
+            open_time=open_time,
+            close_time=close_time,
+            contexts=contexts,
+            driver_shifts=driver_shifts,
+            operator_shifts=operator_shifts,
+        )
+        excluded_ids = self.start_handoff_downtime(
+            shift_index=shift_index,
+            when=close_time - timedelta(minutes=10),
+            carry_out_truck_id=carry_out_truck_id,
+        )
+        self.close_equipment_shifts(
+            shift_index=shift_index,
+            close_time=close_time,
+            driver_shifts=driver_shifts,
+            operator_shifts=operator_shifts,
+            carry_out_truck_id=carry_out_truck_id,
+        )
+        self.record_maintenance_handoff_check(
+            shift_index=shift_index,
+            excluded_equipment_ids=excluded_ids,
+            checked_at=close_time + timedelta(seconds=40),
+        )
+        self.close_shift_roles(
+            shift_index=shift_index,
+            close_time=close_time,
+            dispatcher=dispatcher,
+            mining_master=mining_master,
+        )
+        self.verify_shift(
+            shift_index=shift_index,
+            driver_shifts=driver_shifts,
+            operator_shifts=operator_shifts,
+            carry_in_trip_id=carry_in_trip_id,
+            carry_out_trip_id=carry_out_trip_id,
+            started_at=shift_started,
+        )
+        self.carryover_trip_id = carry_out_trip_id
+        self.carryover_truck_id = carry_out_truck_id
+        return self.shift_results[-1]
+
     def run(self) -> list[ShiftResult]:
         run_started = time.perf_counter()
         for day_index in range(self.config.day_count):
@@ -664,87 +754,9 @@ class Rating30dRunner(FullWeekRunner):
             night_close_time = None
             for shift_in_day in range(2):
                 shift_index = day_index * 2 + shift_in_day
-                shift_started = time.perf_counter()
-                open_time, close_time = self.shift_bounds(shift_index)
+                _, close_time = self.shift_bounds(shift_index)
                 night_close_time = close_time
-                carry_in_trip_id = self.carryover_trip_id
-                dispatcher, mining_master = self.open_shift_roles(
-                    shift_index=shift_index,
-                    open_time=open_time,
-                )
-                driver_shifts, operator_shifts = self.open_equipment_shifts(
-                    shift_index=shift_index,
-                    open_time=open_time,
-                )
-                self.close_transferred_downtimes(
-                    shift_index=shift_index,
-                    when=open_time + timedelta(minutes=2),
-                )
-                if shift_index == 0:
-                    self.establish_initial_complexes(
-                        shift_index=shift_index,
-                        dispatcher=dispatcher,
-                        mining_master=mining_master,
-                        when=open_time + timedelta(minutes=3),
-                    )
-                else:
-                    self.rotate_daily_complexes(
-                        shift_index=shift_index,
-                        mining_master=mining_master,
-                        when=open_time + timedelta(minutes=3),
-                    )
-                contexts = self.apply_excavator_settings(
-                    shift_index=shift_index,
-                    when=open_time + timedelta(minutes=5),
-                )
-                if shift_index == 0:
-                    self.probe_missing_capacity_rule(
-                        shift_index=shift_index,
-                        when=open_time + timedelta(minutes=10),
-                        contexts=contexts,
-                    )
-                carry_out_trip_id, carry_out_truck_id = self.execute_trip_cycle(
-                    shift_index=shift_index,
-                    open_time=open_time,
-                    close_time=close_time,
-                    contexts=contexts,
-                    driver_shifts=driver_shifts,
-                    operator_shifts=operator_shifts,
-                )
-                excluded_ids = self.start_handoff_downtime(
-                    shift_index=shift_index,
-                    when=close_time - timedelta(minutes=10),
-                    carry_out_truck_id=carry_out_truck_id,
-                )
-                self.close_equipment_shifts(
-                    shift_index=shift_index,
-                    close_time=close_time,
-                    driver_shifts=driver_shifts,
-                    operator_shifts=operator_shifts,
-                    carry_out_truck_id=carry_out_truck_id,
-                )
-                self.record_maintenance_handoff_check(
-                    shift_index=shift_index,
-                    excluded_equipment_ids=excluded_ids,
-                    checked_at=close_time + timedelta(seconds=40),
-                )
-                self.close_shift_roles(
-                    shift_index=shift_index,
-                    close_time=close_time,
-                    dispatcher=dispatcher,
-                    mining_master=mining_master,
-                )
-                self.verify_shift(
-                    shift_index=shift_index,
-                    driver_shifts=driver_shifts,
-                    operator_shifts=operator_shifts,
-                    carry_in_trip_id=carry_in_trip_id,
-                    carry_out_trip_id=carry_out_trip_id,
-                    started_at=shift_started,
-                )
-                self.carryover_trip_id = carry_out_trip_id
-                self.carryover_truck_id = carry_out_truck_id
-                result = self.shift_results[-1]
+                result = self.run_shift_step(shift_index)
                 print(
                     "SHIFT_OK "
                     f"{shift_index + 1:02d}/{self.config.total_shift_count} "

@@ -15,6 +15,12 @@
     var previewPayload = readJson("rating-tv-preview-payload", null);
     var root = document.querySelector("[data-rating-tv]");
     if (!root) return;
+    var reserveThreeColumnLayout = /(?:^|[?&])layout=three(?:&|$)/.test(
+        String(window.location && window.location.search || "")
+    );
+    root.dataset.ratingLayout = reserveThreeColumnLayout
+        ? "three-reserve"
+        : "four";
 
     var elements = {
         grid: root.querySelector("[data-rating-grid]"),
@@ -40,7 +46,20 @@
         qaPause: root.querySelector("[data-qa-pause]"),
         qaStep: root.querySelector("[data-qa-step]"),
         qaForward: root.querySelector("[data-qa-forward]"),
-        qaSpeed: root.querySelector("[data-qa-speed]")
+        qaSpeed: root.querySelector("[data-qa-speed]"),
+        qaLiveStep: root.querySelector("[data-qa-live-step]"),
+        qaLiveVirtualAt: root.querySelector("[data-qa-live-virtual-at]"),
+        qaLiveShift: root.querySelector("[data-qa-live-shift]"),
+        qaLiveRevision: root.querySelector("[data-qa-live-revision]"),
+        qaLiveSourceFingerprint: root.querySelector(
+            "[data-qa-live-source-fingerprint]"
+        ),
+        qaLiveScoreFingerprint: root.querySelector(
+            "[data-qa-live-score-fingerprint]"
+        ),
+        qaLiveStateStatus: root.querySelector(
+            "[data-qa-live-state-status]"
+        )
     };
 
     var state = {
@@ -60,6 +79,10 @@
         rotationRemaining: Number(config.rotationSeconds) || 15,
         rotationPlaying: true,
         qaPreview: config.qaPreview === true,
+        qaLive: config.qaLive === true,
+        qaLiveState: null,
+        qaLiveRequestGeneration: 0,
+        qaLiveRequestController: null,
         qaReplayEnabled: config.qaReplayEnabled === true,
         qaReplayKind: ["visual", "formula"].includes(config.qaReplayKind)
             ? config.qaReplayKind
@@ -203,10 +226,33 @@
         state.availablePeriods = Array.isArray(payload.available_rating_periods)
             ? payload.available_rating_periods
             : [];
+        var assignmentGroupContract = (
+            !state.qaPreview
+            && !state.qaLive
+            && (
+                Object.prototype.hasOwnProperty.call(
+                    payload,
+                    "available_rating_groups"
+                )
+                || Object.prototype.hasOwnProperty.call(
+                    payload,
+                    "rating_group"
+                )
+            )
+        );
+        var availableGroups = assignmentGroupContract
+            ? payload.available_rating_groups
+            : payload.available_watch_compositions;
+        var selectedGroup = assignmentGroupContract
+            ? payload.rating_group
+            : payload.watch_composition;
+        var selectedGroupProperty = assignmentGroupContract
+            ? "rating_group"
+            : "watch_composition";
         state.availableCompositions = Array.isArray(
-            payload.available_watch_compositions
+            availableGroups
         )
-            ? payload.available_watch_compositions
+            ? availableGroups
             : [];
 
         if (payload.rating_period && payload.rating_period.id != null) {
@@ -216,27 +262,36 @@
         ) {
             state.selectedPeriod = "";
         }
+        var hasSelectedGroupProperty = Object.prototype.hasOwnProperty.call(
+            payload,
+            selectedGroupProperty
+        );
         if (
-            payload.watch_composition
-            && payload.watch_composition.id != null
+            selectedGroup
+            && selectedGroup.id != null
         ) {
             state.selectedComposition = String(
-                payload.watch_composition.id
+                selectedGroup.id
             );
-        } else if (
-            Object.prototype.hasOwnProperty.call(
-                payload,
-                "watch_composition"
-            )
-        ) {
+        } else if (hasSelectedGroupProperty) {
             state.selectedComposition = "";
-        } else if (
-            !state.selectedComposition
-            && state.availableCompositions.length
-        ) {
-            state.selectedComposition = String(
-                state.availableCompositions[0].id
-            );
+        } else {
+            if (
+                state.selectedComposition
+                && !state.availableCompositions.some(function (item) {
+                    return String(item.id) === state.selectedComposition;
+                })
+            ) {
+                state.selectedComposition = "";
+            }
+            if (
+                !state.selectedComposition
+                && state.availableCompositions.length
+            ) {
+                state.selectedComposition = String(
+                    state.availableCompositions[0].id
+                );
+            }
         }
         if (payload.shift_type === "day" || payload.shift_type === "night") {
             state.shiftType = payload.shift_type;
@@ -261,10 +316,14 @@
         if (elements.shiftType) {
             elements.shiftType.value = state.shiftType;
         }
-        if (state.qaPreview) {
+        if (state.qaPreview || state.qaLive) {
             if (elements.period) elements.period.disabled = true;
             if (elements.composition) elements.composition.disabled = true;
-            updateQaShiftControl();
+            if (elements.shiftType && state.qaLive) {
+                elements.shiftType.disabled = true;
+            } else {
+                updateQaShiftControl();
+            }
         }
     }
 
@@ -325,11 +384,11 @@
         movement.className = "rating-tv__movement";
         movement.setAttribute(
             "aria-hidden",
-            delta == null ? "true" : "false"
+            "false"
         );
         if (delta == null) {
             movement.classList.add("is-unranked");
-            movement.textContent = "";
+            movement.textContent = "—";
         } else if (delta > 0) {
             movement.classList.add("is-up");
             movement.textContent = "↑ " + delta;
@@ -344,8 +403,8 @@
 
     function createAvatar(entry) {
         var avatar = document.createElement("span");
-        avatar.className = "rating-tv__avatar";
-        avatar.textContent = initials(entry.full_name);
+        avatar.className = "rating-tv__avatar is-placeholder";
+        avatar.setAttribute("aria-hidden", "true");
         var url = photoUrl(entry.employee_id);
         if (!url) return avatar;
 
@@ -355,6 +414,7 @@
         image.decoding = "async";
         image.addEventListener("load", function () {
             avatar.textContent = "";
+            avatar.classList.remove("is-placeholder");
             avatar.appendChild(image);
         });
         image.addEventListener("error", function () {
@@ -364,12 +424,60 @@
         return avatar;
     }
 
+    function ratingDisplayName(entry) {
+        return String(
+            entry.display_name
+            || entry.full_name
+            || "Сотрудник не указан"
+        ).trim();
+    }
+
+    function ratingTruckLabel(entry) {
+        var equipment = Array.isArray(entry.equipment)
+            ? entry.equipment[0]
+            : entry.equipment;
+        var normalized = String(equipment || "").trim();
+        if (!normalized) return "№ —";
+        var truckMatch = normalized.match(/(?:№\s*|\s)(\d[\w-]*)\s*$/i);
+        return truckMatch ? "№ " + truckMatch[1] : "№ —";
+    }
+
+    function createTruckIcon() {
+        var namespace = "http://www.w3.org/2000/svg";
+        var icon = document.createElementNS(namespace, "svg");
+        icon.classList.add("rating-tv__truck-icon");
+        icon.setAttribute("viewBox", "0 0 24 16");
+        icon.setAttribute("aria-hidden", "true");
+        icon.setAttribute("focusable", "false");
+
+        var body = document.createElementNS(namespace, "path");
+        body.setAttribute(
+            "d",
+            "M1.5 3.5h10.2l2.2 6H4.4L1.5 3.5Zm12.4 2h4l3.1 3V12h-7.1V5.5ZM3.7 12h17.6"
+        );
+        var wheels = document.createElementNS(namespace, "path");
+        wheels.setAttribute(
+            "d",
+            "M7.3 12.2a2 2 0 1 1-4 0m16.7 0a2 2 0 1 1-4 0"
+        );
+        icon.append(body, wheels);
+        return icon;
+    }
+
     function updateRatingRow(row, entry) {
+        var displayOrder = Number(entry.display_order);
         var place = Number(entry.place);
         var rowStatus = entry.row_status || "";
         var isWithheld = rowStatus === "withheld";
         var isNotObserved = rowStatus === "not_observed";
         var isUnranked = isWithheld || isNotObserved;
+        var hasVisiblePlace = (
+            !isUnranked
+            && Number.isInteger(place)
+            && place >= 1
+            && Number.isInteger(displayOrder)
+            && displayOrder >= 1
+        );
         row.className = "rating-tv__row";
         row.dataset.employeeId = String(entry.employee_id || "");
         row.dataset.place = String(entry.place == null ? "" : entry.place);
@@ -382,8 +490,11 @@
         } else if (isNotObserved) {
             row.classList.add("is-not-observed");
         }
-        if (!isUnranked && place >= 1 && place <= 5) {
-            row.classList.add("is-premium", "is-place-" + place);
+        if (hasVisiblePlace && displayOrder <= 5) {
+            row.classList.add(
+                "is-premium",
+                "is-place-" + displayOrder
+            );
         }
 
         var placeNode = row._ratingPlaceNode;
@@ -393,61 +504,71 @@
             row._ratingPlaceNode = placeNode;
         }
         placeNode.replaceChildren();
-        if (!isUnranked) {
-            var gem = document.createElement("b");
-            gem.textContent = "◆";
-            gem.setAttribute("aria-hidden", "true");
-            placeNode.appendChild(gem);
-        }
-        placeNode.appendChild(
-            document.createTextNode(String(entry.place == null ? "—" : entry.place))
+        placeNode.setAttribute(
+            "aria-label",
+            hasVisiblePlace
+                ? "Место " + String(displayOrder)
+                : "Место не определено"
         );
+        placeNode.appendChild(
+            document.createTextNode(
+                hasVisiblePlace ? String(displayOrder) : "—"
+            )
+        );
+
+        var identity = document.createElement("span");
+        identity.className = "rating-tv__identity";
 
         var name = document.createElement("strong");
         name.className = "rating-tv__name";
-        name.textContent = entry.full_name || "Сотрудник не указан";
+        name.textContent = ratingDisplayName(entry);
         name.title = name.textContent;
 
         var equipment = document.createElement("span");
         equipment.className = "rating-tv__equipment";
-        equipment.textContent = Array.isArray(entry.equipment)
-            ? (entry.equipment.join(", ") || "Техника не указана")
-            : (entry.equipment || "Техника не указана");
+        equipment.textContent = ratingTruckLabel(entry);
         equipment.title = equipment.textContent;
+        equipment.setAttribute("aria-label", equipment.textContent);
+        equipment.prepend(createTruckIcon());
 
-        var score = document.createElement("span");
-        score.className = "rating-tv__score";
-        var scoreValue = document.createElement("b");
-        var scoreLabel = document.createElement("small");
+        var score = null;
         if (isWithheld) {
+            score = document.createElement("span");
+            score.className = "rating-tv__score";
             score.classList.add("is-status", "is-withheld");
+            var scoreValue = document.createElement("b");
             scoreValue.textContent = "Удержан";
+            var scoreLabel = document.createElement("small");
             scoreLabel.textContent = "проверка данных";
+            score.append(scoreValue, scoreLabel);
         } else if (isNotObserved) {
+            score = document.createElement("span");
+            score.className = "rating-tv__score";
             score.classList.add("is-status", "is-not-observed");
-            scoreValue.textContent = "Нет смен";
-            scoreLabel.textContent = "за период";
-        } else {
-            scoreValue.textContent = (
-                entry.score == null || entry.score === ""
-                    ? "—"
-                    : String(entry.score)
+            var noShiftValue = document.createElement("b");
+            noShiftValue.textContent = (
+                String(entry.status_label || "").trim()
+                || "Нет результата"
             );
-            scoreLabel.textContent = "балл";
+            var noShiftLabel = document.createElement("small");
+            noShiftLabel.textContent = "за период";
+            score.append(noShiftValue, noShiftLabel);
         }
-        score.append(scoreValue, scoreLabel);
 
         var movement = document.createElement("span");
         setMovementContent(movement, movementFor(entry));
 
-        row.replaceChildren(
-            placeNode,
-            createAvatar(entry),
-            name,
-            equipment,
-            score,
-            movement
-        );
+        var service = document.createElement("span");
+        service.className = "rating-tv__service";
+        if (score) {
+            row.classList.add("has-service-status");
+            service.classList.add("has-status");
+            service.appendChild(score);
+        }
+        service.appendChild(movement);
+
+        identity.append(createAvatar(entry), name, equipment, service);
+        row.replaceChildren(placeNode, identity);
         return row;
     }
 
@@ -455,13 +576,14 @@
         return updateRatingRow(document.createElement("li"), entry);
     }
 
-    function layoutGrid() {
-        if (!elements.grid || elements.grid.hidden) return;
-        var count = elements.grid.children.length;
-        if (!count) return;
-        var boardHeight = elements.grid.clientHeight
-            || elements.grid.parentElement.clientHeight
-            || window.innerHeight;
+    function clearGridPlacement() {
+        Array.from(elements.grid.children).forEach(function (row) {
+            row.style.setProperty("grid-column", "");
+            row.style.setProperty("grid-row", "");
+        });
+    }
+
+    function layoutThreeColumnReserve(count, boardHeight) {
         var minimumRowHeight = window.innerHeight < 850 ? 34 : 44;
         var rowLimit = window.innerWidth >= 1700 ? 18 : 14;
         var maximumRows = Math.max(
@@ -473,12 +595,84 @@
         );
         var columns = Math.max(1, Math.ceil(count / maximumRows));
         var rows = Math.max(1, Math.ceil(count / columns));
+        clearGridPlacement();
         elements.grid.style.setProperty("--rating-columns", String(columns));
         elements.grid.style.setProperty("--rating-rows", String(rows));
+        elements.grid.classList.remove("is-four-column-layout");
+        elements.grid.classList.add("is-three-column-reserve");
         elements.grid.classList.toggle(
             "is-dense",
             boardHeight / rows < 42
         );
+    }
+
+    function layoutFourColumns(count, boardHeight) {
+        var columns = count <= 14
+            ? 1
+            : count <= 27
+                ? 2
+                : count <= 40
+                    ? 3
+                    : 4;
+        var rows = 14;
+        var columnSizes = [14, 13, 13, 13].slice(0, columns);
+        var entryIndex = 0;
+
+        columnSizes.forEach(function (columnSize, columnIndex) {
+            var populatedRows = Math.min(
+                columnSize,
+                count - entryIndex
+            );
+            for (
+                var rowIndex = 0;
+                rowIndex < populatedRows;
+                rowIndex += 1
+            ) {
+                var row = elements.grid.children[entryIndex];
+                row.style.setProperty(
+                    "grid-column",
+                    String(columnIndex + 1)
+                );
+                row.style.setProperty("grid-row", String(rowIndex + 1));
+                entryIndex += 1;
+            }
+        });
+
+        elements.grid.style.setProperty("--rating-columns", String(columns));
+        elements.grid.style.setProperty("--rating-rows", String(rows));
+        elements.grid.classList.remove("is-three-column-reserve");
+        elements.grid.classList.add("is-four-column-layout");
+        elements.grid.classList.toggle(
+            "is-dense",
+            boardHeight / rows < 42
+        );
+    }
+
+    function layoutGrid() {
+        if (!elements.grid || elements.grid.hidden) return;
+        var count = elements.grid.children.length;
+        if (!count) return;
+        var boardHeight = elements.grid.clientHeight
+            || elements.grid.parentElement.clientHeight
+            || window.innerHeight;
+
+        if (window.innerWidth <= 600) {
+            clearGridPlacement();
+            elements.grid.style.setProperty("--rating-columns", "1");
+            elements.grid.style.setProperty("--rating-rows", String(count));
+            elements.grid.classList.remove(
+                "is-four-column-layout",
+                "is-three-column-reserve",
+                "is-dense"
+            );
+            return;
+        }
+
+        if (reserveThreeColumnLayout) {
+            layoutThreeColumnReserve(count, boardHeight);
+            return;
+        }
+        layoutFourColumns(count, boardHeight);
     }
 
     function renderEntries(entries) {
@@ -643,11 +837,21 @@
         )
             ? payload.rating_period.id
             : state.selectedPeriod;
-        var compositionId = (
-            payload.watch_composition
-            && payload.watch_composition.id != null
+        var payloadGroup = (
+            !state.qaPreview
+            && !state.qaLive
+            && Object.prototype.hasOwnProperty.call(
+                payload,
+                "rating_group"
+            )
         )
-            ? payload.watch_composition.id
+            ? payload.rating_group
+            : payload.watch_composition;
+        var compositionId = (
+            payloadGroup
+            && payloadGroup.id != null
+        )
+            ? payloadGroup.id
             : state.selectedComposition;
         return groupKey(
             periodId,
@@ -657,7 +861,7 @@
     }
 
     function decoratePayloadWithDeltas(payload, previousPayload) {
-        var previousPlaces = new Map();
+        var previousDisplayOrders = new Map();
         var previousEntries = (
             previousPayload
             && Array.isArray(previousPayload.entries)
@@ -665,41 +869,126 @@
             ? previousPayload.entries
             : [];
         previousEntries.forEach(function (entry) {
-            previousPlaces.set(
+            previousDisplayOrders.set(
                 String(entry.employee_id),
-                Number(entry.place)
+                Number(entry.display_order)
             );
         });
         var entries = Array.isArray(payload.entries)
             ? payload.entries.map(function (entry) {
                 var decorated = Object.assign({}, entry);
-                if (
-                    decorated.position_delta == null
-                    || decorated.position_delta === ""
-                    || !Number.isFinite(Number(decorated.position_delta))
-                ) {
-                    var previous = previousPlaces.get(
-                        String(decorated.employee_id)
-                    );
-                    decorated.position_delta = previous == null
-                        ? 0
-                        : Number(previous) - Number(decorated.place);
-                }
+                var previous = previousDisplayOrders.get(
+                    String(decorated.employee_id)
+                );
+                decorated.position_delta = previous == null
+                    ? 0
+                    : Number(previous) - Number(decorated.display_order);
                 return decorated;
             })
             : [];
         return Object.assign({}, payload, {entries: entries});
     }
 
+    function shortFingerprint(value) {
+        var normalized = String(value || "").trim();
+        return normalized ? normalized.slice(0, 10) : "—";
+    }
+
+    function renderQaLiveStateMetadata(qaState) {
+        if (!qaState) return;
+        if (elements.qaLiveStep) {
+            elements.qaLiveStep.textContent = String(qaState.step);
+        }
+        if (elements.qaLiveVirtualAt) {
+            elements.qaLiveVirtualAt.textContent = formatDateTime(
+                qaState.virtual_at
+            );
+        }
+        if (elements.qaLiveShift) {
+            elements.qaLiveShift.textContent = qaState.shift_type === "day"
+                ? "Дневная"
+                : "Ночная";
+        }
+        if (elements.qaLiveStateStatus) {
+            elements.qaLiveStateStatus.textContent = (
+                "Получен шаг "
+                + qaState.step
+                + " · ждём только закрытые смены"
+            );
+        }
+    }
+
+    function applyQaLivePlaceholders(payload) {
+        if (
+            !state.qaLive
+            || !state.qaLiveState
+            || !Array.isArray(state.qaLiveState.placeholders)
+        ) {
+            return payload;
+        }
+        var entries = Array.isArray(payload.entries)
+            ? payload.entries.map(function (entry) {
+                return Object.assign({}, entry);
+            })
+            : [];
+        var existingIds = new Set(entries.map(function (entry) {
+            return String(entry.employee_id);
+        }));
+        var nextDisplayOrder = entries.reduce(function (maximum, entry) {
+            return Math.max(
+                maximum,
+                Number(entry.display_order || entry.place || 0)
+            );
+        }, 0);
+        state.qaLiveState.placeholders.forEach(function (placeholder) {
+            var employeeId = String(placeholder.employee_id);
+            if (existingIds.has(employeeId)) return;
+            nextDisplayOrder += 1;
+            entries.push({
+                employee_id: placeholder.employee_id,
+                full_name: (
+                    placeholder.full_name
+                    || "Синтетический сотрудник №"
+                        + placeholder.employee_id
+                ),
+                equipment: [],
+                row_status: placeholder.status,
+                ranking_eligible: false,
+                shift_count: null,
+                withheld_shift_count: (
+                    placeholder.status === "withheld" ? 1 : 0
+                ),
+                withheld_reasons: {},
+                quality_flags: Array.isArray(placeholder.reasons)
+                    ? placeholder.reasons.slice()
+                    : [],
+                score: null,
+                blocks: null,
+                confidence: null,
+                place: null,
+                shared_score_place: null,
+                display_order: nextDisplayOrder,
+                level: "",
+                position_delta: null
+            });
+            existingIds.add(employeeId);
+        });
+        return Object.assign({}, payload, {entries: entries});
+    }
+
     function renderPayloadMetadata(payload) {
         state.payload = payload;
         updateScopeControls(payload);
-        if (!state.qaPreview) {
+        if (!state.qaPreview && !state.qaLive) {
             ensureInitialProgramGroup();
         }
 
         if (elements.status) {
-            if (state.qaPreview) {
+            if (state.qaLive) {
+                elements.status.textContent = (
+                    "Синтетический live-тест — неофициально"
+                );
+            } else if (state.qaPreview) {
                 elements.status.textContent = payload.formula_evaluated
                     ? "Виртуальный расчёт — неофициально"
                     : "Визуальный replay — не KPI";
@@ -719,6 +1008,23 @@
         }
         if (elements.qaDayCount && payload.qa_day_count != null) {
             elements.qaDayCount.textContent = String(payload.qa_day_count);
+        }
+        if (elements.qaLiveRevision) {
+            elements.qaLiveRevision.textContent = (
+                payload.snapshot_revision == null
+                    ? "—"
+                    : String(payload.snapshot_revision)
+            );
+        }
+        if (elements.qaLiveSourceFingerprint) {
+            elements.qaLiveSourceFingerprint.textContent = shortFingerprint(
+                payload.source_fingerprint
+            );
+        }
+        if (elements.qaLiveScoreFingerprint) {
+            elements.qaLiveScoreFingerprint.textContent = shortFingerprint(
+                payload.shift_score_fingerprint
+            );
         }
     }
 
@@ -766,20 +1072,57 @@
         if (state.selectedPeriod) {
             url.searchParams.set("rating_period", state.selectedPeriod);
         }
-        if (state.selectedComposition) {
+        if (state.qaLive && state.selectedComposition) {
             url.searchParams.set(
                 "watch_composition",
                 state.selectedComposition
+            );
+        } else if (state.selectedComposition) {
+            var selectedGroup = state.availableCompositions.find(
+                function (item) {
+                    return String(item.id) === state.selectedComposition;
+                }
+            );
+            if (
+                selectedGroup
+                && selectedGroup.work_schedule
+                && selectedGroup.work_schedule.id != null
+                && selectedGroup.brigade_number != null
+            ) {
+                url.searchParams.set(
+                    "work_schedule",
+                    String(selectedGroup.work_schedule.id)
+                );
+                url.searchParams.set(
+                    "brigade_number",
+                    String(selectedGroup.brigade_number)
+                );
+            } else {
+                url.searchParams.set(
+                    "watch_composition",
+                    state.selectedComposition
+                );
+            }
+        }
+        if (state.qaLive && state.qaLiveState) {
+            url.searchParams.set(
+                "qa_run_id",
+                state.qaLiveState.run_id
+            );
+            url.searchParams.set(
+                "qa_step",
+                String(state.qaLiveState.step)
             );
         }
         return url.toString();
     }
 
     function bootstrapSelection(payload) {
+        var previousSelection = state.selectedComposition;
         updateScopeControls(payload);
         return (
             state.selectedComposition
-            && state.availableCompositions.length > 1
+            && state.selectedComposition !== previousSelection
         );
     }
 
@@ -1660,6 +2003,231 @@
         }
     }
 
+    function qaLiveStateGroupKey(qaState) {
+        if (!qaState) return "";
+        return groupKey(
+            qaState.rating_period_id,
+            qaState.watch_composition_id,
+            qaState.shift_type
+        );
+    }
+
+    function validateQaLiveState(documentValue) {
+        if (!documentValue || typeof documentValue !== "object") {
+            return false;
+        }
+        var expectedKeys = [
+            "schema",
+            "schema_version",
+            "synthetic",
+            "official",
+            "official_rating_eligible",
+            "run_id",
+            "site_code",
+            "rating_period_id",
+            "watch_composition_id",
+            "step",
+            "virtual_at",
+            "shift_type",
+            "placeholders"
+        ].sort();
+        if (
+            Object.keys(documentValue).sort().join("|")
+            !== expectedKeys.join("|")
+        ) {
+            return false;
+        }
+        if (
+            documentValue.schema
+                !== "driver-rating-qa-live-state"
+            || documentValue.schema_version !== 1
+            || documentValue.synthetic !== true
+            || documentValue.official !== false
+            || documentValue.official_rating_eligible !== false
+            || documentValue.run_id !== config.qaLiveRunId
+            || documentValue.site_code !== config.qaLiveSiteCode
+            || !Number.isSafeInteger(documentValue.step)
+            || documentValue.step < 0
+            || !["day", "night"].includes(documentValue.shift_type)
+            || !Number.isSafeInteger(documentValue.rating_period_id)
+            || documentValue.rating_period_id <= 0
+            || !Number.isSafeInteger(documentValue.watch_composition_id)
+            || documentValue.watch_composition_id <= 0
+            || !parseDate(documentValue.virtual_at)
+            || !Array.isArray(documentValue.placeholders)
+        ) {
+            return false;
+        }
+        var forbiddenKeys = [
+            "score",
+            "place",
+            "shared_score_place",
+            "blocks",
+            "kpi",
+            "weights",
+            "confidence",
+            "source_fingerprint",
+            "shift_score_fingerprint",
+            "payload_fingerprint",
+            "snapshot_revision"
+        ];
+        return documentValue.placeholders.every(function (placeholder) {
+            if (!placeholder || typeof placeholder !== "object") {
+                return false;
+            }
+            var placeholderKeys = Object.keys(placeholder).sort();
+            if (
+                placeholderKeys.join("|")
+                !== [
+                    "employee_id",
+                    "full_name",
+                    "reasons",
+                    "status"
+                ].sort().join("|")
+            ) {
+                return false;
+            }
+            return (
+                Number.isSafeInteger(placeholder.employee_id)
+                && placeholder.employee_id > 0
+                && ["withheld", "not_observed"].includes(
+                    placeholder.status
+                )
+                && Array.isArray(placeholder.reasons)
+                && !forbiddenKeys.some(function (key) {
+                    return Object.prototype.hasOwnProperty.call(
+                        placeholder,
+                        key
+                    );
+                })
+            );
+        });
+    }
+
+    function clearQaLiveMaterializedMetadata() {
+        if (elements.updatedAt) {
+            elements.updatedAt.textContent = "—";
+        }
+        if (elements.qaLiveRevision) {
+            elements.qaLiveRevision.textContent = "—";
+        }
+        if (elements.qaLiveSourceFingerprint) {
+            elements.qaLiveSourceFingerprint.textContent = "—";
+        }
+        if (elements.qaLiveScoreFingerprint) {
+            elements.qaLiveScoreFingerprint.textContent = "—";
+        }
+    }
+
+    function showQaLiveWaiting(message) {
+        state.payload = null;
+        state.activeGroupKey = "";
+        state.sourceFingerprint = "";
+        clearQaLiveMaterializedMetadata();
+        if (elements.status) {
+            elements.status.textContent = "Ожидание QA-live шага";
+        }
+        if (elements.qaLiveStateStatus) {
+            elements.qaLiveStateStatus.textContent = (
+                message || "Ожидание первого шага"
+            );
+        }
+        showMessage(
+            "Ожидание первого закрытого шага",
+            "Рейтинг появится после публикации материализованного снимка."
+        );
+    }
+
+    async function loadQaLive() {
+        if (
+            !state.qaLive
+            || !config.qaLiveStateUrl
+            || !config.qaLiveRunId
+        ) {
+            showQaLiveWaiting("QA-live режим не настроен.");
+            return;
+        }
+        if (state.qaLiveRequestController) {
+            state.qaLiveRequestController.abort();
+        }
+        state.qaLiveRequestGeneration += 1;
+        var generation = state.qaLiveRequestGeneration;
+        var controller = new AbortController();
+        state.qaLiveRequestController = controller;
+        try {
+            var response = await window.fetch(
+                config.qaLiveStateUrl,
+                {
+                    method: "GET",
+                    credentials: "same-origin",
+                    cache: "no-store",
+                    headers: {"Accept": "application/json"},
+                    signal: controller.signal
+                }
+            );
+            var qaState = await response.json();
+            if (
+                generation !== state.qaLiveRequestGeneration
+                || controller.signal.aborted
+            ) {
+                return;
+            }
+            if (!response.ok || !validateQaLiveState(qaState)) {
+                state.qaLiveState = null;
+                showQaLiveWaiting(
+                    qaState.error || "Ожидание актуального QA-live шага."
+                );
+                return;
+            }
+            var previousGroupKey = qaLiveStateGroupKey(
+                state.qaLiveState
+            );
+            var nextGroupKey = qaLiveStateGroupKey(qaState);
+            if (previousGroupKey && previousGroupKey !== nextGroupKey) {
+                state.payload = null;
+                state.activeGroupKey = "";
+                showMessage(
+                    "Переключаем закрытую смену",
+                    "Ожидаем снимок новой QA-live группы."
+                );
+            }
+            state.qaLiveState = qaState;
+            state.selectedPeriod = String(qaState.rating_period_id);
+            state.selectedComposition = String(
+                qaState.watch_composition_id
+            );
+            state.shiftType = qaState.shift_type;
+            if (elements.shiftType) {
+                elements.shiftType.value = state.shiftType;
+                elements.shiftType.disabled = true;
+            }
+            renderQaLiveStateMetadata(qaState);
+            await loadRating({
+                forceRefresh: true,
+                replaceRequest: true
+            });
+        } catch (error) {
+            if (
+                error
+                && error.name === "AbortError"
+            ) {
+                return;
+            }
+            if (generation !== state.qaLiveRequestGeneration) return;
+            state.qaLiveState = null;
+            showQaLiveWaiting(
+                "Нет актуального состояния синтетического прогона."
+            );
+        } finally {
+            if (
+                generation === state.qaLiveRequestGeneration
+                && state.qaLiveRequestController === controller
+            ) {
+                state.qaLiveRequestController = null;
+            }
+        }
+    }
+
     async function loadRating(options) {
         options = options || {};
         if (state.qaPreview) {
@@ -1676,6 +2244,12 @@
             state.requestInFlight = false;
         }
         var requestedGroupKey = currentGroupKey();
+        var requestedIdentityComplete = Boolean(
+            state.selectedPeriod && state.selectedComposition
+        );
+        var requestedQaLiveStep = state.qaLiveState
+            ? state.qaLiveState.step
+            : null;
         var cachedGroup = state.groupCache.get(requestedGroupKey);
         var cacheAgeMilliseconds = cachedGroup
             ? Date.now() - cachedGroup.fetchedAt
@@ -1699,6 +2273,18 @@
             return;
         }
         if (state.requestInFlight) return;
+        if (
+            state.activeGroupKey
+            && state.activeGroupKey !== requestedGroupKey
+            && !cachedGroup
+        ) {
+            showMessage(
+                "Ожидаем снимок выбранной группы",
+                "Данные другой смены на этом месте не показываются."
+            );
+            state.payload = null;
+            state.activeGroupKey = "";
+        }
 
         state.requestGeneration += 1;
         var generation = state.requestGeneration;
@@ -1718,7 +2304,20 @@
                 signal: controller.signal
             });
             var payload = await response.json();
-            if (generation !== state.requestGeneration) return;
+            if (
+                generation !== state.requestGeneration
+                || (
+                    state.qaLive
+                    && (
+                        !state.qaLiveState
+                        || state.qaLiveState.step !== requestedQaLiveStep
+                        || qaLiveStateGroupKey(state.qaLiveState)
+                            !== requestedGroupKey
+                    )
+                )
+            ) {
+                return;
+            }
 
             if (!response.ok) {
                 if (
@@ -1729,17 +2328,43 @@
                     await loadRating({replaceRequest: true});
                     return;
                 }
+                if (
+                    state.qaLive
+                    && [409, 503].includes(response.status)
+                ) {
+                    state.payload = null;
+                    state.activeGroupKey = "";
+                    state.sourceFingerprint = "";
+                    state.groupCache.delete(requestedGroupKey);
+                    clearQaLiveMaterializedMetadata();
+                    showMessage(
+                        "Ожидаем согласованный QA-live снимок",
+                        payload.error
+                        || "Текущий шаг будет прочитан повторно."
+                    );
+                    return;
+                }
+                var hasRequestedGroupPayload = Boolean(
+                    state.payload
+                    && state.activeGroupKey === requestedGroupKey
+                );
                 if ([401, 403, 409].includes(response.status)) {
                     state.payload = null;
                     state.activeGroupKey = "";
-                    state.groupCache.clear();
+                    if ([401, 403].includes(response.status)) {
+                        state.groupCache.clear();
+                    } else {
+                        state.groupCache.delete(requestedGroupKey);
+                    }
                     showMessage(
                         "Рейтинг временно недоступен",
                         payload.error || "Проверьте доступ и выбранную группу."
                     );
-                } else if (state.payload && elements.status) {
+                } else if (hasRequestedGroupPayload && elements.status) {
                     elements.status.textContent = "Показан последний снимок";
                 } else {
+                    state.payload = null;
+                    state.activeGroupKey = "";
                     showMessage(
                         "Не удалось получить рейтинг",
                         payload.error || "Сервер не вернул готовый снимок."
@@ -1750,8 +2375,35 @@
 
             var fingerprint = String(payload.source_fingerprint || "");
             var responseGroupKey = payloadGroupKey(payload);
+            if (
+                (
+                    (state.qaLive || requestedIdentityComplete)
+                    && responseGroupKey !== requestedGroupKey
+                )
+                || (
+                    state.qaLive
+                    && responseGroupKey
+                        !== qaLiveStateGroupKey(state.qaLiveState)
+                )
+            ) {
+                state.payload = null;
+                state.activeGroupKey = "";
+                state.sourceFingerprint = "";
+                if (state.qaLive) {
+                    state.groupCache.delete(requestedGroupKey);
+                    clearQaLiveMaterializedMetadata();
+                }
+                showMessage(
+                    "Снимок другой группы отклонён",
+                    "Ожидаем результат выбранной закрытой смены."
+                );
+                return;
+            }
+            payload = applyQaLivePlaceholders(payload);
             var previousCachedGroup = state.groupCache.get(responseGroupKey);
             if (
+                !state.qaLive
+                &&
                 fingerprint
                 && previousCachedGroup
                 && fingerprint === previousCachedGroup.fingerprint
@@ -1793,9 +2445,15 @@
             state.refreshRemaining = state.refreshSeconds;
         } catch (error) {
             if (error && error.name === "AbortError") return;
-            if (state.payload && elements.status) {
+            if (
+                state.payload
+                && state.activeGroupKey === requestedGroupKey
+                && elements.status
+            ) {
                 elements.status.textContent = "Показан последний снимок";
             } else {
+                state.payload = null;
+                state.activeGroupKey = "";
                 showMessage(
                     "Нет связи с сервером",
                     "Последний успешный рейтинг пока не получен."
@@ -1869,7 +2527,11 @@
         state.refreshRemaining -= 1;
         if (state.refreshRemaining <= 0) {
             state.refreshRemaining = state.refreshSeconds;
-            loadRating();
+            if (state.qaLive) {
+                loadQaLive();
+            } else {
+                loadRating();
+            }
         }
         if (
             state.rotationPlaying
@@ -2014,7 +2676,7 @@
     }
 
     function bindEvents() {
-        if (elements.period && !state.qaPreview) {
+        if (elements.period && !state.qaPreview && !state.qaLive) {
             elements.period.addEventListener("change", function () {
                 state.selectedPeriod = elements.period.value;
                 state.selectedComposition = "";
@@ -2024,7 +2686,11 @@
                 loadRating({replaceRequest: true});
             });
         }
-        if (elements.composition && !state.qaPreview) {
+        if (
+            elements.composition
+            && !state.qaPreview
+            && !state.qaLive
+        ) {
             elements.composition.addEventListener("change", function () {
                 state.selectedComposition = elements.composition.value;
                 state.rotationRemaining = state.rotationSeconds;
@@ -2034,6 +2700,10 @@
         }
         if (elements.shiftType) {
             elements.shiftType.addEventListener("change", function () {
+                if (state.qaLive) {
+                    elements.shiftType.value = state.shiftType;
+                    return;
+                }
                 if (state.qaPreview) {
                     if (state.qaReplayKind !== "formula") return;
                     if (
@@ -2162,6 +2832,9 @@
     updateCountdowns();
     if (state.qaPreview) {
         loadQaReplay();
+    } else if (state.qaLive) {
+        loadQaLive();
+        state.timerId = window.setInterval(tick, 1000);
     } else {
         loadRating();
         state.timerId = window.setInterval(tick, 1000);
@@ -2171,6 +2844,7 @@
         formatSeconds: formatSeconds,
         layoutGrid: layoutGrid,
         loadRating: loadRating,
+        loadQaLive: loadQaLive,
         loadQaReplay: loadQaReplay,
         moveGroup: moveGroup,
         pauseQaReplay: pauseQaReplay,

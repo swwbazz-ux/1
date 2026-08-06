@@ -10,8 +10,11 @@ from django.test import TransactionTestCase, override_settings
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
+from assignments.models import AssignmentStatus, EquipmentAssignment
 from core.production_time import production_work_date
-from shifts.models import ShiftType
+from references.models import Equipment
+from shifts.models import EmployeeShift, ShiftType
+from users.models import WatchComposition, WorkSchedule
 
 from .driver_rating_materialization import (
     DriverRatingMaterializationError,
@@ -21,9 +24,16 @@ from .driver_rating_materialization import (
     get_materialized_driver_rating_period,
     refresh_driver_rating_group,
 )
+from .driver_rating_scope_membership import (
+    discover_driver_rating_current_scope,
+    discover_driver_rating_group_scope,
+)
 from .models import (
     DriverRatingPeriodMaterializedSnapshot,
     DriverRatingSnapshotRefreshStatus,
+    DriverShiftPassportCaptureRequest,
+    DriverShiftPassportRequestStatus,
+    DriverShiftPassportTrigger,
     RatingPeriod,
 )
 from .test_driver_watch_rating import DriverRatingFixtureMixin
@@ -71,6 +81,51 @@ class DriverRatingMaterializationTests(
             **kwargs,
         )
 
+    def _closed_driver_shift(
+        self,
+        employee,
+        *,
+        shift_type=ShiftType.DAY,
+        watch_period=None,
+        equipment=None,
+    ):
+        opened_at = self.now - timedelta(days=1, hours=12)
+        return EmployeeShift.objects.create(
+            employee=employee,
+            shift_type=shift_type,
+            workplace_code='driver',
+            watch_period=watch_period,
+            equipment=equipment,
+            opened_at=opened_at,
+            closed_at=opened_at + timedelta(hours=12),
+            opened_by=employee,
+            closed_by=employee,
+        )
+
+    def _participant_group_context(
+        self,
+        employee,
+        *,
+        shift_type=ShiftType.DAY,
+    ):
+        work_schedule = WorkSchedule.objects.create(
+            code=f'rating-materialized-{employee.id}',
+            name=f'График materialized {employee.id}',
+            brigade_count=4,
+        )
+        employee.work_schedule = work_schedule
+        employee.brigade_number = 2
+        employee.save(update_fields=['work_schedule', 'brigade_number'])
+        assignment = EquipmentAssignment.objects.create(
+            employee=employee,
+            role=self.driver_role,
+            equipment=self.truck,
+            shift_type=shift_type,
+            status=AssignmentStatus.ACCEPTED,
+            accepted_at=self.now,
+        )
+        return work_schedule, assignment
+
     def test_publish_and_read_use_one_shared_database_row(self):
         self.snapshot(self.driver, ordinal=1, trip_count=20)
 
@@ -94,6 +149,119 @@ class DriverRatingMaterializationTests(
             [entry['employee_id'] for entry in payload['entries']],
             [self.driver.id],
         )
+
+    def test_publish_captures_participant_group_fields(self):
+        work_schedule, _assignment = self._participant_group_context(
+            self.driver
+        )
+        self.snapshot(self.driver, ordinal=1, trip_count=20)
+
+        result = self._refresh()
+        snapshot = DriverRatingPeriodMaterializedSnapshot.objects.get(
+            pk=result.snapshot_id,
+        )
+
+        self.assertEqual(
+            snapshot.participant_group_snapshots,
+            [{
+                'employee_id': self.driver.id,
+                'work_schedule_id': work_schedule.id,
+                'brigade_number': 2,
+                'shift_type': ShiftType.DAY,
+                'equipment_id': self.truck.id,
+            }],
+        )
+
+    def test_published_participant_group_survives_source_changes(self):
+        _work_schedule, assignment = self._participant_group_context(
+            self.driver
+        )
+        self.snapshot(self.driver, ordinal=1, trip_count=20)
+        first = self._refresh()
+        snapshot = DriverRatingPeriodMaterializedSnapshot.objects.get(
+            pk=first.snapshot_id,
+        )
+        historical_group = [
+            dict(value) for value in snapshot.participant_group_snapshots
+        ]
+        historical_payload = snapshot.payload
+        historical_revision = snapshot.revision
+
+        replacement_schedule = WorkSchedule.objects.create(
+            code='rating-materialized-replacement',
+            name='Другой график materialized',
+            brigade_count=4,
+        )
+        self.driver.work_schedule = replacement_schedule
+        self.driver.brigade_number = 4
+        self.driver.save(update_fields=['work_schedule', 'brigade_number'])
+        assignment.ended_at = self.now
+        assignment.save(update_fields=['ended_at'])
+        replacement_truck = Equipment.objects.create(
+            equipment_type=self.truck.equipment_type,
+            model=self.model,
+            garage_number='RATING-02',
+        )
+        EquipmentAssignment.objects.create(
+            employee=self.driver,
+            role=self.driver_role,
+            equipment=replacement_truck,
+            shift_type=ShiftType.NIGHT,
+            status=AssignmentStatus.ACCEPTED,
+            accepted_at=self.now,
+        )
+
+        second = self._refresh()
+        snapshot.refresh_from_db()
+
+        self.assertEqual(second.status, 'verified')
+        self.assertFalse(second.changed)
+        self.assertEqual(snapshot.revision, historical_revision)
+        self.assertEqual(snapshot.payload, historical_payload)
+        self.assertEqual(
+            snapshot.participant_group_snapshots,
+            historical_group,
+        )
+
+        self.snapshot(self.driver, ordinal=2, trip_count=23)
+        third = self._refresh()
+        snapshot.refresh_from_db()
+
+        self.assertEqual(third.status, 'published')
+        self.assertTrue(third.changed)
+        self.assertEqual(snapshot.revision, historical_revision + 1)
+        self.assertNotEqual(snapshot.payload, historical_payload)
+        self.assertEqual(
+            snapshot.participant_group_snapshots,
+            historical_group,
+        )
+
+    def test_legacy_snapshot_is_not_backfilled_from_current_sources(self):
+        self._participant_group_context(self.driver)
+        self.snapshot(self.driver, ordinal=1, trip_count=20)
+        first = self._refresh()
+        DriverRatingPeriodMaterializedSnapshot.objects.filter(
+            pk=first.snapshot_id,
+        ).update(participant_group_snapshots=None)
+
+        replacement_schedule = WorkSchedule.objects.create(
+            code='rating-materialized-legacy-replacement',
+            name='Новый график для старого снимка',
+            brigade_count=4,
+        )
+        self.driver.work_schedule = replacement_schedule
+        self.driver.brigade_number = 4
+        self.driver.save(update_fields=['work_schedule', 'brigade_number'])
+        self.snapshot(self.driver, ordinal=2, trip_count=23)
+
+        second = self._refresh()
+        snapshot = DriverRatingPeriodMaterializedSnapshot.objects.get(
+            pk=first.snapshot_id,
+        )
+
+        self.assertEqual(second.status, 'published')
+        self.assertTrue(second.changed)
+        self.assertIsNone(snapshot.participant_group_snapshots)
 
     def test_unchanged_refresh_only_moves_success_heartbeat(self):
         self.snapshot(self.driver, ordinal=1, trip_count=20)
@@ -140,6 +308,284 @@ class DriverRatingMaterializationTests(
         self.assertTrue(second.changed)
         self.assertEqual(second.revision, first.revision + 1)
         self.assertEqual(payload['summary']['rated_shift_count'], 2)
+
+    def test_day_and_night_current_and_member_scopes_are_separate(self):
+        day_driver = self.employee('Дневной водитель раздельного состава')
+        night_driver = self.employee('Ночной водитель раздельного состава')
+        self.snapshot(
+            day_driver,
+            ordinal=1,
+            trip_count=20,
+            shift_type=ShiftType.DAY,
+        )
+        self.snapshot(
+            night_driver,
+            ordinal=2,
+            trip_count=20,
+            shift_type=ShiftType.NIGHT,
+        )
+
+        day_scope = discover_driver_rating_current_scope(
+            self.rating_period,
+            self.composition,
+            shift_type=ShiftType.DAY,
+        )
+        night_scope = discover_driver_rating_current_scope(
+            self.rating_period,
+            self.composition,
+            shift_type=ShiftType.NIGHT,
+        )
+        self._refresh(shift_type=ShiftType.DAY)
+        self._refresh(shift_type=ShiftType.NIGHT)
+        day_snapshot = (
+            DriverRatingPeriodMaterializedSnapshot.objects.get(
+                rating_period=self.rating_period,
+                watch_composition=self.composition,
+                shift_type=ShiftType.DAY,
+            )
+        )
+        night_snapshot = (
+            DriverRatingPeriodMaterializedSnapshot.objects.get(
+                rating_period=self.rating_period,
+                watch_composition=self.composition,
+                shift_type=ShiftType.NIGHT,
+            )
+        )
+
+        self.assertEqual(
+            day_scope.expected_employee_ids,
+            (day_driver.id,),
+        )
+        self.assertEqual(
+            night_scope.expected_employee_ids,
+            (night_driver.id,),
+        )
+        self.assertEqual(
+            day_snapshot.member_employee_ids,
+            [day_driver.id],
+        )
+        self.assertEqual(
+            night_snapshot.member_employee_ids,
+            [night_driver.id],
+        )
+        self.assertEqual(
+            [
+                entry['employee_id']
+                for entry in day_snapshot.payload['entries']
+            ],
+            [day_driver.id],
+        )
+        self.assertEqual(
+            [
+                entry['employee_id']
+                for entry in night_snapshot.payload['entries']
+            ],
+            [night_driver.id],
+        )
+
+    def test_pending_closed_shift_is_in_current_expected_scope(self):
+        driver = self.employee('Водитель ожидающего паспорта')
+        shift = self._closed_driver_shift(
+            driver,
+            watch_period=self.watch,
+            equipment=None,
+        )
+        DriverShiftPassportCaptureRequest.objects.create(
+            shift=shift,
+            request_key=f'pending-current-scope-{shift.id}',
+            trigger=DriverShiftPassportTrigger.DRIVER_CLOSE,
+            calculator_version='pending-current-scope-v1',
+            closed_at=shift.closed_at,
+            status=DriverShiftPassportRequestStatus.PENDING,
+        )
+
+        scope = discover_driver_rating_current_scope(
+            self.rating_period,
+            self.composition,
+            shift_type=ShiftType.DAY,
+        )
+        full_scope = discover_driver_rating_group_scope(
+            self.rating_period,
+            self.composition,
+            shift_type=ShiftType.DAY,
+        )
+
+        self.assertEqual(
+            scope.expected_employee_ids,
+            (driver.id,),
+        )
+        self.assertEqual(
+            full_scope.expected_employee_ids,
+            (driver.id,),
+        )
+        self.assertEqual(
+            full_scope.historical_employee_ids,
+            (),
+        )
+        self.assertEqual(
+            full_scope.latest_closed_at[driver.id],
+            shift.closed_at,
+        )
+        self.assertTrue(
+            shift.passport_capture_requests.filter(
+                status=DriverShiftPassportRequestStatus.PENDING,
+            ).exists()
+        )
+
+    def test_linked_shift_stays_with_its_composition_after_transfer(self):
+        driver = self.employee(
+            'Водитель с исторической связью состава',
+        )
+        self._closed_driver_shift(
+            driver,
+            watch_period=self.watch,
+            equipment=None,
+        )
+        current_composition = WatchComposition.objects.create(
+            code='current-composition-after-linked-shift',
+            name='Текущий состав после перевода',
+        )
+        driver.watch_composition = current_composition
+        driver.save(update_fields=['watch_composition'])
+
+        historical_scope = discover_driver_rating_current_scope(
+            self.rating_period,
+            self.composition,
+            shift_type=ShiftType.DAY,
+        )
+        current_scope = discover_driver_rating_current_scope(
+            self.rating_period,
+            current_composition,
+            shift_type=ShiftType.DAY,
+        )
+
+        self.assertEqual(
+            historical_scope.expected_employee_ids,
+            (driver.id,),
+        )
+        self.assertEqual(
+            current_scope.expected_employee_ids,
+            (),
+        )
+
+    def test_command_does_not_create_group_from_watch_only_pending_shift(self):
+        driver = self.employee(
+            'Переведённый водитель с ожидающим паспортом',
+        )
+        shift = self._closed_driver_shift(
+            driver,
+            watch_period=self.watch,
+            equipment=None,
+        )
+        DriverShiftPassportCaptureRequest.objects.create(
+            shift=shift,
+            request_key=f'pending-command-group-{shift.id}',
+            trigger=DriverShiftPassportTrigger.DRIVER_CLOSE,
+            calculator_version='pending-command-group-v1',
+            closed_at=shift.closed_at,
+            status=DriverShiftPassportRequestStatus.PENDING,
+        )
+        current_composition = WatchComposition.objects.create(
+            code='pending-command-current-composition',
+            name='Новый состав переведённого водителя',
+        )
+        driver.watch_composition = current_composition
+        driver.save(update_fields=['watch_composition'])
+
+        call_command(
+            'refresh_driver_rating_snapshots',
+            rating_period=self.rating_period.id,
+            shift_types=[ShiftType.DAY],
+            strict=True,
+            stdout=io.StringIO(),
+            stderr=io.StringIO(),
+            no_color=True,
+            verbosity=0,
+        )
+
+        self.assertFalse(
+            DriverRatingPeriodMaterializedSnapshot.objects.filter(
+                rating_period=self.rating_period,
+            ).exists()
+        )
+        self.assertTrue(
+            shift.passport_capture_requests.filter(
+                status=DriverShiftPassportRequestStatus.PENDING,
+                snapshot__isnull=True,
+            ).exists()
+        )
+
+    def test_no_shift_colleague_is_not_expected_member_or_entry(self):
+        driver = self.employee('Водитель со сменой для текущей группы')
+        colleague = self.employee('Коллега состава без закрытой смены')
+        self.snapshot(driver, ordinal=1, trip_count=20)
+
+        scope = discover_driver_rating_current_scope(
+            self.rating_period,
+            self.composition,
+            shift_type=ShiftType.DAY,
+        )
+        result = self._refresh()
+        snapshot = (
+            DriverRatingPeriodMaterializedSnapshot.objects.get(
+                pk=result.snapshot_id,
+            )
+        )
+
+        self.assertIn(colleague.id, scope.allowed_employee_ids)
+        self.assertEqual(
+            scope.expected_employee_ids,
+            (driver.id,),
+        )
+        self.assertEqual(
+            snapshot.member_employee_ids,
+            [driver.id],
+        )
+        self.assertEqual(
+            [
+                entry['employee_id']
+                for entry in snapshot.payload['entries']
+            ],
+            [driver.id],
+        )
+
+    def test_unlinked_current_candidate_is_withheld_fail_closed(self):
+        linked_driver = self.employee(
+            'Связанный водитель текущего состава',
+        )
+        driver = self.employee('Водитель текущего состава без вахты')
+        self.snapshot(linked_driver, ordinal=2, trip_count=20)
+        self._closed_driver_shift(
+            driver,
+            watch_period=None,
+            equipment=self.truck,
+        )
+
+        scope = discover_driver_rating_current_scope(
+            self.rating_period,
+            self.composition,
+            shift_type=ShiftType.DAY,
+        )
+        result = self._refresh()
+        snapshot = (
+            DriverRatingPeriodMaterializedSnapshot.objects.get(
+                pk=result.snapshot_id,
+            )
+        )
+
+        self.assertEqual(
+            scope.expected_employee_ids,
+            (linked_driver.id, driver.id),
+        )
+        self.assertFalse(snapshot.payload['available'])
+        self.assertEqual(
+            snapshot.payload['linkage_audit']['unlinked_shift_count'],
+            1,
+        )
+        self.assertEqual(
+            snapshot.payload['summary']['withheld_reasons'],
+            {'rating_period_unlinked_shift': 1},
+        )
 
     def test_missing_scope_and_integrity_fail_closed_without_calculation(self):
         with self.assertRaises(DriverRatingSnapshotUnavailable) as missing:
@@ -326,6 +772,16 @@ class DriverRatingMaterializationTests(
 
     def test_management_command_builds_day_and_night_rows(self):
         self.snapshot(self.driver, ordinal=1, trip_count=20)
+        day_schedule, _day_assignment = self._participant_group_context(
+            self.driver,
+        )
+        night_driver = self.employee('Водитель ночного общего снимка')
+        night_schedule, _night_assignment = (
+            self._participant_group_context(
+                night_driver,
+                shift_type=ShiftType.NIGHT,
+            )
+        )
         first_output = io.StringIO()
 
         call_command(
@@ -339,7 +795,7 @@ class DriverRatingMaterializationTests(
 
         rows = DriverRatingPeriodMaterializedSnapshot.objects.filter(
             rating_period=self.rating_period,
-            watch_composition=self.composition,
+            watch_composition__isnull=True,
         )
         self.assertEqual(rows.count(), 2)
         self.assertEqual(
@@ -350,9 +806,12 @@ class DriverRatingMaterializationTests(
             row.shift_type: (row.revision, row.published_at)
             for row in rows
         }
-        self.assertIn('/day: published, revision=1', first_output.getvalue())
         self.assertIn(
-            '/night: published, revision=1',
+            f'{day_schedule.code}/2/day: published, revision=1',
+            first_output.getvalue(),
+        )
+        self.assertIn(
+            f'{night_schedule.code}/2/night: published, revision=1',
             first_output.getvalue(),
         )
 
@@ -369,13 +828,16 @@ class DriverRatingMaterializationTests(
             row.shift_type: (row.revision, row.published_at)
             for row in DriverRatingPeriodMaterializedSnapshot.objects.filter(
                 rating_period=self.rating_period,
-                watch_composition=self.composition,
+                watch_composition__isnull=True,
             )
         }
         self.assertEqual(after, before)
-        self.assertIn('/day: verified, revision=1', second_output.getvalue())
         self.assertIn(
-            '/night: verified, revision=1',
+            f'{day_schedule.code}/2/day: verified, revision=1',
+            second_output.getvalue(),
+        )
+        self.assertIn(
+            f'{night_schedule.code}/2/night: verified, revision=1',
             second_output.getvalue(),
         )
 

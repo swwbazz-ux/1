@@ -137,169 +137,6 @@ class DriverShiftTimelineTests(TestCase):
         self.assertEqual(timeline.no_assignment_seconds, 0)
         self.assertEqual(timeline.coverage_percent, 16.67)
 
-    def test_passport_marks_common_day_window_as_inferred_only(self):
-        timeline = build_driver_shift_timeline(self.shift, as_of=self.end)
-        time_data = timeline.passport['time']
-
-        self.assertEqual(
-            time_data['scheduled_window_status'],
-            'standard_production_shift_inferred',
-        )
-        self.assertEqual(
-            time_data['schedule_source'],
-            'production_shift_default',
-        )
-        self.assertEqual(time_data['schedule_confidence_percent'], 0)
-        self.assertEqual(time_data['scheduled_start_at'], self.start.isoformat())
-        self.assertEqual(time_data['scheduled_end_at'], self.end.isoformat())
-        self.assertEqual(time_data['scheduled_duration_seconds'], 12 * 3600)
-        self.assertEqual(time_data['start_deviation_seconds'], 0)
-        self.assertEqual(time_data['end_deviation_seconds'], 0)
-        self.assertEqual(time_data['inferred_schedule_gap_seconds'], 0)
-        self.assertIsNone(time_data['observed_short_shift_seconds'])
-        self.assertEqual(time_data['extra_presence_seconds'], 0)
-        self.assertEqual(time_data['confirmed_extra_productive_seconds'], 0)
-        self.assertIsNone(time_data['unjustified_short_shift_seconds'])
-        self.assertEqual(
-            time_data['short_shift_status'],
-            'inferred_comparison_only',
-        )
-        self.assertFalse(time_data['work_time_rating_available'])
-        self.assertEqual(
-            time_data['work_time_rating_status'],
-            'neutral_structural_schedule_and_reason_policy_unavailable',
-        )
-
-    def test_passport_keeps_inferred_gap_neutral_without_reason_policy(self):
-        EmployeeShift.objects.filter(pk=self.shift.pk).update(
-            opened_at=self.start + timedelta(minutes=20),
-            closed_at=self.end - timedelta(minutes=10),
-        )
-        self.shift.refresh_from_db()
-
-        timeline = build_driver_shift_timeline(
-            self.shift,
-            as_of=self.end,
-        )
-        time_data = timeline.passport['time']
-
-        self.assertEqual(time_data['start_deviation_seconds'], 20 * 60)
-        self.assertEqual(time_data['end_deviation_seconds'], -10 * 60)
-        self.assertEqual(
-            time_data['inferred_schedule_gap_seconds'],
-            30 * 60,
-        )
-        self.assertIsNone(time_data['observed_short_shift_seconds'])
-        self.assertIsNone(time_data['unjustified_short_shift_seconds'])
-        self.assertEqual(
-            time_data['short_shift_status'],
-            'inferred_comparison_only',
-        )
-        self.assertFalse(time_data['work_time_rating_available'])
-
-    def test_passport_confirms_productive_time_outside_standard_window(self):
-        actual_start = self.start - timedelta(minutes=30)
-        actual_end = self.end + timedelta(minutes=30)
-        EmployeeShift.objects.filter(pk=self.shift.pk).update(
-            opened_at=actual_start,
-            closed_at=actual_end,
-        )
-        EmployeeShift.objects.filter(pk=self.loading_shift.pk).update(
-            opened_at=actual_start,
-            closed_at=actual_end,
-        )
-        self.shift.refresh_from_db()
-        self.loading_shift.refresh_from_db()
-        self.create_assignment(start=actual_start)
-        self.create_trip(
-            actual_start + timedelta(minutes=5),
-            actual_start + timedelta(minutes=20),
-        )
-        self.create_trip(
-            self.end + timedelta(minutes=10),
-            self.end + timedelta(minutes=20),
-        )
-
-        timeline = build_driver_shift_timeline(
-            self.shift,
-            as_of=actual_end,
-        )
-        time_data = timeline.passport['time']
-
-        self.assertEqual(time_data['start_deviation_seconds'], -30 * 60)
-        self.assertEqual(time_data['end_deviation_seconds'], 30 * 60)
-        self.assertEqual(time_data['extra_presence_seconds'], 60 * 60)
-        self.assertEqual(
-            time_data['confirmed_extra_productive_seconds'],
-            25 * 60,
-        )
-        self.assertEqual(time_data['inferred_schedule_gap_seconds'], 0)
-        self.assertIsNone(time_data['observed_short_shift_seconds'])
-        self.assertIsNone(time_data['unjustified_short_shift_seconds'])
-        self.assertFalse(time_data['work_time_rating_available'])
-
-    def test_passport_marks_night_window_across_midnight_as_inferred(self):
-        night_start = self.end
-        night_end = night_start + timedelta(hours=12)
-        EmployeeShift.objects.filter(pk=self.shift.pk).update(
-            shift_type=ShiftType.NIGHT,
-            opened_at=night_start,
-            closed_at=night_end,
-        )
-        self.shift.refresh_from_db()
-
-        timeline = build_driver_shift_timeline(
-            self.shift,
-            as_of=night_end,
-        )
-        time_data = timeline.passport['time']
-
-        self.assertEqual(
-            time_data['scheduled_window_status'],
-            'standard_production_shift_inferred',
-        )
-        self.assertEqual(
-            time_data['scheduled_start_at'],
-            night_start.isoformat(),
-        )
-        self.assertEqual(
-            time_data['scheduled_end_at'],
-            night_end.isoformat(),
-        )
-        self.assertEqual(time_data['inferred_schedule_gap_seconds'], 0)
-        self.assertFalse(time_data['work_time_rating_available'])
-
-    def test_early_06_to_18_window_is_diagnostic_without_fault_or_reward(self):
-        early_start = self.start - timedelta(hours=1)
-        early_end = self.end - timedelta(hours=1)
-        EmployeeShift.objects.filter(pk=self.shift.pk).update(
-            opened_at=early_start,
-            closed_at=early_end,
-        )
-        self.shift.refresh_from_db()
-
-        timeline = build_driver_shift_timeline(
-            self.shift,
-            as_of=self.end,
-        )
-        time_data = timeline.passport['time']
-
-        self.assertEqual(
-            time_data['scheduled_window_status'],
-            'standard_production_shift_inferred',
-        )
-        self.assertEqual(time_data['start_deviation_seconds'], -3600)
-        self.assertEqual(time_data['end_deviation_seconds'], -3600)
-        self.assertEqual(time_data['extra_presence_seconds'], 3600)
-        self.assertEqual(time_data['inferred_schedule_gap_seconds'], 3600)
-        self.assertIsNone(time_data['observed_short_shift_seconds'])
-        self.assertIsNone(time_data['unjustified_short_shift_seconds'])
-        self.assertEqual(
-            time_data['short_shift_status'],
-            'inferred_comparison_only',
-        )
-        self.assertFalse(time_data['work_time_rating_available'])
-
     def test_unload_to_next_loading_gap_stays_neutral_unexplained_time(self):
         self.create_assignment()
         self.create_trip(
@@ -1540,13 +1377,10 @@ class DriverShiftTimelineTests(TestCase):
         self.assertIsNone(
             passport['expected']['actual_to_expected_ratio']
         )
-        self.assertEqual(
-            passport['time']['scheduled_start_at'],
-            self.start.isoformat(),
-        )
+        self.assertIsNone(passport['time']['scheduled_start_at'])
         self.assertEqual(
             passport['time']['scheduled_window_status'],
-            'standard_production_shift_inferred',
+            'schedule_snapshot_unavailable',
         )
 
     def test_passport_builds_transport_work_route_and_cycle_diagnostics(self):
@@ -1630,7 +1464,7 @@ class DriverShiftTimelineTests(TestCase):
                 'quality',
             },
         )
-        self.assertEqual(passport['passport_schema_version'], 2)
+        self.assertEqual(passport['passport_schema_version'], 1)
         self.assertEqual(
             passport['production']['completed_trip_count'],
             0,

@@ -1,14 +1,11 @@
 from datetime import timedelta
 from decimal import Decimal
-from io import StringIO
 from unittest.mock import patch
 
 from core.production_time import production_work_date
 from django.core.cache import cache
-from django.core.management import call_command
 from django.db import connection
-from django.test import Client, TestCase, TransactionTestCase, override_settings
-from django.test.utils import CaptureQueriesContext
+from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
@@ -42,11 +39,7 @@ from .driver_watch_rating import (
     build_driver_watch_rating,
     get_cached_driver_watch_rating,
 )
-from .models import (
-    DriverRatingPeriodMaterializedSnapshot,
-    DriverShiftPassportSnapshot,
-    RatingPeriod,
-)
+from .models import DriverShiftPassportSnapshot, RatingPeriod
 from .portal_rating_provider import DriverRatingProductionDataProvider
 from .driver_shift_passport_snapshots import _fingerprint
 
@@ -69,17 +62,6 @@ def force_snapshot_payload_update(snapshot, payload):
             f'UPDATE {table_name} SET payload = %s WHERE id = %s',
             [database_value, snapshot.pk],
         )
-
-
-def refresh_test_rating_materialization(rating_period):
-    call_command(
-        'refresh_driver_rating_snapshots',
-        rating_period=rating_period.id,
-        strict=True,
-        stdout=StringIO(),
-        stderr=StringIO(),
-        verbosity=0,
-    )
 
 
 class DriverRatingFixtureMixin:
@@ -162,15 +144,6 @@ class DriverRatingFixtureMixin:
         m3_km_known_value='0',
         t_km_known_value='0',
         downtime_review_seconds=0,
-        scheduled_window_status='schedule_snapshot_unavailable',
-        unjustified_short_shift_seconds=None,
-        extra_presence_seconds=0,
-        confirmed_extra_productive_seconds=0,
-        inferred_schedule_gap_seconds=None,
-        work_time_rating_available=False,
-        work_time_rating_status=(
-            'neutral_structural_schedule_and_reason_policy_unavailable'
-        ),
     ):
         opened_at = self.now - timedelta(days=ordinal, hours=12)
         closed_at = opened_at + timedelta(hours=12)
@@ -295,21 +268,10 @@ class DriverRatingFixtureMixin:
                 'time': {
                     'available_seconds': 43200,
                     'downtime_review_seconds': downtime_review_seconds,
-                    'scheduled_window_status': scheduled_window_status,
-                    'unjustified_short_shift_seconds': (
-                        unjustified_short_shift_seconds
+                    'scheduled_window_status': (
+                        'schedule_snapshot_unavailable'
                     ),
-                    'extra_presence_seconds': extra_presence_seconds,
-                    'confirmed_extra_productive_seconds': (
-                        confirmed_extra_productive_seconds
-                    ),
-                    'inferred_schedule_gap_seconds': (
-                        inferred_schedule_gap_seconds
-                    ),
-                    'work_time_rating_available': (
-                        work_time_rating_available
-                    ),
-                    'work_time_rating_status': work_time_rating_status,
+                    'unjustified_short_shift_seconds': None,
                 },
                 'routing': {
                     'match_count': route_match_count,
@@ -389,139 +351,6 @@ class DriverWatchRatingTests(
             ] is False
             for snapshot in snapshots
         ))
-
-    def test_formula_version_declares_neutral_work_time_policy(self):
-        self.assertEqual(
-            DRIVER_RATING_FORMULA_VERSION,
-            'DRIVER_WATCH_V3_NO_DISTANCE_TIME_POLICY_NEUTRAL',
-        )
-
-    def test_unjustified_none_stays_neutral_without_reason_policy(self):
-        driver = self.employee(
-            'Р’РѕРґРёС‚РµР»СЊ СЃ РЅР°Р±Р»СЋРґР°РµРјС‹Рј РѕРєРЅРѕРј СЃРјРµРЅС‹',
-        )
-        self.snapshot(
-            driver,
-            ordinal=1,
-            trip_count=20,
-            scheduled_window_status=(
-                'structural_schedule_observed'
-            ),
-            unjustified_short_shift_seconds=None,
-            work_time_rating_available=True,
-            work_time_rating_status=(
-                'assessed_structural_schedule_and_reason_policy'
-            ),
-        )
-
-        result = build_driver_watch_rating(
-            self.watch,
-            shift_type=ShiftType.DAY,
-        )
-
-        self.assertTrue(result['available'])
-        self.assertEqual(
-            result['entries'][0]['blocks']['work_time'],
-            '50.0000',
-        )
-
-    def test_inferred_presence_and_productive_extra_do_not_change_rank(self):
-        baseline = self.employee('ТЕСТ водитель без отклонения')
-        early = self.employee('ТЕСТ водитель с графиком 06-18')
-        self.snapshot(
-            baseline,
-            ordinal=1,
-            trip_count=20,
-            scheduled_window_status='standard_production_shift_inferred',
-            inferred_schedule_gap_seconds=0,
-        )
-        self.snapshot(
-            early,
-            ordinal=2,
-            trip_count=20,
-            scheduled_window_status='standard_production_shift_inferred',
-            extra_presence_seconds=3600,
-            confirmed_extra_productive_seconds=1200,
-            inferred_schedule_gap_seconds=3600,
-        )
-
-        result = build_driver_watch_rating(
-            self.watch,
-            shift_type=ShiftType.DAY,
-        )
-        by_employee = {
-            entry['employee_id']: entry
-            for entry in result['entries']
-        }
-
-        self.assertEqual(
-            by_employee[baseline.id]['blocks']['work_time'],
-            '50.0000',
-        )
-        self.assertEqual(
-            by_employee[early.id]['blocks']['work_time'],
-            '50.0000',
-        )
-        self.assertEqual(
-            by_employee[baseline.id]['score'],
-            by_employee[early.id]['score'],
-        )
-        self.assertEqual(by_employee[baseline.id]['place'], 1)
-        self.assertEqual(by_employee[early.id]['place'], 1)
-
-    def test_unknown_schedule_status_is_neutral_with_zero_confidence_component(
-        self,
-    ):
-        unavailable = self.employee(
-            'ТЕСТ водитель без снимка графика',
-        )
-        unknown = self.employee(
-            'ТЕСТ водитель с неизвестным статусом графика',
-        )
-        self.snapshot(
-            unavailable,
-            ordinal=1,
-            trip_count=20,
-        )
-        self.snapshot(
-            unknown,
-            ordinal=2,
-            trip_count=20,
-            scheduled_window_status='unexpected_schedule_status',
-            unjustified_short_shift_seconds=3600,
-            work_time_rating_available=True,
-            work_time_rating_status=(
-                'assessed_structural_schedule_and_reason_policy'
-            ),
-        )
-
-        result = build_driver_watch_rating(
-            self.watch,
-            shift_type=ShiftType.DAY,
-        )
-        by_employee = {
-            entry['employee_id']: entry
-            for entry in result['entries']
-        }
-
-        self.assertEqual(
-            by_employee[unknown.id]['blocks']['work_time'],
-            '50.0000',
-        )
-        self.assertEqual(
-            by_employee[unavailable.id]['confidence'],
-            by_employee[unknown.id]['confidence'],
-        )
-        self.assertEqual(
-            by_employee[unknown.id]['confidence'],
-            '52.5000',
-        )
-        self.assertEqual(
-            by_employee[unavailable.id]['score'],
-            by_employee[unknown.id]['score'],
-        )
-        self.assertEqual(by_employee[unavailable.id]['place'], 1)
-        self.assertEqual(by_employee[unknown.id]['place'], 1)
 
     def test_zero_weight_distance_is_invariant_for_missing_null_zero_and_arbitrary(
         self,
@@ -1253,11 +1082,8 @@ class DriverWatchRatingTests(
         self.assertEqual(overlap_score, _assignments_score(record))
 
 
-@override_settings(
-    PORTAL_WORKING_DRIVER_RATING_ENABLED=True,
-    DRIVER_WATCH_RATING_DIAGNOSTIC_API_ENABLED=True,
-)
-class DriverWatchRatingApiTests(TransactionTestCase):
+@override_settings(PORTAL_WORKING_DRIVER_RATING_ENABLED=True)
+class DriverWatchRatingApiTests(TestCase):
     def setUp(self):
         self.client = Client()
         self.composition = WatchComposition.objects.create(
@@ -1274,7 +1100,6 @@ class DriverWatchRatingApiTests(TransactionTestCase):
             name='Период API рейтинга',
             starts_on=production_work_date(),
             ends_before=production_work_date() + timedelta(days=30),
-            comment='Технический период проверки API рейтинга.',
         )
         self.scope_driver = Employee.objects.create(
             full_name='Водитель области API рейтинга',
@@ -1283,7 +1108,6 @@ class DriverWatchRatingApiTests(TransactionTestCase):
             work_category=Employee.WorkCategory.DRIVER,
             watch_composition=self.composition,
         )
-        refresh_test_rating_materialization(self.rating_period)
 
     def access(self, role_code):
         employee = Employee.objects.create(
@@ -1312,35 +1136,30 @@ class DriverWatchRatingApiTests(TransactionTestCase):
         session[ACTIVE_ROLE_CODE_SESSION_KEY] = access.role.code
         session.save()
 
-    def test_legacy_watch_rating_http_calculation_is_retired(self):
+    def test_dispatcher_admin_and_manager_can_read_rating(self):
         for role_code in ('dispatcher', 'admin', 'manager'):
             with self.subTest(role=role_code):
                 self.client = Client()
                 self.login_as(self.access(role_code))
-                cache.clear()
-                with CaptureQueriesContext(connection) as queries:
-                    response = self.client.get(
-                        reverse('driver_watch_rating_api'),
-                        {
-                            'watch_period': self.watch.id,
-                            'shift_type': ShiftType.DAY,
-                        },
-                    )
-                self.assertEqual(response.status_code, 410)
+                response = self.client.get(
+                    reverse('driver_watch_rating_api'),
+                    {
+                        'watch_period': self.watch.id,
+                        'shift_type': ShiftType.DAY,
+                    },
+                )
+                self.assertEqual(response.status_code, 200)
+                payload = response.json()
+                self.assertFalse(payload['official'])
                 self.assertEqual(
-                    response.json()['snapshot_status'],
-                    'diagnostic_http_calculation_retired',
+                    payload['distance_metrics'],
+                    {
+                        'weight': '0',
+                        'status': 'planned',
+                        'label': 'м³·км и т·км пока не учитываются',
+                    },
                 )
                 self.assertIn('no-store', response.headers['Cache-Control'])
-                passport_table = (
-                    DriverShiftPassportSnapshot._meta.db_table
-                )
-                self.assertFalse(
-                    any(
-                        passport_table in query['sql']
-                        for query in queries.captured_queries
-                    )
-                )
 
     def test_driver_cannot_read_management_rating_api(self):
         self.login_as(self.access('driver'))
@@ -1414,47 +1233,6 @@ class DriverWatchRatingApiTests(TransactionTestCase):
                     response.headers['Cache-Control'],
                 )
 
-    def test_period_rating_api_never_runs_formula_from_http_request(self):
-        self.login_as(self.access('dispatcher'))
-
-        with patch(
-            (
-                'reports.driver_rating_materialization.'
-                'build_driver_rating_period'
-            )
-        ) as calculator:
-            response = self.client.get(
-                reverse('driver_period_rating_api'),
-                {'shift_type': ShiftType.DAY},
-            )
-
-        self.assertEqual(response.status_code, 200)
-        calculator.assert_not_called()
-        self.assertEqual(response.json()['snapshot_status'], 'fresh')
-
-    def test_period_rating_api_returns_503_when_shared_snapshot_is_missing(self):
-        DriverRatingPeriodMaterializedSnapshot.objects.all().delete()
-        self.login_as(self.access('dispatcher'))
-
-        with patch(
-            (
-                'reports.driver_rating_materialization.'
-                'build_driver_rating_period'
-            )
-        ) as calculator:
-            response = self.client.get(
-                reverse('driver_period_rating_api'),
-                {'shift_type': ShiftType.DAY},
-            )
-
-        self.assertEqual(response.status_code, 503)
-        calculator.assert_not_called()
-        self.assertEqual(
-            response.json()['snapshot_status'],
-            'snapshot_missing',
-        )
-        self.assertIn('no-store', response.headers['Cache-Control'])
-
     def test_period_rating_api_requires_auth_role_and_shift_type(self):
         unauthenticated = self.client.get(
             reverse('driver_period_rating_api'),
@@ -1512,9 +1290,8 @@ class DriverWatchRatingApiTests(TransactionTestCase):
             name='Будущий период для повреждённого пересечения',
             starts_on=self.rating_period.ends_before,
             ends_before=self.rating_period.ends_before + timedelta(days=10),
-            comment='Техническая проверка повреждённого пересечения.',
         )
-        RatingPeriod._base_manager.filter(pk=other_period.pk).update(
+        RatingPeriod.objects.filter(pk=other_period.pk).update(
             starts_on=self.rating_period.starts_on,
             ends_before=self.rating_period.ends_before,
         )
@@ -1541,7 +1318,6 @@ class DriverWatchRatingApiTests(TransactionTestCase):
             work_category=Employee.WorkCategory.DRIVER,
             watch_composition=other_composition,
         )
-        refresh_test_rating_materialization(self.rating_period)
         self.login_as(self.access('manager'))
 
         missing_selection = self.client.get(
@@ -1576,7 +1352,6 @@ class DriverWatchRatingApiTests(TransactionTestCase):
             name='Отключённый период API рейтинга',
             starts_on=self.rating_period.ends_before,
             ends_before=self.rating_period.ends_before + timedelta(days=10),
-            comment='Техническая проверка отключённого периода.',
             is_active=False,
         )
         outside_composition = WatchComposition.objects.create(
@@ -1620,7 +1395,6 @@ class DriverWatchRatingApiTests(TransactionTestCase):
 
 @override_settings(
     PORTAL_WORKING_DRIVER_RATING_ENABLED=True,
-    DRIVER_WATCH_RATING_DIAGNOSTIC_API_ENABLED=True,
     PORTAL_EMPLOYEE_SCOPE_PROVIDER=(
         'reports.test_driver_watch_rating.'
         'rating_test_employee_scope_provider'
@@ -1628,7 +1402,7 @@ class DriverWatchRatingApiTests(TransactionTestCase):
 )
 class DriverRatingApiScopeTests(
     DriverRatingFixtureMixin,
-    TransactionTestCase,
+    TestCase,
 ):
     def setUp(self):
         super().setUp()
@@ -1636,7 +1410,6 @@ class DriverRatingApiScopeTests(
             name='Тестовый период API состава',
             starts_on=self.watch.starts_on,
             ends_before=self.watch.ends_on + timedelta(days=1),
-            comment='Технический период проверки API состава.',
         )
         manager = Employee.objects.create(
             full_name='Руководитель области рейтинга',
@@ -1654,11 +1427,6 @@ class DriverRatingApiScopeTests(
             status=EmployeeAccess.Status.ACTIVATED,
             is_active=True,
         )
-
-    def snapshot(self, *args, **kwargs):
-        snapshot = super().snapshot(*args, **kwargs)
-        refresh_test_rating_materialization(self.rating_period)
-        return snapshot
 
     def login_manager(self):
         login_at = timezone.now()
@@ -1692,17 +1460,35 @@ class DriverRatingApiScopeTests(
         hidden_watch = self.watch
         self.login_manager()
 
-        retired_rating_response = self.client.get(
+        rating_response = self.client.get(
             reverse('driver_watch_rating_api'),
             {
                 'watch_period': visible_watch.id,
                 'shift_type': ShiftType.DAY,
             },
         )
+        self.assertEqual(rating_response.status_code, 200)
+        rating_payload = rating_response.json()
         self.assertEqual(
-            retired_rating_response.status_code,
-            410,
+            [entry['employee_id'] for entry in rating_payload['entries']],
+            [visible.id],
         )
+        self.assertNotIn(
+            hidden_watch.name,
+            {
+                period['name']
+                for period in rating_payload['available_watch_periods']
+            },
+        )
+
+        hidden_watch_response = self.client.get(
+            reverse('driver_watch_rating_api'),
+            {
+                'watch_period': hidden_watch.id,
+                'shift_type': ShiftType.DAY,
+            },
+        )
+        self.assertEqual(hidden_watch_response.status_code, 404)
 
         period_rating_response = self.client.get(
             reverse('driver_period_rating_api'),
@@ -1795,7 +1581,6 @@ class DriverRatingApiScopeTests(
         visible.save(update_fields=['watch_composition'])
         historical_composition.is_active = False
         historical_composition.save(update_fields=['is_active'])
-        refresh_test_rating_materialization(self.rating_period)
         self.login_manager()
 
         response = self.client.get(
@@ -1834,7 +1619,7 @@ class DriverRatingApiScopeTests(
 @override_settings(PORTAL_WORKING_DRIVER_RATING_ENABLED=True)
 class DriverRatingPortalProviderTests(
     DriverRatingFixtureMixin,
-    TransactionTestCase,
+    TestCase,
 ):
     def setUp(self):
         super().setUp()
@@ -1842,13 +1627,7 @@ class DriverRatingPortalProviderTests(
             name='Тестовый период рейтинга портала',
             starts_on=self.watch.starts_on,
             ends_before=self.watch.ends_on + timedelta(days=1),
-            comment='Технический период проверки портала.',
         )
-
-    def snapshot(self, *args, **kwargs):
-        snapshot = super().snapshot(*args, **kwargs)
-        refresh_test_rating_materialization(self.rating_period)
-        return snapshot
 
     def test_internal_portal_shows_places_and_only_personal_score(self):
         first = self.employee('Водитель портала первый')
@@ -1898,83 +1677,6 @@ class DriverRatingPortalProviderTests(
             content.index('class="personal-kpi"'),
             content.index('class="full-ranking"'),
         )
-
-    def test_portal_reads_shared_snapshot_without_formula_or_passport_scan(self):
-        employee = self.employee('Водитель готового снимка портала')
-        self.snapshot(employee, ordinal=1, trip_count=20)
-        provider = DriverRatingProductionDataProvider()
-
-        with (
-            patch(
-                (
-                    'reports.driver_rating_materialization.'
-                    'build_driver_rating_period'
-                )
-            ) as calculator,
-            patch(
-                (
-                    'reports.portal_rating_provider.'
-                    'linked_driver_snapshot_scopes'
-                )
-            ) as passport_scan,
-            CaptureQueriesContext(connection) as queries,
-        ):
-            ranking = provider.ranking(employee)
-
-        self.assertTrue(ranking.available)
-        calculator.assert_not_called()
-        passport_scan.assert_not_called()
-        materialized_table = (
-            DriverRatingPeriodMaterializedSnapshot._meta.db_table
-        )
-        metadata_queries = [
-            query['sql']
-            for query in queries.captured_queries
-            if materialized_table in query['sql']
-        ]
-        self.assertEqual(len(metadata_queries), 2)
-        self.assertNotIn(
-            f'"{materialized_table}"."payload"',
-            metadata_queries[0],
-        )
-        self.assertIn(
-            f'"{materialized_table}"."payload"',
-            metadata_queries[1],
-        )
-        passport_table = DriverShiftPassportSnapshot._meta.db_table
-        self.assertFalse(
-            any(
-                passport_table in query['sql']
-                for query in queries.captured_queries
-            )
-        )
-
-    def test_portal_rejects_tampered_group_membership_metadata(self):
-        employee = self.employee('Водитель повреждённого состава снимка')
-        self.snapshot(employee, ordinal=1, trip_count=20)
-        snapshot = DriverRatingPeriodMaterializedSnapshot.objects.get(
-            rating_period=self.rating_period,
-            watch_composition=self.composition,
-            shift_type=ShiftType.DAY,
-        )
-        DriverRatingPeriodMaterializedSnapshot.objects.filter(
-            pk=snapshot.pk,
-        ).update(
-            member_latest_closed_at={
-                str(employee.id): (
-                    self.now + timedelta(days=1)
-                ).isoformat(),
-            },
-        )
-        provider = DriverRatingProductionDataProvider()
-
-        self.assertIsNone(
-            provider._latest_snapshot_scope(
-                self.rating_period,
-                employee,
-            )
-        )
-        self.assertFalse(provider.ranking(employee).available)
 
     def test_home_preview_is_limited_to_five_rows_even_with_ties(self):
         employees = [
@@ -2035,7 +1737,6 @@ class DriverRatingPortalProviderTests(
         employee.save(update_fields=['watch_composition'])
         historical_composition.is_active = False
         historical_composition.save(update_fields=['is_active'])
-        refresh_test_rating_materialization(self.rating_period)
         provider = DriverRatingProductionDataProvider()
 
         snapshot_scope = provider._latest_snapshot_scope(
@@ -2061,7 +1762,6 @@ class DriverRatingPortalProviderTests(
         EmployeeShift.objects.filter(pk=snapshot.shift_id).update(
             watch_period=None,
         )
-        refresh_test_rating_materialization(self.rating_period)
         provider = DriverRatingProductionDataProvider()
 
         snapshot_scope = provider._latest_snapshot_scope(
@@ -2084,7 +1784,6 @@ class DriverRatingPortalProviderTests(
             starts_on=self.rating_period.ends_before + timedelta(days=10),
             ends_on=self.rating_period.ends_before + timedelta(days=40),
         )
-        refresh_test_rating_materialization(self.rating_period)
         provider = DriverRatingProductionDataProvider()
 
         snapshot_scope = provider._latest_snapshot_scope(
@@ -2115,7 +1814,6 @@ class DriverRatingPortalProviderTests(
             starts_on=self.rating_period.ends_before + timedelta(days=10),
             ends_on=self.rating_period.ends_before + timedelta(days=40),
         )
-        refresh_test_rating_materialization(self.rating_period)
         provider = DriverRatingProductionDataProvider()
 
         snapshot_scope = provider._latest_snapshot_scope(
@@ -2152,7 +1850,6 @@ class DriverRatingPortalProviderTests(
                     trip_count=20,
                 )
                 force_snapshot_payload_update(snapshot, malformed_payload)
-                refresh_test_rating_materialization(self.rating_period)
 
                 ranking = provider.ranking(employee)
                 session = self.client.session
@@ -2230,9 +1927,8 @@ class DriverRatingPortalProviderTests(
             name='Будущий конфликтующий период портала',
             starts_on=self.rating_period.ends_before,
             ends_before=self.rating_period.ends_before + timedelta(days=10),
-            comment='Техническая проверка конфликта периодов портала.',
         )
-        RatingPeriod._base_manager.filter(pk=other_period.pk).update(
+        RatingPeriod.objects.filter(pk=other_period.pk).update(
             starts_on=self.rating_period.starts_on,
             ends_before=self.rating_period.ends_before,
         )

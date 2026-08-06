@@ -36,12 +36,18 @@ DEFAULT_PORTAL_PRODUCTION_DATA_PROVIDER = (
 
 @dataclass(frozen=True)
 class RankingEntry:
-    place: int
+    place: int | None
     employee_id: int
     full_name: str
     equipment_name: str = ''
     photo_url: str = ''
     premium_level: str = ''
+    row_status: str = 'rated'
+    status_label: str = ''
+
+    @property
+    def has_result(self):
+        return self.row_status == 'rated' and self.place is not None
 
 
 @dataclass(frozen=True)
@@ -95,15 +101,19 @@ class UnavailableProductionDataProvider:
         return PersonalKpiSnapshot()
 
 
-def production_data_provider():
-    provider_path = getattr(settings, 'PORTAL_PRODUCTION_DATA_PROVIDER', '')
-    if not provider_path:
-        if not getattr(
+def portal_working_driver_rating_enabled():
+    return bool(
+        getattr(
             settings,
             'PORTAL_WORKING_DRIVER_RATING_ENABLED',
             False,
-        ):
-            return UnavailableProductionDataProvider()
+        )
+    )
+
+
+def production_data_provider():
+    provider_path = getattr(settings, 'PORTAL_PRODUCTION_DATA_PROVIDER', '')
+    if not provider_path:
         provider_path = DEFAULT_PORTAL_PRODUCTION_DATA_PROVIDER
     provider_class = import_string(provider_path)
     return provider_class()
@@ -125,6 +135,8 @@ def _provider_snapshot(method_name, fallback, **kwargs):
 
 
 def get_ranking_snapshot(employee=None):
+    if not portal_working_driver_rating_enabled():
+        return RankingSnapshot()
     return _provider_snapshot(
         'ranking',
         RankingSnapshot(status='Рейтинг временно недоступен. Попробуйте обновить страницу позже.'),
@@ -133,6 +145,10 @@ def get_ranking_snapshot(employee=None):
 
 
 def get_public_ranking_snapshot():
+    if not portal_working_driver_rating_enabled():
+        return RankingSnapshot(
+            status='Утверждённые итоги конкурса ещё не опубликованы.',
+        )
     return _provider_snapshot(
         'public_ranking',
         RankingSnapshot(status='Утверждённые итоги конкурса ещё не опубликованы.'),
@@ -147,6 +163,8 @@ def get_shift_result_snapshot():
 
 
 def get_personal_kpi_snapshot(employee):
+    if not portal_working_driver_rating_enabled():
+        return PersonalKpiSnapshot()
     return _provider_snapshot(
         'personal_kpis',
         PersonalKpiSnapshot(status='Личные показатели временно недоступны. Попробуйте обновить страницу позже.'),

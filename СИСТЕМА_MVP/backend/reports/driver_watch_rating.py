@@ -14,8 +14,9 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
 from core.production_time import production_day_bounds, production_work_date
+from references.models import Equipment
 from shifts.models import EmployeeShift, ShiftType, WatchPeriod
-from users.models import WatchComposition
+from users.models import Employee, WatchComposition, WorkSchedule
 
 from .driver_watch_observation import (
     _driver_rating_period_queryset,
@@ -358,6 +359,237 @@ def _latest_rating_period_snapshots(
                 ),
             ),
         )
+    return [
+        snapshot
+        for snapshot in snapshots
+        if _snapshot_manifest_is_in_rating_period(
+            snapshot,
+            rating_period,
+        )
+    ]
+
+
+def _assignment_group_participant_value(participant, key, default=None):
+    if isinstance(participant, dict):
+        return participant.get(key, default)
+    return getattr(participant, key, default)
+
+
+def _normalize_assignment_group_participants(
+    participants,
+    *,
+    work_schedule,
+    brigade_number,
+    shift_type,
+):
+    normalized = []
+    employee_ids = set()
+    for participant in participants or ():
+        try:
+            employee_id = int(
+                _assignment_group_participant_value(
+                    participant,
+                    'employee_id',
+                )
+            )
+            equipment_id = int(
+                _assignment_group_participant_value(
+                    participant,
+                    'equipment_id',
+                )
+            )
+        except (TypeError, ValueError) as error:
+            raise ValueError(
+                'Участник группы рейтинга должен содержать корректные '
+                'employee_id и equipment_id.'
+            ) from error
+        if employee_id <= 0 or equipment_id <= 0:
+            raise ValueError(
+                'employee_id и equipment_id участника должны быть '
+                'положительными числами.'
+            )
+        if employee_id in employee_ids:
+            raise ValueError(
+                'Сотрудник не может дважды входить в одну группу рейтинга.'
+            )
+
+        participant_schedule_id = _assignment_group_participant_value(
+            participant,
+            'work_schedule_id',
+        )
+        participant_brigade = _assignment_group_participant_value(
+            participant,
+            'brigade_number',
+        )
+        participant_shift_type = _assignment_group_participant_value(
+            participant,
+            'shift_type',
+        )
+        if (
+            participant_schedule_id is not None
+            and int(participant_schedule_id) != work_schedule.id
+        ):
+            raise ValueError(
+                'График участника не совпадает с группой рейтинга.'
+            )
+        if (
+            participant_brigade is not None
+            and int(participant_brigade) != brigade_number
+        ):
+            raise ValueError(
+                'Бригада участника не совпадает с группой рейтинга.'
+            )
+        if (
+            participant_shift_type is not None
+            and participant_shift_type != shift_type
+        ):
+            raise ValueError(
+                'Смена участника не совпадает с группой рейтинга.'
+            )
+
+        full_name = str(
+            _assignment_group_participant_value(
+                participant,
+                'full_name',
+                '',
+            )
+            or ''
+        ).strip()
+        equipment_name = str(
+            _assignment_group_participant_value(
+                participant,
+                'equipment_name',
+                _assignment_group_participant_value(
+                    participant,
+                    'equipment',
+                    '',
+                ),
+            )
+            or ''
+        ).strip()
+        normalized.append({
+            'employee_id': employee_id,
+            'equipment_id': equipment_id,
+            'full_name': full_name,
+            'equipment_name': equipment_name,
+        })
+        employee_ids.add(employee_id)
+
+    if not normalized:
+        raise ValueError(
+            'Группа рейтинга должна содержать хотя бы одного участника.'
+        )
+    if len(normalized) > 53:
+        raise ValueError(
+            'TV-группа рейтинга не может содержать более 53 участников.'
+        )
+
+    missing_name_ids = [
+        row['employee_id']
+        for row in normalized
+        if not row['full_name']
+    ]
+    employee_names = dict(
+        Employee.objects
+        .filter(id__in=missing_name_ids)
+        .values_list('id', 'full_name')
+    )
+    missing_equipment_ids = [
+        row['equipment_id']
+        for row in normalized
+        if not row['equipment_name']
+    ]
+    equipment_names = {
+        equipment.id: str(equipment)
+        for equipment in Equipment.objects.filter(
+            id__in=missing_equipment_ids
+        ).select_related('equipment_type', 'model')
+    }
+    for row in normalized:
+        if not row['full_name']:
+            row['full_name'] = str(
+                employee_names.get(row['employee_id']) or ''
+            ).strip()
+        if not row['equipment_name']:
+            row['equipment_name'] = str(
+                equipment_names.get(row['equipment_id']) or ''
+            ).strip()
+        if not row['full_name'] or not row['equipment_name']:
+            raise ValueError(
+                'Для участника группы не удалось определить ФИО или '
+                'назначенную технику.'
+            )
+    return tuple(sorted(normalized, key=lambda row: row['employee_id']))
+
+
+def _assignment_group_period_closed_shifts(
+    rating_period,
+    shift_type,
+    *,
+    employee_ids,
+):
+    period_start, period_end = _rating_period_bounds(rating_period)
+    return (
+        EmployeeShift.objects
+        .filter(
+            opened_at__gte=period_start,
+            opened_at__lt=period_end,
+            shift_type=shift_type,
+            closed_at__isnull=False,
+        )
+        .filter(
+            Q(workplace_code='driver')
+            | Q(
+                workplace_code='',
+                equipment__equipment_type__name__contains='Самосвал',
+            ),
+        )
+        .filter(
+            Q(employee_id__in=employee_ids)
+            | Q(
+                passport_snapshots__payload__source_manifest__shift__employee_id__in=(
+                    employee_ids
+                ),
+            ),
+        )
+        .distinct()
+    )
+
+
+def _latest_assignment_group_period_snapshots(
+    rating_period,
+    shift_type,
+    *,
+    employee_ids,
+):
+    latest_snapshot_id = (
+        DriverShiftPassportSnapshot.objects
+        .filter(shift_id=OuterRef('shift_id'))
+        .order_by('-revision', '-id')
+        .values('id')[:1]
+    )
+    snapshots = (
+        DriverShiftPassportSnapshot.objects
+        .filter(id=Subquery(latest_snapshot_id))
+        .filter(
+            Q(
+                shift__employee_id__in=employee_ids,
+                shift__shift_type=shift_type,
+            )
+            | Q(
+                payload__source_manifest__shift__employee_id__in=(
+                    employee_ids
+                ),
+                payload__source_manifest__shift__shift_type=shift_type,
+            )
+        )
+        .select_related(
+            'shift__employee',
+            'shift__equipment__equipment_type',
+            'shift__equipment__model',
+        )
+        .order_by('shift_id')
+    )
     return [
         snapshot
         for snapshot in snapshots
@@ -769,7 +1001,12 @@ def _snapshot_shift_structure_matches(snapshot, shift_manifest):
     ))
 
 
-def _validate_snapshot(snapshot, *, strict_shift_structure=False):
+def _validate_snapshot(
+    snapshot,
+    *,
+    strict_shift_structure=False,
+    require_watch_linkage=True,
+):
     payload = snapshot.payload
     passport = payload.get('passport') if isinstance(payload, dict) else None
     manifest = (
@@ -799,7 +1036,13 @@ def _validate_snapshot(snapshot, *, strict_shift_structure=False):
         if isinstance(shift_manifest, dict)
         else None
     )
-    if not all(required) or not isinstance(watch_manifest, dict):
+    if (
+        not all(required)
+        or (
+            require_watch_linkage
+            and not isinstance(watch_manifest, dict)
+        )
+    ):
         return None, 'passport_contract_invalid'
     if snapshot.source_fingerprint != _fingerprint(manifest):
         return None, 'source_fingerprint_mismatch'
@@ -813,20 +1056,23 @@ def _validate_snapshot(snapshot, *, strict_shift_structure=False):
         )
     ):
         return None, 'snapshot_shift_structural_mismatch'
-    if watch_manifest.get('id') != snapshot.shift.watch_period_id:
-        return None, 'watch_period_snapshot_mismatch'
-    watch_composition_manifest = watch_manifest.get('watch_composition')
-    live_watch_composition_id = (
-        snapshot.shift.watch_period.watch_composition_id
-        if snapshot.shift.watch_period_id
-        else None
-    )
-    if (
-        not isinstance(watch_composition_manifest, dict)
-        or watch_composition_manifest.get('id')
-        != live_watch_composition_id
-    ):
-        return None, 'watch_composition_snapshot_mismatch'
+    if require_watch_linkage:
+        if watch_manifest.get('id') != snapshot.shift.watch_period_id:
+            return None, 'watch_period_snapshot_mismatch'
+        watch_composition_manifest = watch_manifest.get(
+            'watch_composition'
+        )
+        live_watch_composition_id = (
+            snapshot.shift.watch_period.watch_composition_id
+            if snapshot.shift.watch_period_id
+            else None
+        )
+        if (
+            not isinstance(watch_composition_manifest, dict)
+            or watch_composition_manifest.get('id')
+            != live_watch_composition_id
+        ):
+            return None, 'watch_composition_snapshot_mismatch'
 
     quality = passport.get('quality')
     quality_flags = set(
@@ -2131,6 +2377,420 @@ def build_driver_rating_period(
                     sum(
                         (
                             _decimal(entry['tonnage_t'], ZERO)
+                            for entry in entries
+                        ),
+                        ZERO,
+                    ),
+                    Decimal('0.01'),
+                )
+            ),
+        },
+        'entries': entries,
+    }
+
+
+def _assignment_group_unranked_entry(
+    participant,
+    *,
+    row_status,
+    display_order,
+    shift_count=0,
+    withheld_shift_count=0,
+    withheld_reasons=None,
+):
+    return {
+        'employee_id': participant['employee_id'],
+        'full_name': participant['full_name'],
+        'equipment_id': participant['equipment_id'],
+        'equipment': [participant['equipment_name']],
+        'row_status': row_status,
+        'ranking_eligible': False,
+        'shift_count': int(shift_count),
+        'trip_count': 0,
+        'volume_m3': None,
+        'tonnage_t': None,
+        'score': None,
+        'blocks': None,
+        'confidence': None,
+        'source_shift_ids': [],
+        'place': None,
+        'shared_score_place': None,
+        'display_order': display_order,
+        'level': '',
+        'position_delta': None,
+        'withheld_shift_count': int(withheld_shift_count),
+        'withheld_reasons': dict(sorted(
+            (withheld_reasons or {}).items()
+        )),
+        'status_label': (
+            'Нет результата'
+            if row_status == 'not_observed'
+            else 'Результат удержан'
+        ),
+    }
+
+
+def build_driver_rating_assignment_group_period(
+    rating_period,
+    work_schedule,
+    *,
+    brigade_number,
+    shift_type,
+    participants,
+):
+    """Строит рейтинг группы из действующих назначений на технику.
+
+    Состав передаётся вызывающим кодом как уже проверенный снимок
+    ``work_schedule + brigade_number + shift_type``. Источники KPI
+    выбираются только по RatingPeriod, типу смены и явным employee_id;
+    WatchComposition и WatchPeriod в этом пути не участвуют.
+    """
+
+    if not isinstance(rating_period, RatingPeriod):
+        raise TypeError(
+            'rating_period должен быть экземпляром RatingPeriod.'
+        )
+    if not isinstance(work_schedule, WorkSchedule):
+        raise TypeError(
+            'work_schedule должен быть экземпляром WorkSchedule.'
+        )
+    if rating_period.ends_before <= rating_period.starts_on:
+        raise ValueError(
+            'Конец периода рейтинга должен быть позже даты начала.'
+        )
+    try:
+        brigade_number = int(brigade_number)
+    except (TypeError, ValueError) as error:
+        raise ValueError('Укажите корректный номер бригады.') from error
+    if brigade_number not in Employee.BrigadeNumber.values:
+        raise ValueError('Укажите существующий номер бригады.')
+    if shift_type not in {ShiftType.DAY, ShiftType.NIGHT}:
+        raise ValueError('Для рейтинга укажите shift_type: day или night.')
+
+    participants = _normalize_assignment_group_participants(
+        participants,
+        work_schedule=work_schedule,
+        brigade_number=brigade_number,
+        shift_type=shift_type,
+    )
+    participant_by_employee_id = {
+        participant['employee_id']: participant
+        for participant in participants
+    }
+    employee_ids = tuple(sorted(participant_by_employee_id))
+    snapshots = _latest_assignment_group_period_snapshots(
+        rating_period,
+        shift_type,
+        employee_ids=employee_ids,
+    )
+    closed_shifts = _assignment_group_period_closed_shifts(
+        rating_period,
+        shift_type,
+        employee_ids=employee_ids,
+    )
+    closed_shift_rows = dict(
+        closed_shifts.values_list('id', 'employee_id')
+    )
+    for snapshot in snapshots:
+        closed_shift_rows[snapshot.shift_id] = (
+            _snapshot_manifest_employee_id(snapshot)
+            or snapshot.shift.employee_id
+        )
+
+    records = []
+    withheld_reasons = defaultdict(int)
+    excluded_employee_ids = set()
+    snapshot_shift_ids = {
+        snapshot.shift_id
+        for snapshot in snapshots
+    }
+    missing_snapshot_shift_ids = (
+        set(closed_shift_rows) - snapshot_shift_ids
+    )
+    if missing_snapshot_shift_ids:
+        withheld_reasons['passport_coverage_incomplete'] += len(
+            missing_snapshot_shift_ids
+        )
+        excluded_employee_ids.update(
+            closed_shift_rows[shift_id]
+            for shift_id in missing_snapshot_shift_ids
+        )
+
+    for snapshot in snapshots:
+        record, reason = _validate_snapshot(
+            snapshot,
+            strict_shift_structure=True,
+            require_watch_linkage=False,
+        )
+        if record is None:
+            withheld_reasons[reason] += 1
+            excluded_employee_ids.add(snapshot.shift.employee_id)
+            manifest_employee_id = _snapshot_manifest_employee_id(snapshot)
+            if manifest_employee_id is not None:
+                excluded_employee_ids.add(manifest_employee_id)
+            continue
+        record['credited_trips'] = _credited_trips(record)
+        if (
+            len(record['credited_trips'])
+            != int(record['production'].get('completed_trip_count', 0))
+        ):
+            withheld_reasons['trip_attribution_mismatch'] += 1
+            excluded_employee_ids.add(snapshot.shift.employee_id)
+            manifest_employee_id = _snapshot_manifest_employee_id(snapshot)
+            if manifest_employee_id is not None:
+                excluded_employee_ids.add(manifest_employee_id)
+            continue
+        records.append(record)
+
+    partially_covered_records = [
+        record
+        for record in records
+        if record['snapshot'].shift.employee_id in excluded_employee_ids
+    ]
+    if partially_covered_records:
+        withheld_reasons['employee_partial_coverage'] += len(
+            partially_covered_records
+        )
+        records = [
+            record
+            for record in records
+            if record['snapshot'].shift.employee_id
+            not in excluded_employee_ids
+        ]
+
+    shift_score_lines = []
+    if records:
+        (
+            volume_samples,
+            cycle_samples,
+            cycle_medians,
+        ) = _calibration(records)
+        for record in records:
+            record['work_units'] = _shift_work_units(
+                record,
+                volume_samples,
+                cycle_samples,
+                cycle_medians,
+            )
+            record['production_rate'] = (
+                record['work_units']
+                * Decimal('3600')
+                / record['available_seconds']
+            )
+
+        production_scores = _midrank_percentiles(records)
+        stability_scores = _stability_scores(
+            records,
+            cycle_samples,
+            cycle_medians,
+        )
+        for record in records:
+            shift_id = record['snapshot'].shift_id
+            blocks = {
+                'production': production_scores[shift_id],
+                'work_time': _work_time_score(record),
+                'stability': stability_scores[shift_id],
+                'assignments': _assignments_score(record),
+                'digital_accounting': _digital_accounting_score(record),
+            }
+            raw_score = sum(
+                (
+                    blocks[key] * DRIVER_RATING_WEIGHTS[key]
+                    for key in DRIVER_RATING_WEIGHTS
+                ),
+                ZERO,
+            )
+            record['blocks'] = blocks
+            record['shift_score'] = _quantize(raw_score)
+            record['confidence'] = _confidence_score(
+                record,
+                blocks['assignments'],
+                blocks['digital_accounting'],
+            )
+            shift_score_lines.append(
+                f'{shift_id}:{record["shift_score"]:.4f}'
+            )
+
+    shift_score_fingerprint = hashlib.sha256(
+        '\n'.join(
+            line
+            for _, line in sorted(
+                (
+                    int(line.split(':', 1)[0]),
+                    line,
+                )
+                for line in shift_score_lines
+            )
+        ).encode('utf-8')
+    ).hexdigest().upper()
+    source_fingerprint = hashlib.sha256(
+        '|'.join(
+            (
+                DRIVER_RATING_FORMULA_VERSION,
+                'driver-rating-period-assignment-group-v1',
+                str(rating_period.id),
+                rating_period.name,
+                rating_period.starts_on.isoformat(),
+                rating_period.ends_before.isoformat(),
+                str(work_schedule.id),
+                work_schedule.code,
+                str(brigade_number),
+                shift_type,
+                *(
+                    f'participant:{participant["employee_id"]}:'
+                    f'{participant["equipment_id"]}'
+                    for participant in participants
+                ),
+                *sorted(
+                    (
+                        f'{snapshot.payload_fingerprint}:'
+                        f'{_fingerprint(snapshot.payload)}'
+                    )
+                    for snapshot in snapshots
+                ),
+                *(
+                    f'shift:{shift_id}:employee:'
+                    f'{closed_shift_rows[shift_id]}'
+                    for shift_id in sorted(closed_shift_rows)
+                ),
+            )
+        ).encode('utf-8')
+    ).hexdigest()
+
+    entries = _employee_entries(records) if records else []
+    for entry in entries:
+        entry.update({
+            'row_status': 'rated',
+            'ranking_eligible': True,
+            'withheld_shift_count': 0,
+            'withheld_reasons': {},
+        })
+    rated_employee_ids = {
+        int(entry['employee_id'])
+        for entry in entries
+    }
+    observed_shift_count_by_employee = defaultdict(int)
+    for employee_id in closed_shift_rows.values():
+        observed_shift_count_by_employee[int(employee_id)] += 1
+    observed_employee_ids = set(observed_shift_count_by_employee)
+    withheld_employee_ids = (
+        observed_employee_ids - rated_employee_ids
+    ) & set(employee_ids)
+    not_observed_employee_ids = (
+        set(employee_ids) - observed_employee_ids
+    )
+    next_display_order = len(entries)
+    for employee_id in sorted(
+        withheld_employee_ids | not_observed_employee_ids,
+        key=lambda value: (
+            participant_by_employee_id[value]['full_name'],
+            value,
+        ),
+    ):
+        next_display_order += 1
+        is_withheld = employee_id in withheld_employee_ids
+        entries.append(_assignment_group_unranked_entry(
+            participant_by_employee_id[employee_id],
+            row_status='withheld' if is_withheld else 'not_observed',
+            display_order=next_display_order,
+            shift_count=(
+                observed_shift_count_by_employee[employee_id]
+                if is_withheld
+                else 0
+            ),
+            withheld_shift_count=(
+                observed_shift_count_by_employee[employee_id]
+                if is_withheld
+                else 0
+            ),
+            withheld_reasons=(
+                dict(withheld_reasons)
+                if is_withheld
+                else {}
+            ),
+        ))
+
+    linkage_audit = {
+        'participant_employee_count': len(participants),
+        'candidate_closed_shift_count': len(closed_shift_rows),
+        'observed_employee_count': len(observed_employee_ids),
+        'not_observed_employee_count': len(not_observed_employee_ids),
+        'watch_linkage_required': False,
+        'linkage_ready': True,
+    }
+    return {
+        'available': True,
+        'official': False,
+        'rating_mode': 'working',
+        'scope_type': 'rating_period',
+        'formula_version': DRIVER_RATING_FORMULA_VERSION,
+        'formula_label': (
+            'Рабочая формула без м³·км и т·км; '
+            'рабочее время нейтрально'
+        ),
+        'status': (
+            'Рабочий рейтинг рассчитан.'
+            if records
+            else 'У назначенных водителей пока нет пригодных закрытых смен.'
+        ),
+        'generated_at': timezone.now().isoformat(),
+        'source_fingerprint': source_fingerprint,
+        'shift_score_fingerprint': shift_score_fingerprint,
+        'rating_period': _rating_period_payload(rating_period),
+        'group_identity': {
+            'work_schedule': {
+                'id': work_schedule.id,
+                'code': work_schedule.code,
+                'name': work_schedule.name,
+            },
+            'brigade_number': brigade_number,
+            'shift_type': shift_type,
+        },
+        'shift_type': shift_type,
+        'shift_type_label': dict(ShiftType.choices)[shift_type],
+        'weights': {
+            key: str(value)
+            for key, value in DRIVER_RATING_WEIGHTS.items()
+        },
+        'distance_metrics': {
+            'weight': '0',
+            'status': 'planned',
+            'label': 'м³·км и т·км пока не учитываются',
+        },
+        'linkage_audit': linkage_audit,
+        'summary': {
+            'employee_count': len(entries),
+            'rated_employee_count': len(rated_employee_ids),
+            'not_observed_employee_count': len(
+                not_observed_employee_ids
+            ),
+            'withheld_employee_count': len(withheld_employee_ids),
+            'rated_shift_count': len(records),
+            'withheld_shift_count': (
+                len(closed_shift_rows) - len(records)
+            ),
+            'withheld_reasons': dict(sorted(withheld_reasons.items())),
+            'trip_count': sum(
+                int(entry.get('trip_count') or 0)
+                for entry in entries
+            ),
+            'volume_m3': str(
+                _quantize(
+                    sum(
+                        (
+                            _decimal(entry.get('volume_m3'), ZERO)
+                            for entry in entries
+                        ),
+                        ZERO,
+                    ),
+                    Decimal('0.01'),
+                )
+            ),
+            'tonnage_t': str(
+                _quantize(
+                    sum(
+                        (
+                            _decimal(entry.get('tonnage_t'), ZERO)
                             for entry in entries
                         ),
                         ZERO,

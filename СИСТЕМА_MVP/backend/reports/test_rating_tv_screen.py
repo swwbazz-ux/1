@@ -1,16 +1,20 @@
 import hashlib
 import json
+import os
 import re
 from copy import deepcopy
 from datetime import timedelta
 from decimal import Decimal
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
+from urllib.parse import urlencode
 
 from core.production_time import production_work_date
 from django.conf import settings
 from django.core.files.base import ContentFile
 from django.db import connection
+from django.http import JsonResponse
 from django.test import Client, SimpleTestCase, TestCase, override_settings
 from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
@@ -25,6 +29,7 @@ from users.models import Employee, EmployeeAccess, Role, WatchComposition
 
 from .driver_watch_rating import DRIVER_RATING_LEVELS
 from .models import RatingPeriod
+from .rating_tv_live_qa import RatingTvLiveQaStateError
 from .rating_tv_replay import (
     RATING_TV_REPLAY_DAY_COUNT,
     RATING_TV_REPLAY_EMPLOYEE_COUNT,
@@ -46,6 +51,14 @@ QA_TV_SETTINGS = {
 QA_REPLAY_SETTINGS = {
     **QA_TV_SETTINGS,
     'RATING_TV_QA_REPLAY_ENABLED': True,
+}
+QA_LIVE_SETTINGS = {
+    **LIVE_TV_SETTINGS,
+    'PORTAL_WORKING_DRIVER_RATING_ENABLED': False,
+    'DEBUG': True,
+    'RATING_TV_QA_LIVE_ENABLED': True,
+    'RATING_TV_QA_LIVE_RUN_ID': 'rating-live-test-run',
+    'PORTAL_SITE_CODE': 'site-2',
 }
 
 
@@ -97,6 +110,48 @@ class DriverRatingTvScreenTests(TestCase):
         session[ACTIVE_ROLE_CODE_SESSION_KEY] = access.role.code
         session.save()
         return login_at
+
+    def _assert_private_photo_not_found(self, response):
+        self.assertEqual(response.status_code, 404)
+        self.assertIn('private', response.headers['Cache-Control'])
+        self.assertIn('no-store', response.headers['Cache-Control'])
+        self.assertEqual(
+            response.headers['X-Content-Type-Options'],
+            'nosniff',
+        )
+
+    def _qa_live_state(self, **overrides):
+        if not hasattr(self, '_qa_live_rating_period'):
+            work_date = production_work_date()
+            self._qa_live_rating_period = RatingPeriod.objects.create(
+                name='QA-live период TV-рейтинга',
+                starts_on=work_date - timedelta(days=1),
+                ends_before=work_date + timedelta(days=2),
+                comment='Изолированная проверка QA-live API.',
+            )
+        state = {
+            'schema': 'driver-rating-qa-live-state',
+            'schema_version': 1,
+            'synthetic': True,
+            'official': False,
+            'official_rating_eligible': False,
+            'run_id': 'rating-live-test-run',
+            'site_code': 'site-2',
+            'step': 2,
+            'virtual_at': '2026-07-30T20:00:00+04:00',
+            'shift_type': 'night',
+            'rating_period_id': self._qa_live_rating_period.id,
+            'watch_composition_id': self.composition.id,
+            'placeholders': [
+                {
+                    'employee_id': self.driver.id,
+                    'status': 'withheld',
+                    'reasons': ['blocking_quality:data_conflict'],
+                },
+            ],
+        }
+        state.update(overrides)
+        return state
 
     @override_settings(**LIVE_TV_SETTINGS)
     def test_tv_screen_allows_only_current_management_roles(self):
@@ -312,24 +367,142 @@ class DriverRatingTvScreenTests(TestCase):
         )
 
     @override_settings(**LIVE_TV_SETTINGS)
-    def test_tv_screen_rejects_stale_active_role_generation(self):
+    def test_stale_dispatcher_reauthenticates_for_tv_and_portal_stays_synced(
+        self,
+    ):
+        self.dispatcher_access.employee.phone = '+7 900 000-00-01'
+        self.dispatcher_access.employee.save(update_fields=['phone'])
         login_at = self._login_as(self.dispatcher_access)
         EmployeeAccess.objects.filter(
             pk=self.dispatcher_access.pk,
         ).update(last_login_at=login_at + timedelta(seconds=1))
 
-        response = self.client.get(reverse('driver_rating_tv'))
+        dispatcher_response = self.client.get(reverse('dispatcher_control'))
+        self.assertEqual(dispatcher_response.status_code, 200)
+        self.assertContains(
+            dispatcher_response,
+            'Роль неактивна — доступен только просмотр',
+        )
+
+        tv_url = reverse('driver_rating_tv')
+        data_url = f'{reverse("driver_rating_tv_data_api")}?shift_type=day'
+        login_url = (
+            f'{reverse("login")}?{urlencode({"next": tv_url})}'
+        )
+        tv_response = self.client.get(tv_url)
+        data_response = self.client.get(data_url)
 
         self.assertRedirects(
-            response,
-            reverse('login'),
+            tv_response,
+            login_url,
             fetch_redirect_response=False,
         )
+        self.assertEqual(data_response.status_code, 401)
+
+        login_page = self.client.get(login_url)
+        self.assertEqual(login_page.status_code, 200)
+        self.assertTemplateUsed(login_page, 'users/login.html')
+        self.assertEqual(login_page.context['next_url'], tv_url)
+
+        login_response = self.client.post(
+            reverse('login'),
+            {
+                'phone': self.dispatcher_access.employee.phone,
+                'access_code': self.dispatcher_access.access_code,
+                'device_kind': 'personal',
+                'next': tv_url,
+            },
+        )
+        self.assertRedirects(
+            login_response,
+            tv_url,
+            fetch_redirect_response=False,
+        )
+
+        self.dispatcher_access.refresh_from_db()
+        session = self.client.session
+        self.assertEqual(
+            session[ACTIVE_ROLE_SESSION_KEY],
+            self.dispatcher_access.id,
+        )
+        self.assertEqual(
+            session[ACTIVE_ROLE_GENERATION_SESSION_KEY],
+            self.dispatcher_access.last_login_at.isoformat(),
+        )
+        self.assertEqual(
+            session[ACTIVE_ROLE_CODE_SESSION_KEY],
+            'dispatcher',
+        )
+        self.assertEqual(self.client.get(tv_url).status_code, 200)
+        self.assertEqual(self.client.get(data_url).status_code, 200)
+
+        session = self.client.session
+        session.pop(ACTIVE_ROLE_GENERATION_SESSION_KEY)
+        session.save()
+        self.assertRedirects(
+            self.client.get(tv_url),
+            login_url,
+            fetch_redirect_response=False,
+        )
+        self.assertEqual(self.client.get(login_url).status_code, 200)
+        self.assertEqual(self.client.get(data_url).status_code, 401)
+        missing_generation_login = self.client.post(
+            reverse('login'),
+            {
+                'phone': self.dispatcher_access.employee.phone,
+                'access_code': self.dispatcher_access.access_code,
+                'device_kind': 'personal',
+                'next': tv_url,
+            },
+        )
+        self.assertRedirects(
+            missing_generation_login,
+            tv_url,
+            fetch_redirect_response=False,
+        )
+
+        self.dispatcher_access.refresh_from_db()
+        generation_before_portal_login = self.dispatcher_access.last_login_at
+        portal_response = self.client.post(
+            reverse('portal:login'),
+            {
+                'phone': self.dispatcher_access.employee.phone,
+                'access_code': self.dispatcher_access.access_code,
+            },
+        )
+        self.assertRedirects(
+            portal_response,
+            reverse('portal:dashboard'),
+            fetch_redirect_response=False,
+        )
+
+        self.dispatcher_access.refresh_from_db()
+        session = self.client.session
+        self.assertGreater(
+            self.dispatcher_access.last_login_at,
+            generation_before_portal_login,
+        )
+        self.assertEqual(
+            session[ACTIVE_ROLE_SESSION_KEY],
+            self.dispatcher_access.id,
+        )
+        self.assertEqual(
+            session[ACTIVE_ROLE_GENERATION_SESSION_KEY],
+            self.dispatcher_access.last_login_at.isoformat(),
+        )
+        self.assertEqual(
+            session[ACTIVE_ROLE_CODE_SESSION_KEY],
+            'dispatcher',
+        )
+        self.assertEqual(self.client.get(tv_url).status_code, 200)
+        self.assertEqual(self.client.get(data_url).status_code, 200)
 
     @override_settings(
         PORTAL_WORKING_DRIVER_RATING_ENABLED=False,
         RATING_TV_SCREEN_ENABLED=False,
         RATING_TV_QA_PREVIEW_ENABLED=False,
+        RATING_TV_QA_LIVE_ENABLED=False,
+        RATING_TV_QA_LIVE_RUN_ID='',
     )
     def test_tv_routes_fail_closed_with_default_disabled_flags(self):
         self._login_as(self.dispatcher_access)
@@ -347,7 +520,7 @@ class DriverRatingTvScreenTests(TestCase):
 
         self.assertEqual(live_response.status_code, 404)
         self.assertEqual(qa_response.status_code, 404)
-        self.assertEqual(photo_response.status_code, 404)
+        self._assert_private_photo_not_found(photo_response)
         data_response = self.client.get(
             reverse('driver_rating_tv_data_api'),
             {'shift_type': 'night'},
@@ -359,6 +532,607 @@ class DriverRatingTvScreenTests(TestCase):
         )
         self.assertEqual(replay_response.status_code, 404)
         self.assertIn('no-store', replay_response['Cache-Control'])
+        qa_live_response = self.client.get(
+            reverse('driver_rating_tv_qa_live'),
+        )
+        qa_live_state_response = self.client.get(
+            reverse('driver_rating_tv_qa_live_state_api'),
+        )
+        qa_live_data_response = self.client.get(
+            reverse('driver_rating_tv_qa_live_data_api'),
+            {
+                'rating_period': 1,
+                'watch_composition': self.composition.id,
+                'shift_type': 'night',
+            },
+        )
+        self.assertEqual(qa_live_response.status_code, 404)
+        self.assertEqual(qa_live_state_response.status_code, 404)
+        self.assertEqual(qa_live_data_response.status_code, 404)
+        self.assertIn(
+            'no-store',
+            qa_live_state_response['Cache-Control'],
+        )
+        self.assertIn(
+            'no-store',
+            qa_live_data_response['Cache-Control'],
+        )
+
+    def test_tv_interface_flag_matrix_is_independent_from_portal_flag(self):
+        self._login_as(self.dispatcher_access)
+        image_bytes = (
+            b'GIF89a\x01\x00\x01\x00\x00\x00\x00\x00\x00'
+            b'!\xf9\x04\x01\x00\x00\x00\x00,\x00\x00\x00'
+            b'\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;'
+        )
+
+        with TemporaryDirectory(prefix='rating-tv-flag-matrix-') as media_root:
+            with override_settings(MEDIA_ROOT=media_root):
+                self.driver.photo.save(
+                    'rating-tv-flag-matrix.gif',
+                    ContentFile(image_bytes),
+                    save=True,
+                )
+                for tv_enabled, portal_enabled in (
+                    (False, False),
+                    (True, False),
+                    (False, True),
+                    (True, True),
+                ):
+                    with (
+                        self.subTest(
+                            tv_enabled=tv_enabled,
+                            portal_enabled=portal_enabled,
+                        ),
+                        override_settings(
+                            RATING_TV_SCREEN_ENABLED=tv_enabled,
+                            PORTAL_WORKING_DRIVER_RATING_ENABLED=(
+                                portal_enabled
+                            ),
+                        ),
+                    ):
+                        page_response = self.client.get(
+                            reverse('driver_rating_tv'),
+                        )
+                        data_response = self.client.get(
+                            reverse('driver_rating_tv_data_api'),
+                            {'shift_type': 'night'},
+                        )
+                        photo_response = self.client.get(
+                            reverse(
+                                'driver_rating_employee_photo',
+                                args=[self.driver.pk],
+                            ),
+                        )
+
+                        expected_status = 200 if tv_enabled else 404
+                        self.assertEqual(
+                            page_response.status_code,
+                            expected_status,
+                        )
+                        self.assertEqual(
+                            data_response.status_code,
+                            expected_status,
+                        )
+                        self.assertEqual(
+                            photo_response.status_code,
+                            expected_status,
+                        )
+                        self.assertIn(
+                            'no-store',
+                            data_response['Cache-Control'],
+                        )
+                        self.assertEqual(
+                            data_response['X-Content-Type-Options'],
+                            'nosniff',
+                        )
+                        if not tv_enabled:
+                            self._assert_private_photo_not_found(
+                                photo_response,
+                            )
+                            continue
+
+                        try:
+                            body = b''.join(
+                                photo_response.streaming_content,
+                            )
+                        finally:
+                            for resource_closer in (
+                                photo_response._resource_closers
+                            ):
+                                resource_closer()
+                            photo_response._resource_closers.clear()
+                        self.assertEqual(body, image_bytes)
+                        self.assertIn(
+                            'private',
+                            photo_response['Cache-Control'],
+                        )
+                        self.assertIn(
+                            'no-store',
+                            photo_response['Cache-Control'],
+                        )
+                        self.assertEqual(
+                            photo_response['X-Content-Type-Options'],
+                            'nosniff',
+                        )
+
+    @override_settings(**QA_LIVE_SETTINGS)
+    def test_qa_live_screen_is_separate_loopback_only_and_never_query_enabled(
+        self,
+    ):
+        self._login_as(self.dispatcher_access)
+        live_url = reverse('driver_rating_tv')
+        qa_live_url = reverse('driver_rating_tv_qa_live')
+
+        live_response = self.client.get(f'{live_url}?qa_live=1')
+        qa_live_response = self.client.get(qa_live_url)
+        forwarded_only_response = self.client.get(
+            qa_live_url,
+            REMOTE_ADDR='192.0.2.15',
+            HTTP_X_FORWARDED_FOR='127.0.0.1',
+        )
+
+        self.assertEqual(live_response.status_code, 200)
+        self.assertFalse(live_response.context['rating_tv_qa_live'])
+        self.assertNotContains(
+            live_response,
+            'СИНТЕТИЧЕСКИЙ ТЕСТ',
+        )
+        self.assertEqual(qa_live_response.status_code, 200)
+        self.assertTrue(qa_live_response.context['rating_tv_qa_live'])
+        self.assertEqual(
+            qa_live_response.context['rating_tv_config']['apiUrl'],
+            reverse('driver_rating_tv_qa_live_data_api'),
+        )
+        self.assertEqual(
+            qa_live_response.context['rating_tv_config']['qaLiveStateUrl'],
+            reverse('driver_rating_tv_qa_live_state_api'),
+        )
+        self.assertEqual(
+            qa_live_response.context['rating_tv_config']['refreshSeconds'],
+            10,
+        )
+        self.assertContains(
+            qa_live_response,
+            (
+                'СИНТЕТИЧЕСКИЙ ТЕСТ · НЕ РЕАЛЬНЫЕ ДАННЫЕ '
+                '· НЕ ДЛЯ ПРЕМИРОВАНИЯ'
+            ),
+        )
+        self.assertIn('private', qa_live_response['Cache-Control'])
+        self.assertIn('no-store', qa_live_response['Cache-Control'])
+        self.assertEqual(
+            qa_live_response['X-Content-Type-Options'],
+            'nosniff',
+        )
+        self.assertEqual(forwarded_only_response.status_code, 404)
+
+    @override_settings(**{
+        **QA_LIVE_SETTINGS,
+        'RATING_TV_QA_LIVE_RUN_ID': '',
+    })
+    def test_qa_live_gate_fails_closed_without_expected_run_id(self):
+        self._login_as(self.dispatcher_access)
+
+        response = self.client.get(reverse('driver_rating_tv_qa_live'))
+        state_response = self.client.get(
+            reverse('driver_rating_tv_qa_live_state_api'),
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(state_response.status_code, 404)
+        self.assertIn('private', state_response['Cache-Control'])
+        self.assertIn('no-store', state_response['Cache-Control'])
+        self.assertEqual(
+            state_response['X-Content-Type-Options'],
+            'nosniff',
+        )
+
+    @override_settings(**QA_LIVE_SETTINGS)
+    def test_qa_live_keeps_management_authentication_boundary(self):
+        page_url = reverse('driver_rating_tv_qa_live')
+        state_url = reverse('driver_rating_tv_qa_live_state_api')
+
+        unauthenticated_page = self.client.get(page_url)
+        unauthenticated_state = self.client.get(state_url)
+
+        self.assertRedirects(
+            unauthenticated_page,
+            reverse('login'),
+            fetch_redirect_response=False,
+        )
+        self.assertEqual(unauthenticated_state.status_code, 401)
+        self.assertIn(
+            'no-store',
+            unauthenticated_state['Cache-Control'],
+        )
+
+        driver_access = self._create_access(
+            'driver',
+            'Водитель без доступа к QA-live TV-рейтингу',
+        )
+        self._login_as(driver_access)
+        forbidden_page = self.client.get(page_url)
+        forbidden_state = self.client.get(state_url)
+
+        self.assertRedirects(
+            forbidden_page,
+            reverse('role_home'),
+            fetch_redirect_response=False,
+        )
+        self.assertEqual(forbidden_state.status_code, 403)
+        self.assertIn('no-store', forbidden_state['Cache-Control'])
+
+    @override_settings(**QA_LIVE_SETTINGS)
+    def test_qa_live_state_is_strict_scoped_and_contains_no_rating_values(self):
+        self._login_as(self.dispatcher_access)
+        with TemporaryDirectory() as directory:
+            state_path = Path(directory) / 'rating-live-state.json'
+            live_state = self._qa_live_state()
+            state_path.write_text(
+                json.dumps(live_state),
+                encoding='utf-8',
+            )
+            with override_settings(
+                RATING_TV_QA_LIVE_STATE_PATH=state_path,
+            ):
+                response = self.client.get(
+                    reverse('driver_rating_tv_qa_live_state_api'),
+                )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload['synthetic'])
+        self.assertFalse(payload['official'])
+        self.assertFalse(payload['official_rating_eligible'])
+        self.assertEqual(payload['run_id'], 'rating-live-test-run')
+        self.assertEqual(payload['step'], 2)
+        self.assertEqual(payload['shift_type'], 'night')
+        self.assertEqual(
+            payload['placeholders'],
+            [
+                {
+                    'employee_id': self.driver.id,
+                    'status': 'withheld',
+                    'reasons': ['blocking_quality:data_conflict'],
+                    'full_name': self.driver.full_name,
+                },
+            ],
+        )
+        serialized = json.dumps(payload)
+        for forbidden_key in (
+            'score',
+            'place',
+            'blocks',
+            'weights',
+            'source_fingerprint',
+            'shift_score_fingerprint',
+            'snapshot_revision',
+            'employee_count',
+            'placeholder_count',
+        ):
+            self.assertNotIn(f'"{forbidden_key}"', serialized)
+        self.assertIn('private', response['Cache-Control'])
+        self.assertIn('no-store', response['Cache-Control'])
+        self.assertEqual(response['X-Content-Type-Options'], 'nosniff')
+
+    @override_settings(**QA_LIVE_SETTINGS)
+    def test_qa_live_state_rejects_stale_foreign_and_calculated_sidecars(self):
+        self._login_as(self.dispatcher_access)
+        variants = (
+            ('foreign-run', {'run_id': 'other-run'}, False),
+            ('foreign-site', {'site_code': 'other-site'}, False),
+            ('wrong-schema', {'schema': 'other-schema'}, False),
+            (
+                'official-eligible',
+                {'official_rating_eligible': True},
+                False,
+            ),
+            ('calculated', {'score': '99.0000'}, False),
+            ('counted', {'placeholder_count': 1}, False),
+            (
+                'empty-reasons',
+                {
+                    'placeholders': [
+                        {
+                            'employee_id': self.driver.id,
+                            'status': 'withheld',
+                            'reasons': [],
+                        },
+                    ],
+                },
+                False,
+            ),
+            ('stale', {}, True),
+        )
+        with TemporaryDirectory() as directory:
+            for name, overrides, stale in variants:
+                with self.subTest(name=name):
+                    state_path = Path(directory) / f'{name}.json'
+                    state_path.write_text(
+                        json.dumps(self._qa_live_state(**overrides)),
+                        encoding='utf-8',
+                    )
+                    if stale:
+                        stale_at = (
+                            timezone.now() - timedelta(minutes=10)
+                        ).timestamp()
+                        os.utime(state_path, (stale_at, stale_at))
+                    with override_settings(
+                        RATING_TV_QA_LIVE_STATE_PATH=state_path,
+                        RATING_TV_QA_LIVE_MAX_AGE_SECONDS=120,
+                    ):
+                        response = self.client.get(
+                            reverse(
+                                'driver_rating_tv_qa_live_state_api'
+                            ),
+                        )
+                    self.assertEqual(response.status_code, 503)
+                    self.assertEqual(
+                        response.json(),
+                        {
+                            'error': (
+                                'Ожидание актуального шага синтетического '
+                                'QA-live прогона.'
+                            ),
+                        },
+                    )
+                    self.assertIn('no-store', response['Cache-Control'])
+
+    @override_settings(**QA_LIVE_SETTINGS)
+    def test_qa_live_state_rejects_linked_parent_path(self):
+        self._login_as(self.dispatcher_access)
+        with TemporaryDirectory() as directory:
+            linked_parent = Path(directory) / 'linked-parent'
+            linked_parent.mkdir()
+            state_path = linked_parent / 'rating-live-state.json'
+            state_path.write_text(
+                json.dumps(self._qa_live_state()),
+                encoding='utf-8',
+            )
+            with (
+                override_settings(
+                    RATING_TV_QA_LIVE_STATE_PATH=state_path,
+                ),
+                patch(
+                    (
+                        'reports.rating_tv_live_qa.'
+                        '_path_is_link_or_junction'
+                    ),
+                    side_effect=lambda path: path == linked_parent,
+                ),
+            ):
+                response = self.client.get(
+                    reverse('driver_rating_tv_qa_live_state_api'),
+                )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertIn('no-store', response['Cache-Control'])
+
+    @override_settings(**QA_LIVE_SETTINGS)
+    def test_qa_live_state_rejects_file_changed_during_read(self):
+        self._login_as(self.dispatcher_access)
+        with TemporaryDirectory() as directory:
+            state_path = Path(directory) / 'rating-live-state.json'
+            state_path.write_text(
+                json.dumps(self._qa_live_state()),
+                encoding='utf-8',
+            )
+            real_fstat = os.fstat
+            fstat_call_count = 0
+
+            def changing_fstat(descriptor):
+                nonlocal fstat_call_count
+                fstat_call_count += 1
+                result = real_fstat(descriptor)
+                if fstat_call_count == 1:
+                    return result
+
+                class ChangedStat:
+                    st_mode = result.st_mode
+                    st_dev = result.st_dev
+                    st_ino = result.st_ino
+                    st_size = result.st_size
+                    st_mtime_ns = result.st_mtime_ns + 1
+
+                return ChangedStat()
+
+            with (
+                override_settings(
+                    RATING_TV_QA_LIVE_STATE_PATH=state_path,
+                ),
+                patch(
+                    'reports.rating_tv_live_qa.os.fstat',
+                    side_effect=changing_fstat,
+                ),
+            ):
+                response = self.client.get(
+                    reverse('driver_rating_tv_qa_live_state_api'),
+                )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(fstat_call_count, 2)
+        self.assertIn('no-store', response['Cache-Control'])
+
+    @override_settings(**QA_LIVE_SETTINGS)
+    def test_qa_live_data_allows_only_sidecar_group_and_passes_materialized(
+        self,
+    ):
+        self._login_as(self.dispatcher_access)
+        with TemporaryDirectory() as directory:
+            state_path = Path(directory) / 'rating-live-state.json'
+            live_state = self._qa_live_state()
+            state_path.write_text(
+                json.dumps(live_state),
+                encoding='utf-8',
+            )
+            with override_settings(
+                RATING_TV_QA_LIVE_STATE_PATH=state_path,
+            ):
+                mismatch = self.client.get(
+                    reverse('driver_rating_tv_qa_live_data_api'),
+                    {
+                        'rating_period': 999,
+                        'watch_composition': self.composition.id,
+                        'shift_type': 'night',
+                        'qa_run_id': live_state['run_id'],
+                        'qa_step': live_state['step'],
+                    },
+                )
+
+                materialized_response = JsonResponse({
+                    'available': True,
+                    'official': False,
+                    'rating_period': {
+                        'id': live_state['rating_period_id'],
+                    },
+                    'watch_composition': {'id': self.composition.id},
+                    'shift_type': 'night',
+                    'snapshot_revision': 7,
+                    'source_fingerprint': 'source-from-materialized',
+                    'shift_score_fingerprint': 'scores-from-materialized',
+                    'entries': [],
+                })
+                materialized_response.headers['Cache-Control'] = (
+                    'private, no-store'
+                )
+                materialized_response.headers['X-Content-Type-Options'] = (
+                    'nosniff'
+                )
+                with patch(
+                    'reports.views._resolve_driver_period_rating',
+                    return_value=materialized_response,
+                ) as materialized_api:
+                    success = self.client.get(
+                        reverse('driver_rating_tv_qa_live_data_api'),
+                        {
+                            'rating_period': (
+                                live_state['rating_period_id']
+                            ),
+                            'watch_composition': self.composition.id,
+                            'shift_type': 'night',
+                            'qa_run_id': live_state['run_id'],
+                            'qa_step': live_state['step'],
+                        },
+                    )
+
+        self.assertEqual(mismatch.status_code, 409)
+        self.assertEqual(success.status_code, 200)
+        self.assertEqual(success.json()['snapshot_revision'], 7)
+        self.assertEqual(
+            success.json()['source_fingerprint'],
+            'source-from-materialized',
+        )
+        self.assertEqual(
+            success.json()['shift_score_fingerprint'],
+            'scores-from-materialized',
+        )
+        self.assertNotIn('step', success.json())
+        self.assertEqual(materialized_api.call_count, 1)
+        self.assertIn('private', success['Cache-Control'])
+        self.assertIn('no-store', success['Cache-Control'])
+
+    @override_settings(**QA_LIVE_SETTINGS)
+    def test_qa_live_data_discards_payload_when_state_identity_changes(self):
+        self._login_as(self.dispatcher_access)
+        state_before = self._qa_live_state()
+        state_after = deepcopy(state_before)
+        state_after.update({
+            'step': state_before['step'] + 1,
+            'virtual_at': '2026-07-30T21:00:00+04:00',
+        })
+        materialized_response = JsonResponse({
+            'available': True,
+            'snapshot_revision': 11,
+            'source_fingerprint': 'must-not-leak',
+            'entries': [{'employee_id': self.driver.id}],
+        })
+        with (
+            patch(
+                'reports.views._rating_tv_qa_live_state_for_scope',
+                side_effect=[state_before, state_after],
+            ) as state_reader,
+            patch(
+                'reports.views._resolve_driver_period_rating',
+                return_value=materialized_response,
+            ) as materialized_reader,
+        ):
+            response = self.client.get(
+                reverse('driver_rating_tv_qa_live_data_api'),
+                {
+                    'rating_period': state_before['rating_period_id'],
+                    'watch_composition': (
+                        state_before['watch_composition_id']
+                    ),
+                    'shift_type': state_before['shift_type'],
+                    'qa_run_id': state_before['run_id'],
+                    'qa_step': state_before['step'],
+                },
+            )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(
+            response.json(),
+            {
+                'error': (
+                    'Ожидание актуального шага синтетического '
+                    'QA-live прогона.'
+                ),
+            },
+        )
+        self.assertNotIn('snapshot_revision', response.content.decode())
+        self.assertNotIn('must-not-leak', response.content.decode())
+        self.assertEqual(state_reader.call_count, 2)
+        self.assertEqual(materialized_reader.call_count, 1)
+        self.assertIn('private', response['Cache-Control'])
+        self.assertIn('no-store', response['Cache-Control'])
+        self.assertEqual(response['X-Content-Type-Options'], 'nosniff')
+
+    @override_settings(**QA_LIVE_SETTINGS)
+    def test_qa_live_data_discards_payload_when_second_state_read_fails(self):
+        self._login_as(self.dispatcher_access)
+        state_before = self._qa_live_state()
+        materialized_response = JsonResponse({
+            'available': True,
+            'snapshot_revision': 12,
+            'source_fingerprint': 'must-not-leak-after-stale',
+            'entries': [{'employee_id': self.driver.id}],
+        })
+        with (
+            patch(
+                'reports.views._rating_tv_qa_live_state_for_scope',
+                side_effect=[
+                    state_before,
+                    RatingTvLiveQaStateError('state became stale'),
+                ],
+            ) as state_reader,
+            patch(
+                'reports.views._resolve_driver_period_rating',
+                return_value=materialized_response,
+            ) as materialized_reader,
+        ):
+            response = self.client.get(
+                reverse('driver_rating_tv_qa_live_data_api'),
+                {
+                    'rating_period': state_before['rating_period_id'],
+                    'watch_composition': (
+                        state_before['watch_composition_id']
+                    ),
+                    'shift_type': state_before['shift_type'],
+                    'qa_run_id': state_before['run_id'],
+                    'qa_step': state_before['step'],
+                },
+            )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertNotIn('snapshot_revision', response.content.decode())
+        self.assertNotIn(
+            'must-not-leak-after-stale',
+            response.content.decode(),
+        )
+        self.assertEqual(state_reader.call_count, 2)
+        self.assertEqual(materialized_reader.call_count, 1)
+        self.assertIn('no-store', response['Cache-Control'])
 
     @override_settings(**LIVE_TV_SETTINGS, **QA_TV_SETTINGS)
     def test_qa_preview_has_separate_url_and_live_query_cannot_enable_it(self):
@@ -752,7 +1526,7 @@ class DriverRatingTvScreenTests(TestCase):
         )
 
         unauthenticated = self.client.get(scoped_url)
-        self.assertEqual(unauthenticated.status_code, 404)
+        self._assert_private_photo_not_found(unauthenticated)
 
         driver_access = self._create_access(
             'driver',
@@ -760,7 +1534,7 @@ class DriverRatingTvScreenTests(TestCase):
         )
         self._login_as(driver_access)
         wrong_role = self.client.get(scoped_url)
-        self.assertEqual(wrong_role.status_code, 404)
+        self._assert_private_photo_not_found(wrong_role)
 
         self.client = Client()
         login_at = self._login_as(self.dispatcher_access)
@@ -768,12 +1542,22 @@ class DriverRatingTvScreenTests(TestCase):
             pk=self.dispatcher_access.pk,
         ).update(last_login_at=login_at + timedelta(seconds=1))
         stale_generation = self.client.get(scoped_url)
-        self.assertEqual(stale_generation.status_code, 404)
+        self._assert_private_photo_not_found(stale_generation)
 
         self.client = Client()
         self._login_as(self.dispatcher_access)
+        no_photo = self.client.get(scoped_url)
+        self._assert_private_photo_not_found(no_photo)
+
+        with TemporaryDirectory(prefix='rating-tv-missing-photo-') as media_root:
+            with override_settings(MEDIA_ROOT=media_root):
+                self.driver.photo = 'employee_photos/missing.gif'
+                self.driver.save(update_fields=['photo'])
+                missing_file = self.client.get(scoped_url)
+        self._assert_private_photo_not_found(missing_file)
+
         outside_scope = self.client.get(outside_url)
-        self.assertEqual(outside_scope.status_code, 404)
+        self._assert_private_photo_not_found(outside_scope)
 
 
 class DriverRatingTvReplayContractTests(SimpleTestCase):

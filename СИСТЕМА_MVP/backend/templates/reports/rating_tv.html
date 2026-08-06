@@ -7,10 +7,16 @@
     <meta name="robots" content="noindex,nofollow">
     <title>Рейтинг — ООО «Коппер Рисорсез»</title>
     <link rel="icon" href="{% static 'favicon.ico' %}">
-    <link rel="stylesheet" href="{% static 'css/rating-tv-v1.css' %}?v=20260730-3">
+    <link rel="stylesheet" href="{% static 'css/rating-tv-v1.css' %}?v=20260731-9">
 </head>
-<body class="rating-tv-body{% if rating_tv_qa_preview %} is-qa-preview{% endif %}{% if rating_tv_qa_replay_kind == 'formula' %} is-formula-replay{% endif %}">
+<body class="rating-tv-body{% if rating_tv_qa_preview %} is-qa-preview{% endif %}{% if rating_tv_qa_live %} is-qa-live{% endif %}{% if rating_tv_qa_replay_kind == 'formula' %} is-formula-replay{% endif %}">
     <main class="rating-tv" data-rating-tv>
+        {% if rating_tv_qa_live %}
+        <aside class="rating-tv__qa-live-warning" role="status">
+            СИНТЕТИЧЕСКИЙ ТЕСТ · НЕ РЕАЛЬНЫЕ ДАННЫЕ · НЕ ДЛЯ ПРЕМИРОВАНИЯ
+        </aside>
+        {% endif %}
+
         <header class="rating-tv__header">
             <div class="rating-tv__brand">
                 <img src="{% static 'portal/img/kopper-mark-v1.svg' %}" alt="">
@@ -25,19 +31,19 @@
             <div class="rating-tv__scope">
                 <label>
                     <span>Расчётный период</span>
-                    <select data-rating-period aria-label="Расчётный период">
+                    <select data-rating-period aria-label="Расчётный период"{% if rating_tv_qa_live %} disabled{% endif %}>
                         <option value="">Текущий период</option>
                     </select>
                 </label>
                 <label>
                     <span>Состав вахты</span>
-                    <select data-watch-composition aria-label="Состав вахты">
+                    <select data-watch-composition aria-label="Состав вахты"{% if rating_tv_qa_live %} disabled{% endif %}>
                         <option value="">Выбранный состав</option>
                     </select>
                 </label>
                 <label>
                     <span>Смена</span>
-                    <select data-shift-type aria-label="Смена">
+                    <select data-shift-type aria-label="Смена"{% if rating_tv_qa_live %} disabled{% endif %}>
                         <option value="day">Дневная</option>
                         <option value="night" selected>Ночная</option>
                     </select>
@@ -71,7 +77,10 @@
                 <strong data-updated-at>—</strong>
             </div>
             <div class="rating-tv__countdown">
-                {% if rating_tv_qa_preview %}
+                {% if rating_tv_qa_live %}
+                    <span>Следующее чтение сервера через</span>
+                    <strong data-refresh-countdown>00:10</strong>
+                {% elif rating_tv_qa_preview %}
                     <span>Источник данных</span>
                     <strong data-refresh-countdown>
                         {% if rating_tv_qa_replay_kind == 'formula' %}
@@ -85,7 +94,7 @@
                     <strong data-refresh-countdown>05:00</strong>
                 {% endif %}
             </div>
-            {% if not rating_tv_qa_preview %}
+            {% if not rating_tv_qa_preview and not rating_tv_qa_live %}
             <div class="rating-tv__presentation-controls">
                 <button type="button" data-rotation-toggle>
                     <span aria-hidden="true">Ⅱ</span>
@@ -132,6 +141,36 @@
             </div>
             <ol class="rating-tv__grid" data-rating-grid hidden></ol>
         </section>
+
+        {% if rating_tv_qa_live %}
+        <section class="rating-tv__qa-live" aria-label="Состояние синтетического live-теста">
+            <div>
+                <span>Шаг прогона</span>
+                <strong data-qa-live-step>Ожидание</strong>
+            </div>
+            <div>
+                <span>Виртуальное время</span>
+                <strong data-qa-live-virtual-at>—</strong>
+            </div>
+            <div>
+                <span>Закрытая смена</span>
+                <strong data-qa-live-shift>—</strong>
+            </div>
+            <div>
+                <span>Ревизия снимка</span>
+                <strong data-qa-live-revision>—</strong>
+            </div>
+            <div>
+                <span>Источник / расчёт смен</span>
+                <strong>
+                    <b data-qa-live-source-fingerprint>—</b>
+                    /
+                    <b data-qa-live-score-fingerprint>—</b>
+                </strong>
+            </div>
+            <p data-qa-live-state-status>Ожидание первого шага</p>
+        </section>
+        {% endif %}
 
         {% if rating_tv_qa_preview %}
         <section class="rating-tv__qa" aria-label="Тестовое моделирование">
@@ -206,7 +245,9 @@
                 <span class="is-silver">◆ 4 Серебряный</span>
                 <span class="is-copper">◆ 5 Медный</span>
             </div>
-            {% if rating_tv_qa_preview %}
+            {% if rating_tv_qa_live %}
+                <span>QA-live читает новый материализованный снимок каждые 10 секунд</span>
+            {% elif rating_tv_qa_preview %}
                 {% if rating_tv_qa_replay_kind == 'formula' %}
                     <span>Формула рассчитана заранее на синтетических данных; результат неофициальный и не для премирования</span>
                 {% else %}
@@ -228,6 +269,6 @@
     {% if rating_tv_preview_payload %}
         {{ rating_tv_preview_payload|json_script:"rating-tv-preview-payload" }}
     {% endif %}
-    <script src="{% static 'js/rating-tv-v1.js' %}?v=20260730-4" defer></script>
+    <script src="{% static 'js/rating-tv-v1.js' %}?v=20260801-2" defer></script>
 </body>
 </html>
