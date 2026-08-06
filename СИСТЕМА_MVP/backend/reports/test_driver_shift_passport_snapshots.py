@@ -29,12 +29,9 @@ from users.active_role import activate_role_session
 from users.models import Employee, EmployeeAccess, Role
 
 from .driver_shift_passport_snapshots import (
-    DRIVER_SHIFT_PASSPORT_CALCULATOR_VERSION,
-    LEGACY_REQUEST_SUPERSEDED_PREFIX,
     enqueue_driver_shift_passport_capture,
     enqueue_driver_shift_passport_rebuild,
     process_driver_shift_passport_request,
-    safe_process_driver_shift_passport_request,
 )
 from .models import (
     DriverShiftPassportCaptureRequest,
@@ -156,15 +153,6 @@ class DriverShiftPassportSnapshotTests(TestCase):
             'end_mileage': Decimal('1001.00'),
             'end_engine_hours': Decimal('101.00'),
         }
-
-    def close_without_passport_capture(self):
-        shift = self.create_open_shift(end_readings=True)
-        EmployeeShift.objects.filter(pk=shift.pk).update(
-            closed_at=timezone.now(),
-            closed_by=self.driver,
-        )
-        shift.refresh_from_db()
-        return shift
 
     def close_normally(self, shift, *, action_id='snapshot-close'):
         with self.captureOnCommitCallbacks(execute=True):
@@ -457,285 +445,32 @@ class DriverShiftPassportSnapshotTests(TestCase):
                 pk=snapshot.pk,
             ).delete()
 
-    def test_direct_legacy_request_is_superseded_by_current_request(self):
-        shift = self.close_without_passport_capture()
+    def test_calculator_upgrade_creates_revision_with_same_source_hash(self):
+        shift = self.create_open_shift()
+        self.close_normally(shift)
+        first = DriverShiftPassportSnapshot.objects.get(shift=shift)
+
         with transaction.atomic():
-            legacy_request = enqueue_driver_shift_passport_capture(
-                shift=shift,
-                trigger=DriverShiftPassportTrigger.DRIVER_CLOSE,
-                calculator_version='driver-shift-passport-v1',
+            upgrade_request = enqueue_driver_shift_passport_capture(
+                shift=EmployeeShift.objects.get(pk=shift.pk),
+                trigger=DriverShiftPassportTrigger.CALCULATOR_UPGRADE,
+                calculator_version='driver-shift-passport-v2-test',
                 schedule_on_commit=False,
             )
-        snapshot = process_driver_shift_passport_request(
-            legacy_request.pk,
-        )
+        second = process_driver_shift_passport_request(upgrade_request.pk)
 
-        legacy_request.refresh_from_db()
-        current_request = (
-            DriverShiftPassportCaptureRequest.objects
-            .exclude(pk=legacy_request.pk)
-            .get(shift=shift)
+        self.assertEqual(second.revision, 2)
+        self.assertEqual(
+            second.source_fingerprint,
+            first.source_fingerprint,
+        )
+        self.assertNotEqual(
+            second.calculator_version,
+            first.calculator_version,
         )
         self.assertEqual(
-            legacy_request.status,
-            DriverShiftPassportRequestStatus.FAILED,
-        )
-        self.assertTrue(
-            legacy_request.last_error.startswith(
-                LEGACY_REQUEST_SUPERSEDED_PREFIX,
-            )
-        )
-        self.assertIn(
-            f'current_request_id={current_request.pk}',
-            legacy_request.last_error,
-        )
-        self.assertEqual(
-            current_request.trigger,
-            DriverShiftPassportTrigger.CALCULATOR_UPGRADE,
-        )
-        self.assertEqual(
-            current_request.status,
-            DriverShiftPassportRequestStatus.COMPLETED,
-        )
-        self.assertEqual(snapshot, current_request.snapshot)
-        self.assertEqual(
-            snapshot.calculator_version,
-            DRIVER_SHIFT_PASSPORT_CALCULATOR_VERSION,
-        )
-        self.assertEqual(
-            snapshot.payload['calculator_version'],
-            DRIVER_SHIFT_PASSPORT_CALCULATOR_VERSION,
-        )
-        self.assertFalse(
-            DriverShiftPassportSnapshot.objects.filter(
-                shift=shift,
-                calculator_version='driver-shift-passport-v1',
-            ).exists()
-        )
-
-    def test_safe_on_commit_supersedes_legacy_request_once(self):
-        shift = self.close_without_passport_capture()
-        with self.captureOnCommitCallbacks(execute=True):
-            with transaction.atomic():
-                legacy_request = enqueue_driver_shift_passport_capture(
-                    shift=shift,
-                    trigger=DriverShiftPassportTrigger.DRIVER_CLOSE,
-                    calculator_version='driver-shift-passport-v1',
-                )
-
-        legacy_request.refresh_from_db()
-        current_request = (
-            DriverShiftPassportCaptureRequest.objects
-            .exclude(pk=legacy_request.pk)
-            .get(shift=shift)
-        )
-        self.assertEqual(
-            legacy_request.status,
-            DriverShiftPassportRequestStatus.FAILED,
-        )
-        self.assertEqual(
-            current_request.status,
-            DriverShiftPassportRequestStatus.COMPLETED,
-        )
-        snapshot = safe_process_driver_shift_passport_request(
-            legacy_request.pk,
-        )
-        legacy_request.refresh_from_db()
-        current_request.refresh_from_db()
-        self.assertEqual(snapshot, current_request.snapshot)
-        self.assertEqual(legacy_request.attempt_count, 1)
-        self.assertEqual(
-            DriverShiftPassportCaptureRequest.objects.filter(
-                shift=shift,
-            ).count(),
-            2,
-        )
-        self.assertEqual(
-            DriverShiftPassportSnapshot.objects.filter(
-                shift=shift,
-            ).count(),
-            1,
-        )
-
-    def test_rebuild_command_supersedes_all_legacy_queue_states_once(self):
-        pending_shift = self.close_without_passport_capture()
-        processing_shift = self.close_without_passport_capture()
-        failed_shift = self.close_without_passport_capture()
-        with transaction.atomic():
-            pending_request = enqueue_driver_shift_passport_capture(
-                shift=pending_shift,
-                trigger=DriverShiftPassportTrigger.DRIVER_CLOSE,
-                calculator_version='driver-shift-passport-v1',
-                schedule_on_commit=False,
-            )
-            processing_request = enqueue_driver_shift_passport_capture(
-                shift=processing_shift,
-                trigger=DriverShiftPassportTrigger.DRIVER_CLOSE,
-                calculator_version='driver-shift-passport-v1',
-                schedule_on_commit=False,
-            )
-            failed_request = enqueue_driver_shift_passport_capture(
-                shift=failed_shift,
-                trigger=DriverShiftPassportTrigger.DRIVER_CLOSE,
-                calculator_version='driver-shift-passport-v1',
-                schedule_on_commit=False,
-            )
-        DriverShiftPassportCaptureRequest.objects.filter(
-            pk=processing_request.pk,
-        ).update(
-            status=DriverShiftPassportRequestStatus.PROCESSING,
-            attempt_count=1,
-            last_error='',
-        )
-        DriverShiftPassportCaptureRequest.objects.filter(
-            pk=failed_request.pk,
-        ).update(
-            status=DriverShiftPassportRequestStatus.FAILED,
-            attempt_count=1,
-            last_error='legacy transient failure',
-        )
-
-        stdout = StringIO()
-        stderr = StringIO()
-        call_command(
-            'rebuild_driver_shift_passports',
-            shift_ids=[
-                pending_shift.pk,
-                processing_shift.pk,
-                failed_shift.pk,
-            ],
-            stdout=stdout,
-            stderr=stderr,
-        )
-
-        pending_request.refresh_from_db()
-        processing_request.refresh_from_db()
-        failed_request.refresh_from_db()
-        for legacy_request in (
-            pending_request,
-            processing_request,
-            failed_request,
-        ):
-            self.assertEqual(
-                legacy_request.status,
-                DriverShiftPassportRequestStatus.FAILED,
-            )
-            self.assertTrue(
-                legacy_request.last_error.startswith(
-                    LEGACY_REQUEST_SUPERSEDED_PREFIX,
-                )
-            )
-            current_request = (
-                DriverShiftPassportCaptureRequest.objects
-                .filter(
-                    shift=legacy_request.shift,
-                    calculator_version=(
-                        DRIVER_SHIFT_PASSPORT_CALCULATOR_VERSION
-                    ),
-                )
-                .get()
-            )
-            self.assertEqual(
-                current_request.status,
-                DriverShiftPassportRequestStatus.COMPLETED,
-            )
-            self.assertEqual(
-                current_request.trigger,
-                DriverShiftPassportTrigger.CALCULATOR_UPGRADE,
-            )
-        self.assertEqual(stderr.getvalue(), '')
-
-        state_before_repeat = {
-            shift.pk: (
-                DriverShiftPassportCaptureRequest.objects.filter(
-                    shift=shift,
-                ).count(),
-                DriverShiftPassportSnapshot.objects.get(
-                    shift=shift,
-                ).pk,
-            )
-            for shift in (
-                pending_shift,
-                processing_shift,
-                failed_shift,
-            )
-        }
-        pending_attempts = pending_request.attempt_count
-        processing_attempts = processing_request.attempt_count
-        failed_attempts = failed_request.attempt_count
-        repeat_stdout = StringIO()
-        repeat_stderr = StringIO()
-        call_command(
-            'rebuild_driver_shift_passports',
-            shift_ids=[
-                pending_shift.pk,
-                processing_shift.pk,
-                failed_shift.pk,
-            ],
-            stdout=repeat_stdout,
-            stderr=repeat_stderr,
-        )
-        pending_request.refresh_from_db()
-        processing_request.refresh_from_db()
-        failed_request.refresh_from_db()
-
-        self.assertEqual(pending_request.attempt_count, pending_attempts)
-        self.assertEqual(
-            processing_request.attempt_count,
-            processing_attempts,
-        )
-        self.assertEqual(failed_request.attempt_count, failed_attempts)
-        self.assertEqual(repeat_stderr.getvalue(), '')
-        for shift in (
-            pending_shift,
-            processing_shift,
-            failed_shift,
-        ):
-            self.assertEqual(
-                (
-                    DriverShiftPassportCaptureRequest.objects.filter(
-                        shift=shift,
-                    ).count(),
-                    DriverShiftPassportSnapshot.objects.get(
-                        shift=shift,
-                    ).pk,
-                ),
-                state_before_repeat[shift.pk],
-            )
-
-    def test_current_request_is_processed_without_supersede(self):
-        shift = self.close_without_passport_capture()
-        with transaction.atomic():
-            current_request = enqueue_driver_shift_passport_capture(
-                shift=shift,
-                trigger=DriverShiftPassportTrigger.BACKFILL,
-                schedule_on_commit=False,
-            )
-
-        snapshot = process_driver_shift_passport_request(
-            current_request.pk,
-        )
-        repeated = process_driver_shift_passport_request(
-            current_request.pk,
-        )
-        current_request.refresh_from_db()
-
-        self.assertEqual(snapshot, repeated)
-        self.assertEqual(
-            current_request.status,
-            DriverShiftPassportRequestStatus.COMPLETED,
-        )
-        self.assertEqual(
-            DriverShiftPassportCaptureRequest.objects.filter(
-                shift=shift,
-            ).count(),
-            1,
-        )
-        self.assertEqual(
-            DriverShiftPassportSnapshot.objects.filter(
-                shift=shift,
-            ).count(),
-            1,
+            second.payload['calculator_version'],
+            'driver-shift-passport-v2-test',
         )
 
     def test_snapshot_failure_does_not_block_close_and_command_retries(self):

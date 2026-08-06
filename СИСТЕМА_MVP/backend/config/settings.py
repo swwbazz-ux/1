@@ -269,24 +269,6 @@ RATING_TV_QA_PREVIEW_ENABLED = _env_bool(
     'RATING_TV_QA_PREVIEW_ENABLED',
     default=False,
 )
-RATING_TV_QA_LIVE_ENABLED = _env_bool(
-    'RATING_TV_QA_LIVE_ENABLED',
-    default=False,
-)
-RATING_TV_QA_LIVE_RUN_ID = os.getenv(
-    'RATING_TV_QA_LIVE_RUN_ID',
-    '',
-).strip()
-RATING_TV_QA_LIVE_STATE_PATH = Path(
-    os.getenv(
-        'RATING_TV_QA_LIVE_STATE_PATH',
-        str(BASE_DIR / 'var' / 'qa' / 'rating-tv-live-state.json'),
-    ),
-)
-RATING_TV_QA_LIVE_MAX_AGE_SECONDS = _env_positive_int(
-    'RATING_TV_QA_LIVE_MAX_AGE_SECONDS',
-    120,
-)
 RATING_TV_QA_REPLAY_ENABLED = _env_bool(
     'RATING_TV_QA_REPLAY_ENABLED',
     default=False,

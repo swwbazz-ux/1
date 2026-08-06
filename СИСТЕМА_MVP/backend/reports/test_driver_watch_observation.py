@@ -1,5 +1,4 @@
 import json
-from copy import deepcopy
 from datetime import timedelta
 from decimal import Decimal
 
@@ -29,12 +28,8 @@ from users.active_role import (
 )
 from users.models import Employee, EmployeeAccess, Role, WatchComposition
 
-from .driver_shift_timeline import (
-    TimelineCategory,
-    build_driver_shift_timeline,
-)
+from .driver_shift_timeline import TimelineCategory
 from .driver_watch_observation import (
-    _aggregate_shift_passports,
     build_driver_period_shadow_observation,
     build_driver_watch_linkage_audit,
     build_driver_watch_observation,
@@ -242,24 +237,9 @@ class DriverWatchObservationTests(TestCase):
         self.assertEqual(len(row['shift_passports']), 1)
         self.assertEqual(
             row['shift_passports'][0]['passport_schema_version'],
-            2,
+            1,
         )
-        self.assertEqual(row['passport']['passport_schema_version'], 2)
-        self.assertEqual(
-            row['passport']['time']['scheduled_window_status'],
-            'standard_production_shift_inferred',
-        )
-        self.assertEqual(
-            row['passport']['time']['schedule_confidence_percent'],
-            0,
-        )
-        self.assertFalse(
-            row['passport']['time']['work_time_rating_available']
-        )
-        self.assertEqual(
-            row['passport']['time']['work_time_rating_status'],
-            'neutral_structural_schedule_and_reason_policy_unavailable',
-        )
+        self.assertEqual(row['passport']['passport_schema_version'], 1)
         self.assertEqual(
             row['passport']['production']['completed_trip_count'],
             1,
@@ -284,45 +264,7 @@ class DriverWatchObservationTests(TestCase):
             ensure_ascii=False,
             sort_keys=True,
         )
-        self.assertIn('"passport_schema_version": 2', encoded)
-
-    def test_mixed_passport_schedule_schema_aggregates_fail_closed(self):
-        shift = self.create_shift(ShiftType.DAY, self.day_truck)
-        timeline = build_driver_shift_timeline(shift, as_of=self.end)
-        current_passport = deepcopy(timeline.passport)
-        legacy_passport = deepcopy(timeline.passport)
-        legacy_passport['passport_schema_version'] = 1
-        legacy_time = legacy_passport['time']
-        legacy_time['scheduled_window_status'] = (
-            'schedule_snapshot_unavailable'
-        )
-        for key in (
-            'schedule_source',
-            'schedule_confidence_percent',
-            'inferred_schedule_gap_seconds',
-            'work_time_rating_available',
-            'work_time_rating_status',
-        ):
-            legacy_time.pop(key, None)
-
-        aggregate = _aggregate_shift_passports(
-            (legacy_passport, current_passport),
-            (timeline.cycle_samples, timeline.cycle_samples),
-        )
-        time_data = aggregate['time']
-
-        self.assertEqual(
-            time_data['scheduled_window_status'],
-            'mixed_schedule_sources_unavailable',
-        )
-        self.assertEqual(time_data['schedule_confidence_percent'], 0)
-        self.assertFalse(time_data['work_time_rating_available'])
-        self.assertEqual(
-            time_data['work_time_rating_status'],
-            'neutral_structural_schedule_and_reason_policy_unavailable',
-        )
-        self.assertIsNone(time_data['inferred_schedule_gap_seconds'])
-        self.assertIsNone(time_data['observed_short_shift_seconds'])
+        self.assertIn('"passport_schema_version": 1', encoded)
 
     def test_period_passport_withholds_total_when_one_shift_is_incomplete(self):
         current_shift = self.create_shift(ShiftType.DAY, self.day_truck)
