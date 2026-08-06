@@ -237,9 +237,9 @@ class DriverWatchObservationTests(TestCase):
         self.assertEqual(len(row['shift_passports']), 1)
         self.assertEqual(
             row['shift_passports'][0]['passport_schema_version'],
-            1,
+            2,
         )
-        self.assertEqual(row['passport']['passport_schema_version'], 1)
+        self.assertEqual(row['passport']['passport_schema_version'], 2)
         self.assertEqual(
             row['passport']['production']['completed_trip_count'],
             1,
@@ -264,7 +264,7 @@ class DriverWatchObservationTests(TestCase):
             ensure_ascii=False,
             sort_keys=True,
         )
-        self.assertIn('"passport_schema_version": 1', encoded)
+        self.assertIn('"passport_schema_version": 2', encoded)
 
     def test_period_passport_withholds_total_when_one_shift_is_incomplete(self):
         current_shift = self.create_shift(ShiftType.DAY, self.day_truck)

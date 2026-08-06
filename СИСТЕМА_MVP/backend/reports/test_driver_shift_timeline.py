@@ -1464,7 +1464,7 @@ class DriverShiftTimelineTests(TestCase):
                 'quality',
             },
         )
-        self.assertEqual(passport['passport_schema_version'], 1)
+        self.assertEqual(passport['passport_schema_version'], 2)
         self.assertEqual(
             passport['production']['completed_trip_count'],
             0,
