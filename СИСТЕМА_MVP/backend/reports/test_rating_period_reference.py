@@ -224,8 +224,14 @@ class RatingPeriodSystemAdminReferenceTests(TestCase):
         self.assertContains(response, 'Периоды рейтинга')
         self.assertContains(
             response,
-            'Период задаёт только даты замера рейтинга.',
+            'Обычные периоды создаются автоматически',
         )
+        self.assertContains(
+            response,
+            'Вводить новый период каждый месяц не нужно.',
+        )
+        self.assertContains(response, '14-е → 14-е')
+        self.assertContains(response, 'текущий и 12 следующих')
         self.assertContains(response, 'Считать до (не включая дату)')
         self.assertContains(response, 'type="date"', count=2)
         self.assertIsNone(response.context['form']['starts_on'].value())

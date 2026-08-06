@@ -629,7 +629,12 @@ class PortalProductionBoundaryTests(PortalTestCase):
         publication.refresh_from_db()
         self.assertEqual(publication.status, Publication.Status.DRAFT)
 
-    @override_settings(PORTAL_PRODUCTION_DATA_PROVIDER='portal.tests.FailingProductionDataProvider')
+    @override_settings(
+        PORTAL_WORKING_DRIVER_RATING_ENABLED=True,
+        PORTAL_PRODUCTION_DATA_PROVIDER=(
+            'portal.tests.FailingProductionDataProvider'
+        ),
+    )
     def test_provider_failure_returns_safe_empty_snapshots_and_pages_stay_available(self):
         with self.assertLogs('portal.services', level='ERROR'):
             ranking = get_ranking_snapshot(self.driver)
@@ -687,7 +692,12 @@ class PortalPublicHomeTests(PortalTestCase):
         self.assertContains(response, 'Четыре направления')
         self.assertNotContains(response, 'На связи')
 
-    @override_settings(PORTAL_PRODUCTION_DATA_PROVIDER='portal.tests.PublicRankingDataProvider')
+    @override_settings(
+        PORTAL_WORKING_DRIVER_RATING_ENABLED=True,
+        PORTAL_PRODUCTION_DATA_PROVIDER=(
+            'portal.tests.PublicRankingDataProvider'
+        ),
+    )
     def test_home_renders_public_ranking_from_server_contract_without_kpis(self):
         response = self.client.get(reverse('portal:public_home'))
 
@@ -742,6 +752,7 @@ class PortalPageRenderTests(PortalTestCase):
             ]
         )
 
+    @override_settings(PORTAL_WORKING_DRIVER_RATING_ENABLED=True)
     def test_employee_pages_render(self):
         self.portal_session()
         self.assert_pages_render(
