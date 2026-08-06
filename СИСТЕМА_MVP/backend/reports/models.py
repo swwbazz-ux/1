@@ -195,42 +195,44 @@ class RatingPeriod(models.Model):
             errors['ends_before'] = (
                 'Дата «Считать до» должна быть позже даты «Считать с».'
             )
-        if (
-            self.starts_on is not None
-            and self.ends_before is not None
-            and self.has_manual_override
-            and not (self.comment or '').strip()
-        ):
-            errors['comment'] = (
-                'Укажите причину, почему даты отличаются от обычного '
-                'периода 14-е → 14-е.'
-            )
         if errors:
             raise ValidationError(errors)
         if (
-            not self.is_active
-            or self.starts_on is None
-            or self.ends_before is None
-            or self.ends_before <= self.starts_on
+            self.is_active
+            and self.starts_on is not None
+            and self.ends_before is not None
+            and self.ends_before > self.starts_on
         ):
-            return
-
-        conflicts = type(self).objects.filter(
-            is_active=True,
-            starts_on__lt=self.ends_before,
-            ends_before__gt=self.starts_on,
-        )
-        if self.pk:
-            conflicts = conflicts.exclude(pk=self.pk)
-        conflict = conflicts.order_by('starts_on', 'id').first()
-        if conflict is not None:
-            raise ValidationError(
-                'Период пересекается с '
-                f'«{conflict.name}» '
-                f'({conflict.starts_on:%d.%m.%Y}–'
-                f'{conflict.ends_before:%d.%m.%Y}, конечная дата не входит). '
-                'Измените даты или отключите пересекающийся период.'
+            conflicts = type(self).objects.filter(
+                is_active=True,
+                starts_on__lt=self.ends_before,
+                ends_before__gt=self.starts_on,
             )
+            if self.pk:
+                conflicts = conflicts.exclude(pk=self.pk)
+            conflict = conflicts.order_by('starts_on', 'id').first()
+            if conflict is not None:
+                raise ValidationError(
+                    'Период пересекается с '
+                    f'«{conflict.name}» '
+                    f'({conflict.starts_on:%d.%m.%Y}–'
+                    f'{conflict.ends_before:%d.%m.%Y}, '
+                    'конечная дата не входит). '
+                    'Измените даты или отключите пересекающийся период.'
+                )
+        if (
+            self.starts_on is not None
+            and self.ends_before is not None
+            and self.is_automatically_created
+            and self.has_manual_override
+            and not (self.comment or '').strip()
+        ):
+            raise ValidationError({
+                'comment': (
+                    'Укажите причину, почему даты отличаются от обычного '
+                    'периода 14-е → 14-е.'
+                ),
+            })
 
     @classmethod
     def lock_catalog(cls):
