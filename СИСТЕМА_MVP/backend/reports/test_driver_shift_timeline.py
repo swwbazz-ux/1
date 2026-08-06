@@ -1377,11 +1377,20 @@ class DriverShiftTimelineTests(TestCase):
         self.assertIsNone(
             passport['expected']['actual_to_expected_ratio']
         )
-        self.assertIsNone(passport['time']['scheduled_start_at'])
+        self.assertEqual(
+            passport['time']['scheduled_start_at'],
+            self.start.isoformat(),
+        )
         self.assertEqual(
             passport['time']['scheduled_window_status'],
-            'schedule_snapshot_unavailable',
+            'standard_production_shift_inferred',
         )
+        self.assertEqual(
+            passport['time']['schedule_source'],
+            'production_shift_default',
+        )
+        self.assertEqual(passport['time']['schedule_confidence_percent'], 0)
+        self.assertFalse(passport['time']['work_time_rating_available'])
 
     def test_passport_builds_transport_work_route_and_cycle_diagnostics(self):
         self.create_assignment()

@@ -449,15 +449,27 @@ class DriverShiftPassportSnapshotTests(TestCase):
         shift = self.create_open_shift()
         self.close_normally(shift)
         first = DriverShiftPassportSnapshot.objects.get(shift=shift)
+        upgraded_calculator_version = 'driver-shift-passport-v3-test'
 
-        with transaction.atomic():
-            upgrade_request = enqueue_driver_shift_passport_capture(
-                shift=EmployeeShift.objects.get(pk=shift.pk),
-                trigger=DriverShiftPassportTrigger.CALCULATOR_UPGRADE,
-                calculator_version='driver-shift-passport-v2-test',
-                schedule_on_commit=False,
+        self.assertEqual(first.revision, 1)
+        with patch(
+            'reports.driver_shift_passport_snapshots.'
+            'DRIVER_SHIFT_PASSPORT_CALCULATOR_VERSION',
+            upgraded_calculator_version,
+        ):
+            with transaction.atomic():
+                upgrade_request = enqueue_driver_shift_passport_capture(
+                    shift=EmployeeShift.objects.get(pk=shift.pk),
+                    trigger=DriverShiftPassportTrigger.CALCULATOR_UPGRADE,
+                    calculator_version=upgraded_calculator_version,
+                    schedule_on_commit=False,
+                )
+            second = process_driver_shift_passport_request(
+                upgrade_request.pk,
             )
-        second = process_driver_shift_passport_request(upgrade_request.pk)
+            repeated = process_driver_shift_passport_request(
+                upgrade_request.pk,
+            )
 
         self.assertEqual(second.revision, 2)
         self.assertEqual(
@@ -470,7 +482,13 @@ class DriverShiftPassportSnapshotTests(TestCase):
         )
         self.assertEqual(
             second.payload['calculator_version'],
-            'driver-shift-passport-v2-test',
+            upgraded_calculator_version,
+        )
+        self.assertEqual(repeated.pk, second.pk)
+        self.assertEqual(repeated.revision, 2)
+        self.assertEqual(
+            DriverShiftPassportSnapshot.objects.filter(shift=shift).count(),
+            2,
         )
 
     def test_snapshot_failure_does_not_block_close_and_command_retries(self):
