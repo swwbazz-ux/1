@@ -1,7 +1,8 @@
 {% if room %}
-<article class="settlement-room settlement-room-{{ side }} status-{{ room.transfer_status }}"
+<article class="settlement-room settlement-room-{{ side }} type-{{ room.room_type }} status-{{ room.transfer_status }}"
          data-room-card
          data-room-id="{{ room.id }}"
+         data-room-type="{{ room.room_type }}"
          data-dormitory="{{ room.dormitory.number }}"
          data-floor="{{ room.floor }}"
          data-room-number="{{ room.number }}"
@@ -14,18 +15,24 @@
             class="settlement-room-number"
             data-room-open
             aria-label="Открыть комнату {{ room.number }}">{{ room.number }}</button>
-    <span class="settlement-room-content">
+    <span class="settlement-room-content" style="--settlement-block-count: {{ room.view_blocks|length }};">
         {% for block in room.view_blocks %}
-            <span class="settlement-bed-block">
+            <span class="settlement-bed-block"
+                  data-bed-block-size="{{ block.beds|length }}"
+                  aria-label="Блок {{ block.label }}">
                 <b>{{ block.label }}</b>
-                <span class="settlement-bed-row">
+                <span class="settlement-bed-row" style="--settlement-bed-count: {{ block.beds|length }};">
                     {% for bed in block.beds %}
                         <button type="button"
                                 class="settlement-bed{% if bed.active_occupancy %} is-occupied{% else %} is-free{% endif %}"
                                 data-bed
+                                data-bed-card
                                 data-bed-id="{{ bed.stable_id }}"
+                                data-bed-number="{{ block.label }}{{ bed.position }}"
+                                data-bed-state="{% if not room.is_transferred %}unavailable{% elif bed.active_occupancy %}occupied{% else %}free{% endif %}"
                                 data-occupied="{% if bed.active_occupancy %}true{% else %}false{% endif %}"
                                 data-occupant-name="{{ bed.occupant_name }}"
+                                data-occupant-photo-url="{{ bed.occupant_photo_url }}"
                                 data-shift-label="{{ bed.shift_label }}"
                                 data-work-label="{{ bed.work_label }}"
                                 data-assignment-type-label="{{ bed.assignment_type_label }}"
@@ -36,7 +43,26 @@
                                 data-position-label="место {{ bed.position }}"
                                 aria-label="КИС-{{ room.dormitory.number }}, этаж {{ room.floor }}, комната {{ room.number }}, блок {{ block.label }}, место {{ bed.position }}{% if bed.active_occupancy %}, занято, {{ bed.occupant_name }}{% else %}, свободно{% endif %}{% if not room.is_transferred %}, комната не передана{% endif %}"
                                 {% if not room.is_transferred %}disabled{% endif %}>
-                            <span>{{ bed.position }}</span>
+                            <span class="settlement-bed-visual" data-bed-photo-slot aria-hidden="true">
+                                <img class="settlement-bed-photo"
+                                     data-bed-photo-image
+                                     alt=""
+                                     >
+                                <span class="settlement-bed-photo-placeholder" data-bed-photo-fallback>
+                                    <span class="settlement-bed-avatar-initial"
+                                          data-bed-avatar-initial{% if not bed.active_occupancy %} hidden{% endif %}>{{ bed.occupant_name|slice:":1" }}</span>
+                                    <span class="settlement-bed-empty-icon"
+                                          data-bed-empty-icon{% if bed.active_occupancy %} hidden{% endif %}></span>
+                                </span>
+                            </span>
+                            <span class="settlement-bed-position" data-bed-position>{{ block.label }}{{ bed.position }}</span>
+                            <span class="settlement-bed-person"
+                                  data-bed-person-label{% if not bed.active_occupancy %} hidden{% endif %}>{{ bed.occupant_name }}</span>
+                            <span class="settlement-bed-status"
+                                  data-bed-status{% if bed.active_occupancy %} hidden{% endif %}>{% if room.is_transferred %}Свободна{% else %}Недоступна{% endif %}</span>
+                            <span class="settlement-bed-shift"
+                                  data-bed-shift-badge{% if not bed.active_occupancy %} hidden{% endif %}>{% if bed.shift_label == "День" %}Д{% elif bed.shift_label == "Ночь" %}Н{% elif bed.shift_label != "Не указано" %}{{ bed.shift_label }}{% else %}—{% endif %}</span>
+                            <span class="settlement-bed-state-indicator" data-bed-state-indicator aria-hidden="true"></span>
                         </button>
                     {% endfor %}
                 </span>

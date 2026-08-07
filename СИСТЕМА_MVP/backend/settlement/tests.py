@@ -2,10 +2,12 @@ import re
 import uuid
 from datetime import datetime, timedelta, timezone as datetime_timezone
 from io import StringIO
+from tempfile import TemporaryDirectory
 from unittest import mock
 
 from django.contrib.staticfiles import finders
 from django.core.exceptions import FieldDoesNotExist, ValidationError
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.db import IntegrityError, connection, models, router, transaction
 from django.db.models.deletion import ProtectedError
@@ -3206,18 +3208,85 @@ class SettlementMapAccessTests(TestCase):
         self.assertIn('data-app-service-worker-scope="/clerk/"', content)
         self.assertEqual(content.count('data-room-card'), 60)
         self.assertEqual(content.count('data-bed-id='), 348)
+        self.assertEqual(content.count('data-bed-card'), 348)
+        self.assertEqual(content.count('data-bed-state="free"'), 270)
+        self.assertEqual(content.count('data-bed-state="unavailable"'), 78)
+        self.assertEqual(content.count('data-bed-state="occupied"'), 0)
+        self.assertEqual(content.count('data-bed-photo-slot'), 348)
+        self.assertEqual(content.count('data-bed-photo-image'), 348)
+        self.assertEqual(content.count('data-bed-photo-fallback'), 348)
+        self.assertEqual(content.count('data-occupant-photo-url='), 348)
+        self.assertEqual(content.count('data-bed-number='), 348)
+        self.assertEqual(content.count('data-bed-status'), 348)
+        self.assertEqual(content.count('data-bed-person-label'), 348)
+        self.assertEqual(content.count('data-bed-shift-badge'), 348)
+        self.assertEqual(content.count('data-bed-avatar-initial'), 348)
+        self.assertEqual(content.count('data-bed-empty-icon'), 348)
+        self.assertEqual(content.count('data-bed-state-indicator'), 348)
+        self.assertEqual(content.count('data-bed-block-size="3"'), 114)
+        self.assertEqual(content.count('data-bed-block-size="2"'), 3)
+        self.assertEqual(content.count('data-room-type="itr"'), 3)
         self.assertEqual(
             len(re.findall(r'data-bed-id="[^"]+"[^>]*\sdisabled', content)),
             78,
         )
+        unavailable_buttons = re.findall(
+            r'<button(?=[^>]*data-bed-card)(?=[^>]*data-bed-state="unavailable")'
+            r'(?=[^>]*\sdisabled)[^>]*>',
+            content,
+        )
+        self.assertEqual(len(unavailable_buttons), 78)
+        self.assertEqual(
+            re.findall(
+                r'<button(?=[^>]*data-bed-state="(?:free|occupied)")'
+                r'(?=[^>]*\sdisabled)[^>]*>',
+                content,
+            ),
+            [],
+        )
+        standard_room = re.search(
+            r'<article(?=[^>]*data-dormitory="5")(?=[^>]*data-floor="1")'
+            r'(?=[^>]*data-room-number="1")[^>]*>(.*?)</article>',
+            content,
+            re.S,
+        )
+        self.assertIsNotNone(standard_room)
+        self.assertEqual(standard_room.group(1).count('data-bed-card'), 6)
+        self.assertEqual(standard_room.group(1).count('data-bed-block-size="3"'), 2)
+        for room_number in ('36', '37', '38'):
+            itr_room = re.search(
+                r'<article(?=[^>]*data-room-type="itr")(?=[^>]*data-dormitory="5")'
+                r'(?=[^>]*data-floor="2")(?=[^>]*data-room-number="'
+                + room_number
+                + r'")[^>]*>(.*?)</article>',
+                content,
+                re.S,
+            )
+            self.assertIsNotNone(itr_room)
+            self.assertEqual(itr_room.group(1).count('data-bed-card'), 2)
+            self.assertEqual(itr_room.group(1).count('data-bed-block-size="2"'), 1)
         self.assertIn('data-room-panel', content)
         self.assertIn('data-settlement-form', content)
         self.assertIn('data-employee-search', content)
-        self.assertEqual(content.count('-settlement-occupancy-v1'), 2)
+        self.assertEqual(content.count('-settlement-map-v9'), 2)
+        self.assertNotIn('data-dorm-filter="all"', content)
+        self.assertNotIn('data-floor-filter="all"', content)
         self.assertIn(
-            'Семантическое соответствие номеров комнат между этажами не задано',
+            'class="is-active" data-dorm-filter="5" aria-pressed="true"',
             content,
         )
+        self.assertIn(
+            'class="is-active" data-floor-filter="1" aria-pressed="true"',
+            content,
+        )
+        floor_tags = re.findall(r'<section class="settlement-floor"([^>]*)>', content)
+        self.assertEqual(len(floor_tags), 4)
+        visible_floor_tags = [tag for tag in floor_tags if ' hidden' not in tag]
+        self.assertEqual(len(visible_floor_tags), 1)
+        self.assertIn('data-dormitory="5"', visible_floor_tags[0])
+        self.assertIn('data-floor-section="1"', visible_floor_tags[0])
+        self.assertIn('aria-label="Верхний ряд комнат"', content)
+        self.assertIn('aria-label="Нижний ряд комнат"', content)
 
     def test_get_and_rejected_post_do_not_modify_settlement_data(self):
         self.authenticate(self.client, self.clerk_access)
@@ -3729,8 +3798,84 @@ class SettlementOccupancyWorkflowTests(TestCase):
         self.assertContains(response, 'Тестовый самосвал SET-404')
         self.assertContains(response, 'Временное')
         self.assertContains(response, 'data-occupied="true"')
+        content = response.content.decode('utf-8')
+        self.assertEqual(content.count('data-bed-state="occupied"'), 1)
+        self.assertEqual(content.count('data-bed-state="free"'), 269)
+        self.assertEqual(content.count('data-bed-state="unavailable"'), 78)
+        occupied_card = re.search(
+            r'<button(?=[^>]*data-bed-id="'
+            + re.escape(self.transferred_beds[0].stable_id)
+            + r'")(?=[^>]*data-bed-state="occupied")[^>]*>(.*?)</button>',
+            content,
+            re.S,
+        )
+        self.assertIsNotNone(occupied_card)
+        self.assertIn('data-bed-person-label', occupied_card.group(1))
+        self.assertIn('data-bed-shift-badge', occupied_card.group(1))
+        self.assertIn('>Д</span>', occupied_card.group(1))
         self.assertEqual(response.context['summary']['occupied_beds'], 1)
         self.assertEqual(response.context['summary']['free_beds'], 269)
+
+    def test_occupied_beds_use_canonical_employee_photo_and_initials_fallback(self):
+        image_bytes = (
+            b'GIF89a\x01\x00\x01\x00\x00\x00\x00\x00\x00!\xf9\x04\x01\x00\x00\x00\x00,'
+            b'\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;'
+        )
+        with TemporaryDirectory() as media_root, override_settings(MEDIA_ROOT=media_root):
+            self.candidate.photo.save(
+                'settlement-map.gif',
+                SimpleUploadedFile('settlement-map.gif', image_bytes, content_type='image/gif'),
+            )
+            photo_occupancy = EmployeeBedOccupancy.objects.create(
+                employee=self.candidate,
+                physical_bed=self.transferred_beds[0],
+                assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
+                settled_by=self.clerk,
+            )
+            EmployeeBedOccupancy.objects.create(
+                employee=self.second_candidate,
+                physical_bed=self.transferred_beds[1],
+                assignment_type=EmployeeBedOccupancy.AssignmentType.TEMPORARY,
+                settled_by=self.clerk,
+            )
+            self.authenticate(self.client, self.clerk_access)
+
+            response = self.client.get(reverse('settlement_map'))
+
+            self.assertEqual(response.status_code, 200)
+            content = response.content.decode('utf-8')
+            photo_url = self.candidate.photo.url
+            photo_card = re.search(
+                r'<button(?=[^>]*data-bed-id="'
+                + re.escape(self.transferred_beds[0].stable_id)
+                + r'")(?=[^>]*data-occupant-photo-url="'
+                + re.escape(photo_url)
+                + r'")[^>]*>(.*?)</button>',
+                content,
+                re.S,
+            )
+            self.assertIsNotNone(photo_card)
+            self.assertIn('data-bed-photo-image', photo_card.group(1))
+            self.assertIn('data-bed-photo-fallback', photo_card.group(1))
+            no_photo_card = re.search(
+                r'<button(?=[^>]*data-bed-id="'
+                + re.escape(self.transferred_beds[1].stable_id)
+                + r'")(?=[^>]*data-occupant-photo-url="")[^>]*>(.*?)</button>',
+                content,
+                re.S,
+            )
+            self.assertIsNotNone(no_photo_card)
+            self.assertNotIn(' src=', no_photo_card.group(1))
+            self.assertEqual(_occupancy_response(photo_occupancy)['occupancy']['photo_url'], photo_url)
+
+            photo_response = self.client.get(photo_url)
+            self.assertEqual(photo_response.status_code, 200)
+            self.assertEqual(photo_response['Cache-Control'], 'private, max-age=300')
+            self.assertTrue(photo_response['Content-Type'].startswith('image/gif'))
+            photo_response.close()
+            anonymous_response = Client().get(photo_url)
+            self.assertEqual(anonymous_response.status_code, 404)
+            anonymous_response.close()
 
     def test_employee_search_returns_only_active_unoccupied_employees(self):
         EmployeeBedOccupancy.objects.create(
@@ -3765,6 +3910,7 @@ class SettlementOccupancyWorkflowTests(TestCase):
             EmployeeBedOccupancy.AssignmentType.PERMANENT,
         )
         payload = response.json()
+        self.assertEqual(payload['occupancy']['photo_url'], '')
         self.assertEqual(payload['room']['occupied_beds'], 1)
         self.assertEqual(
             payload['room']['free_beds'],
@@ -4616,6 +4762,19 @@ class SettlementFrontendContractTests(TestCase):
         with open(stylesheet_path, encoding='utf-8') as file:
             stylesheet = file.read()
 
+        self.assertIn('dormitory: "5"', javascript)
+        self.assertIn('floor: "1"', javascript)
+        self.assertIn('section.hidden =', javascript)
+        self.assertIn('function updateSelectionSummary()', javascript)
+        self.assertIn('function renderMapBed(bed)', javascript)
+        self.assertIn('occupancy.photo_url || ""', javascript)
+        self.assertIn('photo.onload = function ()', javascript)
+        self.assertIn('photo.onerror = function ()', javascript)
+        self.assertIn('photo.naturalWidth', javascript)
+        self.assertIn('photo.classList.add("is-loaded")', javascript)
+        self.assertIn('floorSection && floorSection.hidden', javascript)
+        self.assertIn('section.querySelectorAll("[data-bed]").forEach(renderMapBed)', javascript)
+        self.assertIn('renderMapBed(selectedBed);', javascript)
         self.assertIn('classList.toggle("is-filter-muted"', javascript)
         self.assertNotIn('style.display', javascript)
         self.assertIn('fetch(root.dataset.employeeSearchUrl', javascript)
@@ -4628,6 +4787,65 @@ class SettlementFrontendContractTests(TestCase):
         )[0]
         self.assertLess(open_room_source.index('renderRoom(room);'), open_room_source.index('if (bed)'))
         self.assertIn('overflow-x: auto', stylesheet)
+        self.assertIn('.settlement-dormitory[hidden]', stylesheet)
+        self.assertIn(
+            'grid-template-columns: repeat(var(--settlement-side-slots)',
+            stylesheet,
+        )
+        self.assertIn(
+            'grid-template-rows: minmax(var(--settlement-room-min-height)',
+            stylesheet,
+        )
+        self.assertIn(
+            'grid-template-columns: repeat(var(--settlement-block-count), minmax(0, 1fr))',
+            stylesheet,
+        )
+        self.assertIn(
+            'grid-template-rows: repeat(var(--settlement-bed-count), minmax(var(--settlement-bed-card-min-height), 1fr))',
+            stylesheet,
+        )
+        bed_card_styles = stylesheet.split('.settlement-bed {', 1)[1].split('}', 1)[0]
+        self.assertIn('width: 100%', bed_card_styles)
+        self.assertIn('min-width: 0', bed_card_styles)
+        self.assertIn('min-height: var(--settlement-bed-card-min-height)', bed_card_styles)
+        self.assertIn('object-fit: cover', stylesheet)
+        self.assertIn('object-position: center 22%', stylesheet)
+        self.assertIn('.settlement-bed.is-occupied.no-photo', stylesheet)
+        occupied_styles = stylesheet.split('.settlement-bed.is-occupied {', 1)[1].split('}', 1)[0]
+        self.assertIn('border: 2px solid var(--admin-cyan)', occupied_styles)
+        photo_name_styles = stylesheet.split(
+            '.settlement-bed.is-occupied.has-photo .settlement-bed-person {',
+            1,
+        )[1].split('}', 1)[0]
+        self.assertIn('linear-gradient(', photo_name_styles)
+        self.assertIn('max-height: 30px', photo_name_styles)
+        fallback_initial_styles = stylesheet.split(
+            '.settlement-bed.is-occupied.no-photo .settlement-bed-avatar-initial {',
+            1,
+        )[1].split('}', 1)[0]
+        self.assertIn('font-size: 26px', fallback_initial_styles)
+        fallback_name_styles = stylesheet.split(
+            '.settlement-bed.is-occupied.no-photo .settlement-bed-person {',
+            1,
+        )[1].split('}', 1)[0]
+        self.assertIn('max-height: 24px', fallback_name_styles)
+        self.assertIn('overflow-wrap: anywhere', fallback_name_styles)
+        self.assertIn('text-shadow: none', fallback_name_styles)
+        self.assertIn('.settlement-bed.is-free:not(:disabled):hover', stylesheet)
+        itr_content_styles = stylesheet.split(
+            '.settlement-room.type-itr .settlement-room-content {',
+            1,
+        )[1].split('}', 1)[0]
+        self.assertIn('grid-template-columns: minmax(0, 1fr)', itr_content_styles)
+        self.assertIn('--settlement-bed-card-min-height: 80px', stylesheet)
+        self.assertNotIn('--settlement-bed-width', stylesheet)
+        self.assertNotIn('repeat(3, var(--settlement-bed-width))', stylesheet)
+        responsive_toolbar = stylesheet.split('@media (max-width: 1500px)', 1)[1].split(
+            '@media (max-width: 1180px)',
+            1,
+        )[0]
+        self.assertNotIn('display: none', responsive_toolbar)
+        self.assertIn('.settlement-work-badge {\n        grid-column: 1 / -1;', stylesheet)
         self.assertIn('.settlement-room-panel', stylesheet)
         self.assertIn('position: fixed', stylesheet)
         self.assertIn('.clerk-workplace-screen .app-confirm-modal', stylesheet)

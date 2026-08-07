@@ -2,7 +2,7 @@
 {% load static %}
 
 {% block clerk_extra_head %}
-<link rel="stylesheet" href="{% static 'css/settlement-clerk.css' %}?v={{ static_asset_release }}-settlement-occupancy-v1">
+<link rel="stylesheet" href="{% static 'css/settlement-clerk.css' %}?v={{ static_asset_release }}-settlement-map-v9">
 {% endblock %}
 
 {% block clerk_shell_class %}settlement-shell{% endblock %}
@@ -21,8 +21,7 @@
             <fieldset class="settlement-filter-group">
                 <legend>Общежитие</legend>
                 <div class="settlement-filter-buttons">
-                    <button type="button" class="is-active" data-dorm-filter="all" aria-pressed="true">Все</button>
-                    <button type="button" data-dorm-filter="5" aria-pressed="false">КИС-5</button>
+                    <button type="button" class="is-active" data-dorm-filter="5" aria-pressed="true">КИС-5</button>
                     <button type="button" data-dorm-filter="6" aria-pressed="false">КИС-6</button>
                 </div>
             </fieldset>
@@ -30,9 +29,8 @@
             <fieldset class="settlement-filter-group">
                 <legend>Этаж</legend>
                 <div class="settlement-filter-buttons compact">
-                    <button type="button" class="is-active" data-floor-filter="all" aria-pressed="true">Все</button>
-                    <button type="button" data-floor-filter="1" aria-pressed="false">1</button>
-                    <button type="button" data-floor-filter="2" aria-pressed="false">2</button>
+                    <button type="button" class="is-active" data-floor-filter="1" aria-pressed="true">1 этаж</button>
+                    <button type="button" data-floor-filter="2" aria-pressed="false">2 этаж</button>
                 </div>
             </fieldset>
 
@@ -54,65 +52,62 @@
                        data-settlement-search>
             </label>
 
-            <span class="settlement-work-badge">
+            <a class="settlement-work-badge" href="#settlement-map-list">
                 <i aria-hidden="true"></i>
                 Расселение сотрудников
-            </span>
+            </a>
         </section>
 
-        <section class="settlement-summary" aria-label="Сводка физического фонда">
+        <section class="settlement-summary" aria-label="Статистика выбранного этажа" aria-live="polite">
             <article>
-                <span>Физические комнаты</span>
-                <strong>{{ summary.rooms }}</strong>
-                <small><b data-visible-room-count>{{ summary.rooms }}</b> соответствуют фильтру</small>
+                <span>Комнаты</span>
+                <strong data-selected-room-count>—</strong>
+                <small>на выбранном этаже</small>
             </article>
             <article class="is-primary">
                 <span>Передано</span>
-                <strong>{{ summary.transferred_rooms }}</strong>
-                <small><b data-free-bed-count>{{ summary.free_beds }}</b> свободно из {{ summary.transferred_beds }}</small>
+                <strong data-selected-transferred-room-count>—</strong>
+                <small>комнат</small>
             </article>
             <article>
-                <span>Не передано</span>
-                <strong>{{ summary.not_transferred_rooms }}</strong>
-                <small>{{ summary.not_transferred_beds }} недоступных мест</small>
+                <span>Свободно</span>
+                <strong data-free-bed-count>—</strong>
+                <small>коек</small>
             </article>
             <article>
-                <span>Все койко-места</span>
-                <strong>{{ summary.beds }}</strong>
-                <small><b data-occupied-bed-count>{{ summary.occupied_beds }}</b> занято в переданных комнатах</small>
+                <span>Занято</span>
+                <strong data-occupied-bed-count>—</strong>
+                <small>коек</small>
+            </article>
+            <article class="is-unavailable">
+                <span>Недоступно</span>
+                <strong data-selected-unavailable-bed-count>—</strong>
+                <small>коек</small>
             </article>
         </section>
 
         {% if dormitories %}
-            <section class="settlement-map-list" aria-label="Физическая карта общежитий">
+            <section class="settlement-map-list" id="settlement-map-list" aria-label="Физическая карта общежитий">
                 {% for dormitory in dormitories %}
-                    <article class="settlement-dormitory" data-dormitory-section="{{ dormitory.model.number }}">
-                        <header class="settlement-dormitory-header">
-                            <div>
-                                <span>Общежитие</span>
-                                <h2>{{ dormitory.label }}</h2>
-                            </div>
-                            <dl>
-                                <div><dt>Физических комнат</dt><dd>{{ dormitory.room_count }}</dd></div>
-                                <div><dt>Передано</dt><dd>{{ dormitory.transferred_rooms }}</dd></div>
-                                <div><dt>Свободно</dt><dd data-dormitory-free-count>{{ dormitory.free_beds }}</dd></div>
-                                <div><dt>Всего мест</dt><dd>{{ dormitory.bed_count }}</dd></div>
-                            </dl>
-                        </header>
-
+                    <article class="settlement-dormitory"
+                             data-dormitory-section="{{ dormitory.model.number }}"{% if dormitory.model.number != "5" %} hidden{% endif %}>
                         <div class="settlement-floors">
                             {% for floor in dormitory.floors %}
-                                <section class="settlement-floor" data-floor-section="{{ floor.number }}">
+                                <section class="settlement-floor"
+                                         data-dormitory="{{ dormitory.model.number }}"
+                                         data-floor-section="{{ floor.number }}"{% if dormitory.model.number != "5" or floor.number != 1 %} hidden{% endif %}>
                                     <header>
                                         <div>
-                                            <span>Физический контур</span>
-                                            <h3>{{ floor.number }} этаж</h3>
+                                            <span>Выбранный план</span>
+                                            <h2>{{ dormitory.label }} · {{ floor.number }} этаж</h2>
                                         </div>
                                         <p>{{ floor.transferred_count }} из {{ floor.room_count }} комнат передано</p>
                                     </header>
                                     <div class="settlement-floor-scroll">
-                                        <div class="settlement-floor-plan">
-                                            <div class="settlement-side settlement-side-left">
+                                        <div class="settlement-floor-plan"
+                                             data-side-slots="{{ floor.rows|length }}"
+                                             style="--settlement-side-slots: {{ floor.rows|length }};">
+                                            <div class="settlement-side settlement-side-left" aria-label="Верхний ряд комнат">
                                                 {% for row in floor.rows %}
                                                     {% include "settlement/_room_card.html" with room=row.left side="left" only %}
                                                 {% endfor %}
@@ -120,7 +115,7 @@
                                             <div class="settlement-corridor">
                                                 <span>Коридор</span>
                                             </div>
-                                            <div class="settlement-side settlement-side-right">
+                                            <div class="settlement-side settlement-side-right" aria-label="Нижний ряд комнат">
                                                 {% for row in floor.rows %}
                                                     {% include "settlement/_room_card.html" with room=row.right side="right" only %}
                                                 {% endfor %}
@@ -130,9 +125,6 @@
                                 </section>
                             {% endfor %}
                         </div>
-                        <p class="settlement-layout-note">
-                            Контур этажей показан в единой геометрии. Семантическое соответствие номеров комнат между этажами не задано.
-                        </p>
                     </article>
                 {% endfor %}
             </section>
@@ -222,5 +214,5 @@
 {% endblock %}
 
 {% block clerk_scripts %}
-<script src="{% static 'js/settlement-clerk.js' %}?v={{ static_asset_release }}-settlement-occupancy-v1"></script>
+<script src="{% static 'js/settlement-clerk.js' %}?v={{ static_asset_release }}-settlement-map-v9"></script>
 {% endblock %}

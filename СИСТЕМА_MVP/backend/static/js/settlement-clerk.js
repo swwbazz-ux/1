@@ -5,15 +5,19 @@
     if (!root) return;
 
     var state = {
-        dormitory: "all",
-        floor: "all",
+        dormitory: "5",
+        floor: "1",
         status: "all",
         search: ""
     };
     var rooms = Array.from(root.querySelectorAll("[data-room-card]"));
-    var visibleRoomCount = root.querySelector("[data-visible-room-count]");
+    var dormitorySections = Array.from(root.querySelectorAll("[data-dormitory-section]"));
+    var floorSections = Array.from(root.querySelectorAll("[data-floor-section]"));
+    var selectedRoomCount = root.querySelector("[data-selected-room-count]");
+    var selectedTransferredRoomCount = root.querySelector("[data-selected-transferred-room-count]");
     var globalFreeCount = root.querySelector("[data-free-bed-count]");
     var globalOccupiedCount = root.querySelector("[data-occupied-bed-count]");
+    var selectedUnavailableBedCount = root.querySelector("[data-selected-unavailable-bed-count]");
     var searchInput = root.querySelector("[data-settlement-search]");
     var panel = root.querySelector("[data-room-panel]");
     var panelBackdrop = root.querySelector("[data-room-panel-backdrop]");
@@ -41,6 +45,109 @@
     var searchSequence = 0;
     var saving = false;
 
+    function shortPersonName(value) {
+        var parts = String(value || "").trim().split(/\s+/).filter(Boolean);
+        if (!parts.length || String(value).trim() === "Не указано") return "";
+        if (parts.length === 1) return parts[0];
+        var initials = parts.slice(1, 3).map(function (part) {
+            return part.charAt(0).toUpperCase() + ".";
+        }).join("");
+        return parts[0] + " " + initials;
+    }
+
+    function personInitials(value) {
+        var parts = String(value || "").trim().split(/\s+/).filter(Boolean);
+        if (!parts.length || String(value).trim() === "Не указано") return "";
+        return parts.slice(0, 2).map(function (part) {
+            return part.charAt(0).toUpperCase();
+        }).join("");
+    }
+
+    function compactShiftLabel(value) {
+        var label = String(value || "").trim();
+        if (!label || label === "Не указано") return "";
+        if (label === "День") return "Д";
+        if (label === "Ночь") return "Н";
+        return label;
+    }
+
+    function renderMapBed(bed) {
+        var occupied = bed.dataset.occupied === "true";
+        var unavailable = Boolean(bed.disabled);
+        var occupantName = shortPersonName(bed.dataset.occupantName);
+        var photoUrl = occupied ? String(bed.dataset.occupantPhotoUrl || "").trim() : "";
+        var shiftLabel = compactShiftLabel(bed.dataset.shiftLabel);
+        var photo = bed.querySelector("[data-bed-photo-image]");
+        var photoFallback = bed.querySelector("[data-bed-photo-fallback]");
+        var avatar = bed.querySelector("[data-bed-avatar-initial]");
+        var emptyIcon = bed.querySelector("[data-bed-empty-icon]");
+        var person = bed.querySelector("[data-bed-person-label]");
+        var status = bed.querySelector("[data-bed-status]");
+        var shift = bed.querySelector("[data-bed-shift-badge]");
+
+        bed.dataset.bedState = unavailable ? "unavailable" : (occupied ? "occupied" : "free");
+        bed.classList.toggle("is-occupied", occupied);
+        bed.classList.toggle("is-free", !occupied);
+        if (avatar) {
+            avatar.textContent = personInitials(bed.dataset.occupantName);
+            avatar.hidden = !occupied;
+        }
+        if (emptyIcon) emptyIcon.hidden = occupied;
+        if (person) {
+            person.textContent = occupantName;
+            person.hidden = !occupied;
+        }
+        if (status) {
+            status.textContent = unavailable ? "Недоступна" : "Свободна";
+            status.hidden = occupied;
+        }
+        if (shift) {
+            shift.textContent = shiftLabel;
+            shift.hidden = !occupied || !shiftLabel;
+        }
+
+        function showPhotoFallback() {
+            if (photo) {
+                photo.classList.remove("is-loaded");
+            }
+            if (photoFallback) photoFallback.hidden = false;
+            bed.classList.remove("has-photo");
+            bed.classList.toggle("no-photo", occupied);
+        }
+
+        showPhotoFallback();
+        if (!photo) return;
+        photo.onload = null;
+        photo.onerror = null;
+        if (!photoUrl) {
+            photo.removeAttribute("src");
+            photo.dataset.photoSource = "";
+            return;
+        }
+        var floorSection = bed.closest("[data-floor-section]");
+        if (floorSection && floorSection.hidden) return;
+
+        photo.dataset.photoSource = photoUrl;
+        photo.onload = function () {
+            if (photo.dataset.photoSource !== photoUrl) return;
+            if (String(bed.dataset.occupantPhotoUrl || "").trim() !== photoUrl) return;
+            if (!photo.naturalWidth) return;
+            photo.classList.add("is-loaded");
+            if (photoFallback) photoFallback.hidden = true;
+            bed.classList.add("has-photo");
+            bed.classList.remove("no-photo");
+        };
+        photo.onerror = function () {
+            if (photo.dataset.photoSource !== photoUrl) return;
+            showPhotoFallback();
+        };
+        if (photo.getAttribute("src") !== photoUrl) {
+            photo.setAttribute("src", photoUrl);
+        } else if (photo.complete && photo.naturalWidth) {
+            photo.onload();
+        }
+    }
+
     function selectFilter(buttons, activeButton, key, value) {
         buttons.forEach(function (button) {
             var active = button === activeButton;
@@ -52,14 +159,8 @@
     }
 
     function matchesRoom(room) {
-        var dormitoryMatch = (
-            state.dormitory === "all"
-            || room.dataset.dormitory === state.dormitory
-        );
-        var floorMatch = (
-            state.floor === "all"
-            || room.dataset.floor === state.floor
-        );
+        var dormitoryMatch = room.dataset.dormitory === state.dormitory;
+        var floorMatch = room.dataset.floor === state.floor;
         var statusMatch = (
             state.status === "all"
             || room.dataset.transferStatus === state.status
@@ -71,15 +172,76 @@
         return dormitoryMatch && floorMatch && statusMatch && searchMatch;
     }
 
+    function selectedFloorRooms() {
+        return rooms.filter(function (room) {
+            return (
+                room.dataset.dormitory === state.dormitory
+                && room.dataset.floor === state.floor
+            );
+        });
+    }
+
+    function updateSelectionSummary() {
+        var selectedRooms = selectedFloorRooms();
+        var transferredRooms = selectedRooms.filter(function (room) {
+            return room.dataset.transferStatus === "transferred";
+        });
+        var occupiedBeds = 0;
+        var freeBeds = 0;
+        var unavailableBeds = 0;
+
+        selectedRooms.forEach(function (room) {
+            var beds = Array.from(room.querySelectorAll("[data-bed]"));
+            if (room.dataset.transferStatus !== "transferred") {
+                unavailableBeds += beds.length;
+                return;
+            }
+            occupiedBeds += beds.filter(function (bed) {
+                return bed.dataset.occupied === "true";
+            }).length;
+            freeBeds += beds.filter(function (bed) {
+                return bed.dataset.occupied !== "true";
+            }).length;
+        });
+
+        if (selectedRoomCount) selectedRoomCount.textContent = String(selectedRooms.length);
+        if (selectedTransferredRoomCount) {
+            selectedTransferredRoomCount.textContent = String(transferredRooms.length);
+        }
+        if (globalFreeCount) globalFreeCount.textContent = String(freeBeds);
+        if (globalOccupiedCount) globalOccupiedCount.textContent = String(occupiedBeds);
+        if (selectedUnavailableBedCount) {
+            selectedUnavailableBedCount.textContent = String(unavailableBeds);
+        }
+    }
+
     function applyFilters() {
-        var matches = 0;
+        dormitorySections.forEach(function (section) {
+            section.hidden = section.dataset.dormitorySection !== state.dormitory;
+        });
+        floorSections.forEach(function (section) {
+            section.hidden = (
+                section.dataset.dormitory !== state.dormitory
+                || section.dataset.floorSection !== state.floor
+            );
+        });
+        floorSections.filter(function (section) {
+            return !section.hidden;
+        }).forEach(function (section) {
+            section.querySelectorAll("[data-bed]").forEach(renderMapBed);
+        });
+
         rooms.forEach(function (room) {
             var match = matchesRoom(room);
-            room.classList.toggle("is-filter-muted", !match);
+            var selectedFloor = (
+                room.dataset.dormitory === state.dormitory
+                && room.dataset.floor === state.floor
+            );
+            room.classList.toggle("is-filter-muted", selectedFloor && !match);
             room.setAttribute("data-filter-match", String(match));
-            if (match) matches += 1;
         });
-        if (visibleRoomCount) visibleRoomCount.textContent = String(matches);
+        if (activeRoom && !selectedFloorRooms().includes(activeRoom)) closePanel();
+        updateSelectionSummary();
     }
 
     function element(tagName, className, text) {
@@ -334,11 +496,13 @@
         var occupancy = payload.occupancy;
         selectedBed.dataset.occupied = "true";
         selectedBed.dataset.occupantName = occupancy.occupant_name;
+        selectedBed.dataset.occupantPhotoUrl = occupancy.photo_url || "";
         selectedBed.dataset.shiftLabel = occupancy.shift_label;
         selectedBed.dataset.workLabel = occupancy.work_label;
         selectedBed.dataset.assignmentTypeLabel = occupancy.assignment_type_label;
         selectedBed.classList.remove("is-free");
         selectedBed.classList.add("is-occupied");
+        renderMapBed(selectedBed);
         selectedBed.setAttribute(
             "aria-label",
             [
@@ -352,16 +516,7 @@
             ].join(", ")
         );
 
-        if (globalFreeCount) globalFreeCount.textContent = String(payload.summary.free_beds);
-        if (globalOccupiedCount) globalOccupiedCount.textContent = String(payload.summary.occupied_beds);
-        var dormitory = activeRoom.closest("[data-dormitory-section]");
-        var dormitoryFree = dormitory ? dormitory.querySelector("[data-dormitory-free-count]") : null;
-        if (dormitoryFree) {
-            var freeBeds = Array.from(dormitory.querySelectorAll("[data-room-card][data-transfer-status='transferred'] [data-bed]"))
-                .filter(function (bed) { return bed.dataset.occupied !== "true"; })
-                .length;
-            dormitoryFree.textContent = String(freeBeds);
-        }
+        updateSelectionSummary();
         renderRoom(activeRoom);
     }
 
@@ -462,8 +617,9 @@
         if (roomButton) openRoom(roomButton.closest("[data-room-card]"), null);
     });
 
-    root.querySelectorAll("[data-bed]:not(:disabled)").forEach(function (bed) {
-        bed.setAttribute("aria-pressed", "false");
+    root.querySelectorAll("[data-bed]").forEach(function (bed) {
+        renderMapBed(bed);
+        if (!bed.disabled) bed.setAttribute("aria-pressed", "false");
     });
     panelClose.addEventListener("click", closePanel);
     panelBackdrop.addEventListener("click", closePanel);

@@ -31,6 +31,15 @@ DAY_NIGHT_LABELS = {
 }
 
 
+def _employee_photo_url(employee):
+    if not employee.photo:
+        return ''
+    try:
+        return employee.photo.url
+    except ValueError:
+        return ''
+
+
 def settlement_clerk_access_from_request(request):
     access_id = request.session.get('employee_access_id')
     if not access_id:
@@ -117,6 +126,7 @@ def _employee_profiles(employees):
             else employee.position.strip()
         )
         profiles[employee.pk] = {
+            'photo_url': _employee_photo_url(employee),
             'shift_label': DAY_NIGHT_LABELS.get(shift_type, UNKNOWN_LABEL),
             'work_label': str(equipment) if equipment is not None else (position_label or UNKNOWN_LABEL),
         }
@@ -142,6 +152,7 @@ def _attach_occupancy_view(rooms):
             bed.active_occupancy = occupancy
             if occupancy is None:
                 bed.occupant_name = UNKNOWN_LABEL
+                bed.occupant_photo_url = ''
                 bed.shift_label = UNKNOWN_LABEL
                 bed.work_label = UNKNOWN_LABEL
                 bed.assignment_type_label = UNKNOWN_LABEL
@@ -150,6 +161,7 @@ def _attach_occupancy_view(rooms):
             profile = profiles[occupancy.employee_id]
             room.occupied_bed_count += 1
             bed.occupant_name = occupancy.employee.full_name
+            bed.occupant_photo_url = profile['photo_url']
             bed.shift_label = profile['shift_label']
             bed.work_label = profile['work_label']
             bed.assignment_type_label = occupancy.get_assignment_type_display()
@@ -499,6 +511,7 @@ def _occupancy_response(occupancy):
             'id': occupancy.pk,
             'bed_stable_id': bed.stable_id,
             'occupant_name': employee.full_name,
+            'photo_url': profile['photo_url'],
             'shift_label': profile['shift_label'],
             'work_label': profile['work_label'],
             'assignment_type': occupancy.assignment_type,
