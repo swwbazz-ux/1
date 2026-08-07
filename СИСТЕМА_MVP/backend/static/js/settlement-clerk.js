@@ -38,12 +38,118 @@
     var assignmentType = root.querySelector("[data-assignment-type]");
     var settleButton = root.querySelector("[data-settle-button]");
     var placementFeedback = root.querySelector("[data-placement-feedback]");
+    var unsettledPanelToggle = root.querySelector("[data-unsettled-panel-toggle]");
+    var unsettledPanel = root.querySelector("[data-unsettled-panel]");
+    var unsettledPanelClose = root.querySelector("[data-unsettled-panel-close]");
+    var unsettledSearch = root.querySelector("[data-unsettled-search]");
+    var unsettledVisibleCount = root.querySelector("[data-unsettled-visible-count]");
+    var unsettledFilterEmpty = root.querySelector("[data-unsettled-filter-empty]");
+    var unsettledEmployees = Array.from(root.querySelectorAll("[data-unsettled-employee]"));
+    var unsettledShiftButtons = Array.from(root.querySelectorAll("[data-unsettled-shift-filter]"));
     var activeRoom = null;
     var selectedBed = null;
     var selectedEmployee = null;
     var searchTimer = null;
     var searchSequence = 0;
     var saving = false;
+    var unsettledShift = "all";
+
+    function normalizeSearch(value) {
+        return String(value || "").trim().toLocaleLowerCase("ru-RU");
+    }
+
+    function showUnsettledPhotoFallback(card) {
+        var photo = card.querySelector("[data-unsettled-photo]");
+        var fallback = card.querySelector("[data-unsettled-photo-fallback]");
+        if (photo) photo.hidden = true;
+        if (fallback) fallback.hidden = false;
+    }
+
+    function loadUnsettledEmployeePhoto(card) {
+        var photo = card.querySelector("[data-unsettled-photo]");
+        var fallback = card.querySelector("[data-unsettled-photo-fallback]");
+        if (!photo) return;
+        var photoUrl = String(photo.dataset.photoUrl || "").trim();
+        showUnsettledPhotoFallback(card);
+        if (!photoUrl || photo.dataset.photoFailed === photoUrl) return;
+        if (photo.dataset.photoSource === photoUrl && photo.complete && photo.naturalWidth) {
+            photo.hidden = false;
+            if (fallback) fallback.hidden = true;
+            return;
+        }
+        photo.onload = function () {
+            if (photo.dataset.photoSource !== photoUrl || !photo.naturalWidth) return;
+            photo.dataset.photoFailed = "";
+            photo.hidden = false;
+            if (fallback) fallback.hidden = true;
+        };
+        photo.onerror = function () {
+            if (photo.dataset.photoSource !== photoUrl) return;
+            photo.dataset.photoFailed = photoUrl;
+            showUnsettledPhotoFallback(card);
+        };
+        photo.dataset.photoSource = photoUrl;
+        if (photo.getAttribute("src") !== photoUrl) {
+            photo.setAttribute("src", photoUrl);
+        }
+    }
+
+    function renderUnsettledEmployees() {
+        var query = normalizeSearch(unsettledSearch ? unsettledSearch.value : "");
+        var visible = 0;
+        unsettledEmployees.forEach(function (card) {
+            var searchMatch = !query || normalizeSearch(card.dataset.searchText).includes(query);
+            var shiftMatch = unsettledShift === "all" || card.dataset.shift === unsettledShift;
+            card.hidden = !(searchMatch && shiftMatch);
+            if (!card.hidden) {
+                visible += 1;
+                loadUnsettledEmployeePhoto(card);
+            }
+        });
+        if (unsettledVisibleCount) unsettledVisibleCount.textContent = String(visible);
+        if (unsettledFilterEmpty) unsettledFilterEmpty.hidden = visible !== 0;
+    }
+
+    function closeUnsettledPanel(restoreFocus) {
+        if (!unsettledPanel) return;
+        unsettledPanel.hidden = true;
+        unsettledPanel.setAttribute("aria-hidden", "true");
+        if (unsettledPanelToggle) {
+            unsettledPanelToggle.setAttribute("aria-expanded", "false");
+            unsettledPanelToggle.setAttribute(
+                "aria-label",
+                "Открыть панель нерасселённых сотрудников"
+            );
+        }
+        document.body.classList.remove("settlement-unsettled-panel-open");
+        if (restoreFocus !== false && unsettledPanelToggle) unsettledPanelToggle.focus();
+    }
+
+    function openUnsettledPanel() {
+        if (!unsettledPanel) return;
+        closePanel();
+        unsettledPanel.hidden = false;
+        unsettledPanel.setAttribute("aria-hidden", "false");
+        if (unsettledPanelToggle) {
+            unsettledPanelToggle.setAttribute("aria-expanded", "true");
+            unsettledPanelToggle.setAttribute(
+                "aria-label",
+                "Закрыть панель нерасселённых сотрудников"
+            );
+        }
+        document.body.classList.add("settlement-unsettled-panel-open");
+        renderUnsettledEmployees();
+        if (unsettledSearch) unsettledSearch.focus();
+    }
+
+    function toggleUnsettledPanel() {
+        if (!unsettledPanel) return;
+        if (unsettledPanel.hidden) {
+            openUnsettledPanel();
+        } else {
+            closeUnsettledPanel(true);
+        }
+    }
 
     function shortPersonName(value) {
         var parts = String(value || "").trim().split(/\s+/).filter(Boolean);
@@ -380,6 +486,7 @@
     }
 
     function openRoom(room, bed) {
+        closeUnsettledPanel(false);
         activeRoom = room;
         if (selectedBed && !room.contains(selectedBed)) {
             selectedBed.classList.remove("is-selected");
@@ -623,8 +730,35 @@
     });
     panelClose.addEventListener("click", closePanel);
     panelBackdrop.addEventListener("click", closePanel);
+    if (unsettledPanelToggle) {
+        unsettledPanelToggle.addEventListener("click", toggleUnsettledPanel);
+    }
+    if (unsettledPanelClose) {
+        unsettledPanelClose.addEventListener("click", function () {
+            closeUnsettledPanel(true);
+        });
+    }
+    if (unsettledSearch) {
+        unsettledSearch.addEventListener("input", renderUnsettledEmployees);
+    }
+    unsettledShiftButtons.forEach(function (button) {
+        button.addEventListener("click", function () {
+            unsettledShift = button.dataset.unsettledShiftFilter;
+            unsettledShiftButtons.forEach(function (candidate) {
+                var active = candidate === button;
+                candidate.classList.toggle("is-active", active);
+                candidate.setAttribute("aria-pressed", String(active));
+            });
+            renderUnsettledEmployees();
+        });
+    });
     document.addEventListener("keydown", function (event) {
-        if (event.key === "Escape" && !panel.hidden) closePanel();
+        if (event.key !== "Escape") return;
+        if (unsettledPanel && !unsettledPanel.hidden) {
+            closeUnsettledPanel(true);
+        } else if (!panel.hidden) {
+            closePanel();
+        }
     });
     employeeSearch.addEventListener("input", function () {
         window.clearTimeout(searchTimer);

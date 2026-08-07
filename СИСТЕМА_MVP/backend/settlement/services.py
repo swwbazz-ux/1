@@ -1,8 +1,10 @@
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
-from django.db.models import Q
+from django.db.models import Count, Exists, OuterRef, Q, Subquery
 from django.utils import timezone
 
+from core.production_time import production_work_date
+from shifts.models import WatchPeriod
 from users.models import Employee
 
 from .models import EmployeeBedOccupancy, PhysicalBed, PhysicalRoom
@@ -26,6 +28,65 @@ def effective_occupancy_at_q(moment):
             Q(terminated_at__isnull=True)
             | Q(terminated_at__gt=moment)
         )
+    )
+
+
+def _current_watch_period_groups(moment):
+    """Group applicable periods by their canonical watch composition."""
+    as_of = production_work_date(moment)
+    return (
+        WatchPeriod.objects
+        .filter(
+            is_active=True,
+            watch_composition_id__isnull=False,
+            watch_composition__is_active=True,
+            starts_on__lte=as_of,
+            ends_on__gte=as_of,
+        )
+        .order_by()
+        .values('watch_composition_id')
+        .annotate(period_count=Count('pk'))
+    )
+
+
+def current_roster_resolution(moment=None):
+    """Describe whether today's canonical roster is usable or ambiguous."""
+    moment = moment or timezone.now()
+    groups = _current_watch_period_groups(moment)
+    return {
+        'has_unambiguous': groups.filter(period_count=1).exists(),
+        'has_ambiguous': groups.filter(period_count__gt=1).exists(),
+    }
+
+
+def unsettled_current_roster_employees(moment=None):
+    """Return active employees from unambiguous current watch rosters."""
+    moment = moment or timezone.now()
+    unambiguous_composition_ids = (
+        _current_watch_period_groups(moment)
+        .filter(period_count=1)
+        .values('watch_composition_id')
+    )
+    effective_occupancy = EmployeeBedOccupancy.objects.filter(
+        effective_occupancy_at_q(moment),
+        employee_id=OuterRef('pk'),
+    )
+    return (
+        Employee.objects
+        .filter(
+            is_active=True,
+            status=Employee.Status.ACTIVE,
+            watch_composition__is_active=True,
+            watch_composition_id__in=Subquery(
+                unambiguous_composition_ids,
+            ),
+        )
+        .annotate(
+            has_effective_occupancy=Exists(effective_occupancy),
+        )
+        .filter(has_effective_occupancy=False)
+        .select_related('personnel_position', 'watch_composition')
+        .order_by('full_name', 'pk')
     )
 
 

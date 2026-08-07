@@ -3,7 +3,7 @@ from collections import defaultdict
 from urllib.parse import urlencode
 
 from django.core.exceptions import ValidationError
-from django.db.models import Exists, OuterRef, Prefetch, Q
+from django.db.models import Prefetch, Q
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
@@ -21,13 +21,23 @@ from users.role_apps import (
 )
 
 from .models import EmployeeBedOccupancy, PhysicalBed, PhysicalRoom
-from .services import effective_occupancy_at_q, settle_employee_on_bed
+from .services import (
+    current_roster_resolution,
+    effective_occupancy_at_q,
+    settle_employee_on_bed,
+    unsettled_current_roster_employees,
+)
 
 
 UNKNOWN_LABEL = 'Не указано'
 DAY_NIGHT_LABELS = {
     'day': 'День',
     'night': 'Ночь',
+}
+SHIFT_FILTER_VALUES = {
+    'День': 'day',
+    'Ночь': 'night',
+    'Ранняя': 'early',
 }
 
 
@@ -38,6 +48,11 @@ def _employee_photo_url(employee):
         return employee.photo.url
     except ValueError:
         return ''
+
+
+def _person_initials(full_name):
+    parts = [part for part in str(full_name or '').split() if part]
+    return ''.join(part[0].upper() for part in parts[:2])
 
 
 def settlement_clerk_access_from_request(request):
@@ -128,9 +143,39 @@ def _employee_profiles(employees):
         profiles[employee.pk] = {
             'photo_url': _employee_photo_url(employee),
             'shift_label': DAY_NIGHT_LABELS.get(shift_type, UNKNOWN_LABEL),
+            'position_label': position_label or UNKNOWN_LABEL,
             'work_label': str(equipment) if equipment is not None else (position_label or UNKNOWN_LABEL),
         }
     return profiles
+
+
+def _unsettled_employee_cards(moment):
+    employees = list(unsettled_current_roster_employees(moment))
+    profiles = _employee_profiles(employees)
+    return [
+        {
+            'id': employee.pk,
+            'full_name': employee.full_name,
+            'initials': _person_initials(employee.full_name),
+            'personnel_number': employee.personnel_number,
+            'position_label': profiles[employee.pk]['position_label'],
+            'shift_label': profiles[employee.pk]['shift_label'],
+            'has_shift': profiles[employee.pk]['shift_label'] != UNKNOWN_LABEL,
+            'shift_filter': SHIFT_FILTER_VALUES.get(
+                profiles[employee.pk]['shift_label'],
+                '',
+            ),
+            'photo_url': profiles[employee.pk]['photo_url'],
+            'watch_composition_label': employee.watch_composition.name,
+            'search_text': ' '.join(
+                filter(
+                    None,
+                    (employee.full_name, employee.personnel_number),
+                )
+            ).casefold(),
+        }
+        for employee in employees
+    ]
 
 
 def _attach_occupancy_view(rooms):
@@ -405,6 +450,8 @@ def settlement_map_view(request):
         for room in rooms
         if room.is_transferred
     )
+    roster_resolution = current_roster_resolution(moment)
+    unsettled_employees = _unsettled_employee_cards(moment)
 
     return render(
         request,
@@ -424,6 +471,10 @@ def settlement_map_view(request):
                 'not_transferred_beds': total_beds - transferred_beds,
             },
             'assignment_type_choices': EmployeeBedOccupancy.AssignmentType.choices,
+            'unsettled_employees': unsettled_employees,
+            'unsettled_employee_count': len(unsettled_employees),
+            'unsettled_roster_available': roster_resolution['has_unambiguous'],
+            'unsettled_roster_ambiguous': roster_resolution['has_ambiguous'],
             'clerk_active_section': 'settlement',
         },
     )
@@ -443,17 +494,7 @@ def settlement_employee_search_view(request):
 
     moment = timezone.now()
     employees = list(
-        Employee.objects
-        .filter(is_active=True, status=Employee.Status.ACTIVE)
-        .annotate(
-            has_active_occupancy=Exists(
-                EmployeeBedOccupancy.objects.filter(
-                    effective_occupancy_at_q(moment),
-                    employee_id=OuterRef('pk'),
-                )
-            )
-        )
-        .filter(has_active_occupancy=False)
+        unsettled_current_roster_employees(moment)
         .filter(
             Q(full_name__icontains=query)
             | Q(personnel_number__icontains=query)

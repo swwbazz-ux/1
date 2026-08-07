@@ -18,13 +18,15 @@ from django.urls import reverse
 from django.utils import timezone
 
 from assignments.models import AssignmentStatus, EquipmentAssignment, WorkShiftType
+from core.production_time import production_work_date
 from references.models import Dormitory, Equipment, EquipmentType
+from shifts.models import EmployeeShift, ShiftType, WatchPeriod
 from users.active_role import (
     ACTIVE_ROLE_CODE_SESSION_KEY,
     ACTIVE_ROLE_GENERATION_SESSION_KEY,
     ACTIVE_ROLE_SESSION_KEY,
 )
-from users.models import Employee, EmployeeAccess, Role
+from users.models import Employee, EmployeeAccess, Role, WatchComposition
 
 from .fund import expected_fund_totals
 from .models import (
@@ -36,7 +38,12 @@ from .models import (
     SettlementRevision,
     SettlementSource,
 )
-from .services import effective_occupancy_at_q, settle_employee_on_bed
+from .services import (
+    current_roster_resolution,
+    effective_occupancy_at_q,
+    settle_employee_on_bed,
+    unsettled_current_roster_employees,
+)
 from .views import _occupancy_response
 
 
@@ -2751,6 +2758,136 @@ class PhysicalFundTests(TestCase):
         self.assertEqual(mutations, [])
 
 
+class UnsettledCurrentRosterSelectorTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        call_command('load_physical_fund', stdout=StringIO())
+        cls.moment = datetime(
+            2026,
+            8,
+            7,
+            8,
+            0,
+            tzinfo=datetime_timezone.utc,
+        )
+        cls.as_of = production_work_date(cls.moment)
+        cls.bed = (
+            PhysicalBed.objects
+            .filter(room__transfer_status=PhysicalRoom.TransferStatus.TRANSFERRED)
+            .order_by('stable_id')
+            .first()
+        )
+
+    def create_composition(self, suffix, *, active=True, periods=1):
+        composition = WatchComposition.objects.create(
+            code=f'settlement-roster-{suffix}',
+            name=f'Состав расселения {suffix}',
+            is_active=active,
+        )
+        for index in range(periods):
+            WatchPeriod.objects.create(
+                name=f'Период расселения {suffix}-{index + 1}',
+                watch_composition=composition,
+                starts_on=self.as_of,
+                ends_on=self.as_of,
+                is_active=True,
+            )
+        return composition
+
+    def create_employee(self, suffix, *, composition=None, active=True):
+        return Employee.objects.create(
+            full_name=f'Сотрудник состава {suffix}',
+            personnel_number=f'ROSTER-{suffix}',
+            watch_composition=composition,
+            status=(Employee.Status.ACTIVE if active else Employee.Status.DEACTIVATED),
+            is_active=active,
+        )
+
+    def test_selector_uses_only_unambiguous_current_compositions(self):
+        first_composition = self.create_composition('first')
+        second_composition = self.create_composition('second')
+        ambiguous_composition = self.create_composition('ambiguous', periods=2)
+        inactive_composition = self.create_composition('inactive', active=False)
+        first = self.create_employee('first', composition=first_composition)
+        second = self.create_employee('second', composition=second_composition)
+        self.create_employee('ambiguous', composition=ambiguous_composition)
+        self.create_employee('inactive-composition', composition=inactive_composition)
+        self.create_employee('without-composition')
+        self.create_employee('inactive-employee', composition=first_composition, active=False)
+
+        result_ids = set(
+            unsettled_current_roster_employees(self.moment).values_list('pk', flat=True)
+        )
+
+        self.assertEqual(result_ids, {first.pk, second.pk})
+        self.assertEqual(
+            current_roster_resolution(self.moment),
+            {'has_unambiguous': True, 'has_ambiguous': True},
+        )
+
+    def test_resolution_reports_missing_current_roster(self):
+        self.assertEqual(
+            current_roster_resolution(self.moment),
+            {'has_unambiguous': False, 'has_ambiguous': False},
+        )
+
+    def test_selector_excludes_effectively_housed_employee(self):
+        composition = self.create_composition('occupied')
+        housed = self.create_employee('occupied', composition=composition)
+        waiting = self.create_employee('waiting', composition=composition)
+        EmployeeBedOccupancy.objects.create(
+            employee=housed,
+            physical_bed=self.bed,
+            assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
+            settled_at=self.moment - timedelta(days=1),
+            starts_at=self.moment - timedelta(days=1),
+            settled_by=housed,
+        )
+
+        result_ids = set(
+            unsettled_current_roster_employees(self.moment).values_list('pk', flat=True)
+        )
+
+        self.assertEqual(result_ids, {waiting.pk})
+
+    def test_selector_uses_production_date_before_seven_am(self):
+        boundary_moment = datetime(
+            2026,
+            8,
+            7,
+            20,
+            0,
+            tzinfo=datetime_timezone.utc,
+        )
+        composition = WatchComposition.objects.create(
+            code='settlement-roster-production-date',
+            name='Состав на границе производственных суток',
+            is_active=True,
+        )
+        production_date = production_work_date(boundary_moment)
+        WatchPeriod.objects.create(
+            name='Период на границе производственных суток',
+            watch_composition=composition,
+            starts_on=production_date,
+            ends_on=production_date,
+            is_active=True,
+        )
+        waiting = self.create_employee(
+            'production-date',
+            composition=composition,
+        )
+
+        result_ids = set(
+            unsettled_current_roster_employees(boundary_moment).values_list(
+                'pk',
+                flat=True,
+            )
+        )
+
+        self.assertEqual(production_date.isoformat(), '2026-08-07')
+        self.assertEqual(result_ids, {waiting.pk})
+
+
 class SettlementMapAccessTests(TestCase):
     @classmethod
     def setUpTestData(cls):
@@ -3206,6 +3343,23 @@ class SettlementMapAccessTests(TestCase):
         self.assertIn('/clerk/manifest.webmanifest', content)
         self.assertIn('data-app-service-worker-url="/clerk/sw.js"', content)
         self.assertIn('data-app-service-worker-scope="/clerk/"', content)
+        self.assertIn('data-unsettled-panel-toggle', content)
+        self.assertIn('data-unsettled-panel', content)
+        panel_tag = re.search(
+            r'<aside class="settlement-unsettled-panel"([^>]*)>',
+            content,
+        )
+        self.assertIsNotNone(panel_tag)
+        self.assertIn('role="complementary"', panel_tag.group(1))
+        self.assertNotIn('aria-modal', panel_tag.group(1))
+        self.assertNotIn('role="dialog"', panel_tag.group(1))
+        self.assertNotIn('data-unsettled-panel-backdrop', content)
+        self.assertNotRegex(
+            content,
+            r'<img(?=[^>]*data-unsettled-photo)(?=[^>]*loading="lazy")[^>]*>',
+        )
+        self.assertIn('Текущий состав расселения не определён', content)
+        self.assertEqual(content.count('data-unsettled-employee'), 0)
         self.assertEqual(content.count('data-room-card'), 60)
         self.assertEqual(content.count('data-bed-id='), 348)
         self.assertEqual(content.count('data-bed-card'), 348)
@@ -3268,7 +3422,7 @@ class SettlementMapAccessTests(TestCase):
         self.assertIn('data-room-panel', content)
         self.assertIn('data-settlement-form', content)
         self.assertIn('data-employee-search', content)
-        self.assertEqual(content.count('-settlement-map-v9'), 2)
+        self.assertEqual(content.count('-settlement-map-v11'), 2)
         self.assertNotIn('data-dorm-filter="all"', content)
         self.assertNotIn('data-floor-filter="all"', content)
         self.assertIn(
@@ -3287,6 +3441,58 @@ class SettlementMapAccessTests(TestCase):
         self.assertIn('data-floor-section="1"', visible_floor_tags[0])
         self.assertIn('aria-label="Верхний ряд комнат"', content)
         self.assertIn('aria-label="Нижний ряд комнат"', content)
+
+    def test_resolved_empty_roster_uses_all_settled_state(self):
+        composition = WatchComposition.objects.create(
+            code='settlement-empty-current-roster',
+            name='Текущий пустой состав расселения',
+            is_active=True,
+        )
+        today = production_work_date()
+        WatchPeriod.objects.create(
+            name='Текущий пустой период расселения',
+            watch_composition=composition,
+            starts_on=today,
+            ends_on=today,
+            is_active=True,
+        )
+        self.authenticate(self.client, self.clerk_access)
+
+        response = self.client.get(reverse('settlement_map'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context['unsettled_roster_available'])
+        self.assertFalse(response.context['unsettled_roster_ambiguous'])
+        self.assertContains(response, 'Все сотрудники текущего состава расселены')
+        self.assertNotContains(response, 'Текущий состав расселения не определён')
+
+    def test_ambiguous_roster_is_not_reported_as_fully_settled(self):
+        composition = WatchComposition.objects.create(
+            code='settlement-ambiguous-current-roster',
+            name='Неоднозначный текущий состав расселения',
+            is_active=True,
+        )
+        today = production_work_date()
+        for suffix in ('А', 'Б'):
+            WatchPeriod.objects.create(
+                name=f'Пересекающийся период расселения {suffix}',
+                watch_composition=composition,
+                starts_on=today,
+                ends_on=today,
+                is_active=True,
+            )
+        self.authenticate(self.client, self.clerk_access)
+
+        response = self.client.get(reverse('settlement_map'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.context['unsettled_roster_available'])
+        self.assertTrue(response.context['unsettled_roster_ambiguous'])
+        self.assertContains(
+            response,
+            'Текущий состав расселения определён неоднозначно',
+        )
+        self.assertNotContains(response, 'Все сотрудники текущего состава расселены')
 
     def test_get_and_rejected_post_do_not_modify_settlement_data(self):
         self.authenticate(self.client, self.clerk_access)
@@ -3459,11 +3665,25 @@ class SettlementOccupancyWorkflowTests(TestCase):
             status=Employee.Status.ACTIVE,
             is_active=True,
         )
+        cls.watch_composition = WatchComposition.objects.create(
+            code='settlement-workflow-roster',
+            name='Текущий состав тестов расселения',
+            is_active=True,
+        )
+        today = production_work_date()
+        cls.watch_period = WatchPeriod.objects.create(
+            name='Текущий период тестов расселения',
+            watch_composition=cls.watch_composition,
+            starts_on=today - timedelta(days=1),
+            ends_on=today + timedelta(days=1),
+            is_active=True,
+        )
         cls.candidate = Employee.objects.create(
             full_name='Тестовый кандидат Иванов',
             personnel_number='SET-001',
             phone='+79000001903',
             position='Водитель',
+            watch_composition=cls.watch_composition,
             status=Employee.Status.ACTIVE,
             is_active=True,
         )
@@ -3472,6 +3692,7 @@ class SettlementOccupancyWorkflowTests(TestCase):
             personnel_number='SET-002',
             phone='+79000001904',
             position='Слесарь',
+            watch_composition=cls.watch_composition,
             status=Employee.Status.ACTIVE,
             is_active=True,
         )
@@ -3479,6 +3700,7 @@ class SettlementOccupancyWorkflowTests(TestCase):
             full_name='Тестовый кандидат Неактивный',
             personnel_number='SET-003',
             phone='+79000001905',
+            watch_composition=cls.watch_composition,
             status=Employee.Status.DEACTIVATED,
             is_active=False,
         )
@@ -3877,7 +4099,101 @@ class SettlementOccupancyWorkflowTests(TestCase):
             self.assertEqual(anonymous_response.status_code, 404)
             anonymous_response.close()
 
+    def test_unsettled_panel_uses_current_roster_and_excludes_housed_employee(self):
+        outsider = Employee.objects.create(
+            full_name='Тестовый кандидат вне состава',
+            personnel_number='SET-OUTSIDE',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        EmployeeBedOccupancy.objects.create(
+            employee=self.candidate,
+            physical_bed=self.transferred_beds[0],
+            assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
+            settled_by=self.clerk,
+        )
+        self.authenticate(self.client, self.clerk_access)
+
+        response = self.client.get(reverse('settlement_map'))
+
+        self.assertEqual(response.status_code, 200)
+        employee_ids = {
+            item['id']
+            for item in response.context['unsettled_employees']
+        }
+        self.assertEqual(employee_ids, {self.second_candidate.pk})
+        content = response.content.decode('utf-8')
+        self.assertIn(
+            f'data-employee-id="{self.second_candidate.pk}"',
+            content,
+        )
+        self.assertNotIn(f'data-employee-id="{self.candidate.pk}"', content)
+        self.assertNotIn(f'data-employee-id="{outsider.pk}"', content)
+
+    def test_unsettled_panel_cards_show_photo_initials_position_and_shifts(self):
+        image_bytes = (
+            b'GIF89a\x01\x00\x01\x00\x00\x00\x00\x00\x00!\xf9\x04\x01\x00\x00\x00\x00,'
+            b'\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;'
+        )
+        self.second_candidate.full_name = (
+            'Оченьдлиннаяфамилия Дляпроверки Читаемостиинтерфейса'
+        )
+        self.second_candidate.save(update_fields=['full_name'])
+        EmployeeShift.objects.create(
+            employee=self.candidate,
+            shift_type=ShiftType.DAY,
+            watch_period=self.watch_period,
+            opened_at=timezone.now(),
+        )
+        EmployeeShift.objects.create(
+            employee=self.second_candidate,
+            shift_type=ShiftType.NIGHT,
+            watch_period=self.watch_period,
+            opened_at=timezone.now(),
+        )
+
+        with TemporaryDirectory() as media_root, override_settings(MEDIA_ROOT=media_root):
+            self.candidate.photo.save(
+                'unsettled-panel.gif',
+                SimpleUploadedFile(
+                    'unsettled-panel.gif',
+                    image_bytes,
+                    content_type='image/gif',
+                ),
+            )
+            self.authenticate(self.client, self.clerk_access)
+
+            response = self.client.get(reverse('settlement_map'))
+
+            self.assertEqual(response.status_code, 200)
+            cards = {
+                item['id']: item
+                for item in response.context['unsettled_employees']
+            }
+            self.assertEqual(set(cards), {self.candidate.pk, self.second_candidate.pk})
+            self.assertEqual(cards[self.candidate.pk]['photo_url'], self.candidate.photo.url)
+            self.assertEqual(cards[self.candidate.pk]['shift_label'], 'День')
+            self.assertEqual(cards[self.candidate.pk]['shift_filter'], 'day')
+            self.assertEqual(cards[self.second_candidate.pk]['photo_url'], '')
+            self.assertEqual(cards[self.second_candidate.pk]['shift_label'], 'Ночь')
+            self.assertEqual(cards[self.second_candidate.pk]['shift_filter'], 'night')
+            self.assertEqual(cards[self.second_candidate.pk]['initials'], 'ОД')
+            content = response.content.decode('utf-8')
+            self.assertIn(f'data-photo-url="{self.candidate.photo.url}"', content)
+            self.assertIn('data-shift="day"', content)
+            self.assertIn('data-shift="night"', content)
+            self.assertIn(self.second_candidate.full_name, content)
+            self.assertIn('>ОД</span>', content)
+            self.assertNotIn('settlement-unsettled-composition', content)
+            self.assertNotIn(self.watch_composition.name, content)
+
     def test_employee_search_returns_only_active_unoccupied_employees(self):
+        Employee.objects.create(
+            full_name='Тестовый кандидат Внесоставной',
+            personnel_number='SET-OUTSIDE-SEARCH',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
         EmployeeBedOccupancy.objects.create(
             employee=self.candidate,
             physical_bed=self.transferred_beds[0],
@@ -4561,6 +4877,19 @@ class EmployeeSearchEffectiveOccupancyTests(TestCase):
             0,
             tzinfo=datetime_timezone.utc,
         )
+        cls.watch_composition = WatchComposition.objects.create(
+            code='search-effective-roster',
+            name='Состав проверки эффективного размещения',
+            is_active=True,
+        )
+        as_of = production_work_date(cls.moment)
+        WatchPeriod.objects.create(
+            name='Период проверки эффективного размещения',
+            watch_composition=cls.watch_composition,
+            starts_on=as_of,
+            ends_on=as_of,
+            is_active=True,
+        )
         dormitory = Dormitory.objects.create(number='5')
         clerk_role = Role.objects.create(
             code='settlement_clerk',
@@ -4605,6 +4934,7 @@ class EmployeeSearchEffectiveOccupancyTests(TestCase):
                     full_name=f'Кандидат эффективного поиска {index}',
                     personnel_number=f'SEARCH-EFFECTIVE-{index:02d}',
                     phone=f'+790000042{index:02d}',
+                    watch_composition=cls.watch_composition,
                     status=Employee.Status.ACTIVE,
                     is_active=True,
                 )
@@ -4781,6 +5111,39 @@ class SettlementFrontendContractTests(TestCase):
         self.assertIn('fetch(root.dataset.occupancyCreateUrl', javascript)
         self.assertIn('window.openAppConfirmDialog', javascript)
         self.assertIn('var message = "Заселить "', javascript)
+        self.assertIn('function toggleUnsettledPanel()', javascript)
+        self.assertIn('function renderUnsettledEmployees()', javascript)
+        self.assertNotIn('function trapUnsettledPanelFocus(event)', javascript)
+        self.assertNotIn('unsettledPanelFocusables', javascript)
+        self.assertNotIn('data-unsettled-panel-backdrop', javascript)
+        self.assertNotIn('event.key === "Tab"', javascript)
+        self.assertIn('button.dataset.unsettledShiftFilter', javascript)
+        self.assertIn('event.key !== "Escape"', javascript)
+        self.assertIn('settlement-unsettled-panel-open', javascript)
+        self.assertIn('photo.dataset.photoFailed', javascript)
+        drawer_source = javascript.split(
+            'function closeUnsettledPanel',
+            1,
+        )[1].split('function shortPersonName', 1)[0]
+        for state_reset in (
+            'unsettledSearch.value',
+            'unsettledShift =',
+            'state.dormitory =',
+            'state.floor =',
+            'state.status =',
+            'state.search =',
+        ):
+            self.assertNotIn(state_reset, drawer_source)
+        self.assertIn(
+            'unsettledSearch.addEventListener("input", renderUnsettledEmployees)',
+            javascript,
+        )
+        self.assertIn(
+            'var shiftMatch = unsettledShift === "all" || card.dataset.shift === unsettledShift',
+            javascript,
+        )
+        self.assertNotIn('draggable =', javascript)
+        self.assertNotIn('addEventListener("dragstart"', javascript)
         open_room_source = javascript.split('function openRoom(room, bed) {', 1)[1].split(
             'function closePanel()',
             1,
@@ -4848,6 +5211,28 @@ class SettlementFrontendContractTests(TestCase):
         self.assertIn('.settlement-work-badge {\n        grid-column: 1 / -1;', stylesheet)
         self.assertIn('.settlement-room-panel', stylesheet)
         self.assertIn('position: fixed', stylesheet)
+        self.assertIn('.settlement-unsettled-panel', stylesheet)
+        self.assertIn('width: min(480px, calc(100vw - 24px))', stylesheet)
+        self.assertNotIn('.settlement-unsettled-panel-backdrop', stylesheet)
+        self.assertNotIn('body.settlement-unsettled-panel-open {\n    overflow: hidden;', stylesheet)
+        self.assertIn(
+            'body.settlement-unsettled-panel-open .settlement-work-badge[data-unsettled-panel-toggle]',
+            stylesheet,
+        )
+        self.assertIn('z-index: 1260', stylesheet)
+        self.assertIn('.settlement-unsettled-list', stylesheet)
+        self.assertIn('overflow-y: auto', stylesheet)
+        unsettled_photo_styles = stylesheet.split(
+            '.settlement-unsettled-employee-photo {',
+            1,
+        )[1].split('}', 1)[0]
+        self.assertIn('object-fit: cover', unsettled_photo_styles)
+        self.assertIn('object-position: center 22%', unsettled_photo_styles)
+        unsettled_initials_styles = stylesheet.split(
+            '.settlement-unsettled-employee-initials {',
+            1,
+        )[1].split('}', 1)[0]
+        self.assertIn('font-size: 26px', unsettled_initials_styles)
         self.assertIn('.clerk-workplace-screen .app-confirm-modal', stylesheet)
         self.assertIn('z-index: 1300', stylesheet)
         self.assertIn('min-height:', stylesheet)

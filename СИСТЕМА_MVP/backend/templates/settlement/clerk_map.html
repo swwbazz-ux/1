@@ -2,7 +2,7 @@
 {% load static %}
 
 {% block clerk_extra_head %}
-<link rel="stylesheet" href="{% static 'css/settlement-clerk.css' %}?v={{ static_asset_release }}-settlement-map-v9">
+<link rel="stylesheet" href="{% static 'css/settlement-clerk.css' %}?v={{ static_asset_release }}-settlement-map-v11">
 {% endblock %}
 
 {% block clerk_shell_class %}settlement-shell{% endblock %}
@@ -52,10 +52,16 @@
                        data-settlement-search>
             </label>
 
-            <a class="settlement-work-badge" href="#settlement-map-list">
+            <button type="button"
+                    class="settlement-work-badge"
+                    data-unsettled-panel-toggle
+                    aria-controls="settlement-unsettled-panel"
+                    aria-label="Открыть панель нерасселённых сотрудников"
+                    aria-expanded="false">
                 <i aria-hidden="true"></i>
-                Расселение сотрудников
-            </a>
+                <span>Расселение сотрудников</span>
+                <b data-unsettled-toggle-count>{{ unsettled_employee_count }}</b>
+            </button>
         </section>
 
         <section class="settlement-summary" aria-label="Статистика выбранного этажа" aria-live="polite">
@@ -136,6 +142,112 @@
         {% endif %}
     </main>
 
+    <aside class="settlement-unsettled-panel"
+           id="settlement-unsettled-panel"
+           data-unsettled-panel
+           aria-labelledby="settlement-unsettled-panel-title"
+           aria-hidden="true"
+           role="complementary"
+           hidden>
+        <header class="settlement-unsettled-panel-header">
+            <div>
+                <span>Текущий состав расселения</span>
+                <h2 id="settlement-unsettled-panel-title">Нерасселённые сотрудники</h2>
+                <p>Только сотрудники действующего утверждённого состава без активного койко-места</p>
+            </div>
+            <button type="button"
+                    class="settlement-unsettled-panel-close"
+                    data-unsettled-panel-close
+                    aria-label="Закрыть панель нерасселённых сотрудников">×</button>
+        </header>
+
+        <div class="settlement-unsettled-panel-tools">
+            <div class="settlement-unsettled-panel-count" aria-live="polite">
+                Найдено: <strong data-unsettled-visible-count>{{ unsettled_employee_count }}</strong>
+            </div>
+            <label class="settlement-unsettled-search" for="settlement-unsettled-search">
+                <span>Поиск по ФИО или табельному номеру</span>
+                <input id="settlement-unsettled-search"
+                       type="search"
+                       autocomplete="off"
+                       placeholder="Начните вводить ФИО или табельный номер"
+                       data-unsettled-search>
+            </label>
+            <fieldset class="settlement-unsettled-shift-filter">
+                <legend>Смена</legend>
+                <div class="settlement-filter-buttons">
+                    <button type="button" class="is-active" data-unsettled-shift-filter="all" aria-pressed="true">Все</button>
+                    <button type="button" data-unsettled-shift-filter="day" aria-pressed="false">День</button>
+                    <button type="button" data-unsettled-shift-filter="night" aria-pressed="false">Ночь</button>
+                    <button type="button" data-unsettled-shift-filter="early" aria-pressed="false">Ранняя</button>
+                </div>
+            </fieldset>
+        </div>
+
+        <div class="settlement-unsettled-panel-body">
+            {% if unsettled_roster_ambiguous and unsettled_employees %}
+                <div class="settlement-unsettled-roster-warning" data-unsettled-roster-warning>
+                    <strong>Часть текущего состава не определена однозначно</strong>
+                    <p>Сотрудники составов с пересекающимися активными периодами не показаны.</p>
+                </div>
+            {% endif %}
+            {% if unsettled_employees %}
+                <div class="settlement-unsettled-list" data-unsettled-list>
+                    {% for employee in unsettled_employees %}
+                        <article class="settlement-unsettled-employee"
+                                 data-unsettled-employee
+                                 data-employee-id="{{ employee.id }}"
+                                 data-search-text="{{ employee.search_text }}"
+                                 data-shift="{{ employee.shift_filter }}">
+                            <div class="settlement-unsettled-employee-visual">
+                                <img class="settlement-unsettled-employee-photo"
+                                     data-unsettled-photo
+                                     data-photo-url="{{ employee.photo_url }}"
+                                     alt=""
+                                     decoding="async"
+                                     hidden>
+                                <span class="settlement-unsettled-employee-initials"
+                                      data-unsettled-photo-fallback
+                                      aria-hidden="true">{{ employee.initials }}</span>
+                            </div>
+                            <div class="settlement-unsettled-employee-content">
+                                <strong title="{{ employee.full_name }}">{{ employee.full_name }}</strong>
+                                <span>{{ employee.position_label }}</span>
+                                <div class="settlement-unsettled-employee-meta">
+                                    {% if employee.personnel_number %}
+                                        <small>Таб. № {{ employee.personnel_number }}</small>
+                                    {% endif %}
+                                    {% if employee.has_shift %}
+                                        <small class="is-shift">{{ employee.shift_label }}</small>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </article>
+                    {% endfor %}
+                </div>
+                <div class="settlement-unsettled-empty" data-unsettled-filter-empty hidden>
+                    <strong>Сотрудники не найдены</strong>
+                    <p>Измените строку поиска или фильтр смены.</p>
+                </div>
+            {% elif unsettled_roster_ambiguous %}
+                <div class="settlement-unsettled-empty" data-unsettled-roster-ambiguous>
+                    <strong>Текущий состав расселения определён неоднозначно</strong>
+                    <p>Проверьте пересекающиеся активные периоды состава. До уточнения сотрудники не показываются.</p>
+                </div>
+            {% elif unsettled_roster_available %}
+                <div class="settlement-unsettled-empty" data-unsettled-empty>
+                    <strong>Все сотрудники текущего состава расселены</strong>
+                    <p>Новых сотрудников без действующего койко-места нет.</p>
+                </div>
+            {% else %}
+                <div class="settlement-unsettled-empty" data-unsettled-roster-missing>
+                    <strong>Текущий состав расселения не определён</strong>
+                    <p>Нет активного периода, однозначно задающего текущий состав.</p>
+                </div>
+            {% endif %}
+        </div>
+    </aside>
+
     <div class="settlement-room-panel-backdrop" data-room-panel-backdrop hidden></div>
     <aside class="settlement-room-panel"
            data-room-panel
@@ -214,5 +326,5 @@
 {% endblock %}
 
 {% block clerk_scripts %}
-<script src="{% static 'js/settlement-clerk.js' %}?v={{ static_asset_release }}-settlement-map-v9"></script>
+<script src="{% static 'js/settlement-clerk.js' %}?v={{ static_asset_release }}-settlement-map-v11"></script>
 {% endblock %}
