@@ -3422,7 +3422,8 @@ class SettlementMapAccessTests(TestCase):
         self.assertIn('data-room-panel', content)
         self.assertIn('data-settlement-form', content)
         self.assertIn('data-employee-search', content)
-        self.assertEqual(content.count('-settlement-map-v11'), 2)
+        self.assertEqual(content.count('-settlement-map-v12'), 2)
+        self.assertNotIn('-settlement-map-v11', content)
         self.assertNotIn('data-dorm-filter="all"', content)
         self.assertNotIn('data-floor-filter="all"', content)
         self.assertIn(
@@ -5200,9 +5201,28 @@ class SettlementFrontendContractTests(TestCase):
             1,
         )[1].split('}', 1)[0]
         self.assertIn('grid-template-columns: minmax(0, 1fr)', itr_content_styles)
-        self.assertIn('--settlement-bed-card-min-height: 80px', stylesheet)
+        self.assertIn('--settlement-room-min-height: 284px', stylesheet)
+        self.assertIn('--settlement-bed-card-min-height: 70px', stylesheet)
         self.assertNotIn('--settlement-bed-width', stylesheet)
         self.assertNotIn('repeat(3, var(--settlement-bed-width))', stylesheet)
+        self.assertNotRegex(
+            stylesheet,
+            r'(?i)transform\s*:[^;{}]*\bscale(?:3d|x|y|z)?\s*\(',
+        )
+        self.assertNotRegex(
+            javascript,
+            r'(?i)\bscale(?:3d|x|y|z)?\s*\(',
+        )
+        room_state_styles = stylesheet.split(
+            '.settlement-room-state {',
+            1,
+        )[1].split('}', 1)[0]
+        bed_status_styles = stylesheet.split(
+            '.settlement-bed-status {',
+            1,
+        )[1].split('}', 1)[0]
+        self.assertNotIn('text-overflow: ellipsis', room_state_styles)
+        self.assertNotIn('text-overflow: ellipsis', bed_status_styles)
         responsive_toolbar = stylesheet.split('@media (max-width: 1500px)', 1)[1].split(
             '@media (max-width: 1180px)',
             1,
