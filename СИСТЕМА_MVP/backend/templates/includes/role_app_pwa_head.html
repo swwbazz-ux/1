@@ -7,5 +7,5 @@
 <meta name="apple-mobile-web-app-title" content="{{ apple_title }}">
 <link rel="apple-touch-icon" sizes="180x180" href="{% static icon_180 %}">
 <meta name="role-app-service-worker" content="{{ service_worker_url }}">
-<meta name="role-app-scope" content="{% if role_app.role_code == role_code %}/{% else %}{{ legacy_scope }}{% endif %}">
+<meta name="role-app-scope" content="{{ app_service_worker_scope|default:legacy_scope }}">
 <script src="{% static 'js/role-app-pwa-v1.js' %}" defer></script>

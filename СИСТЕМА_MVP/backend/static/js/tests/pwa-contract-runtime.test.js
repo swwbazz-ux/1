@@ -2099,14 +2099,14 @@ test(
     {skip: guardUnavailable},
     async () => {
         const runtime = createRuntime({
-            htmlShellVersion: "settlement-clerk-shell-v1",
-            workerShellVersion: "settlement-clerk-shell-v1",
+            htmlShellVersion: "clerk-workplace-shell-v1",
+            workerShellVersion: "clerk-workplace-shell-v1",
             roleCode: "settlement_clerk",
             locationOrigin: "https://dispatcher.localhost",
-            locationHref: "https://dispatcher.localhost/settlement/",
-            locationPathname: "/settlement/",
-            serviceWorkerUrl: "/settlement/sw.js",
-            serviceWorkerScope: "/settlement/",
+            locationHref: "https://dispatcher.localhost/clerk/",
+            locationPathname: "/clerk/",
+            serviceWorkerUrl: "/clerk/sw.js",
+            serviceWorkerScope: "/clerk/",
             registrationScope: "/",
             registrationWorkerUrl: "/dispatcher-service-worker.js",
             hasWaitingWorker: false,
@@ -2115,18 +2115,48 @@ test(
 
         assert.equal(runtime.registerCalls, 1);
         assert.deepEqual(runtime.registerRequests, [{
-            workerUrl: "/settlement/sw.js",
-            scope: "/settlement/",
+            workerUrl: "/clerk/sw.js",
+            scope: "/clerk/",
             updateViaCache: "none",
         }]);
         assert.equal(
             runtime.registration.scope,
-            "https://dispatcher.localhost/settlement/"
+            "https://dispatcher.localhost/clerk/"
         );
         assert.equal(
             runtime.activeWorker.scriptURL,
-            "https://dispatcher.localhost/settlement/sw.js"
+            "https://dispatcher.localhost/clerk/sw.js"
         );
+    }
+);
+
+test(
+    "a legacy settlement worker cannot replace the configured clerk worker",
+    {skip: guardUnavailable},
+    async () => {
+        const runtime = createRuntime({
+            htmlShellVersion: "clerk-workplace-shell-v1",
+            workerShellVersion: "clerk-workplace-shell-v1",
+            roleCode: "settlement_clerk",
+            locationOrigin: "https://clerk.localhost",
+            locationHref: "https://clerk.localhost/clerk/",
+            locationPathname: "/clerk/",
+            serviceWorkerUrl: "/clerk/sw.js",
+            serviceWorkerScope: "/clerk/",
+            registrationScope: "/settlement/",
+            registrationWorkerUrl: "/settlement/sw.js",
+            hasWaitingWorker: false,
+        });
+        await flushRuntime(runtime);
+
+        assert.equal(runtime.registerCalls, 1);
+        assert.deepEqual(runtime.registerRequests, [{
+            workerUrl: "/clerk/sw.js",
+            scope: "/clerk/",
+            updateViaCache: "none",
+        }]);
+        assert.equal(runtime.registration.scope, "https://clerk.localhost/clerk/");
+        assert.equal(runtime.activeWorker.scriptURL, "https://clerk.localhost/clerk/sw.js");
     }
 );
 

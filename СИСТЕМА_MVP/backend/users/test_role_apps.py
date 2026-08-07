@@ -159,10 +159,14 @@ class RoleAppManifestTests(SimpleTestCase):
                 role_host = f'{app.subdomain}.localhost'
                 manifest_response = client.get(app.manifest_url, HTTP_HOST=role_host)
                 manifest = json.loads(manifest_response.content.decode('utf-8'))
-                self.assertEqual(manifest['scope'], '/')
+                expected_scope = '/' if app.isolated_root_scope else app.legacy_scope
+                self.assertEqual(manifest['scope'], expected_scope)
 
                 worker_response = client.get(app.service_worker_url, HTTP_HOST=role_host)
-                self.assertEqual(worker_response['Service-Worker-Allowed'], '/')
+                self.assertEqual(
+                    worker_response['Service-Worker-Allowed'],
+                    expected_scope,
+                )
 
         self.assertEqual(len(icon_sources), len(ROLE_APPS))
 

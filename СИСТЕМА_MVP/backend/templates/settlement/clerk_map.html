@@ -1,21 +1,16 @@
-{% extends "base.html" %}
+{% extends "clerk/base.html" %}
 {% load static %}
 
-{% block title %}Расселение · Делопроизводитель{% endblock %}
-{% block body_class %}settlement-clerk-screen{% endblock %}
-{% block extra_head %}
-{% include "includes/role_app_pwa_head.html" with manifest_url="/settlement/manifest.webmanifest" theme_color="#2E7D52" apple_title="Расселение" icon_180="img/pwa/settlement-180.png" service_worker_url="/settlement/sw.js" role_code="settlement_clerk" legacy_scope="/settlement/" %}
+{% block clerk_extra_head %}
 <link rel="stylesheet" href="{% static 'css/settlement-clerk.css' %}?v={{ static_asset_release }}-settlement-occupancy-v1">
 {% endblock %}
 
-{% block body %}
-<div class="admin-shell admin-exports-shell settlement-shell admin-day"
-     data-admin-theme
-     data-settlement-root
+{% block clerk_shell_class %}settlement-shell{% endblock %}
+{% block clerk_shell_attributes %}data-settlement-root
      data-employee-search-url="{% url 'settlement_employee_search' %}"
-     data-occupancy-create-url="{% url 'settlement_occupancy_create' %}">
-    {% include "includes/settlement_clerk_header.html" %}
+     data-occupancy-create-url="{% url 'settlement_occupancy_create' %}"{% endblock %}
 
+{% block clerk_content %}
     <main class="admin-console-page settlement-page">
         <section class="settlement-toolbar" aria-label="Фильтры физической карты">
             <time class="settlement-current-date" datetime="{{ current_date|date:'Y-m-d' }}">
@@ -224,6 +219,8 @@
             </section>
         </div>
     </aside>
-</div>
+{% endblock %}
+
+{% block clerk_scripts %}
 <script src="{% static 'js/settlement-clerk.js' %}?v={{ static_asset_release }}-settlement-occupancy-v1"></script>
 {% endblock %}

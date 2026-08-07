@@ -58,6 +58,7 @@ class ActiveRoleSessionMiddleware:
         '/',
         '/activate-access/',
         '/logout/',
+        '/clerk/login/',
         '/settlement/login/',
     }
 

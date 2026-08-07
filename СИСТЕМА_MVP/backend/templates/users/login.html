@@ -233,7 +233,7 @@ document.addEventListener('DOMContentLoaded', function () {
     }
     if ("serviceWorker" in navigator) {
         {% if role_app %}
-        navigator.serviceWorker.register("{{ role_app.service_worker_url }}", { scope: "/" }).catch(function () {});
+        navigator.serviceWorker.register("{{ role_app.service_worker_url }}", { scope: "{{ app_service_worker_scope }}" }).catch(function () {});
         {% else %}
         navigator.serviceWorker.getRegistrations().then(function (registrations) {
             registrations.forEach(function (registration) {

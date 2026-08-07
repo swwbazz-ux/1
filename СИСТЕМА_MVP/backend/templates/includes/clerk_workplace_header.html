@@ -1,4 +1,4 @@
-<header class="admin-console-header settlement-console-header" aria-label="Рабочая шапка делопроизводителя">
+<header class="admin-console-header clerk-workplace-header" aria-label="Рабочая шапка делопроизводителя">
     <section class="admin-console-identity">
         <span class="admin-console-avatar" aria-hidden="true">{{ access.employee.full_name|default:"Д"|first }}</span>
         <span>
@@ -9,16 +9,18 @@
 
     <section class="admin-console-main">
         <div class="admin-console-title">
-            <span>Вахтовый контур</span>
-            <h1>Расселение</h1>
-            <p>Физическая карта общежитий и койко-мест.</p>
+            <span>Рабочее место</span>
+            <h1>Делопроизводитель</h1>
+            <p>Работа с фактическим размещением сотрудников.</p>
         </div>
-        <nav class="admin-console-nav" aria-label="Разделы расселения">
-            <a class="is-active" href="{% url 'settlement_map' %}" aria-current="page">Карта</a>
+        <nav class="admin-console-nav" aria-label="Разделы делопроизводителя">
+            <a{% if clerk_active_section == "settlement" %} class="is-active" aria-current="page"{% endif %}
+               href="{% url 'settlement_map' %}"
+               data-clerk-section="settlement">Расселение</a>
         </nav>
     </section>
 
-    <section class="admin-console-actions settlement-console-actions" aria-label="Тема и выход">
+    <section class="admin-console-actions clerk-console-actions" aria-label="Тема и выход">
         <button type="button"
                 class="admin-theme-button"
                 data-admin-theme-toggle

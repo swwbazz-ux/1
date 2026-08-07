@@ -5,6 +5,7 @@ from .role_apps import (
     get_role_app,
     get_role_app_for_path,
     get_role_app_for_request,
+    role_app_scope,
 )
 
 
@@ -25,11 +26,16 @@ def role_app(request):
     ):
         app = None
     metadata_app = path_app or host_app
+    metadata_scope = (
+        role_app_scope(request, metadata_app.role_code)
+        if metadata_app
+        else ''
+    )
     state = getattr(request, 'role_session_state', None) or role_session_state(request)
     return {
         'role_app': app,
         'role_app_isolated': app is not None,
-        'role_app_pwa_scope': '/' if app else '',
+        'role_app_pwa_scope': metadata_scope if app else '',
         'role_access_is_active': state['is_active'],
         'active_role_code': state.get('active_role_code', ''),
         'active_role_changed_at': state.get('active_role_changed_at'),
@@ -40,7 +46,5 @@ def role_app(request):
         'app_service_worker_url': (
             metadata_app.service_worker_url if metadata_app else ''
         ),
-        'app_service_worker_scope': (
-            '/' if app else metadata_app.legacy_scope if metadata_app else ''
-        ),
+        'app_service_worker_scope': metadata_scope,
     }

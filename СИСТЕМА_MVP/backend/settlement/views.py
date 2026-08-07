@@ -4,11 +4,11 @@ from urllib.parse import urlencode
 
 from django.core.exceptions import ValidationError
 from django.db.models import Exists, OuterRef, Prefetch, Q
-from django.http import JsonResponse
+from django.http import HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils import timezone
-from django.views.decorators.http import require_GET, require_POST
+from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from assignments.models import AssignmentStatus, EquipmentAssignment
 from shifts.models import EmployeeShift
@@ -267,7 +267,7 @@ def settlement_login_view(request):
         request,
         allowed_role_codes=('settlement_clerk', 'admin'),
         target_role_app=get_role_app('settlement_clerk'),
-        forced_next_url=reverse('settlement_map'),
+        forced_next_url=reverse('clerk_home'),
     )
 
 
@@ -280,11 +280,71 @@ def settlement_service_worker_view(request):
 
 
 @require_GET
+def legacy_settlement_entry_view(request):
+    return redirect('clerk_home')
+
+
+@require_http_methods(['GET', 'POST'])
+def legacy_settlement_login_view(request):
+    if request.method == 'POST':
+        return settlement_login_view(request)
+    next_url = urlencode({'next': reverse('clerk_home')})
+    return redirect(f'{reverse("clerk_login")}?{next_url}')
+
+
+@require_GET
+def legacy_settlement_service_worker_view(request):
+    script = r'''
+const LEGACY_CACHE_PREFIX = "settlement-clerk-shell-";
+const CLERK_START_URL = "/clerk/";
+
+self.addEventListener("install", event => {
+  event.waitUntil(self.skipWaiting());
+});
+
+self.addEventListener("activate", event => {
+  event.waitUntil(
+    caches.keys()
+      .then(keys => Promise.all(
+        keys.filter(key => key.startsWith(LEGACY_CACHE_PREFIX))
+          .map(key => caches.delete(key))
+      ))
+      .then(() => self.clients.matchAll({ type: "window", includeUncontrolled: true }))
+      .then(clients => Promise.all(
+        clients.map(client => {
+          const clientUrl = new URL(client.url);
+          return clientUrl.pathname.startsWith("/settlement/")
+            ? client.navigate(CLERK_START_URL)
+            : undefined;
+        })
+      ))
+      .then(() => self.registration.unregister())
+  );
+});
+
+self.addEventListener("fetch", event => {
+  if (event.request.mode !== "navigate") return;
+  const url = new URL(event.request.url);
+  if (url.origin !== self.location.origin || !url.pathname.startsWith("/settlement/")) return;
+  event.respondWith(Response.redirect(new URL(CLERK_START_URL, self.location.origin), 302));
+});
+'''.strip()
+    response = HttpResponse(
+        script,
+        content_type='application/javascript; charset=utf-8',
+    )
+    response['Cache-Control'] = 'no-cache'
+    response['Service-Worker-Allowed'] = '/settlement/'
+    response['X-Content-Type-Options'] = 'nosniff'
+    return response
+
+
+@require_GET
 def settlement_map_view(request):
     access = settlement_clerk_access_from_request(request)
     if not access:
-        next_url = urlencode({'next': reverse('settlement_map')})
-        return redirect(f'{reverse("settlement_login")}?{next_url}')
+        next_url = urlencode({'next': reverse('clerk_home')})
+        return redirect(f'{reverse("clerk_login")}?{next_url}')
 
     moment = timezone.now()
     rooms = list(
@@ -352,6 +412,7 @@ def settlement_map_view(request):
                 'not_transferred_beds': total_beds - transferred_beds,
             },
             'assignment_type_choices': EmployeeBedOccupancy.AssignmentType.choices,
+            'clerk_active_section': 'settlement',
         },
     )
 

@@ -235,6 +235,7 @@ function createIntegratedRuntime(options = {}) {
 
     const activeWorker = {
         state: "activated",
+        scriptURL: "https://driver.localhost/driver-service-worker.js",
         postMessage(message, transfer) {
             if (!message || message.type !== "GET_VERSION" || !transfer || !transfer[0]) {
                 return;
@@ -248,6 +249,7 @@ function createIntegratedRuntime(options = {}) {
         },
     };
     const registration = Object.assign(registrationTarget, {
+        scope: "https://driver.localhost/driver/",
         active: activeWorker,
         waiting: null,
         installing: null,
@@ -279,7 +281,12 @@ function createIntegratedRuntime(options = {}) {
     const window = Object.assign(windowTarget, {
         document,
         navigator,
-        location: {reload() {}},
+        location: {
+            origin: "https://driver.localhost",
+            href: "https://driver.localhost/driver/",
+            pathname: "/driver/",
+            reload() {},
+        },
         localStorage: new StorageStub(),
         sessionStorage: new StorageStub(),
         CustomEvent: CustomEventStub,

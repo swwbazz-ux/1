@@ -2836,14 +2836,14 @@ class SettlementMapAccessTests(TestCase):
         session.save()
 
     @staticmethod
-    def settlement_login_url():
-        return f"{reverse('settlement_login')}?next=%2Fsettlement%2F"
+    def clerk_login_url():
+        return f"{reverse('clerk_login')}?next=%2Fclerk%2F"
 
     def test_anonymous_user_is_redirected_to_login(self):
         response = self.client.get(reverse('settlement_map'))
         self.assertRedirects(
             response,
-            self.settlement_login_url(),
+            self.clerk_login_url(),
             fetch_redirect_response=False,
         )
 
@@ -2852,15 +2852,18 @@ class SettlementMapAccessTests(TestCase):
         response = self.client.get(reverse('settlement_map'))
         self.assertRedirects(
             response,
-            self.settlement_login_url(),
+            self.clerk_login_url(),
             fetch_redirect_response=False,
         )
 
     def test_admin_opens_settlement_map_under_existing_policy(self):
         self.authenticate(self.client, self.admin_access)
 
+        home_response = self.client.get(reverse('clerk_home'))
         response = self.client.get(reverse('settlement_map'))
 
+        self.assertEqual(home_response.status_code, 200)
+        self.assertTemplateUsed(home_response, 'clerk/base.html')
         self.assertEqual(response.status_code, 200)
         self.assertTemplateUsed(response, 'settlement/clerk_map.html')
 
@@ -2871,21 +2874,21 @@ class SettlementMapAccessTests(TestCase):
 
         self.assertRedirects(
             response,
-            self.settlement_login_url(),
+            self.clerk_login_url(),
             fetch_redirect_response=False,
         )
         login_response = self.client.get(response['Location'])
         self.assertEqual(login_response.status_code, 200)
         self.assertTemplateUsed(login_response, 'users/login.html')
-        self.assertContains(login_response, 'Расселение')
-        self.assertContains(login_response, 'name="next" value="/settlement/"')
+        self.assertContains(login_response, 'Делопроизводитель')
+        self.assertContains(login_response, 'name="next" value="/clerk/"')
         self.assertContains(
             login_response,
             'data-app-role-code="settlement_clerk"',
         )
         self.assertContains(
             login_response,
-            'data-app-service-worker-url="/settlement/sw.js"',
+            'data-app-service-worker-url="/clerk/sw.js"',
         )
         self.assertNotContains(login_response, '/dispatcher.webmanifest')
         self.assertNotContains(login_response, '/dispatcher-sw.js')
@@ -2900,7 +2903,7 @@ class SettlementMapAccessTests(TestCase):
         original_session_key = self.client.session.session_key
 
         redirect_response = self.client.get(
-            reverse('settlement_map'),
+            reverse('clerk_home'),
             HTTP_HOST='dispatcher.localhost',
         )
         login_response = self.client.get(
@@ -2915,11 +2918,11 @@ class SettlementMapAccessTests(TestCase):
         )
         self.assertContains(
             login_response,
-            'data-app-service-worker-url="/settlement/sw.js"',
+            'data-app-service-worker-url="/clerk/sw.js"',
         )
         self.assertContains(
             login_response,
-            'data-app-service-worker-scope="/settlement/"',
+            'data-app-service-worker-scope="/clerk/"',
         )
         self.assertNotContains(login_response, '/dispatcher.webmanifest')
         self.assertNotContains(login_response, '/dispatcher-sw.js')
@@ -2942,11 +2945,11 @@ class SettlementMapAccessTests(TestCase):
         self.assertContains(response, 'data-app-role-code="settlement_clerk"')
         self.assertContains(
             response,
-            'data-app-service-worker-url="/settlement/sw.js"',
+            'data-app-service-worker-url="/clerk/sw.js"',
         )
         self.assertContains(
             response,
-            'data-app-service-worker-scope="/settlement/"',
+            'data-app-service-worker-scope="/clerk/"',
         )
         self.assertNotContains(response, '/system-admin-sw.js')
 
@@ -2955,7 +2958,7 @@ class SettlementMapAccessTests(TestCase):
         original_session_key = self.client.session.session_key
 
         response = self.client.post(
-            reverse('settlement_login'),
+            reverse('clerk_login'),
             {
                 'phone': self.switch_employee.phone,
                 'access_code': self.switch_clerk_access.access_code,
@@ -2966,7 +2969,7 @@ class SettlementMapAccessTests(TestCase):
 
         self.assertRedirects(
             response,
-            reverse('settlement_map'),
+            reverse('clerk_home'),
             fetch_redirect_response=False,
         )
         session = self.client.session
@@ -3005,7 +3008,7 @@ class SettlementMapAccessTests(TestCase):
         original_session_key = self.client.session.session_key
 
         login_response = self.client.post(
-            reverse('settlement_login'),
+            reverse('clerk_login'),
             {
                 'phone': self.switch_employee.phone,
                 'access_code': '990006',
@@ -3027,11 +3030,11 @@ class SettlementMapAccessTests(TestCase):
         self.assertContains(activation_page, 'data-app-role-code="settlement_clerk"')
         self.assertContains(
             activation_page,
-            'data-app-service-worker-url="/settlement/sw.js"',
+            'data-app-service-worker-url="/clerk/sw.js"',
         )
         self.assertContains(
             activation_page,
-            'data-app-service-worker-scope="/settlement/"',
+            'data-app-service-worker-scope="/clerk/"',
         )
         self.assertNotContains(activation_page, '/dispatcher-sw.js')
 
@@ -3046,7 +3049,7 @@ class SettlementMapAccessTests(TestCase):
 
         self.assertRedirects(
             activation_response,
-            reverse('settlement_map'),
+            reverse('clerk_home'),
             fetch_redirect_response=False,
         )
         pending_access.refresh_from_db()
@@ -3071,7 +3074,7 @@ class SettlementMapAccessTests(TestCase):
         self.authenticate(self.client, self.driver_access)
 
         response = self.client.post(
-            reverse('settlement_login'),
+            reverse('clerk_login'),
             {
                 'phone': self.driver_employee.phone,
                 'access_code': self.driver_access.access_code,
@@ -3082,7 +3085,7 @@ class SettlementMapAccessTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(
             response,
-            'У этой учетной записи нет доступа к приложению «Расселение».',
+            'У этой учетной записи нет доступа к приложению «Делопроизводитель».',
         )
         self.assertContains(response, 'data-app-role-code="settlement_clerk"')
         self.assertNotContains(response, '/driver.webmanifest')
@@ -3096,14 +3099,90 @@ class SettlementMapAccessTests(TestCase):
             self.switch_clerk_access.id,
         )
 
-    def test_role_home_routes_settlement_clerk_to_map(self):
+    def test_role_home_routes_settlement_clerk_to_workplace(self):
         self.authenticate(self.client, self.clerk_access)
         response = self.client.get(reverse('role_home'))
         self.assertRedirects(
             response,
-            reverse('settlement_map'),
+            reverse('clerk_home'),
             fetch_redirect_response=False,
         )
+
+    def test_clerk_home_opens_workplace_with_only_settlement_tab_active(self):
+        self.authenticate(self.client, self.clerk_access)
+
+        response = self.client.get(reverse('clerk_home'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, 'clerk/base.html')
+        self.assertTemplateUsed(response, 'settlement/clerk_map.html')
+        self.assertContains(response, '<h1>Делопроизводитель</h1>', html=True)
+        content = response.content.decode('utf-8')
+        self.assertEqual(content.count('data-clerk-section='), 1)
+        self.assertRegex(
+            content,
+            r'<a[^>]*class="is-active"[^>]*aria-current="page"[^>]*'
+            r'data-clerk-section="settlement">Расселение</a>',
+        )
+        self.assertNotIn('<iframe', content.lower())
+
+    def test_legacy_settlement_routes_enter_only_the_clerk_contour(self):
+        self.authenticate(self.client, self.dispatcher_access)
+
+        entry_response = self.client.get(reverse('legacy_settlement_entry'))
+        login_response = self.client.get(reverse('legacy_settlement_login'))
+
+        self.assertRedirects(
+            entry_response,
+            reverse('clerk_home'),
+            fetch_redirect_response=False,
+        )
+        self.assertRedirects(
+            login_response,
+            self.clerk_login_url(),
+            fetch_redirect_response=False,
+        )
+        clerk_response = self.client.get(entry_response['Location'])
+        self.assertRedirects(
+            clerk_response,
+            self.clerk_login_url(),
+            fetch_redirect_response=False,
+        )
+        self.assertNotIn('/home/', clerk_response['Location'])
+        self.assertNotIn('/dispatcher/control/', clerk_response['Location'])
+        self.assertEqual(
+            self.client.session['employee_access_id'],
+            self.dispatcher_access.id,
+        )
+
+        self.authenticate(self.client, self.clerk_access)
+        authorized_response = self.client.get(entry_response['Location'])
+        self.assertEqual(authorized_response.status_code, 200)
+        self.assertTemplateUsed(authorized_response, 'settlement/clerk_map.html')
+
+    def test_legacy_login_post_uses_targeted_clerk_activation(self):
+        self.authenticate(self.client, self.dispatcher_access)
+
+        response = self.client.post(
+            reverse('legacy_settlement_login'),
+            {
+                'phone': self.switch_employee.phone,
+                'access_code': self.switch_clerk_access.access_code,
+                'next': '/home/',
+                'device_kind': 'personal',
+            },
+        )
+
+        self.assertRedirects(
+            response,
+            reverse('clerk_home'),
+            fetch_redirect_response=False,
+        )
+        self.assertEqual(
+            self.client.session['employee_access_id'],
+            self.switch_clerk_access.id,
+        )
+        self.assertNotEqual(response['Location'], '/home/')
 
     def test_clerk_opens_complete_settlement_map(self):
         self.authenticate(self.client, self.clerk_access)
@@ -3120,9 +3199,11 @@ class SettlementMapAccessTests(TestCase):
         self.assertEqual(response.context['summary']['transferred_beds'], 270)
 
         content = response.content.decode('utf-8')
-        self.assertIn('/settlement/manifest.webmanifest', content)
-        self.assertIn('data-app-service-worker-url="/settlement/sw.js"', content)
-        self.assertIn('data-app-service-worker-scope="/settlement/"', content)
+        self.assertNotIn('<iframe', content.lower())
+        self.assertIn('/static/js/clerk-workplace-pwa.js', content)
+        self.assertIn('/clerk/manifest.webmanifest', content)
+        self.assertIn('data-app-service-worker-url="/clerk/sw.js"', content)
+        self.assertIn('data-app-service-worker-scope="/clerk/"', content)
         self.assertEqual(content.count('data-room-card'), 60)
         self.assertEqual(content.count('data-bed-id='), 348)
         self.assertEqual(
@@ -3166,27 +3247,30 @@ class SettlementMapAccessTests(TestCase):
 
 
 class SettlementPwaContractTests(TestCase):
-    def test_manifest_has_isolated_settlement_start_and_scope(self):
-        response = self.client.get(reverse('settlement_manifest'))
+    def test_manifest_has_clerk_identity_start_scope_and_stable_install_id(self):
+        response = self.client.get(reverse('clerk_manifest'))
 
         self.assertEqual(response.status_code, 200)
         manifest = response.json()
-        self.assertEqual(manifest['start_url'], '/settlement/')
-        self.assertEqual(manifest['scope'], '/settlement/')
+        self.assertEqual(manifest['id'], '/settlement/')
+        self.assertEqual(manifest['name'], 'Делопроизводитель')
+        self.assertEqual(manifest['short_name'], 'Делопроизводитель')
+        self.assertEqual(manifest['start_url'], '/clerk/')
+        self.assertEqual(manifest['scope'], '/clerk/')
         self.assertEqual(manifest['role_code'], 'settlement_clerk')
-        self.assertEqual(manifest['shell_version'], 'settlement-clerk-shell-v1')
+        self.assertEqual(manifest['shell_version'], 'clerk-workplace-shell-v1')
         self.assertTrue(
-            all(icon['src'].startswith('/static/img/pwa/settlement-') for icon in manifest['icons'])
+            all(icon['src'].startswith('/static/img/pwa/clerk-') for icon in manifest['icons'])
         )
 
-    def test_worker_has_narrow_scope_unique_cache_and_old_cache_cleanup(self):
-        response = self.client.get(reverse('settlement_service_worker'))
+    def test_worker_has_narrow_clerk_scope_and_unique_cache(self):
+        response = self.client.get(reverse('clerk_service_worker'))
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response['Service-Worker-Allowed'], '/settlement/')
+        self.assertEqual(response['Service-Worker-Allowed'], '/clerk/')
         script = response.content.decode('utf-8')
-        self.assertIn('const CACHE_PREFIX = "settlement-clerk-shell-";', script)
-        self.assertIn('const CACHE_NAME = "settlement-clerk-shell-v1";', script)
+        self.assertIn('const CACHE_PREFIX = "clerk-workplace-shell-";', script)
+        self.assertIn('const CACHE_NAME = "clerk-workplace-shell-v1";', script)
         self.assertIn('key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME', script)
         self.assertIn('.map(key => caches.delete(key))', script)
         self.assertNotIn('/dispatcher/control/', script)
@@ -3194,45 +3278,66 @@ class SettlementPwaContractTests(TestCase):
         self.assertNotIn('/excavator/work/', script)
         self.assertNotIn('/mining-master/assignments/', script)
 
-    def test_targeted_login_registers_only_settlement_pwa_metadata(self):
-        response = self.client.get(reverse('settlement_login'))
+    def test_targeted_login_publishes_only_clerk_pwa_metadata(self):
+        response = self.client.get(reverse('clerk_login'))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, '/settlement/manifest.webmanifest')
-        self.assertContains(response, 'data-app-service-worker-url="/settlement/sw.js"')
-        self.assertContains(response, 'data-app-service-worker-scope="/settlement/"')
+        self.assertContains(response, '/clerk/manifest.webmanifest')
+        self.assertContains(response, 'data-app-service-worker-url="/clerk/sw.js"')
+        self.assertContains(response, 'data-app-service-worker-scope="/clerk/"')
         self.assertNotContains(response, '/dispatcher-sw.js')
 
         shared_login = self.client.get(reverse('login'))
         self.assertEqual(shared_login.status_code, 200)
-        self.assertNotContains(shared_login, '/settlement/manifest.webmanifest')
+        self.assertNotContains(shared_login, '/clerk/manifest.webmanifest')
         self.assertContains(shared_login, 'data-app-service-worker-url=""')
 
     @override_settings(ALLOWED_HOSTS=['localhost', '.localhost'])
-    def test_isolated_settlement_host_uses_root_scope_for_its_own_worker(self):
-        manifest_response = self.client.get(
-            reverse('settlement_manifest'),
-            HTTP_HOST='settlement.localhost',
-        )
-        worker_response = self.client.get(
-            reverse('settlement_service_worker'),
-            HTTP_HOST='settlement.localhost',
-        )
-        login_response = self.client.get(
-            reverse('settlement_login'),
-            HTTP_HOST='settlement.localhost',
-        )
+    def test_clerk_and_legacy_settlement_hosts_keep_worker_scope_narrow(self):
+        for host in ('clerk.localhost', 'settlement.localhost'):
+            with self.subTest(host=host):
+                manifest_response = self.client.get(
+                    reverse('clerk_manifest'),
+                    HTTP_HOST=host,
+                )
+                worker_response = self.client.get(
+                    reverse('clerk_service_worker'),
+                    HTTP_HOST=host,
+                )
+                login_response = self.client.get(
+                    reverse('clerk_login'),
+                    HTTP_HOST=host,
+                )
 
-        self.assertEqual(manifest_response.json()['scope'], '/')
-        self.assertEqual(worker_response['Service-Worker-Allowed'], '/')
-        self.assertContains(
-            login_response,
-            'data-app-service-worker-url="/settlement/sw.js"',
-        )
-        self.assertContains(login_response, 'data-app-service-worker-scope="/"')
-        self.assertNotContains(login_response, '/dispatcher-sw.js')
+                self.assertEqual(manifest_response.json()['scope'], '/clerk/')
+                self.assertEqual(worker_response['Service-Worker-Allowed'], '/clerk/')
+                self.assertContains(
+                    login_response,
+                    'data-app-service-worker-url="/clerk/sw.js"',
+                )
+                self.assertContains(
+                    login_response,
+                    'data-app-service-worker-scope="/clerk/"',
+                )
+                self.assertNotContains(login_response, '/dispatcher-sw.js')
 
-    def test_other_role_workers_do_not_fallback_to_settlement(self):
+    def test_legacy_manifest_updates_same_pwa_and_worker_retires_old_shell(self):
+        legacy_manifest = self.client.get(reverse('legacy_settlement_manifest'))
+        clerk_manifest = self.client.get(reverse('clerk_manifest'))
+        legacy_worker = self.client.get(reverse('legacy_settlement_service_worker'))
+
+        self.assertEqual(legacy_manifest.status_code, 200)
+        self.assertEqual(legacy_manifest.json(), clerk_manifest.json())
+        self.assertEqual(legacy_manifest.json()['id'], '/settlement/')
+        self.assertEqual(legacy_worker['Service-Worker-Allowed'], '/settlement/')
+        script = legacy_worker.content.decode('utf-8')
+        self.assertIn('const LEGACY_CACHE_PREFIX = "settlement-clerk-shell-";', script)
+        self.assertIn('const CLERK_START_URL = "/clerk/";', script)
+        self.assertIn('self.registration.unregister()', script)
+        self.assertIn('client.navigate(CLERK_START_URL)', script)
+        self.assertNotIn('clerk-workplace-shell-v1', script)
+
+    def test_other_role_workers_do_not_fallback_to_clerk(self):
         cases = (
             ('driver_service_worker', '/driver/'),
             ('excavator_service_worker', '/excavator/'),
@@ -3246,7 +3351,7 @@ class SettlementPwaContractTests(TestCase):
                 self.assertEqual(response.status_code, 200)
                 self.assertEqual(response['Service-Worker-Allowed'], expected_scope)
                 self.assertNotIn(
-                    '/settlement/',
+                    '/clerk/',
                     response.content.decode('utf-8'),
                 )
 
@@ -4525,6 +4630,6 @@ class SettlementFrontendContractTests(TestCase):
         self.assertIn('overflow-x: auto', stylesheet)
         self.assertIn('.settlement-room-panel', stylesheet)
         self.assertIn('position: fixed', stylesheet)
-        self.assertIn('.settlement-clerk-screen .app-confirm-modal', stylesheet)
+        self.assertIn('.clerk-workplace-screen .app-confirm-modal', stylesheet)
         self.assertIn('z-index: 1300', stylesheet)
         self.assertIn('min-height:', stylesheet)

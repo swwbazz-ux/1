@@ -19,7 +19,7 @@ ROLE_ICONS = {
     "mining-master": ("#2366A8", "Горный мастер"),
     "deputy-mining-manager": ("#2E7D52", "Заместитель начальника участка"),
     "dispatcher": ("#B33A4C", "Диспетчер"),
-    "settlement": ("#2E7D52", "Расселение"),
+    "clerk": ("#2E7D52", "Делопроизводитель"),
     "oup": ("#A64778", "ОУП"),
     "mechanic": ("#C65C2E", "Механик"),
     "management": ("#5058A4", "Руководство"),
@@ -112,7 +112,7 @@ def draw_dispatcher(draw: ImageDraw.ImageDraw) -> None:
     draw.arc(box((344, 338, 680, 674)), start=205, end=335, fill=COPPER, width=s(24))
 
 
-def draw_settlement(draw: ImageDraw.ImageDraw) -> None:
+def draw_clerk(draw: ImageDraw.ImageDraw) -> None:
     rounded(draw, (282, 430, 742, 674), radius=34, fill=INK)
     rounded(draw, (326, 478, 470, 574), radius=24, fill=GRAPHITE)
     rounded(draw, (494, 478, 698, 574), radius=24, fill=GRAPHITE)
@@ -176,7 +176,7 @@ DRAWERS = {
     "mining-master": draw_mining_master,
     "deputy-mining-manager": draw_deputy,
     "dispatcher": draw_dispatcher,
-    "settlement": draw_settlement,
+    "clerk": draw_clerk,
     "oup": draw_oup,
     "mechanic": draw_mechanic,
     "management": draw_management,

@@ -1,6 +1,9 @@
 from django.urls import path
 
 from .views import (
+    legacy_settlement_entry_view,
+    legacy_settlement_login_view,
+    legacy_settlement_service_worker_view,
     settlement_employee_search_view,
     settlement_login_view,
     settlement_manifest_view,
@@ -12,25 +15,56 @@ from .views import (
 
 urlpatterns = [
     path(
-        'settlement/manifest.webmanifest',
+        'clerk/manifest.webmanifest',
         settlement_manifest_view,
-        name='settlement_manifest',
+        name='clerk_manifest',
     ),
     path(
-        'settlement/sw.js',
+        'clerk/sw.js',
         settlement_service_worker_view,
-        name='settlement_service_worker',
+        name='clerk_service_worker',
     ),
-    path('settlement/login/', settlement_login_view, name='settlement_login'),
-    path('settlement/', settlement_map_view, name='settlement_map'),
+    path('clerk/login/', settlement_login_view, name='clerk_login'),
+    path('clerk/', settlement_map_view, name='clerk_home'),
+    path('clerk/settlement/', settlement_map_view, name='settlement_map'),
     path(
-        'settlement/employees/search/',
+        'clerk/settlement/employees/search/',
         settlement_employee_search_view,
         name='settlement_employee_search',
     ),
     path(
-        'settlement/occupancies/',
+        'clerk/settlement/occupancies/',
         settlement_occupancy_create_view,
         name='settlement_occupancy_create',
+    ),
+    path(
+        'settlement/manifest.webmanifest',
+        settlement_manifest_view,
+        name='legacy_settlement_manifest',
+    ),
+    path(
+        'settlement/sw.js',
+        legacy_settlement_service_worker_view,
+        name='legacy_settlement_service_worker',
+    ),
+    path(
+        'settlement/login/',
+        legacy_settlement_login_view,
+        name='legacy_settlement_login',
+    ),
+    path(
+        'settlement/',
+        legacy_settlement_entry_view,
+        name='legacy_settlement_entry',
+    ),
+    path(
+        'settlement/employees/search/',
+        settlement_employee_search_view,
+        name='legacy_settlement_employee_search',
+    ),
+    path(
+        'settlement/occupancies/',
+        settlement_occupancy_create_view,
+        name='legacy_settlement_occupancy_create',
     ),
 ]

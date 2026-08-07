@@ -81,6 +81,8 @@ class RoleApp:
     manifest_url: str
     service_worker_url: str
     shell_version: str
+    manifest_id: str | None = None
+    isolated_root_scope: bool = True
 
     @property
     def icon_180_url(self):
@@ -182,19 +184,21 @@ ROLE_APPS = (
     ),
     RoleApp(
         role_code='settlement_clerk',
-        subdomain='settlement',
-        name='Расселение',
-        short_name='Расселение',
-        description='Рабочее место делопроизводителя для управления фактическим расселением сотрудников.',
-        start_url='/settlement/',
-        legacy_scope='/settlement/',
+        subdomain='clerk',
+        name='Делопроизводитель',
+        short_name='Делопроизводитель',
+        description='Рабочее место делопроизводителя с функциональным разделом расселения сотрудников.',
+        start_url='/clerk/',
+        legacy_scope='/clerk/',
         orientation='any',
         theme_color='#2E7D52',
         background_color='#101820',
-        icon_slug='settlement',
-        manifest_url='/settlement/manifest.webmanifest',
-        service_worker_url='/settlement/sw.js',
-        shell_version='settlement-clerk-shell-v1',
+        icon_slug='clerk',
+        manifest_url='/clerk/manifest.webmanifest',
+        service_worker_url='/clerk/sw.js',
+        shell_version='clerk-workplace-shell-v1',
+        manifest_id='/settlement/',
+        isolated_root_scope=False,
     ),
     RoleApp(
         role_code='oup',
@@ -296,6 +300,7 @@ ROLE_APPS = (
 
 ROLE_APPS_BY_CODE = {app.role_code: app for app in ROLE_APPS}
 ROLE_APPS_BY_SUBDOMAIN = {app.subdomain: app for app in ROLE_APPS}
+ROLE_APPS_BY_SUBDOMAIN['settlement'] = ROLE_APPS_BY_CODE['settlement_clerk']
 
 
 def _normalized_host(host):
@@ -358,7 +363,9 @@ def is_isolated_role_app_request(request, role_code=None):
 
 def role_app_scope(request, role_code):
     app = ROLE_APPS_BY_CODE[role_code]
-    return '/' if is_isolated_role_app_request(request, role_code) else app.legacy_scope
+    if app.isolated_root_scope and is_isolated_role_app_request(request, role_code):
+        return '/'
+    return app.legacy_scope
 
 
 def role_app_icons(app):
@@ -393,7 +400,7 @@ def build_role_app_manifest(request, role_code):
         'app_contract_version': APP_CONTRACT_VERSION,
         'shell_version': app.shell_version,
         'role_code': app.role_code,
-        'id': app.start_url,
+        'id': app.manifest_id or app.start_url,
         'name': app.name,
         'short_name': app.short_name,
         'description': app.description,

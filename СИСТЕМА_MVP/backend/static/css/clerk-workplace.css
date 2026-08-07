@@ -1,0 +1,58 @@
+.clerk-workplace-screen {
+    min-width: 0;
+    overflow-x: hidden;
+    background: #dce4e7;
+}
+
+.clerk-workplace-shell {
+    min-height: calc(100dvh / var(--admin-interface-scale));
+    overflow-x: hidden;
+}
+
+.clerk-workplace-shell .clerk-console-actions {
+    grid-template-columns: 40px var(--admin-header-utility-width);
+    gap: var(--admin-header-gap);
+    justify-content: end;
+}
+
+.clerk-workplace-shell .admin-console-title h1 {
+    max-width: 100%;
+    overflow: visible;
+    font-size: clamp(20px, 1.8vw, 28px);
+    text-overflow: clip;
+    white-space: normal;
+}
+
+.clerk-workplace-shell .admin-console-nav a,
+.clerk-workplace-shell .admin-utility-link,
+.clerk-workplace-shell .admin-theme-button {
+    min-height: 40px;
+    font-size: 13px;
+}
+
+.clerk-workplace-shell .admin-theme-button {
+    width: 40px;
+    min-width: 40px;
+    font-size: 0;
+    line-height: 0;
+}
+
+@media (min-width: 1181px) and (max-width: 1439px) {
+    .clerk-workplace-shell {
+        --admin-header-title-column: 330px;
+    }
+}
+
+@media (max-width: 720px) {
+    .clerk-workplace-shell .clerk-workplace-header {
+        min-width: 0;
+    }
+
+    .clerk-workplace-shell .admin-console-title h1 {
+        font-size: 28px;
+    }
+
+    .clerk-workplace-shell .admin-console-nav {
+        grid-template-columns: 1fr;
+    }
+}

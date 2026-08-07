@@ -247,7 +247,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
     if ('serviceWorker' in navigator && {{ role_app|yesno:"true,false" }}) {
         {% if role_app %}
-        navigator.serviceWorker.register('{{ role_app.service_worker_url }}', { scope: '/' }).catch(function () {});
+        navigator.serviceWorker.register('{{ role_app.service_worker_url }}', { scope: '{{ app_service_worker_scope }}' }).catch(function () {});
         {% endif %}
     }
 });

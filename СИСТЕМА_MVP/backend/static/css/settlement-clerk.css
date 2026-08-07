@@ -1,44 +1,8 @@
-.settlement-clerk-screen {
-    min-width: 0;
-    overflow-x: hidden;
-    background: #dce4e7;
-}
-
 .settlement-shell {
     --settlement-room-width: 154px;
     --settlement-bed-size: 28px;
     --settlement-accent: var(--admin-green);
     --settlement-accent-soft: var(--admin-green-soft);
-    min-height: calc(100dvh / var(--admin-interface-scale));
-    overflow-x: hidden;
-}
-
-.settlement-shell .settlement-console-actions {
-    grid-template-columns: 40px var(--admin-header-utility-width);
-    gap: var(--admin-header-gap);
-    justify-content: end;
-}
-
-.settlement-shell .admin-console-title h1 {
-    max-width: 100%;
-    overflow: hidden;
-    font-size: 32px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.settlement-shell .admin-console-nav a,
-.settlement-shell .admin-utility-link,
-.settlement-shell .admin-theme-button {
-    min-height: 40px;
-    font-size: 13px;
-}
-
-.settlement-shell .admin-theme-button {
-    width: 40px;
-    min-width: 40px;
-    font-size: 0;
-    line-height: 0;
 }
 
 .settlement-page {
@@ -606,7 +570,7 @@
     z-index: 1250;
 }
 
-.settlement-clerk-screen .app-confirm-modal {
+.clerk-workplace-screen .app-confirm-modal {
     z-index: 1300;
 }
 
@@ -1043,10 +1007,6 @@
     .settlement-shell {
         --settlement-room-width: 150px;
         --settlement-bed-size: 27px;
-    }
-
-    .settlement-shell .settlement-console-header {
-        min-width: 0;
     }
 
     .settlement-page {

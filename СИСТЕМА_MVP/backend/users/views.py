@@ -782,7 +782,7 @@ def role_home_view(request):
     if access.role.code == 'manager':
         return redirect('management_dashboard')
     if access.role.code == 'settlement_clerk':
-        return redirect('settlement_map')
+        return redirect('clerk_home')
     if access.role.code == 'admin':
         return redirect('system_admin_dashboard')
     interface_name = ROLE_INTERFACE_NAMES.get(access.role.code, f'Интерфейс роли: {access.role.name}')
