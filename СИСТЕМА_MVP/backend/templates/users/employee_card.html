@@ -143,6 +143,13 @@
                             </div>
                             {{ form.birth_date }}{{ form.birth_date.errors }}
                         </div>
+                        <div class="employee-card-field" data-card-field data-copy-label="Пол">
+                            <div class="employee-card-label-row">
+                                <label for="{{ form.sex.id_for_label }}">{{ form.sex.label }}</label>
+                                <button type="button" class="employee-copy-icon" data-copy-target="#{{ form.sex.id_for_label }}" aria-label="Скопировать пол" title="Скопировать пол"></button>
+                            </div>
+                            {{ form.sex }}{{ form.sex.errors }}
+                        </div>
                         <div class="employee-card-field" data-card-field data-copy-label="Телефон">
                             <div class="employee-card-label-row">
                                 <label for="{{ form.phone.id_for_label }}">{{ form.phone.label }}{% if form.phone.field.required %}<b>*</b>{% endif %}</label>

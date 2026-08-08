@@ -249,13 +249,16 @@ class OupActionUndoTests(TestCase):
             name='ТЕСТ_ОТМЕНА_Новый состав',
         )
         self.employee.watch_composition = previous_composition
-        self.employee.save(update_fields=['watch_composition', 'updated_at'])
+        self.employee.sex = Employee.Sex.MALE
+        self.employee.save(update_fields=['watch_composition', 'sex', 'updated_at'])
         before = employee_card_undo_state(self.employee)
         self.employee.full_name = 'Измененное Имя ОУП'
         self.employee.watch_composition = next_composition
+        self.employee.sex = Employee.Sex.FEMALE
         self.employee.save(update_fields=[
             'full_name',
             'watch_composition',
+            'sex',
             'updated_at',
         ])
         after = employee_card_undo_state(self.employee)
@@ -274,6 +277,7 @@ class OupActionUndoTests(TestCase):
 
         self.employee.refresh_from_db()
         self.assertEqual(self.employee.full_name, 'Новый Водитель')
+        self.assertEqual(self.employee.sex, Employee.Sex.MALE)
         self.assertEqual(
             self.employee.watch_composition,
             previous_composition,

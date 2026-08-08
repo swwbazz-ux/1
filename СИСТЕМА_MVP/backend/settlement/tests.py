@@ -5,14 +5,17 @@ from io import StringIO
 from tempfile import TemporaryDirectory
 from unittest import mock
 
+from django.contrib import admin
+from django.contrib.auth.models import AnonymousUser
 from django.contrib.staticfiles import finders
 from django.core.exceptions import FieldDoesNotExist, ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.db import IntegrityError, connection, models, router, transaction
+from django.db.migrations.executor import MigrationExecutor
 from django.db.models.deletion import ProtectedError
 from django.db.utils import NotSupportedError
-from django.test import Client, TestCase, TransactionTestCase, override_settings
+from django.test import Client, RequestFactory, TestCase, TransactionTestCase, override_settings
 from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone
@@ -28,7 +31,8 @@ from users.active_role import (
 )
 from users.models import Employee, EmployeeAccess, Role, WatchComposition
 
-from .fund import expected_fund_totals
+from .admin import PhysicalRoomAdmin
+from .fund import PHYSICAL_FUND_SPECS, expected_fund_totals
 from .models import (
     AccommodationAnchor,
     AccommodationAnchorBedAssignment,
@@ -2756,6 +2760,154 @@ class PhysicalFundTests(TestCase):
             if re.match(r'^\s*(INSERT|UPDATE|DELETE|REPLACE)\b', query['sql'], re.I)
         ]
         self.assertEqual(mutations, [])
+
+
+class PhysicalRoomSexRestrictionTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        call_command('load_physical_fund', stdout=StringIO())
+
+    def test_fund_rooms_default_to_unknown_without_automatic_classification(self):
+        totals = expected_fund_totals()
+        restrictions = set(PhysicalRoom.objects.values_list('sex_restriction', flat=True))
+        room_23 = PhysicalRoom.objects.get(dormitory__number='5', floor=2, number=23)
+        room_24 = PhysicalRoom.objects.get(dormitory__number='5', floor=2, number=24)
+
+        self.assertEqual(PhysicalRoom.objects.count(), totals['rooms'])
+        self.assertEqual(restrictions, {PhysicalRoom.SexRestriction.UNKNOWN})
+        self.assertEqual(room_23.sex_restriction, PhysicalRoom.SexRestriction.UNKNOWN)
+        self.assertEqual(room_24.sex_restriction, PhysicalRoom.SexRestriction.UNKNOWN)
+
+    def test_allowed_sex_restrictions_are_saved_and_invalid_value_is_rejected(self):
+        dormitory = Dormitory.objects.create(number='TEST-SEX')
+        for position, restriction in enumerate(PhysicalRoom.SexRestriction.values, start=1):
+            with self.subTest(restriction=restriction):
+                room = PhysicalRoom(
+                    dormitory=dormitory,
+                    floor=1,
+                    number=100 + position,
+                    room_type=PhysicalRoom.RoomType.STANDARD,
+                    transfer_status=PhysicalRoom.TransferStatus.NOT_TRANSFERRED,
+                    sex_restriction=restriction,
+                    capacity=6,
+                    corridor_side=PhysicalRoom.CorridorSide.LEFT,
+                    side_position=position,
+                )
+                room.full_clean()
+                room.save()
+                self.assertEqual(room.sex_restriction, restriction)
+
+        invalid = PhysicalRoom(
+            dormitory=dormitory,
+            floor=1,
+            number=199,
+            room_type=PhysicalRoom.RoomType.STANDARD,
+            transfer_status=PhysicalRoom.TransferStatus.NOT_TRANSFERRED,
+            sex_restriction='mixed',
+            capacity=6,
+            corridor_side=PhysicalRoom.CorridorSide.RIGHT,
+            side_position=1,
+        )
+        with self.assertRaises(ValidationError):
+            invalid.full_clean()
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                invalid.save()
+
+    def test_django_admin_form_saves_selected_sex_restriction(self):
+        dormitory = Dormitory.objects.create(number='ADMIN-SEX')
+        room_admin = PhysicalRoomAdmin(PhysicalRoom, admin.site)
+        request = RequestFactory().get('/admin/settlement/physicalroom/add/')
+        request.user = AnonymousUser()
+        form_class = room_admin.get_form(request)
+        form = form_class(data={
+            'dormitory': dormitory.pk,
+            'floor': 1,
+            'number': 1,
+            'room_type': PhysicalRoom.RoomType.STANDARD,
+            'transfer_status': PhysicalRoom.TransferStatus.NOT_TRANSFERRED,
+            'sex_restriction': PhysicalRoom.SexRestriction.FEMALE_ONLY,
+            'capacity': 6,
+            'corridor_side': PhysicalRoom.CorridorSide.LEFT,
+            'side_position': 1,
+        })
+
+        self.assertEqual(form.fields['sex_restriction'].widget.__class__.__name__, 'Select')
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(
+            form.save().sex_restriction,
+            PhysicalRoom.SexRestriction.FEMALE_ONLY,
+        )
+
+    def test_reloading_fund_preserves_manual_sex_restrictions(self):
+        room_23 = PhysicalRoom.objects.get(dormitory__number='5', floor=2, number=23)
+        room_24 = PhysicalRoom.objects.get(dormitory__number='5', floor=2, number=24)
+        room_23.sex_restriction = PhysicalRoom.SexRestriction.FEMALE_ONLY
+        room_24.sex_restriction = PhysicalRoom.SexRestriction.MALE_ONLY
+        room_23.save(update_fields=['sex_restriction'])
+        room_24.save(update_fields=['sex_restriction'])
+
+        call_command('load_physical_fund', stdout=StringIO())
+
+        room_23.refresh_from_db()
+        room_24.refresh_from_db()
+        self.assertEqual(room_23.sex_restriction, PhysicalRoom.SexRestriction.FEMALE_ONLY)
+        self.assertEqual(room_24.sex_restriction, PhysicalRoom.SexRestriction.MALE_ONLY)
+
+
+class PhysicalRoomSexRestrictionMigrationTests(TransactionTestCase):
+    migrate_from = ('settlement', '0004_employeebedoccupancy_temporal_fields')
+    migrate_to = ('settlement', '0005_physical_room_sex_restriction')
+
+    def setUp(self):
+        super().setUp()
+        executor = MigrationExecutor(connection)
+        executor.migrate([self.migrate_from])
+        old_apps = executor.loader.project_state([self.migrate_from]).apps
+        DormitoryBefore = old_apps.get_model('references', 'Dormitory')
+        PhysicalRoomBefore = old_apps.get_model('settlement', 'PhysicalRoom')
+        dormitories = {
+            number: DormitoryBefore.objects.create(number=number)
+            for number in ('5', '6')
+        }
+        self.room_ids = [
+            PhysicalRoomBefore.objects.create(
+                dormitory_id=dormitories[spec.dormitory_number].pk,
+                floor=spec.floor,
+                number=spec.room_number,
+                room_type=spec.room_type,
+                transfer_status=spec.transfer_status,
+                capacity=spec.capacity,
+                corridor_side=spec.corridor_side,
+                side_position=spec.side_position,
+            ).pk
+            for spec in PHYSICAL_FUND_SPECS
+        ]
+
+        executor = MigrationExecutor(connection)
+        executor.migrate([self.migrate_to])
+        self.apps = executor.loader.project_state([self.migrate_to]).apps
+
+    def tearDown(self):
+        executor = MigrationExecutor(connection)
+        executor.migrate(executor.loader.graph.leaf_nodes())
+        super().tearDown()
+
+    def test_all_existing_rooms_receive_unknown(self):
+        PhysicalRoomAfter = self.apps.get_model('settlement', 'PhysicalRoom')
+
+        self.assertEqual(
+            PhysicalRoomAfter.objects.filter(pk__in=self.room_ids).count(),
+            60,
+        )
+        self.assertEqual(
+            set(
+                PhysicalRoomAfter.objects
+                .filter(pk__in=self.room_ids)
+                .values_list('sex_restriction', flat=True)
+            ),
+            {'unknown'},
+        )
 
 
 class UnsettledCurrentRosterSelectorTests(TestCase):

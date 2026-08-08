@@ -7,6 +7,7 @@ from django.core.management import call_command
 from django.test import TestCase
 
 from users.models import AdminActionLog, Employee, PersonnelDepartment, WorkSchedule
+from users.management.commands.import_oup_employees import REQUIRED_COLUMNS
 
 
 class OupEmployeeImportCommandTests(TestCase):
@@ -99,3 +100,20 @@ class OupEmployeeImportCommandTests(TestCase):
         self.assertEqual(created.work_schedule, WorkSchedule.objects.get(code='schedule_12'))
         self.assertEqual(created.brigade_number, 1)
         self.assertEqual(AdminActionLog.objects.filter(action__contains='массовым импортом').count(), 2)
+
+    def test_import_without_sex_column_preserves_explicit_value(self):
+        employee = Employee.objects.create(
+            full_name='Иванов Иван Иванович',
+            personnel_number='101',
+            phone='+79000000001',
+            sex=Employee.Sex.MALE,
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        self.write_rows([self.base_row(phone='+7 900 000-00-02')])
+
+        call_command('import_oup_employees', str(self.csv_path), '--commit')
+
+        employee.refresh_from_db()
+        self.assertNotIn('sex', REQUIRED_COLUMNS)
+        self.assertEqual(employee.sex, Employee.Sex.MALE)

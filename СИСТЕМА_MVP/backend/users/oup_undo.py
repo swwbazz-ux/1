@@ -46,6 +46,7 @@ LEGACY_ACTION_CODES = {
 EMPLOYEE_CARD_UNDO_FIELDS = (
     'full_name',
     'birth_date',
+    'sex',
     'personnel_number',
     'phone',
     'personnel_position_id',

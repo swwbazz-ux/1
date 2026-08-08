@@ -1,10 +1,20 @@
 import re
+from io import BytesIO
 from pathlib import Path
 
-from django.test import TestCase
+from django.core.exceptions import ValidationError
+from django.db import IntegrityError, connection, transaction
+from django.db.migrations.executor import MigrationExecutor
+from django.test import TestCase, TransactionTestCase
 from django.urls import reverse
+from openpyxl import load_workbook
 
-from .forms import AdminEmployeeForm, PersonnelPositionReferenceForm
+from .forms import (
+    AdminEmployeeEditForm,
+    AdminEmployeeForm,
+    EmployeeCardForm,
+    PersonnelPositionReferenceForm,
+)
 from .models import (
     Employee,
     EmployeeAccess,
@@ -16,6 +26,80 @@ from .models import (
     WorkSchedule,
 )
 from .oup_forms import OupEmployeeForm
+
+
+class EmployeeSexModelTests(TestCase):
+    def test_default_sex_is_unknown_and_is_not_inferred(self):
+        employee = Employee.objects.create(
+            full_name='Иванова Анна Сергеевна',
+            position='Машинист технологического оборудования',
+        )
+
+        self.assertEqual(employee.sex, Employee.Sex.UNKNOWN)
+        self.assertEqual(employee.get_sex_display(), 'Не указан')
+
+    def test_all_canonical_sex_values_are_accepted(self):
+        for index, sex in enumerate(Employee.Sex.values, start=1):
+            with self.subTest(sex=sex):
+                employee = Employee(full_name=f'Сотрудник Проверки {index}', sex=sex)
+                employee.full_clean()
+                employee.save()
+                self.assertEqual(employee.sex, sex)
+
+    def test_arbitrary_sex_is_rejected_by_model_and_database(self):
+        employee = Employee(full_name='Сотрудник Некорректного Пола', sex='other')
+        with self.assertRaises(ValidationError):
+            employee.full_clean()
+
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                Employee.objects.create(
+                    full_name='Сотрудник DB Constraint',
+                    sex='other',
+                )
+
+
+class EmployeeSexMigrationTests(TransactionTestCase):
+    migrate_from = ('users', '0016_watchcomposition_employee_watch_composition')
+    migrate_to = ('users', '0017_employee_sex')
+
+    def setUp(self):
+        super().setUp()
+        executor = MigrationExecutor(connection)
+        executor.migrate([self.migrate_from])
+        old_apps = executor.loader.project_state([self.migrate_from]).apps
+        EmployeeBeforeSex = old_apps.get_model('users', 'Employee')
+        self.employee_ids = [
+            EmployeeBeforeSex.objects.create(
+                full_name='Иванова Анна До Миграции',
+                position='Лаборант',
+            ).pk,
+            EmployeeBeforeSex.objects.create(
+                full_name='Петров Петр До Миграции',
+                position='Водитель',
+            ).pk,
+        ]
+
+        executor = MigrationExecutor(connection)
+        executor.migrate([self.migrate_to])
+        self.apps = executor.loader.project_state([self.migrate_to]).apps
+
+    def tearDown(self):
+        executor = MigrationExecutor(connection)
+        executor.migrate(executor.loader.graph.leaf_nodes())
+        super().tearDown()
+
+    def test_existing_employees_receive_only_unknown(self):
+        EmployeeAfterSex = self.apps.get_model('users', 'Employee')
+
+        self.assertEqual(
+            set(
+                EmployeeAfterSex.objects
+                .filter(pk__in=self.employee_ids)
+                .values_list('sex', flat=True)
+            ),
+            {'unknown'},
+        )
 
 
 class UnifiedEmployeeCardTests(TestCase):
@@ -83,6 +167,8 @@ class UnifiedEmployeeCardTests(TestCase):
         self.assertContains(create_response, 'name="work_schedule"', html=False)
         self.assertContains(create_response, 'name="brigade_number"', html=False)
         self.assertContains(create_response, 'name="watch_composition"', html=False)
+        self.assertContains(create_response, 'name="sex"', html=False)
+        self.assertContains(create_response, '<option value="female">Женский</option>', html=False)
         self.assertContains(create_response, 'data-brigade-count="0"', html=False)
         self.assertContains(create_response, 'value="Активен"', html=False)
         self.assertNotContains(create_response, 'id="id_status"', html=False)
@@ -119,6 +205,7 @@ class UnifiedEmployeeCardTests(TestCase):
         self.assertContains(create_response, 'value="Активен"', html=False)
         self.assertNotContains(create_response, 'id="id_status"', html=False)
         self.assertContains(create_response, 'data-copy-target="#id_access_role"', html=False)
+        self.assertContains(create_response, 'name="sex"', html=False)
         self.assertContains(create_response, '>Выберите доступ</option>', html=False)
         self.assertNotContains(
             create_response,
@@ -135,6 +222,69 @@ class UnifiedEmployeeCardTests(TestCase):
             html=False,
         )
         self.assertContains(edit_response, 'employee-card-unified.js')
+
+    def test_all_employee_card_forms_save_selected_sex_from_a_select(self):
+        form_cases = (
+            (EmployeeCardForm, None, '+79000001001'),
+            (AdminEmployeeForm, None, '+79000001002'),
+            (OupEmployeeForm, None, '+79000001003'),
+            (
+                AdminEmployeeEditForm,
+                Employee.objects.create(
+                    full_name='Сотрудник Для Редактирования',
+                    phone='+79000001004',
+                    sex=Employee.Sex.MALE,
+                ),
+                '+79000001004',
+            ),
+        )
+
+        for form_class, instance, phone in form_cases:
+            with self.subTest(form=form_class.__name__):
+                form = form_class(
+                    data={
+                        'full_name': f'Проверка Формы {form_class.__name__}',
+                        'phone': phone,
+                        'sex': Employee.Sex.FEMALE,
+                    },
+                    instance=instance,
+                )
+                self.assertEqual(form.fields['sex'].widget.__class__.__name__, 'Select')
+                self.assertEqual(
+                    [value for value, _label in form.fields['sex'].choices],
+                    Employee.Sex.values,
+                )
+                self.assertTrue(form.is_valid(), form.errors)
+                employee = form.save()
+                self.assertEqual(employee.sex, Employee.Sex.FEMALE)
+
+    def test_legacy_edit_without_sex_preserves_explicit_value(self):
+        self.employee.sex = Employee.Sex.MALE
+        self.employee.save(update_fields=['sex', 'updated_at'])
+        form = EmployeeCardForm(
+            data={
+                'full_name': self.employee.full_name,
+                'phone': self.employee.phone,
+            },
+            instance=self.employee,
+        )
+
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.save().sex, Employee.Sex.MALE)
+
+    def test_employee_export_contains_human_readable_sex(self):
+        self.employee.sex = Employee.Sex.FEMALE
+        self.employee.save(update_fields=['sex', 'updated_at'])
+        self.login_as(self.admin_access)
+
+        response = self.client.get(reverse('system_admin_employee_export'))
+
+        self.assertEqual(response.status_code, 200)
+        workbook = load_workbook(BytesIO(response.content), read_only=True)
+        rows = list(workbook['Сотрудники'].iter_rows(values_only=True))
+        self.assertIn('Пол', rows[0])
+        exported = next(row for row in rows[1:] if row[0] == self.employee.full_name)
+        self.assertEqual(exported[rows[0].index('Пол')], 'Женский')
 
     def test_personnel_number_is_not_a_visible_card_field(self):
         self.login_as(self.admin_access)

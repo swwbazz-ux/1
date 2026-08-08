@@ -74,6 +74,7 @@ class OupWorkplaceTests(TestCase):
         payload = {
             'full_name': 'Петров Петр Петрович',
             'birth_date': '1988-03-12',
+            'sex': Employee.Sex.UNKNOWN,
             'personnel_number': 'CR-1001',
             'phone': '+7 900 111-22-33',
             'position': 'Водитель автомобиля',
@@ -519,17 +520,25 @@ class OupWorkplaceTests(TestCase):
             work_category=Employee.WorkCategory.DRIVER,
             hired_at=timezone.localdate(),
             rotation='Вахта 1',
+            sex=Employee.Sex.MALE,
             status=Employee.Status.ACTIVE,
         )
         response = self.client.post(
             reverse('oup_employee_detail', args=[employee.id]),
-            self.employee_payload(full_name='Новое Имя Сотрудника', personnel_number='CR-2001'),
+            self.employee_payload(
+                full_name='Новое Имя Сотрудника',
+                personnel_number='CR-2001',
+                sex=Employee.Sex.FEMALE,
+            ),
         )
         self.assertRedirects(response, reverse('oup_employee_detail', args=[employee.id]), fetch_redirect_response=False)
         log = AdminActionLog.objects.get(action='ОУП: изменена карточка сотрудника')
         self.assertEqual(log.object_id, str(employee.id))
+        employee.refresh_from_db()
+        self.assertEqual(employee.sex, Employee.Sex.FEMALE)
         self.assertIn('Старое Имя Сотрудника', log.old_value)
         self.assertIn('Новое Имя Сотрудника', log.old_value)
+        self.assertIn('Пол: Мужской → Женский', log.old_value)
         detail = self.client.get(reverse('oup_employee_detail', args=[employee.id]))
         self.assertContains(detail, 'изменена карточка сотрудника')
 

@@ -2624,7 +2624,7 @@ def system_admin_employee_export_view(request):
     sheet = workbook.active
     sheet.title = 'Сотрудники'
     sheet.append([
-        'ФИО', 'Табельный номер', 'Телефон', 'Статус', 'Подразделение',
+        'ФИО', 'Табельный номер', 'Телефон', 'Пол', 'Статус', 'Подразделение',
         'Дата приема', 'Дата увольнения', 'График работы', 'Бригада',
         'Утверждённый состав вахты', 'Место проживания',
     ])
@@ -2637,6 +2637,7 @@ def system_admin_employee_export_view(request):
             employee.full_name,
             employee.personnel_number,
             employee.phone,
+            employee.get_sex_display(),
             employee.get_status_display(),
             employee.department_label,
             excel_value(employee.hired_at),

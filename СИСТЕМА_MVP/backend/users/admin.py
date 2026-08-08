@@ -20,6 +20,7 @@ from .models import (
 class EmployeeAdmin(admin.ModelAdmin):
     list_display = (
         'full_name',
+        'sex',
         'personnel_department',
         'personnel_position',
         'base_specialization',
@@ -33,6 +34,7 @@ class EmployeeAdmin(admin.ModelAdmin):
     list_filter = (
         'status',
         'is_active',
+        'sex',
         'work_category',
         'personnel_department',
         'work_schedule',

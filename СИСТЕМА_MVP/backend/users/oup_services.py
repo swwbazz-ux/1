@@ -38,6 +38,7 @@ PROTECTED_OUP_ROLE_CODE = 'admin'
 OUP_AUDIT_FIELDS = (
     ('full_name', 'ФИО'),
     ('birth_date', 'Дата рождения'),
+    ('sex', 'Пол'),
     ('phone', 'Телефон'),
     ('personnel_position', 'Кадровая должность'),
     ('base_specialization', 'Производственная специализация'),
@@ -139,6 +140,8 @@ def employee_audit_snapshot(employee):
         value = getattr(employee, field_name, '')
         if field_name == 'brigade_number' and value:
             value = employee.get_brigade_number_display()
+        elif field_name == 'sex':
+            value = employee.get_sex_display()
         if hasattr(value, 'strftime'):
             value = value.strftime('%d.%m.%Y')
         snapshot[field_name] = (label, str(value or '—'))

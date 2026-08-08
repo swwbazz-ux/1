@@ -73,6 +73,11 @@ class Employee(models.Model):
         EXCAVATOR_OPERATOR = 'excavator_operator', 'Машинист экскаватора'
         OTHER = 'other', 'Без привязки к технике'
 
+    class Sex(models.TextChoices):
+        UNKNOWN = 'unknown', 'Не указан'
+        MALE = 'male', 'Мужской'
+        FEMALE = 'female', 'Женский'
+
     class Status(models.TextChoices):
         ACTIVE = 'active', 'Активен'
         NOT_ACTIVATED = 'not_activated', 'Не активирован'
@@ -83,6 +88,12 @@ class Employee(models.Model):
 
     full_name = models.CharField('ФИО', max_length=255)
     birth_date = models.DateField('Дата рождения', null=True, blank=True)
+    sex = models.CharField(
+        'Пол',
+        max_length=7,
+        choices=Sex.choices,
+        default=Sex.UNKNOWN,
+    )
     personnel_position = models.ForeignKey(
         'PersonnelPosition',
         verbose_name='Кадровая должность',
@@ -162,6 +173,10 @@ class Employee(models.Model):
                     | models.Q(brigade_number__gte=1, brigade_number__lte=4)
                 ),
                 name='employee_brigade_number_1_4',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(sex__in=['unknown', 'male', 'female']),
+                name='employee_sex_valid',
             ),
         ]
 

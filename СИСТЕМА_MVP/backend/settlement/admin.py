@@ -17,11 +17,12 @@ class PhysicalRoomAdmin(admin.ModelAdmin):
         'number',
         'room_type',
         'transfer_status',
+        'sex_restriction',
         'capacity',
         'corridor_side',
         'side_position',
     )
-    list_filter = ('dormitory', 'floor', 'room_type', 'transfer_status')
+    list_filter = ('dormitory', 'floor', 'room_type', 'transfer_status', 'sex_restriction')
     search_fields = ('dormitory__number', 'number', 'beds__stable_id')
     inlines = (PhysicalBedInline,)
 

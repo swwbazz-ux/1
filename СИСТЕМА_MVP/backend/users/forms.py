@@ -143,6 +143,7 @@ class EmployeeCardForm(forms.ModelForm):
         fields = [
             'full_name',
             'birth_date',
+            'sex',
             'personnel_number',
             'phone',
             'photo',
@@ -164,6 +165,7 @@ class EmployeeCardForm(forms.ModelForm):
         labels = {
             'full_name': 'ФИО',
             'birth_date': 'Дата рождения',
+            'sex': 'Пол',
             'phone': 'Мобильный телефон',
             'photo': 'Фото сотрудника',
             'personnel_position': 'Кадровая должность',
@@ -216,6 +218,9 @@ class EmployeeCardForm(forms.ModelForm):
         is_existing_employee = bool(self.instance and self.instance.pk)
         self.fields['full_name'].required = True
         self.fields['phone'].required = not is_existing_employee
+        # Older internal POST clients did not send this field. Preserve an
+        # existing explicit value and use the canonical unknown value on create.
+        self.fields['sex'].required = False
         self.fields['personnel_number'].required = False
         self.fields['work_category'].required = False
         self.fields['position'].required = False
@@ -342,6 +347,14 @@ class EmployeeCardForm(forms.ModelForm):
         if value and value > timezone.localdate():
             raise ValidationError('Дата рождения не может быть позже сегодняшней даты.')
         return value
+
+    def clean_sex(self):
+        value = self.cleaned_data.get('sex')
+        if value:
+            return value
+        if self.instance and self.instance.pk:
+            return self.instance.sex
+        return Employee.Sex.UNKNOWN
 
     def clean_work_category(self):
         value = self.cleaned_data.get('work_category')

@@ -1169,6 +1169,11 @@ class PhysicalRoom(models.Model):
         TRANSFERRED = 'transferred', 'Передана'
         NOT_TRANSFERRED = 'not_transferred', 'Не передана'
 
+    class SexRestriction(models.TextChoices):
+        UNKNOWN = 'unknown', 'Не указано'
+        MALE_ONLY = 'male_only', 'Мужская'
+        FEMALE_ONLY = 'female_only', 'Женская'
+
     class CorridorSide(models.TextChoices):
         LEFT = 'left', 'Левая сторона'
         RIGHT = 'right', 'Правая сторона'
@@ -1196,6 +1201,13 @@ class PhysicalRoom(models.Model):
         choices=TransferStatus.choices,
         default=TransferStatus.NOT_TRANSFERRED,
         db_index=True,
+    )
+    sex_restriction = models.CharField(
+        'Ограничение пола комнаты',
+        max_length=11,
+        choices=SexRestriction.choices,
+        default=SexRestriction.UNKNOWN,
+        blank=False,
     )
     capacity = models.PositiveSmallIntegerField(
         'Вместимость',
@@ -1241,6 +1253,12 @@ class PhysicalRoom(models.Model):
             models.CheckConstraint(
                 condition=models.Q(capacity__gte=1, capacity__lte=6),
                 name='physical_room_capacity_1_6',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    sex_restriction__in=['unknown', 'male_only', 'female_only'],
+                ),
+                name='physical_room_sex_restriction_valid',
             ),
         ]
 
