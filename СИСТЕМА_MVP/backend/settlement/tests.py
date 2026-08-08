@@ -3422,8 +3422,8 @@ class SettlementMapAccessTests(TestCase):
         self.assertIn('data-room-panel', content)
         self.assertIn('data-settlement-form', content)
         self.assertIn('data-employee-search', content)
-        self.assertEqual(content.count('-settlement-map-v12'), 2)
-        self.assertNotIn('-settlement-map-v11', content)
+        self.assertEqual(content.count('-settlement-map-v14'), 2)
+        self.assertNotIn('-settlement-map-v13', content)
         self.assertNotIn('data-dorm-filter="all"', content)
         self.assertNotIn('data-floor-filter="all"', content)
         self.assertIn(
@@ -5093,6 +5093,22 @@ class SettlementFrontendContractTests(TestCase):
         with open(stylesheet_path, encoding='utf-8') as file:
             stylesheet = file.read()
 
+        def declaration(selector, property_name):
+            blocks = re.findall(
+                rf'(?ms)^\s*{re.escape(selector)}\s*\{{(?P<body>[^}}]*)\}}',
+                stylesheet,
+            )
+            values = []
+            for block in blocks:
+                values.extend(
+                    re.findall(
+                        rf'(?m)^\s*{re.escape(property_name)}\s*:\s*([^;]+);',
+                        block,
+                    )
+                )
+            self.assertTrue(values, f'{selector} / {property_name}')
+            return values[0].strip()
+
         self.assertIn('dormitory: "5"', javascript)
         self.assertIn('floor: "1"', javascript)
         self.assertIn('section.hidden =', javascript)
@@ -5156,10 +5172,9 @@ class SettlementFrontendContractTests(TestCase):
             'grid-template-columns: repeat(var(--settlement-side-slots)',
             stylesheet,
         )
-        self.assertIn(
-            'grid-template-rows: minmax(var(--settlement-room-min-height)',
-            stylesheet,
-        )
+        plan_rows = declaration('.settlement-floor-plan', 'grid-template-rows')
+        self.assertEqual(plan_rows.count('minmax(var(--settlement-room-min-height), 1fr)'), 2)
+        self.assertIn('var(--settlement-corridor-height)', plan_rows)
         self.assertIn(
             'grid-template-columns: repeat(var(--settlement-block-count), minmax(0, 1fr))',
             stylesheet,
@@ -5176,23 +5191,26 @@ class SettlementFrontendContractTests(TestCase):
         self.assertIn('object-position: center 22%', stylesheet)
         self.assertIn('.settlement-bed.is-occupied.no-photo', stylesheet)
         occupied_styles = stylesheet.split('.settlement-bed.is-occupied {', 1)[1].split('}', 1)[0]
-        self.assertIn('border: 2px solid var(--admin-cyan)', occupied_styles)
+        self.assertIn('border: var(--settlement-strong-line) solid var(--admin-cyan)', occupied_styles)
         photo_name_styles = stylesheet.split(
             '.settlement-bed.is-occupied.has-photo .settlement-bed-person {',
             1,
         )[1].split('}', 1)[0]
         self.assertIn('linear-gradient(', photo_name_styles)
-        self.assertIn('max-height: 30px', photo_name_styles)
+        self.assertRegex(photo_name_styles, r'max-height:\s*clamp\([^;]*dvh[^;]*\)')
         fallback_initial_styles = stylesheet.split(
             '.settlement-bed.is-occupied.no-photo .settlement-bed-avatar-initial {',
             1,
         )[1].split('}', 1)[0]
-        self.assertIn('font-size: 26px', fallback_initial_styles)
+        self.assertIn(
+            'font-size: calc(26 * var(--settlement-density-unit))',
+            fallback_initial_styles,
+        )
         fallback_name_styles = stylesheet.split(
             '.settlement-bed.is-occupied.no-photo .settlement-bed-person {',
             1,
         )[1].split('}', 1)[0]
-        self.assertIn('max-height: 24px', fallback_name_styles)
+        self.assertRegex(fallback_name_styles, r'max-height:\s*clamp\([^;]*dvh[^;]*\)')
         self.assertIn('overflow-wrap: anywhere', fallback_name_styles)
         self.assertIn('text-shadow: none', fallback_name_styles)
         self.assertIn('.settlement-bed.is-free:not(:disabled):hover', stylesheet)
@@ -5201,8 +5219,101 @@ class SettlementFrontendContractTests(TestCase):
             1,
         )[1].split('}', 1)[0]
         self.assertIn('grid-template-columns: minmax(0, 1fr)', itr_content_styles)
-        self.assertIn('--settlement-room-min-height: 284px', stylesheet)
-        self.assertIn('--settlement-bed-card-min-height: 70px', stylesheet)
+        header_height = declaration('.settlement-shell', '--admin-console-header-height')
+        room_min_height = declaration('.settlement-shell', '--settlement-room-min-height')
+        bed_min_height = declaration('.settlement-shell', '--settlement-bed-card-min-height')
+        corridor_height = declaration('.settlement-shell', '--settlement-corridor-height')
+        drawer_width = declaration('.settlement-shell', '--settlement-drawer-width')
+        density_unit = declaration('.settlement-shell', '--settlement-density-unit')
+        self.assertIn('clamp(', density_unit)
+        self.assertIn('min(', density_unit)
+        self.assertIn('vw', density_unit)
+        self.assertIn('dvh', density_unit)
+        self.assertIn('1.4px', density_unit)
+        self.assertEqual(
+            declaration('.settlement-shell', '--settlement-line'),
+            'var(--settlement-density-unit)',
+        )
+        self.assertEqual(
+            declaration('.settlement-shell', '--settlement-strong-line'),
+            'calc(2 * var(--settlement-density-unit))',
+        )
+        for fluid_height in (
+            header_height,
+            room_min_height,
+            bed_min_height,
+            corridor_height,
+        ):
+            self.assertIn('clamp(', fluid_height)
+            self.assertIn('dvh', fluid_height)
+        self.assertIn('clamp(', drawer_width)
+        self.assertIn('vw', drawer_width)
+        self.assertIn('var(--settlement-density-unit)', drawer_width)
+        self.assertEqual(declaration('.settlement-shell', '--admin-interface-scale'), '1')
+        self.assertEqual(declaration('.settlement-shell', 'height'), '100dvh')
+        self.assertEqual(declaration('.settlement-shell', 'max-height'), '100dvh')
+        self.assertEqual(declaration('.settlement-page', 'height'), '100%')
+        self.assertEqual(declaration('.settlement-floor-plan', 'height'), 'auto')
+        self.assertEqual(declaration('.settlement-floor-plan', 'min-height'), '0')
+        self.assertEqual(declaration('.settlement-floor-plan', 'max-height'), '100%')
+        self.assertIn(
+            '--settlement-plan-inline-size',
+            declaration('.settlement-floor-plan', 'width'),
+        )
+        self.assertEqual(
+            declaration('.settlement-floor-plan', 'aspect-ratio'),
+            'var(--settlement-plan-aspect)',
+        )
+        self.assertEqual(
+            declaration('.settlement-shell', '--settlement-plan-inline-size'),
+            '255cqh',
+        )
+        self.assertEqual(
+            declaration('.settlement-shell', '--settlement-plan-aspect'),
+            '2.55 / 1',
+        )
+        self.assertEqual(declaration('.settlement-floor-scroll', 'container-type'), 'size')
+        for density_consumer in (
+            '.settlement-shell .admin-console-avatar',
+            '.settlement-shell .admin-console-nav a',
+            '.settlement-shell .admin-theme-button[data-theme-icon="sun"]::before',
+            '.settlement-room-number',
+            '.settlement-bed-block b',
+            '.settlement-bed-empty-icon',
+            '.settlement-bed-status',
+            '.settlement-room-state',
+            '.settlement-unsettled-employee',
+            '.settlement-unsettled-employee-initials',
+        ):
+            consumer_blocks = re.findall(
+                rf'(?ms)^\s*{re.escape(density_consumer)}\s*\{{(?P<body>[^}}]*)\}}',
+                stylesheet,
+            )
+            self.assertTrue(consumer_blocks, density_consumer)
+            self.assertTrue(
+                any('var(--settlement-density-unit)' in block for block in consumer_blocks),
+                density_consumer,
+            )
+        self.assertNotIn('--settlement-room-min-height: 284px', stylesheet)
+        self.assertNotIn('--settlement-bed-card-min-height: 70px', stylesheet)
+        self.assertNotRegex(
+            stylesheet,
+            r'(?m)^\s*(?:height|min-height)\s*:\s*(?:min\(100%,\s*)?616px\)?\s*;',
+        )
+        self.assertNotRegex(stylesheet, r'(?im)^\s*zoom\s*:')
+        for unclipped_selector in (
+            '.settlement-page',
+            '.settlement-map-list',
+            '.settlement-dormitory',
+            '.settlement-floors',
+            '.settlement-floor',
+            '.settlement-floor-scroll',
+        ):
+            self.assertNotEqual(
+                declaration(unclipped_selector, 'overflow'),
+                'hidden',
+                unclipped_selector,
+            )
         self.assertNotIn('--settlement-bed-width', stylesheet)
         self.assertNotIn('repeat(3, var(--settlement-bed-width))', stylesheet)
         self.assertNotRegex(
@@ -5232,7 +5343,19 @@ class SettlementFrontendContractTests(TestCase):
         self.assertIn('.settlement-room-panel', stylesheet)
         self.assertIn('position: fixed', stylesheet)
         self.assertIn('.settlement-unsettled-panel', stylesheet)
-        self.assertIn('width: min(480px, calc(100vw - 24px))', stylesheet)
+        drawer_blocks = re.findall(
+            r'(?ms)^\s*\.settlement-unsettled-panel\s*\{(?P<body>[^}]*)\}',
+            stylesheet,
+        )
+        self.assertTrue(
+            any(
+                'width: min(' in block
+                and 'var(--settlement-drawer-width)' in block
+                and 'height: 100dvh' in block
+                and 'max-height: 100dvh' in block
+                for block in drawer_blocks
+            )
+        )
         self.assertNotIn('.settlement-unsettled-panel-backdrop', stylesheet)
         self.assertNotIn('body.settlement-unsettled-panel-open {\n    overflow: hidden;', stylesheet)
         self.assertIn(
@@ -5252,7 +5375,10 @@ class SettlementFrontendContractTests(TestCase):
             '.settlement-unsettled-employee-initials {',
             1,
         )[1].split('}', 1)[0]
-        self.assertIn('font-size: 26px', unsettled_initials_styles)
+        self.assertIn(
+            'font-size: calc(26 * var(--settlement-density-unit))',
+            unsettled_initials_styles,
+        )
         self.assertIn('.clerk-workplace-screen .app-confirm-modal', stylesheet)
         self.assertIn('z-index: 1300', stylesheet)
         self.assertIn('min-height:', stylesheet)

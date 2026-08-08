@@ -1,44 +1,159 @@
 .settlement-shell {
-    --admin-console-header-height: 60px;
-    --admin-header-control-height: 28px;
-    --admin-header-icon-size: 28px;
-    --admin-header-identity-column: minmax(190px, 230px);
-    --admin-header-actions-column: minmax(150px, 190px);
-    --admin-header-title-column: clamp(190px, 17vw, 300px);
-    --admin-header-utility-width: 80px;
-    --admin-header-gap: 6px;
-    --settlement-room-min-height: 284px;
-    --settlement-bed-card-min-height: 70px;
-    --settlement-bed-photo-size: 54px;
+    --admin-interface-scale: 1;
+    --settlement-density-unit: clamp(
+        1px,
+        min(
+            calc(.6px + .0208333333vw),
+            calc(.55px + .05dvh)
+        ),
+        1.4px
+    );
+    --settlement-line: var(--settlement-density-unit);
+    --settlement-strong-line: calc(2 * var(--settlement-density-unit));
+    --admin-console-header-height: clamp(
+        48px,
+        8dvh,
+        calc(72 * var(--settlement-density-unit))
+    );
+    --admin-header-control-height: clamp(
+        28px,
+        4.4dvh,
+        calc(36 * var(--settlement-density-unit))
+    );
+    --admin-header-icon-size: clamp(
+        32px,
+        5dvh,
+        calc(38 * var(--settlement-density-unit))
+    );
+    --admin-header-identity-column: minmax(
+        calc(190 * var(--settlement-density-unit)),
+        calc(230 * var(--settlement-density-unit))
+    );
+    --admin-header-actions-column: minmax(
+        calc(150 * var(--settlement-density-unit)),
+        calc(190 * var(--settlement-density-unit))
+    );
+    --admin-header-title-column: clamp(
+        calc(190 * var(--settlement-density-unit)),
+        17vw,
+        calc(300 * var(--settlement-density-unit))
+    );
+    --admin-header-utility-width: calc(80 * var(--settlement-density-unit));
+    --admin-header-gap: clamp(
+        4px,
+        .45vw,
+        calc(8 * var(--settlement-density-unit))
+    );
+    --settlement-room-min-height: clamp(
+        188px,
+        32dvh,
+        calc(520 * var(--settlement-density-unit))
+    );
+    --settlement-bed-card-min-height: clamp(
+        42px,
+        7dvh,
+        calc(88 * var(--settlement-density-unit))
+    );
+    --settlement-bed-photo-size: clamp(
+        40px,
+        7dvh,
+        calc(64 * var(--settlement-density-unit))
+    );
+    --settlement-corridor-height: clamp(
+        28px,
+        5dvh,
+        calc(52 * var(--settlement-density-unit))
+    );
+    --settlement-map-gap: clamp(
+        3px,
+        .55dvh,
+        calc(7 * var(--settlement-density-unit))
+    );
+    --settlement-side-gap: clamp(
+        3px,
+        .3vw,
+        calc(8 * var(--settlement-density-unit))
+    );
+    --settlement-room-gap: clamp(
+        2px,
+        .3dvh,
+        calc(5 * var(--settlement-density-unit))
+    );
+    --settlement-room-padding: clamp(
+        3px,
+        .45dvh,
+        calc(7 * var(--settlement-density-unit))
+    );
+    --settlement-bed-gap: clamp(
+        2px,
+        .4dvh,
+        calc(6 * var(--settlement-density-unit))
+    );
+    --settlement-control-height: clamp(
+        28px,
+        4.4dvh,
+        calc(34 * var(--settlement-density-unit))
+    );
+    --settlement-drawer-width: clamp(
+        calc(340 * var(--settlement-density-unit)),
+        28vw,
+        calc(520 * var(--settlement-density-unit))
+    );
+    --settlement-plan-inline-size: 255cqh;
+    --settlement-plan-aspect: 2.55 / 1;
     --settlement-accent: var(--admin-green);
     --settlement-accent-soft: var(--admin-green-soft);
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    width: 100%;
+    height: 100dvh;
+    min-height: 0;
+    max-height: 100dvh;
+    overflow: visible;
+}
+
+.clerk-workplace-screen {
+    overflow: visible;
 }
 
 @media (min-width: 1181px) {
+    .settlement-shell .admin-console-header {
+        border-bottom-width: var(--settlement-line);
+    }
+
     .settlement-shell .admin-console-identity,
     .settlement-shell .admin-console-main,
     .settlement-shell .admin-console-actions {
-        padding: 4px 10px;
+        padding:
+            clamp(3px, .55dvh, calc(7 * var(--settlement-density-unit)))
+            clamp(8px, .7vw, calc(14 * var(--settlement-density-unit)));
     }
 
     .settlement-shell .admin-console-identity {
-        grid-template-columns: 32px minmax(0, 1fr);
-        gap: 7px;
+        grid-template-columns: var(--admin-header-icon-size) minmax(0, 1fr);
+        gap: calc(7 * var(--settlement-density-unit));
+        border-right-width: var(--settlement-line);
     }
 
     .settlement-shell .admin-console-avatar {
-        width: 32px;
-        height: 32px;
-        font-size: 16px;
+        width: var(--admin-header-icon-size);
+        height: var(--admin-header-icon-size);
+        border-width: var(--settlement-line);
+        border-radius: calc(8 * var(--settlement-density-unit));
+        font-size: calc(16 * var(--settlement-density-unit));
+    }
+
+    .settlement-shell .admin-console-main {
+        border-right-width: var(--settlement-line);
     }
 
     .settlement-shell .admin-console-identity strong {
-        font-size: 14px;
+        font-size: calc(14 * var(--settlement-density-unit));
     }
 
     .settlement-shell .admin-console-identity em {
-        margin-top: 1px;
-        font-size: 9px;
+        margin-top: var(--settlement-density-unit);
+        font-size: calc(9 * var(--settlement-density-unit));
     }
 
     .settlement-shell .admin-console-title span {
@@ -47,7 +162,11 @@
 
     .settlement-shell .admin-console-title h1 {
         margin-top: 0;
-        font-size: 18px;
+        font-size: clamp(
+            18px,
+            2.8dvh,
+            calc(24 * var(--settlement-density-unit))
+        );
         line-height: 1;
     }
 
@@ -58,40 +177,88 @@
     .settlement-shell .admin-console-nav a,
     .settlement-shell .admin-utility-link,
     .settlement-shell .admin-theme-button {
-        min-height: 28px;
-        font-size: 11px;
+        min-height: var(--admin-header-control-height);
+        border-width: var(--settlement-line);
+        border-radius: calc(6 * var(--settlement-density-unit));
+        font-size: calc(11 * var(--settlement-density-unit));
+    }
+
+    .settlement-shell .admin-console-nav {
+        gap: calc(8 * var(--settlement-density-unit));
+    }
+
+    .settlement-shell .admin-console-nav a {
+        padding-inline: calc(10 * var(--settlement-density-unit));
+    }
+
+    .settlement-shell .admin-console-nav a.is-active {
+        box-shadow:
+            inset 0 calc(-3 * var(--settlement-density-unit)) 0
+            var(--admin-green);
+    }
+
+    .settlement-shell .admin-console-actions .admin-utility-link {
+        padding-inline: calc(8 * var(--settlement-density-unit));
     }
 
     .settlement-shell .clerk-console-actions {
-        grid-template-columns: 28px var(--admin-header-utility-width);
+        grid-template-columns: var(--admin-header-control-height) var(--admin-header-utility-width);
         gap: var(--admin-header-gap);
     }
 
     .settlement-shell .admin-theme-button {
-        width: 28px;
-        min-width: 28px;
+        width: var(--admin-header-control-height);
+        min-width: var(--admin-header-control-height);
+    }
+
+    .settlement-shell .admin-theme-button[data-theme-icon="sun"]::before {
+        width: calc(12 * var(--settlement-density-unit));
+        height: calc(12 * var(--settlement-density-unit));
+        box-shadow:
+            0 calc(-8 * var(--settlement-density-unit)) 0 calc(-5 * var(--settlement-density-unit)) #f2b23a,
+            0 calc(8 * var(--settlement-density-unit)) 0 calc(-5 * var(--settlement-density-unit)) #f2b23a,
+            calc(8 * var(--settlement-density-unit)) 0 0 calc(-5 * var(--settlement-density-unit)) #f2b23a,
+            calc(-8 * var(--settlement-density-unit)) 0 0 calc(-5 * var(--settlement-density-unit)) #f2b23a,
+            calc(6 * var(--settlement-density-unit)) calc(6 * var(--settlement-density-unit)) 0 calc(-5 * var(--settlement-density-unit)) #f2b23a,
+            calc(-6 * var(--settlement-density-unit)) calc(6 * var(--settlement-density-unit)) 0 calc(-5 * var(--settlement-density-unit)) #f2b23a,
+            calc(6 * var(--settlement-density-unit)) calc(-6 * var(--settlement-density-unit)) 0 calc(-5 * var(--settlement-density-unit)) #f2b23a,
+            calc(-6 * var(--settlement-density-unit)) calc(-6 * var(--settlement-density-unit)) 0 calc(-5 * var(--settlement-density-unit)) #f2b23a;
+    }
+
+    .settlement-shell .admin-theme-button[data-theme-icon="moon"]::before {
+        width: calc(15 * var(--settlement-density-unit));
+        height: calc(15 * var(--settlement-density-unit));
+    }
+
+    .settlement-shell .admin-theme-button[data-theme-icon="moon"]::after {
+        width: calc(14 * var(--settlement-density-unit));
+        height: calc(14 * var(--settlement-density-unit));
+        transform: translate(
+            calc(5 * var(--settlement-density-unit)),
+            calc(-3 * var(--settlement-density-unit))
+        );
     }
 }
 
 .settlement-page {
     display: grid;
     grid-template-rows: auto auto minmax(0, 1fr);
-    gap: 4px;
-    width: calc(100% - 24px);
+    gap: clamp(2px, .5dvh, calc(6 * var(--settlement-density-unit)));
+    width: calc(100% - clamp(12px, 1.5vw, calc(32 * var(--settlement-density-unit))));
     max-width: none;
-    height: calc((100dvh / var(--admin-interface-scale)) - var(--admin-console-header-height));
+    height: 100%;
     min-height: 0;
     margin: 0 auto;
-    padding: 3px 0;
-    overflow: hidden;
+    padding: clamp(2px, .4dvh, calc(6 * var(--settlement-density-unit))) 0;
+    overflow: visible;
 }
 
 .settlement-toolbar,
 .settlement-summary,
 .settlement-dormitory,
 .settlement-empty-state {
-    border: 1px solid var(--admin-line);
-    border-radius: 8px;
+    border: var(--settlement-line) solid var(--admin-line);
+    border-radius: calc(8 * var(--settlement-density-unit));
     background: var(--admin-panel);
     box-shadow: var(--admin-shadow);
 }
@@ -105,17 +272,17 @@
         minmax(280px, auto)
         minmax(210px, 1fr)
         auto;
-    gap: 5px;
+    gap: clamp(3px, .35vw, calc(7 * var(--settlement-density-unit)));
     align-items: end;
-    padding: 3px;
+    padding: clamp(2px, .45dvh, calc(5 * var(--settlement-density-unit)));
 }
 
 .settlement-current-date {
     display: grid;
-    min-height: 28px;
+    min-height: var(--settlement-control-height);
     align-content: center;
-    padding: 1px 6px;
-    border-right: 1px solid var(--admin-line-soft);
+    padding: var(--settlement-density-unit) calc(6 * var(--settlement-density-unit));
+    border-right: var(--settlement-line) solid var(--admin-line-soft);
 }
 
 .settlement-current-date span,
@@ -124,7 +291,7 @@
 .settlement-dormitory-header > div > span,
 .settlement-floor > header span {
     color: var(--admin-muted);
-    font-size: 9px;
+    font-size: calc(9 * var(--settlement-density-unit));
     font-weight: 900;
     letter-spacing: .08em;
     line-height: 1.15;
@@ -132,9 +299,9 @@
 }
 
 .settlement-current-date strong {
-    margin-top: 1px;
+    margin-top: var(--settlement-density-unit);
     color: var(--admin-ink);
-    font-size: 13px;
+    font-size: calc(13 * var(--settlement-density-unit));
     font-weight: 900;
 }
 
@@ -163,22 +330,22 @@
     display: flex;
     min-width: 0;
     overflow: hidden;
-    border: 1px solid var(--admin-line);
-    border-radius: 6px;
+    border: var(--settlement-line) solid var(--admin-line);
+    border-radius: calc(6 * var(--settlement-density-unit));
     background: var(--admin-panel-soft);
 }
 
 .settlement-filter-buttons button {
     flex: 1 1 auto;
-    min-width: 40px;
-    min-height: 28px;
-    padding: 0 7px;
+    min-width: calc(40 * var(--settlement-density-unit));
+    min-height: var(--settlement-control-height);
+    padding: 0 calc(7 * var(--settlement-density-unit));
     border: 0;
-    border-left: 1px solid var(--admin-line-soft);
+    border-left: var(--settlement-line) solid var(--admin-line-soft);
     background: transparent;
     color: var(--admin-muted);
     font: inherit;
-    font-size: 11px;
+    font-size: calc(11 * var(--settlement-density-unit));
     font-weight: 900;
     white-space: nowrap;
     cursor: pointer;
@@ -198,7 +365,7 @@
 .settlement-filter-buttons button.is-active {
     background: var(--settlement-accent-soft);
     color: var(--settlement-accent);
-    box-shadow: inset 0 -2px 0 var(--settlement-accent);
+    box-shadow: inset 0 calc(-2 * var(--settlement-density-unit)) 0 var(--settlement-accent);
 }
 
 .settlement-search-field {
@@ -219,36 +386,36 @@
 
 .settlement-search-field input {
     width: 100%;
-    min-height: 28px;
-    padding: 0 9px;
-    border: 1px solid var(--admin-line);
-    border-radius: 6px;
+    min-height: var(--settlement-control-height);
+    padding: 0 calc(9 * var(--settlement-density-unit));
+    border: var(--settlement-line) solid var(--admin-line);
+    border-radius: calc(6 * var(--settlement-density-unit));
     outline: 0;
     background: var(--admin-panel-soft);
     color: var(--admin-ink);
     font: inherit;
-    font-size: 12px;
+    font-size: calc(12 * var(--settlement-density-unit));
     font-weight: 800;
 }
 
 .settlement-search-field input:focus {
     border-color: var(--settlement-accent);
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--settlement-accent) 18%, transparent);
+    box-shadow: 0 0 0 calc(3 * var(--settlement-density-unit)) color-mix(in srgb, var(--settlement-accent) 18%, transparent);
 }
 
 .settlement-work-badge {
     display: inline-flex;
-    min-height: 28px;
-    gap: 6px;
+    min-height: var(--settlement-control-height);
+    gap: calc(6 * var(--settlement-density-unit));
     align-items: center;
     justify-content: center;
-    padding: 0 9px;
-    border: 1px solid var(--settlement-accent);
-    border-radius: 6px;
+    padding: 0 calc(9 * var(--settlement-density-unit));
+    border: var(--settlement-line) solid var(--settlement-accent);
+    border-radius: calc(6 * var(--settlement-density-unit));
     background: var(--settlement-accent);
     color: #fff;
     font: inherit;
-    font-size: 10px;
+    font-size: calc(10 * var(--settlement-density-unit));
     font-weight: 900;
     letter-spacing: .04em;
     text-transform: uppercase;
@@ -259,18 +426,18 @@
 }
 
 .settlement-work-badge i {
-    width: 8px;
-    height: 8px;
+    width: calc(8 * var(--settlement-density-unit));
+    height: calc(8 * var(--settlement-density-unit));
     border-radius: 50%;
     background: #fff;
 }
 
 .settlement-work-badge b {
-    min-width: 20px;
-    padding: 2px 5px;
+    min-width: calc(20 * var(--settlement-density-unit));
+    padding: calc(2 * var(--settlement-density-unit)) calc(5 * var(--settlement-density-unit));
     border-radius: 999px;
     background: rgb(255 255 255 / 22%);
-    font-size: 10px;
+    font-size: calc(10 * var(--settlement-density-unit));
     line-height: 1.2;
     text-align: center;
 }
@@ -291,10 +458,12 @@
 .settlement-summary article {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
-    gap: 1px 7px;
+    gap: var(--settlement-density-unit) calc(7 * var(--settlement-density-unit));
     min-width: 0;
-    padding: 3px 8px;
-    border-left: 1px solid var(--admin-line-soft);
+    padding:
+        clamp(2px, .45dvh, calc(6 * var(--settlement-density-unit)))
+        clamp(6px, .55vw, calc(10 * var(--settlement-density-unit)));
+    border-left: var(--settlement-line) solid var(--admin-line-soft);
 }
 
 .settlement-summary article:first-child {
@@ -312,7 +481,7 @@
 .settlement-summary span {
     align-self: end;
     color: var(--admin-muted);
-    font-size: 9px;
+    font-size: calc(9 * var(--settlement-density-unit));
     font-weight: 900;
     text-transform: uppercase;
 }
@@ -322,7 +491,7 @@
     grid-column: 2;
     align-self: center;
     color: var(--admin-ink);
-    font-size: 18px;
+    font-size: clamp(16px, 2.6dvh, calc(22 * var(--settlement-density-unit)));
     font-weight: 900;
     line-height: 1;
 }
@@ -334,14 +503,14 @@
 .settlement-map-list {
     display: grid;
     min-height: 0;
-    overflow: hidden;
+    overflow: visible;
 }
 
 .settlement-dormitory {
     display: grid;
     min-height: 0;
     min-width: 0;
-    overflow: hidden;
+    overflow: visible;
 }
 
 .settlement-dormitory[hidden],
@@ -408,7 +577,7 @@
     display: grid;
     grid-template-columns: minmax(0, 1fr);
     min-height: 0;
-    overflow: hidden;
+    overflow: visible;
 }
 
 .settlement-floor {
@@ -416,29 +585,29 @@
     grid-template-rows: auto minmax(0, 1fr);
     min-width: 0;
     min-height: 0;
-    overflow: hidden;
-    border: 1px solid var(--admin-line);
-    border-radius: 7px;
+    overflow: visible;
+    border: var(--settlement-line) solid var(--admin-line);
+    border-radius: calc(7 * var(--settlement-density-unit));
     background: var(--admin-bg);
 }
 
 .settlement-floor > header {
     display: flex;
-    min-height: 28px;
-    gap: 8px;
+    min-height: clamp(24px, 4.5dvh, calc(34 * var(--settlement-density-unit)));
+    gap: calc(8 * var(--settlement-density-unit));
     align-items: center;
     justify-content: space-between;
-    padding: 2px 7px;
-    border-bottom: 1px solid var(--admin-line);
+    padding: calc(2 * var(--settlement-density-unit)) calc(7 * var(--settlement-density-unit));
+    border-bottom: var(--settlement-line) solid var(--admin-line);
     background: var(--admin-panel);
 }
 
 .settlement-floor > header h3 {
-    font-size: 16px;
+    font-size: clamp(14px, 2.3dvh, calc(18 * var(--settlement-density-unit)));
 }
 
 .settlement-floor > header h2 {
-    font-size: 14px;
+    font-size: clamp(13px, 2.1dvh, calc(17 * var(--settlement-density-unit)));
 }
 
 .settlement-floor > header span {
@@ -448,7 +617,7 @@
 .settlement-floor > header p {
     margin: 0;
     color: var(--admin-muted);
-    font-size: 8px;
+    font-size: calc(8 * var(--settlement-density-unit));
     font-weight: 800;
     white-space: nowrap;
 }
@@ -458,25 +627,31 @@
     min-width: 0;
     min-height: 0;
     place-items: center;
-    padding: 3px;
-    overflow: hidden;
+    padding: clamp(2px, .45dvh, calc(6 * var(--settlement-density-unit)));
+    overflow: visible;
     overscroll-behavior-inline: contain;
     scrollbar-width: thin;
+    container-type: size;
 }
 
 .settlement-floor-plan {
     display: grid;
-    grid-template-rows: minmax(var(--settlement-room-min-height), 1fr) 38px minmax(var(--settlement-room-min-height), 1fr);
-    gap: 5px;
-    width: 100%;
-    height: min(100%, 616px);
-    min-height: 616px;
+    grid-template-rows:
+        minmax(var(--settlement-room-min-height), 1fr)
+        var(--settlement-corridor-height)
+        minmax(var(--settlement-room-min-height), 1fr);
+    gap: var(--settlement-map-gap);
+    width: min(100%, var(--settlement-plan-inline-size));
+    height: auto;
+    min-height: 0;
+    max-height: 100%;
+    aspect-ratio: var(--settlement-plan-aspect);
 }
 
 .settlement-side {
     display: grid;
     grid-template-columns: repeat(var(--settlement-side-slots), minmax(0, 1fr));
-    gap: 5px;
+    gap: var(--settlement-side-gap);
     min-width: 0;
     min-height: 0;
 }
@@ -484,10 +659,10 @@
 .settlement-corridor {
     display: grid;
     min-width: 100%;
-    min-height: 38px;
+    min-height: var(--settlement-corridor-height);
     place-items: center;
-    border: 1px solid var(--admin-line);
-    border-width: 1px 0;
+    border: var(--settlement-line) solid var(--admin-line);
+    border-width: var(--settlement-line) 0;
     background:
         linear-gradient(
             0deg,
@@ -499,7 +674,7 @@
 }
 
 .settlement-corridor span {
-    font-size: 10px;
+    font-size: calc(10 * var(--settlement-density-unit));
     font-weight: 900;
     letter-spacing: .15em;
     text-transform: uppercase;
@@ -513,15 +688,21 @@
 .settlement-room {
     position: relative;
     display: grid;
-    grid-template-rows: 22px minmax(0, 1fr) 10px;
-    gap: 2px;
+    grid-template-rows:
+        clamp(18px, 3dvh, calc(26 * var(--settlement-density-unit)))
+        minmax(0, 1fr)
+        clamp(8px, 1.3dvh, calc(12 * var(--settlement-density-unit)));
+    gap: var(--settlement-room-gap);
     width: 100%;
     height: 100%;
-    padding: 4px;
-    border: 1px solid var(--admin-line);
-    border-radius: 6px;
+    padding: var(--settlement-room-padding);
+    border: var(--settlement-line) solid var(--admin-line);
+    border-radius: calc(6 * var(--settlement-density-unit));
     background: var(--admin-panel);
-    box-shadow: 0 3px 8px rgba(53, 70, 78, .08);
+    box-shadow:
+        0 calc(3 * var(--settlement-density-unit))
+        calc(8 * var(--settlement-density-unit))
+        rgba(53, 70, 78, .08);
     transition: opacity 120ms ease, filter 120ms ease, border-color 120ms ease;
 }
 
@@ -541,17 +722,17 @@
 
 .settlement-room-number {
     display: grid;
-    min-width: 36px;
-    min-height: 22px;
+    min-width: calc(36 * var(--settlement-density-unit));
+    min-height: clamp(18px, 3dvh, calc(26 * var(--settlement-density-unit)));
     justify-self: start;
     place-items: center;
-    border-radius: 4px;
+    border-radius: calc(4 * var(--settlement-density-unit));
     border: 0;
     background: var(--admin-panel-soft);
     color: var(--admin-ink);
     cursor: pointer;
     font: inherit;
-    font-size: 14px;
+    font-size: clamp(13px, 2.2dvh, calc(17 * var(--settlement-density-unit)));
     font-weight: 900;
 }
 
@@ -560,21 +741,21 @@
     outline: 0;
     background: var(--settlement-accent-soft);
     color: var(--settlement-accent);
-    box-shadow: inset 0 0 0 1px var(--settlement-accent);
+    box-shadow: inset 0 0 0 var(--settlement-line) var(--settlement-accent);
 }
 
 .settlement-room-content {
     display: grid;
     grid-template-columns: repeat(var(--settlement-block-count), minmax(0, 1fr));
-    gap: 5px;
+    gap: clamp(3px, .22vw, calc(6 * var(--settlement-density-unit)));
     min-width: 0;
     min-height: 0;
 }
 
 .settlement-bed-block {
     display: grid;
-    grid-template-rows: 11px minmax(0, 1fr);
-    gap: 2px;
+    grid-template-rows: clamp(10px, 1.7dvh, calc(14 * var(--settlement-density-unit))) minmax(0, 1fr);
+    gap: var(--settlement-room-gap);
     min-width: 0;
     min-height: 0;
 }
@@ -582,7 +763,7 @@
 .settlement-bed-block b {
     overflow: hidden;
     color: var(--admin-muted);
-    font-size: 11px;
+    font-size: calc(11 * var(--settlement-density-unit));
     font-weight: 900;
     text-align: center;
     text-overflow: ellipsis;
@@ -592,7 +773,7 @@
 .settlement-bed-row {
     display: grid;
     grid-template-rows: repeat(var(--settlement-bed-count), minmax(var(--settlement-bed-card-min-height), 1fr));
-    gap: 4px;
+    gap: var(--settlement-bed-gap);
     min-width: 0;
     min-height: 0;
 }
@@ -604,16 +785,16 @@
 
 .settlement-room-state {
     position: absolute;
-    right: 4px;
-    bottom: 3px;
+    right: calc(4 * var(--settlement-density-unit));
+    bottom: calc(3 * var(--settlement-density-unit));
     left: auto;
-    max-width: calc(100% - 8px);
+    max-width: calc(100% - calc(8 * var(--settlement-density-unit)));
     overflow: hidden;
-    padding: 1px 4px;
+    padding: var(--settlement-density-unit) calc(4 * var(--settlement-density-unit));
     border-radius: 999px;
     background: var(--admin-panel-soft);
     color: var(--admin-muted);
-    font-size: 9px;
+    font-size: clamp(10px, 1.25dvh, calc(11 * var(--settlement-density-unit)));
     font-weight: 800;
     letter-spacing: .01em;
     line-height: 1.1;
@@ -636,14 +817,14 @@
     min-width: 0;
     min-height: var(--settlement-bed-card-min-height);
     overflow: hidden;
-    padding: 5px;
-    border: 1px solid color-mix(in srgb, var(--admin-line) 88%, var(--settlement-accent));
-    border-radius: 7px;
+    padding: calc(5 * var(--settlement-density-unit));
+    border: var(--settlement-line) solid color-mix(in srgb, var(--admin-line) 88%, var(--settlement-accent));
+    border-radius: calc(7 * var(--settlement-density-unit));
     outline: 0;
     background: color-mix(in srgb, var(--admin-panel-soft) 52%, var(--admin-panel));
     color: var(--admin-muted);
     font: inherit;
-    font-size: 12px;
+    font-size: calc(12 * var(--settlement-density-unit));
     font-weight: 900;
     cursor: pointer;
     isolation: isolate;
@@ -655,16 +836,16 @@
     transform: translateY(-1px);
     border-color: var(--settlement-accent);
     background: var(--settlement-accent-soft);
-    box-shadow: 0 0 0 2px color-mix(in srgb, var(--settlement-accent) 20%, transparent);
+    box-shadow: 0 0 0 calc(2 * var(--settlement-density-unit)) color-mix(in srgb, var(--settlement-accent) 20%, transparent);
 }
 
 .settlement-bed-visual {
     position: absolute;
-    inset: 4px;
+    inset: calc(4 * var(--settlement-density-unit));
     display: grid;
     overflow: hidden;
     place-items: center;
-    border-radius: 5px;
+    border-radius: calc(5 * var(--settlement-density-unit));
     pointer-events: none;
 }
 
@@ -673,7 +854,7 @@
     display: block;
     width: 100%;
     height: 100%;
-    border-radius: 5px;
+    border-radius: calc(5 * var(--settlement-density-unit));
     object-fit: cover;
     object-position: center 22%;
     opacity: 0;
@@ -687,16 +868,19 @@
     position: relative;
     grid-area: 1 / 1;
     display: grid;
-    width: min(var(--settlement-bed-photo-size), calc(100% - 8px));
+    width: auto;
+    max-width: calc(100% - calc(8 * var(--settlement-density-unit)));
+    height: min(var(--settlement-bed-photo-size), calc(100% - calc(4 * var(--settlement-density-unit))));
     aspect-ratio: 1;
     place-items: center;
-    border: 1px solid color-mix(in srgb, currentColor 28%, var(--admin-line));
-    border-radius: 8px;
+    border: var(--settlement-line) solid color-mix(in srgb, currentColor 28%, var(--admin-line));
+    border-radius: calc(8 * var(--settlement-density-unit));
     background: color-mix(in srgb, var(--admin-panel) 82%, transparent);
 }
 
 .settlement-bed.is-occupied.no-photo .settlement-bed-photo-placeholder {
     width: 100%;
+    max-width: none;
     height: 100%;
     aspect-ratio: auto;
     border-color: color-mix(in srgb, var(--admin-cyan) 26%, var(--admin-line));
@@ -705,10 +889,10 @@
 }
 
 .settlement-bed.is-occupied.no-photo .settlement-bed-avatar-initial {
-    font-size: 26px;
+    font-size: calc(26 * var(--settlement-density-unit));
     line-height: 1;
     letter-spacing: .03em;
-    transform: translateY(-7px);
+    transform: translateY(calc(-7 * var(--settlement-density-unit)));
 }
 
 .settlement-bed-avatar-initial {
@@ -716,39 +900,46 @@
     width: 100%;
     height: 100%;
     place-items: center;
-    font-size: 20px;
+    font-size: calc(20 * var(--settlement-density-unit));
     font-weight: 900;
     text-transform: uppercase;
 }
 
 .settlement-bed-empty-icon {
     position: relative;
-    width: 30px;
-    height: 19px;
-    border: 2px solid currentColor;
+    width: calc(30 * var(--settlement-density-unit));
+    height: calc(19 * var(--settlement-density-unit));
+    border: var(--settlement-strong-line) solid currentColor;
     border-top: 0;
-    border-radius: 2px 2px 4px 4px;
+    border-radius:
+        calc(2 * var(--settlement-density-unit))
+        calc(2 * var(--settlement-density-unit))
+        calc(4 * var(--settlement-density-unit))
+        calc(4 * var(--settlement-density-unit));
     opacity: .72;
 }
 
 .settlement-bed-empty-icon::before {
     position: absolute;
-    top: 3px;
-    right: 3px;
-    left: 3px;
-    height: 7px;
-    border: 2px solid currentColor;
-    border-radius: 3px 3px 0 0;
+    top: calc(3 * var(--settlement-density-unit));
+    right: calc(3 * var(--settlement-density-unit));
+    left: calc(3 * var(--settlement-density-unit));
+    height: calc(7 * var(--settlement-density-unit));
+    border: var(--settlement-strong-line) solid currentColor;
+    border-radius:
+        calc(3 * var(--settlement-density-unit))
+        calc(3 * var(--settlement-density-unit))
+        0 0;
     content: "";
 }
 
 .settlement-bed-empty-icon::after {
     position: absolute;
-    right: -2px;
-    bottom: -5px;
-    left: -2px;
-    height: 3px;
-    border-radius: 2px;
+    right: calc(-2 * var(--settlement-density-unit));
+    bottom: calc(-5 * var(--settlement-density-unit));
+    left: calc(-2 * var(--settlement-density-unit));
+    height: calc(3 * var(--settlement-density-unit));
+    border-radius: calc(2 * var(--settlement-density-unit));
     background: currentColor;
     content: "";
 }
@@ -756,30 +947,30 @@
 .settlement-bed-position,
 .settlement-bed-shift {
     position: absolute;
-    top: 4px;
+    top: calc(4 * var(--settlement-density-unit));
     z-index: 1;
     display: grid;
-    min-width: 22px;
-    min-height: 20px;
-    padding: 1px 4px;
+    min-width: calc(22 * var(--settlement-density-unit));
+    min-height: calc(20 * var(--settlement-density-unit));
+    padding: var(--settlement-density-unit) calc(4 * var(--settlement-density-unit));
     place-items: center;
-    border: 1px solid color-mix(in srgb, currentColor 30%, var(--admin-line));
-    border-radius: 5px;
+    border: var(--settlement-line) solid color-mix(in srgb, currentColor 30%, var(--admin-line));
+    border-radius: calc(5 * var(--settlement-density-unit));
     background: color-mix(in srgb, var(--admin-panel) 90%, transparent);
-    font-size: 12px;
+    font-size: calc(12 * var(--settlement-density-unit));
     line-height: 1;
 }
 
 .settlement-bed-position {
-    left: 4px;
+    left: calc(4 * var(--settlement-density-unit));
 }
 
 .settlement-bed-shift {
-    right: 7px;
-    max-width: calc(100% - 36px);
+    right: calc(7 * var(--settlement-density-unit));
+    max-width: calc(100% - calc(36 * var(--settlement-density-unit)));
     overflow: hidden;
-    padding-inline: 3px;
-    font-size: 10px;
+    padding-inline: calc(3 * var(--settlement-density-unit));
+    font-size: calc(10 * var(--settlement-density-unit));
     text-overflow: ellipsis;
     white-space: nowrap;
 }
@@ -787,15 +978,15 @@
 .settlement-bed-person,
 .settlement-bed-status {
     position: absolute;
-    right: 5px;
-    bottom: 4px;
-    left: 5px;
+    right: calc(5 * var(--settlement-density-unit));
+    bottom: calc(4 * var(--settlement-density-unit));
+    left: calc(5 * var(--settlement-density-unit));
     z-index: 1;
     overflow: hidden;
-    padding: 2px 3px;
-    border-radius: 4px;
+    padding: calc(2 * var(--settlement-density-unit)) calc(3 * var(--settlement-density-unit));
+    border-radius: calc(4 * var(--settlement-density-unit));
     background: color-mix(in srgb, var(--admin-panel) 90%, transparent);
-    font-size: 12px;
+    font-size: calc(12 * var(--settlement-density-unit));
     font-weight: 900;
     line-height: 1.05;
     text-align: center;
@@ -809,22 +1000,25 @@
 }
 
 .settlement-bed-status {
-    right: 2px;
-    bottom: 3px;
-    left: 2px;
-    padding: 1px 0;
-    font-size: 10px;
+    right: 0;
+    bottom: calc(3 * var(--settlement-density-unit));
+    left: 0;
+    padding: var(--settlement-density-unit) 0;
+    font-family: "Roboto Condensed", "Arial Narrow", "Segoe UI", Arial, sans-serif;
+    font-size: clamp(10px, 1.5dvh, calc(12 * var(--settlement-density-unit)));
+    font-weight: 800;
+    letter-spacing: -.04em;
     text-overflow: clip;
     white-space: nowrap;
 }
 
 .settlement-bed-state-indicator {
     position: absolute;
-    top: 5px;
-    right: 2px;
-    bottom: 5px;
-    width: 3px;
-    border-radius: 2px;
+    top: calc(5 * var(--settlement-density-unit));
+    right: calc(2 * var(--settlement-density-unit));
+    bottom: calc(5 * var(--settlement-density-unit));
+    width: calc(3 * var(--settlement-density-unit));
+    border-radius: calc(2 * var(--settlement-density-unit));
     background: var(--admin-line);
 }
 
@@ -836,28 +1030,28 @@
     border-color: var(--settlement-accent);
     background: var(--settlement-accent);
     color: #fff;
-    box-shadow: 0 0 0 2px color-mix(in srgb, var(--settlement-accent) 24%, transparent);
+    box-shadow: 0 0 0 calc(2 * var(--settlement-density-unit)) color-mix(in srgb, var(--settlement-accent) 24%, transparent);
 }
 
 .settlement-bed.is-occupied {
-    border: 2px solid var(--admin-cyan);
+    border: var(--settlement-strong-line) solid var(--admin-cyan);
     background: color-mix(in srgb, var(--admin-cyan-soft) 72%, var(--admin-panel));
     color: var(--admin-cyan);
 }
 
 .settlement-bed.is-occupied .settlement-bed-visual {
-    inset: 3px;
+    inset: calc(3 * var(--settlement-density-unit));
 }
 
 .settlement-bed.is-occupied .settlement-bed-position,
 .settlement-bed.is-occupied .settlement-bed-shift {
-    min-width: 20px;
-    min-height: 18px;
-    padding-inline: 3px;
+    min-width: calc(18 * var(--settlement-density-unit));
+    min-height: clamp(15px, 2.8dvh, calc(18 * var(--settlement-density-unit)));
+    padding-inline: calc(3 * var(--settlement-density-unit));
     border-color: rgb(255 255 255 / 38%);
     background: rgb(7 19 31 / 82%);
     color: #fff;
-    font-size: 10px;
+    font-size: calc(10 * var(--settlement-density-unit));
 }
 
 .settlement-bed.is-occupied .settlement-bed-person {
@@ -866,33 +1060,39 @@
 }
 
 .settlement-bed.is-occupied.has-photo .settlement-bed-person {
-    right: 2px;
-    bottom: 2px;
-    left: 2px;
-    max-height: 30px;
-    padding: 7px 3px 2px;
-    border-radius: 0 0 4px 4px;
+    right: calc(2 * var(--settlement-density-unit));
+    bottom: calc(2 * var(--settlement-density-unit));
+    left: calc(2 * var(--settlement-density-unit));
+    max-height: clamp(16px, 3.2dvh, calc(30 * var(--settlement-density-unit)));
+    padding:
+        calc(7 * var(--settlement-density-unit))
+        calc(3 * var(--settlement-density-unit))
+        calc(2 * var(--settlement-density-unit));
+    border-radius:
+        0 0
+        calc(4 * var(--settlement-density-unit))
+        calc(4 * var(--settlement-density-unit));
     background: linear-gradient(
         to bottom,
         rgb(7 19 31 / 0%),
         rgb(7 19 31 / 62%) 44%,
         rgb(7 19 31 / 94%) 100%
     );
-    font-size: 10px;
+    font-size: clamp(9px, 1.5dvh, calc(10 * var(--settlement-density-unit)));
     line-height: 1.05;
 }
 
 .settlement-bed.is-occupied.no-photo .settlement-bed-person {
-    right: 4px;
-    bottom: 3px;
-    left: 4px;
-    max-height: 24px;
-    padding: 2px 3px;
-    border: 1px solid color-mix(in srgb, var(--admin-cyan) 18%, var(--admin-line));
-    border-radius: 4px;
+    right: calc(4 * var(--settlement-density-unit));
+    bottom: calc(3 * var(--settlement-density-unit));
+    left: calc(4 * var(--settlement-density-unit));
+    max-height: clamp(16px, 3dvh, calc(24 * var(--settlement-density-unit)));
+    padding: calc(2 * var(--settlement-density-unit)) calc(3 * var(--settlement-density-unit));
+    border: var(--settlement-line) solid color-mix(in srgb, var(--admin-cyan) 18%, var(--admin-line));
+    border-radius: calc(4 * var(--settlement-density-unit));
     background: rgb(255 255 255 / 78%);
     color: color-mix(in srgb, var(--admin-ink) 88%, var(--admin-cyan));
-    font-size: 10px;
+    font-size: clamp(9px, 1.5dvh, calc(10 * var(--settlement-density-unit)));
     line-height: 1.05;
     overflow-wrap: anywhere;
     text-shadow: none;
@@ -927,12 +1127,12 @@
 }
 
 .settlement-room.type-itr .settlement-bed-photo-placeholder {
-    --settlement-bed-photo-size: 60px;
+    --settlement-bed-photo-size: calc(60 * var(--settlement-density-unit));
 }
 
 .settlement-room.type-itr .settlement-bed-person,
 .settlement-room.type-itr .settlement-bed-status {
-    font-size: 13px;
+    font-size: calc(13 * var(--settlement-density-unit));
 }
 
 .settlement-room.is-filter-muted {
@@ -956,14 +1156,14 @@
 
 body.settlement-unsettled-panel-open .settlement-work-badge[data-unsettled-panel-toggle] {
     position: fixed;
-    top: 18px;
-    right: min(480px, calc(100vw - 24px));
+    top: calc(18 * var(--settlement-density-unit));
+    right: min(var(--settlement-drawer-width), calc(100vw - calc(12 * var(--settlement-density-unit))));
     z-index: 1260;
-    width: 40px;
-    min-height: 38px;
+    width: calc(40 * var(--settlement-density-unit));
+    min-height: calc(38 * var(--settlement-density-unit));
     padding: 0;
-    border-radius: 7px;
-    transform: translateX(-8px);
+    border-radius: calc(7 * var(--settlement-density-unit));
+    transform: translateX(calc(-8 * var(--settlement-density-unit)));
 }
 
 body.settlement-unsettled-panel-open .settlement-work-badge[data-unsettled-panel-toggle] > * {
@@ -972,7 +1172,7 @@ body.settlement-unsettled-panel-open .settlement-work-badge[data-unsettled-panel
 
 body.settlement-unsettled-panel-open .settlement-work-badge[data-unsettled-panel-toggle]::before {
     content: "×";
-    font-size: 24px;
+    font-size: calc(24 * var(--settlement-density-unit));
     font-weight: 700;
     line-height: 1;
 }
@@ -988,11 +1188,19 @@ body.settlement-unsettled-panel-open .settlement-work-badge[data-unsettled-panel
     left: auto;
     display: grid;
     grid-template-rows: auto auto minmax(0, 1fr);
-    width: min(480px, calc(100vw - 24px));
+    width: min(
+        var(--settlement-drawer-width),
+        calc(100vw - clamp(12px, 2vw, calc(24 * var(--settlement-density-unit))))
+    );
+    height: 100dvh;
+    max-height: 100dvh;
     min-height: 0;
-    border-left: 1px solid var(--admin-line);
+    border-left: var(--settlement-line) solid var(--admin-line);
     background: var(--admin-bg);
-    box-shadow: -18px 0 48px rgb(35 49 57 / 24%);
+    box-shadow:
+        calc(-18 * var(--settlement-density-unit)) 0
+        calc(48 * var(--settlement-density-unit))
+        rgb(35 49 57 / 24%);
 }
 
 .settlement-unsettled-panel[hidden],
@@ -1003,10 +1211,13 @@ body.settlement-unsettled-panel-open .settlement-work-badge[data-unsettled-panel
 .settlement-unsettled-panel-header {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
-    gap: 16px;
+    gap: calc(16 * var(--settlement-density-unit));
     align-items: start;
-    padding: 18px 20px 15px;
-    border-bottom: 1px solid var(--admin-line);
+    padding:
+        calc(18 * var(--settlement-density-unit))
+        calc(20 * var(--settlement-density-unit))
+        calc(15 * var(--settlement-density-unit));
+    border-bottom: var(--settlement-line) solid var(--admin-line);
     background: var(--admin-panel);
 }
 
@@ -1014,40 +1225,40 @@ body.settlement-unsettled-panel-open .settlement-work-badge[data-unsettled-panel
 .settlement-unsettled-search > span,
 .settlement-unsettled-shift-filter legend {
     color: var(--admin-muted);
-    font-size: 9px;
+    font-size: calc(9 * var(--settlement-density-unit));
     font-weight: 900;
     letter-spacing: .08em;
     text-transform: uppercase;
 }
 
 .settlement-unsettled-panel-header h2 {
-    margin: 3px 0 0;
+    margin: calc(3 * var(--settlement-density-unit)) 0 0;
     color: var(--admin-ink);
-    font-size: 22px;
+    font-size: calc(22 * var(--settlement-density-unit));
     font-weight: 900;
 }
 
 .settlement-unsettled-panel-header p {
-    max-width: 370px;
-    margin: 4px 0 0;
+    max-width: calc(370 * var(--settlement-density-unit));
+    margin: calc(4 * var(--settlement-density-unit)) 0 0;
     color: var(--admin-muted);
-    font-size: 11px;
+    font-size: calc(11 * var(--settlement-density-unit));
     font-weight: 700;
     line-height: 1.35;
 }
 
 .settlement-unsettled-panel-close {
     display: grid;
-    width: 38px;
-    height: 38px;
+    width: calc(38 * var(--settlement-density-unit));
+    height: calc(38 * var(--settlement-density-unit));
     place-items: center;
     padding: 0;
-    border: 1px solid var(--admin-line);
-    border-radius: 7px;
+    border: var(--settlement-line) solid var(--admin-line);
+    border-radius: calc(7 * var(--settlement-density-unit));
     background: var(--admin-panel-soft);
     color: var(--admin-muted);
     font: inherit;
-    font-size: 24px;
+    font-size: calc(24 * var(--settlement-density-unit));
     line-height: 1;
     cursor: pointer;
 }
@@ -1061,28 +1272,30 @@ body.settlement-unsettled-panel-open .settlement-work-badge[data-unsettled-panel
 
 .settlement-unsettled-panel-tools {
     display: grid;
-    gap: 10px;
-    padding: 12px 20px;
-    border-bottom: 1px solid var(--admin-line);
+    gap: calc(10 * var(--settlement-density-unit));
+    padding:
+        calc(12 * var(--settlement-density-unit))
+        calc(20 * var(--settlement-density-unit));
+    border-bottom: var(--settlement-line) solid var(--admin-line);
     background: var(--admin-panel);
 }
 
 .settlement-unsettled-panel-count {
     color: var(--admin-muted);
-    font-size: 11px;
+    font-size: calc(11 * var(--settlement-density-unit));
     font-weight: 800;
 }
 
 .settlement-unsettled-panel-count strong {
     color: var(--admin-cyan);
-    font-size: 14px;
+    font-size: calc(14 * var(--settlement-density-unit));
 }
 
 .settlement-unsettled-search,
 .settlement-unsettled-shift-filter {
     display: grid;
     min-width: 0;
-    gap: 5px;
+    gap: calc(5 * var(--settlement-density-unit));
     margin: 0;
     padding: 0;
     border: 0;
@@ -1090,34 +1303,45 @@ body.settlement-unsettled-panel-open .settlement-work-badge[data-unsettled-panel
 
 .settlement-unsettled-search input {
     width: 100%;
-    min-height: 40px;
-    padding: 0 11px;
-    border: 1px solid var(--admin-line);
-    border-radius: 7px;
+    min-height: calc(40 * var(--settlement-density-unit));
+    padding: 0 calc(11 * var(--settlement-density-unit));
+    border: var(--settlement-line) solid var(--admin-line);
+    border-radius: calc(7 * var(--settlement-density-unit));
     outline: 0;
     background: var(--admin-panel-soft);
     color: var(--admin-ink);
     font: inherit;
-    font-size: 13px;
+    font-size: calc(13 * var(--settlement-density-unit));
     font-weight: 800;
 }
 
 .settlement-unsettled-search input:focus {
     border-color: var(--settlement-accent);
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--settlement-accent) 17%, transparent);
+    box-shadow: 0 0 0 calc(3 * var(--settlement-density-unit)) color-mix(in srgb, var(--settlement-accent) 17%, transparent);
 }
 
 .settlement-unsettled-panel-body {
+    display: flex;
+    flex-direction: column;
+    gap: calc(10 * var(--settlement-density-unit));
     min-height: 0;
     overflow: hidden;
-    padding: 12px 12px 16px;
+    padding:
+        calc(12 * var(--settlement-density-unit))
+        calc(12 * var(--settlement-density-unit))
+        calc(16 * var(--settlement-density-unit));
 }
 
 .settlement-unsettled-roster-warning {
-    margin: 12px 20px 0;
-    padding: 10px 12px;
-    border: 1px solid color-mix(in srgb, var(--admin-orange) 52%, var(--admin-line));
-    border-radius: 7px;
+    margin:
+        calc(12 * var(--settlement-density-unit))
+        calc(20 * var(--settlement-density-unit))
+        0;
+    padding:
+        calc(10 * var(--settlement-density-unit))
+        calc(12 * var(--settlement-density-unit));
+    border: var(--settlement-line) solid color-mix(in srgb, var(--admin-orange) 52%, var(--admin-line));
+    border-radius: calc(7 * var(--settlement-density-unit));
     background: color-mix(in srgb, var(--admin-orange-soft) 72%, var(--admin-panel));
     color: var(--admin-ink);
 }
@@ -1128,40 +1352,45 @@ body.settlement-unsettled-panel-open .settlement-work-badge[data-unsettled-panel
 }
 
 .settlement-unsettled-roster-warning strong {
-    font-size: 12px;
+    font-size: calc(12 * var(--settlement-density-unit));
     font-weight: 900;
 }
 
 .settlement-unsettled-roster-warning p {
-    margin-top: 3px;
+    margin-top: calc(3 * var(--settlement-density-unit));
     color: var(--admin-muted);
-    font-size: 10px;
+    font-size: calc(10 * var(--settlement-density-unit));
     font-weight: 700;
     line-height: 1.35;
 }
 
 .settlement-unsettled-list {
     display: grid;
-    max-height: 100%;
-    gap: 8px;
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: none;
+    gap: calc(8 * var(--settlement-density-unit));
     overflow-y: auto;
-    padding: 0 6px 0 0;
+    padding: 0 calc(6 * var(--settlement-density-unit)) 0 0;
     overscroll-behavior: contain;
     scrollbar-width: thin;
 }
 
 .settlement-unsettled-employee {
     display: grid;
-    grid-template-columns: 74px minmax(0, 1fr);
-    gap: 11px;
-    min-height: 94px;
-    padding: 8px;
+    grid-template-columns: calc(74 * var(--settlement-density-unit)) minmax(0, 1fr);
+    gap: calc(11 * var(--settlement-density-unit));
+    min-height: calc(94 * var(--settlement-density-unit));
+    padding: calc(8 * var(--settlement-density-unit));
     overflow: hidden;
-    border: 1px solid var(--admin-line);
-    border-left: 3px solid var(--admin-cyan);
-    border-radius: 9px;
+    border: var(--settlement-line) solid var(--admin-line);
+    border-left: calc(3 * var(--settlement-density-unit)) solid var(--admin-cyan);
+    border-radius: calc(9 * var(--settlement-density-unit));
     background: var(--admin-panel);
-    box-shadow: 0 5px 14px rgb(35 49 57 / 7%);
+    box-shadow:
+        0 calc(5 * var(--settlement-density-unit))
+        calc(14 * var(--settlement-density-unit))
+        rgb(35 49 57 / 7%);
 }
 
 .settlement-unsettled-employee[hidden] {
@@ -1171,12 +1400,12 @@ body.settlement-unsettled-panel-open .settlement-work-badge[data-unsettled-panel
 .settlement-unsettled-employee-visual {
     position: relative;
     display: grid;
-    width: 74px;
-    min-height: 78px;
+    width: calc(74 * var(--settlement-density-unit));
+    min-height: calc(78 * var(--settlement-density-unit));
     place-items: center;
     overflow: hidden;
-    border: 1px solid color-mix(in srgb, var(--admin-cyan) 38%, var(--admin-line));
-    border-radius: 7px;
+    border: var(--settlement-line) solid color-mix(in srgb, var(--admin-cyan) 38%, var(--admin-line));
+    border-radius: calc(7 * var(--settlement-density-unit));
     background: color-mix(in srgb, var(--admin-cyan-soft) 74%, var(--admin-panel));
     color: var(--admin-cyan);
 }
@@ -1196,7 +1425,7 @@ body.settlement-unsettled-panel-open .settlement-work-badge[data-unsettled-panel
 }
 
 .settlement-unsettled-employee-initials {
-    font-size: 26px;
+    font-size: calc(26 * var(--settlement-density-unit));
     font-weight: 900;
     letter-spacing: .02em;
 }
@@ -1205,14 +1434,14 @@ body.settlement-unsettled-panel-open .settlement-work-badge[data-unsettled-panel
     display: grid;
     min-width: 0;
     align-content: center;
-    gap: 3px;
+    gap: calc(3 * var(--settlement-density-unit));
 }
 
 .settlement-unsettled-employee-content > strong {
     display: -webkit-box;
     overflow: hidden;
     color: var(--admin-ink);
-    font-size: 13px;
+    font-size: calc(13 * var(--settlement-density-unit));
     font-weight: 900;
     line-height: 1.2;
     -webkit-box-orient: vertical;
@@ -1222,7 +1451,7 @@ body.settlement-unsettled-panel-open .settlement-work-badge[data-unsettled-panel
 .settlement-unsettled-employee-content > span {
     overflow: hidden;
     color: var(--admin-muted);
-    font-size: 11px;
+    font-size: calc(11 * var(--settlement-density-unit));
     font-weight: 700;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -1231,18 +1460,18 @@ body.settlement-unsettled-panel-open .settlement-work-badge[data-unsettled-panel
 .settlement-unsettled-employee-meta {
     display: flex;
     flex-wrap: wrap;
-    gap: 4px;
+    gap: calc(4 * var(--settlement-density-unit));
 }
 
 .settlement-unsettled-employee-meta small {
     width: max-content;
     max-width: 100%;
-    padding: 2px 5px;
+    padding: calc(2 * var(--settlement-density-unit)) calc(5 * var(--settlement-density-unit));
     overflow: hidden;
     border-radius: 999px;
     background: var(--admin-panel-soft);
     color: var(--admin-muted);
-    font-size: 9px;
+    font-size: calc(9 * var(--settlement-density-unit));
     font-weight: 800;
     line-height: 1.25;
     text-overflow: ellipsis;
@@ -1256,21 +1485,21 @@ body.settlement-unsettled-panel-open .settlement-work-badge[data-unsettled-panel
 
 .settlement-unsettled-empty {
     display: grid;
-    min-height: 210px;
+    min-height: calc(210 * var(--settlement-density-unit));
     place-content: center;
-    padding: 24px;
+    padding: calc(24 * var(--settlement-density-unit));
     color: var(--admin-muted);
     text-align: center;
 }
 
 .settlement-unsettled-empty strong {
     color: var(--admin-ink);
-    font-size: 16px;
+    font-size: calc(16 * var(--settlement-density-unit));
 }
 
 .settlement-unsettled-empty p {
-    margin: 6px 0 0;
-    font-size: 12px;
+    margin: calc(6 * var(--settlement-density-unit)) 0 0;
+    font-size: calc(12 * var(--settlement-density-unit));
 }
 
 .settlement-room-panel-backdrop,
@@ -1745,7 +1974,7 @@ body.settlement-unsettled-panel-open .settlement-work-badge[data-unsettled-panel
 
 @media (max-width: 720px) {
     .settlement-shell {
-        --settlement-room-min-height: 330px;
+        --settlement-room-min-height: clamp(188px, 32dvh, 330px);
         --settlement-bed-photo-size: 50px;
     }
 
