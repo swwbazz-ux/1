@@ -2,7 +2,7 @@
 {% load static %}
 
 {% block clerk_extra_head %}
-<link rel="stylesheet" href="{% static 'css/settlement-clerk.css' %}?v={{ static_asset_release }}-settlement-map-v14">
+<link rel="stylesheet" href="{% static 'css/settlement-clerk.css' %}?v={{ static_asset_release }}-settlement-map-v15">
 {% endblock %}
 
 {% block clerk_shell_class %}settlement-shell{% endblock %}
@@ -284,7 +284,7 @@
                 <div class="settlement-room-panel-section-title">
                     <div>
                         <span>Действие</span>
-                        <h3>Заселение сотрудника</h3>
+                        <h3 data-placement-title>Заселение сотрудника</h3>
                     </div>
                 </div>
                 <p class="settlement-placement-hint" data-placement-hint>
@@ -308,17 +308,31 @@
                     </div>
                     <label class="settlement-assignment-type" for="settlement-assignment-type">
                         <span>Тип закрепления</span>
-                        <select id="settlement-assignment-type" data-assignment-type required>
+                        <select id="settlement-assignment-type" data-assignment-type-select required>
                             <option value="">Выберите тип</option>
                             {% for value, label in assignment_type_choices %}
                                 <option value="{{ value }}">{{ label }}</option>
                             {% endfor %}
                         </select>
                     </label>
+                    <label class="settlement-assignment-end" for="settlement-assignment-end" data-assignment-end hidden>
+                        <span>Плановое окончание</span>
+                        <input id="settlement-assignment-end"
+                               type="datetime-local"
+                               data-assignment-end-input>
+                    </label>
                     <button type="submit" class="settlement-place-button" data-settle-button disabled>
                         Заселить
                     </button>
                 </form>
+                <div class="settlement-occupied-actions" data-occupied-actions hidden>
+                    <button type="button" class="settlement-place-button" data-relocate-button>
+                        Переселить сотрудника
+                    </button>
+                    <button type="button" class="settlement-release-button" data-release-button>
+                        Освободить койко-место
+                    </button>
+                </div>
                 <p class="settlement-placement-feedback" data-placement-feedback hidden></p>
             </section>
         </div>
@@ -326,5 +340,5 @@
 {% endblock %}
 
 {% block clerk_scripts %}
-<script src="{% static 'js/settlement-clerk.js' %}?v={{ static_asset_release }}-settlement-map-v14"></script>
+<script src="{% static 'js/settlement-clerk.js' %}?v={{ static_asset_release }}-settlement-map-v15"></script>
 {% endblock %}

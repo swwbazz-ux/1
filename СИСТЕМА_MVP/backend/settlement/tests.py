@@ -45,6 +45,8 @@ from .models import (
 from .services import (
     current_roster_resolution,
     effective_occupancy_at_q,
+    relocate_employee_to_bed,
+    release_employee_from_bed,
     settle_employee_on_bed,
     unsettled_current_roster_employees,
 )
@@ -2910,6 +2912,105 @@ class PhysicalRoomSexRestrictionMigrationTests(TransactionTestCase):
         )
 
 
+class EmployeeBedOccupancyCanonicalIntervalMigrationTests(TransactionTestCase):
+    migrate_from = ('settlement', '0005_physical_room_sex_restriction')
+    migrate_to = ('settlement', '0006_remove_legacy_occupancy_constraints')
+
+    def setUp(self):
+        super().setUp()
+        self.starts_at = datetime(2026, 8, 1, 8, tzinfo=datetime_timezone.utc)
+        self.terminated_at = self.starts_at + timedelta(days=1)
+        self.ends_at = self.starts_at + timedelta(days=5)
+
+        executor = MigrationExecutor(connection)
+        executor.migrate([self.migrate_from])
+        old_apps = executor.loader.project_state([self.migrate_from]).apps
+        DormitoryBefore = old_apps.get_model('references', 'Dormitory')
+        PhysicalRoomBefore = old_apps.get_model('settlement', 'PhysicalRoom')
+        PhysicalBedBefore = old_apps.get_model('settlement', 'PhysicalBed')
+        OccupancyBefore = old_apps.get_model('settlement', 'EmployeeBedOccupancy')
+
+        dormitory = DormitoryBefore.objects.create(number='OCC-MIG')
+        self.employee_id = Employee.objects.create(
+            full_name='Сотрудник миграции интервального размещения',
+            phone='+79000002911',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        ).pk
+        self.room_id = PhysicalRoomBefore.objects.create(
+            dormitory_id=dormitory.pk,
+            floor=1,
+            number=1,
+            room_type='standard',
+            transfer_status='transferred',
+            capacity=1,
+            corridor_side='left',
+            side_position=1,
+        ).pk
+        self.bed_id = PhysicalBedBefore.objects.create(
+            room_id=self.room_id,
+            stable_id='OCC-MIG-F1-R01-A1',
+            block='A',
+            position=1,
+        ).pk
+        self.occupancy_id = OccupancyBefore.objects.create(
+            employee_id=self.employee_id,
+            physical_bed_id=self.bed_id,
+            assignment_type='permanent',
+            settled_at=self.starts_at,
+            starts_at=self.starts_at,
+            ends_at=self.ends_at,
+            terminated_at=self.terminated_at,
+            settled_by_id=self.employee_id,
+            ended_at=None,
+        ).pk
+
+        executor = MigrationExecutor(connection)
+        executor.migrate([self.migrate_to])
+        self.apps = executor.loader.project_state([self.migrate_to]).apps
+
+    def tearDown(self):
+        executor = MigrationExecutor(connection)
+        executor.migrate(executor.loader.graph.leaf_nodes())
+        super().tearDown()
+
+    def test_legacy_columns_are_preserved_and_constraints_removed(self):
+        OccupancyAfter = self.apps.get_model('settlement', 'EmployeeBedOccupancy')
+        occupancy = OccupancyAfter.objects.get(pk=self.occupancy_id)
+
+        self.assertEqual(occupancy.settled_at, self.starts_at)
+        self.assertEqual(occupancy.starts_at, self.starts_at)
+        self.assertEqual(occupancy.ends_at, self.ends_at)
+        self.assertEqual(occupancy.terminated_at, self.terminated_at)
+        self.assertIsNone(occupancy.ended_at)
+        constraint_names = {
+            constraint.name
+            for constraint in OccupancyAfter._meta.constraints
+        }
+        self.assertFalse({
+            'unique_active_employee_bed_occupancy',
+            'unique_active_employee_occupancy',
+            'employee_bed_occupancy_period_valid',
+        } & constraint_names)
+        self.assertTrue({
+            'occupancy_ends_after_start',
+            'occupancy_term_after_start',
+            'occupancy_term_before_end',
+        } <= constraint_names)
+
+        next_occupancy = OccupancyAfter.objects.create(
+            employee_id=self.employee_id,
+            physical_bed_id=self.bed_id,
+            assignment_type='permanent',
+            settled_at=self.terminated_at + timedelta(seconds=1),
+            starts_at=self.terminated_at + timedelta(seconds=1),
+            settled_by_id=self.employee_id,
+            ended_at=None,
+        )
+
+        self.assertIsNotNone(next_occupancy.pk)
+
+
 class UnsettledCurrentRosterSelectorTests(TestCase):
     @classmethod
     def setUpTestData(cls):
@@ -3574,8 +3675,11 @@ class SettlementMapAccessTests(TestCase):
         self.assertIn('data-room-panel', content)
         self.assertIn('data-settlement-form', content)
         self.assertIn('data-employee-search', content)
-        self.assertEqual(content.count('-settlement-map-v14'), 2)
-        self.assertNotIn('-settlement-map-v13', content)
+        self.assertEqual(content.count('-settlement-map-v15'), 2)
+        self.assertNotIn('-settlement-map-v14', content)
+        self.assertIn('data-relocate-button', content)
+        self.assertIn('data-release-button', content)
+        self.assertIn('data-assignment-end-input', content)
         self.assertNotIn('data-dorm-filter="all"', content)
         self.assertNotIn('data-floor-filter="all"', content)
         self.assertIn(
@@ -3898,17 +4002,29 @@ class SettlementOccupancyWorkflowTests(TestCase):
         session['employee_access_id'] = access.id
         session.save()
 
-    def post_settle(self, *, bed=None, employee=None, assignment_type=None):
+    def post_settle(
+        self,
+        *,
+        bed=None,
+        employee=None,
+        assignment_type=None,
+        action='settle',
+        ends_at=None,
+    ):
+        payload = {
+            'action': action,
+            'bed_stable_id': (bed or self.transferred_beds[0]).stable_id,
+            'employee_id': (employee or self.candidate).pk,
+            'assignment_type': (
+                assignment_type
+                or EmployeeBedOccupancy.AssignmentType.PERMANENT
+            ),
+        }
+        if ends_at is not None:
+            payload['ends_at'] = ends_at.isoformat()
         return self.client.post(
             reverse('settlement_occupancy_create'),
-            data={
-                'bed_stable_id': (bed or self.transferred_beds[0]).stable_id,
-                'employee_id': (employee or self.candidate).pk,
-                'assignment_type': (
-                    assignment_type
-                    or EmployeeBedOccupancy.AssignmentType.PERMANENT
-                ),
-            },
+            data=payload,
             content_type='application/json',
         )
 
@@ -4028,7 +4144,7 @@ class SettlementOccupancyWorkflowTests(TestCase):
         self.assertEqual(occupancy.terminated_at, terminated_at)
         self.assertEqual(occupancy.ends_at, ends_at)
 
-    def test_active_occupancy_is_unique_for_bed_and_employee(self):
+    def test_database_no_longer_uses_legacy_ended_at_uniqueness(self):
         EmployeeBedOccupancy.objects.create(
             employee=self.candidate,
             physical_bed=self.transferred_beds[0],
@@ -4036,22 +4152,20 @@ class SettlementOccupancyWorkflowTests(TestCase):
             settled_by=self.clerk,
         )
 
-        with self.assertRaises(IntegrityError), transaction.atomic():
-            EmployeeBedOccupancy.objects.create(
-                employee=self.second_candidate,
-                physical_bed=self.transferred_beds[0],
-                assignment_type=EmployeeBedOccupancy.AssignmentType.TEMPORARY,
-                settled_by=self.clerk,
-            )
-        with self.assertRaises(IntegrityError), transaction.atomic():
-            EmployeeBedOccupancy.objects.create(
-                employee=self.candidate,
-                physical_bed=self.transferred_beds[1],
-                assignment_type=EmployeeBedOccupancy.AssignmentType.PROPOSED,
-                settled_by=self.clerk,
-            )
+        EmployeeBedOccupancy.objects.create(
+            employee=self.second_candidate,
+            physical_bed=self.transferred_beds[0],
+            assignment_type=EmployeeBedOccupancy.AssignmentType.TEMPORARY,
+            settled_by=self.clerk,
+        )
+        EmployeeBedOccupancy.objects.create(
+            employee=self.candidate,
+            physical_bed=self.transferred_beds[1],
+            assignment_type=EmployeeBedOccupancy.AssignmentType.PROPOSED,
+            settled_by=self.clerk,
+        )
 
-        self.assertEqual(EmployeeBedOccupancy.objects.count(), 1)
+        self.assertEqual(EmployeeBedOccupancy.objects.count(), 3)
 
     def test_service_rejects_same_bed_interval_overlap_without_partial_write(self):
         moment = datetime(2026, 8, 5, 12, tzinfo=datetime_timezone.utc)
@@ -4102,7 +4216,7 @@ class SettlementOccupancyWorkflowTests(TestCase):
                 settle_employee_on_bed(
                     bed_stable_id=self.transferred_beds[1].stable_id,
                     employee_id=self.candidate.pk,
-                    assignment_type=EmployeeBedOccupancy.AssignmentType.TEMPORARY,
+                    assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
                     settled_by=self.clerk,
                 )
 
@@ -4125,7 +4239,7 @@ class SettlementOccupancyWorkflowTests(TestCase):
             ends_at=moment + timedelta(days=10),
             terminated_at=terminated_at,
             settled_by=self.clerk,
-            ended_at=terminated_at,
+            ended_at=None,
         )
         occupancy_count = EmployeeBedOccupancy.objects.count()
 
@@ -4141,6 +4255,49 @@ class SettlementOccupancyWorkflowTests(TestCase):
         self.assertNotEqual(occupancy.pk, historical.pk)
         self.assertEqual(occupancy.employee, self.candidate)
         self.assertEqual(occupancy.physical_bed, self.transferred_beds[0])
+
+        with mock.patch('settlement.services.timezone.now', return_value=moment):
+            reused_employee_occupancy = settle_employee_on_bed(
+                bed_stable_id=self.transferred_beds[1].stable_id,
+                employee_id=self.second_candidate.pk,
+                assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
+                settled_by=self.clerk,
+            )
+
+        self.assertEqual(reused_employee_occupancy.employee, self.second_candidate)
+        self.assertEqual(reused_employee_occupancy.physical_bed, self.transferred_beds[1])
+
+    def test_service_allows_after_planned_end_without_false_conflict(self):
+        moment = datetime(2026, 8, 5, 12, tzinfo=datetime_timezone.utc)
+        starts_at = moment - timedelta(days=10)
+        ends_at = moment - timedelta(days=1)
+        EmployeeBedOccupancy.objects.create(
+            employee=self.second_candidate,
+            physical_bed=self.transferred_beds[0],
+            assignment_type=EmployeeBedOccupancy.AssignmentType.TEMPORARY,
+            settled_at=starts_at,
+            starts_at=starts_at,
+            ends_at=ends_at,
+            settled_by=self.clerk,
+            ended_at=None,
+        )
+
+        with mock.patch('settlement.services.timezone.now', return_value=moment):
+            reused_bed_occupancy = settle_employee_on_bed(
+                bed_stable_id=self.transferred_beds[0].stable_id,
+                employee_id=self.candidate.pk,
+                assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
+                settled_by=self.clerk,
+            )
+            reused_employee_occupancy = settle_employee_on_bed(
+                bed_stable_id=self.transferred_beds[1].stable_id,
+                employee_id=self.second_candidate.pk,
+                assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
+                settled_by=self.clerk,
+            )
+
+        self.assertEqual(reused_bed_occupancy.physical_bed, self.transferred_beds[0])
+        self.assertEqual(reused_employee_occupancy.employee, self.second_candidate)
 
     def test_map_panel_shows_occupant_shift_equipment_and_assignment_type(self):
         equipment_type = EquipmentType.objects.create(name='Тестовый самосвал')
@@ -4488,6 +4645,254 @@ class SettlementOccupancyWorkflowTests(TestCase):
         self.assertEqual(response.json()['code'], 'settlement_employee_inactive')
         self.assertFalse(EmployeeBedOccupancy.objects.exists())
 
+    def test_temporary_placement_requires_future_end_and_is_saved(self):
+        self.authenticate(self.client, self.clerk_access)
+        moment = datetime(2026, 8, 5, 12, tzinfo=datetime_timezone.utc)
+
+        with mock.patch('settlement.services.timezone.now', return_value=moment):
+            missing_end = self.post_settle(
+                assignment_type=EmployeeBedOccupancy.AssignmentType.TEMPORARY,
+            )
+            invalid_end = self.post_settle(
+                assignment_type=EmployeeBedOccupancy.AssignmentType.TEMPORARY,
+                ends_at=moment,
+            )
+            valid_end = moment + timedelta(days=3)
+            response = self.post_settle(
+                assignment_type=EmployeeBedOccupancy.AssignmentType.TEMPORARY,
+                ends_at=valid_end,
+            )
+
+        self.assertEqual(missing_end.status_code, 400)
+        self.assertEqual(
+            missing_end.json()['code'],
+            'settlement_temporary_end_required',
+        )
+        self.assertEqual(invalid_end.status_code, 400)
+        self.assertEqual(
+            invalid_end.json()['code'],
+            'settlement_ends_at_not_after_start',
+        )
+        self.assertEqual(response.status_code, 201)
+        occupancy = EmployeeBedOccupancy.objects.get()
+        self.assertEqual(occupancy.ends_at, valid_end)
+        self.assertEqual(occupancy.starts_at, moment)
+
+    def test_gender_restrictions_block_only_unknown_or_mismatched_employee(self):
+        self.candidate.sex = Employee.Sex.FEMALE
+        self.candidate.save(update_fields=['sex'])
+        self.second_candidate.sex = Employee.Sex.MALE
+        self.second_candidate.save(update_fields=['sex'])
+        restricted_room = self.transferred_beds[0].room
+        restricted_room.sex_restriction = PhysicalRoom.SexRestriction.FEMALE_ONLY
+        restricted_room.save(update_fields=['sex_restriction'])
+        self.authenticate(self.client, self.clerk_access)
+
+        matching = self.post_settle()
+
+        self.assertEqual(matching.status_code, 201)
+        EmployeeBedOccupancy.objects.all().delete()
+        mismatched = self.post_settle(employee=self.second_candidate)
+
+        self.assertEqual(mismatched.status_code, 409)
+        self.assertEqual(mismatched.json()['code'], 'settlement_room_sex_mismatch')
+        self.second_candidate.sex = Employee.Sex.UNKNOWN
+        self.second_candidate.save(update_fields=['sex'])
+        unknown = self.post_settle(employee=self.second_candidate)
+
+        self.assertEqual(unknown.status_code, 409)
+        self.assertEqual(unknown.json()['code'], 'settlement_employee_sex_unknown')
+
+    def test_unknown_room_restriction_allows_employee_with_unknown_sex(self):
+        self.assertEqual(
+            self.transferred_beds[0].room.sex_restriction,
+            PhysicalRoom.SexRestriction.UNKNOWN,
+        )
+        self.authenticate(self.client, self.clerk_access)
+
+        response = self.post_settle()
+
+        self.assertEqual(response.status_code, 201)
+
+    def test_relocation_obeys_target_room_sex_restriction(self):
+        moment = timezone.now().replace(microsecond=0)
+        self.candidate.sex = Employee.Sex.MALE
+        self.candidate.save(update_fields=['sex'])
+        original = EmployeeBedOccupancy.objects.create(
+            employee=self.candidate,
+            physical_bed=self.transferred_beds[0],
+            assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
+            settled_at=moment - timedelta(hours=1),
+            starts_at=moment - timedelta(hours=1),
+            settled_by=self.clerk,
+        )
+        target_room = self.transferred_beds[1].room
+        target_room.sex_restriction = PhysicalRoom.SexRestriction.FEMALE_ONLY
+        target_room.save(update_fields=['sex_restriction'])
+        self.authenticate(self.client, self.clerk_access)
+
+        with mock.patch('settlement.services.timezone.now', return_value=moment):
+            response = self.post_settle(
+                action='relocate',
+                bed=self.transferred_beds[1],
+            )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()['code'], 'settlement_room_sex_mismatch')
+        original.refresh_from_db()
+        self.assertIsNone(original.terminated_at)
+
+    def test_relocation_terminates_old_occupancy_and_preserves_history(self):
+        moment = datetime(2026, 8, 5, 12, tzinfo=datetime_timezone.utc)
+        original = EmployeeBedOccupancy.objects.create(
+            employee=self.candidate,
+            physical_bed=self.transferred_beds[0],
+            assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
+            settled_at=moment - timedelta(days=1),
+            starts_at=moment - timedelta(days=1),
+            ends_at=moment + timedelta(days=10),
+            settled_by=self.clerk,
+        )
+        self.authenticate(self.client, self.clerk_access)
+
+        with mock.patch('settlement.services.timezone.now', return_value=moment):
+            response = self.post_settle(
+                action='relocate',
+                bed=self.transferred_beds[1],
+                assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
+            )
+
+        self.assertEqual(response.status_code, 201)
+        original.refresh_from_db()
+        replacement = EmployeeBedOccupancy.objects.exclude(pk=original.pk).get()
+        self.assertEqual(original.terminated_at, moment)
+        self.assertEqual(original.ends_at, moment + timedelta(days=10))
+        self.assertIsNone(original.ended_at)
+        self.assertEqual(replacement.starts_at, moment)
+        self.assertEqual(replacement.settled_at, moment)
+        self.assertIsNone(replacement.ended_at)
+        self.assertEqual(replacement.physical_bed, self.transferred_beds[1])
+
+    def test_relocation_rolls_back_when_target_is_occupied_or_same_bed(self):
+        moment = datetime(2026, 8, 5, 12, tzinfo=datetime_timezone.utc)
+        original = EmployeeBedOccupancy.objects.create(
+            employee=self.candidate,
+            physical_bed=self.transferred_beds[0],
+            assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
+            settled_at=moment - timedelta(days=1),
+            starts_at=moment - timedelta(days=1),
+            settled_by=self.clerk,
+        )
+        EmployeeBedOccupancy.objects.create(
+            employee=self.second_candidate,
+            physical_bed=self.transferred_beds[1],
+            assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
+            settled_at=moment - timedelta(days=1),
+            starts_at=moment - timedelta(days=1),
+            settled_by=self.clerk,
+        )
+        self.authenticate(self.client, self.clerk_access)
+
+        with mock.patch('settlement.services.timezone.now', return_value=moment):
+            occupied_target = self.post_settle(
+                action='relocate',
+                bed=self.transferred_beds[1],
+            )
+            same_bed = self.post_settle(
+                action='relocate',
+                bed=self.transferred_beds[0],
+            )
+
+        self.assertEqual(occupied_target.status_code, 409)
+        self.assertEqual(
+            occupied_target.json()['code'],
+            'settlement.bed.interval_overlap',
+        )
+        self.assertEqual(same_bed.status_code, 409)
+        self.assertEqual(same_bed.json()['code'], 'settlement_relocation_same_bed')
+        original.refresh_from_db()
+        self.assertIsNone(original.terminated_at)
+        self.assertEqual(EmployeeBedOccupancy.objects.count(), 2)
+
+    def test_release_frees_bed_and_employee_for_immediate_reuse(self):
+        moment = datetime(2026, 8, 5, 12, tzinfo=datetime_timezone.utc)
+        original = EmployeeBedOccupancy.objects.create(
+            employee=self.candidate,
+            physical_bed=self.transferred_beds[0],
+            assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
+            settled_at=moment - timedelta(days=1),
+            starts_at=moment - timedelta(days=1),
+            settled_by=self.clerk,
+        )
+        self.authenticate(self.client, self.clerk_access)
+
+        with mock.patch('settlement.services.timezone.now', return_value=moment):
+            released = self.post_settle(action='release')
+            repeated = self.post_settle(action='release')
+            reused_bed = self.post_settle(employee=self.second_candidate)
+            reused_employee = self.post_settle(
+                bed=self.transferred_beds[1],
+                employee=self.candidate,
+            )
+
+        self.assertEqual(released.status_code, 200)
+        self.assertEqual(repeated.status_code, 409)
+        self.assertEqual(repeated.json()['code'], 'settlement_bed_already_free')
+        original.refresh_from_db()
+        self.assertEqual(original.terminated_at, moment)
+        self.assertIsNone(original.ended_at)
+        self.assertEqual(reused_bed.status_code, 201)
+        self.assertEqual(reused_employee.status_code, 201)
+
+    def test_map_search_and_counters_follow_action_results(self):
+        moment = timezone.now().replace(microsecond=0)
+        self.authenticate(self.client, self.clerk_access)
+
+        with mock.patch('settlement.services.timezone.now', return_value=moment):
+            settled = self.post_settle()
+        self.assertEqual(settled.status_code, 201)
+        with mock.patch('settlement.views.timezone.now', return_value=moment):
+            search_after_settle = self.client.get(
+                reverse('settlement_employee_search'),
+                {'q': 'Иванов'},
+            )
+            map_after_settle = self.client.get(reverse('settlement_map'))
+        self.assertEqual(search_after_settle.json()['results'], [])
+        self.assertContains(map_after_settle, 'data-occupied="true"')
+
+        with mock.patch('settlement.services.timezone.now', return_value=moment + timedelta(minutes=1)):
+            released = self.post_settle(action='release')
+        self.assertEqual(released.status_code, 200)
+        with mock.patch('settlement.views.timezone.now', return_value=moment + timedelta(minutes=1)):
+            search_after_release = self.client.get(
+                reverse('settlement_employee_search'),
+                {'q': 'Иванов'},
+            )
+            map_after_release = self.client.get(reverse('settlement_map'))
+        self.assertEqual(
+            [item['id'] for item in search_after_release.json()['results']],
+            [self.candidate.pk],
+        )
+        self.assertContains(map_after_release, 'data-occupied="false"')
+
+    def test_endpoint_requires_role_and_csrf(self):
+        csrf_client = Client(enforce_csrf_checks=True)
+        self.authenticate(csrf_client, self.clerk_access)
+
+        csrf_response = csrf_client.post(
+            reverse('settlement_occupancy_create'),
+            data={
+                'action': 'settle',
+                'bed_stable_id': self.transferred_beds[0].stable_id,
+                'employee_id': self.candidate.pk,
+                'assignment_type': EmployeeBedOccupancy.AssignmentType.PERMANENT,
+            },
+            content_type='application/json',
+        )
+
+        self.assertEqual(csrf_response.status_code, 403)
+        self.assertFalse(EmployeeBedOccupancy.objects.exists())
+
 
 class EffectiveOccupancyAtQueryTests(TestCase):
     @classmethod
@@ -4530,7 +4935,14 @@ class EffectiveOccupancyAtQueryTests(TestCase):
             is_active=True,
         )
 
-    def create_occupancy(self, *, starts_at, ends_at=None, terminated_at=None):
+    def create_occupancy(
+        self,
+        *,
+        starts_at,
+        ends_at=None,
+        terminated_at=None,
+        ended_at=None,
+    ):
         return EmployeeBedOccupancy.objects.create(
             employee=self.employee,
             physical_bed=self.bed,
@@ -4540,7 +4952,7 @@ class EffectiveOccupancyAtQueryTests(TestCase):
             ends_at=ends_at,
             terminated_at=terminated_at,
             settled_by=self.settled_by,
-            ended_at=None,
+            ended_at=ended_at,
         )
 
     def effective_ids_at(self, moment):
@@ -4631,6 +5043,50 @@ class EffectiveOccupancyAtQueryTests(TestCase):
         distant_future = self.moment + timedelta(days=3650)
 
         self.assertEqual(self.effective_ids_at(distant_future), {occupancy.pk})
+
+    def test_model_is_active_at_uses_the_same_half_open_interval(self):
+        starts_at = self.moment
+        occupancy = self.create_occupancy(
+            starts_at=starts_at,
+            ends_at=starts_at + timedelta(hours=2),
+            terminated_at=starts_at + timedelta(hours=1),
+        )
+
+        self.assertFalse(occupancy.is_active_at(starts_at - timedelta(microseconds=1)))
+        self.assertTrue(occupancy.is_active_at(starts_at))
+        self.assertTrue(occupancy.is_active_at(starts_at + timedelta(minutes=30)))
+        self.assertFalse(occupancy.is_active_at(starts_at + timedelta(hours=1)))
+        self.assertFalse(occupancy.is_active_at(starts_at + timedelta(hours=2)))
+
+    def test_model_is_active_at_remains_open_without_end_boundaries(self):
+        occupancy = self.create_occupancy(
+            starts_at=self.moment - timedelta(days=1),
+        )
+
+        self.assertTrue(occupancy.is_active_at(self.moment + timedelta(days=3650)))
+
+    def test_legacy_ended_at_does_not_affect_model_or_query_activity(self):
+        occupancy = self.create_occupancy(
+            starts_at=self.moment - timedelta(days=1),
+            ended_at=self.moment - timedelta(hours=1),
+        )
+
+        self.assertTrue(occupancy.is_active_at(self.moment))
+        self.assertEqual(self.effective_ids_at(self.moment), {occupancy.pk})
+
+    def test_is_active_property_delegates_to_current_moment(self):
+        occupancy = self.create_occupancy(
+            starts_at=self.moment,
+            ends_at=self.moment + timedelta(hours=1),
+        )
+
+        with mock.patch('settlement.models.timezone.now', return_value=self.moment):
+            self.assertTrue(occupancy.is_active)
+        with mock.patch(
+            'settlement.models.timezone.now',
+            return_value=self.moment + timedelta(hours=1),
+        ):
+            self.assertFalse(occupancy.is_active)
 
 
 class ClerkMapEffectiveOccupancyTests(TestCase):
@@ -5279,7 +5735,11 @@ class SettlementFrontendContractTests(TestCase):
         self.assertIn('fetch(root.dataset.employeeSearchUrl', javascript)
         self.assertIn('fetch(root.dataset.occupancyCreateUrl', javascript)
         self.assertIn('window.openAppConfirmDialog', javascript)
-        self.assertIn('var message = "Заселить "', javascript)
+        self.assertIn('action: relocationSourceBed ? "relocate" : "settle"', javascript)
+        self.assertIn('action: "release"', javascript)
+        self.assertIn('function confirmRelease()', javascript)
+        self.assertIn('function startRelocation()', javascript)
+        self.assertIn('function updateAssignmentEndVisibility()', javascript)
         self.assertIn('function toggleUnsettledPanel()', javascript)
         self.assertIn('function renderUnsettledEmployees()', javascript)
         self.assertNotIn('function trapUnsettledPanelFocus(event)', javascript)

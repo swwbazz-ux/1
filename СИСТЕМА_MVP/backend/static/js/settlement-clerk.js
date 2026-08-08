@@ -35,8 +35,14 @@
     var selectedEmployeeCard = root.querySelector("[data-selected-employee]");
     var selectedEmployeeName = root.querySelector("[data-selected-employee-name]");
     var selectedEmployeeMeta = root.querySelector("[data-selected-employee-meta]");
-    var assignmentType = root.querySelector("[data-assignment-type]");
+    var assignmentType = root.querySelector("[data-assignment-type-select]");
+    var assignmentEnd = root.querySelector("[data-assignment-end]");
+    var assignmentEndInput = root.querySelector("[data-assignment-end-input]");
     var settleButton = root.querySelector("[data-settle-button]");
+    var placementTitle = root.querySelector("[data-placement-title]");
+    var occupiedActions = root.querySelector("[data-occupied-actions]");
+    var relocateButton = root.querySelector("[data-relocate-button]");
+    var releaseButton = root.querySelector("[data-release-button]");
     var placementFeedback = root.querySelector("[data-placement-feedback]");
     var unsettledPanelToggle = root.querySelector("[data-unsettled-panel-toggle]");
     var unsettledPanel = root.querySelector("[data-unsettled-panel]");
@@ -49,6 +55,7 @@
     var activeRoom = null;
     var selectedBed = null;
     var selectedEmployee = null;
+    var relocationSourceBed = null;
     var searchTimer = null;
     var searchSequence = 0;
     var saving = false;
@@ -412,7 +419,28 @@
         }
         if (employeeSearch) employeeSearch.value = "";
         if (assignmentType) assignmentType.value = "";
+        if (assignmentEndInput) assignmentEndInput.value = "";
+        updateAssignmentEndVisibility();
         updateSettleButton();
+    }
+
+    function resetRelocation() {
+        relocationSourceBed = null;
+        resetEmployeeSelection();
+    }
+
+    function updateAssignmentEndVisibility() {
+        if (!assignmentEnd || !assignmentEndInput || !assignmentType) return;
+        var temporary = assignmentType.value === "temporary";
+        assignmentEnd.hidden = !temporary;
+        assignmentEndInput.required = temporary;
+        if (!temporary) assignmentEndInput.value = "";
+    }
+
+    function updateEmployeeSearchAvailability() {
+        if (!employeeSearch) return;
+        var label = employeeSearch.closest(".settlement-employee-search");
+        if (label) label.hidden = Boolean(relocationSourceBed);
     }
 
     function showFeedback(message, isError) {
@@ -427,13 +455,24 @@
         showFeedback("", false);
         settlementForm.hidden = true;
         placementHint.hidden = false;
+        if (occupiedActions) occupiedActions.hidden = true;
+        updateEmployeeSearchAvailability();
 
         if (!selectedBed) {
-            placementHint.textContent = "Выберите свободное койко-место в переданной комнате.";
+            if (placementTitle) {
+                placementTitle.textContent = relocationSourceBed
+                    ? "Переселение сотрудника"
+                    : "Заселение сотрудника";
+            }
+            placementHint.textContent = relocationSourceBed
+                ? "Выберите свободное койко-место для переселения выбранного сотрудника."
+                : "Выберите свободное койко-место в переданной комнате.";
             return;
         }
         if (selectedBed.dataset.occupied === "true") {
-            placementHint.textContent = "Это койко-место занято. Доступны только сведения о текущем жильце.";
+            if (placementTitle) placementTitle.textContent = "Действия с размещением";
+            placementHint.textContent = "Это койко-место занято. Можно переселить сотрудника или освободить место.";
+            if (occupiedActions) occupiedActions.hidden = false;
             return;
         }
         if (!activeRoom || activeRoom.dataset.transferStatus !== "transferred") {
@@ -441,9 +480,20 @@
             return;
         }
 
+        if (placementTitle) {
+            placementTitle.textContent = relocationSourceBed
+                ? "Переселение сотрудника"
+                : "Заселение сотрудника";
+        }
         placementHint.hidden = true;
         settlementForm.hidden = false;
-        if (employeeSearch) employeeSearch.focus();
+        if (settleButton) {
+            settleButton.textContent = relocationSourceBed ? "Переселить" : "Заселить";
+        }
+        if (relocationSourceBed && selectedEmployeeCard) {
+            selectedEmployeeCard.hidden = false;
+        }
+        if (employeeSearch && !relocationSourceBed) employeeSearch.focus();
     }
 
     function selectBed(bed) {
@@ -455,9 +505,10 @@
         selectedBed = bed;
         selectedBed.classList.add("is-selected");
         selectedBed.setAttribute("aria-pressed", "true");
-        if (changed) resetEmployeeSelection();
+        if (changed && !relocationSourceBed) resetEmployeeSelection();
         renderBedCards();
         updatePlacementPanel();
+        updateSettleButton();
     }
 
     function roomCounts(room) {
@@ -507,6 +558,7 @@
         panel.hidden = true;
         panel.setAttribute("aria-hidden", "true");
         panelBackdrop.hidden = true;
+        resetRelocation();
     }
 
     function employeeMeta(employee) {
@@ -584,12 +636,52 @@
 
     function updateSettleButton() {
         if (!settleButton) return;
+        var temporaryNeedsEnd = (
+            assignmentType
+            && assignmentType.value === "temporary"
+            && (!assignmentEndInput || !assignmentEndInput.value)
+        );
         settleButton.disabled = Boolean(
             saving
             || !selectedEmployee
+            || !selectedBed
             || !assignmentType
             || !assignmentType.value
+            || temporaryNeedsEnd
         );
+    }
+
+    function startRelocation() {
+        if (!selectedBed || selectedBed.dataset.occupied !== "true" || saving) return;
+        relocationSourceBed = selectedBed;
+        selectedEmployee = {
+            id: Number(selectedBed.dataset.occupantId),
+            full_name: selectedBed.dataset.occupantName,
+            personnel_number: "Не указано",
+            shift_label: selectedBed.dataset.shiftLabel,
+            work_label: selectedBed.dataset.workLabel
+        };
+        if (!selectedEmployee.id) {
+            showFeedback("Не удалось определить сотрудника текущего размещения.", true);
+            resetRelocation();
+            return;
+        }
+        if (selectedEmployeeName) selectedEmployeeName.textContent = selectedEmployee.full_name;
+        if (selectedEmployeeMeta) selectedEmployeeMeta.textContent = employeeMeta(selectedEmployee);
+        if (selectedEmployeeCard) selectedEmployeeCard.hidden = false;
+        if (assignmentType) {
+            assignmentType.value = selectedBed.dataset.assignmentType || "";
+        }
+        updateAssignmentEndVisibility();
+        selectedBed.classList.remove("is-selected");
+        selectedBed.setAttribute("aria-pressed", "false");
+        selectedBed = null;
+        renderBedCards();
+        updatePlacementPanel();
+        updateSettleButton();
+        panel.hidden = true;
+        panel.setAttribute("aria-hidden", "true");
+        panelBackdrop.hidden = true;
     }
 
     function csrfToken() {
@@ -642,9 +734,13 @@
                 "X-Requested-With": "XMLHttpRequest"
             },
             body: JSON.stringify({
+                action: relocationSourceBed ? "relocate" : "settle",
                 bed_stable_id: selectedBed.dataset.bedId,
                 employee_id: selectedEmployee.id,
-                assignment_type: assignmentType.value
+                assignment_type: assignmentType.value,
+                ends_at: assignmentEndInput && assignmentEndInput.value
+                    ? new Date(assignmentEndInput.value).toISOString()
+                    : null
             })
         })
             .then(function (response) {
@@ -655,9 +751,13 @@
             })
             .then(function (payload) {
                 var occupantName = payload.occupancy.occupant_name;
-                updateMapAfterSettlement(payload);
-                resetEmployeeSelection();
-                showFeedback(occupantName + " заселён в выбранное койко-место.", false);
+                showFeedback(
+                    relocationSourceBed
+                        ? occupantName + " переселён. Обновляем карту…"
+                        : occupantName + " заселён. Обновляем карту…",
+                    false
+                );
+                window.location.reload();
             })
             .catch(function (error) {
                 showFeedback(error.message || "Не удалось сохранить заселение.", true);
@@ -677,18 +777,76 @@
             "блок " + selectedBed.dataset.blockLabel,
             selectedBed.dataset.positionLabel
         ].join(", ");
-        var message = "Заселить " + selectedEmployee.full_name + " в " + destination + "?";
+        var relocating = Boolean(relocationSourceBed);
+        var message = (relocating ? "Переселить " : "Заселить ")
+            + selectedEmployee.full_name + " в " + destination + "?";
         if (typeof window.openAppConfirmDialog === "function") {
             window.openAppConfirmDialog(
                 message,
                 submitPlacement,
                 0,
-                "Заселить",
-                {title: "Подтвердите заселение"}
+                relocating ? "Переселить" : "Заселить",
+                {title: relocating ? "Подтвердите переселение" : "Подтвердите заселение"}
             );
             return;
         }
         if (window.confirm(message)) submitPlacement();
+    }
+
+    function submitRelease() {
+        if (!selectedBed || selectedBed.dataset.occupied !== "true" || saving) return;
+        saving = true;
+        if (releaseButton) releaseButton.disabled = true;
+        if (relocateButton) relocateButton.disabled = true;
+        showFeedback("Освобождаем койко-место…", false);
+        fetch(root.dataset.occupancyCreateUrl, {
+            method: "POST",
+            credentials: "same-origin",
+            headers: {
+                "Content-Type": "application/json",
+                "X-CSRFToken": csrfToken(),
+                "X-Requested-With": "XMLHttpRequest"
+            },
+            body: JSON.stringify({
+                action: "release",
+                bed_stable_id: selectedBed.dataset.bedId
+            })
+        })
+            .then(function (response) {
+                return response.json().then(function (payload) {
+                    if (!response.ok) throw new Error(payload.error || "Не удалось освободить койко-место.");
+                    return payload;
+                });
+            })
+            .then(function () {
+                showFeedback("Койко-место освобождено. Обновляем карту…", false);
+                window.location.reload();
+            })
+            .catch(function (error) {
+                showFeedback(error.message || "Не удалось освободить койко-место.", true);
+            })
+            .finally(function () {
+                saving = false;
+                if (releaseButton) releaseButton.disabled = false;
+                if (relocateButton) relocateButton.disabled = false;
+                updateSettleButton();
+            });
+    }
+
+    function confirmRelease() {
+        if (!selectedBed || selectedBed.dataset.occupied !== "true" || saving) return;
+        var message = "Освободить " + bedLabel(selectedBed) + " и завершить текущее размещение?";
+        if (typeof window.openAppConfirmDialog === "function") {
+            window.openAppConfirmDialog(
+                message,
+                submitRelease,
+                1,
+                "Освободить",
+                {title: "Подтвердите освобождение"}
+            );
+            return;
+        }
+        if (window.confirm(message)) submitRelease();
     }
 
     [
@@ -730,6 +888,8 @@
     });
     panelClose.addEventListener("click", closePanel);
     panelBackdrop.addEventListener("click", closePanel);
+    if (relocateButton) relocateButton.addEventListener("click", startRelocation);
+    if (releaseButton) releaseButton.addEventListener("click", confirmRelease);
     if (unsettledPanelToggle) {
         unsettledPanelToggle.addEventListener("click", toggleUnsettledPanel);
     }
@@ -764,7 +924,13 @@
         window.clearTimeout(searchTimer);
         searchTimer = window.setTimeout(runEmployeeSearch, 220);
     });
-    assignmentType.addEventListener("change", updateSettleButton);
+    assignmentType.addEventListener("change", function () {
+        updateAssignmentEndVisibility();
+        updateSettleButton();
+    });
+    if (assignmentEndInput) {
+        assignmentEndInput.addEventListener("input", updateSettleButton);
+    }
     settlementForm.addEventListener("submit", function (event) {
         event.preventDefault();
         confirmPlacement();

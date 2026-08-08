@@ -1393,23 +1393,6 @@ class EmployeeBedOccupancy(models.Model):
         verbose_name_plural = 'Размещения сотрудников на койко-местах'
         ordering = ['-settled_at', '-id']
         constraints = [
-            models.UniqueConstraint(
-                fields=['physical_bed'],
-                condition=models.Q(ended_at__isnull=True),
-                name='unique_active_employee_bed_occupancy',
-            ),
-            models.UniqueConstraint(
-                fields=['employee'],
-                condition=models.Q(ended_at__isnull=True),
-                name='unique_active_employee_occupancy',
-            ),
-            models.CheckConstraint(
-                condition=(
-                    models.Q(ended_at__isnull=True)
-                    | models.Q(ended_at__gt=models.F('settled_at'))
-                ),
-                name='employee_bed_occupancy_period_valid',
-            ),
             models.CheckConstraint(
                 condition=(
                     models.Q(ends_at__isnull=True)
@@ -1434,9 +1417,18 @@ class EmployeeBedOccupancy(models.Model):
             ),
         ]
 
+    def is_active_at(self, moment):
+        if moment < self.starts_at:
+            return False
+        if self.ends_at is not None and moment >= self.ends_at:
+            return False
+        if self.terminated_at is not None and moment >= self.terminated_at:
+            return False
+        return True
+
     @property
     def is_active(self):
-        return self.ended_at is None
+        return self.is_active_at(timezone.now())
 
     def __str__(self):
         return f'{self.employee} — {self.physical_bed}'

@@ -1534,6 +1534,9 @@ body.settlement-unsettled-panel-open .settlement-work-badge[data-unsettled-panel
 .settlement-employee-results[hidden],
 .settlement-selected-employee[hidden],
 .settlement-placement-panel form[hidden],
+.settlement-assignment-end[hidden],
+.settlement-employee-search[hidden],
+.settlement-occupied-actions[hidden],
 .settlement-placement-feedback[hidden] {
     display: none !important;
 }
@@ -1771,13 +1774,15 @@ body.settlement-unsettled-panel-open .settlement-work-badge[data-unsettled-panel
 }
 
 .settlement-employee-search,
-.settlement-assignment-type {
+.settlement-assignment-type,
+.settlement-assignment-end {
     display: grid;
     gap: 5px;
 }
 
 .settlement-employee-search input,
-.settlement-assignment-type select {
+.settlement-assignment-type select,
+.settlement-assignment-end input {
     width: 100%;
     min-height: 40px;
     padding: 0 11px;
@@ -1792,7 +1797,8 @@ body.settlement-unsettled-panel-open .settlement-work-badge[data-unsettled-panel
 }
 
 .settlement-employee-search input:focus,
-.settlement-assignment-type select:focus {
+.settlement-assignment-type select:focus,
+.settlement-assignment-end input:focus {
     border-color: var(--settlement-accent);
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--settlement-accent) 17%, transparent);
 }
@@ -1890,6 +1896,29 @@ body.settlement-unsettled-panel-open .settlement-work-badge[data-unsettled-panel
 
 .settlement-shell.admin-night .settlement-bed.is-selected {
     color: #07131f;
+}
+
+.settlement-occupied-actions {
+    display: grid;
+    gap: 8px;
+}
+
+.settlement-release-button {
+    min-height: 40px;
+    padding: 0 16px;
+    border: 1px solid color-mix(in srgb, var(--admin-red) 58%, var(--admin-line));
+    border-radius: 7px;
+    background: var(--admin-red-soft);
+    color: var(--admin-red);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 900;
+    cursor: pointer;
+}
+
+.settlement-release-button:disabled {
+    opacity: .58;
+    cursor: not-allowed;
 }
 
 @media (max-width: 1500px) {

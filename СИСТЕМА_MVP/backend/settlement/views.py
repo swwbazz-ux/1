@@ -8,6 +8,7 @@ from django.http import HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from assignments.models import AssignmentStatus, EquipmentAssignment
@@ -24,6 +25,8 @@ from .models import EmployeeBedOccupancy, PhysicalBed, PhysicalRoom
 from .services import (
     current_roster_resolution,
     effective_occupancy_at_q,
+    relocate_employee_to_bed,
+    release_employee_from_bed,
     settle_employee_on_bed,
     unsettled_current_roster_employees,
 )
@@ -570,6 +573,24 @@ def _occupancy_response(occupancy):
     }
 
 
+def _payload_ends_at(payload):
+    value = payload.get('ends_at')
+    if value in (None, ''):
+        return None
+    if not isinstance(value, str):
+        raise ValidationError(
+            'Плановое окончание размещения указано некорректно.',
+            code='settlement_ends_at_invalid',
+        )
+    parsed = parse_datetime(value)
+    if parsed is None or timezone.is_naive(parsed):
+        raise ValidationError(
+            'Плановое окончание размещения указано некорректно.',
+            code='settlement_ends_at_invalid',
+        )
+    return parsed
+
+
 @require_POST
 def settlement_occupancy_create_view(request):
     access = settlement_clerk_access_from_request(request)
@@ -592,13 +613,33 @@ def settlement_occupancy_create_view(request):
             status=400,
         )
 
+    action = payload.get('action', 'settle')
     try:
-        occupancy = settle_employee_on_bed(
-            bed_stable_id=payload.get('bed_stable_id', ''),
-            employee_id=payload.get('employee_id'),
-            assignment_type=payload.get('assignment_type', ''),
-            settled_by=access.employee,
-        )
+        if action == 'settle':
+            occupancy = settle_employee_on_bed(
+                bed_stable_id=payload.get('bed_stable_id', ''),
+                employee_id=payload.get('employee_id'),
+                assignment_type=payload.get('assignment_type', ''),
+                ends_at=_payload_ends_at(payload),
+                settled_by=access.employee,
+            )
+        elif action == 'relocate':
+            occupancy = relocate_employee_to_bed(
+                bed_stable_id=payload.get('bed_stable_id', ''),
+                employee_id=payload.get('employee_id'),
+                assignment_type=payload.get('assignment_type', ''),
+                ends_at=_payload_ends_at(payload),
+                settled_by=access.employee,
+            )
+        elif action == 'release':
+            occupancy = release_employee_from_bed(
+                bed_stable_id=payload.get('bed_stable_id', ''),
+            )
+        else:
+            raise ValidationError(
+                'Неизвестное действие расселения.',
+                code='settlement_action_invalid',
+            )
     except ValidationError as error:
         message, code = _validation_error_details(error)
         status = 409 if code in {
@@ -607,6 +648,15 @@ def settlement_occupancy_create_view(request):
             'settlement_bed_occupied',
             'settlement_employee_already_housed',
             'settlement_room_not_transferred',
+            'settlement_employee_not_housed',
+            'settlement_employee_multiple_active_occupancies',
+            'settlement_bed_multiple_active_occupancies',
+            'settlement_bed_already_free',
+            'settlement_relocation_same_bed',
+            'settlement_relocation_same_moment',
+            'settlement_release_same_moment',
+            'settlement_employee_sex_unknown',
+            'settlement_room_sex_mismatch',
         } else 400
         if code in {'settlement_bed_not_found', 'settlement_employee_not_found'}:
             status = 404
@@ -615,4 +665,10 @@ def settlement_occupancy_create_view(request):
             status=status,
         )
 
+    if action == 'release':
+        return JsonResponse({
+            'ok': True,
+            'action': 'release',
+            'occupancy_id': occupancy.pk,
+        })
     return JsonResponse(_occupancy_response(occupancy), status=201)
