@@ -2,7 +2,9 @@ import re
 import uuid
 from datetime import datetime, timedelta, timezone as datetime_timezone
 from io import StringIO
+from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 from unittest import mock
 
 from django.contrib import admin
@@ -43,6 +45,7 @@ from .models import (
     SettlementSource,
 )
 from .services import (
+    build_auto_settlement_preview,
     current_roster_resolution,
     effective_occupancy_at_q,
     relocate_employee_to_bed,
@@ -3511,10 +3514,17 @@ class SettlementMapAccessTests(TestCase):
         self.assertContains(response, '<h1>Делопроизводитель</h1>', html=True)
         content = response.content.decode('utf-8')
         self.assertEqual(content.count('data-clerk-section='), 1)
+        active_sections = re.findall(
+            r'<(?:a|button)\b(?=[^>]*class="[^"]*\bis-active\b[^"]*")'
+            r'(?=[^>]*data-clerk-section="([^"]+)")[^>]*>',
+            content,
+        )
+        self.assertEqual(active_sections, ['settlement'])
         self.assertRegex(
             content,
-            r'<a[^>]*class="is-active"[^>]*aria-current="page"[^>]*'
-            r'data-clerk-section="settlement">Расселение</a>',
+            r'<button\b(?=[^>]*type="button")'
+            r'(?=[^>]*data-clerk-section="settlement")'
+            r'(?=[^>]*data-unsettled-panel-toggle)[^>]*>Расселение</button>',
         )
         self.assertNotIn('<iframe', content.lower())
 
@@ -3582,7 +3592,7 @@ class SettlementMapAccessTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTemplateUsed(response, 'settlement/clerk_map.html')
         self.assertContains(response, 'Расселение')
-        self.assertContains(response, 'Расселение сотрудников')
+        self.assertContains(response, 'Нерасселённые')
         self.assertContains(response, 'КИС-5')
         self.assertContains(response, 'КИС-6')
         self.assertEqual(response.context['summary']['rooms'], 60)
@@ -3675,8 +3685,8 @@ class SettlementMapAccessTests(TestCase):
         self.assertIn('data-room-panel', content)
         self.assertIn('data-settlement-form', content)
         self.assertIn('data-employee-search', content)
-        self.assertEqual(content.count('-settlement-map-v15'), 2)
-        self.assertNotIn('-settlement-map-v14', content)
+        self.assertEqual(content.count('-settlement-map-v23'), 2)
+        self.assertNotIn('-settlement-map-v22', content)
         self.assertIn('data-relocate-button', content)
         self.assertIn('data-release-button', content)
         self.assertIn('data-assignment-end-input', content)
@@ -3776,6 +3786,289 @@ class SettlementMapAccessTests(TestCase):
             ),
             before,
         )
+
+
+class AutoSettlementPreviewPageTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        call_command('load_physical_fund', stdout=StringIO())
+        cls.clerk_role = Role.objects.create(code='settlement_clerk', name='Делопроизводитель')
+        cls.admin_role = Role.objects.create(code='admin', name='Администратор')
+        cls.driver_role = Role.objects.create(code='driver', name='Водитель')
+        cls.clerk = Employee.objects.create(
+            full_name='Тестовый делопроизводитель preview',
+            phone='+79000001901',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        cls.admin = Employee.objects.create(
+            full_name='Тестовый администратор preview',
+            phone='+79000001902',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        cls.driver = Employee.objects.create(
+            full_name='Тестовый водитель preview',
+            phone='+79000001903',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        cls.clerk_access = EmployeeAccess.objects.create(
+            employee=cls.clerk,
+            role=cls.clerk_role,
+            access_code='991901',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+        cls.admin_access = EmployeeAccess.objects.create(
+            employee=cls.admin,
+            role=cls.admin_role,
+            access_code='991902',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+        cls.driver_access = EmployeeAccess.objects.create(
+            employee=cls.driver,
+            role=cls.driver_role,
+            access_code='991903',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+
+    @staticmethod
+    def authenticate(client, access):
+        session = client.session
+        session['employee_access_id'] = access.id
+        session.save()
+
+    @classmethod
+    def preview_result(cls):
+        employee = SimpleNamespace(pk=901, full_name='Иванов Иван Иванович')
+        equipment = mock.MagicMock()
+        equipment.__str__.return_value = 'Самосвал № 101'
+        anchor = mock.MagicMock()
+        anchor.__str__.return_value = 'Жилая позиция № 1'
+        bed = PhysicalBed.objects.select_related('room__dormitory').order_by('pk').first()
+        room = bed.room
+        assignment = SimpleNamespace(
+            employee=employee,
+            equipment=equipment,
+            shift_type=WorkShiftType.SHIFT_1,
+        )
+        return {
+            'summary': {
+                'effective_assignment_count': 2,
+                'success_count': 1,
+                'conflict_count': 1,
+                'conflicted_assignment_count': 1,
+            },
+            'rows': ({
+                'employee': employee,
+                'equipment_assignment': assignment,
+                'equipment': equipment,
+                'shift_type': WorkShiftType.SHIFT_1,
+                'accommodation_anchor': anchor,
+                'room': room,
+                'bed': bed,
+            },),
+            'conflicts': ({
+                'code': 'equipment_anchor_missing',
+                'equipment_assignments': (assignment,),
+                'employee': employee,
+                'equipment': equipment,
+                'shift_type': WorkShiftType.SHIFT_2,
+            },),
+        }
+
+    def test_get_does_not_run_preview_and_keeps_map_available(self):
+        self.authenticate(self.client, self.clerk_access)
+        with mock.patch('settlement.views.build_auto_settlement_preview') as preview:
+            response = self.client.get(reverse('settlement_map'))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context['summary']['rooms'], 60)
+        self.assertEqual(response.context['summary']['beds'], 348)
+        self.assertContains(response, 'Предварительное авторасселение')
+        self.assertNotContains(response, 'data-auto-settlement-preview-bed')
+        preview.assert_not_called()
+
+    def test_clerk_and_admin_run_preview_with_selected_date(self):
+        for access in (self.clerk_access, self.admin_access):
+            self.authenticate(self.client, access)
+            with mock.patch(
+                'settlement.views.build_auto_settlement_preview',
+                return_value=self.preview_result(),
+            ) as preview:
+                response = self.client.get(
+                    reverse('settlement_map'),
+                    {'preview': '1', 'effective_date': '2026-08-10'},
+                )
+            self.assertEqual(response.status_code, 200)
+            effective_moment = preview.call_args.kwargs['effective_date']
+            self.assertEqual(effective_moment.date().isoformat(), '2026-08-10')
+            self.assertTrue(timezone.is_aware(effective_moment))
+
+    def test_other_role_cannot_run_preview(self):
+        self.authenticate(self.client, self.driver_access)
+        with mock.patch('settlement.views.build_auto_settlement_preview') as preview:
+            response = self.client.get(reverse('settlement_map'), {'preview': '1', 'effective_date': '2026-08-10'})
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(reverse('clerk_login'), response['Location'])
+        preview.assert_not_called()
+
+    def test_preview_renders_rows_summary_and_readable_conflict(self):
+        self.authenticate(self.client, self.clerk_access)
+        with mock.patch(
+            'settlement.views.build_auto_settlement_preview',
+            return_value=self.preview_result(),
+        ):
+            response = self.client.get(reverse('settlement_map'), {'preview': '1', 'effective_date': '10.08.2026'})
+        self.assertContains(response, 'Иванов Иван Иванович')
+        self.assertContains(response, 'Самосвал № 101')
+        self.assertContains(response, 'День')
+        self.assertContains(response, 'Ночь')
+        self.assertContains(response, 'КИС-5')
+        self.assertContains(
+            response,
+            PhysicalBed.objects.order_by('pk').first().stable_id,
+        )
+        self.assertContains(response, 'Действующих назначений')
+        self.assertContains(response, 'Подобрано мест')
+        self.assertContains(response, 'За техникой не закреплена жилая позиция.')
+        self.assertNotContains(response, 'has-auto-settlement-preview')
+        self.assertNotContains(response, 'has-preview')
+
+    def test_invalid_date_is_a_form_error_without_occupancy_write(self):
+        self.authenticate(self.client, self.clerk_access)
+        before = EmployeeBedOccupancy.objects.count()
+        with mock.patch('settlement.views.build_auto_settlement_preview') as preview:
+            response = self.client.get(reverse('settlement_map'), {'preview': '1', 'effective_date': 'not-a-date'})
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Укажите дату расчёта в корректном формате.')
+        self.assertEqual(EmployeeBedOccupancy.objects.count(), before)
+        preview.assert_not_called()
+
+    def test_preview_never_changes_occupancies_or_map_totals(self):
+        self.authenticate(self.client, self.clerk_access)
+        before = EmployeeBedOccupancy.objects.count()
+        with mock.patch(
+            'settlement.views.build_auto_settlement_preview',
+            return_value=self.preview_result(),
+        ):
+            response = self.client.get(reverse('settlement_map'), {'preview': '1', 'effective_date': '2026-08-10'})
+        self.assertEqual(response.context['summary']['rooms'], 60)
+        self.assertEqual(response.context['summary']['beds'], 348)
+        self.assertEqual(EmployeeBedOccupancy.objects.count(), before)
+
+    def test_successful_preview_rows_stay_in_the_result_table_and_do_not_change_bed_markup(self):
+        self.authenticate(self.client, self.clerk_access)
+        bed = PhysicalBed.objects.select_related('room__dormitory').order_by('pk').first()
+        equipment = mock.MagicMock()
+        equipment.__str__.return_value = 'БелАЗ 7513D №137'
+        equipment.equipment_type.name = 'БелАЗ 7513D'
+        equipment.garage_number = '137'
+        day_employee = SimpleNamespace(pk=901, full_name='Александров Александр Александрович')
+        night_employee = SimpleNamespace(pk=902, full_name='Константинопольский Константин Константинович')
+        preview = {
+            'summary': {
+                'effective_assignment_count': 2,
+                'success_count': 2,
+                'conflict_count': 1,
+                'conflicted_assignment_count': 1,
+            },
+            'rows': tuple(
+                {
+                    'employee': employee,
+                    'equipment_assignment': SimpleNamespace(
+                        employee=employee,
+                        equipment=equipment,
+                        shift_type=shift_type,
+                    ),
+                    'equipment': equipment,
+                    'shift_type': shift_type,
+                    'accommodation_anchor': mock.MagicMock(),
+                    'room': bed.room,
+                    'bed': bed,
+                }
+                for employee, shift_type in (
+                    (night_employee, WorkShiftType.SHIFT_2),
+                    (day_employee, WorkShiftType.SHIFT_1),
+                )
+            ),
+            'conflicts': ({
+                'code': 'equipment_anchor_missing',
+                'employee': SimpleNamespace(full_name='Конфликтный сотрудник'),
+            },),
+        }
+
+        with mock.patch('settlement.views.build_auto_settlement_preview', return_value=preview):
+            response = self.client.get(
+                reverse('settlement_map'),
+                {'preview': '1', 'effective_date': '2026-08-10'},
+            )
+
+        content = response.content.decode('utf-8')
+        bed_markup = re.search(
+            rf'<button(?=[^>]*data-bed-id="{re.escape(bed.stable_id)}")[\s\S]*?</button>',
+            content,
+        ).group(0)
+        self.assertNotIn('data-auto-settlement-preview-bed', bed_markup)
+        self.assertNotIn('Александров Александр Александрович', bed_markup)
+        self.assertNotIn('Константинопольский Константин Константинович', bed_markup)
+        self.assertNotIn('БелАЗ 7513D №137', bed_markup)
+        self.assertIn('Александров Александр Александрович', content)
+        self.assertIn('Константинопольский Константин Константинович', content)
+        self.assertNotIn('Конфликтный сотрудник', bed_markup)
+        self.assertNotIn('data-auto-settlement-preview-bed', content)
+
+    def test_preview_marks_matching_actual_occupancy_without_duplicate_resident(self):
+        self.authenticate(self.client, self.clerk_access)
+        bed = PhysicalBed.objects.order_by('pk').first()
+        EmployeeBedOccupancy.objects.create(
+            employee=self.clerk,
+            physical_bed=bed,
+            assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
+            settled_by=self.admin,
+            starts_at=timezone.now() - timedelta(days=1),
+        )
+        equipment = mock.MagicMock()
+        equipment.__str__.return_value = 'Самосвал № 303'
+        preview = {
+            'summary': {
+                'effective_assignment_count': 1,
+                'success_count': 1,
+                'conflict_count': 0,
+                'conflicted_assignment_count': 0,
+            },
+            'rows': ({
+                'employee': self.clerk,
+                'equipment_assignment': SimpleNamespace(
+                    employee=self.clerk,
+                    equipment=equipment,
+                    shift_type=WorkShiftType.SHIFT_1,
+                ),
+                'equipment': equipment,
+                'shift_type': WorkShiftType.SHIFT_1,
+                'accommodation_anchor': mock.MagicMock(),
+                'room': bed.room,
+                'bed': bed,
+            },),
+            'conflicts': (),
+        }
+
+        with mock.patch('settlement.views.build_auto_settlement_preview', return_value=preview):
+            response = self.client.get(
+                reverse('settlement_map'),
+                {'preview': '1', 'effective_date': '2026-08-10'},
+            )
+
+        content = response.content.decode('utf-8')
+        bed_markup = re.search(
+            rf'<button(?=[^>]*data-bed-id="{re.escape(bed.stable_id)}")[\s\S]*?</button>',
+            content,
+        ).group(0)
+        self.assertNotIn('Без изменений', bed_markup)
+        self.assertNotIn('data-auto-settlement-preview-bed', bed_markup)
+        self.assertEqual(EmployeeBedOccupancy.objects.count(), 1)
 
 
 class SettlementPwaContractTests(TestCase):
@@ -4050,6 +4343,40 @@ class SettlementOccupancyWorkflowTests(TestCase):
         self.assertIsNone(occupancy.ends_at)
         self.assertIsNone(occupancy.terminated_at)
         self.assertIsNone(occupancy.ended_at)
+
+    def test_clerk_can_read_occupied_employee_card_with_actual_bed(self):
+        occupancy = EmployeeBedOccupancy.objects.create(
+            employee=self.candidate,
+            physical_bed=self.transferred_beds[0],
+            assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
+            starts_at=timezone.now() - timedelta(minutes=1),
+            settled_by=self.clerk,
+        )
+        self.authenticate(self.client, self.clerk_access)
+
+        response = self.client.get(
+            reverse('settlement_employee_detail', args=[self.candidate.pk]),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()['employee']
+        self.assertEqual(payload['id'], self.candidate.pk)
+        self.assertEqual(payload['full_name'], self.candidate.full_name)
+        self.assertIn(self.transferred_beds[0].stable_id, payload['residence'])
+        self.assertIn(str(self.transferred_beds[0].room.number), payload['residence'])
+        self.assertEqual(
+            EmployeeBedOccupancy.objects.get(pk=occupancy.pk).physical_bed_id,
+            self.transferred_beds[0].pk,
+        )
+
+    def test_other_role_cannot_read_occupied_employee_card(self):
+        self.authenticate(self.client, self.driver_access)
+
+        response = self.client.get(
+            reverse('settlement_employee_detail', args=[self.candidate.pk]),
+        )
+
+        self.assertEqual(response.status_code, 403)
 
     def test_future_starts_at_can_be_saved_explicitly(self):
         future_start = timezone.now() + timedelta(days=30)
@@ -5700,6 +6027,8 @@ class SettlementFrontendContractTests(TestCase):
             javascript = file.read()
         with open(stylesheet_path, encoding='utf-8') as file:
             stylesheet = file.read()
+        room_card_path = Path(__file__).resolve().parents[1] / 'templates' / 'settlement' / '_room_card.html'
+        room_card_template = room_card_path.read_text(encoding='utf-8')
 
         def declaration(selector, property_name):
             blocks = re.findall(
@@ -5736,11 +6065,21 @@ class SettlementFrontendContractTests(TestCase):
         self.assertIn('fetch(root.dataset.occupancyCreateUrl', javascript)
         self.assertIn('window.openAppConfirmDialog', javascript)
         self.assertIn('action: relocationSourceBed ? "relocate" : "settle"', javascript)
+        self.assertIn('if (relocationSourceBed) {\n            submitPlacement();', javascript)
+        self.assertIn('dragHandle.setAttribute("data-bed-drag-handle", "");', javascript)
+        self.assertIn('dragHandle.setAttribute("draggable", "true");', javascript)
+        self.assertIn('selectedBed.dataset.occupantId = String(movedEmployeeId || "");', javascript)
         self.assertIn('action: "release"', javascript)
         self.assertIn('function confirmRelease()', javascript)
         self.assertIn('function startRelocation()', javascript)
         self.assertIn('function updateAssignmentEndVisibility()', javascript)
-        self.assertIn('function toggleUnsettledPanel()', javascript)
+        self.assertIn('function toggleUnsettledPanel(event)', javascript)
+        self.assertIn('function restoreMapSelection()', javascript)
+        self.assertIn('function persistMapSelection()', javascript)
+        self.assertIn('unsettledPanelToggles.forEach', javascript)
+        self.assertIn('toggle.hidden = true', javascript)
+        self.assertIn('toggle.hidden = false', javascript)
+        self.assertIn('application/x-settlement-bed', javascript)
         self.assertIn('function renderUnsettledEmployees()', javascript)
         self.assertNotIn('function trapUnsettledPanelFocus(event)', javascript)
         self.assertNotIn('unsettledPanelFocusables', javascript)
@@ -5771,8 +6110,14 @@ class SettlementFrontendContractTests(TestCase):
             'var shiftMatch = unsettledShift === "all" || card.dataset.shift === unsettledShift',
             javascript,
         )
-        self.assertNotIn('draggable =', javascript)
-        self.assertNotIn('addEventListener("dragstart"', javascript)
+        self.assertIn('data-bed-drag-handle', javascript)
+        self.assertIn('addEventListener("dragstart"', javascript)
+        self.assertIn('addEventListener("drop"', javascript)
+        self.assertIn('function configureRelocation(sourceBed, destinationBed)', javascript)
+        self.assertIn('addEventListener("dblclick"', javascript)
+        self.assertIn('function openEmployeePanel(employeeId)', javascript)
+        self.assertIn('openEmployeePanel(Number(bed.dataset.occupantId))', javascript)
+        self.assertIn('action: relocationSourceBed ? "relocate" : "settle"', javascript)
         open_room_source = javascript.split('function openRoom(room, bed) {', 1)[1].split(
             'function closePanel()',
             1,
@@ -5801,30 +6146,33 @@ class SettlementFrontendContractTests(TestCase):
         self.assertIn('min-height: var(--settlement-bed-card-min-height)', bed_card_styles)
         self.assertIn('object-fit: cover', stylesheet)
         self.assertIn('object-position: center 22%', stylesheet)
+        self.assertNotIn('.settlement-page.has-auto-settlement-preview', stylesheet)
+        self.assertNotIn('.settlement-bed.has-preview', stylesheet)
+        self.assertNotIn('.settlement-bed-preview-row', stylesheet)
+        self.assertNotIn('data-auto-settlement-preview-bed', room_card_template)
+        self.assertNotIn('preview.employee', room_card_template)
+        self.assertIn('data-bed-hover-card', room_card_template)
+        self.assertIn('data-bed-drag-handle', room_card_template)
+        self.assertIn('draggable="false"', room_card_template)
+        hover_card = room_card_template.split('data-bed-hover-card', 1)[1].split('>', 1)[0]
+        self.assertNotIn('data-bed-drag-handle', hover_card)
+        self.assertIn('.settlement-bed-hover-card', stylesheet)
+        self.assertIn('.settlement-room:has(.settlement-bed.is-occupied:hover)', stylesheet)
+        self.assertIn('.settlement-bed.is-occupied:hover,', stylesheet)
+        self.assertIn('pointer-events: none', stylesheet)
+        self.assertIn('position: absolute', stylesheet)
+        self.assertIn('object-fit: cover', stylesheet)
         self.assertIn('.settlement-bed.is-occupied.no-photo', stylesheet)
         occupied_styles = stylesheet.split('.settlement-bed.is-occupied {', 1)[1].split('}', 1)[0]
         self.assertIn('border: var(--settlement-strong-line) solid var(--admin-cyan)', occupied_styles)
-        photo_name_styles = stylesheet.split(
-            '.settlement-bed.is-occupied.has-photo .settlement-bed-person {',
-            1,
-        )[1].split('}', 1)[0]
-        self.assertIn('linear-gradient(', photo_name_styles)
-        self.assertRegex(photo_name_styles, r'max-height:\s*clamp\([^;]*dvh[^;]*\)')
-        fallback_initial_styles = stylesheet.split(
-            '.settlement-bed.is-occupied.no-photo .settlement-bed-avatar-initial {',
-            1,
-        )[1].split('}', 1)[0]
-        self.assertIn(
-            'font-size: calc(26 * var(--settlement-density-unit))',
-            fallback_initial_styles,
+        self.assertRegex(
+            stylesheet,
+            r'\.settlement-bed-position,\s*'
+            r'\.settlement-bed-person,\s*'
+            r'\.settlement-bed-status,\s*'
+            r'\.settlement-bed-shift,\s*'
+            r'\.settlement-bed-state-indicator\s*\{[^}]*display:\s*none !important',
         )
-        fallback_name_styles = stylesheet.split(
-            '.settlement-bed.is-occupied.no-photo .settlement-bed-person {',
-            1,
-        )[1].split('}', 1)[0]
-        self.assertRegex(fallback_name_styles, r'max-height:\s*clamp\([^;]*dvh[^;]*\)')
-        self.assertIn('overflow-wrap: anywhere', fallback_name_styles)
-        self.assertIn('text-shadow: none', fallback_name_styles)
         self.assertIn('.settlement-bed.is-free:not(:disabled):hover', stylesheet)
         itr_content_styles = stylesheet.split(
             '.settlement-room.type-itr .settlement-room-content {',
@@ -5864,27 +6212,17 @@ class SettlementFrontendContractTests(TestCase):
         self.assertEqual(declaration('.settlement-shell', '--admin-interface-scale'), '1')
         self.assertEqual(declaration('.settlement-shell', 'height'), '100dvh')
         self.assertEqual(declaration('.settlement-shell', 'max-height'), '100dvh')
-        self.assertEqual(declaration('.settlement-page', 'height'), '100%')
-        self.assertEqual(declaration('.settlement-floor-plan', 'height'), 'auto')
+        self.assertEqual(declaration('.settlement-page', 'height'), 'auto')
+        self.assertEqual(declaration('.settlement-floor-plan', 'height'), 'var(--settlement-plan-block-size)')
         self.assertEqual(declaration('.settlement-floor-plan', 'min-height'), '0')
-        self.assertEqual(declaration('.settlement-floor-plan', 'max-height'), '100%')
-        self.assertIn(
-            '--settlement-plan-inline-size',
-            declaration('.settlement-floor-plan', 'width'),
-        )
-        self.assertEqual(
-            declaration('.settlement-floor-plan', 'aspect-ratio'),
-            'var(--settlement-plan-aspect)',
-        )
-        self.assertEqual(
-            declaration('.settlement-shell', '--settlement-plan-inline-size'),
-            '255cqh',
-        )
-        self.assertEqual(
-            declaration('.settlement-shell', '--settlement-plan-aspect'),
-            '2.55 / 1',
-        )
-        self.assertEqual(declaration('.settlement-floor-scroll', 'container-type'), 'size')
+        self.assertEqual(declaration('.settlement-floor-plan', 'max-height'), 'none')
+        self.assertEqual(declaration('.settlement-floor-plan', 'width'), '100%')
+        self.assertEqual(declaration('.settlement-floor-plan', 'aspect-ratio'), 'auto')
+        plan_block_size = declaration('.settlement-shell', '--settlement-plan-block-size')
+        self.assertIn('var(--settlement-room-min-height)', plan_block_size)
+        self.assertIn('var(--settlement-corridor-height)', plan_block_size)
+        self.assertIn('var(--settlement-map-gap)', plan_block_size)
+        self.assertEqual(declaration('.settlement-floor-scroll', 'container-type'), 'inline-size')
         for density_consumer in (
             '.settlement-shell .admin-console-avatar',
             '.settlement-shell .admin-console-nav a',
@@ -5970,11 +6308,10 @@ class SettlementFrontendContractTests(TestCase):
         )
         self.assertNotIn('.settlement-unsettled-panel-backdrop', stylesheet)
         self.assertNotIn('body.settlement-unsettled-panel-open {\n    overflow: hidden;', stylesheet)
-        self.assertIn(
+        self.assertNotIn(
             'body.settlement-unsettled-panel-open .settlement-work-badge[data-unsettled-panel-toggle]',
             stylesheet,
         )
-        self.assertIn('z-index: 1260', stylesheet)
         self.assertIn('.settlement-unsettled-list', stylesheet)
         self.assertIn('overflow-y: auto', stylesheet)
         unsettled_photo_styles = stylesheet.split(
@@ -5994,3 +6331,343 @@ class SettlementFrontendContractTests(TestCase):
         self.assertIn('.clerk-workplace-screen .app-confirm-modal', stylesheet)
         self.assertIn('z-index: 1300', stylesheet)
         self.assertIn('min-height:', stylesheet)
+
+
+class AutoSettlementPreviewTests(TestCase):
+    def setUp(self):
+        self.moment = timezone.now().replace(microsecond=0)
+        self.role = Role.objects.create(code='preview-driver', name='Водитель preview')
+        self.employee = Employee.objects.create(
+            full_name='Сотрудник preview 1',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        self.second_employee = Employee.objects.create(
+            full_name='Сотрудник preview 2',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        self.third_employee = Employee.objects.create(
+            full_name='Сотрудник preview 3',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        equipment_type = EquipmentType.objects.create(name='Техника preview')
+        self.equipment_1 = Equipment.objects.create(
+            equipment_type=equipment_type,
+            garage_number='PREVIEW-01',
+        )
+        self.equipment_2 = Equipment.objects.create(
+            equipment_type=equipment_type,
+            garage_number='PREVIEW-02',
+        )
+        dormitory = Dormitory.objects.create(number='PREVIEW')
+        self.room = PhysicalRoom.objects.create(
+            dormitory=dormitory,
+            floor=1,
+            number=1,
+            room_type=PhysicalRoom.RoomType.STANDARD,
+            transfer_status=PhysicalRoom.TransferStatus.TRANSFERRED,
+            capacity=2,
+            corridor_side=PhysicalRoom.CorridorSide.LEFT,
+            side_position=1,
+        )
+        self.bed_1 = PhysicalBed.objects.create(
+            room=self.room,
+            stable_id='PREVIEW-F1-R01-A1',
+            block=PhysicalBed.Block.A,
+            position=1,
+        )
+        self.bed_2 = PhysicalBed.objects.create(
+            room=self.room,
+            stable_id='PREVIEW-F1-R01-A2',
+            block=PhysicalBed.Block.A,
+            position=2,
+        )
+        source = SettlementSource.objects.create(
+            source_type=SettlementSource.SourceType.SYSTEM,
+            title='Источник preview',
+            version='1',
+            file_sha256='b' * 64,
+            status=SettlementSource.Status.CONFIRMED,
+            confirmed_at=self.moment,
+            confirmed_by_label='Тестовый контур',
+        )
+        self.revision = SettlementRevision.objects.create(
+            code='PREVIEW-REVISION',
+            source=source,
+            status=SettlementRevision.Status.CONFIRMED,
+            effective_at=self.moment - timedelta(days=1),
+            confirmed_at=self.moment,
+            confirmed_by_label='Тестовый контур',
+            reason='Настройка preview.',
+        )
+
+    def create_anchor(self, equipment, code):
+        return AccommodationAnchor.objects.create(
+            code=code,
+            display_name=code,
+            anchor_type=AccommodationAnchor.AnchorType.EQUIPMENT,
+            equipment=equipment,
+            status=AccommodationAnchor.Status.ACTIVE,
+            created_revision=self.revision,
+        )
+
+    def bind_bed(self, anchor, bed):
+        return AccommodationAnchorBedAssignment.objects.create(
+            anchor=anchor,
+            physical_bed=bed,
+            valid_from=self.moment - timedelta(days=1),
+            status=AccommodationAnchorBedAssignment.Status.CONFIRMED,
+            started_revision=self.revision,
+        )
+
+    def create_assignment(self, *, employee, equipment, shift_type):
+        assignment = EquipmentAssignment.objects.create(
+            employee=employee,
+            role=self.role,
+            equipment=equipment,
+            shift_type=shift_type,
+            status=AssignmentStatus.ACCEPTED,
+            accepted_at=self.moment,
+        )
+        assigned_at = self.moment - timedelta(seconds=1)
+        EquipmentAssignment.objects.filter(pk=assignment.pk).update(
+            assigned_at=assigned_at,
+        )
+        assignment.assigned_at = assigned_at
+        return assignment
+
+    def conflict_codes(self, preview):
+        return {conflict['code'] for conflict in preview['conflicts']}
+
+    def test_effective_assignment_resolves_employee_equipment_shift_anchor_room_and_bed(self):
+        anchor = self.create_anchor(self.equipment_1, 'PREVIEW-ANCHOR-1')
+        anchor_bed_assignment = self.bind_bed(anchor, self.bed_1)
+        assignment = self.create_assignment(
+            employee=self.employee,
+            equipment=self.equipment_1,
+            shift_type=WorkShiftType.SHIFT_1,
+        )
+        occupancy_count = EmployeeBedOccupancy.objects.count()
+
+        preview = build_auto_settlement_preview(effective_date=self.moment)
+
+        self.assertEqual(preview['summary'], {
+            'effective_assignment_count': 1,
+            'success_count': 1,
+            'conflict_count': 0,
+            'conflicted_assignment_count': 0,
+        })
+        row = preview['rows'][0]
+        self.assertEqual(row['employee'], self.employee)
+        self.assertEqual(row['equipment_assignment'], assignment)
+        self.assertEqual(row['equipment'], self.equipment_1)
+        self.assertEqual(row['shift_type'], WorkShiftType.SHIFT_1)
+        self.assertEqual(row['accommodation_anchor'], anchor)
+        self.assertEqual(row['anchor_bed_assignment'], anchor_bed_assignment)
+        self.assertEqual(row['room'], self.room)
+        self.assertEqual(row['bed'], self.bed_1)
+        self.assertEqual(EmployeeBedOccupancy.objects.count(), occupancy_count)
+
+    def test_day_and_night_assignments_share_configured_bed_only_across_shifts(self):
+        anchor = self.create_anchor(self.equipment_1, 'PREVIEW-ANCHOR-DAY-NIGHT')
+        self.bind_bed(anchor, self.bed_1)
+        self.create_assignment(
+            employee=self.employee,
+            equipment=self.equipment_1,
+            shift_type=WorkShiftType.SHIFT_1,
+        )
+        self.create_assignment(
+            employee=self.second_employee,
+            equipment=self.equipment_1,
+            shift_type=WorkShiftType.SHIFT_2,
+        )
+
+        preview = build_auto_settlement_preview(effective_date=self.moment)
+
+        self.assertEqual(preview['summary']['success_count'], 2)
+        self.assertEqual(preview['summary']['conflict_count'], 0)
+        self.assertEqual(
+            {(row['shift_type'], row['bed'].pk) for row in preview['rows']},
+            {
+                (WorkShiftType.SHIFT_1, self.bed_1.pk),
+                (WorkShiftType.SHIFT_2, self.bed_1.pk),
+            },
+        )
+
+    def test_ended_and_future_assignments_do_not_enter_preview(self):
+        anchor = self.create_anchor(self.equipment_1, 'PREVIEW-ANCHOR-TIME')
+        self.bind_bed(anchor, self.bed_1)
+        ended = self.create_assignment(
+            employee=self.employee,
+            equipment=self.equipment_1,
+            shift_type=WorkShiftType.SHIFT_1,
+        )
+        future = self.create_assignment(
+            employee=self.second_employee,
+            equipment=self.equipment_1,
+            shift_type=WorkShiftType.SHIFT_2,
+        )
+        EquipmentAssignment.objects.filter(pk=ended.pk).update(
+            ended_at=self.moment - timedelta(seconds=1),
+        )
+        EquipmentAssignment.objects.filter(pk=future.pk).update(
+            assigned_at=self.moment + timedelta(days=1),
+        )
+
+        preview = build_auto_settlement_preview(effective_date=self.moment)
+
+        self.assertEqual(preview['summary']['effective_assignment_count'], 0)
+        self.assertEqual(preview['rows'], ())
+        self.assertEqual(preview['conflicts'], ())
+
+    def test_missing_anchor_and_missing_bed_assignment_are_conflicts(self):
+        self.create_assignment(
+            employee=self.employee,
+            equipment=self.equipment_1,
+            shift_type=WorkShiftType.SHIFT_1,
+        )
+        anchor = self.create_anchor(self.equipment_2, 'PREVIEW-ANCHOR-WITHOUT-BED')
+        self.create_assignment(
+            employee=self.second_employee,
+            equipment=self.equipment_2,
+            shift_type=WorkShiftType.SHIFT_1,
+        )
+
+        preview = build_auto_settlement_preview(effective_date=self.moment)
+
+        self.assertEqual(self.conflict_codes(preview), {
+            'equipment_anchor_missing',
+            'anchor_bed_assignment_missing',
+        })
+        self.assertEqual(
+            next(
+                conflict['accommodation_anchor']
+                for conflict in preview['conflicts']
+                if conflict['code'] == 'anchor_bed_assignment_missing'
+            ),
+            anchor,
+        )
+
+    def test_duplicate_effective_employee_assignment_is_reported_without_guessing(self):
+        anchor_1 = self.create_anchor(self.equipment_1, 'PREVIEW-ANCHOR-DUP-1')
+        anchor_2 = self.create_anchor(self.equipment_2, 'PREVIEW-ANCHOR-DUP-2')
+        self.bind_bed(anchor_1, self.bed_1)
+        self.bind_bed(anchor_2, self.bed_2)
+        first = self.create_assignment(
+            employee=self.employee,
+            equipment=self.equipment_1,
+            shift_type=WorkShiftType.SHIFT_1,
+        )
+        second = EquipmentAssignment.objects.create(
+            employee=self.second_employee,
+            role=self.role,
+            equipment=self.equipment_2,
+            shift_type=WorkShiftType.SHIFT_2,
+            status=AssignmentStatus.PENDING,
+        )
+        second.employee = self.employee
+        second.status = AssignmentStatus.ACCEPTED
+        second.accepted_at = self.moment
+
+        with mock.patch(
+            'settlement.services._effective_auto_settlement_equipment_assignments',
+            return_value=[first, second],
+        ):
+            preview = build_auto_settlement_preview(effective_date=self.moment)
+
+        self.assertEqual(self.conflict_codes(preview), {
+            'employee_multiple_effective_assignments',
+        })
+        self.assertEqual(preview['summary']['success_count'], 0)
+
+    def test_bed_capacity_conflict_is_reported_for_same_shift_without_writing(self):
+        anchor_1 = self.create_anchor(self.equipment_1, 'PREVIEW-ANCHOR-CAP-1')
+        anchor_2 = self.create_anchor(self.equipment_2, 'PREVIEW-ANCHOR-CAP-2')
+        first_anchor_bed_assignment = self.bind_bed(anchor_1, self.bed_1)
+        self.create_assignment(
+            employee=self.employee,
+            equipment=self.equipment_1,
+            shift_type=WorkShiftType.SHIFT_1,
+        )
+        self.create_assignment(
+            employee=self.second_employee,
+            equipment=self.equipment_2,
+            shift_type=WorkShiftType.SHIFT_1,
+        )
+        conflicting_anchor_bed_assignment = SimpleNamespace(
+            anchor_id=anchor_2.pk,
+            physical_bed=self.bed_1,
+        )
+        occupancy_count = EmployeeBedOccupancy.objects.count()
+
+        with mock.patch(
+            'settlement.services._effective_anchor_bed_assignments',
+            return_value=[
+                first_anchor_bed_assignment,
+                conflicting_anchor_bed_assignment,
+            ],
+        ):
+            preview = build_auto_settlement_preview(effective_date=self.moment)
+
+        self.assertEqual(self.conflict_codes(preview), {'bed_shift_capacity_conflict'})
+        self.assertEqual(preview['summary']['success_count'], 0)
+        self.assertEqual(EmployeeBedOccupancy.objects.count(), occupancy_count)
+
+    def test_incompatible_effective_occupancy_blocks_bed(self):
+        anchor = self.create_anchor(self.equipment_1, 'PREVIEW-ANCHOR-OCCUPIED')
+        self.bind_bed(anchor, self.bed_1)
+        self.create_assignment(
+            employee=self.employee,
+            equipment=self.equipment_1,
+            shift_type=WorkShiftType.SHIFT_1,
+        )
+        EmployeeBedOccupancy.objects.create(
+            employee=self.second_employee,
+            physical_bed=self.bed_1,
+            assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
+            settled_by=self.third_employee,
+            starts_at=self.moment - timedelta(days=1),
+        )
+
+        preview = build_auto_settlement_preview(effective_date=self.moment)
+
+        self.assertEqual(self.conflict_codes(preview), {'bed_occupied_by_other_employee'})
+        self.assertEqual(preview['rows'], ())
+
+    def test_repeated_preview_is_deterministic_and_never_changes_data(self):
+        anchor = self.create_anchor(self.equipment_1, 'PREVIEW-ANCHOR-REPEAT')
+        self.bind_bed(anchor, self.bed_1)
+        assignment = self.create_assignment(
+            employee=self.employee,
+            equipment=self.equipment_1,
+            shift_type=WorkShiftType.SHIFT_1,
+        )
+        before = {
+            'equipment_assignment_ids': tuple(EquipmentAssignment.objects.values_list('pk', flat=True)),
+            'occupancy_ids': tuple(EmployeeBedOccupancy.objects.values_list('pk', flat=True)),
+            'anchor_assignment_ids': tuple(
+                AccommodationAnchorBedAssignment.objects.values_list('pk', flat=True),
+            ),
+        }
+
+        first = build_auto_settlement_preview(effective_date=self.moment)
+        second = build_auto_settlement_preview(effective_date=self.moment)
+
+        self.assertEqual(
+            [row['equipment_assignment'].pk for row in first['rows']],
+            [row['equipment_assignment'].pk for row in second['rows']],
+        )
+        self.assertEqual(
+            [conflict['code'] for conflict in first['conflicts']],
+            [conflict['code'] for conflict in second['conflicts']],
+        )
+        self.assertEqual(first['rows'][0]['equipment_assignment'], assignment)
+        self.assertEqual(before, {
+            'equipment_assignment_ids': tuple(EquipmentAssignment.objects.values_list('pk', flat=True)),
+            'occupancy_ids': tuple(EmployeeBedOccupancy.objects.values_list('pk', flat=True)),
+            'anchor_assignment_ids': tuple(
+                AccommodationAnchorBedAssignment.objects.values_list('pk', flat=True),
+            ),
+        })

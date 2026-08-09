@@ -1,3 +1,4 @@
+from collections import defaultdict
 from datetime import datetime
 
 from django.core.exceptions import ValidationError
@@ -8,8 +9,15 @@ from django.utils import timezone
 from core.production_time import production_work_date
 from shifts.models import WatchPeriod
 from users.models import Employee
+from assignments.models import AssignmentStatus, EquipmentAssignment, WorkShiftType
 
-from .models import EmployeeBedOccupancy, PhysicalBed, PhysicalRoom
+from .models import (
+    AccommodationAnchor,
+    AccommodationAnchorBedAssignment,
+    EmployeeBedOccupancy,
+    PhysicalBed,
+    PhysicalRoom,
+)
 from .validator import (
     ActualPlacementType,
     EffectivePlacementInterval,
@@ -31,6 +39,284 @@ def effective_occupancy_at_q(moment):
             | Q(terminated_at__gt=moment)
         )
     )
+
+
+def _auto_settlement_preview_conflict(code, *, assignments=(), **details):
+    return {
+        'code': code,
+        'equipment_assignments': tuple(assignments),
+        **details,
+    }
+
+
+def _effective_auto_settlement_equipment_assignments(effective_date):
+    return list(
+        EquipmentAssignment.objects.filter(
+            status=AssignmentStatus.ACCEPTED,
+            role__isnull=False,
+            shift__isnull=True,
+            assigned_at__lte=effective_date,
+        )
+        .filter(Q(accepted_at__isnull=True) | Q(accepted_at__lte=effective_date))
+        .filter(Q(ended_at__isnull=True) | Q(ended_at__gt=effective_date))
+        .select_related('employee', 'equipment', 'role')
+        .order_by('employee_id', 'equipment_id', 'shift_type', 'pk')
+    )
+
+
+def _effective_anchor_bed_assignments(*, anchor_ids, effective_date):
+    return list(
+        AccommodationAnchorBedAssignment.objects
+        .filter(
+            anchor_id__in=anchor_ids,
+            status=AccommodationAnchorBedAssignment.Status.CONFIRMED,
+            valid_from__lte=effective_date,
+        )
+        .filter(Q(valid_to__isnull=True) | Q(valid_to__gt=effective_date))
+        .select_related('anchor', 'physical_bed__room')
+        .order_by('pk')
+    )
+
+
+def build_auto_settlement_preview(*, effective_date):
+    """Calculate a non-persistent accommodation proposal from active work assignments."""
+    if not isinstance(effective_date, datetime) or timezone.is_naive(effective_date):
+        raise ValueError('effective_date must be an aware datetime.')
+
+    effective_assignments = _effective_auto_settlement_equipment_assignments(
+        effective_date,
+    )
+    conflicts = []
+    conflicted_assignment_ids = set()
+
+    assignments_by_employee = defaultdict(list)
+    for assignment in effective_assignments:
+        assignments_by_employee[assignment.employee_id].append(assignment)
+    for employee_id in sorted(assignments_by_employee):
+        assignments = assignments_by_employee[employee_id]
+        if len(assignments) > 1:
+            conflicts.append(
+                _auto_settlement_preview_conflict(
+                    'employee_multiple_effective_assignments',
+                    assignments=assignments,
+                    employee=assignments[0].employee,
+                ),
+            )
+            conflicted_assignment_ids.update(item.pk for item in assignments)
+
+    candidates = []
+    for assignment in effective_assignments:
+        if assignment.pk in conflicted_assignment_ids:
+            continue
+        if assignment.equipment_id is None:
+            conflicts.append(
+                _auto_settlement_preview_conflict(
+                    'assignment_equipment_missing',
+                    assignments=(assignment,),
+                    employee=assignment.employee,
+                ),
+            )
+            conflicted_assignment_ids.add(assignment.pk)
+            continue
+        if assignment.shift_type not in WorkShiftType.values:
+            conflicts.append(
+                _auto_settlement_preview_conflict(
+                    'assignment_shift_missing_or_invalid',
+                    assignments=(assignment,),
+                    employee=assignment.employee,
+                    equipment=assignment.equipment,
+                    shift_type=assignment.shift_type,
+                ),
+            )
+            conflicted_assignment_ids.add(assignment.pk)
+            continue
+        candidates.append(assignment)
+
+    anchors_by_equipment = defaultdict(list)
+    equipment_ids = {assignment.equipment_id for assignment in candidates}
+    if equipment_ids:
+        for anchor in AccommodationAnchor.objects.filter(
+            equipment_id__in=equipment_ids,
+            anchor_type=AccommodationAnchor.AnchorType.EQUIPMENT,
+            status=AccommodationAnchor.Status.ACTIVE,
+        ).order_by('pk'):
+            anchors_by_equipment[anchor.equipment_id].append(anchor)
+
+    assignments_by_anchor = defaultdict(list)
+    anchor_ids = {
+        anchor.pk
+        for anchors in anchors_by_equipment.values()
+        for anchor in anchors
+    }
+    if anchor_ids:
+        for anchor_assignment in _effective_anchor_bed_assignments(
+            anchor_ids=anchor_ids,
+            effective_date=effective_date,
+        ):
+            assignments_by_anchor[anchor_assignment.anchor_id].append(anchor_assignment)
+
+    provisional_rows = []
+    for assignment in candidates:
+        anchors = anchors_by_equipment[assignment.equipment_id]
+        if not anchors:
+            conflicts.append(
+                _auto_settlement_preview_conflict(
+                    'equipment_anchor_missing',
+                    assignments=(assignment,),
+                    employee=assignment.employee,
+                    equipment=assignment.equipment,
+                    shift_type=assignment.shift_type,
+                ),
+            )
+            conflicted_assignment_ids.add(assignment.pk)
+            continue
+        if len(anchors) != 1:
+            conflicts.append(
+                _auto_settlement_preview_conflict(
+                    'equipment_anchor_ambiguous_for_shift',
+                    assignments=(assignment,),
+                    employee=assignment.employee,
+                    equipment=assignment.equipment,
+                    shift_type=assignment.shift_type,
+                    accommodation_anchors=tuple(anchors),
+                ),
+            )
+            conflicted_assignment_ids.add(assignment.pk)
+            continue
+
+        anchor = anchors[0]
+        anchor_bed_assignments = assignments_by_anchor[anchor.pk]
+        if not anchor_bed_assignments:
+            conflicts.append(
+                _auto_settlement_preview_conflict(
+                    'anchor_bed_assignment_missing',
+                    assignments=(assignment,),
+                    employee=assignment.employee,
+                    equipment=assignment.equipment,
+                    shift_type=assignment.shift_type,
+                    accommodation_anchor=anchor,
+                ),
+            )
+            conflicted_assignment_ids.add(assignment.pk)
+            continue
+        if len(anchor_bed_assignments) != 1:
+            conflicts.append(
+                _auto_settlement_preview_conflict(
+                    'anchor_bed_assignment_ambiguous',
+                    assignments=(assignment,),
+                    employee=assignment.employee,
+                    equipment=assignment.equipment,
+                    shift_type=assignment.shift_type,
+                    accommodation_anchor=anchor,
+                    anchor_bed_assignments=tuple(anchor_bed_assignments),
+                ),
+            )
+            conflicted_assignment_ids.add(assignment.pk)
+            continue
+
+        anchor_bed_assignment = anchor_bed_assignments[0]
+        bed = anchor_bed_assignment.physical_bed
+        room = bed.room
+        if not bed.is_available:
+            conflicts.append(
+                _auto_settlement_preview_conflict(
+                    'anchor_bed_unavailable',
+                    assignments=(assignment,),
+                    employee=assignment.employee,
+                    equipment=assignment.equipment,
+                    shift_type=assignment.shift_type,
+                    accommodation_anchor=anchor,
+                    room=room,
+                    bed=bed,
+                ),
+            )
+            conflicted_assignment_ids.add(assignment.pk)
+            continue
+        provisional_rows.append({
+            'employee': assignment.employee,
+            'equipment_assignment': assignment,
+            'equipment': assignment.equipment,
+            'shift_type': assignment.shift_type,
+            'accommodation_anchor': anchor,
+            'anchor_bed_assignment': anchor_bed_assignment,
+            'room': room,
+            'bed': bed,
+        })
+
+    rows_by_bed_shift = defaultdict(list)
+    for row in provisional_rows:
+        rows_by_bed_shift[(row['bed'].pk, row['shift_type'])].append(row)
+    for bed_id, shift_type in sorted(rows_by_bed_shift):
+        rows = rows_by_bed_shift[(bed_id, shift_type)]
+        if len(rows) > 1:
+            conflicts.append(
+                _auto_settlement_preview_conflict(
+                    'bed_shift_capacity_conflict',
+                    assignments=tuple(row['equipment_assignment'] for row in rows),
+                    bed=rows[0]['bed'],
+                    room=rows[0]['room'],
+                    shift_type=shift_type,
+                ),
+            )
+            conflicted_assignment_ids.update({
+                row['equipment_assignment'].pk
+                for row in rows
+            })
+
+    candidate_bed_ids = {
+        row['bed'].pk
+        for row in provisional_rows
+        if row['equipment_assignment'].pk not in conflicted_assignment_ids
+    }
+    occupancies_by_bed = defaultdict(list)
+    if candidate_bed_ids:
+        for occupancy in (
+            EmployeeBedOccupancy.objects
+            .filter(effective_occupancy_at_q(effective_date), physical_bed_id__in=candidate_bed_ids)
+            .select_related('employee', 'physical_bed__room')
+            .order_by('pk')
+        ):
+            occupancies_by_bed[occupancy.physical_bed_id].append(occupancy)
+
+    successful_rows = []
+    for row in provisional_rows:
+        assignment = row['equipment_assignment']
+        if assignment.pk in conflicted_assignment_ids:
+            continue
+        incompatible_occupancies = [
+            occupancy
+            for occupancy in occupancies_by_bed[row['bed'].pk]
+            if occupancy.employee_id != assignment.employee_id
+        ]
+        if incompatible_occupancies:
+            conflicts.append(
+                _auto_settlement_preview_conflict(
+                    'bed_occupied_by_other_employee',
+                    assignments=(assignment,),
+                    employee=assignment.employee,
+                    equipment=assignment.equipment,
+                    shift_type=assignment.shift_type,
+                    accommodation_anchor=row['accommodation_anchor'],
+                    room=row['room'],
+                    bed=row['bed'],
+                    occupancies=tuple(incompatible_occupancies),
+                ),
+            )
+            conflicted_assignment_ids.add(assignment.pk)
+            continue
+        successful_rows.append(row)
+
+    return {
+        'effective_date': effective_date,
+        'rows': tuple(successful_rows),
+        'conflicts': tuple(conflicts),
+        'summary': {
+            'effective_assignment_count': len(effective_assignments),
+            'success_count': len(successful_rows),
+            'conflict_count': len(conflicts),
+            'conflicted_assignment_count': len(conflicted_assignment_ids),
+        },
+    }
 
 
 def _current_watch_period_groups(moment):

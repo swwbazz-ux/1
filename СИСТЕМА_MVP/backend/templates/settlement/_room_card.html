@@ -45,12 +45,17 @@
                                 data-position-label="место {{ bed.position }}"
                                 aria-label="КИС-{{ room.dormitory.number }}, этаж {{ room.floor }}, комната {{ room.number }}, блок {{ block.label }}, место {{ bed.position }}{% if bed.active_occupancy %}, занято, {{ bed.occupant_name }}{% else %}, свободно{% endif %}{% if not room.is_transferred %}, комната не передана{% endif %}"
                                 {% if not room.is_transferred %}disabled{% endif %}>
-                            <span class="settlement-bed-visual" data-bed-photo-slot aria-hidden="true">
+                            <span class="settlement-bed-visual"
+                                  data-bed-photo-slot{% if bed.active_occupancy %}
+                                  data-bed-drag-handle draggable="true"{% endif %}
+                                  aria-hidden="true">
                                 <img class="settlement-bed-photo"
                                      data-bed-photo-image
+                                     draggable="false"
                                      alt=""
                                      >
-                                <span class="settlement-bed-photo-placeholder" data-bed-photo-fallback>
+                                <span class="settlement-bed-photo-placeholder"
+                                      data-bed-photo-fallback>
                                     <span class="settlement-bed-avatar-initial"
                                           data-bed-avatar-initial{% if not bed.active_occupancy %} hidden{% endif %}>{{ bed.occupant_name|slice:":1" }}</span>
                                     <span class="settlement-bed-empty-icon"
@@ -64,6 +69,16 @@
                                   data-bed-status{% if bed.active_occupancy %} hidden{% endif %}>{% if room.is_transferred %}Свободна{% else %}Недоступна{% endif %}</span>
                             <span class="settlement-bed-shift"
                                   data-bed-shift-badge{% if not bed.active_occupancy %} hidden{% endif %}>{% if bed.shift_label == "День" %}Д{% elif bed.shift_label == "Ночь" %}Н{% elif bed.shift_label != "Не указано" %}{{ bed.shift_label }}{% else %}—{% endif %}</span>
+                            {% if bed.active_occupancy %}
+                                <span class="settlement-bed-hover-card"
+                                      data-bed-hover-card
+                                      aria-hidden="true">
+                                    <strong>{{ bed.occupant_short_name }}</strong>
+                                    <span>{{ bed.position_label }}</span>
+                                    <span>{{ bed.work_label }}</span>
+                                    {% if bed.shift_label != "Не указано" %}<small>{{ bed.shift_label }}</small>{% endif %}
+                                </span>
+                            {% endif %}
                             <span class="settlement-bed-state-indicator" data-bed-state-indicator aria-hidden="true"></span>
                         </button>
                     {% endfor %}

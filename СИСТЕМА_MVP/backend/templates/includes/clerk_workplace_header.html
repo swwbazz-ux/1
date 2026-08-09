@@ -14,9 +14,12 @@
             <p>Работа с фактическим размещением сотрудников.</p>
         </div>
         <nav class="admin-console-nav" aria-label="Разделы делопроизводителя">
-            <a{% if clerk_active_section == "settlement" %} class="is-active" aria-current="page"{% endif %}
-               href="{% url 'settlement_map' %}"
-               data-clerk-section="settlement">Расселение</a>
+            <button type="button"
+                    class="{% if clerk_active_section == "settlement" %}is-active{% endif %}"
+                    data-clerk-section="settlement"
+                    data-unsettled-panel-toggle
+                    aria-controls="settlement-unsettled-panel"
+                    aria-expanded="false">Расселение</button>
         </nav>
     </section>
 

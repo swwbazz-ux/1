@@ -5,6 +5,7 @@ from .views import (
     legacy_settlement_login_view,
     legacy_settlement_service_worker_view,
     settlement_employee_search_view,
+    settlement_employee_detail_view,
     settlement_login_view,
     settlement_manifest_view,
     settlement_map_view,
@@ -31,6 +32,11 @@ urlpatterns = [
         'clerk/settlement/employees/search/',
         settlement_employee_search_view,
         name='settlement_employee_search',
+    ),
+    path(
+        'clerk/settlement/employees/<int:employee_id>/',
+        settlement_employee_detail_view,
+        name='settlement_employee_detail',
     ),
     path(
         'clerk/settlement/occupancies/',

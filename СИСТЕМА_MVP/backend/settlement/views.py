@@ -2,6 +2,7 @@ import json
 from collections import defaultdict
 from urllib.parse import urlencode
 
+from django import forms
 from django.core.exceptions import ValidationError
 from django.db.models import Prefetch, Q
 from django.http import HttpResponse, JsonResponse
@@ -12,6 +13,7 @@ from django.utils.dateparse import parse_datetime
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from assignments.models import AssignmentStatus, EquipmentAssignment
+from core.production_time import production_day_bounds, production_work_date
 from shifts.models import EmployeeShift
 from users.active_role import role_session_state
 from users.models import Employee, EmployeeAccess
@@ -24,6 +26,7 @@ from users.role_apps import (
 from .models import EmployeeBedOccupancy, PhysicalBed, PhysicalRoom
 from .services import (
     current_roster_resolution,
+    build_auto_settlement_preview,
     effective_occupancy_at_q,
     relocate_employee_to_bed,
     release_employee_from_bed,
@@ -44,6 +47,125 @@ SHIFT_FILTER_VALUES = {
 }
 
 
+class AutoSettlementPreviewForm(forms.Form):
+    effective_date = forms.DateField(
+        label='Расчётная дата',
+        input_formats=['%Y-%m-%d', '%d.%m.%Y'],
+        widget=forms.DateInput(
+            format='%Y-%m-%d',
+            attrs={'type': 'date'},
+        ),
+        error_messages={
+            'required': 'Укажите дату расчёта.',
+            'invalid': 'Укажите дату расчёта в корректном формате.',
+        },
+    )
+
+
+_AUTO_SETTLEMENT_CONFLICT_LABELS = {
+    'employee_multiple_effective_assignments': 'У сотрудника несколько несовместимых действующих назначений.',
+    'assignment_equipment_missing': 'В действующем назначении не указана техника.',
+    'assignment_shift_missing_or_invalid': 'В действующем назначении не указана дневная или ночная смена.',
+    'equipment_anchor_missing': 'За техникой не закреплена жилая позиция.',
+    'equipment_anchor_ambiguous_for_shift': 'Для техники и смены найдено несколько жилых позиций.',
+    'anchor_bed_assignment_missing': 'Для жилой позиции не закреплена действующая койка.',
+    'anchor_bed_assignment_ambiguous': 'Для жилой позиции нельзя однозначно определить койку.',
+    'anchor_bed_unavailable': 'Закреплённая койка недоступна для расселения.',
+    'bed_shift_capacity_conflict': 'Одна койка предварительно выбрана для нескольких сотрудников одной смены.',
+    'bed_occupied_by_other_employee': 'Койка занята действующим размещением другого сотрудника.',
+}
+
+
+def _preview_employee_label(employee):
+    return getattr(employee, 'full_name', '') or str(employee or '—')
+
+
+def _preview_bed_label(bed):
+    return getattr(bed, 'stable_id', '') or str(bed or '—')
+
+
+def _auto_settlement_preview_context(preview):
+    rows = []
+    for row in preview['rows']:
+        room = row['room']
+        dormitory = getattr(room, 'dormitory', None)
+        employee_label = _preview_employee_label(row['employee'])
+        rows.append(
+            {
+                'employee': employee_label,
+                'employee_id': row['employee'].pk,
+                'employee_sort': employee_label.casefold(),
+                'equipment': str(row['equipment']),
+                'shift': DAY_NIGHT_LABELS.get(row['shift_type'], 'Не указана'),
+                'shift_type': row['shift_type'],
+                'dormitory': getattr(dormitory, 'number', '—'),
+                'room': getattr(room, 'number', '—'),
+                'bed': _preview_bed_label(row['bed']),
+                'bed_id': row['bed'].pk,
+            }
+        )
+
+    conflicts = []
+    for conflict in preview['conflicts']:
+        assignments = tuple(conflict.get('equipment_assignments') or ())
+        assignment = assignments[0] if assignments else None
+        employee = conflict.get('employee') or getattr(assignment, 'employee', None)
+        equipment = conflict.get('equipment') or getattr(assignment, 'equipment', None)
+        shift_type = conflict.get('shift_type') or getattr(assignment, 'shift_type', None)
+        room = conflict.get('room') or getattr(conflict.get('bed'), 'room', None)
+        conflicts.append(
+            {
+                'message': _AUTO_SETTLEMENT_CONFLICT_LABELS.get(
+                    conflict['code'],
+                    'Предварительный расчёт обнаружил конфликт.',
+                ),
+                'employee': _preview_employee_label(employee) if employee else '—',
+                'equipment': str(equipment) if equipment else '—',
+                'shift': DAY_NIGHT_LABELS.get(shift_type, '—'),
+                'anchor': str(conflict['accommodation_anchor']) if conflict.get('accommodation_anchor') else '—',
+                'room': getattr(room, 'number', '—'),
+                'bed': _preview_bed_label(conflict.get('bed')) if conflict.get('bed') else '—',
+            }
+        )
+    return {'summary': preview['summary'], 'rows': rows, 'conflicts': conflicts}
+
+
+def _attach_auto_settlement_preview(rooms, preview):
+    """Attach only successful, already-resolved preview rows to map bed objects."""
+    beds_by_id = {
+        bed.pk: bed
+        for room in rooms
+        for bed in room.beds.all()
+    }
+    for bed in beds_by_id.values():
+        bed.preview_rows = []
+
+    shift_order = {'day': 0, 'night': 1}
+    for row in preview['rows']:
+        bed = beds_by_id.get(row['bed_id'])
+        if bed is None:
+            raise ValueError('Предварительная строка не связана с физической койкой карты.')
+        active_occupancy = bed.active_occupancy
+        bed.preview_rows.append(
+            {
+                **row,
+                'unchanged': bool(
+                    active_occupancy
+                    and active_occupancy.employee_id == row['employee_id']
+                ),
+            }
+        )
+
+    for bed in beds_by_id.values():
+        bed.preview_rows.sort(
+            key=lambda row: (
+                shift_order.get(row['shift_type'], 2),
+                row['employee_sort'],
+                row['employee_id'],
+            )
+        )
+
+
 def _employee_photo_url(employee):
     if not employee.photo:
         return ''
@@ -56,6 +178,13 @@ def _employee_photo_url(employee):
 def _person_initials(full_name):
     parts = [part for part in str(full_name or '').split() if part]
     return ''.join(part[0].upper() for part in parts[:2])
+
+
+def _person_short_label(full_name):
+    parts = [part for part in str(full_name or '').split() if part]
+    if len(parts) < 2:
+        return ' '.join(parts)
+    return f"{parts[0]} {''.join(f'{part[0]}.' for part in parts[1:])}"
 
 
 def settlement_clerk_access_from_request(request):
@@ -198,20 +327,25 @@ def _attach_occupancy_view(rooms):
         for bed in room.beds.all():
             occupancy = bed.active_occupancies[0] if bed.active_occupancies else None
             bed.active_occupancy = occupancy
+            bed.preview_rows = []
             if occupancy is None:
                 bed.occupant_name = UNKNOWN_LABEL
+                bed.occupant_short_name = UNKNOWN_LABEL
                 bed.occupant_photo_url = ''
                 bed.shift_label = UNKNOWN_LABEL
                 bed.work_label = UNKNOWN_LABEL
+                bed.position_label = UNKNOWN_LABEL
                 bed.assignment_type_label = UNKNOWN_LABEL
                 continue
 
             profile = profiles[occupancy.employee_id]
             room.occupied_bed_count += 1
             bed.occupant_name = occupancy.employee.full_name
+            bed.occupant_short_name = _person_short_label(occupancy.employee.full_name)
             bed.occupant_photo_url = profile['photo_url']
             bed.shift_label = profile['shift_label']
             bed.work_label = profile['work_label']
+            bed.position_label = profile['position_label']
             bed.assignment_type_label = occupancy.get_assignment_type_display()
         room.free_bed_count = len(room.beds.all()) - room.occupied_bed_count
 
@@ -407,6 +541,24 @@ def settlement_map_view(request):
         return redirect(f'{reverse("clerk_login")}?{next_url}')
 
     moment = timezone.now()
+    preview_requested = request.GET.get('preview') == '1'
+    preview_form = AutoSettlementPreviewForm(
+        request.GET if preview_requested else None,
+        initial={'effective_date': production_work_date(moment)},
+    )
+    auto_settlement_preview = None
+    if preview_requested and preview_form.is_valid():
+        effective_date = preview_form.cleaned_data['effective_date']
+        effective_moment, _ = production_day_bounds(effective_date)
+        try:
+            auto_settlement_preview = _auto_settlement_preview_context(
+                build_auto_settlement_preview(effective_date=effective_moment)
+            )
+        except ValueError:
+            preview_form.add_error(
+                'effective_date',
+                'Не удалось выполнить расчёт для указанной даты.',
+            )
     rooms = list(
         PhysicalRoom.objects
         .select_related('dormitory')
@@ -440,6 +592,8 @@ def settlement_map_view(request):
         )
     )
     _attach_occupancy_view(rooms)
+    if auto_settlement_preview is not None:
+        _attach_auto_settlement_preview(rooms, auto_settlement_preview)
     dormitories = _dormitory_views(rooms)
     total_beds = sum(room.capacity for room in rooms)
     transferred_rooms = sum(room.is_transferred for room in rooms)
@@ -478,6 +632,9 @@ def settlement_map_view(request):
             'unsettled_employee_count': len(unsettled_employees),
             'unsettled_roster_available': roster_resolution['has_unambiguous'],
             'unsettled_roster_ambiguous': roster_resolution['has_ambiguous'],
+            'auto_settlement_preview_form': preview_form,
+            'auto_settlement_preview': auto_settlement_preview,
+            'auto_settlement_preview_requested': preview_requested,
             'clerk_active_section': 'settlement',
         },
     )
@@ -520,6 +677,69 @@ def settlement_employee_search_view(request):
             }
             for employee in employees
         ],
+    })
+
+
+@require_GET
+def settlement_employee_detail_view(request, employee_id):
+    """Read-only operational card opened from an occupied bed on the map."""
+    if not settlement_clerk_access_from_request(request):
+        return JsonResponse(
+            {'ok': False, 'error': 'Нет доступа к расселению.'},
+            status=403,
+        )
+
+    employee = (
+        Employee.objects
+        .select_related(
+            'personnel_position',
+            'personnel_department',
+            'work_schedule',
+        )
+        .filter(pk=employee_id)
+        .first()
+    )
+    if employee is None:
+        return JsonResponse(
+            {'ok': False, 'error': 'Сотрудник не найден.'},
+            status=404,
+        )
+
+    occupancy = (
+        EmployeeBedOccupancy.objects
+        .filter(effective_occupancy_at_q(timezone.now()), employee=employee)
+        .select_related('physical_bed__room__dormitory')
+        .order_by('pk')
+        .first()
+    )
+    residence = 'Фактическое место проживания не назначено.'
+    if occupancy is not None:
+        bed = occupancy.physical_bed
+        room = bed.room
+        residence = (
+            f'КИС-{room.dormitory.number}, этаж {room.floor}, '
+            f'комната {room.number}, блок {bed.get_block_display()}, '
+            f'койка {bed.position} ({bed.stable_id})'
+        )
+
+    return JsonResponse({
+        'ok': True,
+        'employee': {
+            'id': employee.pk,
+            'full_name': employee.full_name,
+            'personnel_number': employee.personnel_number or UNKNOWN_LABEL,
+            'position': (
+                employee.personnel_position.name
+                if employee.personnel_position_id
+                else employee.position or UNKNOWN_LABEL
+            ),
+            'department': employee.department_label or UNKNOWN_LABEL,
+            'work_schedule': employee.work_schedule_label or UNKNOWN_LABEL,
+            'brigade': employee.get_brigade_number_display() or UNKNOWN_LABEL,
+            'sex': employee.get_sex_display(),
+            'phone': employee.phone or UNKNOWN_LABEL,
+            'residence': residence,
+        },
     })
 
 

@@ -99,8 +99,11 @@
         28vw,
         calc(520 * var(--settlement-density-unit))
     );
-    --settlement-plan-inline-size: 255cqh;
-    --settlement-plan-aspect: 2.55 / 1;
+    --settlement-plan-block-size: calc(
+        (2 * var(--settlement-room-min-height))
+        + var(--settlement-corridor-height)
+        + (2 * var(--settlement-map-gap))
+    );
     --settlement-accent: var(--admin-green);
     --settlement-accent-soft: var(--admin-green-soft);
     display: grid;
@@ -145,6 +148,7 @@
 
     .settlement-shell .admin-console-main {
         border-right-width: var(--settlement-line);
+        grid-template-columns: minmax(0, 1fr) auto;
     }
 
     .settlement-shell .admin-console-identity strong {
@@ -175,6 +179,7 @@
     }
 
     .settlement-shell .admin-console-nav a,
+    .settlement-shell .admin-console-nav button,
     .settlement-shell .admin-utility-link,
     .settlement-shell .admin-theme-button {
         min-height: var(--admin-header-control-height);
@@ -191,7 +196,17 @@
         padding-inline: calc(10 * var(--settlement-density-unit));
     }
 
-    .settlement-shell .admin-console-nav a.is-active {
+    .settlement-shell .admin-console-nav button {
+        padding-inline: calc(10 * var(--settlement-density-unit));
+        border: var(--settlement-line) solid var(--admin-line);
+        background: var(--admin-panel-soft);
+        color: var(--admin-ink);
+        font: inherit;
+        cursor: pointer;
+    }
+
+    .settlement-shell .admin-console-nav a.is-active,
+    .settlement-shell .admin-console-nav button.is-active {
         box-shadow:
             inset 0 calc(-3 * var(--settlement-density-unit)) 0
             var(--admin-green);
@@ -246,8 +261,9 @@
     gap: clamp(2px, .5dvh, calc(6 * var(--settlement-density-unit)));
     width: calc(100% - clamp(12px, 1.5vw, calc(32 * var(--settlement-density-unit))));
     max-width: none;
-    height: 100%;
+    height: auto;
     min-height: 0;
+    max-height: none;
     margin: 0 auto;
     padding: clamp(2px, .4dvh, calc(6 * var(--settlement-density-unit))) 0;
     overflow: visible;
@@ -271,6 +287,7 @@
         minmax(142px, auto)
         minmax(280px, auto)
         minmax(210px, 1fr)
+        auto
         auto;
     gap: clamp(3px, .35vw, calc(7 * var(--settlement-density-unit)));
     align-items: end;
@@ -449,6 +466,26 @@
     color: #fff;
 }
 
+.settlement-auto-preview-trigger {
+    min-height: var(--settlement-control-height);
+    padding: 0 calc(12 * var(--settlement-density-unit));
+    border: var(--settlement-line) solid var(--admin-line);
+    border-radius: calc(6 * var(--settlement-density-unit));
+    background: var(--admin-panel-soft);
+    color: var(--admin-ink);
+    font: inherit;
+    font-size: calc(11 * var(--settlement-density-unit));
+    font-weight: 900;
+    cursor: pointer;
+}
+
+.settlement-auto-preview-trigger:hover,
+.settlement-auto-preview-trigger:focus-visible {
+    outline: 0;
+    border-color: var(--settlement-accent);
+    color: var(--settlement-accent);
+}
+
 .settlement-summary {
     display: grid;
     grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -505,6 +542,73 @@
     min-height: 0;
     overflow: visible;
 }
+
+.settlement-auto-preview {
+    display: grid;
+    gap: clamp(8px, 1dvh, 14px);
+    margin-top: clamp(10px, 1.5dvh, 20px);
+    padding: clamp(10px, 1.5dvh, 18px);
+    border: var(--settlement-line) solid var(--admin-line);
+    border-radius: calc(8 * var(--settlement-density-unit));
+    background: var(--admin-panel);
+    box-shadow: var(--admin-shadow);
+}
+
+.settlement-auto-preview > header,
+.settlement-auto-preview-form,
+.settlement-auto-preview-summary {
+    display: flex;
+    gap: clamp(8px, 1vw, 16px);
+    align-items: end;
+    justify-content: space-between;
+}
+
+.settlement-auto-preview header span,
+.settlement-auto-preview-form label > span,
+.settlement-auto-preview-summary span {
+    color: var(--admin-muted);
+    font-size: calc(9 * var(--settlement-density-unit));
+    font-weight: 900;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+}
+
+.settlement-auto-preview h2,
+.settlement-auto-preview h3,
+.settlement-auto-preview p { margin: 0; }
+.settlement-auto-preview h2 { font-size: calc(18 * var(--settlement-density-unit)); }
+.settlement-auto-preview header p { margin-top: 3px; color: var(--admin-muted); font-size: calc(11 * var(--settlement-density-unit)); }
+.settlement-auto-preview-form label { display: grid; gap: 4px; }
+.settlement-auto-preview-form input,
+.settlement-auto-preview-form button {
+    min-height: var(--settlement-control-height);
+    padding: 0 calc(9 * var(--settlement-density-unit));
+    border: var(--settlement-line) solid var(--admin-line);
+    border-radius: calc(6 * var(--settlement-density-unit));
+    background: var(--admin-panel-soft);
+    color: var(--admin-ink);
+    font: inherit;
+    font-size: calc(12 * var(--settlement-density-unit));
+    font-weight: 800;
+}
+.settlement-auto-preview-form button { border-color: var(--settlement-accent); background: var(--settlement-accent); color: #fff; cursor: pointer; }
+.settlement-auto-preview-summary { justify-content: flex-start; border-top: var(--settlement-line) solid var(--admin-line-soft); padding-top: 8px; }
+.settlement-auto-preview-summary article { display: grid; gap: 2px; min-width: 120px; }
+.settlement-auto-preview-summary strong { font-size: calc(20 * var(--settlement-density-unit)); }
+.settlement-auto-preview-summary .is-success strong { color: var(--settlement-accent); }
+.settlement-auto-preview-summary .is-conflict strong { color: var(--admin-red); }
+.settlement-auto-preview-table-wrap { overflow-x: auto; }
+.settlement-auto-preview-table { width: 100%; border-collapse: collapse; font-size: calc(12 * var(--settlement-density-unit)); }
+.settlement-auto-preview-table caption { padding: 0 0 8px; color: var(--admin-muted); text-align: left; }
+.settlement-auto-preview-table th, .settlement-auto-preview-table td { padding: 7px 8px; border: var(--settlement-line) solid var(--admin-line-soft); text-align: left; }
+.settlement-auto-preview-table th { color: var(--admin-muted); font-size: calc(9 * var(--settlement-density-unit)); text-transform: uppercase; }
+.settlement-auto-preview-conflicts { padding-top: 8px; border-top: var(--settlement-line) solid var(--admin-line-soft); }
+.settlement-auto-preview-conflicts h3 { font-size: calc(14 * var(--settlement-density-unit)); }
+.settlement-auto-preview-conflicts ul { display: grid; gap: 6px; margin: 8px 0 0; padding: 0; list-style: none; }
+.settlement-auto-preview-conflicts li { display: grid; gap: 3px; padding: 8px; border-left: calc(3 * var(--settlement-density-unit)) solid var(--admin-red); background: var(--admin-red-soft); }
+.settlement-auto-preview-conflicts li span, .settlement-auto-preview-error { color: var(--admin-muted); font-size: calc(11 * var(--settlement-density-unit)); }
+.settlement-auto-preview-error ul { margin: 0; padding-left: 18px; color: var(--admin-red); }
+.settlement-auto-preview-empty { color: var(--admin-muted); }
 
 .settlement-dormitory {
     display: grid;
@@ -631,7 +735,7 @@
     overflow: visible;
     overscroll-behavior-inline: contain;
     scrollbar-width: thin;
-    container-type: size;
+    container-type: inline-size;
 }
 
 .settlement-floor-plan {
@@ -641,11 +745,11 @@
         var(--settlement-corridor-height)
         minmax(var(--settlement-room-min-height), 1fr);
     gap: var(--settlement-map-gap);
-    width: min(100%, var(--settlement-plan-inline-size));
-    height: auto;
+    width: 100%;
+    height: var(--settlement-plan-block-size);
     min-height: 0;
-    max-height: 100%;
-    aspect-ratio: var(--settlement-plan-aspect);
+    max-height: none;
+    aspect-ratio: auto;
 }
 
 .settlement-side {
@@ -706,6 +810,11 @@
     transition: opacity 120ms ease, filter 120ms ease, border-color 120ms ease;
 }
 
+.settlement-room:has(.settlement-bed.is-occupied:hover),
+.settlement-room:has(.settlement-bed.is-occupied:focus-visible) {
+    z-index: 20;
+}
+
 .settlement-room-right {
     grid-template-columns: minmax(0, 1fr);
 }
@@ -734,6 +843,10 @@
     font: inherit;
     font-size: clamp(13px, 2.2dvh, calc(17 * var(--settlement-density-unit)));
     font-weight: 900;
+    line-height: 1;
+    padding: 0;
+    position: relative;
+    top: calc(-1 * var(--settlement-density-unit));
 }
 
 .settlement-room-number:hover,
@@ -816,7 +929,7 @@
     height: 100%;
     min-width: 0;
     min-height: var(--settlement-bed-card-min-height);
-    overflow: hidden;
+    overflow: visible;
     padding: calc(5 * var(--settlement-density-unit));
     border: var(--settlement-line) solid color-mix(in srgb, var(--admin-line) 88%, var(--settlement-accent));
     border-radius: calc(7 * var(--settlement-density-unit));
@@ -858,6 +971,7 @@
     object-fit: cover;
     object-position: center 22%;
     opacity: 0;
+    pointer-events: none;
 }
 
 .settlement-bed-photo.is-loaded {
@@ -876,6 +990,7 @@
     border: var(--settlement-line) solid color-mix(in srgb, currentColor 28%, var(--admin-line));
     border-radius: calc(8 * var(--settlement-density-unit));
     background: color-mix(in srgb, var(--admin-panel) 82%, transparent);
+    pointer-events: none;
 }
 
 .settlement-bed.is-occupied.no-photo .settlement-bed-photo-placeholder {
@@ -1041,6 +1156,79 @@
 
 .settlement-bed.is-occupied .settlement-bed-visual {
     inset: calc(3 * var(--settlement-density-unit));
+    pointer-events: auto;
+    cursor: grab;
+}
+
+.settlement-bed.is-occupied .settlement-bed-visual:active {
+    cursor: grabbing;
+}
+
+.settlement-bed.is-occupied:hover,
+.settlement-bed.is-occupied:focus-visible {
+    z-index: 30;
+}
+
+.settlement-bed-position,
+.settlement-bed-person,
+.settlement-bed-status,
+.settlement-bed-shift,
+.settlement-bed-state-indicator {
+    display: none !important;
+}
+
+.settlement-bed-hover-card {
+    position: absolute;
+    top: 50%;
+    left: calc(100% + calc(6 * var(--settlement-density-unit)));
+    z-index: 30;
+    display: grid;
+    width: max-content;
+    max-width: min(230px, calc(100vw - 24px));
+    gap: calc(2 * var(--settlement-density-unit));
+    padding: calc(7 * var(--settlement-density-unit));
+    border: var(--settlement-line) solid color-mix(in srgb, var(--admin-cyan) 58%, var(--admin-line));
+    border-radius: calc(6 * var(--settlement-density-unit));
+    background: color-mix(in srgb, var(--admin-panel) 96%, var(--admin-cyan-soft));
+    box-shadow: 0 calc(8 * var(--settlement-density-unit)) calc(20 * var(--settlement-density-unit)) rgb(7 19 31 / 22%);
+    color: var(--admin-ink);
+    cursor: grab;
+    font-size: calc(11 * var(--settlement-density-unit));
+    line-height: 1.2;
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(-50%);
+    transition: opacity 120ms ease;
+    visibility: hidden;
+}
+
+.settlement-room-right .settlement-bed-hover-card {
+    right: calc(100% + calc(6 * var(--settlement-density-unit)));
+    left: auto;
+}
+
+.settlement-bed.is-occupied:hover .settlement-bed-hover-card,
+.settlement-bed.is-occupied:focus-visible .settlement-bed-hover-card {
+    opacity: 1;
+    visibility: visible;
+}
+
+.settlement-bed-hover-card strong {
+    font-size: calc(12 * var(--settlement-density-unit));
+}
+
+.settlement-bed-hover-card span,
+.settlement-bed-hover-card small {
+    color: var(--admin-muted);
+}
+
+.settlement-bed.is-drag-source .settlement-bed-visual {
+    opacity: .55;
+}
+
+.settlement-bed.is-drop-target {
+    border-color: var(--settlement-accent);
+    box-shadow: 0 0 0 calc(2 * var(--settlement-density-unit)) color-mix(in srgb, var(--settlement-accent) 28%, transparent);
 }
 
 .settlement-bed.is-occupied .settlement-bed-position,
@@ -1103,6 +1291,19 @@
     display: none;
 }
 
+.settlement-auto-preview-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 16px;
+    color: var(--admin-muted);
+    font-size: calc(11 * var(--settlement-density-unit));
+}
+
+.settlement-auto-preview-legend span { display: inline-flex; gap: 5px; align-items: center; }
+.settlement-auto-preview-legend i { width: 18px; height: 10px; border-radius: 3px; }
+.settlement-auto-preview-legend .is-actual { border: var(--settlement-strong-line) solid var(--admin-cyan); background: var(--admin-cyan-soft); }
+.settlement-auto-preview-legend .is-preview { border: var(--settlement-line) dashed var(--settlement-accent); background: var(--settlement-accent-soft); }
+
 .settlement-bed.is-occupied.is-selected {
     border-color: var(--admin-cyan);
     background: var(--admin-cyan);
@@ -1152,29 +1353,6 @@
     color: var(--admin-muted);
     font-size: 9px;
     font-weight: 700;
-}
-
-body.settlement-unsettled-panel-open .settlement-work-badge[data-unsettled-panel-toggle] {
-    position: fixed;
-    top: calc(18 * var(--settlement-density-unit));
-    right: min(var(--settlement-drawer-width), calc(100vw - calc(12 * var(--settlement-density-unit))));
-    z-index: 1260;
-    width: calc(40 * var(--settlement-density-unit));
-    min-height: calc(38 * var(--settlement-density-unit));
-    padding: 0;
-    border-radius: calc(7 * var(--settlement-density-unit));
-    transform: translateX(calc(-8 * var(--settlement-density-unit)));
-}
-
-body.settlement-unsettled-panel-open .settlement-work-badge[data-unsettled-panel-toggle] > * {
-    display: none;
-}
-
-body.settlement-unsettled-panel-open .settlement-work-badge[data-unsettled-panel-toggle]::before {
-    content: "×";
-    font-size: calc(24 * var(--settlement-density-unit));
-    font-weight: 700;
-    line-height: 1;
 }
 
 .settlement-unsettled-panel {
@@ -1503,7 +1681,13 @@ body.settlement-unsettled-panel-open .settlement-work-badge[data-unsettled-panel
 }
 
 .settlement-room-panel-backdrop,
-.settlement-room-panel {
+.settlement-room-panel,
+.settlement-employee-panel-backdrop,
+.settlement-employee-panel,
+.settlement-relocation-modal-backdrop,
+.settlement-relocation-modal,
+.settlement-auto-preview-modal-backdrop,
+.settlement-auto-preview-modal {
     position: fixed;
     inset: 0;
     z-index: 1250;
@@ -1514,6 +1698,21 @@ body.settlement-unsettled-panel-open .settlement-work-badge[data-unsettled-panel
 }
 
 .settlement-room-panel-backdrop {
+    background: rgba(25, 39, 47, .42);
+    backdrop-filter: blur(2px);
+}
+
+.settlement-employee-panel-backdrop {
+    background: rgba(25, 39, 47, .42);
+    backdrop-filter: blur(2px);
+}
+
+.settlement-relocation-modal-backdrop {
+    background: rgba(25, 39, 47, .42);
+    backdrop-filter: blur(2px);
+}
+
+.settlement-auto-preview-modal-backdrop {
     background: rgba(25, 39, 47, .42);
     backdrop-filter: blur(2px);
 }
@@ -1529,8 +1728,51 @@ body.settlement-unsettled-panel-open .settlement-work-badge[data-unsettled-panel
     box-shadow: -18px 0 48px rgba(35, 49, 57, .24);
 }
 
+.settlement-employee-panel {
+    right: 0;
+    left: auto;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    width: min(580px, calc(100vw - 24px));
+    border-left: 1px solid var(--admin-line);
+    background: var(--admin-bg);
+    box-shadow: -18px 0 48px rgba(35, 49, 57, .24);
+}
+
+.settlement-relocation-modal {
+    inset: 50% auto auto 50%;
+    display: grid;
+    grid-template-rows: auto auto auto;
+    width: min(460px, calc(100vw - 32px));
+    max-height: calc(100dvh - 32px);
+    transform: translate(-50%, -50%);
+    border: 1px solid var(--admin-line);
+    border-radius: 10px;
+    background: var(--admin-bg);
+    box-shadow: 0 18px 48px rgba(35, 49, 57, .28);
+}
+
+.settlement-auto-preview-modal {
+    inset: 50% auto auto 50%;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    width: min(880px, calc(100vw - 32px));
+    max-height: calc(100dvh - 48px);
+    transform: translate(-50%, -50%);
+    border: 1px solid var(--admin-line);
+    border-radius: 10px;
+    background: var(--admin-bg);
+    box-shadow: 0 18px 48px rgba(35, 49, 57, .28);
+}
+
 .settlement-room-panel[hidden],
 .settlement-room-panel-backdrop[hidden],
+.settlement-employee-panel[hidden],
+.settlement-employee-panel-backdrop[hidden],
+.settlement-relocation-modal[hidden],
+.settlement-relocation-modal-backdrop[hidden],
+.settlement-auto-preview-modal[hidden],
+.settlement-auto-preview-modal-backdrop[hidden],
 .settlement-employee-results[hidden],
 .settlement-selected-employee[hidden],
 .settlement-placement-panel form[hidden],
@@ -1620,9 +1862,220 @@ body.settlement-unsettled-panel-open .settlement-work-badge[data-unsettled-panel
 }
 
 .settlement-room-panel-body {
+    display: flex;
+    flex-direction: column;
     min-height: 0;
     overflow-y: auto;
     overscroll-behavior: contain;
+}
+
+.settlement-relocation-modal-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 16px;
+    align-items: start;
+    padding: 18px 20px 15px;
+    border-bottom: 1px solid var(--admin-line);
+    background: var(--admin-panel);
+}
+
+.settlement-auto-preview-modal-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 16px;
+    align-items: center;
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--admin-line);
+    background: var(--admin-panel);
+}
+
+.settlement-auto-preview-modal-header h2 {
+    margin: 0;
+    color: var(--admin-ink);
+    font-size: 20px;
+    font-weight: 900;
+}
+
+.settlement-auto-preview-modal-body {
+    min-height: 0;
+    padding: 14px 18px 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+
+.settlement-auto-preview-modal .settlement-auto-preview {
+    gap: 12px;
+    padding: 0;
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+}
+
+.settlement-auto-preview-intro {
+    display: grid;
+    gap: 10px;
+}
+
+.settlement-auto-preview-intro > p {
+    color: var(--admin-muted);
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.settlement-auto-preview-modal .settlement-auto-preview-form {
+    display: grid;
+    grid-template-columns: minmax(220px, 1fr) auto;
+    grid-template-rows: calc(13 * var(--settlement-density-unit)) 40px;
+    column-gap: 12px;
+    row-gap: 4px;
+    align-items: stretch;
+    align-content: start;
+}
+
+.settlement-auto-preview-modal .settlement-auto-preview-form label,
+.settlement-auto-preview-modal .settlement-auto-preview-form-action {
+    display: contents;
+}
+
+.settlement-auto-preview-modal .settlement-auto-preview-form label > span,
+.settlement-auto-preview-modal .settlement-auto-preview-form-action > span {
+    color: var(--admin-muted);
+    font-size: 9px;
+    font-weight: 900;
+    line-height: calc(13 * var(--settlement-density-unit));
+    letter-spacing: .08em;
+    text-transform: uppercase;
+}
+
+.settlement-auto-preview-modal .settlement-auto-preview-form label > span {
+    grid-column: 1;
+    grid-row: 1;
+}
+
+.settlement-auto-preview-modal .settlement-auto-preview-form label > input {
+    grid-column: 1;
+    grid-row: 2;
+}
+
+.settlement-auto-preview-modal .settlement-auto-preview-form-action > span {
+    grid-column: 2;
+    grid-row: 1;
+    visibility: hidden;
+}
+
+.settlement-auto-preview-modal .settlement-auto-preview-form-action > button {
+    grid-column: 2;
+    grid-row: 2;
+}
+
+.settlement-auto-preview-modal .settlement-auto-preview-form input,
+.settlement-auto-preview-modal .settlement-auto-preview-form button {
+    box-sizing: border-box;
+    height: 40px;
+    min-height: 40px;
+}
+
+.settlement-auto-preview-modal .settlement-auto-preview-legend {
+    padding: 9px 0;
+    border-top: 1px solid var(--admin-line-soft);
+    border-bottom: 1px solid var(--admin-line-soft);
+}
+
+.settlement-auto-preview-modal .settlement-auto-preview-summary {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+    align-items: stretch;
+    padding: 0;
+    border: 0;
+}
+
+.settlement-auto-preview-modal .settlement-auto-preview-summary article {
+    display: grid;
+    grid-template-rows: minmax(2.4em, auto) auto;
+    align-content: space-between;
+    min-width: 0;
+    min-height: 78px;
+    padding: 10px;
+    border: 1px solid var(--admin-line-soft);
+    border-radius: 7px;
+    background: var(--admin-panel-soft);
+}
+
+.settlement-auto-preview-modal .settlement-auto-preview-summary strong {
+    font-size: 22px;
+    line-height: 1;
+}
+
+.settlement-auto-preview-modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    padding: 12px 18px 16px;
+    border-top: 1px solid var(--admin-line-soft);
+}
+
+.settlement-auto-preview-modal-footer .settlement-relocation-cancel {
+    width: auto;
+    min-height: 38px;
+}
+
+.settlement-relocation-modal-header span {
+    color: var(--admin-muted);
+    font-size: 9px;
+    font-weight: 900;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+}
+
+.settlement-relocation-modal-header h2 {
+    margin: 3px 0 0;
+    color: var(--admin-ink);
+    font-size: 20px;
+    font-weight: 900;
+}
+
+.settlement-relocation-modal-body {
+    display: grid;
+    gap: 10px;
+    padding: 16px 20px 10px;
+}
+
+.settlement-relocation-modal-body .settlement-placement-panel {
+    display: contents;
+}
+
+.settlement-relocation-modal-body .settlement-placement-panel form {
+    display: grid;
+    gap: 10px;
+}
+
+.settlement-relocation-modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    padding: 0 20px 18px;
+}
+
+.settlement-relocation-cancel {
+    min-height: 42px;
+    padding: 0 16px;
+    border: 1px solid var(--admin-line);
+    border-radius: 7px;
+    background: var(--admin-panel-soft);
+    color: var(--admin-ink);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 800;
+    cursor: pointer;
+}
+
+body.settlement-relocation-modal-open {
+    overflow: hidden;
+}
+
+body.settlement-auto-preview-modal-open {
+    overflow: hidden;
 }
 
 .settlement-room-bed-section,
@@ -1631,8 +2084,24 @@ body.settlement-unsettled-panel-open .settlement-work-badge[data-unsettled-panel
 }
 
 .settlement-placement-panel {
+    order: 2;
     border-top: 1px solid var(--admin-line);
     background: var(--admin-panel);
+}
+
+.settlement-room-bed-section {
+    order: 1;
+}
+
+/* A relocation must be actionable before the room's bed inventory. */
+.settlement-room-panel.is-relocating-with-target .settlement-placement-panel {
+    order: 1;
+    border-top: 0;
+    border-bottom: 1px solid var(--admin-line);
+}
+
+.settlement-room-panel.is-relocating-with-target .settlement-room-bed-section {
+    order: 2;
 }
 
 .settlement-room-panel-section-title {
@@ -1898,6 +2367,38 @@ body.settlement-unsettled-panel-open .settlement-work-badge[data-unsettled-panel
     color: #07131f;
 }
 
+.settlement-employee-panel-body {
+    display: grid;
+    gap: 12px;
+    align-content: start;
+    min-height: 0;
+    padding: 18px 20px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+
+.settlement-employee-panel-details {
+    display: grid;
+    grid-template-columns: minmax(120px, .7fr) minmax(0, 1.3fr);
+    gap: 8px 14px;
+    margin: 0;
+}
+
+.settlement-employee-panel-details dt {
+    color: var(--admin-muted);
+    font-size: 11px;
+    font-weight: 800;
+}
+
+.settlement-employee-panel-details dd {
+    min-width: 0;
+    margin: 0;
+    color: var(--admin-ink);
+    font-size: 13px;
+    font-weight: 800;
+    overflow-wrap: break-word;
+}
+
 .settlement-occupied-actions {
     display: grid;
     gap: 8px;
@@ -1923,16 +2424,72 @@ body.settlement-unsettled-panel-open .settlement-work-badge[data-unsettled-panel
 
 @media (max-width: 1500px) {
     .settlement-toolbar {
-        grid-template-columns: auto minmax(160px, auto) minmax(120px, auto) minmax(220px, auto) minmax(160px, 1fr) auto;
+        grid-template-columns: auto minmax(160px, auto) minmax(120px, auto) minmax(220px, auto) minmax(160px, 1fr) auto auto;
     }
 
 }
 
 @media (max-width: 1180px) {
+    .settlement-shell .clerk-workplace-header {
+        grid-template-columns: minmax(0, 1fr) auto;
+        min-height: 0;
+    }
+
+    .settlement-shell .admin-console-identity {
+        grid-column: 1;
+        grid-row: 1;
+        border-bottom: var(--settlement-line) solid var(--admin-line-soft);
+    }
+
+    .settlement-shell .admin-console-actions {
+        grid-column: 2;
+        grid-row: 1;
+        align-self: stretch;
+        border-bottom: var(--settlement-line) solid var(--admin-line-soft);
+        border-left: var(--settlement-line) solid var(--admin-line-soft);
+    }
+
+    .settlement-shell .admin-console-main {
+        grid-column: 1 / -1;
+        grid-row: 2;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: center;
+    }
+
+    .settlement-shell .admin-console-title h1 {
+        overflow: visible;
+        text-overflow: clip;
+        white-space: normal;
+    }
+
+    .settlement-shell .admin-console-nav button {
+        min-height: var(--admin-header-control-height);
+        padding-inline: calc(10 * var(--settlement-density-unit));
+        border: var(--settlement-line) solid var(--admin-line);
+        border-radius: calc(6 * var(--settlement-density-unit));
+        background: var(--admin-panel-soft);
+        color: var(--admin-ink);
+        font: inherit;
+        font-size: calc(11 * var(--settlement-density-unit));
+        cursor: pointer;
+    }
+
+    .settlement-shell .admin-console-nav button.is-active {
+        box-shadow:
+            inset 0 calc(-3 * var(--settlement-density-unit)) 0
+            var(--admin-green);
+    }
+
     .settlement-page {
         width: calc(100% - 16px);
         height: auto;
         overflow: visible;
+    }
+
+    .settlement-auto-preview > header,
+    .settlement-auto-preview-form,
+    .settlement-auto-preview-summary {
+        flex-wrap: wrap;
     }
 
     .settlement-toolbar {
@@ -1949,6 +2506,10 @@ body.settlement-unsettled-panel-open .settlement-work-badge[data-unsettled-panel
     }
 
     .settlement-work-badge {
+        grid-column: 1 / -1;
+    }
+
+    .settlement-auto-preview-trigger {
         grid-column: 1 / -1;
     }
 
@@ -2012,6 +2573,35 @@ body.settlement-unsettled-panel-open .settlement-work-badge[data-unsettled-panel
         padding-top: 6px;
     }
 
+    .settlement-auto-preview > header,
+    .settlement-auto-preview-form {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .settlement-auto-preview-form input,
+    .settlement-auto-preview-form button {
+        width: 100%;
+    }
+
+    .settlement-auto-preview-modal {
+        width: min(calc(100vw - 20px), 880px);
+        max-height: calc(100dvh - 20px);
+    }
+
+    .settlement-auto-preview-modal-body {
+        padding: 12px 14px 0;
+    }
+
+    .settlement-auto-preview-modal .settlement-auto-preview-form {
+        grid-template-columns: minmax(0, 1fr);
+        align-items: stretch;
+    }
+
+    .settlement-auto-preview-modal .settlement-auto-preview-summary {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
     .settlement-toolbar {
         grid-template-columns: 1fr;
     }
@@ -2044,17 +2634,6 @@ body.settlement-unsettled-panel-open .settlement-work-badge[data-unsettled-panel
     .settlement-room-panel,
     .settlement-unsettled-panel {
         width: 100vw;
-    }
-
-    body.settlement-unsettled-panel-open .settlement-work-badge[data-unsettled-panel-toggle] {
-        top: 10px;
-        right: auto;
-        left: 8px;
-        transform: none;
-    }
-
-    body.settlement-unsettled-panel-open .settlement-unsettled-panel-header {
-        padding-left: 60px;
     }
 
     .settlement-room-panel-header,

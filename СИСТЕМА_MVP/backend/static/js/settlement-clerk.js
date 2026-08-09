@@ -22,6 +22,11 @@
     var panel = root.querySelector("[data-room-panel]");
     var panelBackdrop = root.querySelector("[data-room-panel-backdrop]");
     var panelClose = root.querySelector("[data-room-panel-close]");
+    var employeePanel = root.querySelector("[data-employee-panel]");
+    var employeePanelBackdrop = root.querySelector("[data-employee-panel-backdrop]");
+    var employeePanelClose = root.querySelector("[data-employee-panel-close]");
+    var employeePanelTitle = root.querySelector("[data-employee-panel-title]");
+    var employeePanelBody = root.querySelector("[data-employee-panel-body]");
     var panelTitle = root.querySelector("[data-room-panel-title]");
     var panelLocation = root.querySelector("[data-room-panel-location]");
     var panelStatus = root.querySelector("[data-room-panel-status]");
@@ -29,12 +34,15 @@
     var panelFreeCount = root.querySelector("[data-room-free-count]");
     var panelBeds = root.querySelector("[data-room-panel-beds]");
     var placementHint = root.querySelector("[data-placement-hint]");
+    var placementPanel = root.querySelector("[data-placement-panel]");
     var settlementForm = root.querySelector("[data-settlement-form]");
     var employeeSearch = root.querySelector("[data-employee-search]");
     var employeeResults = root.querySelector("[data-employee-results]");
     var selectedEmployeeCard = root.querySelector("[data-selected-employee]");
     var selectedEmployeeName = root.querySelector("[data-selected-employee-name]");
     var selectedEmployeeMeta = root.querySelector("[data-selected-employee-meta]");
+    var selectedEmployeeCurrentPlace = root.querySelector("[data-selected-employee-current-place]");
+    var selectedEmployeeTargetPlace = root.querySelector("[data-selected-employee-target-place]");
     var assignmentType = root.querySelector("[data-assignment-type-select]");
     var assignmentEnd = root.querySelector("[data-assignment-end]");
     var assignmentEndInput = root.querySelector("[data-assignment-end-input]");
@@ -44,7 +52,18 @@
     var relocateButton = root.querySelector("[data-relocate-button]");
     var releaseButton = root.querySelector("[data-release-button]");
     var placementFeedback = root.querySelector("[data-placement-feedback]");
-    var unsettledPanelToggle = root.querySelector("[data-unsettled-panel-toggle]");
+    var relocationModal = root.querySelector("[data-relocation-modal]");
+    var relocationModalBackdrop = root.querySelector("[data-relocation-modal-backdrop]");
+    var relocationModalContent = root.querySelector("[data-relocation-modal-content]");
+    var relocationModalClose = root.querySelector("[data-relocation-modal-close]");
+    var relocationModalCancel = root.querySelector("[data-relocation-modal-cancel]");
+    var autoPreviewModal = root.querySelector("[data-auto-preview-modal]");
+    var autoPreviewModalBackdrop = root.querySelector("[data-auto-preview-modal-backdrop]");
+    var autoPreviewModalOpen = root.querySelector("[data-auto-preview-modal-open]");
+    var autoPreviewModalClose = root.querySelector("[data-auto-preview-modal-close]");
+    var autoPreviewModalCancel = root.querySelector("[data-auto-preview-modal-cancel]");
+    var autoPreviewForm = root.querySelector("[data-auto-preview-form]");
+    var unsettledPanelToggles = Array.from(root.querySelectorAll("[data-unsettled-panel-toggle]"));
     var unsettledPanel = root.querySelector("[data-unsettled-panel]");
     var unsettledPanelClose = root.querySelector("[data-unsettled-panel-close]");
     var unsettledSearch = root.querySelector("[data-unsettled-search]");
@@ -60,6 +79,58 @@
     var searchSequence = 0;
     var saving = false;
     var unsettledShift = "all";
+    var unsettledPanelTrigger = null;
+    var autoPreviewOpenOnceKey = "settlement:auto-preview-open-once";
+
+    function hasFloorSelection(dormitory, floor) {
+        return floorSections.some(function (section) {
+            return (
+                section.dataset.dormitory === String(dormitory)
+                && section.dataset.floorSection === String(floor)
+            );
+        });
+    }
+
+    function firstFloorForDormitory(dormitory) {
+        var section = floorSections.find(function (candidate) {
+            return candidate.dataset.dormitory === String(dormitory);
+        });
+        return section ? section.dataset.floorSection : null;
+    }
+
+    function syncMapSelectionButtons() {
+        root.querySelectorAll("[data-dorm-filter]").forEach(function (button) {
+            var active = button.dataset.dormFilter === state.dormitory;
+            button.classList.toggle("is-active", active);
+            button.setAttribute("aria-pressed", String(active));
+        });
+        root.querySelectorAll("[data-floor-filter]").forEach(function (button) {
+            var active = button.dataset.floorFilter === state.floor;
+            button.classList.toggle("is-active", active);
+            button.setAttribute("aria-pressed", String(active));
+        });
+    }
+
+    function restoreMapSelection() {
+        var params = new URLSearchParams(window.location.search);
+        var requestedDormitory = params.get("dormitory");
+        var requestedFloor = params.get("floor");
+        if (hasFloorSelection(requestedDormitory, requestedFloor)) {
+            state.dormitory = requestedDormitory;
+            state.floor = requestedFloor;
+        } else {
+            state.dormitory = "5";
+            state.floor = firstFloorForDormitory(state.dormitory) || "1";
+        }
+        syncMapSelectionButtons();
+    }
+
+    function persistMapSelection() {
+        var url = new URL(window.location.href);
+        url.searchParams.set("dormitory", state.dormitory);
+        url.searchParams.set("floor", state.floor);
+        window.history.replaceState({}, "", url.pathname + url.search + url.hash);
+    }
 
     function normalizeSearch(value) {
         return String(value || "").trim().toLocaleLowerCase("ru-RU");
@@ -121,38 +192,44 @@
         if (!unsettledPanel) return;
         unsettledPanel.hidden = true;
         unsettledPanel.setAttribute("aria-hidden", "true");
-        if (unsettledPanelToggle) {
-            unsettledPanelToggle.setAttribute("aria-expanded", "false");
-            unsettledPanelToggle.setAttribute(
+        unsettledPanelToggles.forEach(function (toggle) {
+            toggle.hidden = false;
+            toggle.removeAttribute("tabindex");
+            toggle.setAttribute("aria-expanded", "false");
+            toggle.setAttribute(
                 "aria-label",
                 "Открыть панель нерасселённых сотрудников"
             );
-        }
+        });
         document.body.classList.remove("settlement-unsettled-panel-open");
-        if (restoreFocus !== false && unsettledPanelToggle) unsettledPanelToggle.focus();
+        if (restoreFocus !== false && unsettledPanelTrigger) unsettledPanelTrigger.focus();
+        unsettledPanelTrigger = null;
     }
 
-    function openUnsettledPanel() {
+    function openUnsettledPanel(trigger) {
         if (!unsettledPanel) return;
         closePanel();
+        unsettledPanelTrigger = trigger || unsettledPanelToggles[0] || null;
         unsettledPanel.hidden = false;
         unsettledPanel.setAttribute("aria-hidden", "false");
-        if (unsettledPanelToggle) {
-            unsettledPanelToggle.setAttribute("aria-expanded", "true");
-            unsettledPanelToggle.setAttribute(
+        unsettledPanelToggles.forEach(function (toggle) {
+            toggle.hidden = true;
+            toggle.setAttribute("tabindex", "-1");
+            toggle.setAttribute("aria-expanded", "true");
+            toggle.setAttribute(
                 "aria-label",
-                "Закрыть панель нерасселённых сотрудников"
+                "Открыть панель нерасселённых сотрудников"
             );
-        }
+        });
         document.body.classList.add("settlement-unsettled-panel-open");
         renderUnsettledEmployees();
         if (unsettledSearch) unsettledSearch.focus();
     }
 
-    function toggleUnsettledPanel() {
+    function toggleUnsettledPanel(event) {
         if (!unsettledPanel) return;
         if (unsettledPanel.hidden) {
-            openUnsettledPanel();
+            openUnsettledPanel(event.currentTarget);
         } else {
             closeUnsettledPanel(true);
         }
@@ -184,6 +261,36 @@
         return label;
     }
 
+    function renderBedHoverCard(bed, occupied) {
+        var hoverCard = bed.querySelector("[data-bed-hover-card]");
+        if (!occupied) {
+            if (hoverCard) hoverCard.remove();
+            return;
+        }
+
+        if (!hoverCard) {
+            hoverCard = document.createElement("span");
+            hoverCard.className = "settlement-bed-hover-card";
+            hoverCard.setAttribute("data-bed-hover-card", "");
+            hoverCard.setAttribute("aria-hidden", "true");
+            bed.appendChild(hoverCard);
+        }
+
+        var shortName = document.createElement("strong");
+        shortName.textContent = shortPersonName(bed.dataset.occupantName);
+        var position = document.createElement("span");
+        position.textContent = bed.dataset.positionLabel || "";
+        var work = document.createElement("span");
+        work.textContent = bed.dataset.workLabel || "";
+        var shiftLabel = String(bed.dataset.shiftLabel || "").trim();
+        hoverCard.replaceChildren(shortName, position, work);
+        if (shiftLabel && shiftLabel !== "Не указано") {
+            var shift = document.createElement("small");
+            shift.textContent = shiftLabel;
+            hoverCard.appendChild(shift);
+        }
+    }
+
     function renderMapBed(bed) {
         var occupied = bed.dataset.occupied === "true";
         var unavailable = Boolean(bed.disabled);
@@ -197,10 +304,24 @@
         var person = bed.querySelector("[data-bed-person-label]");
         var status = bed.querySelector("[data-bed-status]");
         var shift = bed.querySelector("[data-bed-shift-badge]");
+        var dragHandle = bed.querySelector("[data-bed-photo-slot]");
 
         bed.dataset.bedState = unavailable ? "unavailable" : (occupied ? "occupied" : "free");
         bed.classList.toggle("is-occupied", occupied);
         bed.classList.toggle("is-free", !occupied);
+        bed.classList.remove("is-drag-source", "is-drop-target", "is-dragging");
+        if (dragHandle) {
+            dragHandle.classList.remove("is-dragging");
+            dragHandle.removeAttribute("aria-grabbed");
+            dragHandle.style.removeProperty("pointer-events");
+            if (occupied) {
+                dragHandle.setAttribute("data-bed-drag-handle", "");
+                dragHandle.setAttribute("draggable", "true");
+            } else {
+                dragHandle.removeAttribute("data-bed-drag-handle");
+                dragHandle.removeAttribute("draggable");
+            }
+        }
         if (avatar) {
             avatar.textContent = personInitials(bed.dataset.occupantName);
             avatar.hidden = !occupied;
@@ -218,6 +339,7 @@
             shift.textContent = shiftLabel;
             shift.hidden = !occupied || !shiftLabel;
         }
+        renderBedHoverCard(bed, occupied);
 
         function showPhotoFallback() {
             if (photo) {
@@ -268,6 +390,11 @@
             button.setAttribute("aria-pressed", String(active));
         });
         state[key] = value;
+        if (key === "dormitory" && !hasFloorSelection(state.dormitory, state.floor)) {
+            state.floor = firstFloorForDormitory(state.dormitory) || "1";
+            syncMapSelectionButtons();
+        }
+        if (key === "dormitory" || key === "floor") persistMapSelection();
         applyFilters();
     }
 
@@ -413,6 +540,14 @@
         if (selectedEmployeeCard) selectedEmployeeCard.hidden = true;
         if (selectedEmployeeName) selectedEmployeeName.textContent = "";
         if (selectedEmployeeMeta) selectedEmployeeMeta.textContent = "";
+        if (selectedEmployeeCurrentPlace) {
+            selectedEmployeeCurrentPlace.textContent = "";
+            selectedEmployeeCurrentPlace.hidden = true;
+        }
+        if (selectedEmployeeTargetPlace) {
+            selectedEmployeeTargetPlace.textContent = "";
+            selectedEmployeeTargetPlace.hidden = true;
+        }
         if (employeeResults) {
             employeeResults.hidden = true;
             employeeResults.replaceChildren();
@@ -426,7 +561,40 @@
 
     function resetRelocation() {
         relocationSourceBed = null;
+        if (panel) panel.classList.remove("is-relocating-with-target");
         resetEmployeeSelection();
+    }
+
+    function bedLocation(bed) {
+        if (!bed) return "";
+        return [
+            bed.dataset.dormitoryLabel,
+            bed.dataset.floorLabel,
+            bed.dataset.roomLabel,
+            "блок " + bed.dataset.blockLabel,
+            bed.dataset.positionLabel
+        ].filter(Boolean).join(", ");
+    }
+
+    function updateRelocationDetails() {
+        var hasTarget = Boolean(
+            relocationSourceBed
+            && selectedBed
+            && selectedBed.dataset.occupied !== "true"
+        );
+        if (panel) panel.classList.toggle("is-relocating-with-target", hasTarget);
+        if (selectedEmployeeCurrentPlace) {
+            selectedEmployeeCurrentPlace.textContent = relocationSourceBed
+                ? "Текущее место: " + bedLocation(relocationSourceBed)
+                : "";
+            selectedEmployeeCurrentPlace.hidden = !relocationSourceBed;
+        }
+        if (selectedEmployeeTargetPlace) {
+            selectedEmployeeTargetPlace.textContent = hasTarget
+                ? "Новое место: " + bedLocation(selectedBed)
+                : "";
+            selectedEmployeeTargetPlace.hidden = !hasTarget;
+        }
     }
 
     function updateAssignmentEndVisibility() {
@@ -452,6 +620,7 @@
 
     function updatePlacementPanel() {
         if (!placementHint || !settlementForm) return;
+        updateRelocationDetails();
         showFeedback("", false);
         settlementForm.hidden = true;
         placementHint.hidden = false;
@@ -561,6 +730,120 @@
         resetRelocation();
     }
 
+    function closeRelocationModal(force) {
+        if (saving && !force) return;
+        if (!relocationModal || relocationModal.hidden) return;
+        relocationModal.hidden = true;
+        relocationModal.setAttribute("aria-hidden", "true");
+        if (relocationModalBackdrop) relocationModalBackdrop.hidden = true;
+        document.body.classList.remove("settlement-relocation-modal-open");
+        if (placementPanel && settlementForm) placementPanel.appendChild(settlementForm);
+        if (placementPanel && placementFeedback) placementPanel.appendChild(placementFeedback);
+        if (selectedBed) {
+            selectedBed.classList.remove("is-selected");
+            selectedBed.setAttribute("aria-pressed", "false");
+            selectedBed = null;
+        }
+        resetRelocation();
+    }
+
+    function openRelocationModal() {
+        if (!relocationModal || !relocationModalBackdrop || !relocationModalContent) return;
+        panel.hidden = true;
+        panel.setAttribute("aria-hidden", "true");
+        panelBackdrop.hidden = true;
+        relocationModalContent.appendChild(settlementForm);
+        relocationModalContent.appendChild(placementFeedback);
+        relocationModal.hidden = false;
+        relocationModal.setAttribute("aria-hidden", "false");
+        relocationModalBackdrop.hidden = false;
+        document.body.classList.add("settlement-relocation-modal-open");
+        if (assignmentType) assignmentType.focus();
+    }
+
+    function setAutoPreviewModal(open) {
+        if (!autoPreviewModal || !autoPreviewModalBackdrop) return;
+        autoPreviewModal.hidden = !open;
+        autoPreviewModal.setAttribute("aria-hidden", String(!open));
+        autoPreviewModalBackdrop.hidden = !open;
+        document.body.classList.toggle("settlement-auto-preview-modal-open", open);
+        if (autoPreviewModalOpen) autoPreviewModalOpen.setAttribute("aria-expanded", String(open));
+    }
+
+    function markAutoPreviewOpenOnce() {
+        try {
+            window.sessionStorage.setItem(autoPreviewOpenOnceKey, "1");
+        } catch (error) {
+            // The calculation still works when session storage is unavailable.
+        }
+    }
+
+    function consumeAutoPreviewOpenOnce() {
+        try {
+            if (window.sessionStorage.getItem(autoPreviewOpenOnceKey) !== "1") return false;
+            window.sessionStorage.removeItem(autoPreviewOpenOnceKey);
+            return true;
+        } catch (error) {
+            return false;
+        }
+    }
+
+    function closeEmployeePanel() {
+        if (!employeePanel || !employeePanelBackdrop) return;
+        employeePanel.hidden = true;
+        employeePanel.setAttribute("aria-hidden", "true");
+        employeePanelBackdrop.hidden = true;
+    }
+
+    function renderEmployeePanel(employee) {
+        if (!employeePanelBody || !employeePanelTitle) return;
+        employeePanelTitle.textContent = employee.full_name;
+        employeePanelBody.textContent = "";
+        var details = element("dl", "settlement-employee-panel-details");
+        [
+            ["Табельный номер", employee.personnel_number],
+            ["Должность", employee.position],
+            ["Подразделение", employee.department],
+            ["График", employee.work_schedule],
+            ["Бригада", employee.brigade],
+            ["Пол", employee.sex],
+            ["Телефон", employee.phone],
+            ["Фактическое место", employee.residence]
+        ].forEach(function (row) {
+            details.appendChild(element("dt", "", row[0]));
+            details.appendChild(element("dd", "", row[1]));
+        });
+        employeePanelBody.appendChild(details);
+    }
+
+    function openEmployeePanel(employeeId) {
+        if (!employeePanel || !employeePanelBackdrop || !employeeId) return;
+        var url = String(root.dataset.employeeDetailUrl || "").replace("/0/", "/" + employeeId + "/");
+        if (!url) return;
+        closePanel();
+        fetch(url, {
+            credentials: "same-origin",
+            headers: {"X-Requested-With": "XMLHttpRequest"}
+        })
+            .then(function (response) {
+                return response.json().then(function (payload) {
+                    if (!response.ok || !payload.ok) {
+                        throw new Error(payload.error || "Не удалось открыть карточку сотрудника.");
+                    }
+                    return payload.employee;
+                });
+            })
+            .then(function (employee) {
+                renderEmployeePanel(employee);
+                employeePanel.hidden = false;
+                employeePanel.setAttribute("aria-hidden", "false");
+                employeePanelBackdrop.hidden = false;
+            })
+            .catch(function (error) {
+                showFeedback(error.message || "Не удалось открыть карточку сотрудника.", true);
+            });
+    }
+
     function employeeMeta(employee) {
         return [
             "Таб. № " + employee.personnel_number,
@@ -651,15 +934,26 @@
         );
     }
 
-    function startRelocation() {
-        if (!selectedBed || selectedBed.dataset.occupied !== "true" || saving) return;
-        relocationSourceBed = selectedBed;
+    function configureRelocation(sourceBed, destinationBed) {
+        if (!sourceBed || sourceBed.dataset.occupied !== "true" || saving) return;
+        if (destinationBed) {
+            closeUnsettledPanel(false);
+            activeRoom = destinationBed.closest("[data-room-card]");
+            if (selectedBed) {
+                selectedBed.classList.remove("is-selected");
+                selectedBed.setAttribute("aria-pressed", "false");
+            }
+            selectedBed = destinationBed;
+            selectedBed.classList.add("is-selected");
+            selectedBed.setAttribute("aria-pressed", "true");
+        }
+        relocationSourceBed = sourceBed;
         selectedEmployee = {
-            id: Number(selectedBed.dataset.occupantId),
-            full_name: selectedBed.dataset.occupantName,
+            id: Number(sourceBed.dataset.occupantId),
+            full_name: sourceBed.dataset.occupantName,
             personnel_number: "Не указано",
-            shift_label: selectedBed.dataset.shiftLabel,
-            work_label: selectedBed.dataset.workLabel
+            shift_label: sourceBed.dataset.shiftLabel,
+            work_label: sourceBed.dataset.workLabel
         };
         if (!selectedEmployee.id) {
             showFeedback("Не удалось определить сотрудника текущего размещения.", true);
@@ -670,18 +964,29 @@
         if (selectedEmployeeMeta) selectedEmployeeMeta.textContent = employeeMeta(selectedEmployee);
         if (selectedEmployeeCard) selectedEmployeeCard.hidden = false;
         if (assignmentType) {
-            assignmentType.value = selectedBed.dataset.assignmentType || "";
+            assignmentType.value = sourceBed.dataset.assignmentType || "";
         }
         updateAssignmentEndVisibility();
-        selectedBed.classList.remove("is-selected");
-        selectedBed.setAttribute("aria-pressed", "false");
-        selectedBed = null;
+        if (!destinationBed) {
+            selectedBed.classList.remove("is-selected");
+            selectedBed.setAttribute("aria-pressed", "false");
+            selectedBed = null;
+        }
         renderBedCards();
         updatePlacementPanel();
         updateSettleButton();
-        panel.hidden = true;
-        panel.setAttribute("aria-hidden", "true");
-        panelBackdrop.hidden = true;
+        if (destinationBed) {
+            openRelocationModal();
+        } else {
+            panel.hidden = true;
+            panel.setAttribute("aria-hidden", "true");
+            panelBackdrop.hidden = true;
+        }
+    }
+
+    function startRelocation() {
+        if (!selectedBed || selectedBed.dataset.occupied !== "true" || saving) return;
+        configureRelocation(selectedBed, null);
     }
 
     function csrfToken() {
@@ -693,12 +998,29 @@
 
     function updateMapAfterSettlement(payload) {
         var occupancy = payload.occupancy;
+        var movedEmployeeId = selectedEmployee && selectedEmployee.id;
+        clearDragState();
+        if (relocationSourceBed) {
+            relocationSourceBed.dataset.occupied = "false";
+            relocationSourceBed.dataset.occupantId = "";
+            relocationSourceBed.dataset.occupantName = "";
+            relocationSourceBed.dataset.occupantPhotoUrl = "";
+            relocationSourceBed.dataset.shiftLabel = "";
+            relocationSourceBed.dataset.workLabel = "";
+            relocationSourceBed.dataset.assignmentTypeLabel = "";
+            relocationSourceBed.dataset.assignmentType = "";
+            relocationSourceBed.classList.remove("is-occupied");
+            relocationSourceBed.classList.add("is-free");
+            renderMapBed(relocationSourceBed);
+        }
         selectedBed.dataset.occupied = "true";
+        selectedBed.dataset.occupantId = String(movedEmployeeId || "");
         selectedBed.dataset.occupantName = occupancy.occupant_name;
         selectedBed.dataset.occupantPhotoUrl = occupancy.photo_url || "";
         selectedBed.dataset.shiftLabel = occupancy.shift_label;
         selectedBed.dataset.workLabel = occupancy.work_label;
         selectedBed.dataset.assignmentTypeLabel = occupancy.assignment_type_label;
+        selectedBed.dataset.assignmentType = occupancy.assignment_type || "";
         selectedBed.classList.remove("is-free");
         selectedBed.classList.add("is-occupied");
         renderMapBed(selectedBed);
@@ -750,14 +1072,12 @@
                 });
             })
             .then(function (payload) {
-                var occupantName = payload.occupancy.occupant_name;
-                showFeedback(
-                    relocationSourceBed
-                        ? occupantName + " переселён. Обновляем карту…"
-                        : occupantName + " заселён. Обновляем карту…",
-                    false
-                );
-                window.location.reload();
+                updateMapAfterSettlement(payload);
+                if (relocationSourceBed) {
+                    closeRelocationModal(true);
+                } else {
+                    closePanel();
+                }
             })
             .catch(function (error) {
                 showFeedback(error.message || "Не удалось сохранить заселение.", true);
@@ -873,6 +1193,7 @@
     }
 
     root.addEventListener("click", function (event) {
+        if (event.target.closest("[data-bed-photo-slot], [data-bed-hover-card]")) return;
         var bed = event.target.closest("[data-bed]");
         if (bed) {
             openRoom(bed.closest("[data-room-card]"), bed);
@@ -886,13 +1207,99 @@
         renderMapBed(bed);
         if (!bed.disabled) bed.setAttribute("aria-pressed", "false");
     });
+
+    var dragSourceBed = null;
+
+    function clearDragState() {
+        root.querySelectorAll(".is-drag-source, .is-drop-target").forEach(function (bed) {
+            bed.classList.remove("is-drag-source", "is-drop-target");
+        });
+        dragSourceBed = null;
+    }
+
+    root.addEventListener("dragstart", function (event) {
+        var handle = event.target.closest("[data-bed-drag-handle]");
+        var bed = handle && handle.closest("[data-bed]");
+        if (!bed || bed.dataset.occupied !== "true" || saving) {
+            event.preventDefault();
+            return;
+        }
+        dragSourceBed = bed;
+        bed.classList.add("is-drag-source");
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData("text/plain", bed.dataset.bedId);
+        event.dataTransfer.setData("application/x-settlement-bed", bed.dataset.bedId);
+    });
+
+    root.addEventListener("dragover", function (event) {
+        var bed = event.target.closest("[data-bed]");
+        if (
+            !dragSourceBed
+            || !bed
+            || bed === dragSourceBed
+            || bed.disabled
+            || bed.dataset.occupied === "true"
+            || bed.closest("[data-floor-section]").hidden
+        ) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "move";
+        root.querySelectorAll(".is-drop-target").forEach(function (candidate) {
+            if (candidate !== bed) candidate.classList.remove("is-drop-target");
+        });
+        bed.classList.add("is-drop-target");
+    });
+
+    root.addEventListener("drop", function (event) {
+        var targetBed = event.target.closest("[data-bed]");
+        if (
+            !dragSourceBed
+            || !targetBed
+            || targetBed === dragSourceBed
+            || targetBed.disabled
+            || targetBed.dataset.occupied === "true"
+            || targetBed.closest("[data-floor-section]").hidden
+        ) return;
+        event.preventDefault();
+        var sourceBed = dragSourceBed;
+        clearDragState();
+        configureRelocation(sourceBed, targetBed);
+    });
+
+    root.addEventListener("dragend", clearDragState);
+
+    root.addEventListener("dblclick", function (event) {
+        var handle = event.target.closest("[data-bed-photo-slot], [data-bed-hover-card]");
+        var bed = handle && handle.closest("[data-bed]");
+        if (!bed || bed.dataset.occupied !== "true") return;
+        event.preventDefault();
+        event.stopPropagation();
+        openEmployeePanel(Number(bed.dataset.occupantId));
+    });
     panelClose.addEventListener("click", closePanel);
     panelBackdrop.addEventListener("click", closePanel);
+    if (employeePanelClose) employeePanelClose.addEventListener("click", closeEmployeePanel);
+    if (employeePanelBackdrop) employeePanelBackdrop.addEventListener("click", closeEmployeePanel);
+    if (relocationModalClose) relocationModalClose.addEventListener("click", closeRelocationModal);
+    if (relocationModalCancel) relocationModalCancel.addEventListener("click", closeRelocationModal);
+    if (relocationModalBackdrop) relocationModalBackdrop.addEventListener("click", closeRelocationModal);
+    if (autoPreviewModalOpen) autoPreviewModalOpen.addEventListener("click", function () {
+        setAutoPreviewModal(true);
+    });
+    if (autoPreviewModalClose) autoPreviewModalClose.addEventListener("click", function () {
+        setAutoPreviewModal(false);
+    });
+    if (autoPreviewModalCancel) autoPreviewModalCancel.addEventListener("click", function () {
+        setAutoPreviewModal(false);
+    });
+    if (autoPreviewForm) autoPreviewForm.addEventListener("submit", markAutoPreviewOpenOnce);
+    if (autoPreviewModalBackdrop) autoPreviewModalBackdrop.addEventListener("click", function () {
+        setAutoPreviewModal(false);
+    });
     if (relocateButton) relocateButton.addEventListener("click", startRelocation);
     if (releaseButton) releaseButton.addEventListener("click", confirmRelease);
-    if (unsettledPanelToggle) {
-        unsettledPanelToggle.addEventListener("click", toggleUnsettledPanel);
-    }
+    unsettledPanelToggles.forEach(function (toggle) {
+        toggle.addEventListener("click", toggleUnsettledPanel);
+    });
     if (unsettledPanelClose) {
         unsettledPanelClose.addEventListener("click", function () {
             closeUnsettledPanel(true);
@@ -916,6 +1323,10 @@
         if (event.key !== "Escape") return;
         if (unsettledPanel && !unsettledPanel.hidden) {
             closeUnsettledPanel(true);
+        } else if (autoPreviewModal && !autoPreviewModal.hidden) {
+            setAutoPreviewModal(false);
+        } else if (relocationModal && !relocationModal.hidden) {
+            closeRelocationModal();
         } else if (!panel.hidden) {
             closePanel();
         }
@@ -933,8 +1344,16 @@
     }
     settlementForm.addEventListener("submit", function (event) {
         event.preventDefault();
+        if (relocationSourceBed) {
+            submitPlacement();
+            return;
+        }
         confirmPlacement();
     });
 
+    restoreMapSelection();
     applyFilters();
+    if (consumeAutoPreviewOpenOnce()) {
+        setAutoPreviewModal(true);
+    }
 }());
