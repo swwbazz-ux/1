@@ -3643,6 +3643,22 @@ class SettlementMapAccessTests(TestCase):
         self.assertEqual(content.count('data-bed-block-size="3"'), 114)
         self.assertEqual(content.count('data-bed-block-size="2"'), 3)
         self.assertEqual(content.count('data-room-type="itr"'), 3)
+        self.assertNotIn('settlement-room-state', content)
+        transferred_room_tag = re.search(
+            r'<article(?=[^>]*data-room-card)(?=[^>]*data-transfer-status="transferred")([^>]*)>',
+            content,
+        )
+        not_transferred_room_tag = re.search(
+            r'<article(?=[^>]*data-room-card)(?=[^>]*data-transfer-status="not_transferred")([^>]*)>',
+            content,
+        )
+        self.assertIsNotNone(transferred_room_tag)
+        self.assertIsNotNone(not_transferred_room_tag)
+        self.assertIn('is-transferred', transferred_room_tag.group(1))
+        self.assertIn('role="group"', transferred_room_tag.group(1))
+        self.assertIn('передана в распоряжение', transferred_room_tag.group(1))
+        self.assertIn('is-not-transferred', not_transferred_room_tag.group(1))
+        self.assertIn('не передана и недоступна для расселения', not_transferred_room_tag.group(1))
         self.assertEqual(
             len(re.findall(r'data-bed-id="[^"]+"[^>]*\sdisabled', content)),
             78,
@@ -3685,13 +3701,15 @@ class SettlementMapAccessTests(TestCase):
         self.assertIn('data-room-panel', content)
         self.assertIn('data-settlement-form', content)
         self.assertIn('data-employee-search', content)
-        self.assertEqual(content.count('-settlement-map-v23'), 2)
-        self.assertNotIn('-settlement-map-v22', content)
+        self.assertEqual(content.count('-settlement-map-v29'), 2)
+        self.assertNotIn('-settlement-map-v28', content)
+        self.assertNotIn('-settlement-map-v24', content)
         self.assertIn('data-relocate-button', content)
         self.assertIn('data-release-button', content)
         self.assertIn('data-assignment-end-input', content)
         self.assertNotIn('data-dorm-filter="all"', content)
         self.assertNotIn('data-floor-filter="all"', content)
+        self.assertNotIn('data-status-filter', content)
         self.assertIn(
             'class="is-active" data-dorm-filter="5" aria-pressed="true"',
             content,
@@ -6098,7 +6116,6 @@ class SettlementFrontendContractTests(TestCase):
             'unsettledShift =',
             'state.dormitory =',
             'state.floor =',
-            'state.status =',
             'state.search =',
         ):
             self.assertNotIn(state_reset, drawer_source)
@@ -6231,7 +6248,6 @@ class SettlementFrontendContractTests(TestCase):
             '.settlement-bed-block b',
             '.settlement-bed-empty-icon',
             '.settlement-bed-status',
-            '.settlement-room-state',
             '.settlement-unsettled-employee',
             '.settlement-unsettled-employee-initials',
         ):
@@ -6274,16 +6290,30 @@ class SettlementFrontendContractTests(TestCase):
             javascript,
             r'(?i)\bscale(?:3d|x|y|z)?\s*\(',
         )
-        room_state_styles = stylesheet.split(
-            '.settlement-room-state {',
-            1,
-        )[1].split('}', 1)[0]
         bed_status_styles = stylesheet.split(
             '.settlement-bed-status {',
             1,
         )[1].split('}', 1)[0]
-        self.assertNotIn('text-overflow: ellipsis', room_state_styles)
         self.assertNotIn('text-overflow: ellipsis', bed_status_styles)
+        self.assertIn('.settlement-room.is-not-transferred {', stylesheet)
+        self.assertIn('border-style: dashed', stylesheet)
+        self.assertIn('--settlement-untransferred-room-surface:', stylesheet)
+        self.assertIn('--settlement-untransferred-bed-surface:', stylesheet)
+        self.assertIn('background: var(--settlement-untransferred-room-surface)', stylesheet)
+        self.assertIn('background: var(--settlement-untransferred-bed-surface)', stylesheet)
+        untransferred_room_rules = stylesheet.split('.settlement-room.is-not-transferred {', 1)[1].split('}', 1)[0]
+        self.assertNotIn('opacity:', untransferred_room_rules)
+        self.assertNotIn('.settlement-room-state {', stylesheet)
+        self.assertIn('role="group"', room_card_template)
+        self.assertIn('is-transferred', room_card_template)
+        self.assertIn('is-not-transferred', room_card_template)
+        self.assertNotIn('status-{{ room.transfer_status }}', room_card_template)
+        self.assertNotIn('settlement-room-state', room_card_template)
+        self.assertIn('function isTransferredBed(bed)', javascript)
+        self.assertIn('root.addEventListener("dragenter"', javascript)
+        self.assertIn('!isTransferredBed(targetBed)', javascript)
+        self.assertNotIn('data-status-filter', javascript)
+        self.assertNotIn('status: "all"', javascript)
         responsive_toolbar = stylesheet.split('@media (max-width: 1500px)', 1)[1].split(
             '@media (max-width: 1180px)',
             1,

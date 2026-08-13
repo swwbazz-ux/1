@@ -106,6 +106,17 @@
     );
     --settlement-accent: var(--admin-green);
     --settlement-accent-soft: var(--admin-green-soft);
+    --settlement-transferred-room-surface: var(--admin-panel);
+    --settlement-transferred-room-border: color-mix(
+        in srgb,
+        var(--admin-line) 78%,
+        var(--settlement-accent)
+    );
+    --settlement-untransferred-room-surface: #aebdc3;
+    --settlement-untransferred-room-border: #66787f;
+    --settlement-untransferred-bed-surface: #c9d4d7;
+    --settlement-untransferred-bed-border: #71838a;
+    --settlement-untransferred-secondary: #3f5057;
     display: grid;
     grid-template-rows: auto minmax(0, 1fr);
     width: 100%;
@@ -197,16 +208,23 @@
     }
 
     .settlement-shell .admin-console-nav button {
-        padding-inline: calc(10 * var(--settlement-density-unit));
+        height: var(--admin-header-control-height);
+        padding-inline: calc(8 * var(--settlement-density-unit));
+        padding-block: 0;
         border: var(--settlement-line) solid var(--admin-line);
         background: var(--admin-panel-soft);
         color: var(--admin-ink);
-        font: inherit;
+        font-family: inherit;
+        font-weight: 900;
+        line-height: 1;
         cursor: pointer;
     }
 
     .settlement-shell .admin-console-nav a.is-active,
     .settlement-shell .admin-console-nav button.is-active {
+        border-color: color-mix(in srgb, var(--admin-green) 48%, var(--admin-line));
+        background: var(--settlement-accent-soft);
+        color: var(--settlement-accent);
         box-shadow:
             inset 0 calc(-3 * var(--settlement-density-unit)) 0
             var(--admin-green);
@@ -285,7 +303,6 @@
         auto
         minmax(190px, auto)
         minmax(142px, auto)
-        minmax(280px, auto)
         minmax(210px, 1fr)
         auto
         auto;
@@ -495,7 +512,8 @@
 .settlement-summary article {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
-    gap: var(--settlement-density-unit) calc(7 * var(--settlement-density-unit));
+    gap: calc(5 * var(--settlement-density-unit));
+    align-items: center;
     min-width: 0;
     padding:
         clamp(2px, .45dvh, calc(6 * var(--settlement-density-unit)))
@@ -516,16 +534,16 @@
 }
 
 .settlement-summary span {
-    align-self: end;
+    align-self: center;
     color: var(--admin-muted);
-    font-size: calc(9 * var(--settlement-density-unit));
+    font-size: calc(10 * var(--settlement-density-unit));
     font-weight: 900;
+    line-height: 1.1;
+    white-space: nowrap;
     text-transform: uppercase;
 }
 
 .settlement-summary strong {
-    grid-row: 1 / span 2;
-    grid-column: 2;
     align-self: center;
     color: var(--admin-ink);
     font-size: clamp(16px, 2.6dvh, calc(22 * var(--settlement-density-unit)));
@@ -800,9 +818,9 @@
     width: 100%;
     height: 100%;
     padding: var(--settlement-room-padding);
-    border: var(--settlement-line) solid var(--admin-line);
+    border: var(--settlement-line) solid var(--settlement-transferred-room-border);
     border-radius: calc(6 * var(--settlement-density-unit));
-    background: var(--admin-panel);
+    background: var(--settlement-transferred-room-surface);
     box-shadow:
         0 calc(3 * var(--settlement-density-unit))
         calc(8 * var(--settlement-density-unit))
@@ -857,6 +875,22 @@
     box-shadow: inset 0 0 0 var(--settlement-line) var(--settlement-accent);
 }
 
+.settlement-room.is-not-transferred .settlement-room-number {
+    cursor: default;
+}
+
+.settlement-room.is-not-transferred .settlement-room-number:hover,
+.settlement-room.is-not-transferred .settlement-room-number:focus-visible {
+    background: var(--admin-panel-soft);
+    color: var(--admin-ink);
+    box-shadow: none;
+}
+
+.settlement-room.is-not-transferred .settlement-room-number:focus-visible {
+    outline: var(--settlement-line) dashed var(--admin-muted);
+    outline-offset: calc(2 * var(--settlement-density-unit));
+}
+
 .settlement-room-content {
     display: grid;
     grid-template-columns: repeat(var(--settlement-block-count), minmax(0, 1fr));
@@ -891,35 +925,42 @@
     min-height: 0;
 }
 
-.settlement-room.status-not_transferred {
+.settlement-room.is-not-transferred {
+    border-color: var(--settlement-untransferred-room-border);
     border-style: dashed;
-    background: color-mix(in srgb, var(--admin-gray-soft) 75%, var(--admin-panel));
+    background: var(--settlement-untransferred-room-surface);
 }
 
-.settlement-room-state {
-    position: absolute;
-    right: calc(4 * var(--settlement-density-unit));
-    bottom: calc(3 * var(--settlement-density-unit));
-    left: auto;
-    max-width: calc(100% - calc(8 * var(--settlement-density-unit)));
-    overflow: hidden;
-    padding: var(--settlement-density-unit) calc(4 * var(--settlement-density-unit));
-    border-radius: 999px;
-    background: var(--admin-panel-soft);
-    color: var(--admin-muted);
-    font-size: clamp(10px, 1.25dvh, calc(11 * var(--settlement-density-unit)));
-    font-weight: 800;
-    letter-spacing: .01em;
-    line-height: 1.1;
-    text-align: right;
-    text-overflow: clip;
-    text-transform: none;
-    white-space: nowrap;
+.settlement-room.is-not-transferred [data-bed]:disabled {
+    border-color: var(--settlement-untransferred-bed-border);
+    background: var(--settlement-untransferred-bed-surface);
+    color: var(--settlement-untransferred-secondary);
+    cursor: default;
 }
 
-.settlement-room.status-not_transferred .settlement-room-state {
-    background: var(--admin-gray-soft);
-    color: var(--admin-muted);
+.settlement-room.is-not-transferred [data-bed].is-occupied {
+    border-color: var(--settlement-untransferred-bed-border);
+    background: var(--settlement-untransferred-bed-surface);
+    color: var(--settlement-untransferred-secondary);
+}
+
+.settlement-room.is-not-transferred [data-bed].is-occupied .settlement-bed-visual {
+    pointer-events: none;
+    cursor: not-allowed;
+}
+
+.settlement-room.is-not-transferred [data-bed].is-occupied:hover,
+.settlement-room.is-not-transferred [data-bed].is-occupied:focus-visible {
+    z-index: auto;
+}
+
+.settlement-room.is-not-transferred .settlement-bed-hover-card {
+    display: none;
+}
+
+.settlement-room.is-not-transferred:has(.settlement-bed.is-occupied:hover),
+.settlement-room.is-not-transferred:has(.settlement-bed.is-occupied:focus-visible) {
+    z-index: auto;
 }
 
 .settlement-bed {
@@ -2424,7 +2465,7 @@ body.settlement-auto-preview-modal-open {
 
 @media (max-width: 1500px) {
     .settlement-toolbar {
-        grid-template-columns: auto minmax(160px, auto) minmax(120px, auto) minmax(220px, auto) minmax(160px, 1fr) auto auto;
+        grid-template-columns: auto minmax(160px, auto) minmax(120px, auto) minmax(160px, 1fr) auto auto;
     }
 
 }
@@ -2463,18 +2504,25 @@ body.settlement-auto-preview-modal-open {
     }
 
     .settlement-shell .admin-console-nav button {
+        height: var(--admin-header-control-height);
         min-height: var(--admin-header-control-height);
-        padding-inline: calc(10 * var(--settlement-density-unit));
+        padding-inline: calc(8 * var(--settlement-density-unit));
+        padding-block: 0;
         border: var(--settlement-line) solid var(--admin-line);
         border-radius: calc(6 * var(--settlement-density-unit));
         background: var(--admin-panel-soft);
         color: var(--admin-ink);
-        font: inherit;
+        font-family: inherit;
+        font-weight: 900;
+        line-height: 1;
         font-size: calc(11 * var(--settlement-density-unit));
         cursor: pointer;
     }
 
     .settlement-shell .admin-console-nav button.is-active {
+        border-color: color-mix(in srgb, var(--admin-green) 48%, var(--admin-line));
+        background: var(--settlement-accent-soft);
+        color: var(--settlement-accent);
         box-shadow:
             inset 0 calc(-3 * var(--settlement-density-unit)) 0
             var(--admin-green);

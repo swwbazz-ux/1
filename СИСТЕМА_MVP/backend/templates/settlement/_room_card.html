@@ -1,5 +1,5 @@
 {% if room %}
-<article class="settlement-room settlement-room-{{ side }} type-{{ room.room_type }} status-{{ room.transfer_status }}"
+<article class="settlement-room settlement-room-{{ side }} type-{{ room.room_type }} {% if room.is_transferred %}is-transferred{% else %}is-not-transferred{% endif %}"
          data-room-card
          data-room-id="{{ room.id }}"
          data-room-type="{{ room.room_type }}"
@@ -10,7 +10,8 @@
          data-occupied-beds="{{ room.occupied_bed_count }}"
          data-free-beds="{{ room.free_bed_count }}"
          data-search="{{ room.search_text }}"
-         aria-label="КИС-{{ room.dormitory.number }}, этаж {{ room.floor }}, комната {{ room.number }}, {{ room.get_transfer_status_display|lower }}">
+         role="group"
+         aria-label="КИС-{{ room.dormitory.number }}, этаж {{ room.floor }}, комната {{ room.number }}, {% if room.is_transferred %}передана в распоряжение{% else %}не передана и недоступна для расселения{% endif %}">
     <button type="button"
             class="settlement-room-number"
             data-room-open
@@ -43,7 +44,7 @@
                                 data-room-label="комната {{ room.number }}"
                                 data-block-label="{{ block.label }}"
                                 data-position-label="место {{ bed.position }}"
-                                aria-label="КИС-{{ room.dormitory.number }}, этаж {{ room.floor }}, комната {{ room.number }}, блок {{ block.label }}, место {{ bed.position }}{% if bed.active_occupancy %}, занято, {{ bed.occupant_name }}{% else %}, свободно{% endif %}{% if not room.is_transferred %}, комната не передана{% endif %}"
+                                aria-label="КИС-{{ room.dormitory.number }}, этаж {{ room.floor }}, комната {{ room.number }}, блок {{ block.label }}, место {{ bed.position }}{% if bed.active_occupancy %}, занято, {{ bed.occupant_name }}{% else %}, свободно{% endif %}"
                                 {% if not room.is_transferred %}disabled{% endif %}>
                             <span class="settlement-bed-visual"
                                   data-bed-photo-slot{% if bed.active_occupancy %}
@@ -85,9 +86,6 @@
                 </span>
             </span>
         {% endfor %}
-    </span>
-    <span class="settlement-room-state">
-        {% if room.is_transferred %}Передана{% else %}Не передана{% endif %}
     </span>
 </article>
 {% else %}

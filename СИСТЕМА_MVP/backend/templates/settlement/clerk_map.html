@@ -2,7 +2,7 @@
 {% load static %}
 
 {% block clerk_extra_head %}
-<link rel="stylesheet" href="{% static 'css/settlement-clerk.css' %}?v={{ static_asset_release }}-settlement-map-v23">
+<link rel="stylesheet" href="{% static 'css/settlement-clerk.css' %}?v={{ static_asset_release }}-settlement-map-v29">
 {% endblock %}
 
 {% block clerk_shell_class %}settlement-shell{% endblock %}
@@ -32,15 +32,6 @@
                 <div class="settlement-filter-buttons compact">
                     <button type="button" class="is-active" data-floor-filter="1" aria-pressed="true">1 этаж</button>
                     <button type="button" data-floor-filter="2" aria-pressed="false">2 этаж</button>
-                </div>
-            </fieldset>
-
-            <fieldset class="settlement-filter-group">
-                <legend>Статус комнаты</legend>
-                <div class="settlement-filter-buttons">
-                    <button type="button" class="is-active" data-status-filter="all" aria-pressed="true">Все</button>
-                    <button type="button" data-status-filter="transferred" aria-pressed="false">Передана</button>
-                    <button type="button" data-status-filter="not_transferred" aria-pressed="false">Не передана</button>
                 </div>
             </fieldset>
 
@@ -461,5 +452,5 @@
 {% endblock %}
 
 {% block clerk_scripts %}
-<script src="{% static 'js/settlement-clerk.js' %}?v={{ static_asset_release }}-settlement-map-v23"></script>
+<script src="{% static 'js/settlement-clerk.js' %}?v={{ static_asset_release }}-settlement-map-v29"></script>
 {% endblock %}

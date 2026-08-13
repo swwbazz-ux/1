@@ -7,7 +7,6 @@
     var state = {
         dormitory: "5",
         floor: "1",
-        status: "all",
         search: ""
     };
     var rooms = Array.from(root.querySelectorAll("[data-room-card]"));
@@ -291,9 +290,18 @@
         }
     }
 
+    function isTransferredBed(bed) {
+        var room = bed && bed.closest("[data-room-card]");
+        return Boolean(
+            room
+            && room.dataset.transferStatus === "transferred"
+            && room.classList.contains("is-transferred")
+        );
+    }
+
     function renderMapBed(bed) {
         var occupied = bed.dataset.occupied === "true";
-        var unavailable = Boolean(bed.disabled);
+        var unavailable = !isTransferredBed(bed) || Boolean(bed.disabled);
         var occupantName = shortPersonName(bed.dataset.occupantName);
         var photoUrl = occupied ? String(bed.dataset.occupantPhotoUrl || "").trim() : "";
         var shiftLabel = compactShiftLabel(bed.dataset.shiftLabel);
@@ -314,7 +322,7 @@
             dragHandle.classList.remove("is-dragging");
             dragHandle.removeAttribute("aria-grabbed");
             dragHandle.style.removeProperty("pointer-events");
-            if (occupied) {
+            if (occupied && !unavailable) {
                 dragHandle.setAttribute("data-bed-drag-handle", "");
                 dragHandle.setAttribute("draggable", "true");
             } else {
@@ -401,15 +409,11 @@
     function matchesRoom(room) {
         var dormitoryMatch = room.dataset.dormitory === state.dormitory;
         var floorMatch = room.dataset.floor === state.floor;
-        var statusMatch = (
-            state.status === "all"
-            || room.dataset.transferStatus === state.status
-        );
         var searchMatch = (
             !state.search
             || String(room.dataset.search || "").includes(state.search)
         );
-        return dormitoryMatch && floorMatch && statusMatch && searchMatch;
+        return dormitoryMatch && floorMatch && searchMatch;
     }
 
     function selectedFloorRooms() {
@@ -935,7 +939,13 @@
     }
 
     function configureRelocation(sourceBed, destinationBed) {
-        if (!sourceBed || sourceBed.dataset.occupied !== "true" || saving) return;
+        if (
+            !sourceBed
+            || !isTransferredBed(sourceBed)
+            || sourceBed.dataset.occupied !== "true"
+            || saving
+        ) return;
+        if (destinationBed && !isTransferredBed(destinationBed)) return;
         if (destinationBed) {
             closeUnsettledPanel(false);
             activeRoom = destinationBed.closest("[data-room-card]");
@@ -1171,8 +1181,7 @@
 
     [
         ["[data-dorm-filter]", "dormitory", "dormFilter"],
-        ["[data-floor-filter]", "floor", "floorFilter"],
-        ["[data-status-filter]", "status", "statusFilter"]
+        ["[data-floor-filter]", "floor", "floorFilter"]
     ].forEach(function (definition) {
         var selector = definition[0];
         var stateKey = definition[1];
@@ -1195,6 +1204,7 @@
     root.addEventListener("click", function (event) {
         if (event.target.closest("[data-bed-photo-slot], [data-bed-hover-card]")) return;
         var bed = event.target.closest("[data-bed]");
+        if (bed && !isTransferredBed(bed)) return;
         if (bed) {
             openRoom(bed.closest("[data-room-card]"), bed);
             return;
@@ -1205,7 +1215,9 @@
 
     root.querySelectorAll("[data-bed]").forEach(function (bed) {
         renderMapBed(bed);
-        if (!bed.disabled) bed.setAttribute("aria-pressed", "false");
+        if (isTransferredBed(bed) && !bed.disabled) {
+            bed.setAttribute("aria-pressed", "false");
+        }
     });
 
     var dragSourceBed = null;
@@ -1220,7 +1232,7 @@
     root.addEventListener("dragstart", function (event) {
         var handle = event.target.closest("[data-bed-drag-handle]");
         var bed = handle && handle.closest("[data-bed]");
-        if (!bed || bed.dataset.occupied !== "true" || saving) {
+        if (!bed || !isTransferredBed(bed) || bed.dataset.occupied !== "true" || saving) {
             event.preventDefault();
             return;
         }
@@ -1231,12 +1243,20 @@
         event.dataTransfer.setData("application/x-settlement-bed", bed.dataset.bedId);
     });
 
+    root.addEventListener("dragenter", function (event) {
+        var bed = event.target.closest("[data-bed]");
+        if (bed && !isTransferredBed(bed)) {
+            bed.classList.remove("is-drop-target");
+        }
+    });
+
     root.addEventListener("dragover", function (event) {
         var bed = event.target.closest("[data-bed]");
         if (
             !dragSourceBed
             || !bed
             || bed === dragSourceBed
+            || !isTransferredBed(bed)
             || bed.disabled
             || bed.dataset.occupied === "true"
             || bed.closest("[data-floor-section]").hidden
@@ -1255,6 +1275,7 @@
             !dragSourceBed
             || !targetBed
             || targetBed === dragSourceBed
+            || !isTransferredBed(targetBed)
             || targetBed.disabled
             || targetBed.dataset.occupied === "true"
             || targetBed.closest("[data-floor-section]").hidden
