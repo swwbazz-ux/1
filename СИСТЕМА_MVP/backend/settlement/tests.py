@@ -4749,10 +4749,9 @@ class SettlementOccupancyWorkflowTests(TestCase):
             self.assertEqual(photo_response.status_code, 200)
             self.assertEqual(photo_response['Cache-Control'], 'private, max-age=300')
             self.assertTrue(photo_response['Content-Type'].startswith('image/gif'))
-            photo_response.close()
+            self.assertEqual(b''.join(photo_response.streaming_content), image_bytes)
             anonymous_response = Client().get(photo_url)
             self.assertEqual(anonymous_response.status_code, 404)
-            anonymous_response.close()
 
     def test_unsettled_panel_uses_current_roster_and_excludes_housed_employee(self):
         outsider = Employee.objects.create(
