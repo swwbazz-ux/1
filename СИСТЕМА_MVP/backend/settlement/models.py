@@ -929,11 +929,44 @@ class AccommodationAnchor(StableIdentifierModel):
         return f'{self.code} — {self.display_name}'
 
 
+class AccommodationAnchorBedAssignmentQuerySet(models.QuerySet):
+    MASS_WRITE_FORBIDDEN_CODE = 'anchor_bed_mass_write_forbidden'
+    MASS_WRITE_FORBIDDEN_MESSAGE = (
+        'Массовые изменения закреплений жилищных якорей запрещены. '
+        'Используйте instance save().'
+    )
+
+    def _raise_mass_write_forbidden(self):
+        raise ValidationError(
+            self.MASS_WRITE_FORBIDDEN_MESSAGE,
+            code=self.MASS_WRITE_FORBIDDEN_CODE,
+        )
+
+    def update(self, **kwargs):
+        self._raise_mass_write_forbidden()
+
+    def bulk_create(
+        self,
+        objs,
+        batch_size=None,
+        ignore_conflicts=False,
+        update_conflicts=False,
+        update_fields=None,
+        unique_fields=None,
+    ):
+        self._raise_mass_write_forbidden()
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        self._raise_mass_write_forbidden()
+
+
 class AccommodationAnchorBedAssignment(StableIdentifierModel):
     class Status(models.TextChoices):
         DRAFT = 'draft', 'Черновик'
         CONFIRMED = 'confirmed', 'Подтверждено'
         CANCELLED = 'cancelled', 'Отменено'
+
+    objects = AccommodationAnchorBedAssignmentQuerySet.as_manager()
 
     anchor = models.ForeignKey(
         AccommodationAnchor,

@@ -159,6 +159,12 @@ class AccommodationAnchorDomainTests(TestCase):
             cancelled_revision=cancelled_revision,
         )
 
+    def assert_anchor_bed_mass_write_forbidden(self, operation):
+        with self.assertRaises(ValidationError) as error:
+            operation()
+        self.assertEqual(error.exception.code, 'anchor_bed_mass_write_forbidden')
+        self.assertIn('Используйте instance save().', error.exception.message)
+
     def test_confirmed_source_requires_confirmation_metadata(self):
         with self.assertRaises(ValidationError) as error:
             SettlementSource.objects.create(
@@ -1228,6 +1234,243 @@ class AccommodationAnchorDomainTests(TestCase):
                 status=AccommodationAnchorBedAssignment.Status.DRAFT,
             ).count(),
             2,
+        )
+
+    def test_draft_instance_lifecycle_remains_supported(self):
+        assignment = self.create_assignment(
+            status=AccommodationAnchorBedAssignment.Status.DRAFT,
+        )
+        assignment.comment = 'Черновик изменён через instance save().'
+        assignment.save()
+        assignment.comment = 'Черновик изменён через save(update_fields=...).'
+        assignment.save(update_fields=['comment'])
+
+        assignment.status = AccommodationAnchorBedAssignment.Status.CONFIRMED
+        assignment.save(update_fields=['status'])
+        boundary = self.base_time + timedelta(days=10)
+        assignment.valid_to = boundary
+        assignment.ended_revision = self.end_revision
+        assignment.save(update_fields=['valid_to', 'ended_revision'])
+        assignment.status = AccommodationAnchorBedAssignment.Status.CANCELLED
+        assignment.cancelled_revision = self.cancel_revision
+        assignment.save(update_fields=['status', 'cancelled_revision'])
+
+        assignment.refresh_from_db()
+        self.assertEqual(
+            assignment.comment,
+            'Черновик изменён через save(update_fields=...).',
+        )
+        self.assertEqual(assignment.valid_to, boundary)
+        self.assertEqual(assignment.ended_revision, self.end_revision)
+        self.assertEqual(
+            assignment.status,
+            AccommodationAnchorBedAssignment.Status.CANCELLED,
+        )
+        self.assertEqual(assignment.cancelled_revision, self.cancel_revision)
+
+    def test_get_or_create_and_update_or_create_keep_instance_writer(self):
+        stable_id = uuid.uuid4()
+        assignment, created = AccommodationAnchorBedAssignment.objects.get_or_create(
+            stable_id=stable_id,
+            defaults={
+                'anchor': self.anchor_1,
+                'physical_bed': self.bed_1,
+                'valid_from': self.base_time,
+                'status': AccommodationAnchorBedAssignment.Status.DRAFT,
+                'started_revision': self.start_revision,
+            },
+        )
+        self.assertTrue(created)
+
+        assignment, created = (
+            AccommodationAnchorBedAssignment.objects.update_or_create(
+                pk=assignment.pk,
+                defaults={'comment': 'Изменено через instance writer.'},
+            )
+        )
+
+        self.assertFalse(created)
+        self.assertEqual(assignment.stable_id, stable_id)
+        self.assertEqual(assignment.comment, 'Изменено через instance writer.')
+
+    def test_queryset_update_is_forbidden_for_every_status_without_partial_changes(self):
+        draft = self.create_assignment(
+            status=AccommodationAnchorBedAssignment.Status.DRAFT,
+        )
+        confirmed = self.create_assignment(
+            valid_to=self.base_time + timedelta(days=1),
+            ended_revision=self.end_revision,
+        )
+        cancelled = self.create_assignment(
+            valid_from=self.base_time + timedelta(days=2),
+            valid_to=self.base_time + timedelta(days=3),
+            status=AccommodationAnchorBedAssignment.Status.CANCELLED,
+            ended_revision=self.end_revision,
+            cancelled_revision=self.cancel_revision,
+        )
+        assignments = (draft, confirmed, cancelled)
+
+        for assignment in assignments:
+            with self.subTest(status=assignment.status):
+                self.assert_anchor_bed_mass_write_forbidden(
+                    lambda assignment=assignment: (
+                        AccommodationAnchorBedAssignment.objects
+                        .filter(pk=assignment.pk)
+                        .update(comment='Массовое изменение')
+                    )
+                )
+
+        self.assertEqual(
+            set(
+                AccommodationAnchorBedAssignment.objects.filter(
+                    pk__in=[assignment.pk for assignment in assignments],
+                ).values_list('comment', flat=True)
+            ),
+            {''},
+        )
+
+    def test_bulk_create_is_forbidden_for_every_status_and_upsert(self):
+        for status in AccommodationAnchorBedAssignment.Status.values:
+            with self.subTest(status=status):
+                candidate = AccommodationAnchorBedAssignment(
+                    anchor=self.anchor_1,
+                    physical_bed=self.bed_1,
+                    valid_from=self.base_time,
+                    status=status,
+                    started_revision=self.start_revision,
+                )
+                self.assert_anchor_bed_mass_write_forbidden(
+                    lambda candidate=candidate: (
+                        AccommodationAnchorBedAssignment.objects.bulk_create([candidate])
+                    )
+                )
+                self.assertIsNone(candidate.pk)
+
+        upsert_candidate = AccommodationAnchorBedAssignment(
+            anchor=self.anchor_1,
+            physical_bed=self.bed_1,
+            valid_from=self.base_time,
+            status=AccommodationAnchorBedAssignment.Status.DRAFT,
+            started_revision=self.start_revision,
+        )
+        self.assert_anchor_bed_mass_write_forbidden(
+            lambda: AccommodationAnchorBedAssignment.objects.bulk_create(
+                [upsert_candidate],
+                update_conflicts=True,
+                update_fields=['comment'],
+                unique_fields=['stable_id'],
+            )
+        )
+        self.assertEqual(AccommodationAnchorBedAssignment.objects.count(), 0)
+
+    def test_bulk_create_mixed_batch_is_rejected_without_partial_insert(self):
+        candidates = [
+            AccommodationAnchorBedAssignment(
+                anchor=self.anchor_1,
+                physical_bed=self.bed_1,
+                valid_from=self.base_time,
+                status=status,
+                started_revision=self.start_revision,
+            )
+            for status in (
+                AccommodationAnchorBedAssignment.Status.DRAFT,
+                AccommodationAnchorBedAssignment.Status.CONFIRMED,
+            )
+        ]
+
+        self.assert_anchor_bed_mass_write_forbidden(
+            lambda: AccommodationAnchorBedAssignment.objects.bulk_create(candidates)
+        )
+
+        self.assertEqual(AccommodationAnchorBedAssignment.objects.count(), 0)
+        self.assertTrue(all(candidate.pk is None for candidate in candidates))
+
+    def test_bulk_update_is_forbidden_for_every_status_without_partial_changes(self):
+        draft = self.create_assignment(
+            status=AccommodationAnchorBedAssignment.Status.DRAFT,
+        )
+        confirmed = self.create_assignment(
+            valid_to=self.base_time + timedelta(days=1),
+            ended_revision=self.end_revision,
+        )
+        cancelled = self.create_assignment(
+            valid_from=self.base_time + timedelta(days=2),
+            valid_to=self.base_time + timedelta(days=3),
+            status=AccommodationAnchorBedAssignment.Status.CANCELLED,
+            ended_revision=self.end_revision,
+            cancelled_revision=self.cancel_revision,
+        )
+        assignments = (draft, confirmed, cancelled)
+
+        for assignment in assignments:
+            assignment.comment = 'Массовое изменение'
+            with self.subTest(status=assignment.status):
+                self.assert_anchor_bed_mass_write_forbidden(
+                    lambda assignment=assignment: (
+                        AccommodationAnchorBedAssignment.objects.bulk_update(
+                            [assignment],
+                            ['comment'],
+                        )
+                    )
+                )
+
+        self.assertEqual(
+            set(
+                AccommodationAnchorBedAssignment.objects.filter(
+                    pk__in=[assignment.pk for assignment in assignments],
+                ).values_list('comment', flat=True)
+            ),
+            {''},
+        )
+
+    def test_bulk_update_mixed_batch_is_rejected_without_partial_update(self):
+        draft = self.create_assignment(
+            status=AccommodationAnchorBedAssignment.Status.DRAFT,
+        )
+        confirmed = self.create_assignment(
+            valid_to=self.base_time + timedelta(days=1),
+            ended_revision=self.end_revision,
+        )
+        draft.comment = 'Черновик массово изменён'
+        confirmed.comment = 'Подтверждение массово изменено'
+
+        self.assert_anchor_bed_mass_write_forbidden(
+            lambda: AccommodationAnchorBedAssignment.objects.bulk_update(
+                [draft, confirmed],
+                ['comment'],
+            )
+        )
+
+        self.assertEqual(
+            set(
+                AccommodationAnchorBedAssignment.objects.filter(
+                    pk__in=(draft.pk, confirmed.pk),
+                ).values_list('comment', flat=True)
+            ),
+            {''},
+        )
+
+    def test_confirmed_cannot_be_demoted_and_deleted_through_mass_api(self):
+        assignment = self.create_assignment()
+
+        self.assert_anchor_bed_mass_write_forbidden(
+            lambda: AccommodationAnchorBedAssignment.objects.filter(
+                pk=assignment.pk,
+            ).update(status=AccommodationAnchorBedAssignment.Status.DRAFT)
+        )
+        assignment.refresh_from_db()
+        self.assertEqual(
+            assignment.status,
+            AccommodationAnchorBedAssignment.Status.CONFIRMED,
+        )
+
+        with self.assertRaises(ProtectedError):
+            with transaction.atomic():
+                AccommodationAnchorBedAssignment.objects.filter(
+                    pk=assignment.pk,
+                ).delete()
+        self.assertTrue(
+            AccommodationAnchorBedAssignment.objects.filter(pk=assignment.pk).exists()
         )
 
     def test_confirmed_assignment_requires_active_anchor_and_confirmed_revision(self):
