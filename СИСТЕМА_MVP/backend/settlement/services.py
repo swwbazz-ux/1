@@ -428,7 +428,7 @@ def _locked_employee(employee_id):
     try:
         return (
             Employee.objects
-            .select_for_update()
+            .select_for_update(of=('self',))
             .select_related('personnel_position')
             .get(pk=employee_id)
         )
