@@ -1,25 +1,25 @@
 # Текущее состояние актуального HEAD
 
-Версия документа: 0.3
-Дата сверки: 13.08.2026
-Статус: заполнено по полному read-only аудиту Codex
-Источник доказательств: `Вставленная уценка(20260813-103732).md`
+Версия документа: 0.4
+Дата последней сверки отчётов: 14.08.2026
+Статус: фактический кодовый аудит завершён; последующие изменения затрагивали только принятую UI-версию и документацию
+Источники доказательств: read-only отчёт `Вставленная уценка(20260813-103732).md`, отчёты фиксации v29 и документации 0.3, evidence bundle SHA-256 `b9d89fb04d039e5a717f3418e64765808e286dc71d587a94b4f5f621297a8442`
 
 ## 1. Репозиторий и baseline
 
-### Текущая локальная точка после нормализации
+### Текущая локальная точка по последнему проверенному отчёту
 
 | Параметр | Значение |
 |---|---|
-| Локальный HEAD | `e71dc4e0b7ca26c0402e6e2ac990c8cae5fd1d1b` |
-| Сообщение | `fix(settlement): finalize transferred-room map safeguards` |
-| Родитель | `4df3c6276a8f08b86d86e003e8985aeb3b991c61` |
+| Локальный HEAD | `aba37c44e39b6f6f3bc0ab2caa51d9dae4c4ed9c` |
+| Сообщение | `docs(settlement): add module architecture and delivery plan` |
+| Родитель / кодовый baseline | `e71dc4e0b7ca26c0402e6e2ac990c8cae5fd1d1b` |
 | Рабочее дерево | Чистое |
 | Settlement tests | 272/272 PASS |
 | origin/main | Остался на `4df3c6276a8f08b86d86e003e8985aeb3b991c61` |
 | Публикация | Push/merge/deploy не выполнялись |
 
-Commit содержит ровно пять UI/test-файлов принятого v29. Доменная логика, модели, services и миграции не менялись.
+Commit `e71dc4e0` содержит ровно пять UI/test-файлов принятого v29. Следующий commit `aba37c44` добавляет ровно десять Markdown-документов версии 0.3. Доменная логика, модели, services и миграции после исходного аудита не менялись. Редакция документов 0.4 ещё не перенесена в репозиторий.
 
 Резервный patch до ADR-014: SHA-256 `8D34729F75247EEFCE37535F35C1CE8D7D0C4D8CC7ABAE3997A956821C6BBC47`.
 
@@ -36,7 +36,7 @@ Commit содержит ровно пять UI/test-файлов принято�
 | Ранее заявленный `0f4c2a1` | Не существует в репозитории |
 | Production | В аудите не подключался; совпадение с HEAD не доказано |
 
-Актуальный clean baseline — `4df3c62`, а не ранее переданный `0f4c2a1`.
+Исходный clean baseline аудита — `4df3c62`, а не ранее переданный `0f4c2a1`. Текущая локальная история продолжена UI-commit `e71dc4e0` и docs-commit `aba37c44`; ни один из них не опубликован в `origin/main`.
 
 ## 2. Рабочее дерево до нормализации
 
@@ -127,7 +127,7 @@ Legacy `ended_at` в runtime activity больше не участвует.
 
 `publish_crew_plan()` закрывает старые и создаёт новые accepted `EquipmentAssignment`, но новый EquipmentAssignment не хранит FK на CrewPlan или его ревизию. Provenance публикации теряется.
 
-`EquipmentAssignment` не различает постоянное и временное назначение и не является жилищным основанием.
+`EquipmentAssignment` не хранит provenance опубликованного CrewPlan и сам по себе не является сохранённым жилищным основанием. Целевая версия допускает использовать текущий опубликованный контекст только при создании первого binding с обязательным snapshot; такого механизма в HEAD нет.
 
 ### 4.6. Вахта и приезд
 
@@ -217,8 +217,8 @@ Preview группирует конкуренцию по `(physical_bed_id, shif
 - CSRF включён;
 - непереданный destination закрыт UI и server writer;
 - в чистом HEAD занятую койку непереданной комнаты можно визуально начать тащить как source, но destination и server закрыты;
-- принятая локальная v29 добавляет дополнительные guards;
-- clean HEAD использует cache-buster v23, v29 находится только в dirty worktree.
+- принятая v29 добавляет дополнительные guards и cache-buster v29;
+- изменения v29 зафиксированы локальным commit `e71dc4e0`; dirty UI-worktree устранён.
 
 ## 9. Тесты на дату аудита
 
@@ -233,6 +233,8 @@ Preview группирует конкуренцию по `(physical_bed_id, shif
 
 Исторический зелёный результат 1444/42 не является актуальным текущим прогоном.
 
+После фиксации v29 settlement-набор повторно прошёл 272/272 теста за 7.228 сек на штатном проектном Python. Полный набор после этого не перезапускался; состояние единственного внешнего failure не переобъявляется исправленным.
+
 ## 10. Матрица относительно целевой архитектуры
 
 | Целевой элемент | Статус | Фактический разрыв |
@@ -246,11 +248,14 @@ Preview группирует конкуренцию по `(physical_bed_id, shif
 | Authoritative SettlementCohort | PARTIAL | Upstream-факты есть, immutable roster отсутствует |
 | AccommodationAnchorCalendarSlot | ABSENT | Модель отсутствует |
 | EmployeeAccommodationBinding | ABSENT | Employee→housing право отсутствует |
-| Permanent/temporary assignment | CONTRADICTED | Discriminator и CrewPlan provenance отсутствуют |
+| Initial-binding provenance snapshot | ABSENT | CrewPlan provenance теряется; binding и снимок основания отсутствуют |
 | Конечная factual occupancy | PARTIAL | Интервалы есть; provenance/DB overlap отсутствуют |
 | Room profiles | PARTIAL | transfer/sex/type есть; режим и 2+1 отсутствуют |
 | Rule 2+1 | ABSENT | Нет модели, resolver или тестов |
 | Non-equipment resolvers | ABSENT | Preview использует только EQUIPMENT |
+| Explicit category assignments | ABSENT | Нет версионируемого назначения RESERVE и аналогичных категорий |
+| Trainee target-vacancy route | ABSENT | Стажировка не связана с жилищным маршрутом будущей позиции |
+| Group capacity conflict | ABSENT | Preview не агрегирует потребность/дефицит и не защищает от скрытого выбора людей |
 | Explicit KEEP | PARTIAL | Совпадение employee допускается, action/provenance нет |
 | Saved AutoSettlementRun | ABSENT | Модель отсутствует |
 | Immutable run rows | ABSENT | Отсутствуют |
@@ -283,7 +288,8 @@ Preview группирует конкуренцию по `(physical_bed_id, shif
 3. calendar slots;
 4. permanent employee binding;
 5. authoritative versioned cohort;
-6. permanent/temporary provenance;
-7. room profiles и resolver rules.
+6. snapshot первичного CrewPlan/EquipmentAssignment при создании binding;
+7. явные category assignments и маршрут стажёра через подтверждённую вакансию;
+8. room profiles, resolver rules и групповые конфликты дефицита.
 
 Только после этого строятся saved preview и transactional Apply.
