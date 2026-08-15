@@ -1499,3 +1499,218 @@ class EmployeeBedOccupancy(models.Model):
 
     def __str__(self):
         return f'{self.employee} — {self.physical_bed}'
+
+
+class SettlementControlLease(models.Model):
+    ALLOWED_OWNER_ROLE_CODES = frozenset({'settlement_clerk', 'admin'})
+
+    scope = models.CharField(
+        'Контур управления',
+        max_length=64,
+        unique=True,
+    )
+    owner_access = models.ForeignKey(
+        'users.EmployeeAccess',
+        verbose_name='Доступ текущего владельца',
+        on_delete=models.PROTECT,
+        related_name='settlement_control_leases',
+        null=True,
+        blank=True,
+    )
+    owner_session_hash = models.CharField(
+        'Хеш сессии владельца',
+        max_length=128,
+        blank=True,
+    )
+    lease_token = models.UUIDField(
+        'Токен владения',
+        null=True,
+        blank=True,
+    )
+    fencing_revision = models.PositiveBigIntegerField(
+        'Ревизия владения',
+        default=0,
+    )
+    acquired_at = models.DateTimeField(
+        'Управление получено',
+        null=True,
+        blank=True,
+    )
+    heartbeat_at = models.DateTimeField(
+        'Последнее подтверждение активности',
+        null=True,
+        blank=True,
+    )
+    expires_at = models.DateTimeField(
+        'Срок владения истекает',
+        null=True,
+        blank=True,
+    )
+    created_at = models.DateTimeField('Создано', auto_now_add=True)
+    updated_at = models.DateTimeField('Изменено', auto_now=True)
+
+    class Meta:
+        verbose_name = 'Право управления расселением'
+        verbose_name_plural = 'Права управления расселением'
+        ordering = ['scope']
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        owner_access__isnull=True,
+                        owner_session_hash='',
+                        lease_token__isnull=True,
+                        acquired_at__isnull=True,
+                        heartbeat_at__isnull=True,
+                        expires_at__isnull=True,
+                    )
+                    | (
+                        models.Q(
+                            owner_access__isnull=False,
+                            lease_token__isnull=False,
+                            acquired_at__isnull=False,
+                            heartbeat_at__isnull=False,
+                            expires_at__isnull=False,
+                        )
+                        & ~models.Q(owner_session_hash='')
+                    )
+                ),
+                name='settlement_control_lease_state_valid',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(owner_access__isnull=True)
+                    | (
+                        models.Q(heartbeat_at__gte=models.F('acquired_at'))
+                        & models.Q(expires_at__gt=models.F('heartbeat_at'))
+                    )
+                ),
+                name='settlement_control_lease_time_valid',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(fencing_revision__gte=0),
+                name='settlement_control_revision_nonnegative',
+            ),
+        ]
+
+    def clean(self):
+        super().clean()
+        if not self.owner_access_id:
+            return
+
+        access_model = self._meta.get_field('owner_access').remote_field.model
+        owner_access = (
+            access_model.objects.select_related('role')
+            .filter(pk=self.owner_access_id)
+            .first()
+        )
+        if owner_access is None:
+            return
+
+        if (
+            not owner_access.is_active
+            or owner_access.status != owner_access.Status.ACTIVATED
+            or owner_access.role.code not in self.ALLOWED_OWNER_ROLE_CODES
+        ):
+            raise ValidationError({
+                'owner_access': (
+                    'Владелец должен иметь действующий доступ '
+                    'с ролью settlement_clerk либо admin.'
+                ),
+            })
+
+    def __str__(self):
+        return self.scope
+
+
+class SettlementControlEvent(models.Model):
+    class EventType(models.TextChoices):
+        ACQUIRED = 'ACQUIRED', 'Управление получено'
+        RELEASED = 'RELEASED', 'Управление освобождено'
+        EXPIRED = 'EXPIRED', 'Срок управления истёк'
+        TAKEN_OVER = 'TAKEN_OVER', 'Управление перехвачено'
+
+    event_type = models.CharField(
+        'Тип события',
+        max_length=16,
+        choices=EventType.choices,
+    )
+    scope = models.CharField('Контур управления', max_length=64)
+    actor_access = models.ForeignKey(
+        'users.EmployeeAccess',
+        verbose_name='Доступ инициатора',
+        on_delete=models.PROTECT,
+        related_name='settlement_control_events_as_actor',
+        null=True,
+        blank=True,
+    )
+    previous_owner_access = models.ForeignKey(
+        'users.EmployeeAccess',
+        verbose_name='Прежний владелец',
+        on_delete=models.PROTECT,
+        related_name='settlement_control_events_as_previous_owner',
+        null=True,
+        blank=True,
+    )
+    new_owner_access = models.ForeignKey(
+        'users.EmployeeAccess',
+        verbose_name='Новый владелец',
+        on_delete=models.PROTECT,
+        related_name='settlement_control_events_as_new_owner',
+        null=True,
+        blank=True,
+    )
+    reason = models.TextField('Причина', blank=True)
+    occurred_at = models.DateTimeField('Произошло', default=timezone.now)
+    source = models.CharField('Источник', max_length=64)
+    previous_fencing_revision = models.PositiveBigIntegerField(
+        'Предыдущая ревизия',
+    )
+    new_fencing_revision = models.PositiveBigIntegerField(
+        'Новая ревизия',
+    )
+    session_metadata = models.JSONField(
+        'Безопасные метаданные сессии',
+        default=dict,
+        blank=True,
+    )
+
+    class Meta:
+        verbose_name = 'Событие управления расселением'
+        verbose_name_plural = 'События управления расселением'
+        ordering = ['-occurred_at', '-id']
+        indexes = [
+            models.Index(
+                fields=['scope', 'occurred_at'],
+                name='settle_event_scope_time_idx',
+            ),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(event_type__in=[
+                    'ACQUIRED',
+                    'RELEASED',
+                    'EXPIRED',
+                    'TAKEN_OVER',
+                ]),
+                name='settlement_control_event_type_valid',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    new_fencing_revision__gt=models.F(
+                        'previous_fencing_revision',
+                    ),
+                ),
+                name='settlement_control_event_revision_increases',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    ~models.Q(event_type='TAKEN_OVER')
+                    | ~models.Q(reason='')
+                ),
+                name='settlement_takeover_reason_required',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.scope}: {self.event_type} @ {self.occurred_at:%Y-%m-%d %H:%M:%S}'

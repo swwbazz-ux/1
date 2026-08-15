@@ -26,7 +26,7 @@ from django.db import (
     transaction,
 )
 from django.db.migrations.executor import MigrationExecutor
-from django.db.models.deletion import ProtectedError
+from django.db.models.deletion import PROTECT, ProtectedError
 from django.db.utils import NotSupportedError
 from django.test import Client, RequestFactory, TestCase, TransactionTestCase, override_settings
 from django.test.utils import CaptureQueriesContext
@@ -52,6 +52,8 @@ from .models import (
     EmployeeBedOccupancy,
     PhysicalBed,
     PhysicalRoom,
+    SettlementControlEvent,
+    SettlementControlLease,
     SettlementRevision,
     SettlementSource,
 )
@@ -7336,3 +7338,310 @@ class AutoSettlementPreviewTests(TestCase):
                 AccommodationAnchorBedAssignment.objects.values_list('pk', flat=True),
             ),
         })
+
+
+class SettlementControlSchemaTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.clerk_role = Role.objects.create(
+            code='settlement_clerk',
+            name='Делопроизводитель схемы управления',
+        )
+        cls.admin_role = Role.objects.create(
+            code='admin',
+            name='Администратор схемы управления',
+        )
+        cls.other_role = Role.objects.create(
+            code='control-schema-other',
+            name='Посторонняя роль схемы управления',
+        )
+        cls.clerk_access = cls._create_access(
+            'Делопроизводитель схемы управления',
+            'CONTROL-SCHEMA-CLERK',
+            cls.clerk_role,
+        )
+        cls.admin_access = cls._create_access(
+            'Администратор схемы управления',
+            'CONTROL-SCHEMA-ADMIN',
+            cls.admin_role,
+        )
+        cls.other_access = cls._create_access(
+            'Пользователь посторонней роли',
+            'CONTROL-SCHEMA-OTHER',
+            cls.other_role,
+        )
+        cls.inactive_access = cls._create_access(
+            'Неактивный делопроизводитель',
+            'CONTROL-SCHEMA-INACTIVE',
+            cls.clerk_role,
+            active=False,
+        )
+
+    @classmethod
+    def _create_access(cls, full_name, access_code, role, *, active=True):
+        employee = Employee.objects.create(
+            full_name=full_name,
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        return EmployeeAccess.objects.create(
+            employee=employee,
+            role=role,
+            access_code=access_code,
+            status=(
+                EmployeeAccess.Status.ACTIVATED
+                if active
+                else EmployeeAccess.Status.DEACTIVATED
+            ),
+            is_active=active,
+        )
+
+    def _held_values(self, *, owner_access=None, now=None):
+        acquired_at = now or timezone.now()
+        heartbeat_at = acquired_at + timedelta(seconds=30)
+        return {
+            'owner_access': owner_access or self.clerk_access,
+            'owner_session_hash': 'sha256:control-session',
+            'lease_token': uuid.uuid4(),
+            'fencing_revision': 1,
+            'acquired_at': acquired_at,
+            'heartbeat_at': heartbeat_at,
+            'expires_at': heartbeat_at + timedelta(minutes=5),
+        }
+
+    def _event_values(self, **overrides):
+        values = {
+            'event_type': SettlementControlEvent.EventType.ACQUIRED,
+            'scope': 'settlement',
+            'actor_access': self.clerk_access,
+            'new_owner_access': self.clerk_access,
+            'reason': '',
+            'source': 'test',
+            'previous_fencing_revision': 0,
+            'new_fencing_revision': 1,
+            'session_metadata': {'session_hash_prefix': 'safe-prefix'},
+        }
+        values.update(overrides)
+        return values
+
+    def test_free_and_fully_held_states_are_valid(self):
+        free_lease = SettlementControlLease.objects.get(scope='settlement')
+        free_lease.full_clean()
+        self.assertIsNone(free_lease.owner_access)
+        self.assertEqual(free_lease.owner_session_hash, '')
+        self.assertIsNone(free_lease.lease_token)
+        self.assertEqual(free_lease.fencing_revision, 0)
+        self.assertIsNone(free_lease.acquired_at)
+        self.assertIsNone(free_lease.heartbeat_at)
+        self.assertIsNone(free_lease.expires_at)
+
+        released_free_lease = SettlementControlLease.objects.create(
+            scope='settlement-free-revision',
+            fencing_revision=7,
+        )
+        released_free_lease.full_clean()
+        released_free_lease.refresh_from_db()
+        self.assertEqual(released_free_lease.fencing_revision, 7)
+
+        held_lease = SettlementControlLease.objects.create(
+            scope='settlement-held',
+            **self._held_values(),
+        )
+        held_lease.full_clean()
+        self.assertEqual(held_lease.owner_access, self.clerk_access)
+
+    def test_control_identity_fields_are_distinct_and_token_has_no_default(self):
+        field_names = {
+            field.name
+            for field in SettlementControlLease._meta.get_fields()
+        }
+        self.assertTrue({
+            'owner_access',
+            'owner_session_hash',
+            'lease_token',
+            'fencing_revision',
+        } <= field_names)
+        self.assertIsInstance(
+            SettlementControlLease._meta.get_field('owner_session_hash'),
+            models.CharField,
+        )
+        self.assertIsInstance(
+            SettlementControlLease._meta.get_field('lease_token'),
+            models.UUIDField,
+        )
+        self.assertIsInstance(
+            SettlementControlLease._meta.get_field('fencing_revision'),
+            models.PositiveBigIntegerField,
+        )
+        self.assertIs(
+            SettlementControlLease._meta.get_field('lease_token').default,
+            models.NOT_PROVIDED,
+        )
+        for model, field_name in (
+            (SettlementControlLease, 'owner_access'),
+            (SettlementControlEvent, 'actor_access'),
+            (SettlementControlEvent, 'previous_owner_access'),
+            (SettlementControlEvent, 'new_owner_access'),
+        ):
+            with self.subTest(model=model.__name__, field=field_name):
+                self.assertIs(
+                    model._meta.get_field(field_name).remote_field.on_delete,
+                    PROTECT,
+                )
+
+    def test_partial_lease_states_are_rejected_by_database(self):
+        now = timezone.now()
+        partial_states = (
+            {'owner_access': self.clerk_access},
+            {'owner_session_hash': 'sha256:partial'},
+            {'lease_token': uuid.uuid4()},
+            {'acquired_at': now},
+            {'heartbeat_at': now},
+            {'expires_at': now + timedelta(minutes=5)},
+        )
+        for index, partial_state in enumerate(partial_states):
+            with self.subTest(partial_state=tuple(partial_state)):
+                with self.assertRaises(IntegrityError), transaction.atomic():
+                    SettlementControlLease.objects.create(
+                        scope=f'partial-{index}',
+                        **partial_state,
+                    )
+
+    def test_invalid_lease_time_order_is_rejected_by_database(self):
+        acquired_at = timezone.now()
+        invalid_times = (
+            {
+                'heartbeat_at': acquired_at - timedelta(seconds=1),
+                'expires_at': acquired_at + timedelta(minutes=5),
+            },
+            {
+                'heartbeat_at': acquired_at + timedelta(seconds=1),
+                'expires_at': acquired_at + timedelta(seconds=1),
+            },
+        )
+        for index, times in enumerate(invalid_times):
+            values = self._held_values(now=acquired_at)
+            values.update(times)
+            with self.subTest(times=times):
+                with self.assertRaises(IntegrityError), transaction.atomic():
+                    SettlementControlLease.objects.create(
+                        scope=f'invalid-time-{index}',
+                        **values,
+                    )
+
+    def test_scope_is_unique(self):
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            SettlementControlLease.objects.create(scope='settlement')
+
+    def test_fencing_revision_cannot_be_negative(self):
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            SettlementControlLease.objects.create(
+                scope='negative-revision',
+                fencing_revision=-1,
+            )
+
+    def test_owner_access_clean_requires_active_clerk_or_admin(self):
+        admin_lease = SettlementControlLease(
+            scope='admin-held',
+            **self._held_values(owner_access=self.admin_access),
+        )
+        admin_lease.full_clean()
+
+        invalid_accesses = (self.other_access, self.inactive_access)
+        for index, owner_access in enumerate(invalid_accesses):
+            lease = SettlementControlLease(
+                scope=f'invalid-owner-{index}',
+                **self._held_values(owner_access=owner_access),
+            )
+            with self.subTest(owner_access=owner_access.pk):
+                with self.assertRaises(ValidationError) as context:
+                    lease.full_clean()
+                self.assertIn('owner_access', context.exception.message_dict)
+
+    def test_event_type_contract_and_blank_reason_for_non_takeover(self):
+        expected_types = {'ACQUIRED', 'RELEASED', 'EXPIRED', 'TAKEN_OVER'}
+        self.assertEqual(
+            set(SettlementControlEvent.EventType.values),
+            expected_types,
+        )
+        for index, event_type in enumerate(SettlementControlEvent.EventType.values):
+            event = SettlementControlEvent.objects.create(
+                **self._event_values(
+                    event_type=event_type,
+                    reason=('Обязательная причина' if event_type == 'TAKEN_OVER' else ''),
+                    previous_fencing_revision=index,
+                    new_fencing_revision=index + 1,
+                ),
+            )
+            self.assertEqual(event.event_type, event_type)
+
+    def test_unknown_event_type_and_takeover_without_reason_are_rejected(self):
+        invalid_events = (
+            self._event_values(event_type='UNKNOWN'),
+            self._event_values(
+                event_type=SettlementControlEvent.EventType.TAKEN_OVER,
+                reason='',
+            ),
+        )
+        for values in invalid_events:
+            with self.subTest(event_type=values['event_type']):
+                with self.assertRaises(IntegrityError), transaction.atomic():
+                    SettlementControlEvent.objects.create(**values)
+
+    def test_event_revision_must_strictly_increase(self):
+        for new_revision in (3, 2):
+            with self.subTest(new_revision=new_revision):
+                with self.assertRaises(IntegrityError), transaction.atomic():
+                    SettlementControlEvent.objects.create(
+                        **self._event_values(
+                            previous_fencing_revision=3,
+                            new_fencing_revision=new_revision,
+                        ),
+                    )
+
+    def test_owner_and_event_access_foreign_keys_are_protected(self):
+        SettlementControlLease.objects.create(
+            scope='protected-owner',
+            **self._held_values(),
+        )
+        SettlementControlEvent.objects.create(
+            **self._event_values(
+                actor_access=self.clerk_access,
+                previous_owner_access=self.clerk_access,
+                new_owner_access=self.clerk_access,
+            ),
+        )
+        with self.assertRaises(ProtectedError):
+            self.clerk_access.delete()
+
+
+class SettlementControlMigrationBootstrapTests(TransactionTestCase):
+    migrate_from = ('settlement', '0006_remove_legacy_occupancy_constraints')
+    migrate_to = ('settlement', '0007_settlement_control_lease_and_event')
+
+    def setUp(self):
+        super().setUp()
+        executor = MigrationExecutor(connection)
+        executor.migrate([self.migrate_from])
+        executor = MigrationExecutor(connection)
+        executor.migrate([self.migrate_to])
+        self.apps = executor.loader.project_state([self.migrate_to]).apps
+
+    def tearDown(self):
+        executor = MigrationExecutor(connection)
+        executor.migrate(executor.loader.graph.leaf_nodes())
+        super().tearDown()
+
+    def test_migration_creates_exactly_one_free_settlement_lease(self):
+        Lease = self.apps.get_model('settlement', 'SettlementControlLease')
+        leases = list(Lease.objects.filter(scope='settlement'))
+
+        self.assertEqual(len(leases), 1)
+        lease = leases[0]
+        self.assertIsNone(lease.owner_access_id)
+        self.assertEqual(lease.owner_session_hash, '')
+        self.assertIsNone(lease.lease_token)
+        self.assertEqual(lease.fencing_revision, 0)
+        self.assertIsNone(lease.acquired_at)
+        self.assertIsNone(lease.heartbeat_at)
+        self.assertIsNone(lease.expires_at)
