@@ -1,26 +1,28 @@
 # Текущее состояние актуального HEAD
 
-Версия документа: 0.4
-Дата последней сверки отчётов: 14.08.2026
-Статус: фактический кодовый аудит завершён; последующие изменения затрагивали только принятую UI-версию и документацию
-Источники доказательств: read-only отчёт `Вставленная уценка(20260813-103732).md`, отчёты фиксации v29 и документации 0.3, evidence bundle SHA-256 `b9d89fb04d039e5a717f3418e64765808e286dc71d587a94b4f5f621297a8442`
+Версия документа: 0.5
+Дата последней сверки отчётов: 15.08.2026
+Статус: актуализирован по локальному HEAD после независимо принятых M2-усилений; утверждённый control lease является целевой архитектурой и в коде ещё отсутствует
+Источники доказательств: Git history до `f7719c7d2e5ed009ca5b61e6ec375341cb62288d`, PostgreSQL 14.24 concurrency-проверки, read-only аудит ролевого/сессионного контура и evidence bundle SHA-256 `b9d89fb04d039e5a717f3418e64765808e286dc71d587a94b4f5f621297a8442`
 
 ## 1. Репозиторий и baseline
 
-### Текущая локальная точка по последнему проверенному отчёту
+### Текущая локальная точка
 
 | Параметр | Значение |
 |---|---|
 | Проверенный baseline документации v0.4 | `45de5d068f3b8c7f971e6065b974e4857e872f76` |
 | Сообщение baseline v0.4 | `docs(settlement): finalize architecture specification v0.4` |
+| Служебная синхронизация v0.4 | `31f09903ca8682e9e8635ca1b593e8dbd0d394cf` |
 | Предыдущий baseline документации v0.3 | `aba37c44e39b6f6f3bc0ab2caa51d9dae4c4ed9c` |
 | Кодовый baseline | `e71dc4e0b7ca26c0402e6e2ac990c8cae5fd1d1b` |
-| Рабочее дерево после фиксации v0.4 | Чистое |
-| Settlement tests | 272/272 PASS |
+| Актуальный локальный HEAD | `f7719c7d2e5ed009ca5b61e6ec375341cb62288d` |
+| Рабочее дерево до документации 0.5 | Чистое |
+| Settlement tests | SQLite: 286 PASS / 1 PostgreSQL-only skip; PostgreSQL 14.24: 287/287 PASS |
 | origin/main | Остался на `4df3c6276a8f08b86d86e003e8985aeb3b991c61` |
 | Публикация | Push/merge/deploy не выполнялись |
 
-Цепочка локальных baseline: `e71dc4e0 → aba37c44 → 45de5d0`. Commit `e71dc4e0` содержит ровно пять UI/test-файлов принятого v29; commit `aba37c44` добавляет десять Markdown-документов версии 0.3; commit `45de5d0` фиксирует независимо принятую документацию версии 0.4. `45de5d0` обозначает именно проверенный baseline документации v0.4; SHA будущего служебного commit здесь намеренно не фиксируется. Доменная логика, модели, services и миграции после исходного аудита не менялись.
+Цепочка baseline и M2-усилений: `e71dc4e0 → aba37c44 → 45de5d0 → 31f09903 → b8b54cbe → 85df6213 → 4e88278e → 1e701208 → f7719c7d`. После документации 0.4 исправлены PostgreSQL employee lock, lifecycle тестового `FileResponse`, публичные массовые ORM-обходы anchor-bed/occupancy и порядок блокировок ручных writers. Миграции и production не затрагивались. Рабочая документация 0.5 описывает следующий control-lease шаг, но не объявляет его реализованным.
 
 Резервный patch до ADR-014: SHA-256 `8D34729F75247EEFCE37535F35C1CE8D7D0C4D8CC7ABAE3997A956821C6BBC47`.
 
@@ -39,9 +41,9 @@
 
 Исходный clean baseline аудита — `4df3c62`, а не ранее переданный `0f4c2a1`. Текущая локальная цепочка baseline продолжена commit `e71dc4e0`, документацией v0.3 в commit `aba37c44` и принятым baseline документации v0.4 в commit `45de5d0`; эти commits не опубликованы в `origin/main`.
 
-## 2. Рабочее дерево до нормализации
+## 2. Историческое рабочее дерево до нормализации
 
-В рабочем дереве 11 файлов со статусом `.M`.
+До commit `e71dc4e0` в рабочем дереве было 11 файлов со статусом `.M`.
 
 Содержательные изменения есть в пяти файлах:
 
@@ -53,7 +55,7 @@
 
 Объём содержательного diff: `202 insertions(+), 75 deletions(-)`.
 
-Эти изменения содержат принятую заказчиком UI-итерацию v29, удаление фильтра передачи и дополнительные UI/DnD guards. Они не входят в HEAD и не должны быть потеряны при следующих изменениях.
+Эти изменения содержали принятую заказчиком UI-итерацию v29, удаление фильтра передачи и дополнительные UI/DnD guards. Они вошли в commit `e71dc4e0` и сохранены в актуальном HEAD.
 
 После scope-сверки 13.08.2026 точный baseline определён так: button styling и обновлённые settlement-summary карточки сохраняются; room-transfer legend, связанный CSS и тесты исключаются; числовое количество переданных комнат сохраняется.
 
@@ -75,14 +77,15 @@
 | `PhysicalRoom/PhysicalBed` | Физическая карта, A/B/ITR, transfer status, sex restriction | READY/PARTIAL |
 | `SettlementSource/SettlementRevision` | Источники и версии с сильной ORM-защитой | READY/PARTIAL |
 | `AccommodationAnchor` | Типы equipment/function/reserve/group/service/protected; Equipment→Anchor = 1:N | PARTIAL |
-| `AccommodationAnchorBedAssignment` | Версионированная interval-связь anchor→bed | PARTIAL |
-| `EmployeeBedOccupancy` | Canonical интервалы и manual lifecycle | PARTIAL |
+| `AccommodationAnchorBedAssignment` | Версионированная interval-связь anchor→bed; публичные mass-write API запрещены | PARTIAL |
+| `EmployeeBedOccupancy` | Canonical интервалы, manual lifecycle; публичные mass-write API запрещены | PARTIAL |
 | `build_auto_settlement_preview()` | Узкий GET-only in-memory preview по EquipmentAssignment | PARTIAL/CONTRADICTED |
 | `settle_employee_on_bed()` | Атомарный ручной writer | PARTIAL |
 | `relocate_employee_to_bed()` | Атомарный ручной перенос | PARTIAL |
 | release | Досрочное прекращение через `terminated_at` | PARTIAL |
 | Карта/панели/drawer/DnD | Рабочий ручной интерфейс | READY/PARTIAL |
 | Apply | Endpoint/service/model отсутствуют | ABSENT |
+| `SettlementControlLease` | Модель, singleton row, fencing и takeover отсутствуют | ABSENT |
 
 ## 4. Фактическая модель данных
 
@@ -108,7 +111,7 @@ DB гарантирует уникальность комнаты и позиц�
 
 DB-level conditional unique покрывает только открытые confirmed записи `valid_to IS NULL`. Две пересекающиеся конечные confirmed записи можно создать в обход штатного `save()`.
 
-`bulk_create`, `bulk_update` и `QuerySet.update` обходят interval validation. Удаление confirmed/cancelled записей защищено сигналом.
+Публичные `bulk_create`, `bulk_update` и `QuerySet.update` запрещены специализированным QuerySet с кодом `anchor_bed_mass_write_forbidden`; normal instance `save()` и draft delete сохранены. Private ORM API, raw SQL и внешний DB-клиент остаются техническими обходами. Удаление confirmed/cancelled записей защищено сигналом. DB-level finite interval overlap ещё не закрыт.
 
 ### 4.4. EmployeeBedOccupancy
 
@@ -120,7 +123,7 @@ Runtime использует единую полуоткрытую семант�
 
 Legacy `ended_at` в runtime activity больше не участвует.
 
-После миграции `0006` DB-level защита overlap bed/employee отсутствует. Модель не имеет FK на cohort, anchor, binding, source, revision или run; отсутствуют reason, release actor и idempotency key. Прямые create/save/update/bulk/delete обходят доменный writer.
+После миграции `0006` DB-level защита overlap bed/employee отсутствует. Модель не имеет FK на cohort, anchor, binding, source, revision или run; отсутствуют reason, release actor и idempotency key. Публичные `update/bulk_create/bulk_update` запрещены специализированным QuerySet с кодом `employee_bed_occupancy_mass_write_forbidden`. Разрешённые `create/save/delete`, private ORM API, raw SQL и внешний DB-клиент всё ещё требуют дисциплины writer/следующих DB-гарантий.
 
 ### 4.5. CrewPlan и EquipmentAssignment
 
@@ -194,9 +197,12 @@ Preview группирует конкуренцию по `(physical_bed_id, shif
 
 - одна transaction;
 - требует ровно одну active occupancy;
-- lock Employee → current occupancy → beds → rooms → related occupancies;
+- неблокирующее discovery только ID текущей occupancy/source bed;
+- lock Employee → beds по PK → rooms по PK → related occupancies по PK;
+- `FOR UPDATE OF` ограничен базовой таблицей каждого набора и не блокирует joined room/dormitory/bed;
+- после блокировок повторно проверяются current occupancy, source bed, active interval и conflicts;
 - закрывает старую запись через `terminated_at` и создаёт новую;
-- mutual A→B/B→A может привести к PostgreSQL deadlock; retry/нормализация DatabaseError отсутствуют.
+- mutual A→B/B→A и pairwise manual-writer matrix проверены на PostgreSQL 14.24 без `40P01`, `55P03` и HTTP 500.
 
 ### Release
 
@@ -206,7 +212,19 @@ Preview группирует конкуренцию по `(physical_bed_id, shif
 
 ### Общая оценка
 
-Штатные ручные writers атомарны и полезны, но защищены application-level блокировками только при использовании именно этих writers. Глобального DB-инварианта нет. Полный typed COMMIT contract существует как заготовка, но writer вызывает только SET-R033/SET-R034 overlap subset.
+Штатные ручные writers атомарны, используют согласованный порядок Employee → Beds → Rooms → Occupancies и закрыты от публичных массовых ORM-изменений. Глобального DB interval-инварианта и полного typed COMMIT contract всё ещё нет; writer вызывает только SET-R033/SET-R034 overlap subset.
+
+### Исключительность управляющего
+
+Текущий `settlement_clerk_access_from_request()` проверяет session `employee_access_id`, активность `EmployeeAccess`/Employee/Role и допускает к settlement роли `settlement_clerk` и `admin`. `role_session_state()` ограничивает активную роль внутри одной сессии/сотрудника, но не между разными сотрудниками и устройствами. В `EmployeeAccess` нет singleton или DB constraint глобального владельца settlement.
+
+Следствия актуального HEAD:
+
+- два разных делопроизводителя либо делопроизводитель и администратор могут одновременно пройти серверную авторизацию;
+- две вкладки/два HTTP-запроса одного пользователя могут выполняться параллельно;
+- кадровый график, `WatchComposition`, `WatchPeriod` и открытая смена не являются precondition ручного POST writer;
+- background Apply отсутствует, но будущий Apply без общего control gate создал бы дополнительный конкурентный writer;
+- утверждённый в 0.5 `SettlementControlLease` и takeover пока только запроектированы.
 
 ## 8. UI и HTTP
 
@@ -221,11 +239,14 @@ Preview группирует конкуренцию по `(physical_bed_id, shif
 - принятая v29 добавляет дополнительные guards и cache-buster v29;
 - изменения v29 зафиксированы локальным commit `e71dc4e0`; dirty UI-worktree устранён.
 
-## 9. Тесты на дату аудита
+## 9. Актуальные проверки
 
 | Набор | Команда | Результат | Ограничение |
 |---|---|---|---|
-| Settlement | `python manage.py test settlement --verbosity 1` | 272/272 PASS, 0 skipped, 15.832 сек | SQLite in-memory; не доказывает PostgreSQL concurrency |
+| Settlement SQLite | `python manage.py test settlement --verbosity 1 --noinput` | 287 найдено: 286 PASS, 1 PostgreSQL-only skip | Быстрая регрессия |
+| Settlement PostgreSQL 14.24 | та же команда с изолированным PostgreSQL profile | 287/287 PASS | Полная текущая suite и concurrency |
+| Mutual relocate | PostgreSQL TransactionTestCase, три последовательных запуска | 1/1 PASS каждый | Barrier/timeouts; mutation старого порядка воспроизводит `40P01` |
+| Pairwise manual writers | relocate/relocate, settle/relocate, relocate/release, settle/settle | PASS | Нет `40P01`, `55P03`, HTTP 500 и двойной occupancy |
 | Полный | `python manage.py test --verbosity 1` | 1444 выполнено: 1401 PASS, 1 FAIL, 42 skipped, 172.655 сек | SQLite in-memory |
 
 Единственный текущий failure находится вне settlement:
@@ -234,7 +255,7 @@ Preview группирует конкуренцию по `(physical_bed_id, shif
 
 Исторический зелёный результат 1444/42 не является актуальным текущим прогоном.
 
-После фиксации v29 settlement-набор повторно прошёл 272/272 теста за 7.228 сек на штатном проектном Python. Полный набор после этого не перезапускался; состояние единственного внешнего failure не переобъявляется исправленным.
+Исторический полный набор всего проекта после новых settlement-изменений не перезапускался; состояние внешнего failure не переобъявляется исправленным. Актуальная доказанная граница — полные settlement suites на SQLite и PostgreSQL.
 
 ## 10. Матрица относительно целевой архитектуры
 
@@ -263,6 +284,8 @@ Preview группирует конкуренцию по `(physical_bed_id, shif
 | Input hash/stale detection | ABSENT | Отсутствуют |
 | Transactional Apply | ABSENT | Endpoint/service отсутствуют |
 | Idempotency | ABSENT | Отсутствует |
+| Единственный активный управляющий | ABSENT | Нет singleton lease, session fencing и write-boundary проверки |
+| Административный takeover | ABSENT | `admin` сейчас имеет обычный параллельный доступ, а не атомарный перехват |
 | Единый полный COMMIT validator | PARTIAL | Подключены только overlap rules |
 | Temporary manual exception | PARTIAL | Temporary/relocate/release есть; binding/reason нет |
 | Permanent binding correction | ABSENT | Binding отсутствует |
