@@ -1623,12 +1623,48 @@ class SettlementControlLease(models.Model):
         return self.scope
 
 
+class SettlementControlEventQuerySet(models.QuerySet):
+    IMMUTABLE_CODE = 'settlement.control.event_immutable'
+    IMMUTABLE_MESSAGE = 'События управления расселением неизменяемы.'
+
+    def _raise_immutable(self):
+        raise ValidationError(
+            self.IMMUTABLE_MESSAGE,
+            code=self.IMMUTABLE_CODE,
+        )
+
+    def update(self, **kwargs):
+        self._raise_immutable()
+
+    def bulk_create(
+        self,
+        objs,
+        batch_size=None,
+        ignore_conflicts=False,
+        update_conflicts=False,
+        update_fields=None,
+        unique_fields=None,
+    ):
+        self._raise_immutable()
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        self._raise_immutable()
+
+    def delete(self):
+        self._raise_immutable()
+
+
 class SettlementControlEvent(models.Model):
+    IMMUTABLE_CODE = SettlementControlEventQuerySet.IMMUTABLE_CODE
+    IMMUTABLE_MESSAGE = SettlementControlEventQuerySet.IMMUTABLE_MESSAGE
+
     class EventType(models.TextChoices):
         ACQUIRED = 'ACQUIRED', 'Управление получено'
         RELEASED = 'RELEASED', 'Управление освобождено'
         EXPIRED = 'EXPIRED', 'Срок управления истёк'
         TAKEN_OVER = 'TAKEN_OVER', 'Управление перехвачено'
+
+    objects = SettlementControlEventQuerySet.as_manager()
 
     event_type = models.CharField(
         'Тип события',
@@ -1714,3 +1750,27 @@ class SettlementControlEvent(models.Model):
 
     def __str__(self):
         return f'{self.scope}: {self.event_type} @ {self.occurred_at:%Y-%m-%d %H:%M:%S}'
+
+    @classmethod
+    def _immutability_error(cls):
+        return ValidationError(
+            cls.IMMUTABLE_MESSAGE,
+            code=cls.IMMUTABLE_CODE,
+        )
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding:
+            raise self._immutability_error()
+        using = kwargs.get('using') or router.db_for_write(type(self), instance=self)
+        if (
+            self.pk is not None
+            and type(self)._base_manager.using(using).filter(pk=self.pk).exists()
+        ):
+            raise self._immutability_error()
+        if kwargs.get('force_update'):
+            raise self._immutability_error()
+        kwargs['force_insert'] = True
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise self._immutability_error()
