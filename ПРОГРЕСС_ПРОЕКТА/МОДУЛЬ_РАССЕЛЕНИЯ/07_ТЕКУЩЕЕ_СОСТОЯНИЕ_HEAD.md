@@ -1,9 +1,9 @@
-# Текущее состояние актуального HEAD
+# Текущее состояние реализации settlement
 
 Версия документа: 0.5
-Дата последней сверки отчётов: 15.08.2026
-Статус: актуализирован по локальному HEAD после независимо принятых M2-усилений; утверждённый control lease является целевой архитектурой и в коде ещё отсутствует
-Источники доказательств: Git history до `f7719c7d2e5ed009ca5b61e6ec375341cb62288d`, PostgreSQL 14.24 concurrency-проверки, read-only аудит ролевого/сессионного контура и evidence bundle SHA-256 `b9d89fb04d039e5a717f3418e64765808e286dc71d587a94b4f5f621297a8442`
+Дата последней сверки отчётов: 16.08.2026
+Статус: актуализирован по проверенному baseline реализации перед текущей документационной актуализацией — `902e38860f7439343cddd47d8494c993ba3e345b`; schema, внутренний lifecycle и административный takeover реализованы, а write gate, HTTP/session integration и UI integration отсутствуют
+Источники доказательств: Git history до implementation baseline `902e38860f7439343cddd47d8494c993ba3e345b`, migration `0007`, код моделей и lifecycle, PostgreSQL 14.24 concurrency-проверки и read-only сверка runtime wiring; SHA последующего документационного commit намеренно не фиксируется внутри самого commit
 
 ## 1. Репозиторий и baseline
 
@@ -16,13 +16,13 @@
 | Служебная синхронизация v0.4 | `31f09903ca8682e9e8635ca1b593e8dbd0d394cf` |
 | Предыдущий baseline документации v0.3 | `aba37c44e39b6f6f3bc0ab2caa51d9dae4c4ed9c` |
 | Кодовый baseline | `e71dc4e0b7ca26c0402e6e2ac990c8cae5fd1d1b` |
-| Актуальный локальный HEAD | `f7719c7d2e5ed009ca5b61e6ec375341cb62288d` |
-| Рабочее дерево до документации 0.5 | Чистое |
-| Settlement tests | SQLite: 286 PASS / 1 PostgreSQL-only skip; PostgreSQL 14.24: 287/287 PASS |
-| origin/main | Остался на `4df3c6276a8f08b86d86e003e8985aeb3b991c61` |
+| Проверенный implementation baseline перед текущей документационной актуализацией | `902e38860f7439343cddd47d8494c993ba3e345b` |
+| Рабочее дерево в implementation baseline | Чистое |
+| Settlement tests после takeover | SQLite: 324 PASS / 8 PostgreSQL-only skip; PostgreSQL 14.24: 332/332 PASS |
+| origin/main | Локальная цепочка не опубликована; точное ahead-число намеренно не фиксируется |
 | Публикация | Push/merge/deploy не выполнялись |
 
-Цепочка baseline и M2-усилений: `e71dc4e0 → aba37c44 → 45de5d0 → 31f09903 → b8b54cbe → 85df6213 → 4e88278e → 1e701208 → f7719c7d`. После документации 0.4 исправлены PostgreSQL employee lock, lifecycle тестового `FileResponse`, публичные массовые ORM-обходы anchor-bed/occupancy и порядок блокировок ручных writers. Миграции и production не затрагивались. Рабочая документация 0.5 описывает следующий control-lease шаг, но не объявляет его реализованным.
+Цепочка baseline и локальных усилений реализации: `e71dc4e0 → aba37c44 → 45de5d0 → 31f09903 → b8b54cbe → 85df6213 → 4e88278e → 1e701208 → f7719c7d → ef5b96b → 33e09a8 → d19b040 → d2e3404 → 902e388`. После документации 0.4 исправлены PostgreSQL employee lock, lifecycle тестового `FileResponse`, публичные массовые ORM-обходы anchor-bed/occupancy и порядок блокировок ручных writers; затем добавлены schema control lease/event, migration `0007`, внутренний lifecycle и административный takeover. Migration `0007` проверена только в изолированных тестовых средах и не объявляется применённой к production. Локальная цепочка не опубликована в `origin/main`.
 
 Резервный patch до ADR-014: SHA-256 `8D34729F75247EEFCE37535F35C1CE8D7D0C4D8CC7ABAE3997A956821C6BBC47`.
 
@@ -85,7 +85,12 @@
 | release | Досрочное прекращение через `terminated_at` | PARTIAL |
 | Карта/панели/drawer/DnD | Рабочий ручной интерфейс | READY/PARTIAL |
 | Apply | Endpoint/service/model отсутствуют | ABSENT |
-| `SettlementControlLease` | Модель, singleton row, fencing и takeover отсутствуют | ABSENT |
+| `SettlementControlLease/SettlementControlEvent` | Schema, migration `0007` и bootstrap FREE singleton присутствуют в репозитории | PRESENT |
+| Control lifecycle | Внутренние ensure/acquire/heartbeat/release/expire, HMAC session binding, token/fencing и audit events реализованы | PRESENT |
+| Административный takeover | Внутренняя атомарная команда с обязательной причиной и fencing реализована | PRESENT |
+| Settlement write gate | Manual writers не проверяют lease token/revision и не используют общий кадровый lock plan | ABSENT |
+| Control HTTP/session integration | Endpoints/URLs и хранение lease credentials в пользовательской session отсутствуют | ABSENT |
+| Control UI integration | Browser heartbeat, owner indicator, read-only banner и takeover UI отсутствуют | ABSENT |
 
 ## 4. Фактическая модель данных
 
@@ -216,15 +221,17 @@ Preview группирует конкуренцию по `(physical_bed_id, shif
 
 ### Исключительность управляющего
 
-Текущий `settlement_clerk_access_from_request()` проверяет session `employee_access_id`, активность `EmployeeAccess`/Employee/Role и допускает к settlement роли `settlement_clerk` и `admin`. `role_session_state()` ограничивает активную роль внутри одной сессии/сотрудника, но не между разными сотрудниками и устройствами. В `EmployeeAccess` нет singleton или DB constraint глобального владельца settlement.
+Текущий `settlement_clerk_access_from_request()` проверяет session `employee_access_id`, активность `EmployeeAccess`/Employee/Role и допускает к settlement роли `settlement_clerk` и `admin`. `role_session_state()` ограничивает активную роль внутри одной сессии/сотрудника, но не между разными сотрудниками и устройствами. В schema уже существуют singleton `SettlementControlLease`, session hash, token и fencing revision, а внутренние lifecycle/takeover команды меняют их атомарно и создают `SettlementControlEvent`.
 
-Следствия актуального HEAD:
+Однако runtime HTTP-контур не вызывает эти команды: manual POST по-прежнему напрямую запускает `settle_employee_on_bed()`, `relocate_employee_to_bed()` или `release_employee_from_bed()` без write gate. Control endpoints/URLs, хранение credentials в пользовательской session и UI отсутствуют. Кроме того, общий порядок `Lease → все Employee → все EmployeeAccess → доменные строки` ещё не реализован: acquire/takeover используют существующий access-root lock и должны быть приведены к утверждённому кадровому префиксу до подключения gate.
+
+Следствия для runtime в implementation baseline `902e3886`:
 
 - два разных делопроизводителя либо делопроизводитель и администратор могут одновременно пройти серверную авторизацию;
 - две вкладки/два HTTP-запроса одного пользователя могут выполняться параллельно;
 - кадровый график, `WatchComposition`, `WatchPeriod` и открытая смена не являются precondition ручного POST writer;
 - background Apply отсутствует, но будущий Apply без общего control gate создал бы дополнительный конкурентный writer;
-- утверждённый в 0.5 `SettlementControlLease` и takeover пока только запроектированы.
+- schema/lifecycle/takeover доступны только как внутренний сервисный контур и пока не дают пользователю техническую исключительность управления.
 
 ## 8. UI и HTTP
 
@@ -243,19 +250,13 @@ Preview группирует конкуренцию по `(physical_bed_id, shif
 
 | Набор | Команда | Результат | Ограничение |
 |---|---|---|---|
-| Settlement SQLite | `python manage.py test settlement --verbosity 1 --noinput` | 287 найдено: 286 PASS, 1 PostgreSQL-only skip | Быстрая регрессия |
-| Settlement PostgreSQL 14.24 | та же команда с изолированным PostgreSQL profile | 287/287 PASS | Полная текущая suite и concurrency |
+| Settlement SQLite после takeover | `python manage.py test settlement --verbosity 1 --noinput` | 324 PASS, 8 PostgreSQL-only skip | Последний подтверждённый локальный полный settlement suite |
+| Settlement PostgreSQL 14.24 после takeover | та же команда с изолированным PostgreSQL profile | 332/332 PASS | Последний подтверждённый полный settlement suite и concurrency |
 | Mutual relocate | PostgreSQL TransactionTestCase, три последовательных запуска | 1/1 PASS каждый | Barrier/timeouts; mutation старого порядка воспроизводит `40P01` |
 | Pairwise manual writers | relocate/relocate, settle/relocate, relocate/release, settle/settle | PASS | Нет `40P01`, `55P03`, HTTP 500 и двойной occupancy |
-| Полный | `python manage.py test --verbosity 1` | 1444 выполнено: 1401 PASS, 1 FAIL, 42 skipped, 172.655 сек | SQLite in-memory |
+| Migration drift | `makemigrations --check --dry-run` | Изменений нет | Migration `0007` соответствует model state |
 
-Единственный текущий failure находится вне settlement:
-
-`DriverWatchPeriodLinkageTests.test_night_replacement_after_midnight_uses_previous_production_date` — фактический `shift.watch_period` равен `None` вместо ожидаемого `WatchPeriod`.
-
-Исторический зелёный результат 1444/42 не является актуальным текущим прогоном.
-
-Исторический полный набор всего проекта после новых settlement-изменений не перезапускался; состояние внешнего failure не переобъявляется исправленным. Актуальная доказанная граница — полные settlement suites на SQLite и PostgreSQL.
+После PostgreSQL-проверок test database удалялась. Эти результаты относятся к изолированным локальным средам и не доказывают применение migration `0007` к production.
 
 ## 10. Матрица относительно целевой архитектуры
 
@@ -266,7 +267,7 @@ Preview группирует конкуренцию по `(physical_bed_id, shif
 | AccommodationAnchor как atomic identity | PARTIAL | Нет строгой type-shape/capacity/calendar semantics |
 | Два atomic anchor одной Equipment | CONTRADICTED | Schema допускает, preview требует ровно один |
 | Equipment pair `An+Bn` | ABSENT | Нет pair/slot semantics и validation |
-| Anchor-bed interval integrity | PARTIAL | Normal save защищает; DB и bulk обходы остаются |
+| Anchor-bed interval integrity | PARTIAL | Normal save и публичный QuerySet guard защищают; private/raw и DB-level finite interval overlap остаются |
 | Authoritative SettlementCohort | PARTIAL | Upstream-факты есть, immutable roster отсутствует |
 | AccommodationAnchorCalendarSlot | ABSENT | Модель отсутствует |
 | EmployeeAccommodationBinding | ABSENT | Employee→housing право отсутствует |
@@ -284,8 +285,8 @@ Preview группирует конкуренцию по `(physical_bed_id, shif
 | Input hash/stale detection | ABSENT | Отсутствуют |
 | Transactional Apply | ABSENT | Endpoint/service отсутствуют |
 | Idempotency | ABSENT | Отсутствует |
-| Единственный активный управляющий | ABSENT | Нет singleton lease, session fencing и write-boundary проверки |
-| Административный takeover | ABSENT | `admin` сейчас имеет обычный параллельный доступ, а не атомарный перехват |
+| Единственный активный управляющий | PARTIAL | Singleton lease, lifecycle и fencing реализованы внутренне; write gate, HTTP/session binding и server read-only enforcement отсутствуют |
+| Административный takeover | PARTIAL | Внутренняя команда реализована; endpoint, UI подтверждения и fencing действующих manual writers отсутствуют |
 | Единый полный COMMIT validator | PARTIAL | Подключены только overlap rules |
 | Temporary manual exception | PARTIAL | Temporary/relocate/release есть; binding/reason нет |
 | Permanent binding correction | ABSENT | Binding отсутствует |
