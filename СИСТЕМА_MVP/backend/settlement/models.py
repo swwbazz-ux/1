@@ -1371,11 +1371,45 @@ class PhysicalBed(models.Model):
         return f'{self.room}, {self.get_block_display()}-{self.position}'
 
 
+class EmployeeBedOccupancyQuerySet(models.QuerySet):
+    MASS_WRITE_FORBIDDEN_CODE = 'employee_bed_occupancy_mass_write_forbidden'
+    MASS_WRITE_FORBIDDEN_MESSAGE = (
+        'Массовые изменения фактического проживания запрещены. '
+        'Используйте штатные settlement services или instance save() '
+        'для разрешённых операций.'
+    )
+
+    def _raise_mass_write_forbidden(self):
+        raise ValidationError(
+            self.MASS_WRITE_FORBIDDEN_MESSAGE,
+            code=self.MASS_WRITE_FORBIDDEN_CODE,
+        )
+
+    def update(self, **kwargs):
+        self._raise_mass_write_forbidden()
+
+    def bulk_create(
+        self,
+        objs,
+        batch_size=None,
+        ignore_conflicts=False,
+        update_conflicts=False,
+        update_fields=None,
+        unique_fields=None,
+    ):
+        self._raise_mass_write_forbidden()
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        self._raise_mass_write_forbidden()
+
+
 class EmployeeBedOccupancy(models.Model):
     class AssignmentType(models.TextChoices):
         PERMANENT = 'permanent', 'Постоянное'
         TEMPORARY = 'temporary', 'Временное'
         PROPOSED = 'proposed', 'Предложенное'
+
+    objects = EmployeeBedOccupancyQuerySet.as_manager()
 
     employee = models.ForeignKey(
         'users.Employee',

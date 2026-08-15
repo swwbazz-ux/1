@@ -7,6 +7,7 @@ from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest import mock
 
+from asgiref.sync import async_to_sync
 from django.contrib import admin
 from django.contrib.auth.models import AnonymousUser
 from django.contrib.staticfiles import finders
@@ -4581,6 +4582,246 @@ class SettlementOccupancyWorkflowTests(TestCase):
             data=payload,
             content_type='application/json',
         )
+
+    def create_workflow_occupancy(
+        self,
+        *,
+        employee=None,
+        bed=None,
+        assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
+        starts_at=None,
+        ends_at=None,
+    ):
+        starts_at = starts_at or timezone.now() - timedelta(hours=1)
+        if (
+            assignment_type == EmployeeBedOccupancy.AssignmentType.TEMPORARY
+            and ends_at is None
+        ):
+            ends_at = starts_at + timedelta(days=1)
+        return EmployeeBedOccupancy.objects.create(
+            employee=employee or self.candidate,
+            physical_bed=bed or self.transferred_beds[0],
+            assignment_type=assignment_type,
+            settled_at=starts_at,
+            starts_at=starts_at,
+            ends_at=ends_at,
+            settled_by=self.clerk,
+        )
+
+    def occupancy_state(self):
+        field_names = tuple(
+            field.attname
+            for field in EmployeeBedOccupancy._meta.concrete_fields
+        )
+        return tuple(
+            EmployeeBedOccupancy.objects
+            .order_by('pk')
+            .values_list(*field_names)
+        )
+
+    def assert_occupancy_mass_write_forbidden(self, operation):
+        with self.assertRaises(ValidationError) as error:
+            operation()
+        self.assertEqual(
+            error.exception.code,
+            'employee_bed_occupancy_mass_write_forbidden',
+        )
+        self.assertIn(
+            'Используйте штатные settlement services или instance save()',
+            error.exception.message,
+        )
+
+    def run_async_occupancy_operation(self, operation):
+        async def runner():
+            return await operation()
+
+        return async_to_sync(runner)()
+
+    def test_occupancy_objects_create_and_instance_save_remain_supported(self):
+        permanent = self.create_workflow_occupancy()
+        temporary = self.create_workflow_occupancy(
+            employee=self.second_candidate,
+            bed=self.transferred_beds[1],
+            assignment_type=EmployeeBedOccupancy.AssignmentType.TEMPORARY,
+        )
+
+        permanent.ends_at = permanent.starts_at + timedelta(days=2)
+        permanent.save()
+        temporary.terminated_at = temporary.starts_at + timedelta(hours=1)
+        temporary.save(update_fields=['terminated_at'])
+
+        permanent.refresh_from_db()
+        temporary.refresh_from_db()
+        self.assertEqual(
+            permanent.ends_at,
+            permanent.starts_at + timedelta(days=2),
+        )
+        self.assertEqual(
+            temporary.terminated_at,
+            temporary.starts_at + timedelta(hours=1),
+        )
+
+    def test_occupancy_queryset_update_is_forbidden_without_changes(self):
+        permanent = self.create_workflow_occupancy()
+        temporary = self.create_workflow_occupancy(
+            employee=self.second_candidate,
+            bed=self.transferred_beds[1],
+            assignment_type=EmployeeBedOccupancy.AssignmentType.TEMPORARY,
+        )
+        state_before = self.occupancy_state()
+
+        for occupancy in (permanent, temporary):
+            with self.subTest(assignment_type=occupancy.assignment_type):
+                self.assert_occupancy_mass_write_forbidden(
+                    lambda occupancy=occupancy: (
+                        EmployeeBedOccupancy.objects
+                        .filter(pk=occupancy.pk)
+                        .update(ended_at=timezone.now())
+                    )
+                )
+
+        self.assertEqual(self.occupancy_state(), state_before)
+
+    def test_occupancy_bulk_create_rejects_mixed_batch_without_partial_write(self):
+        starts_at = timezone.now()
+        candidates = [
+            EmployeeBedOccupancy(
+                employee=self.candidate,
+                physical_bed=self.transferred_beds[0],
+                assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
+                settled_at=starts_at,
+                starts_at=starts_at,
+                settled_by=self.clerk,
+            ),
+            EmployeeBedOccupancy(
+                employee=self.second_candidate,
+                physical_bed=self.transferred_beds[1],
+                assignment_type=EmployeeBedOccupancy.AssignmentType.TEMPORARY,
+                settled_at=starts_at,
+                starts_at=starts_at,
+                ends_at=starts_at + timedelta(days=1),
+                settled_by=self.clerk,
+            ),
+        ]
+        state_before = self.occupancy_state()
+
+        self.assert_occupancy_mass_write_forbidden(
+            lambda: EmployeeBedOccupancy.objects.bulk_create(candidates)
+        )
+
+        self.assertEqual(self.occupancy_state(), state_before)
+        self.assertTrue(all(candidate.pk is None for candidate in candidates))
+
+        self.assert_occupancy_mass_write_forbidden(
+            lambda: EmployeeBedOccupancy.objects.bulk_create(
+                candidates,
+                update_conflicts=True,
+                update_fields=['assignment_type'],
+                unique_fields=['pk'],
+            )
+        )
+        self.assertEqual(self.occupancy_state(), state_before)
+
+    def test_occupancy_bulk_update_rejects_mixed_batch_without_changes(self):
+        permanent = self.create_workflow_occupancy()
+        temporary = self.create_workflow_occupancy(
+            employee=self.second_candidate,
+            bed=self.transferred_beds[1],
+            assignment_type=EmployeeBedOccupancy.AssignmentType.TEMPORARY,
+        )
+        state_before = self.occupancy_state()
+        permanent.assignment_type = EmployeeBedOccupancy.AssignmentType.PROPOSED
+        temporary.assignment_type = EmployeeBedOccupancy.AssignmentType.PERMANENT
+
+        self.assert_occupancy_mass_write_forbidden(
+            lambda: EmployeeBedOccupancy.objects.bulk_update(
+                [permanent, temporary],
+                ['assignment_type'],
+            )
+        )
+
+        self.assertEqual(self.occupancy_state(), state_before)
+
+    def test_occupancy_async_mass_write_wrappers_do_not_bypass_guard(self):
+        permanent = self.create_workflow_occupancy()
+        temporary = self.create_workflow_occupancy(
+            employee=self.second_candidate,
+            bed=self.transferred_beds[1],
+            assignment_type=EmployeeBedOccupancy.AssignmentType.TEMPORARY,
+        )
+        state_before = self.occupancy_state()
+
+        self.assert_occupancy_mass_write_forbidden(
+            lambda: self.run_async_occupancy_operation(
+                lambda: (
+                    EmployeeBedOccupancy.objects
+                    .filter(pk=permanent.pk)
+                    .aupdate(ended_at=timezone.now())
+                )
+            )
+        )
+
+        starts_at = timezone.now()
+        candidate = EmployeeBedOccupancy(
+            employee=self.candidate,
+            physical_bed=self.transferred_beds[2],
+            assignment_type=EmployeeBedOccupancy.AssignmentType.TEMPORARY,
+            settled_at=starts_at,
+            starts_at=starts_at,
+            ends_at=starts_at + timedelta(days=1),
+            settled_by=self.clerk,
+        )
+        self.assert_occupancy_mass_write_forbidden(
+            lambda: self.run_async_occupancy_operation(
+                lambda: EmployeeBedOccupancy.objects.abulk_create([candidate])
+            )
+        )
+
+        permanent.assignment_type = EmployeeBedOccupancy.AssignmentType.PROPOSED
+        temporary.assignment_type = EmployeeBedOccupancy.AssignmentType.PERMANENT
+        self.assert_occupancy_mass_write_forbidden(
+            lambda: self.run_async_occupancy_operation(
+                lambda: EmployeeBedOccupancy.objects.abulk_update(
+                    [permanent, temporary],
+                    ['assignment_type'],
+                )
+            )
+        )
+
+        self.assertEqual(self.occupancy_state(), state_before)
+        self.assertIsNone(candidate.pk)
+
+    def test_occupancy_services_keep_settle_relocate_release_lifecycle(self):
+        settled_at = datetime(2026, 8, 15, 8, tzinfo=datetime_timezone.utc)
+        relocated_at = settled_at + timedelta(hours=1)
+        released_at = relocated_at + timedelta(hours=1)
+
+        with mock.patch('settlement.services.timezone.now', return_value=settled_at):
+            original = settle_employee_on_bed(
+                bed_stable_id=self.transferred_beds[0].stable_id,
+                employee_id=self.candidate.pk,
+                assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
+                settled_by=self.clerk,
+            )
+        with mock.patch('settlement.services.timezone.now', return_value=relocated_at):
+            replacement = relocate_employee_to_bed(
+                bed_stable_id=self.transferred_beds[1].stable_id,
+                employee_id=self.candidate.pk,
+                assignment_type=EmployeeBedOccupancy.AssignmentType.TEMPORARY,
+                ends_at=relocated_at + timedelta(days=1),
+                settled_by=self.clerk,
+            )
+        with mock.patch('settlement.services.timezone.now', return_value=released_at):
+            released = release_employee_from_bed(
+                bed_stable_id=self.transferred_beds[1].stable_id,
+            )
+
+        original.refresh_from_db()
+        replacement.refresh_from_db()
+        self.assertEqual(original.terminated_at, relocated_at)
+        self.assertEqual(replacement.assignment_type, EmployeeBedOccupancy.AssignmentType.TEMPORARY)
+        self.assertEqual(replacement.terminated_at, released_at)
+        self.assertEqual(released.pk, replacement.pk)
 
     def test_current_service_sets_matching_legacy_and_canonical_start(self):
         placement_started_at = timezone.now().replace(microsecond=123456)
