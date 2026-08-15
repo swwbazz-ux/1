@@ -1,6 +1,7 @@
 import json
 import logging
 import threading
+import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import FrozenInstanceError
@@ -8,7 +9,7 @@ from datetime import timedelta
 from unittest import mock
 
 from django.core.exceptions import ValidationError
-from django.db import close_old_connections, connection, connections
+from django.db import close_old_connections, connection, connections, transaction
 from django.test import TestCase, TransactionTestCase
 from django.utils import timezone
 
@@ -21,6 +22,7 @@ from .control import (
     expire_control_lease,
     heartbeat_control_lease,
     release_control_lease,
+    takeover_control_lease,
 )
 from .models import SettlementControlEvent, SettlementControlLease
 
@@ -159,6 +161,27 @@ class SettlementControlLifecycleTests(
         return acquire_control_lease(
             owner_access_id=(access or self.clerk_access).pk,
             raw_session_key=session,
+            source=source,
+            session_metadata=metadata,
+            now=now or self.now,
+            ttl=ttl,
+        )
+
+    def takeover(
+        self,
+        *,
+        access=None,
+        session='control-admin-session',
+        reason='Administrative handover approved',
+        now=None,
+        ttl=timedelta(minutes=5),
+        source='test-takeover',
+        metadata=None,
+    ):
+        return takeover_control_lease(
+            admin_access_id=(access or self.admin_access).pk,
+            raw_session_key=session,
+            reason=reason,
             source=source,
             session_metadata=metadata,
             now=now or self.now,
@@ -751,6 +774,289 @@ class SettlementControlLifecycleTests(
         self.assertLessEqual(len(latest_metadata.get('request_id', '')), 512)
         self.assertNotEqual(oversized.lease_token, grant.lease_token)
 
+    def test_takeover_requires_active_admin_and_valid_reason_without_writes(self):
+        grant = self.acquire()
+        before_lease = self.lease_state()
+        before_events = self.event_state()
+        inactive_admin = self.create_access(
+            'INACTIVE-ADMIN',
+            self.admin_role,
+            access_is_active=False,
+        )
+        inactive_employee_admin = self.create_access(
+            'INACTIVE-EMPLOYEE-ADMIN',
+            self.admin_role,
+            employee_is_active=False,
+        )
+
+        cases = (
+            (
+                'settlement.control.invalid_role',
+                {'access': self.clerk_access},
+            ),
+            (
+                'settlement.control.inactive_access',
+                {'access': inactive_admin},
+            ),
+            (
+                'settlement.control.inactive_access',
+                {'access': inactive_employee_admin},
+            ),
+            (
+                'settlement.control.takeover_reason_required',
+                {'reason': ''},
+            ),
+            (
+                'settlement.control.takeover_reason_required',
+                {'reason': '   '},
+            ),
+            (
+                'settlement.control.takeover_reason_required',
+                {'reason': 'x' * 513},
+            ),
+            (
+                'settlement.control.takeover_reason_required',
+                {'reason': 'control-admin-session'},
+            ),
+            (
+                'settlement.control.takeover_reason_required',
+                {'reason': str(grant.lease_token)},
+            ),
+        )
+        for expected_code, kwargs in cases:
+            with self.subTest(expected_code=expected_code, kwargs=kwargs):
+                error = self.assert_control_error(
+                    expected_code,
+                    self.takeover,
+                    **kwargs,
+                )
+                self.assert_error_contains_no_secrets(
+                    error,
+                    'control-admin-session',
+                    grant.lease_token,
+                )
+                self.assertEqual(self.lease_state(), before_lease)
+                self.assertEqual(self.event_state(), before_events)
+
+    def test_takeover_replaces_held_owner_and_writes_exact_safe_audit(self):
+        previous = self.acquire(session='raw-clerk-session')
+        admin_session = 'raw-admin-session-never-persisted'
+        reason = '  Approved operational handover  '
+        grant = self.takeover(
+            session=admin_session,
+            reason=reason,
+            metadata={
+                'session_kind': 'django',
+                'request_id': 'takeover-request-001',
+                'owner_session_hash': admin_session,
+                'lease_token': str(previous.lease_token),
+                'nested': {'raw': admin_session},
+            },
+            now=self.now + timedelta(seconds=1),
+        )
+
+        lease = SettlementControlLease.objects.get(scope='settlement')
+        self.assertEqual(lease.owner_access_id, self.admin_access.pk)
+        self.assertNotEqual(lease.owner_session_hash, admin_session)
+        self.assertEqual(lease.lease_token, grant.lease_token)
+        self.assertNotEqual(grant.lease_token, previous.lease_token)
+        self.assertEqual(grant.fencing_revision, previous.fencing_revision + 1)
+        self.assertEqual(lease.acquired_at, self.now + timedelta(seconds=1))
+        self.assertEqual(lease.heartbeat_at, self.now + timedelta(seconds=1))
+        self.assertFalse(hasattr(lease, 'reason'))
+
+        events = self.event_state()
+        self.assertEqual(len(events), 2)
+        self.assertEqual(events[-1], {
+            'event_type': SettlementControlEvent.EventType.TAKEN_OVER,
+            'actor_access_id': self.admin_access.pk,
+            'previous_owner_access_id': self.clerk_access.pk,
+            'new_owner_access_id': self.admin_access.pk,
+            'reason': 'Approved operational handover',
+            'source': 'test-takeover',
+            'previous_fencing_revision': previous.fencing_revision,
+            'new_fencing_revision': grant.fencing_revision,
+            'session_metadata': {
+                'session_kind': 'django',
+                'request_id': 'takeover-request-001',
+            },
+        })
+        persisted = json.dumps(
+            {
+                'lease': self.lease_state(),
+                'events': events,
+            },
+            default=str,
+        )
+        self.assertNotIn('raw-clerk-session', persisted)
+        self.assertNotIn(admin_session, persisted)
+        self.assertNotIn(str(previous.lease_token), persisted)
+
+    def test_takeover_invalidates_old_owner_session_token_and_revision(self):
+        old = self.acquire(session='old-clerk-session')
+        new = self.takeover(
+            session='new-admin-session',
+            now=self.now + timedelta(seconds=1),
+        )
+
+        self.assert_control_error(
+            'settlement.control.busy',
+            heartbeat_control_lease,
+            owner_access_id=self.clerk_access.pk,
+            raw_session_key='old-clerk-session',
+            lease_token=old.lease_token,
+            fencing_revision=old.fencing_revision,
+            now=self.now + timedelta(seconds=2),
+        )
+        self.assert_control_error(
+            'settlement.control.session_mismatch',
+            heartbeat_control_lease,
+            owner_access_id=self.admin_access.pk,
+            raw_session_key='old-admin-session',
+            lease_token=new.lease_token,
+            fencing_revision=new.fencing_revision,
+            now=self.now + timedelta(seconds=2),
+        )
+        self.assert_control_error(
+            'settlement.control.invalid_token',
+            heartbeat_control_lease,
+            owner_access_id=self.admin_access.pk,
+            raw_session_key='new-admin-session',
+            lease_token=old.lease_token,
+            fencing_revision=new.fencing_revision,
+            now=self.now + timedelta(seconds=2),
+        )
+        self.assert_control_error(
+            'settlement.control.stale_revision',
+            heartbeat_control_lease,
+            owner_access_id=self.admin_access.pk,
+            raw_session_key='new-admin-session',
+            lease_token=new.lease_token,
+            fencing_revision=old.fencing_revision,
+            now=self.now + timedelta(seconds=2),
+        )
+        self.assert_control_error(
+            'settlement.control.busy',
+            release_control_lease,
+            owner_access_id=self.clerk_access.pk,
+            raw_session_key='old-clerk-session',
+            lease_token=old.lease_token,
+            fencing_revision=old.fencing_revision,
+            source='old-release',
+            now=self.now + timedelta(seconds=2),
+        )
+        self.assert_control_error(
+            'settlement.control.invalid_token',
+            release_control_lease,
+            owner_access_id=self.admin_access.pk,
+            raw_session_key='new-admin-session',
+            lease_token=old.lease_token,
+            fencing_revision=new.fencing_revision,
+            source='old-token-release',
+            now=self.now + timedelta(seconds=2),
+        )
+        self.assert_control_error(
+            'settlement.control.stale_revision',
+            release_control_lease,
+            owner_access_id=self.admin_access.pk,
+            raw_session_key='new-admin-session',
+            lease_token=new.lease_token,
+            fencing_revision=old.fencing_revision,
+            source='old-revision-release',
+            now=self.now + timedelta(seconds=2),
+        )
+        self.assertEqual(self.lease_state()['lease_token'], new.lease_token)
+        self.assertEqual(len(self.event_state()), 2)
+
+    def test_same_admin_session_takeover_is_idempotent_but_validates_reason(self):
+        self.acquire()
+        first = self.takeover(now=self.now + timedelta(seconds=1))
+        events_before = self.event_state()
+
+        second = self.takeover(
+            reason='Second confirmed request',
+            now=self.now + timedelta(seconds=2),
+            ttl=timedelta(minutes=10),
+        )
+
+        self.assertEqual(second.lease_token, first.lease_token)
+        self.assertEqual(second.fencing_revision, first.fencing_revision)
+        self.assertEqual(second.expires_at, self.now + timedelta(minutes=10, seconds=2))
+        self.assertEqual(self.event_state(), events_before)
+        self.assert_control_error(
+            'settlement.control.takeover_reason_required',
+            self.takeover,
+            reason='   ',
+            now=self.now + timedelta(seconds=3),
+        )
+        self.assertEqual(self.event_state(), events_before)
+
+    def test_takeover_of_free_lease_is_an_acquire_not_taken_over(self):
+        grant = self.takeover(reason='Admin starts control')
+
+        self.assertEqual(grant.fencing_revision, 1)
+        event = self.event_state()
+        self.assertEqual(event, [{
+            'event_type': SettlementControlEvent.EventType.ACQUIRED,
+            'actor_access_id': self.admin_access.pk,
+            'previous_owner_access_id': None,
+            'new_owner_access_id': self.admin_access.pk,
+            'reason': '',
+            'source': 'test-takeover',
+            'previous_fencing_revision': 0,
+            'new_fencing_revision': 1,
+            'session_metadata': {},
+        }])
+
+    def test_takeover_of_expired_lease_emits_expired_then_acquired(self):
+        previous = self.acquire(ttl=timedelta(seconds=1))
+
+        grant = self.takeover(
+            reason='Expired owner replacement',
+            now=self.now + timedelta(seconds=2),
+        )
+
+        self.assertEqual(grant.fencing_revision, previous.fencing_revision + 2)
+        events = self.event_state()
+        self.assertEqual(
+            [event['event_type'] for event in events],
+            [
+                SettlementControlEvent.EventType.ACQUIRED,
+                SettlementControlEvent.EventType.EXPIRED,
+                SettlementControlEvent.EventType.ACQUIRED,
+            ],
+        )
+        self.assertEqual(
+            [
+                (
+                    event['previous_fencing_revision'],
+                    event['new_fencing_revision'],
+                )
+                for event in events
+            ],
+            [(0, 1), (1, 2), (2, 3)],
+        )
+        self.assertFalse(any(
+            event['event_type'] == SettlementControlEvent.EventType.TAKEN_OVER
+            for event in events
+        ))
+        self.assertTrue(all(event['reason'] == '' for event in events))
+
+    def test_takeover_rolls_back_owner_when_audit_event_cannot_be_created(self):
+        self.acquire()
+        before_lease = self.lease_state()
+        before_events = self.event_state()
+
+        with mock.patch(
+            'settlement.control._create_event',
+            side_effect=RuntimeError('synthetic audit failure'),
+        ):
+            with self.assertRaisesRegex(RuntimeError, 'synthetic audit failure'):
+                self.takeover(now=self.now + timedelta(seconds=1))
+
+        self.assertEqual(self.lease_state(), before_lease)
+        self.assertEqual(self.event_state(), before_events)
+
     def test_event_is_append_only_through_public_orm_apis(self):
         self.acquire()
         event = SettlementControlEvent.objects.get()
@@ -834,6 +1140,10 @@ class SettlementControlConcurrencyTests(
 ):
     def setUp(self):
         self.create_control_fixtures()
+        self.second_admin_access = self.create_access(
+            'SECOND-ADMIN',
+            self.admin_role,
+        )
         self.now = timezone.now()
 
     @staticmethod
@@ -866,6 +1176,59 @@ class SettlementControlConcurrencyTests(
             )
         finally:
             connections['default'].close()
+
+    @staticmethod
+    def control_action_in_thread(*, barrier, action):
+        close_old_connections()
+        try:
+            with connections['default'].cursor() as cursor:
+                cursor.execute("SET lock_timeout = '5s'")
+                cursor.execute("SET statement_timeout = '15s'")
+            barrier.wait(timeout=10)
+            try:
+                result = action()
+            except ValidationError as error:
+                codes = SettlementControlFixtureMixin.validation_codes(error)
+                return ('validation', tuple(sorted(codes)))
+            except Exception as error:  # Returned for an exact fail-fast assertion.
+                return ('unexpected', type(error).__name__, str(error))
+            if result is None:
+                return ('success', 'none')
+            if isinstance(result, ControlLeaseGrant):
+                return (
+                    'success',
+                    'grant',
+                    str(result.lease_token),
+                    result.fencing_revision,
+                )
+            return (
+                'success',
+                'transition',
+                result.event_type,
+                result.fencing_revision,
+            )
+        finally:
+            connections['default'].close()
+
+    def run_control_actions(self, *actions):
+        barrier = threading.Barrier(len(actions))
+        with ThreadPoolExecutor(max_workers=len(actions)) as executor:
+            futures = [
+                executor.submit(
+                    self.control_action_in_thread,
+                    barrier=barrier,
+                    action=action,
+                )
+                for action in actions
+            ]
+            return [future.result(timeout=20) for future in futures]
+
+    def assert_no_unexpected_concurrency_result(self, results):
+        self.assertFalse(
+            any(result[0] == 'unexpected' for result in results),
+            results,
+        )
+        self.assertTrue(all(result[0] in {'success', 'validation'} for result in results))
 
     def run_two_acquires(self):
         barrier = threading.Barrier(2)
@@ -935,3 +1298,307 @@ class SettlementControlConcurrencyTests(
         results = self.run_two_acquires()
 
         self.assert_single_concurrency_winner(results)
+
+    def test_two_admin_takeovers_serialize_with_strict_revisions(self):
+        if connection.vendor != 'postgresql':
+            self.skipTest('Concurrent takeover is PostgreSQL-only.')
+        acquire_control_lease(
+            owner_access_id=self.clerk_access.pk,
+            raw_session_key='concurrent-clerk-session',
+            source='concurrent-setup',
+            now=self.now,
+            ttl=timedelta(minutes=5),
+        )
+        admin_cases = (
+            (self.admin_access, 'concurrent-admin-one'),
+            (self.second_admin_access, 'concurrent-admin-two'),
+        )
+
+        results = self.run_control_actions(*(
+            lambda access=access, session=session: takeover_control_lease(
+                admin_access_id=access.pk,
+                raw_session_key=session,
+                reason=f'Approved takeover for {access.pk}',
+                source='concurrent-takeover',
+                now=self.now + timedelta(seconds=1),
+                ttl=timedelta(minutes=5),
+            )
+            for access, session in admin_cases
+        ))
+
+        self.assert_no_unexpected_concurrency_result(results)
+        self.assertTrue(all(result[:2] == ('success', 'grant') for result in results))
+        self.assertEqual(sorted(result[3] for result in results), [2, 3])
+        lease = SettlementControlLease.objects.get(scope='settlement')
+        self.assertEqual(lease.fencing_revision, 3)
+        self.assertIn(
+            lease.owner_access_id,
+            {self.admin_access.pk, self.second_admin_access.pk},
+        )
+        events = self.event_state()
+        self.assertEqual(
+            [event['event_type'] for event in events],
+            [
+                SettlementControlEvent.EventType.ACQUIRED,
+                SettlementControlEvent.EventType.TAKEN_OVER,
+                SettlementControlEvent.EventType.TAKEN_OVER,
+            ],
+        )
+        self.assertEqual(
+            [
+                (
+                    event['previous_fencing_revision'],
+                    event['new_fencing_revision'],
+                )
+                for event in events
+            ],
+            [(0, 1), (1, 2), (2, 3)],
+        )
+
+        first_index = next(index for index, result in enumerate(results) if result[3] == 2)
+        final_index = next(index for index, result in enumerate(results) if result[3] == 3)
+        final_access, final_session = admin_cases[final_index]
+        self.assert_control_error(
+            'settlement.control.invalid_token',
+            heartbeat_control_lease,
+            owner_access_id=final_access.pk,
+            raw_session_key=final_session,
+            lease_token=results[first_index][2],
+            fencing_revision=3,
+            now=self.now + timedelta(seconds=2),
+        )
+
+    def test_takeover_and_old_owner_heartbeat_serialize(self):
+        if connection.vendor != 'postgresql':
+            self.skipTest('Concurrent takeover is PostgreSQL-only.')
+        grant = acquire_control_lease(
+            owner_access_id=self.clerk_access.pk,
+            raw_session_key='heartbeat-clerk-session',
+            source='concurrent-setup',
+            now=self.now,
+            ttl=timedelta(minutes=5),
+        )
+
+        results = self.run_control_actions(
+            lambda: takeover_control_lease(
+                admin_access_id=self.admin_access.pk,
+                raw_session_key='heartbeat-admin-session',
+                reason='Heartbeat race takeover',
+                source='concurrent-takeover',
+                now=self.now + timedelta(seconds=1),
+            ),
+            lambda: heartbeat_control_lease(
+                owner_access_id=self.clerk_access.pk,
+                raw_session_key='heartbeat-clerk-session',
+                lease_token=grant.lease_token,
+                fencing_revision=grant.fencing_revision,
+                now=self.now + timedelta(seconds=1),
+            ),
+        )
+
+        self.assert_no_unexpected_concurrency_result(results)
+        self.assertEqual(results[0][:2], ('success', 'grant'))
+        self.assertIn(
+            results[1],
+            {
+                ('success', 'grant', str(grant.lease_token), grant.fencing_revision),
+                ('validation', ('settlement.control.busy',)),
+            },
+        )
+        lease = SettlementControlLease.objects.get(scope='settlement')
+        self.assertEqual(lease.owner_access_id, self.admin_access.pk)
+        self.assertEqual(lease.fencing_revision, 2)
+        self.assertEqual(
+            [event['event_type'] for event in self.event_state()],
+            [
+                SettlementControlEvent.EventType.ACQUIRED,
+                SettlementControlEvent.EventType.TAKEN_OVER,
+            ],
+        )
+
+    def test_takeover_and_old_owner_release_serialize(self):
+        if connection.vendor != 'postgresql':
+            self.skipTest('Concurrent takeover is PostgreSQL-only.')
+        grant = acquire_control_lease(
+            owner_access_id=self.clerk_access.pk,
+            raw_session_key='release-clerk-session',
+            source='concurrent-setup',
+            now=self.now,
+            ttl=timedelta(minutes=5),
+        )
+
+        results = self.run_control_actions(
+            lambda: takeover_control_lease(
+                admin_access_id=self.admin_access.pk,
+                raw_session_key='release-admin-session',
+                reason='Release race takeover',
+                source='concurrent-takeover',
+                now=self.now + timedelta(seconds=1),
+            ),
+            lambda: release_control_lease(
+                owner_access_id=self.clerk_access.pk,
+                raw_session_key='release-clerk-session',
+                lease_token=grant.lease_token,
+                fencing_revision=grant.fencing_revision,
+                source='concurrent-release',
+                now=self.now + timedelta(seconds=1),
+            ),
+        )
+
+        self.assert_no_unexpected_concurrency_result(results)
+        self.assertEqual(results[0][:2], ('success', 'grant'))
+        self.assertIn(
+            results[1],
+            {
+                (
+                    'success',
+                    'transition',
+                    SettlementControlEvent.EventType.RELEASED,
+                    2,
+                ),
+                ('validation', ('settlement.control.busy',)),
+            },
+        )
+        lease = SettlementControlLease.objects.get(scope='settlement')
+        self.assertEqual(lease.owner_access_id, self.admin_access.pk)
+        events = self.event_state()
+        event_types = [event['event_type'] for event in events]
+        self.assertIn(
+            event_types,
+            [
+                [
+                    SettlementControlEvent.EventType.ACQUIRED,
+                    SettlementControlEvent.EventType.TAKEN_OVER,
+                ],
+                [
+                    SettlementControlEvent.EventType.ACQUIRED,
+                    SettlementControlEvent.EventType.RELEASED,
+                    SettlementControlEvent.EventType.ACQUIRED,
+                ],
+            ],
+        )
+        self.assertEqual(lease.fencing_revision, events[-1]['new_fencing_revision'])
+
+    def test_takeover_and_expiry_create_one_expired_and_one_acquired(self):
+        if connection.vendor != 'postgresql':
+            self.skipTest('Concurrent takeover is PostgreSQL-only.')
+        acquire_control_lease(
+            owner_access_id=self.clerk_access.pk,
+            raw_session_key='expiry-clerk-session',
+            source='concurrent-setup',
+            now=self.now,
+            ttl=timedelta(seconds=1),
+        )
+        operation_time = self.now + timedelta(seconds=2)
+
+        results = self.run_control_actions(
+            lambda: takeover_control_lease(
+                admin_access_id=self.admin_access.pk,
+                raw_session_key='expiry-admin-session',
+                reason='Expiry race takeover',
+                source='concurrent-takeover',
+                now=operation_time,
+            ),
+            lambda: expire_control_lease(
+                source='concurrent-expiry',
+                now=operation_time,
+            ),
+        )
+
+        self.assert_no_unexpected_concurrency_result(results)
+        self.assertEqual(results[0][:2], ('success', 'grant'))
+        self.assertEqual(
+            [event['event_type'] for event in self.event_state()],
+            [
+                SettlementControlEvent.EventType.ACQUIRED,
+                SettlementControlEvent.EventType.EXPIRED,
+                SettlementControlEvent.EventType.ACQUIRED,
+            ],
+        )
+        lease = SettlementControlLease.objects.get(scope='settlement')
+        self.assertEqual(lease.owner_access_id, self.admin_access.pk)
+        self.assertEqual(lease.fencing_revision, 3)
+
+    def test_takeover_waits_for_existing_lease_row_lock(self):
+        if connection.vendor != 'postgresql':
+            self.skipTest('PostgreSQL lock wait introspection is required.')
+        acquire_control_lease(
+            owner_access_id=self.clerk_access.pk,
+            raw_session_key='locked-clerk-session',
+            source='concurrent-setup',
+            now=self.now,
+            ttl=timedelta(minutes=5),
+        )
+        lease_locked = threading.Event()
+        release_lock = threading.Event()
+        waiter_started = threading.Event()
+        waiter_pid = []
+
+        def hold_lease_lock():
+            close_old_connections()
+            try:
+                with transaction.atomic():
+                    SettlementControlLease.objects.select_for_update().get(
+                        scope='settlement',
+                    )
+                    lease_locked.set()
+                    if not release_lock.wait(timeout=10):
+                        raise TimeoutError('Lease lock release signal was not received.')
+            finally:
+                connections['default'].close()
+
+        def waiting_takeover():
+            close_old_connections()
+            try:
+                with connections['default'].cursor() as cursor:
+                    cursor.execute("SET lock_timeout = '5s'")
+                    cursor.execute("SET statement_timeout = '15s'")
+                    cursor.execute('SELECT pg_backend_pid()')
+                    waiter_pid.append(cursor.fetchone()[0])
+                waiter_started.set()
+                return takeover_control_lease(
+                    admin_access_id=self.admin_access.pk,
+                    raw_session_key='locked-admin-session',
+                    reason='Wait for in-flight lease transaction',
+                    source='concurrent-takeover',
+                    now=self.now + timedelta(seconds=1),
+                )
+            finally:
+                connections['default'].close()
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            lock_future = executor.submit(hold_lease_lock)
+            self.assertTrue(lease_locked.wait(timeout=10))
+            takeover_future = executor.submit(waiting_takeover)
+            self.assertTrue(waiter_started.wait(timeout=10))
+
+            deadline = time.monotonic() + 5
+            observed_lock_wait = False
+            while time.monotonic() < deadline:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        'SELECT wait_event_type FROM pg_stat_activity WHERE pid = %s',
+                        [waiter_pid[0]],
+                    )
+                    row = cursor.fetchone()
+                if row and row[0] == 'Lock':
+                    observed_lock_wait = True
+                    break
+                time.sleep(0.05)
+            self.assertTrue(observed_lock_wait)
+            self.assertFalse(takeover_future.done())
+            release_lock.set()
+            lock_future.result(timeout=10)
+            grant = takeover_future.result(timeout=20)
+
+        self.assertIsInstance(grant, ControlLeaseGrant)
+        self.assertEqual(grant.fencing_revision, 2)
+        lease = SettlementControlLease.objects.get(scope='settlement')
+        self.assertEqual(lease.owner_access_id, self.admin_access.pk)
+        self.assertEqual(
+            [event['event_type'] for event in self.event_state()],
+            [
+                SettlementControlEvent.EventType.ACQUIRED,
+                SettlementControlEvent.EventType.TAKEN_OVER,
+            ],
+        )

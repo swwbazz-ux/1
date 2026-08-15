@@ -27,6 +27,7 @@ SAFE_SESSION_METADATA_FIELDS = frozenset({
     'remote_addr_hash',
 })
 SAFE_SESSION_METADATA_VALUE_MAX_LENGTH = 256
+TAKEOVER_REASON_MAX_LENGTH = 512
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,6 +116,32 @@ def _validated_reason(
     ):
         raise _validation_error('invalid_reason', 'Причина освобождения недопустима.')
     return reason
+
+
+def _validated_takeover_reason(
+    reason: str,
+    *,
+    forbidden_values: tuple[str, ...] = (),
+) -> str:
+    if not isinstance(reason, str):
+        raise _validation_error(
+            'takeover_reason_required',
+            'Для перехвата управления требуется причина.',
+        )
+    normalized_reason = reason.strip()
+    if (
+        not normalized_reason
+        or len(normalized_reason) > TAKEOVER_REASON_MAX_LENGTH
+        or any(
+            forbidden_value and forbidden_value in normalized_reason
+            for forbidden_value in forbidden_values
+        )
+    ):
+        raise _validation_error(
+            'takeover_reason_required',
+            'Для перехвата управления требуется корректная причина.',
+        )
+    return normalized_reason
 
 
 def _validated_scope(scope: str) -> str:
@@ -223,6 +250,23 @@ def _validated_owner_access(
             'Роль не разрешает управление расселением.',
         )
     return owner_access
+
+
+def _validated_admin_access(
+    *,
+    admin_access_id: int,
+    using: str,
+) -> EmployeeAccess:
+    admin_access = _validated_owner_access(
+        owner_access_id=admin_access_id,
+        using=using,
+    )
+    if admin_access.role.code != 'admin':
+        raise _validation_error(
+            'invalid_role',
+            'Роль не разрешает перехват управления расселением.',
+        )
+    return admin_access
 
 
 def _grant_from_lease(lease: SettlementControlLease) -> ControlLeaseGrant:
@@ -421,6 +465,134 @@ def acquire_control_lease(
             previous_revision=previous_revision,
             new_revision=grant.fencing_revision,
             session_metadata=safe_metadata,
+        )
+        return grant
+
+
+def takeover_control_lease(
+    *,
+    admin_access_id: int,
+    raw_session_key: str,
+    reason: str,
+    source: str,
+    session_metadata: Mapping[str, Any] | None = None,
+    now: datetime | None = None,
+    ttl: timedelta | int | float | None = None,
+    scope: str = CONTROL_SCOPE,
+) -> ControlLeaseGrant:
+    scope = _validated_scope(scope)
+    current_time = _resolved_now(now)
+    lease_ttl = _resolved_ttl(ttl)
+    session_hash = _session_hash(raw_session_key)
+    preliminary_forbidden_values = (raw_session_key, session_hash)
+    event_reason = _validated_takeover_reason(
+        reason,
+        forbidden_values=preliminary_forbidden_values,
+    )
+    event_source = _validated_source(
+        source,
+        forbidden_values=preliminary_forbidden_values,
+    )
+    safe_metadata = _safe_session_metadata(
+        session_metadata,
+        forbidden_values=preliminary_forbidden_values,
+    )
+    using = router.db_for_write(SettlementControlLease)
+
+    with transaction.atomic(using=using):
+        lease = _ensure_control_lease_locked(scope=scope, using=using)
+        admin_access = _validated_admin_access(
+            admin_access_id=admin_access_id,
+            using=using,
+        )
+
+        current_token = str(lease.lease_token) if lease.lease_token else ''
+        current_session_hash = lease.owner_session_hash
+        forbidden_values = (
+            raw_session_key,
+            session_hash,
+            current_session_hash,
+            current_token,
+        )
+        event_reason = _validated_takeover_reason(
+            event_reason,
+            forbidden_values=forbidden_values,
+        )
+        event_source = _validated_source(
+            event_source,
+            forbidden_values=forbidden_values,
+        )
+        safe_metadata = _safe_session_metadata(
+            safe_metadata,
+            forbidden_values=forbidden_values,
+        )
+
+        if lease.owner_access_id is not None and lease.expires_at <= current_time:
+            _expire_locked_lease(
+                lease,
+                using=using,
+                now=current_time,
+                source=event_source,
+                session_metadata={},
+            )
+
+        if lease.owner_access_id is None:
+            previous_revision = lease.fencing_revision
+            grant = _set_lease_held(
+                lease,
+                owner_access=admin_access,
+                owner_session_hash=session_hash,
+                now=current_time,
+                ttl=lease_ttl,
+            )
+            _create_event(
+                using=using,
+                event_type=SettlementControlEvent.EventType.ACQUIRED,
+                scope=lease.scope,
+                actor_access_id=admin_access.pk,
+                previous_owner_access_id=None,
+                new_owner_access_id=admin_access.pk,
+                occurred_at=current_time,
+                source=event_source,
+                previous_revision=previous_revision,
+                new_revision=grant.fencing_revision,
+                session_metadata=safe_metadata,
+            )
+            return grant
+
+        is_same_owner = lease.owner_access_id == admin_access.pk
+        is_same_session = constant_time_compare(
+            lease.owner_session_hash,
+            session_hash,
+        )
+        if is_same_owner and is_same_session:
+            lease.heartbeat_at = current_time
+            lease.expires_at = current_time + lease_ttl
+            lease.save(update_fields=['heartbeat_at', 'expires_at', 'updated_at'])
+            return _grant_from_lease(lease)
+
+        previous_owner_access_id = lease.owner_access_id
+        previous_revision = lease.fencing_revision
+        grant = _set_lease_held(
+            lease,
+            owner_access=admin_access,
+            owner_session_hash=session_hash,
+            now=current_time,
+            ttl=lease_ttl,
+        )
+        _create_event(
+            using=using,
+            event_type=SettlementControlEvent.EventType.TAKEN_OVER,
+            scope=lease.scope,
+            actor_access_id=admin_access.pk,
+            previous_owner_access_id=previous_owner_access_id,
+            new_owner_access_id=admin_access.pk,
+            occurred_at=current_time,
+            source=event_source,
+            previous_revision=previous_revision,
+            new_revision=grant.fencing_revision,
+            session_metadata=safe_metadata,
+            reason=event_reason,
         )
         return grant
 
