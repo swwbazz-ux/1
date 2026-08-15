@@ -1,5 +1,7 @@
 import re
+import threading
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone as datetime_timezone
 from io import StringIO
 from pathlib import Path
@@ -14,7 +16,15 @@ from django.contrib.staticfiles import finders
 from django.core.exceptions import FieldDoesNotExist, ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
-from django.db import IntegrityError, connection, models, router, transaction
+from django.db import (
+    IntegrityError,
+    close_old_connections,
+    connection,
+    connections,
+    models,
+    router,
+    transaction,
+)
 from django.db.migrations.executor import MigrationExecutor
 from django.db.models.deletion import ProtectedError
 from django.db.utils import NotSupportedError
@@ -54,6 +64,7 @@ from .services import (
     settle_employee_on_bed,
     unsettled_current_roster_employees,
 )
+from . import services as settlement_services
 from .views import _occupancy_response
 
 
@@ -5720,6 +5731,147 @@ class SettlementOccupancyWorkflowTests(TestCase):
 
         self.assertEqual(csrf_response.status_code, 403)
         self.assertFalse(EmployeeBedOccupancy.objects.exists())
+
+
+class SettlementMutualRelocationConcurrencyTests(TransactionTestCase):
+    def setUp(self):
+        self.dormitory = Dormitory.objects.create(number='LOCK-ORDER')
+        self.room = PhysicalRoom.objects.create(
+            dormitory=self.dormitory,
+            floor=1,
+            number=1,
+            room_type=PhysicalRoom.RoomType.STANDARD,
+            transfer_status=PhysicalRoom.TransferStatus.TRANSFERRED,
+            capacity=2,
+            corridor_side=PhysicalRoom.CorridorSide.LEFT,
+            side_position=1,
+        )
+        self.bed_a = PhysicalBed.objects.create(
+            room=self.room,
+            stable_id='LOCK-ORDER-A1',
+            block=PhysicalBed.Block.A,
+            position=1,
+        )
+        self.bed_b = PhysicalBed.objects.create(
+            room=self.room,
+            stable_id='LOCK-ORDER-B1',
+            block=PhysicalBed.Block.B,
+            position=1,
+        )
+        self.employee_a = Employee.objects.create(
+            full_name='Сотрудник конкурентного переселения А',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        self.employee_b = Employee.objects.create(
+            full_name='Сотрудник конкурентного переселения Б',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        self.clerk = Employee.objects.create(
+            full_name='Делопроизводитель конкурентного переселения',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        starts_at = timezone.now() - timedelta(minutes=5)
+        self.occupancy_a = EmployeeBedOccupancy.objects.create(
+            employee=self.employee_a,
+            physical_bed=self.bed_a,
+            assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
+            settled_at=starts_at,
+            starts_at=starts_at,
+            settled_by=self.clerk,
+        )
+        self.occupancy_b = EmployeeBedOccupancy.objects.create(
+            employee=self.employee_b,
+            physical_bed=self.bed_b,
+            assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
+            settled_at=starts_at,
+            starts_at=starts_at,
+            settled_by=self.clerk,
+        )
+
+    @staticmethod
+    def _relocate(employee_id, target_bed_stable_id, settled_by_id):
+        close_old_connections()
+        try:
+            with connections['default'].cursor() as cursor:
+                cursor.execute("SET lock_timeout = '5s'")
+                cursor.execute("SET statement_timeout = '15s'")
+            try:
+                relocate_employee_to_bed(
+                    bed_stable_id=target_bed_stable_id,
+                    employee_id=employee_id,
+                    assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
+                    settled_by=Employee.objects.get(pk=settled_by_id),
+                )
+            except ValidationError as error:
+                return (
+                    'validation',
+                    tuple(item.code for item in error.error_list),
+                )
+            return ('created', ())
+        finally:
+            connections['default'].close()
+
+    def test_mutual_relocation_uses_one_lock_order_without_deadlock(self):
+        if connection.vendor != 'postgresql':
+            self.skipTest('Проверка конкурентных row locks выполняется только на PostgreSQL.')
+
+        before = list(
+            EmployeeBedOccupancy.objects
+            .order_by('pk')
+            .values_list('pk', 'employee_id', 'physical_bed_id', 'terminated_at')
+        )
+        barrier = threading.Barrier(2)
+        original_locked_beds = settlement_services._locked_beds
+
+        def synchronized_locked_beds(*bed_ids):
+            barrier.wait(timeout=10)
+            return original_locked_beds(*bed_ids)
+
+        with mock.patch(
+            'settlement.services._locked_beds',
+            side_effect=synchronized_locked_beds,
+        ):
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                future_a = executor.submit(
+                    self._relocate,
+                    self.employee_a.pk,
+                    self.bed_b.stable_id,
+                    self.clerk.pk,
+                )
+                future_b = executor.submit(
+                    self._relocate,
+                    self.employee_b.pk,
+                    self.bed_a.stable_id,
+                    self.clerk.pk,
+                )
+                results = [
+                    future_a.result(timeout=20),
+                    future_b.result(timeout=20),
+                ]
+
+        self.assertEqual(
+            results,
+            [
+                ('validation', ('settlement.bed.interval_overlap',)),
+                ('validation', ('settlement.bed.interval_overlap',)),
+            ],
+        )
+        self.assertEqual(
+            list(
+                EmployeeBedOccupancy.objects
+                .order_by('pk')
+                .values_list(
+                    'pk',
+                    'employee_id',
+                    'physical_bed_id',
+                    'terminated_at',
+                )
+            ),
+            before,
+        )
 
 
 class EffectiveOccupancyAtQueryTests(TestCase):

@@ -442,7 +442,7 @@ def _locked_employee(employee_id):
 def _locked_beds(*bed_ids):
     beds = list(
         PhysicalBed.objects
-        .select_for_update()
+        .select_for_update(of=('self',))
         .select_related('room', 'room__dormitory')
         .filter(pk__in=bed_ids)
         .order_by('pk')
@@ -458,7 +458,7 @@ def _locked_beds(*bed_ids):
 def _locked_rooms(*room_ids):
     rooms = list(
         PhysicalRoom.objects
-        .select_for_update()
+        .select_for_update(of=('self',))
         .filter(pk__in=room_ids)
         .order_by('pk')
     )
@@ -487,7 +487,7 @@ def _validate_employee_and_destination(*, employee, room):
 def _locked_related_occupancies(*, employee_id, bed_ids):
     return list(
         EmployeeBedOccupancy.objects
-        .select_for_update()
+        .select_for_update(of=('self',))
         .filter(Q(employee_id=employee_id) | Q(physical_bed_id__in=bed_ids))
         .select_related('physical_bed')
         .order_by('pk')
@@ -636,9 +636,8 @@ def relocate_employee_to_bed(
         moment = timezone.now()
         active_occupancies = list(
             EmployeeBedOccupancy.objects
-            .select_for_update()
             .filter(effective_occupancy_at_q(moment), employee=employee)
-            .select_related('physical_bed')
+            .values('pk', 'physical_bed_id')
             .order_by('pk')
         )
         if not active_occupancies:
@@ -651,7 +650,8 @@ def relocate_employee_to_bed(
                 'У сотрудника найдено несколько действующих размещений.',
                 'settlement_employee_multiple_active_occupancies',
             )
-        current_occupancy = active_occupancies[0]
+        current_occupancy_id = active_occupancies[0]['pk']
+        current_bed_id = active_occupancies[0]['physical_bed_id']
         try:
             target_bed_id = (
                 PhysicalBed.objects
@@ -664,13 +664,13 @@ def relocate_employee_to_bed(
                 'Койко-место не найдено.',
                 'settlement_bed_not_found',
             ) from error
-        if target_bed_id == current_occupancy.physical_bed_id:
+        if target_bed_id == current_bed_id:
             raise _settlement_error(
                 'Нельзя переселить сотрудника на то же койко-место.',
                 'settlement_relocation_same_bed',
             )
 
-        beds = _locked_beds(current_occupancy.physical_bed_id, target_bed_id)
+        beds = _locked_beds(current_bed_id, target_bed_id)
         target_bed = beds[target_bed_id]
         rooms = _locked_rooms(*(bed.room_id for bed in beds.values()))
         target_room = rooms[target_bed.room_id]
@@ -680,15 +680,40 @@ def relocate_employee_to_bed(
             starts_at=moment,
             ends_at=ends_at,
         )
+        persisted_occupancies = _locked_related_occupancies(
+            employee_id=employee.pk,
+            bed_ids=(target_bed.pk,),
+        )
+        active_occupancies = [
+            occupancy
+            for occupancy in persisted_occupancies
+            if occupancy.employee_id == employee.pk
+            and occupancy.is_active_at(moment)
+        ]
+        if not active_occupancies:
+            raise _settlement_error(
+                'У сотрудника нет действующего размещения для переселения.',
+                'settlement_employee_not_housed',
+            )
+        if len(active_occupancies) != 1:
+            raise _settlement_error(
+                'У сотрудника найдено несколько действующих размещений.',
+                'settlement_employee_multiple_active_occupancies',
+            )
+        current_occupancy = active_occupancies[0]
+        if (
+            current_occupancy.pk != current_occupancy_id
+            or current_occupancy.physical_bed_id != current_bed_id
+        ):
+            raise _settlement_error(
+                'Состояние размещения изменилось. Повторите действие.',
+                'settlement_occupancy_changed',
+            )
         if current_occupancy.starts_at >= moment:
             raise _settlement_error(
                 'Переселение невозможно в момент начала текущего размещения.',
                 'settlement_relocation_same_moment',
             )
-        persisted_occupancies = _locked_related_occupancies(
-            employee_id=employee.pk,
-            bed_ids=(target_bed.pk,),
-        )
         _validate_occupancy_conflicts(
             employee_id=employee.pk,
             bed=target_bed,
@@ -745,7 +770,7 @@ def release_employee_from_bed(*, bed_stable_id):
         bed = _locked_beds(bed_id)[bed_id]
         active_occupancies = list(
             EmployeeBedOccupancy.objects
-            .select_for_update()
+            .select_for_update(of=('self',))
             .filter(effective_occupancy_at_q(moment), physical_bed=bed)
             .order_by('pk')
         )
