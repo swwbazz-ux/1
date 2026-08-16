@@ -1009,9 +1009,19 @@ class OupEmployeeStatusMigrationTests(TransactionTestCase):
     migrate_from = ('users', '0009_employee_oup_fields_and_audit_target')
     migrate_to = ('users', '0010_normalize_activated_employee_status')
 
+    def _restore_latest_migrations(self):
+        executor = MigrationExecutor(connection)
+        executor.migrate(executor.loader.graph.leaf_nodes())
+
     def setUp(self):
         super().setUp()
+        self.addCleanup(self._restore_latest_migrations)
         executor = MigrationExecutor(connection)
+        if connection.vendor == 'postgresql':
+            executor.loader.get_migration(
+                'users',
+                '0014_allow_work_schedules_without_brigades',
+            ).atomic = False
         executor.migrate([self.migrate_from])
         old_apps = executor.loader.project_state([self.migrate_from]).apps
         Employee = old_apps.get_model('users', 'Employee')
