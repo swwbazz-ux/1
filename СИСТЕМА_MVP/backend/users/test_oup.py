@@ -11,6 +11,7 @@ from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.db import connection
+from django.db.models import QuerySet
 from django.db.migrations.executor import MigrationExecutor
 from django.test import RequestFactory, TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
@@ -30,6 +31,10 @@ from references.models import Equipment, EquipmentModel, EquipmentType
 from shifts.models import EmployeeShift, ShiftType
 
 from .admin import AdminActionLogAdmin
+from .employee_access_locks import (
+    build_employee_access_lock_plan,
+    lock_employee_access_plan,
+)
 from .forms import optimize_employee_photo
 from .models import (
     AdminActionLog,
@@ -100,6 +105,22 @@ class OupWorkplaceTests(TestCase):
         ).update(closed_at=timezone.now(), closed_by=self.oup_employee)
         return True
 
+    def create_access_deactivation_target(self, *, suffix='01'):
+        employee = Employee.objects.create(
+            full_name=f'Сотрудник для отключения {suffix}',
+            phone=f'+7900001{suffix.zfill(4)}',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        access = EmployeeAccess.objects.create(
+            employee=employee,
+            role=self.driver_role,
+            access_code=f'81{suffix.zfill(4)}',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+        return employee, access
+
     def test_create_employee_can_issue_non_admin_primary_pin(self):
         self.start_shift()
         response = self.client.post(
@@ -161,6 +182,286 @@ class OupWorkplaceTests(TestCase):
         issued_access.refresh_from_db()
         self.assertFalse(issued_access.is_active)
         self.assertEqual(issued_access.status, EmployeeAccess.Status.DEACTIVATED)
+        self.assertTrue(
+            AdminActionLog.objects.filter(
+                actor=self.oup_employee,
+                object_type='EmployeeAccess',
+                object_id=str(issued_access.pk),
+                action_code='oup_access_deactivated',
+            ).exists()
+        )
+
+    def test_access_deactivation_uses_exact_sorted_employee_access_plan(self):
+        target_employee, target_access = self.create_access_deactivation_target(suffix='02')
+        exact_actor_access = EmployeeAccess.objects.create(
+            employee=self.oup_employee,
+            role=self.oup_role,
+            access_code='820002',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+        session = self.client.session
+        session['employee_access_id'] = exact_actor_access.pk
+        session.save()
+        self.start_shift()
+
+        lock_calls = []
+        original_select_for_update = QuerySet.select_for_update
+
+        def traced_select_for_update(queryset, *args, **kwargs):
+            lock_calls.append((queryset.model, kwargs.get('of')))
+            return original_select_for_update(queryset, *args, **kwargs)
+
+        with (
+            patch(
+                'users.oup_views.build_employee_access_lock_plan',
+                wraps=build_employee_access_lock_plan,
+            ) as build_plan,
+            patch(
+                'users.oup_views.lock_employee_access_plan',
+                wraps=lock_employee_access_plan,
+            ) as lock_plan,
+            patch.object(QuerySet, 'select_for_update', traced_select_for_update),
+        ):
+            response = self.client.post(
+                reverse('oup_employee_access_deactivate', args=[target_access.pk])
+            )
+
+        self.assertEqual(response.status_code, 302)
+        plan = lock_plan.call_args.args[0]
+        self.assertEqual(
+            plan.employee_ids,
+            tuple(sorted((self.oup_employee.pk, target_employee.pk))),
+        )
+        self.assertEqual(
+            plan.access_ids,
+            tuple(sorted((exact_actor_access.pk, target_access.pk))),
+        )
+        self.assertNotIn(self.oup_access.pk, plan.access_ids)
+        self.assertEqual(
+            build_plan.call_args.kwargs['access_ids'],
+            tuple(sorted((exact_actor_access.pk, target_access.pk))),
+        )
+
+        locked_models = [model for model, _of in lock_calls]
+        employee_lock_index = locked_models.index(Employee)
+        access_lock_index = locked_models.index(EmployeeAccess)
+        self.assertLess(employee_lock_index, access_lock_index)
+        self.assertFalse(
+            any(model is Employee for model in locked_models[access_lock_index + 1:])
+        )
+        self.assertEqual(lock_calls[employee_lock_index][1], ('self',))
+        self.assertEqual(lock_calls[access_lock_index][1], ('self',))
+        self.assertNotIn(Role, locked_models)
+
+    def test_access_deactivation_rejects_stale_employee_mapping_without_writes(self):
+        target_employee, target_access = self.create_access_deactivation_target(
+            suffix='03'
+        )
+        replacement_employee = Employee.objects.create(
+            full_name='Подменённый сотрудник доступа',
+            phone='+79000010003',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        self.start_shift()
+        audit_before = AdminActionLog.objects.count()
+
+        def reassign_before_lock(plan):
+            EmployeeAccess.objects.filter(pk=target_access.pk).update(
+                employee=replacement_employee
+            )
+            return lock_employee_access_plan(plan)
+
+        with patch(
+            'users.oup_views.lock_employee_access_plan',
+            side_effect=reassign_before_lock,
+        ):
+            response = self.client.post(
+                reverse('oup_employee_access_deactivate', args=[target_access.pk])
+            )
+
+        self.assertEqual(response.status_code, 302)
+        target_access.refresh_from_db()
+        self.assertEqual(target_access.employee_id, target_employee.pk)
+        self.assertTrue(target_access.is_active)
+        self.assertEqual(AdminActionLog.objects.count(), audit_before)
+
+    def test_access_deactivation_rejects_stale_role_mapping_without_writes(self):
+        _target_employee, target_access = self.create_access_deactivation_target(
+            suffix='04'
+        )
+        replacement_role = Role.objects.create(code='mechanic', name='Механик')
+        self.start_shift()
+        audit_before = AdminActionLog.objects.count()
+
+        def change_role_before_lock(plan):
+            EmployeeAccess.objects.filter(pk=target_access.pk).update(role=replacement_role)
+            return lock_employee_access_plan(plan)
+
+        with patch(
+            'users.oup_views.lock_employee_access_plan',
+            side_effect=change_role_before_lock,
+        ):
+            response = self.client.post(
+                reverse('oup_employee_access_deactivate', args=[target_access.pk])
+            )
+
+        self.assertEqual(response.status_code, 302)
+        target_access.refresh_from_db()
+        self.assertEqual(target_access.role_id, self.driver_role.pk)
+        self.assertTrue(target_access.is_active)
+        self.assertEqual(AdminActionLog.objects.count(), audit_before)
+
+    def test_access_deactivation_revalidates_target_access_employee_and_role(self):
+        target_employee, target_access = self.create_access_deactivation_target(
+            suffix='05'
+        )
+        admin_role = Role.objects.create(code='admin', name='Администратор')
+        self.start_shift()
+
+        invalid_states = (
+            (
+                'inactive_access',
+                lambda: EmployeeAccess.objects.filter(pk=target_access.pk).update(is_active=False),
+            ),
+            (
+                'inactive_employee',
+                lambda: Employee.objects.filter(pk=target_employee.pk).update(
+                    status=Employee.Status.DEACTIVATED,
+                    is_active=False,
+                ),
+            ),
+            (
+                'inactive_role',
+                lambda: Role.objects.filter(pk=self.driver_role.pk).update(is_active=False),
+            ),
+            (
+                'protected_admin_role',
+                lambda: EmployeeAccess.objects.filter(pk=target_access.pk).update(
+                    role=admin_role
+                ),
+            ),
+        )
+
+        for state_name, invalidate in invalid_states:
+            with self.subTest(state=state_name):
+                EmployeeAccess.objects.filter(pk=target_access.pk).update(
+                    status=EmployeeAccess.Status.ACTIVATED,
+                    is_active=True,
+                    role=self.driver_role,
+                )
+                Employee.objects.filter(pk=target_employee.pk).update(
+                    status=Employee.Status.ACTIVE,
+                    is_active=True,
+                )
+                Role.objects.filter(pk=self.driver_role.pk).update(is_active=True)
+                invalidate()
+                state_before = tuple(
+                    EmployeeAccess.objects.filter(pk=target_access.pk).values_list(
+                        'status', 'is_active', 'deactivated_at'
+                    ).get()
+                )
+                audit_before = AdminActionLog.objects.count()
+
+                response = self.client.post(
+                    reverse('oup_employee_access_deactivate', args=[target_access.pk])
+                )
+
+                self.assertEqual(response.status_code, 302)
+                self.assertEqual(
+                    tuple(
+                        EmployeeAccess.objects.filter(pk=target_access.pk).values_list(
+                            'status', 'is_active', 'deactivated_at'
+                        ).get()
+                    ),
+                    state_before,
+                )
+                self.assertEqual(AdminActionLog.objects.count(), audit_before)
+
+    def test_access_deactivation_revalidates_exact_actor_after_preread(self):
+        _target_employee, target_access = self.create_access_deactivation_target(
+            suffix='07'
+        )
+        self.start_shift()
+
+        invalid_states = (
+            (
+                'inactive_actor_access',
+                lambda: EmployeeAccess.objects.filter(pk=self.oup_access.pk).update(
+                    is_active=False
+                ),
+            ),
+            (
+                'inactive_actor_employee',
+                lambda: Employee.objects.filter(pk=self.oup_employee.pk).update(
+                    status=Employee.Status.DEACTIVATED,
+                    is_active=False,
+                ),
+            ),
+            (
+                'inactive_actor_role',
+                lambda: Role.objects.filter(pk=self.oup_role.pk).update(is_active=False),
+            ),
+        )
+
+        for state_name, invalidate in invalid_states:
+            with self.subTest(state=state_name):
+                audit_before = AdminActionLog.objects.count()
+
+                def invalidate_after_preread(**kwargs):
+                    invalidate()
+                    return build_employee_access_lock_plan(**kwargs)
+
+                with patch(
+                    'users.oup_views.build_employee_access_lock_plan',
+                    side_effect=invalidate_after_preread,
+                ):
+                    response = self.client.post(
+                        reverse('oup_employee_access_deactivate', args=[target_access.pk])
+                    )
+
+                self.assertEqual(response.status_code, 302)
+                target_access.refresh_from_db()
+                self.assertTrue(target_access.is_active)
+                self.assertEqual(
+                    target_access.status,
+                    EmployeeAccess.Status.ACTIVATED,
+                )
+                self.assertEqual(AdminActionLog.objects.count(), audit_before)
+
+    def test_access_deactivation_rolls_back_error_after_locks(self):
+        _target_employee, target_access = self.create_access_deactivation_target(
+            suffix='06'
+        )
+        self.start_shift()
+        audit_before = AdminActionLog.objects.count()
+
+        def fail_after_write(*, employee_access, actor):
+            employee_access.is_active = False
+            employee_access.status = EmployeeAccess.Status.DEACTIVATED
+            employee_access.save(update_fields=['is_active', 'status'])
+            AdminActionLog.objects.create(
+                actor=actor,
+                action='ОУП: тестовая частичная запись',
+                object_type='EmployeeAccess',
+                object_id=str(employee_access.pk),
+            )
+            raise ValidationError('Контрольная ошибка после блокировок.')
+
+        with patch(
+            'users.oup_views.deactivate_employee_access',
+            side_effect=fail_after_write,
+        ):
+            response = self.client.post(
+                reverse('oup_employee_access_deactivate', args=[target_access.pk])
+            )
+
+        self.assertEqual(response.status_code, 302)
+        target_access.refresh_from_db()
+        self.assertTrue(target_access.is_active)
+        self.assertEqual(target_access.status, EmployeeAccess.Status.ACTIVATED)
+        self.assertEqual(AdminActionLog.objects.count(), audit_before)
 
     def test_role_home_routes_oup_to_workplace(self):
         response = self.client.get(reverse('role_home'))

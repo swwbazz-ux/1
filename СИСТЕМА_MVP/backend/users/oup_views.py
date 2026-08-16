@@ -11,6 +11,11 @@ from django.views.decorators.http import require_POST
 
 from assignments.services import WORK_ASSIGNMENT_ROLE_EQUIPMENT_TYPES, get_active_equipment_assignment
 
+from .employee_access_locks import (
+    EmployeeAccessLockPlanError,
+    build_employee_access_lock_plan,
+    lock_employee_access_plan,
+)
 from .models import (
     AdminActionLog,
     Employee,
@@ -26,6 +31,8 @@ from .oup_forms import (
     TemporaryWorkTransferReviewForm,
 )
 from .oup_services import (
+    OUP_ROLE_CODE,
+    PROTECTED_OUP_ROLE_CODE,
     close_oup_shift,
     dismiss_employee,
     deactivate_employee_access,
@@ -39,6 +46,7 @@ from .oup_services import (
     issue_employee_access,
     log_oup_action,
     lock_current_crew_drafts,
+    lock_open_oup_shift,
     lock_oup_write_context,
     open_oup_shift,
 )
@@ -586,6 +594,70 @@ def oup_employee_access_issue_view(request, employee_id):
     return redirect('oup_employee_detail', employee_id=employee.id)
 
 
+def _stale_access_deactivation_error():
+    return ValidationError('Доступ сотрудника уже изменен. Повторите действие.')
+
+
+def _lock_access_deactivation_context(*, actor_access_id, target_access_id):
+    access_ids = tuple(sorted({actor_access_id, target_access_id}))
+    expected_rows = tuple(
+        EmployeeAccess.objects
+        .filter(pk__in=access_ids)
+        .order_by('pk')
+        .values_list('pk', 'employee_id', 'role_id')
+    )
+    if tuple(row[0] for row in expected_rows) != access_ids:
+        raise _stale_access_deactivation_error()
+
+    expected_role_ids = {
+        access_id: role_id
+        for access_id, _employee_id, role_id in expected_rows
+    }
+    try:
+        plan = build_employee_access_lock_plan(
+            access_ids=access_ids,
+            employee_ids=tuple(row[1] for row in expected_rows),
+        )
+        locked_rows = lock_employee_access_plan(plan)
+        actor_access = locked_rows.access_by_id(actor_access_id)
+        target_access = locked_rows.access_by_id(target_access_id)
+        actor = locked_rows.employee_by_id(actor_access.employee_id)
+        target_employee = locked_rows.employee_by_id(target_access.employee_id)
+    except EmployeeAccessLockPlanError as error:
+        raise _stale_access_deactivation_error() from error
+
+    if any(
+        locked_access.role_id != expected_role_ids[locked_access.pk]
+        for locked_access in (actor_access, target_access)
+    ):
+        raise _stale_access_deactivation_error()
+
+    if not actor_access.role.is_active or actor_access.role.code != OUP_ROLE_CODE:
+        raise ValidationError('Роль ОУП не настроена.', code='oup_role_unavailable')
+    if not actor.is_active or actor.status != Employee.Status.ACTIVE:
+        raise ValidationError('Сотрудник ОУП неактивен или уволен.')
+    if (
+        not actor_access.is_active
+        or actor_access.status != EmployeeAccess.Status.ACTIVATED
+    ):
+        raise ValidationError('Активированный доступ ОУП не найден.')
+
+    if not target_access.is_active:
+        raise ValidationError('Доступ сотрудника уже отключён.')
+    if not target_employee.is_active or target_employee.status != Employee.Status.ACTIVE:
+        raise ValidationError('Сотрудник неактивен или уволен.')
+    if not target_access.role.is_active:
+        raise ValidationError('Роль доступа сотрудника неактивна.')
+    if target_access.role.code == PROTECTED_OUP_ROLE_CODE:
+        raise ValidationError(
+            'Специалист ОУП не может изменять роль администратора.',
+            code='admin_role_forbidden',
+        )
+
+    target_access.employee = target_employee
+    return actor, target_access
+
+
 @require_POST
 def oup_employee_access_deactivate_view(request, access_id):
     access = require_oup_access(request)
@@ -600,10 +672,11 @@ def oup_employee_access_deactivate_view(request, access_id):
         return redirect('oup_employee_detail', employee_id=employee_id)
     try:
         with transaction.atomic():
-            actor, _shift = lock_oup_write_context(employee=access.employee)
-            employee_access = EmployeeAccess.objects.select_for_update().select_related(
-                'employee', 'role'
-            ).get(pk=employee_access.pk)
+            actor, employee_access = _lock_access_deactivation_context(
+                actor_access_id=access.pk,
+                target_access_id=employee_access.pk,
+            )
+            lock_open_oup_shift(employee=actor)
             deactivate_employee_access(employee_access=employee_access, actor=actor)
     except ValidationError as error:
         messages.error(request, '; '.join(error.messages))
