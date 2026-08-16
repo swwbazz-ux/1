@@ -11,6 +11,11 @@ from django.utils.dateparse import parse_date, parse_datetime
 from assignments.models import AssignmentStatus, EquipmentAssignment
 from core.models import bump_operational_state
 
+from .employee_access_locks import (
+    EmployeeAccessLockPlanError,
+    build_employee_access_lock_plan,
+    lock_employee_access_plan,
+)
 from .models import AdminActionLog, Employee, EmployeeAccess
 
 
@@ -319,15 +324,31 @@ def get_oup_action_undo_state(log):
     return _available('Отменить выдачу PIN', 'Отменить выдачу или перевыпуск первичного PIN?')
 
 
-def _require_admin_actor(actor):
-    if not EmployeeAccess.objects.filter(
-        employee=actor,
-        role__code='admin',
-        role__is_active=True,
-        status=EmployeeAccess.Status.ACTIVATED,
-        is_active=True,
-    ).exists():
+def _validate_admin_actor_access(employee_access, employee):
+    if (
+        employee_access.employee_id != employee.pk
+        or employee_access.role.code != 'admin'
+        or not employee_access.role.is_active
+        or employee_access.status != EmployeeAccess.Status.ACTIVATED
+        or not employee_access.is_active
+        or employee.status != Employee.Status.ACTIVE
+        or not employee.is_active
+    ):
         raise ValidationError('Отменять действия ОУП может только системный администратор.')
+
+
+def _get_admin_actor_access(actor_access_id):
+    try:
+        employee_access = (
+            EmployeeAccess.objects.select_related('employee', 'role')
+            .get(pk=actor_access_id)
+        )
+    except (EmployeeAccess.DoesNotExist, TypeError, ValueError) as error:
+        raise ValidationError(
+            'Отменять действия ОУП может только системный администратор.'
+        ) from error
+    _validate_admin_actor_access(employee_access, employee_access.employee)
+    return employee_access
 
 
 def _notify_employee_changed(employee, action):
@@ -545,22 +566,68 @@ def _undo_employee_dismissed(log):
     )
 
 
-def _undo_access_action(log, action_code):
+def _build_access_undo_lock_plan(log, actor_access_id, actor_employee_id):
+    target_access_id = (
+        EmployeeAccess.objects.filter(pk=log.object_id)
+        .order_by()
+        .values_list('pk', flat=True)
+        .first()
+    )
+    if target_access_id is None:
+        raise EmployeeAccess.DoesNotExist
+
+    try:
+        plan = build_employee_access_lock_plan(
+            access_ids=(actor_access_id, target_access_id),
+            employee_ids=(actor_employee_id,),
+        )
+    except EmployeeAccessLockPlanError as error:
+        raise ValidationError(
+            'Доступ уже изменен или первичный PIN уже использован.'
+        ) from error
+    return plan, target_access_id
+
+
+def _lock_access_undo_rows(log, actor_access_id, actor_employee_id):
+    plan, target_access_id = _build_access_undo_lock_plan(
+        log,
+        actor_access_id,
+        actor_employee_id,
+    )
+    try:
+        locked_rows = lock_employee_access_plan(plan)
+    except EmployeeAccessLockPlanError as error:
+        raise ValidationError(
+            'Доступ уже изменен или первичный PIN уже использован.'
+        ) from error
+
+    actor_access = locked_rows.access_by_id(actor_access_id)
+    actor_employee = locked_rows.employee_by_id(actor_access.employee_id)
+    if actor_employee.pk != actor_employee_id:
+        raise ValidationError('Отменять действия ОУП может только системный администратор.')
+    actor_employee.refresh_from_db(fields=('status', 'is_active'))
+    _validate_admin_actor_access(actor_access, actor_employee)
+
+    employee_access = locked_rows.access_by_id(target_access_id)
+    employee = locked_rows.employee_by_id(employee_access.employee_id)
+    return employee_access, employee
+
+
+def _undo_access_action(log, action_code, actor_access_id, actor_employee_id):
     payload = log.undo_payload or {}
     before = payload.get('before')
     after = payload.get('after') or {}
     if not after:
         raise ValidationError('У старого события нет структурированного снимка доступа.')
 
-    employee_access = (
-        EmployeeAccess.objects.select_for_update()
-        .select_related('employee')
-        .get(pk=log.object_id)
+    employee_access, employee = _lock_access_undo_rows(
+        log,
+        actor_access_id,
+        actor_employee_id,
     )
     if not _state_matches(employee_access, after):
         raise ValidationError('Доступ уже изменен или первичный PIN уже использован.')
 
-    employee = Employee.objects.select_for_update().get(pk=employee_access.employee_id)
     if before is None:
         employee_access.delete()
         _notify_employee_changed(employee, 'access_issue_reversed')
@@ -585,8 +652,9 @@ def _undo_access_action(log, action_code):
 
 
 @transaction.atomic
-def undo_oup_action(*, log_id, actor, comment=''):
-    _require_admin_actor(actor)
+def undo_oup_action(*, log_id, actor_access_id, comment=''):
+    actor_access = _get_admin_actor_access(actor_access_id)
+    actor = actor_access.employee
     log = (
         AdminActionLog.objects.select_for_update(of=('self',))
         .select_related('actor')
@@ -615,7 +683,12 @@ def undo_oup_action(*, log_id, actor, comment=''):
         elif action_code == OUP_ACTION_EMPLOYEE_DISMISSED:
             result = _undo_employee_dismissed(log)
         else:
-            result = _undo_access_action(log, action_code)
+            result = _undo_access_action(
+                log,
+                action_code,
+                actor_access_id,
+                actor.pk,
+            )
     except (Employee.DoesNotExist, EmployeeAccess.DoesNotExist, EquipmentAssignment.DoesNotExist) as error:
         raise ValidationError('Объект действия больше не найден.') from error
 

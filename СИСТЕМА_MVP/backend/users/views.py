@@ -1785,7 +1785,7 @@ def system_admin_undo_oup_action_view(request, log_id):
     try:
         result, _reversal = undo_oup_action(
             log_id=log_id,
-            actor=access.employee,
+            actor_access_id=access.pk,
             comment=request.POST.get('comment', '').strip(),
         )
     except ValidationError as error:

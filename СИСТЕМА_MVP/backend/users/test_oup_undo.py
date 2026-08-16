@@ -1,3 +1,7 @@
+from unittest.mock import patch
+
+from django.core.exceptions import ValidationError
+from django.db.models.query import QuerySet
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
@@ -5,6 +9,7 @@ from django.utils import timezone
 from assignments.models import AssignmentStatus, EquipmentAssignment, WorkShiftType
 from references.models import Equipment, EquipmentModel, EquipmentType
 
+from . import employee_access_locks, oup_undo as oup_undo_module
 from .models import (
     AdminActionLog,
     Employee,
@@ -29,6 +34,7 @@ from .oup_undo import (
     employee_created_undo_payload,
     get_oup_action_undo_state,
     state_change_payload,
+    undo_oup_action,
 )
 
 
@@ -89,6 +95,15 @@ class OupActionUndoTests(TestCase):
         open_oup_shift(employee=actor)
         return actor
 
+    def create_second_admin_access(self):
+        return EmployeeAccess.objects.create(
+            employee=self.admin_employee,
+            role=self.admin_role,
+            access_code='100002',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+
     def dismiss_with_assignment(self):
         actor = self.create_oup_actor()
         self.employee_access.status = EmployeeAccess.Status.ACTIVATED
@@ -145,6 +160,253 @@ class OupActionUndoTests(TestCase):
         )
         self.assertContains(second_response, 'уже отменено')
         self.assertEqual(AdminActionLog.objects.filter(reversal_of=self.log).count(), 1)
+
+    def test_undo_view_passes_exact_session_access_id(self):
+        with patch('users.views.undo_oup_action', return_value=('Готово', None)) as undo_mock:
+            response = self.client.post(
+                reverse('system_admin_undo_oup_action', args=[self.log.pk]),
+                {
+                    'comment': '  Проверка session access  ',
+                    'next': reverse('system_admin_logs'),
+                },
+            )
+
+        self.assertRedirects(response, reverse('system_admin_logs'))
+        undo_mock.assert_called_once_with(
+            log_id=self.log.pk,
+            actor_access_id=self.admin_access.pk,
+            comment='Проверка session access',
+        )
+
+    def test_access_undo_uses_complete_employee_access_lock_plan(self):
+        unrelated_admin_access = self.create_second_admin_access()
+        captured_plans = []
+        lock_calls = []
+        original_build_plan = employee_access_locks.build_employee_access_lock_plan
+        original_select_for_update = QuerySet.select_for_update
+
+        def capture_plan(**kwargs):
+            plan = original_build_plan(**kwargs)
+            captured_plans.append(plan)
+            return plan
+
+        def capture_select_for_update(queryset, *args, **kwargs):
+            if queryset.model in {Employee, EmployeeAccess}:
+                lock_calls.append((queryset.model, kwargs.get('of')))
+            return original_select_for_update(queryset, *args, **kwargs)
+
+        with (
+            patch.object(
+                oup_undo_module,
+                'build_employee_access_lock_plan',
+                side_effect=capture_plan,
+            ),
+            patch.object(
+                QuerySet,
+                'select_for_update',
+                new=capture_select_for_update,
+            ),
+        ):
+            result, reversal = undo_oup_action(
+                log_id=self.log.pk,
+                actor_access_id=self.admin_access.pk,
+            )
+
+        self.assertEqual(result, 'Выдача первичного PIN отменена; запись доступа удалена.')
+        self.assertEqual(reversal.reversal_of_id, self.log.pk)
+        self.assertEqual(len(captured_plans), 1)
+        plan = captured_plans[0]
+        self.assertEqual(
+            plan.employee_ids,
+            tuple(sorted({self.admin_employee.pk, self.employee.pk})),
+        )
+        self.assertEqual(
+            plan.access_ids,
+            tuple(sorted({self.admin_access.pk, self.employee_access.pk})),
+        )
+        self.assertNotIn(unrelated_admin_access.pk, plan.access_ids)
+        self.assertEqual(
+            lock_calls,
+            [
+                (Employee, ('self',)),
+                (EmployeeAccess, ('self',)),
+            ],
+        )
+
+    def test_access_undo_rejects_stale_relation_without_partial_write(self):
+        replacement_employee = Employee.objects.create(
+            full_name='Сотрудник с изменённой связью',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        original_employee_id = self.employee_access.employee_id
+        original_lock_employees = employee_access_locks._lock_employees
+
+        def reassign_after_employee_locks(plan):
+            employees = original_lock_employees(plan)
+            EmployeeAccess.objects.filter(pk=self.employee_access.pk).update(
+                employee=replacement_employee,
+            )
+            return employees
+
+        with (
+            patch.object(
+                employee_access_locks,
+                '_lock_employees',
+                side_effect=reassign_after_employee_locks,
+            ),
+            self.assertRaisesMessage(
+                ValidationError,
+                'Доступ уже изменен или первичный PIN уже использован.',
+            ),
+        ):
+            undo_oup_action(
+                log_id=self.log.pk,
+                actor_access_id=self.admin_access.pk,
+            )
+
+        self.employee_access.refresh_from_db()
+        self.assertEqual(self.employee_access.employee_id, original_employee_id)
+        self.assertFalse(AdminActionLog.objects.filter(reversal_of=self.log).exists())
+
+    def test_access_undo_rejects_missing_target_without_partial_write(self):
+        target_access_id = self.employee_access.pk
+        self.employee_access.delete()
+
+        with self.assertRaisesMessage(ValidationError, 'Объект действия больше не найден.'):
+            undo_oup_action(
+                log_id=self.log.pk,
+                actor_access_id=self.admin_access.pk,
+            )
+
+        self.assertFalse(EmployeeAccess.objects.filter(pk=target_access_id).exists())
+        self.assertFalse(AdminActionLog.objects.filter(reversal_of=self.log).exists())
+
+    def test_access_undo_revalidates_actor_access_after_locking(self):
+        self.create_second_admin_access()
+        original_lock_employees = employee_access_locks._lock_employees
+
+        def deactivate_actor_after_employee_locks(plan):
+            employees = original_lock_employees(plan)
+            EmployeeAccess.objects.filter(pk=self.admin_access.pk).update(is_active=False)
+            return employees
+
+        with (
+            patch.object(
+                employee_access_locks,
+                '_lock_employees',
+                side_effect=deactivate_actor_after_employee_locks,
+            ),
+            self.assertRaisesMessage(
+                ValidationError,
+                'Отменять действия ОУП может только системный администратор.',
+            ),
+        ):
+            undo_oup_action(
+                log_id=self.log.pk,
+                actor_access_id=self.admin_access.pk,
+            )
+
+        self.admin_access.refresh_from_db()
+        self.assertTrue(self.admin_access.is_active)
+        self.assertTrue(EmployeeAccess.objects.filter(pk=self.employee_access.pk).exists())
+        self.assertFalse(AdminActionLog.objects.filter(reversal_of=self.log).exists())
+
+    def test_second_admin_access_cannot_replace_inactive_session_access(self):
+        second_admin_access = self.create_second_admin_access()
+        self.admin_access.is_active = False
+        self.admin_access.save(update_fields=['is_active'])
+
+        with self.assertRaisesMessage(
+            ValidationError,
+            'Отменять действия ОУП может только системный администратор.',
+        ):
+            undo_oup_action(
+                log_id=self.log.pk,
+                actor_access_id=self.admin_access.pk,
+            )
+
+        second_admin_access.refresh_from_db()
+        self.assertTrue(second_admin_access.is_active)
+        self.assertTrue(EmployeeAccess.objects.filter(pk=self.employee_access.pk).exists())
+        self.assertFalse(AdminActionLog.objects.filter(reversal_of=self.log).exists())
+
+    def test_access_undo_revalidates_actor_employee_activity_after_locking(self):
+        original_lock_employees = employee_access_locks._lock_employees
+
+        def deactivate_employee_after_employee_locks(plan):
+            employees = original_lock_employees(plan)
+            Employee.objects.filter(pk=self.admin_employee.pk).update(is_active=False)
+            return employees
+
+        with (
+            patch.object(
+                employee_access_locks,
+                '_lock_employees',
+                side_effect=deactivate_employee_after_employee_locks,
+            ),
+            self.assertRaisesMessage(
+                ValidationError,
+                'Отменять действия ОУП может только системный администратор.',
+            ),
+        ):
+            undo_oup_action(
+                log_id=self.log.pk,
+                actor_access_id=self.admin_access.pk,
+            )
+
+        self.admin_employee.refresh_from_db()
+        self.assertTrue(self.admin_employee.is_active)
+        self.assertTrue(EmployeeAccess.objects.filter(pk=self.employee_access.pk).exists())
+        self.assertFalse(AdminActionLog.objects.filter(reversal_of=self.log).exists())
+
+    def test_access_undo_revalidates_actor_employee_status_after_locking(self):
+        original_lock_employees = employee_access_locks._lock_employees
+
+        def dismiss_employee_after_employee_locks(plan):
+            employees = original_lock_employees(plan)
+            Employee.objects.filter(pk=self.admin_employee.pk).update(
+                status=Employee.Status.DISMISSED,
+            )
+            return employees
+
+        with (
+            patch.object(
+                employee_access_locks,
+                '_lock_employees',
+                side_effect=dismiss_employee_after_employee_locks,
+            ),
+            self.assertRaisesMessage(
+                ValidationError,
+                'Отменять действия ОУП может только системный администратор.',
+            ),
+        ):
+            undo_oup_action(
+                log_id=self.log.pk,
+                actor_access_id=self.admin_access.pk,
+            )
+
+        self.admin_employee.refresh_from_db()
+        self.assertEqual(self.admin_employee.status, Employee.Status.ACTIVE)
+        self.assertTrue(EmployeeAccess.objects.filter(pk=self.employee_access.pk).exists())
+        self.assertFalse(AdminActionLog.objects.filter(reversal_of=self.log).exists())
+
+    def test_access_undo_rolls_back_when_notification_fails_after_locks(self):
+        with (
+            patch.object(
+                oup_undo_module,
+                '_notify_employee_changed',
+                side_effect=RuntimeError('notification failed'),
+            ),
+            self.assertRaisesMessage(RuntimeError, 'notification failed'),
+        ):
+            undo_oup_action(
+                log_id=self.log.pk,
+                actor_access_id=self.admin_access.pk,
+            )
+
+        self.assertTrue(EmployeeAccess.objects.filter(pk=self.employee_access.pk).exists())
+        self.assertFalse(AdminActionLog.objects.filter(reversal_of=self.log).exists())
 
     def test_oup_access_issue_route_is_registered(self):
         url = reverse('oup_employee_access_issue', args=[self.employee.id])
