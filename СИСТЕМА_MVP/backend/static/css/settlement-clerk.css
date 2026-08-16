@@ -1657,23 +1657,25 @@
 }
 
 .settlement-unsettled-employee-content > strong {
-    display: -webkit-box;
-    overflow: hidden;
+    display: block;
+    overflow: visible;
     color: var(--admin-ink);
     font-size: calc(13 * var(--settlement-density-unit));
     font-weight: 900;
     line-height: 1.2;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
+    overflow-wrap: anywhere;
+    text-overflow: clip;
+    white-space: normal;
 }
 
 .settlement-unsettled-employee-content > span {
-    overflow: hidden;
+    overflow: visible;
     color: var(--admin-muted);
     font-size: calc(11 * var(--settlement-density-unit));
     font-weight: 700;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    overflow-wrap: anywhere;
+    text-overflow: clip;
+    white-space: normal;
 }
 
 .settlement-unsettled-employee-meta {
@@ -2245,13 +2247,14 @@ body.settlement-auto-preview-modal-open {
 }
 
 .settlement-room-bed-card dd {
-    overflow: hidden;
+    overflow: visible;
     margin: 2px 0 0;
     color: var(--admin-ink);
     font-size: 11px;
     font-weight: 800;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    overflow-wrap: anywhere;
+    text-overflow: clip;
+    white-space: normal;
 }
 
 .settlement-placement-hint,
