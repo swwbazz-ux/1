@@ -85,14 +85,14 @@ class OupActionUndoTests(TestCase):
             status=Employee.Status.ACTIVE,
             is_active=True,
         )
-        EmployeeAccess.objects.create(
+        actor_access = EmployeeAccess.objects.create(
             employee=actor,
             role=oup_role,
             access_code='300001',
             status=EmployeeAccess.Status.ACTIVATED,
             is_active=True,
         )
-        open_oup_shift(employee=actor)
+        open_oup_shift(actor_access_id=actor_access.pk)
         return actor
 
     def create_second_admin_access(self):

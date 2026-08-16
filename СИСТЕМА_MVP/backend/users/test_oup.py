@@ -1,16 +1,18 @@
 import shutil
 import tempfile
 from datetime import timedelta
+from importlib import import_module
 from io import BytesIO, StringIO
 from unittest.mock import patch
 
 from django.contrib import admin
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
+from django.contrib.messages import get_messages
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
-from django.db import connection
+from django.db import IntegrityError, connection, transaction
 from django.db.models import QuerySet
 from django.db.migrations.executor import MigrationExecutor
 from django.test import RequestFactory, TestCase, TransactionTestCase, override_settings
@@ -96,6 +98,21 @@ class OupWorkplaceTests(TestCase):
         response = self.client.post(reverse('oup_shift_start'), {'next': reverse('oup_employees')})
         self.assertEqual(response.status_code, 302)
         return EmployeeShift.objects.get(employee=self.oup_employee, closed_at__isnull=True)
+
+    def create_oup_actor(self, *, suffix):
+        employee = Employee.objects.create(
+            full_name=f'Специалист ОУП {suffix}',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        access = EmployeeAccess.objects.create(
+            employee=employee,
+            role=self.oup_role,
+            access_code=f'81{suffix:04d}',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+        return employee, access
 
     def close_shift_after_outer_guard(self, *_args, **_kwargs):
         EmployeeShift.objects.filter(
@@ -594,7 +611,7 @@ class OupWorkplaceTests(TestCase):
         opened_at = timezone.now() - timedelta(days=31)
         EmployeeShift.objects.filter(pk=shift.pk).update(opened_at=opened_at)
 
-        same_shift, created = open_oup_shift(employee=self.oup_employee)
+        same_shift, created = open_oup_shift(actor_access_id=self.oup_access.pk)
 
         self.assertFalse(created)
         self.assertEqual(same_shift.pk, shift.pk)
@@ -602,6 +619,173 @@ class OupWorkplaceTests(TestCase):
             EmployeeShift.objects.filter(workplace_code='oup', closed_at__isnull=True).count(),
             1,
         )
+
+    def test_unique_open_oup_period_constraint_blocks_second_employee(self):
+        second_employee, _second_access = self.create_oup_actor(suffix=91)
+        EmployeeShift.objects.create(
+            employee=self.oup_employee,
+            shift_type=ShiftType.DAY,
+            workplace_code='oup',
+            opened_at=timezone.now(),
+            opened_by=self.oup_employee,
+        )
+
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            EmployeeShift.objects.create(
+                employee=second_employee,
+                shift_type=ShiftType.DAY,
+                workplace_code='oup',
+                opened_at=timezone.now(),
+                opened_by=second_employee,
+            )
+
+        self.assertEqual(
+            EmployeeShift.objects.filter(workplace_code='oup', closed_at__isnull=True).count(),
+            1,
+        )
+
+    def test_closed_oup_period_does_not_block_new_period(self):
+        second_employee, _second_access = self.create_oup_actor(suffix=92)
+        EmployeeShift.objects.create(
+            employee=self.oup_employee,
+            shift_type=ShiftType.DAY,
+            workplace_code='oup',
+            opened_at=timezone.now() - timedelta(hours=1),
+            closed_at=timezone.now(),
+            opened_by=self.oup_employee,
+            closed_by=self.oup_employee,
+        )
+
+        shift = EmployeeShift.objects.create(
+            employee=second_employee,
+            shift_type=ShiftType.DAY,
+            workplace_code='oup',
+            opened_at=timezone.now(),
+            opened_by=second_employee,
+        )
+
+        self.assertEqual(shift.employee_id, second_employee.pk)
+
+    def test_unique_open_oup_period_does_not_affect_other_workplaces(self):
+        second_employee, _second_access = self.create_oup_actor(suffix=93)
+
+        EmployeeShift.objects.create(
+            employee=self.oup_employee,
+            shift_type=ShiftType.DAY,
+            workplace_code='driver',
+            opened_at=timezone.now(),
+            opened_by=self.oup_employee,
+        )
+        EmployeeShift.objects.create(
+            employee=second_employee,
+            shift_type=ShiftType.DAY,
+            workplace_code='driver',
+            opened_at=timezone.now(),
+            opened_by=second_employee,
+        )
+
+        self.assertEqual(
+            EmployeeShift.objects.filter(workplace_code='driver', closed_at__isnull=True).count(),
+            2,
+        )
+
+    def test_same_actor_start_remains_idempotent_with_one_audit(self):
+        first_shift, first_created = open_oup_shift(actor_access_id=self.oup_access.pk)
+        second_shift, second_created = open_oup_shift(actor_access_id=self.oup_access.pk)
+
+        self.assertTrue(first_created)
+        self.assertFalse(second_created)
+        self.assertEqual(second_shift.pk, first_shift.pk)
+        self.assertEqual(
+            AdminActionLog.objects.filter(action_code='oup_period_started').count(),
+            1,
+        )
+
+    def test_other_actor_busy_keeps_message_and_does_not_add_audit(self):
+        shift, created = open_oup_shift(actor_access_id=self.oup_access.pk)
+        second_employee, second_access = self.create_oup_actor(suffix=94)
+
+        with self.assertRaisesMessage(
+            ValidationError,
+            f'Редактирование кадровых данных уже выполняет {self.oup_employee.full_name}',
+        ):
+            open_oup_shift(actor_access_id=second_access.pk)
+
+        self.assertTrue(created)
+        self.assertEqual(shift.employee_id, self.oup_employee.pk)
+        self.assertFalse(
+            EmployeeShift.objects.filter(employee=second_employee, closed_at__isnull=True).exists()
+        )
+        self.assertEqual(
+            AdminActionLog.objects.filter(action_code='oup_period_started').count(),
+            1,
+        )
+
+    def test_insert_conflict_with_same_actor_winner_is_idempotent(self):
+        winner = EmployeeShift(
+            id=901,
+            employee=self.oup_employee,
+            shift_type=ShiftType.DAY,
+            workplace_code='oup',
+            opened_at=timezone.now(),
+            opened_by=self.oup_employee,
+        )
+
+        with (
+            patch.object(
+                EmployeeShift.objects,
+                'create',
+                side_effect=IntegrityError('simulated unique_open_oup_period'),
+            ),
+            patch('users.oup_services.get_active_oup_period', return_value=winner),
+        ):
+            shift, created = open_oup_shift(actor_access_id=self.oup_access.pk)
+
+        self.assertIs(shift, winner)
+        self.assertFalse(created)
+        self.assertFalse(AdminActionLog.objects.exists())
+
+    def test_insert_conflict_with_other_actor_winner_is_controlled_busy(self):
+        second_employee, _second_access = self.create_oup_actor(suffix=95)
+        winner = EmployeeShift(
+            id=902,
+            employee=second_employee,
+            shift_type=ShiftType.DAY,
+            workplace_code='oup',
+            opened_at=timezone.now(),
+            opened_by=second_employee,
+        )
+
+        with (
+            patch.object(
+                EmployeeShift.objects,
+                'create',
+                side_effect=IntegrityError('simulated unique_open_oup_period'),
+            ),
+            patch('users.oup_services.get_active_oup_period', return_value=winner),
+            self.assertRaisesMessage(
+                ValidationError,
+                f'Редактирование кадровых данных уже выполняет {second_employee.full_name}',
+            ),
+        ):
+            open_oup_shift(actor_access_id=self.oup_access.pk)
+
+        self.assertFalse(EmployeeShift.objects.exists())
+        self.assertFalse(AdminActionLog.objects.exists())
+
+    def test_insert_integrity_error_without_winner_is_not_masked(self):
+        insert_error = IntegrityError('unrelated insert failure')
+
+        with (
+            patch.object(EmployeeShift.objects, 'create', side_effect=insert_error),
+            patch('users.oup_services.get_active_oup_period', return_value=None),
+            self.assertRaises(IntegrityError) as caught,
+        ):
+            open_oup_shift(actor_access_id=self.oup_access.pk)
+
+        self.assertIs(caught.exception, insert_error)
+        self.assertFalse(EmployeeShift.objects.exists())
+        self.assertFalse(AdminActionLog.objects.exists())
 
     def test_oup_activation_does_not_show_pin_confirmation_banner(self):
         employee = Employee.objects.create(
@@ -656,6 +840,225 @@ class OupWorkplaceTests(TestCase):
             for call in shift_lock.call_args_list
         ))
 
+    def test_shift_views_pass_exact_session_access_id_and_keep_messages(self):
+        with patch(
+            'users.oup_views.open_oup_shift',
+            return_value=(object(), True),
+        ) as open_shift:
+            response = self.client.post(reverse('oup_shift_start'))
+
+        open_shift.assert_called_once_with(actor_access_id=self.oup_access.pk)
+        self.assertIn(
+            'Редактирование кадровых данных включено.',
+            [str(message) for message in get_messages(response.wsgi_request)],
+        )
+
+        shift = self.start_shift()
+        with patch(
+            'users.oup_views.close_oup_shift',
+            return_value=shift,
+        ) as close_shift:
+            response = self.client.post(reverse('oup_shift_close'))
+
+        close_shift.assert_called_once_with(actor_access_id=self.oup_access.pk)
+        self.assertIn(
+            'Редактирование кадровых данных завершено.',
+            [str(message) for message in get_messages(response.wsgi_request)],
+        )
+
+    def test_exact_shift_actor_does_not_fall_back_to_second_oup_access(self):
+        EmployeeAccess.objects.create(
+            employee=self.oup_employee,
+            role=self.oup_role,
+            access_code='700002',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+        EmployeeAccess.objects.filter(pk=self.oup_access.pk).update(
+            status=EmployeeAccess.Status.DEACTIVATED,
+            is_active=False,
+        )
+        audit_before = AdminActionLog.objects.count()
+
+        with self.assertRaisesMessage(
+            ValidationError,
+            'Активированный доступ ОУП не найден.',
+        ):
+            open_oup_shift(actor_access_id=self.oup_access.pk)
+
+        self.assertFalse(EmployeeShift.objects.exists())
+        self.assertEqual(AdminActionLog.objects.count(), audit_before)
+
+    def test_exact_shift_actor_locks_employee_then_access_then_shift(self):
+        lock_order = []
+        original_select_for_update = QuerySet.select_for_update
+
+        def traced_select_for_update(queryset, *args, **kwargs):
+            lock_order.append((queryset.model, kwargs.get('of')))
+            return original_select_for_update(queryset, *args, **kwargs)
+
+        with patch.object(QuerySet, 'select_for_update', traced_select_for_update):
+            open_oup_shift(actor_access_id=self.oup_access.pk)
+
+        employee_index = next(
+            index for index, (model, _of) in enumerate(lock_order)
+            if model is Employee
+        )
+        access_index = next(
+            index for index, (model, _of) in enumerate(lock_order)
+            if model is EmployeeAccess
+        )
+        shift_indexes = [
+            index for index, (model, _of) in enumerate(lock_order)
+            if model is EmployeeShift
+        ]
+        self.assertLess(employee_index, access_index)
+        self.assertTrue(shift_indexes)
+        self.assertTrue(all(access_index < index for index in shift_indexes))
+        self.assertEqual(lock_order[employee_index][1], ('self',))
+        self.assertEqual(lock_order[access_index][1], ('self',))
+        self.assertFalse(any(model is Role for model, _of in lock_order))
+        self.assertFalse(any(
+            model is Employee
+            for model, _of in lock_order[access_index + 1:]
+        ))
+
+    def test_exact_shift_actor_rejects_stale_employee_mapping(self):
+        replacement = Employee.objects.create(
+            full_name='Другой специалист ОУП',
+            phone='+79000000031',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        audit_before = AdminActionLog.objects.count()
+
+        def reassign_before_lock(plan):
+            EmployeeAccess.objects.filter(pk=self.oup_access.pk).update(
+                employee=replacement,
+            )
+            return lock_employee_access_plan(plan)
+
+        with (
+            patch(
+                'users.oup_services.lock_employee_access_plan',
+                side_effect=reassign_before_lock,
+            ),
+            self.assertRaisesMessage(
+                ValidationError,
+                'Активированный доступ ОУП не найден.',
+            ),
+        ):
+            open_oup_shift(actor_access_id=self.oup_access.pk)
+
+        self.oup_access.refresh_from_db()
+        self.assertEqual(self.oup_access.employee_id, self.oup_employee.pk)
+        self.assertFalse(EmployeeShift.objects.exists())
+        self.assertEqual(AdminActionLog.objects.count(), audit_before)
+
+    def test_exact_shift_actor_rejects_stale_role_mapping(self):
+        replacement_role = Role.objects.create(code='oup-copy', name='Другой ОУП')
+        audit_before = AdminActionLog.objects.count()
+
+        def change_role_before_lock(plan):
+            EmployeeAccess.objects.filter(pk=self.oup_access.pk).update(
+                role=replacement_role,
+            )
+            return lock_employee_access_plan(plan)
+
+        with (
+            patch(
+                'users.oup_services.lock_employee_access_plan',
+                side_effect=change_role_before_lock,
+            ),
+            self.assertRaisesMessage(
+                ValidationError,
+                'Активированный доступ ОУП не найден.',
+            ),
+        ):
+            open_oup_shift(actor_access_id=self.oup_access.pk)
+
+        self.oup_access.refresh_from_db()
+        self.assertEqual(self.oup_access.role_id, self.oup_role.pk)
+        self.assertFalse(EmployeeShift.objects.exists())
+        self.assertEqual(AdminActionLog.objects.count(), audit_before)
+
+    def test_exact_shift_actor_preserves_inactive_employee_and_role_errors(self):
+        Employee.objects.filter(pk=self.oup_employee.pk).update(
+            status=Employee.Status.DISMISSED,
+            is_active=False,
+        )
+        with self.assertRaisesMessage(
+            ValidationError,
+            'Сотрудник ОУП неактивен или уволен.',
+        ):
+            open_oup_shift(actor_access_id=self.oup_access.pk)
+
+        Employee.objects.filter(pk=self.oup_employee.pk).update(
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        Role.objects.filter(pk=self.oup_role.pk).update(is_active=False)
+        with self.assertRaisesMessage(ValidationError, 'Роль ОУП не настроена.') as caught:
+            open_oup_shift(actor_access_id=self.oup_access.pk)
+
+        self.assertEqual(caught.exception.code, 'oup_role_unavailable')
+        self.assertFalse(EmployeeShift.objects.exists())
+
+    def test_exact_shift_actor_requires_strict_oup_role_code(self):
+        Role.objects.filter(pk=self.oup_role.pk).update(code='former-oup')
+
+        with self.assertRaisesMessage(ValidationError, 'Роль ОУП не настроена.') as caught:
+            open_oup_shift(actor_access_id=self.oup_access.pk)
+
+        self.assertEqual(caught.exception.code, 'oup_role_unavailable')
+        self.assertFalse(EmployeeShift.objects.exists())
+
+    def test_shift_audit_failure_rolls_back_open_and_close(self):
+        audit_before = AdminActionLog.objects.count()
+        with (
+            patch('users.oup_services.log_oup_action', side_effect=RuntimeError('audit failed')),
+            self.assertRaisesMessage(RuntimeError, 'audit failed'),
+        ):
+            open_oup_shift(actor_access_id=self.oup_access.pk)
+
+        self.assertFalse(EmployeeShift.objects.exists())
+        self.assertEqual(AdminActionLog.objects.count(), audit_before)
+
+        shift = self.start_shift()
+        audit_before = AdminActionLog.objects.count()
+        with (
+            patch('users.oup_services.log_oup_action', side_effect=RuntimeError('audit failed')),
+            self.assertRaisesMessage(RuntimeError, 'audit failed'),
+        ):
+            from .oup_services import close_oup_shift
+
+            close_oup_shift(actor_access_id=self.oup_access.pk)
+
+        shift.refresh_from_db()
+        self.assertIsNone(shift.closed_at)
+        self.assertIsNone(shift.closed_by_id)
+        self.assertEqual(AdminActionLog.objects.count(), audit_before)
+
+    def test_shift_start_and_close_keep_audit_contract(self):
+        shift, created = open_oup_shift(actor_access_id=self.oup_access.pk)
+        self.assertTrue(created)
+        self.assertTrue(AdminActionLog.objects.filter(
+            actor=self.oup_employee,
+            object_id=str(shift.pk),
+            action_code='oup_period_started',
+        ).exists())
+
+        from .oup_services import close_oup_shift
+
+        close_oup_shift(actor_access_id=self.oup_access.pk)
+        shift.refresh_from_db()
+        self.assertEqual(shift.closed_by_id, self.oup_employee.pk)
+        self.assertTrue(AdminActionLog.objects.filter(
+            actor=self.oup_employee,
+            object_id=str(shift.pk),
+            action_code='oup_period_finished',
+        ).exists())
+
     def test_open_shift_reloads_employee_and_rejects_dismissed_stale_object(self):
         stale_employee = self.oup_employee
         Employee.objects.filter(pk=stale_employee.pk).update(
@@ -664,7 +1067,7 @@ class OupWorkplaceTests(TestCase):
         )
 
         with self.assertRaises(ValidationError):
-            open_oup_shift(employee=stale_employee)
+            open_oup_shift(actor_access_id=self.oup_access.pk)
 
         self.assertFalse(EmployeeShift.objects.filter(employee=stale_employee).exists())
 
@@ -675,7 +1078,7 @@ class OupWorkplaceTests(TestCase):
         )
 
         with self.assertRaises(ValidationError):
-            open_oup_shift(employee=self.oup_employee)
+            open_oup_shift(actor_access_id=self.oup_access.pk)
 
         self.assertFalse(EmployeeShift.objects.filter(employee=self.oup_employee).exists())
 
@@ -1299,11 +1702,69 @@ class OupSeedCommandTests(TestCase):
         self.assertEqual(access.status, EmployeeAccess.Status.ACTIVATED)
         self.assertTrue(access.is_active)
 
-        shift, created = open_oup_shift(employee=employee)
+        shift, created = open_oup_shift(actor_access_id=access.pk)
 
         self.assertTrue(created)
         self.assertEqual(shift.shift_type, ShiftType.DAY)
         self.assertEqual(shift.workplace_code, 'oup')
+
+
+class OupPeriodConstraintMigrationTests(TestCase):
+    @staticmethod
+    def migration_apps(open_period_count):
+        class HistoricalQuerySet:
+            def __init__(self, rows):
+                self.rows = rows
+
+            def count(self):
+                return len(self.rows)
+
+        class HistoricalManager:
+            def __init__(self, rows):
+                self.rows = rows
+                self.filters = []
+
+            def filter(self, **kwargs):
+                self.filters.append(kwargs)
+                return HistoricalQuerySet(self.rows)
+
+        class HistoricalEmployeeShift:
+            objects = HistoricalManager(list(range(open_period_count)))
+
+        class HistoricalApps:
+            def get_model(self, app_label, model_name):
+                if (app_label, model_name) != ('shifts', 'EmployeeShift'):
+                    raise AssertionError((app_label, model_name))
+                return HistoricalEmployeeShift
+
+        return HistoricalApps(), HistoricalEmployeeShift
+
+    def test_migration_precondition_accepts_zero_or_one_open_period(self):
+        migration = import_module('shifts.migrations.0013_unique_open_oup_period')
+
+        for open_period_count in (0, 1):
+            with self.subTest(open_period_count=open_period_count):
+                apps, historical_shift = self.migration_apps(open_period_count)
+                migration.assert_single_open_oup_period(apps, schema_editor=None)
+                migration.noop_reverse(apps, schema_editor=None)
+                self.assertEqual(
+                    historical_shift.objects.filters,
+                    [{'workplace_code': 'oup', 'closed_at__isnull': True}],
+                )
+
+    def test_migration_precondition_rejects_duplicates_without_cleanup(self):
+        migration = import_module('shifts.migrations.0013_unique_open_oup_period')
+        apps, historical_shift = self.migration_apps(3)
+        rows_before = list(historical_shift.objects.rows)
+
+        with self.assertRaisesMessage(RuntimeError, 'found 3 open OUP periods'):
+            migration.assert_single_open_oup_period(apps, schema_editor=None)
+
+        self.assertEqual(historical_shift.objects.rows, rows_before)
+        self.assertEqual(
+            historical_shift.objects.filters,
+            [{'workplace_code': 'oup', 'closed_at__isnull': True}],
+        )
 
 
 class OupEmployeeStatusMigrationTests(TransactionTestCase):
@@ -1490,7 +1951,7 @@ class OupOpenShiftAdminSafetyTests(TestCase):
             status=EmployeeAccess.Status.ACTIVATED,
             is_active=True,
         )
-        self.shift, _created = open_oup_shift(employee=self.oup_employee)
+        self.shift, _created = open_oup_shift(actor_access_id=self.oup_access.pk)
         session = self.client.session
         session['employee_access_id'] = self.admin_access.id
         session.save()

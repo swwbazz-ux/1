@@ -1,7 +1,7 @@
 import secrets
 
 from django.core.exceptions import ValidationError
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import F, Q
 from django.utils import timezone
 
@@ -17,6 +17,11 @@ from core.models import bump_operational_state
 from shifts.models import EmployeeShift, ShiftType
 from trips.models import OPEN_TRIP_STATUSES, Trip
 
+from .employee_access_locks import (
+    EmployeeAccessLockPlanError,
+    build_employee_access_lock_plan,
+    lock_employee_access_plan,
+)
 from .models import AdminActionLog, Employee, EmployeeAccess, Role
 from .work_profiles import PRODUCTION_APP_ROLE_CODES, employee_has_effective_access_role
 from .oup_undo import (
@@ -321,22 +326,73 @@ def _lock_oup_actor(*, employee):
     return employee
 
 
+def _exact_oup_access_error():
+    return ValidationError('Активированный доступ ОУП не найден.')
+
+
+def _lock_exact_oup_actor(*, actor_access_id):
+    expected_access = (
+        EmployeeAccess.objects
+        .filter(pk=actor_access_id)
+        .order_by('pk')
+        .values_list('pk', 'employee_id', 'role_id')
+        .first()
+    )
+    if not expected_access:
+        raise _exact_oup_access_error()
+
+    _access_id, expected_employee_id, expected_role_id = expected_access
+    try:
+        plan = build_employee_access_lock_plan(
+            access_ids=(actor_access_id,),
+            employee_ids=(expected_employee_id,),
+        )
+        locked_rows = lock_employee_access_plan(plan)
+        actor_access = locked_rows.access_by_id(actor_access_id)
+        actor = locked_rows.employee_by_id(expected_employee_id)
+    except EmployeeAccessLockPlanError as error:
+        raise _exact_oup_access_error() from error
+
+    if (
+        actor_access.pk != actor_access_id
+        or actor_access.employee_id != expected_employee_id
+        or actor_access.role_id != expected_role_id
+    ):
+        raise _exact_oup_access_error()
+    if not actor_access.role.is_active or actor_access.role.code != OUP_ROLE_CODE:
+        raise ValidationError('Роль ОУП не настроена.', code='oup_role_unavailable')
+    if not actor.is_active or actor.status != Employee.Status.ACTIVE:
+        raise ValidationError('Сотрудник ОУП неактивен или уволен.')
+    if (
+        not actor_access.is_active
+        or actor_access.status != EmployeeAccess.Status.ACTIVATED
+    ):
+        raise _exact_oup_access_error()
+    return actor, actor_access
+
+
 def lock_oup_write_context(*, employee):
     employee = _lock_oup_actor(employee=employee)
     shift = lock_open_oup_shift(employee=employee)
     return employee, shift
 
 
+def _lock_exact_oup_write_context(*, actor_access_id):
+    actor, actor_access = _lock_exact_oup_actor(actor_access_id=actor_access_id)
+    shift = lock_open_oup_shift(employee=actor)
+    return actor, actor_access, shift
+
+
 @transaction.atomic
-def open_oup_shift(*, employee):
-    employee = _lock_oup_actor(employee=employee)
-    current = get_open_oup_shift(employee)
+def open_oup_shift(*, actor_access_id):
+    actor, _actor_access = _lock_exact_oup_actor(actor_access_id=actor_access_id)
+    current = get_open_oup_shift(actor)
     if current:
         return current, False
 
     other_workplace_shift = (
         EmployeeShift.objects.select_for_update()
-        .filter(employee=employee, closed_at__isnull=True)
+        .filter(employee=actor, closed_at__isnull=True)
         .exclude(workplace_code=OUP_ROLE_CODE)
         .first()
     )
@@ -349,7 +405,7 @@ def open_oup_shift(*, employee):
             closed_at__isnull=True,
             workplace_code=OUP_ROLE_CODE,
         )
-        .exclude(employee=employee)
+        .exclude(employee=actor)
         .select_related('employee')
         .order_by('id')
         .first()
@@ -362,16 +418,29 @@ def open_oup_shift(*, employee):
         )
 
     now = timezone.now()
-    shift = EmployeeShift.objects.create(
-        employee=employee,
-        shift_type=ShiftType.DAY,
-        workplace_code=OUP_ROLE_CODE,
-        equipment=None,
-        opened_at=now,
-        opened_by=employee,
-    )
+    try:
+        with transaction.atomic():
+            shift = EmployeeShift.objects.create(
+                employee=actor,
+                shift_type=ShiftType.DAY,
+                workplace_code=OUP_ROLE_CODE,
+                equipment=None,
+                opened_at=now,
+                opened_by=actor,
+            )
+    except IntegrityError as error:
+        winning_shift = get_active_oup_period()
+        if not winning_shift:
+            raise
+        if winning_shift.employee_id == actor.pk:
+            return winning_shift, False
+        opened_at = timezone.localtime(winning_shift.opened_at)
+        raise ValidationError(
+            'Редактирование кадровых данных уже выполняет '
+            f'{winning_shift.employee.full_name}, с {opened_at:%d.%m.%Y %H:%M}.'
+        ) from error
     log_oup_action(
-        employee,
+        actor,
         'начат рабочий период',
         shift,
         action_code=OUP_ACTION_PERIOD_STARTED,
@@ -382,14 +451,16 @@ def open_oup_shift(*, employee):
 
 
 @transaction.atomic
-def close_oup_shift(*, employee):
-    employee, shift = lock_oup_write_context(employee=employee)
+def close_oup_shift(*, actor_access_id):
+    actor, _actor_access, shift = _lock_exact_oup_write_context(
+        actor_access_id=actor_access_id,
+    )
     now = timezone.now()
     shift.closed_at = now
-    shift.closed_by = employee
+    shift.closed_by = actor
     shift.save(update_fields=['closed_at', 'closed_by'])
     log_oup_action(
-        employee,
+        actor,
         'завершён рабочий период',
         shift,
         action_code=OUP_ACTION_PERIOD_FINISHED,

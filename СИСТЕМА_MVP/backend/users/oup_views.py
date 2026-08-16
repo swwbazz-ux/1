@@ -784,7 +784,7 @@ def oup_shift_start_view(request):
     if not access:
         return redirect('role_home')
     try:
-        _shift, created = open_oup_shift(employee=access.employee)
+        _shift, created = open_oup_shift(actor_access_id=access.pk)
     except ValidationError as error:
         messages.error(request, '; '.join(error.messages))
     else:
@@ -801,7 +801,7 @@ def oup_shift_close_view(request):
     if not access:
         return redirect('role_home')
     try:
-        close_oup_shift(employee=access.employee)
+        close_oup_shift(actor_access_id=access.pk)
     except ValidationError as error:
         messages.error(request, '; '.join(error.messages))
     else:

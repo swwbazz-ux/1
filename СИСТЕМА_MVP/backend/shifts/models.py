@@ -201,6 +201,14 @@ class EmployeeShift(models.Model):
                 condition=models.Q(closed_at__isnull=True, equipment__isnull=False),
                 name='unique_open_shift_per_equipment',
             ),
+            models.UniqueConstraint(
+                fields=['workplace_code'],
+                condition=models.Q(
+                    workplace_code='oup',
+                    closed_at__isnull=True,
+                ),
+                name='unique_open_oup_period',
+            ),
         ]
 
     def _watch_period_snapshot_changed(self):
