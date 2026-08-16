@@ -11,10 +11,13 @@ from unittest import mock
 from django.core.exceptions import ValidationError
 from django.db import close_old_connections, connection, connections, transaction
 from django.test import TestCase, TransactionTestCase
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
+from users import employee_access_locks
 from users.models import Employee, EmployeeAccess, Role
 
+from . import control as control_module
 from .control import (
     ControlLeaseGrant,
     acquire_control_lease,
@@ -1134,6 +1137,111 @@ class SettlementControlLifecycleTests(
         self.assertEqual(event.source, 'test-control')
 
 
+class SettlementControlLockOrderTests(
+    SettlementControlFixtureMixin,
+    TestCase,
+):
+    @classmethod
+    def setUpTestData(cls):
+        cls.create_control_fixtures()
+
+    def setUp(self):
+        SettlementControlLease.objects.filter(scope='settlement').update(
+            owner_access=None,
+            owner_session_hash='',
+            lease_token=None,
+            fencing_revision=0,
+            acquired_at=None,
+            heartbeat_at=None,
+            expires_at=None,
+        )
+        self.now = timezone.now()
+
+    def assert_postgresql_control_lock_order(self, action):
+        if connection.vendor != 'postgresql':
+            self.skipTest('Exact control lock SQL is PostgreSQL-only.')
+
+        with CaptureQueriesContext(connection) as captured:
+            action()
+
+        sql_statements = [query['sql'].upper() for query in captured]
+        lease_positions = [
+            index
+            for index, sql in enumerate(sql_statements)
+            if 'FROM "SETTLEMENT_SETTLEMENTCONTROLLEASE"' in sql
+            and 'FOR UPDATE' in sql
+        ]
+        preread_positions = [
+            index
+            for index, sql in enumerate(sql_statements)
+            if 'FROM "USERS_EMPLOYEEACCESS"' in sql
+            and 'FOR UPDATE' not in sql
+        ]
+        employee_lock_positions = [
+            index
+            for index, sql in enumerate(sql_statements)
+            if 'FROM "USERS_EMPLOYEE"' in sql
+            and 'FOR UPDATE' in sql
+        ]
+        access_lock_positions = [
+            index
+            for index, sql in enumerate(sql_statements)
+            if 'FROM "USERS_EMPLOYEEACCESS"' in sql
+            and 'FOR UPDATE' in sql
+        ]
+        self.assertEqual(len(lease_positions), 1, sql_statements)
+        self.assertEqual(len(preread_positions), 1, sql_statements)
+        self.assertEqual(len(employee_lock_positions), 1, sql_statements)
+        self.assertEqual(len(access_lock_positions), 1, sql_statements)
+        positions = (
+            lease_positions[0],
+            preread_positions[0],
+            employee_lock_positions[0],
+            access_lock_positions[0],
+        )
+        self.assertEqual(positions, tuple(sorted(positions)), sql_statements)
+        self.assertIn(
+            'FOR UPDATE OF "USERS_EMPLOYEE"',
+            sql_statements[employee_lock_positions[0]],
+        )
+        access_sql = sql_statements[access_lock_positions[0]]
+        self.assertIn('FOR UPDATE OF "USERS_EMPLOYEEACCESS"', access_sql)
+        access_lock_clause = access_sql.split('FOR UPDATE OF', 1)[1]
+        self.assertNotIn('"USERS_EMPLOYEE"', access_lock_clause)
+        self.assertNotIn('"USERS_ROLE"', access_lock_clause)
+        self.assertFalse(any(
+            position > access_lock_positions[0]
+            for position in employee_lock_positions
+        ))
+
+    def test_acquire_uses_lease_employee_access_order(self):
+        self.assert_postgresql_control_lock_order(lambda: acquire_control_lease(
+            owner_access_id=self.clerk_access.pk,
+            raw_session_key='lock-order-clerk-session',
+            source='lock-order-acquire',
+            now=self.now,
+            ttl=timedelta(minutes=5),
+        ))
+
+    def test_takeover_uses_lease_employee_access_order(self):
+        acquire_control_lease(
+            owner_access_id=self.clerk_access.pk,
+            raw_session_key='lock-order-owner-session',
+            source='lock-order-setup',
+            now=self.now,
+            ttl=timedelta(minutes=5),
+        )
+
+        self.assert_postgresql_control_lock_order(lambda: takeover_control_lease(
+            admin_access_id=self.admin_access.pk,
+            raw_session_key='lock-order-admin-session',
+            reason='Canonical lock-order takeover',
+            source='lock-order-takeover',
+            now=self.now + timedelta(seconds=1),
+            ttl=timedelta(minutes=5),
+        ))
+
+
 class SettlementControlConcurrencyTests(
     SettlementControlFixtureMixin,
     TransactionTestCase,
@@ -1414,6 +1522,231 @@ class SettlementControlConcurrencyTests(
                 SettlementControlEvent.EventType.ACQUIRED,
                 SettlementControlEvent.EventType.TAKEN_OVER,
             ],
+        )
+
+    @staticmethod
+    def concurrency_exception_signature(error):
+        current = error
+        seen = set()
+        while current is not None and id(current) not in seen:
+            seen.add(id(current))
+            code = getattr(current, 'sqlstate', None) or getattr(current, 'pgcode', None)
+            if code:
+                return (type(error).__name__, code)
+            current = getattr(current, '__cause__', None) or getattr(
+                current,
+                '__context__',
+                None,
+            )
+        return (type(error).__name__, None)
+
+    def run_service_against_canonical_employee_access_lock(
+        self,
+        *,
+        employee_id,
+        access_id,
+        action,
+    ):
+        employee_locked = threading.Event()
+        service_employee_lock_attempted = threading.Event()
+        original_lock_employees = employee_access_locks._lock_employees
+
+        def observed_lock_employees(plan):
+            service_employee_lock_attempted.set()
+            return original_lock_employees(plan)
+
+        def canonical_holder():
+            close_old_connections()
+            try:
+                with connections['default'].cursor() as cursor:
+                    cursor.execute("SET lock_timeout = '5s'")
+                    cursor.execute("SET statement_timeout = '15s'")
+                with transaction.atomic():
+                    Employee.objects.select_for_update(of=('self',)).get(
+                        pk=employee_id,
+                    )
+                    employee_locked.set()
+                    if not service_employee_lock_attempted.wait(timeout=10):
+                        raise TimeoutError('Service did not attempt the Employee lock.')
+                    EmployeeAccess.objects.select_for_update(of=('self',)).get(
+                        pk=access_id,
+                    )
+                return ('success', 'canonical')
+            except Exception as error:
+                return ('unexpected', *self.concurrency_exception_signature(error))
+            finally:
+                connections['default'].close()
+
+        def service_worker():
+            close_old_connections()
+            try:
+                with connections['default'].cursor() as cursor:
+                    cursor.execute("SET lock_timeout = '5s'")
+                    cursor.execute("SET statement_timeout = '15s'")
+                result = action()
+                return (
+                    'success',
+                    'service',
+                    result.fencing_revision,
+                    str(result.lease_token),
+                )
+            except ValidationError as error:
+                return ('validation', tuple(sorted(self.validation_codes(error))))
+            except Exception as error:
+                return ('unexpected', *self.concurrency_exception_signature(error))
+            finally:
+                connections['default'].close()
+
+        with mock.patch.object(
+            employee_access_locks,
+            '_lock_employees',
+            side_effect=observed_lock_employees,
+        ):
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                holder = executor.submit(canonical_holder)
+                self.assertTrue(employee_locked.wait(timeout=10))
+                service = executor.submit(service_worker)
+                results = [
+                    holder.result(timeout=20),
+                    service.result(timeout=20),
+                ]
+
+        self.assertFalse(any(result[0] == 'unexpected' for result in results), results)
+        self.assertEqual(results[0], ('success', 'canonical'))
+        self.assertEqual(results[1][:2], ('success', 'service'))
+        return results[1]
+
+    def test_acquire_is_compatible_with_canonical_employee_access_transaction(self):
+        if connection.vendor != 'postgresql':
+            self.skipTest('PostgreSQL row-lock behavior is required.')
+        ensure_control_lease()
+
+        service_result = self.run_service_against_canonical_employee_access_lock(
+            employee_id=self.clerk_access.employee_id,
+            access_id=self.clerk_access.pk,
+            action=lambda: acquire_control_lease(
+                owner_access_id=self.clerk_access.pk,
+                raw_session_key='canonical-acquire-session',
+                source='canonical-acquire',
+                now=self.now,
+                ttl=timedelta(minutes=5),
+            ),
+        )
+
+        self.assertEqual(service_result[2], 1)
+        lease = SettlementControlLease.objects.get(scope='settlement')
+        self.assertEqual(lease.owner_access_id, self.clerk_access.pk)
+        self.assertEqual(lease.fencing_revision, 1)
+        self.assertEqual(
+            [event['event_type'] for event in self.event_state()],
+            [SettlementControlEvent.EventType.ACQUIRED],
+        )
+
+    def test_takeover_is_compatible_with_canonical_employee_access_transaction(self):
+        if connection.vendor != 'postgresql':
+            self.skipTest('PostgreSQL row-lock behavior is required.')
+        acquire_control_lease(
+            owner_access_id=self.clerk_access.pk,
+            raw_session_key='canonical-owner-session',
+            source='canonical-setup',
+            now=self.now,
+            ttl=timedelta(minutes=5),
+        )
+
+        service_result = self.run_service_against_canonical_employee_access_lock(
+            employee_id=self.admin_access.employee_id,
+            access_id=self.admin_access.pk,
+            action=lambda: takeover_control_lease(
+                admin_access_id=self.admin_access.pk,
+                raw_session_key='canonical-admin-session',
+                reason='Canonical Employee then Access transaction',
+                source='canonical-takeover',
+                now=self.now + timedelta(seconds=1),
+                ttl=timedelta(minutes=5),
+            ),
+        )
+
+        self.assertEqual(service_result[2], 2)
+        lease = SettlementControlLease.objects.get(scope='settlement')
+        self.assertEqual(lease.owner_access_id, self.admin_access.pk)
+        self.assertEqual(lease.fencing_revision, 2)
+        self.assertEqual(
+            [event['event_type'] for event in self.event_state()],
+            [
+                SettlementControlEvent.EventType.ACQUIRED,
+                SettlementControlEvent.EventType.TAKEN_OVER,
+            ],
+        )
+
+    def test_access_reassignment_after_preread_fails_without_partial_control_write(self):
+        if connection.vendor != 'postgresql':
+            self.skipTest('PostgreSQL transaction interleaving is required.')
+        ensure_control_lease()
+        replacement_employee = Employee.objects.create(
+            full_name='Control reassignment replacement',
+            personnel_number='CONTROL-REASSIGN',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        before_lease = self.lease_state()
+        before_events = self.event_state()
+        preread_complete = threading.Event()
+        allow_locking = threading.Event()
+        original_builder = control_module.build_employee_access_lock_plan
+
+        def paused_builder(*args, **kwargs):
+            plan = original_builder(*args, **kwargs)
+            preread_complete.set()
+            if not allow_locking.wait(timeout=10):
+                raise TimeoutError('Access reassignment was not released.')
+            return plan
+
+        def acquiring_worker():
+            close_old_connections()
+            try:
+                with connections['default'].cursor() as cursor:
+                    cursor.execute("SET lock_timeout = '5s'")
+                    cursor.execute("SET statement_timeout = '15s'")
+                try:
+                    acquire_control_lease(
+                        owner_access_id=self.clerk_access.pk,
+                        raw_session_key='reassigned-access-session',
+                        source='reassigned-access',
+                        now=self.now,
+                        ttl=timedelta(minutes=5),
+                    )
+                except ValidationError as error:
+                    return ('validation', tuple(sorted(self.validation_codes(error))))
+                return ('unexpected', 'acquire_succeeded', None)
+            except Exception as error:
+                return ('unexpected', *self.concurrency_exception_signature(error))
+            finally:
+                connections['default'].close()
+
+        with mock.patch.object(
+            control_module,
+            'build_employee_access_lock_plan',
+            side_effect=paused_builder,
+        ):
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(acquiring_worker)
+                self.assertTrue(preread_complete.wait(timeout=10))
+                updated = EmployeeAccess.objects.filter(
+                    pk=self.clerk_access.pk,
+                ).update(employee=replacement_employee)
+                self.assertEqual(updated, 1)
+                allow_locking.set()
+                result = future.result(timeout=20)
+
+        self.assertEqual(
+            result,
+            ('validation', ('settlement.control.invalid_access',)),
+        )
+        self.assertEqual(self.lease_state(), before_lease)
+        self.assertEqual(self.event_state(), before_events)
+        self.assertEqual(
+            EmployeeAccess.objects.get(pk=self.clerk_access.pk).employee_id,
+            replacement_employee.pk,
         )
 
     def test_takeover_and_old_owner_release_serialize(self):

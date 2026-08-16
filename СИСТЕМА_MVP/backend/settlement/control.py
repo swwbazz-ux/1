@@ -12,6 +12,11 @@ from django.db import IntegrityError, connections, router, transaction
 from django.utils import timezone
 from django.utils.crypto import constant_time_compare, salted_hmac
 
+from users.employee_access_locks import (
+    EmployeeAccessLockPlanError,
+    build_employee_access_lock_plan,
+    lock_employee_access_plan,
+)
 from users.models import Employee, EmployeeAccess
 
 from .models import SettlementControlEvent, SettlementControlLease
@@ -217,13 +222,18 @@ def _validated_owner_access(
             'Доступ сотрудника не найден.',
         )
     try:
-        owner_access = (
-            EmployeeAccess.objects.using(using)
-            .select_for_update()
-            .select_related('employee', 'role')
-            .get(pk=owner_access_id)
+        plan = build_employee_access_lock_plan(
+            access_ids=(owner_access_id,),
+            using=using,
         )
-    except (EmployeeAccess.DoesNotExist, TypeError, ValueError):
+        locked_rows = lock_employee_access_plan(plan)
+        owner_access = locked_rows.access_by_id(owner_access_id)
+        owner_employee = locked_rows.employee_by_id(owner_access.employee_id)
+    except EmployeeAccessLockPlanError as error:
+        if error.reason == EmployeeAccessLockPlanError.OUTSIDE_ATOMIC:
+            raise RuntimeError(
+                'Control owner access must be locked inside transaction.atomic().',
+            ) from error
         raise _validation_error(
             'invalid_access',
             'Доступ сотрудника не найден.',
@@ -232,8 +242,8 @@ def _validated_owner_access(
     if (
         not owner_access.is_active
         or owner_access.status != EmployeeAccess.Status.ACTIVATED
-        or not owner_access.employee.is_active
-        or owner_access.employee.status != Employee.Status.ACTIVE
+        or not owner_employee.is_active
+        or owner_employee.status != Employee.Status.ACTIVE
     ):
         raise _validation_error(
             'inactive_access',
