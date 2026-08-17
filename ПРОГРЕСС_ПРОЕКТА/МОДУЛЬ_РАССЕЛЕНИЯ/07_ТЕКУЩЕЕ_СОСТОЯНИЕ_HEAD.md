@@ -1,9 +1,9 @@
 # Текущее состояние реализации settlement
 
 Версия документа: 0.5
-Дата последней сверки отчётов: 16.08.2026
-Статус: актуализирован по проверенному baseline реализации перед текущей документационной актуализацией — `902e38860f7439343cddd47d8494c993ba3e345b`; schema, внутренний lifecycle и административный takeover реализованы, а write gate, HTTP/session integration и UI integration отсутствуют
-Источники доказательств: Git history до implementation baseline `902e38860f7439343cddd47d8494c993ba3e345b`, migration `0007`, код моделей и lifecycle, PostgreSQL 14.24 concurrency-проверки и read-only сверка runtime wiring; SHA последующего документационного commit намеренно не фиксируется внутри самого commit
+Дата последней сверки отчётов: 17.08.2026
+Статус: актуализирован по HEAD `dd0459ee39b00a352ef0da0ff647f1d03ad59389` и принятому локальному шестфайловому M4/M5 resident transition; migration leaf рабочего дерева — `settlement.0011_resident_subject_transition`
+Источники доказательств: модели и domain-код M4/M5, migrations `0008`–`0011`, целевые resident/M4/M5/migration tests и чистый SQLite migration cycle `0010 → 0011 → 0010 → 0011`; production не проверялась и migration `0011` к ней не применялась
 
 ## 1. Репозиторий и baseline
 
@@ -16,13 +16,13 @@
 | Служебная синхронизация v0.4 | `31f09903ca8682e9e8635ca1b593e8dbd0d394cf` |
 | Предыдущий baseline документации v0.3 | `aba37c44e39b6f6f3bc0ab2caa51d9dae4c4ed9c` |
 | Кодовый baseline | `e71dc4e0b7ca26c0402e6e2ac990c8cae5fd1d1b` |
-| Проверенный implementation baseline перед текущей документационной актуализацией | `902e38860f7439343cddd47d8494c993ba3e345b` |
-| Рабочее дерево в implementation baseline | Чистое |
-| Settlement tests после takeover | SQLite: 324 PASS / 8 PostgreSQL-only skip; PostgreSQL 14.24: 332/332 PASS |
-| origin/main | Локальная цепочка не опубликована; точное ahead-число намеренно не фиксируется |
+| Текущий HEAD | `dd0459ee39b00a352ef0da0ff647f1d03ad59389` |
+| Рабочее дерево | Принятый локальный M4/M5 resident transition: пять modified code/test-файлов и новая migration `0011`; документационная актуализация выполняется поверх него |
+| Целевые resident/M4/M5/migration tests | SQLite direct: 57/57 PASS; `--reverse`: 57/57 PASS; migration cycle PASS |
+| origin/main | Ahead 25, behind 0; локальная цепочка не опубликована |
 | Публикация | Push/merge/deploy не выполнялись |
 
-Цепочка baseline и локальных усилений реализации: `e71dc4e0 → aba37c44 → 45de5d0 → 31f09903 → b8b54cbe → 85df6213 → 4e88278e → 1e701208 → f7719c7d → ef5b96b → 33e09a8 → d19b040 → d2e3404 → 902e388`. После документации 0.4 исправлены PostgreSQL employee lock, lifecycle тестового `FileResponse`, публичные массовые ORM-обходы anchor-bed/occupancy и порядок блокировок ручных writers; затем добавлены schema control lease/event, migration `0007`, внутренний lifecycle и административный takeover. Migration `0007` проверена только в изолированных тестовых средах и не объявляется применённой к production. Локальная цепочка не опубликована в `origin/main`.
+После прежнего checkpoint реализованы control-контур, M4 calendar slots/bindings (`0008`), M5 authoritative cohorts (`0009`), общий `SettlementResident` (`0010`) и локальный переход subject identity M4/M5 (`0011`). Migration `0011` проверена только в изолированной SQLite-среде и не объявляется применённой к production. Локальная цепочка не опубликована в `origin/main`.
 
 Резервный patch до ADR-014: SHA-256 `8D34729F75247EEFCE37535F35C1CE8D7D0C4D8CC7ABAE3997A956821C6BBC47`.
 
@@ -79,6 +79,9 @@
 | `AccommodationAnchor` | Типы equipment/function/reserve/group/service/protected; Equipment→Anchor = 1:N | PARTIAL |
 | `AccommodationAnchorBedAssignment` | Версионированная interval-связь anchor→bed; публичные mass-write API запрещены | PARTIAL |
 | `EmployeeBedOccupancy` | Canonical интервалы, manual lifecycle; публичные mass-write API запрещены | PARTIAL |
+| `SettlementResident` | Единый subject: internal wrapper Employee и внешняя карточка без Employee/Access/Role/PIN | READY |
+| `AccommodationAnchorCalendarSlot/EmployeeAccommodationBinding` | M4 реализован; binding ссылается на resident, actor/audit остаются Employee | READY |
+| `SettlementCohort/SettlementCohortMember` | M5 реализован; member ссылается на resident, APPROVED overlap проверяется по resident | READY |
 | `build_auto_settlement_preview()` | Узкий GET-only in-memory preview по EquipmentAssignment | PARTIAL/CONTRADICTED |
 | `settle_employee_on_bed()` | Атомарный ручной writer | PARTIAL |
 | `relocate_employee_to_bed()` | Атомарный ручной перенос | PARTIAL |
@@ -108,7 +111,7 @@ DB гарантирует уникальность комнаты и позиц�
 
 Проблема находится в preview: он требует ровно один active equipment anchor и объявляет любое другое количество неоднозначностью.
 
-Текущий anchor семантически ближе к атомарному месту, потому что штатная anchor-bed связь допускает не более одной effective bed. Отдельной модели пары, capacity или calendar slot нет.
+Текущий anchor семантически является атомарным местом. M4 добавил `AccommodationAnchorCalendarSlot` для конкретного `WatchPeriod`; отдельная модель equipment pair по-прежнему отсутствует и полнота пары `An+Bn` остаётся задачей последующего контура.
 
 ### 4.3. Anchor-bed assignment
 
@@ -148,7 +151,17 @@ Legacy `ended_at` в runtime activity больше не участвует.
 - `EmployeeShift`;
 - `RotationResponse` с arrival/departure/намерением.
 
-Ни одна из этих сущностей не является утверждённым immutable ArrivalRoster конкретного авторасселения.
+M5 использует эти upstream-факты через отдельные `SettlementCohort/SettlementCohortMember`: cohort имеет версию, lifecycle и immutable provenance, а member хранит конкретный resident и конечный интервал участия. Подключение cohort к новому preview ещё не реализовано.
+
+### 4.7. SettlementResident и subject transition M4/M5
+
+`SettlementResident` является единой identity расселения. Тип `EMPLOYEE` имеет защищённую связь с `Employee`; кадровые сведения и принадлежность к `WatchComposition` проверяются по Employee. Типы `CONTRACTOR`, `BUSINESS_TRIP`, `EXTERNAL_OTHER` не имеют Employee и не получают login, PIN, `Role`, `EmployeeAccess` или выдуманную корпоративную composition.
+
+Migration `0011_resident_subject_transition` заменила subject `employee` на `resident` в `EmployeeAccommodationBinding` и `SettlementCohortMember`. Имена моделей сохранены; actor/audit-поля продолжают ссылаться на `Employee`. Binding overlap, correction и supersede, а также member uniqueness и overlapping APPROVED memberships используют `resident_id`.
+
+Forward migration создаёт или переиспользует ровно один внутренний wrapper для существующих subject Employee и не создаёт `EmployeeAccess`. Reverse восстанавливает Employee subject только для internal resident и останавливается fail-closed при external subject. M4/M5 domain-команды используют полный порядок `Employee внутренних resident по PK → SettlementResident по PK с OF self → WatchPeriod → Cohort/Member → Slot/Binding → Anchor/Assignment/Bed → revalidation/write`.
+
+Внешний resident уже может быть subject cohort member и calendar binding. Не реализованы: UI создания внешней карточки, подключение external resident к preview, M6 resolver, saved preview, Apply, external occupancy и trainee adapter.
 
 ## 5. Фактическая трассировка preview
 
@@ -254,7 +267,9 @@ Preview группирует конкуренцию по `(physical_bed_id, shif
 | Settlement PostgreSQL 14.24 после takeover | та же команда с изолированным PostgreSQL profile | 332/332 PASS | Последний подтверждённый полный settlement suite и concurrency |
 | Mutual relocate | PostgreSQL TransactionTestCase, три последовательных запуска | 1/1 PASS каждый | Barrier/timeouts; mutation старого порядка воспроизводит `40P01` |
 | Pairwise manual writers | relocate/relocate, settle/relocate, relocate/release, settle/settle | PASS | Нет `40P01`, `55P03`, HTTP 500 и двойной occupancy |
-| Migration drift | `makemigrations --check --dry-run` | Изменений нет | Migration `0007` соответствует model state |
+| Resident/M4/M5/migration SQLite | четыре целевых класса direct и `--reverse` | 57/57 PASS в каждом порядке | Не является полным settlement suite |
+| Migration `0011` cycle | чистая временная SQLite DB: `0010 → 0011 → 0010 → 0011` | PASS | Временная БД удалена; production не затрагивалась |
+| Migration drift | `makemigrations --check --dry-run` | Изменений нет | Leaf `settlement.0011_resident_subject_transition` соответствует model state |
 
 После PostgreSQL-проверок test database удалялась. Эти результаты относятся к изолированным локальным средам и не доказывают применение migration `0007` к production.
 
@@ -268,17 +283,17 @@ Preview группирует конкуренцию по `(physical_bed_id, shif
 | Два atomic anchor одной Equipment | CONTRADICTED | Schema допускает, preview требует ровно один |
 | Equipment pair `An+Bn` | ABSENT | Нет pair/slot semantics и validation |
 | Anchor-bed interval integrity | PARTIAL | Normal save и публичный QuerySet guard защищают; private/raw и DB-level finite interval overlap остаются |
-| Authoritative SettlementCohort | PARTIAL | Upstream-факты есть, immutable roster отсутствует |
-| AccommodationAnchorCalendarSlot | ABSENT | Модель отсутствует |
-| EmployeeAccommodationBinding | ABSENT | Employee→housing право отсутствует |
-| Initial-binding provenance snapshot | ABSENT | CrewPlan provenance теряется; binding и снимок основания отсутствуют |
+| Authoritative SettlementCohort | READY | M5 cohort/member, lifecycle, immutable provenance и resident identity реализованы migration `0009/0011` |
+| AccommodationAnchorCalendarSlot | READY | M4 concrete WatchPeriod slot, boundaries/stale/overlap guards реализованы migration `0008` |
+| EmployeeAccommodationBinding | READY | Subject — `SettlementResident`; прямого subject-FK Employee нет; actor/audit остаются Employee |
+| Initial-binding provenance snapshot | READY/PARTIAL | Binding хранит immutable basis/source snapshot; автоматическое создание из будущего Apply отсутствует |
 | Конечная factual occupancy | PARTIAL | Интервалы есть; provenance/DB overlap отсутствуют |
 | Room profiles | PARTIAL | transfer/sex/type есть; режим и 2+1 отсутствуют |
 | Rule 2+1 | ABSENT | Нет модели, resolver или тестов |
 | Non-equipment resolvers | ABSENT | Preview использует только EQUIPMENT |
 | Explicit category assignments | ABSENT | Нет версионируемого назначения RESERVE и аналогичных категорий |
 | Trainee structured-state route | ABSENT | Существующий authoritative trainee state/adapter не найден; Vacancy исключена ADR-030 |
-| Authoritative SettlementResident | READY | Internal Employee wrapper и внешние карточки с control/revision/provenance реализованы migration `0010`; M4/M5 ещё используют Employee FK |
+| Authoritative SettlementResident | READY | Migration `0010_settlement_residents` ввела resident lifecycle; migration `0011_resident_subject_transition` перевела M4 binding и M5 member на resident identity без создания EmployeeAccess |
 | Group capacity conflict | ABSENT | Preview не агрегирует потребность/дефицит и не защищает от скрытого выбора людей |
 | Explicit KEEP | PARTIAL | Совпадение employee допускается, action/provenance нет |
 | Saved AutoSettlementRun | ABSENT | Модель отсутствует |
@@ -290,7 +305,7 @@ Preview группирует конкуренцию по `(physical_bed_id, shif
 | Административный takeover | PARTIAL | Внутренняя команда реализована; endpoint, UI подтверждения и fencing действующих manual writers отсутствуют |
 | Единый полный COMMIT validator | PARTIAL | Подключены только overlap rules |
 | Temporary manual exception | PARTIAL | Temporary/relocate/release есть; binding/reason нет |
-| Permanent binding correction | ABSENT | Binding отсутствует |
+| Permanent binding correction | READY | Correction/supersede реализованы по resident identity с сохранением истории |
 
 ## 11. Решение архитектора
 
@@ -311,9 +326,9 @@ Preview группирует конкуренцию по `(physical_bed_id, shif
 
 1. усиление текущих interval/writer invariants;
 2. два atomic equipment slots и validation пары `An+Bn`;
-3. calendar slots;
-4. permanent employee binding;
-5. authoritative versioned cohort;
+3. ~~calendar slots~~ — реализованы M4;
+4. ~~permanent resident binding~~ — реализован M4 и переведён на `SettlementResident` migration `0011`;
+5. ~~authoritative versioned cohort~~ — реализован M5 и переведён на `SettlementResident` migration `0011`;
 6. snapshot первичного CrewPlan/EquipmentAssignment при создании binding;
 7. явные category assignments и маршрут стажёра по настоящей должности через authoritative structured state/adapter;
 8. room profiles, resolver rules и групповые конфликты дефицита.

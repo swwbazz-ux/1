@@ -2,6 +2,7 @@ import re
 import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone as datetime_timezone
 from io import StringIO
 from pathlib import Path
@@ -78,8 +79,10 @@ from .models import (
 )
 from .residents import (
     archive_external_resident,
+    build_settlement_resident_lock_plan,
     create_external_resident,
     get_or_create_employee_resident,
+    lock_settlement_resident_plan,
     reactivate_external_resident,
     update_external_resident,
 )
@@ -417,6 +420,36 @@ class SettlementResidentTests(TestCase):
         self.assertNotEqual(first.pk, second.pk)
         self.assertNotEqual(first.stable_id, second.stable_id)
         self.assertNotEqual(first.display_identity, second.display_identity)
+
+    def test_resident_plan_locks_internal_employee_before_resident(self):
+        resident, _ = get_or_create_employee_resident(employee_id=self.employee.pk)
+        plan = build_settlement_resident_lock_plan(resident_ids=(resident.pk,))
+        with CaptureQueriesContext(connection) as captured, transaction.atomic():
+            locked = lock_settlement_resident_plan(plan)
+
+        selects = [item['sql'].lower() for item in captured.captured_queries if 'select' in item['sql'].lower()]
+        employee_index = next(
+            index for index, sql in enumerate(selects) if 'users_employee' in sql
+        )
+        resident_index = next(
+            index for index, sql in enumerate(selects) if 'settlement_settlementresident' in sql
+        )
+        self.assertLess(employee_index, resident_index)
+        self.assertEqual(locked.resident_by_id(resident.pk).employee_id, self.employee.pk)
+
+    def test_resident_plan_rejects_stale_subject_snapshot(self):
+        resident = self.create_external()
+        plan = build_settlement_resident_lock_plan(resident_ids=(resident.pk,))
+        stale_subject = (
+            resident.pk,
+            SettlementResident.ResidentType.BUSINESS_TRIP,
+            None,
+            resident.created_by_access_id,
+            resident.status,
+        )
+        stale_plan = replace(plan, expected_subjects=(stale_subject,))
+        with transaction.atomic(), self.assertRaisesMessage(ValidationError, 'изменился'):
+            lock_settlement_resident_plan(stale_plan)
 
 
 class AccommodationAnchorDomainTests(TestCase):
@@ -7792,6 +7825,25 @@ class M4CalendarBindingTests(TestCase):
             is_active=True,
             watch_composition=cls.composition_b,
         )
+        cls.resident_a, _ = get_or_create_employee_resident(employee_id=cls.employee_a.pk)
+        cls.resident_a_2, _ = get_or_create_employee_resident(employee_id=cls.employee_a_2.pk)
+        cls.resident_b, _ = get_or_create_employee_resident(employee_id=cls.employee_b.pk)
+        cls.resident_role = Role.objects.create(code='m4-resident-clerk', name='M4 actor')
+        cls.resident_access = EmployeeAccess.objects.create(
+            employee=cls.employee_a,
+            role=cls.resident_role,
+            access_code='M4-RESIDENT-ACTOR',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+        cls.external_resident = SettlementResident.objects.create(
+            resident_type=SettlementResident.ResidentType.CONTRACTOR,
+            full_name='ДЕМО M4 Внешний жилец',
+            position_title='Подрядчик',
+            organization='ДЕМО Подрядчик',
+            phone='+7 900 000-00-01',
+            created_by_access=cls.resident_access,
+        )
         cls.source = SettlementSource.objects.create(
             source_type=SettlementSource.SourceType.DOCUMENT,
             title='M4 нормативное основание',
@@ -7881,7 +7933,7 @@ class M4CalendarBindingTests(TestCase):
     def create_binding(
         self,
         *,
-        employee=None,
+        resident=None,
         slot=None,
         valid_from=None,
         valid_to=None,
@@ -7889,8 +7941,9 @@ class M4CalendarBindingTests(TestCase):
         supersedes=None,
     ):
         slot = slot or self.create_slot()
+        resident = resident or self.resident_a
         binding = create_employee_accommodation_binding(
-            employee_id=(employee or self.employee_a).pk,
+            resident_id=resident.pk,
             calendar_slot_id=slot.pk,
             valid_from=valid_from or slot.valid_from,
             valid_to=valid_to or slot.valid_to,
@@ -7979,15 +8032,78 @@ class M4CalendarBindingTests(TestCase):
                 confirm=False,
             )
         with self.assertRaises(ValidationError) as employee_error:
-            self.create_binding(employee=self.employee_b, slot=slot, confirm=False)
-        self.assertIn('employee', employee_error.exception.message_dict)
+            self.create_binding(resident=self.resident_b, slot=slot, confirm=False)
+        self.assertIn('resident', employee_error.exception.message_dict)
+
+    def test_external_resident_binding_never_creates_employee_or_access(self):
+        slot = self.create_slot()
+        baseline = (Employee.objects.count(), EmployeeAccess.objects.count())
+        binding = self.create_binding(resident=self.external_resident, slot=slot)
+
+        self.assertEqual(binding.resident_id, self.external_resident.pk)
+        self.assertIsNone(binding.resident.employee_id)
+        self.assertEqual((Employee.objects.count(), EmployeeAccess.objects.count()), baseline)
+
+    def test_archived_resident_cannot_create_binding(self):
+        archived = SettlementResident.objects.create(
+            resident_type=SettlementResident.ResidentType.BUSINESS_TRIP,
+            full_name='ДЕМО M4 Архивный жилец',
+            position_title='Командированный',
+            organization='ДЕМО Организация',
+            phone='+7 900 000-00-02',
+            status=SettlementResident.Status.ARCHIVED,
+            archived_at=self.now,
+            created_by_access=self.resident_access,
+        )
+        slot = self.create_slot()
+        with self.assertRaisesMessage(ValidationError, 'Архивный resident'):
+            self.create_binding(resident=archived, slot=slot, confirm=False)
+        self.assertFalse(EmployeeAccommodationBinding.objects.exists())
+
+    def test_resident_archived_after_draft_cannot_confirm_binding(self):
+        slot = self.create_slot()
+        binding = self.create_binding(
+            resident=self.external_resident,
+            slot=slot,
+            confirm=False,
+        )
+        self.external_resident.status = SettlementResident.Status.ARCHIVED
+        self.external_resident.archived_at = self.now
+        self.external_resident.revision += 1
+        self.external_resident.updated_by_access = self.resident_access
+        self.external_resident.save()
+
+        with self.assertRaisesMessage(ValidationError, 'Архивный resident'):
+            confirm_employee_accommodation_binding(
+                binding_id=binding.pk,
+                approved_by_id=self.employee_a.pk,
+                approved_at=self.now,
+            )
+        binding.refresh_from_db()
+        self.assertEqual(binding.status, EmployeeAccommodationBinding.Status.DRAFT)
+
+    def test_binding_api_requires_preexisting_resident_id(self):
+        slot = self.create_slot()
+        resident_count = SettlementResident.objects.count()
+        with self.assertRaises(ValidationError):
+            create_employee_accommodation_binding(
+                resident_id=999999,
+                calendar_slot_id=slot.pk,
+                valid_from=slot.valid_from,
+                valid_to=slot.valid_to,
+                basis_type='manual',
+                basis_id='M4-MISSING-RESIDENT',
+                basis_snapshot={'source': 'missing'},
+                source_revision_id=self.revision.pk,
+            )
+        self.assertEqual(SettlementResident.objects.count(), resident_count)
 
     def test_confirmed_bindings_do_not_overlap_for_employee_or_slot(self):
         slot = self.create_slot()
         self.create_binding(slot=slot)
         second_slot = self.create_slot(anchor=self.anchor_2)
         employee_conflict = self.create_binding(
-            employee=self.employee_a,
+            resident=self.resident_a,
             slot=second_slot,
             confirm=False,
         )
@@ -7997,10 +8113,10 @@ class M4CalendarBindingTests(TestCase):
                 approved_by_id=self.employee_a.pk,
                 approved_at=self.now,
             )
-        self.assertIn('employee', employee_error.exception.message_dict)
+        self.assertIn('resident', employee_error.exception.message_dict)
 
         slot_conflict = self.create_binding(
-            employee=self.employee_a_2,
+            resident=self.external_resident,
             slot=slot,
             confirm=False,
         )
@@ -8011,6 +8127,22 @@ class M4CalendarBindingTests(TestCase):
                 approved_at=self.now,
             )
         self.assertIn('anchor_calendar_slot', slot_error.exception.message_dict)
+
+    def test_external_resident_cannot_have_overlapping_confirmed_bindings(self):
+        first_slot = self.create_slot()
+        second_slot = self.create_slot(anchor=self.anchor_2)
+        self.create_binding(resident=self.external_resident, slot=first_slot)
+        conflict = self.create_binding(
+            resident=self.external_resident,
+            slot=second_slot,
+            confirm=False,
+        )
+        with self.assertRaisesMessage(ValidationError, 'Жилец уже имеет'):
+            confirm_employee_accommodation_binding(
+                binding_id=conflict.pk,
+                approved_by_id=self.employee_a.pk,
+                approved_at=self.now,
+            )
 
     def test_structural_fields_and_public_mass_writes_are_immutable(self):
         slot = self.create_slot(confirm=False)
@@ -8439,6 +8571,27 @@ class M5CohortTests(TestCase):
             is_active=True,
             watch_composition=cls.other_composition,
         )
+        cls.resident, _ = get_or_create_employee_resident(employee_id=cls.employee.pk)
+        cls.other_resident, _ = get_or_create_employee_resident(employee_id=cls.other_employee.pk)
+        cls.foreign_resident, _ = get_or_create_employee_resident(
+            employee_id=cls.foreign_employee.pk,
+        )
+        cls.resident_role = Role.objects.create(code='m5-resident-clerk', name='M5 actor')
+        cls.resident_access = EmployeeAccess.objects.create(
+            employee=cls.actor,
+            role=cls.resident_role,
+            access_code='M5-RESIDENT-ACTOR',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+        cls.external_resident = SettlementResident.objects.create(
+            resident_type=SettlementResident.ResidentType.CONTRACTOR,
+            full_name='ДЕМО M5 Внешний жилец',
+            position_title='Подрядчик',
+            organization='ДЕМО Подрядчик',
+            phone='+7 900 000-00-03',
+            created_by_access=cls.resident_access,
+        )
         cls.source = SettlementSource.objects.create(
             source_type=SettlementSource.SourceType.DOCUMENT,
             title='M5 нормативное основание',
@@ -8483,7 +8636,7 @@ class M5CohortTests(TestCase):
         self,
         cohort,
         *,
-        employee=None,
+        resident=None,
         period=None,
         participation_status=SettlementCohortMember.ParticipationStatus.PARTICIPATING,
         reason='',
@@ -8491,9 +8644,10 @@ class M5CohortTests(TestCase):
     ):
         period = period or cohort.watch_period
         arrival, departure = self.period_bounds(period)
+        resident = resident or self.resident
         return add_settlement_cohort_member(
             cohort_id=cohort.pk,
-            employee_id=(employee or self.employee).pk,
+            resident_id=resident.pk,
             arrival_at=arrival,
             departure_at=departure,
             participation_status=participation_status,
@@ -8501,8 +8655,8 @@ class M5CohortTests(TestCase):
             expected_schedule_regime='documented-only',
             source_revision_id=(revision or self.revision).pk,
             basis_type='rotation_response',
-            basis_id=f'M5-MEMBER-{cohort.pk}-{(employee or self.employee).pk}',
-            basis_snapshot={'employee_id': (employee or self.employee).pk, 'period_id': period.pk},
+            basis_id=f'M5-MEMBER-{cohort.pk}-{resident.pk}',
+            basis_snapshot={'resident_id': resident.pk, 'period_id': period.pk},
             production_context_snapshot={'equipment_assignment': None},
         )
 
@@ -8521,13 +8675,71 @@ class M5CohortTests(TestCase):
         self.assertEqual(cohort.watch_composition_id, self.composition.pk)
         self.assertEqual(cohort.version, 1)
         self.assertEqual(member.cohort_id, cohort.pk)
-        self.assertEqual(member.employee_id, self.employee.pk)
+        self.assertEqual(member.resident_id, self.resident.pk)
         self.assertEqual(member.source_revision_id, self.revision.pk)
         self.assertTrue(member.basis_snapshot)
         with self.assertRaises(FieldDoesNotExist):
             SettlementCohort._meta.get_field('shift_type')
         with self.assertRaises(FieldDoesNotExist):
             SettlementCohortMember._meta.get_field('physical_bed')
+
+    def test_external_resident_membership_has_no_employee_or_access_side_effect(self):
+        cohort = self.create_cohort()
+        baseline = (Employee.objects.count(), EmployeeAccess.objects.count())
+        member = self.add_member(cohort, resident=self.external_resident)
+        self.approve(cohort)
+
+        self.assertEqual(member.resident_id, self.external_resident.pk)
+        self.assertIsNone(member.resident.employee_id)
+        self.assertEqual((Employee.objects.count(), EmployeeAccess.objects.count()), baseline)
+
+    def test_archived_resident_cannot_join_cohort(self):
+        archived = SettlementResident.objects.create(
+            resident_type=SettlementResident.ResidentType.EXTERNAL_OTHER,
+            full_name='ДЕМО M5 Архивный жилец',
+            position_title='Внешний специалист',
+            organization='ДЕМО Организация',
+            phone='+7 900 000-00-04',
+            status=SettlementResident.Status.ARCHIVED,
+            archived_at=self.now,
+            created_by_access=self.resident_access,
+        )
+        cohort = self.create_cohort()
+        with self.assertRaisesMessage(ValidationError, 'Архивный resident'):
+            self.add_member(cohort, resident=archived)
+        self.assertFalse(cohort.members.exists())
+
+    def test_resident_archived_after_membership_cannot_be_approved(self):
+        cohort = self.create_cohort()
+        self.add_member(cohort, resident=self.external_resident)
+        self.external_resident.status = SettlementResident.Status.ARCHIVED
+        self.external_resident.archived_at = self.now
+        self.external_resident.revision += 1
+        self.external_resident.updated_by_access = self.resident_access
+        self.external_resident.save()
+
+        with self.assertRaisesMessage(ValidationError, 'Архивный resident'):
+            self.approve(cohort)
+        cohort.refresh_from_db()
+        self.assertEqual(cohort.status, SettlementCohort.Status.DRAFT)
+
+    def test_cohort_member_api_requires_preexisting_resident_id(self):
+        cohort = self.create_cohort()
+        arrival, departure = self.period_bounds()
+        resident_count = SettlementResident.objects.count()
+        with self.assertRaises(ValidationError):
+            add_settlement_cohort_member(
+                cohort_id=cohort.pk,
+                resident_id=999999,
+                arrival_at=arrival,
+                departure_at=departure,
+                participation_status=SettlementCohortMember.ParticipationStatus.PARTICIPATING,
+                source_revision_id=self.revision.pk,
+                basis_type='manual',
+                basis_id='M5-MISSING-RESIDENT',
+                basis_snapshot={'source': 'missing'},
+            )
+        self.assertEqual(SettlementResident.objects.count(), resident_count)
 
     def test_cohort_rejects_watch_composition_mismatch_and_bad_fingerprint(self):
         mismatched = SettlementCohort(
@@ -8572,7 +8784,7 @@ class M5CohortTests(TestCase):
         with self.assertRaises(ValidationError):
             add_settlement_cohort_member(
                 cohort_id=cohort.pk,
-                employee_id=self.employee.pk,
+                resident_id=self.resident.pk,
                 arrival_at=unrelated_start,
                 departure_at=unrelated_end,
                 participation_status=SettlementCohortMember.ParticipationStatus.PARTICIPATING,
@@ -8632,6 +8844,25 @@ class M5CohortTests(TestCase):
             self.approve(second)
         second.refresh_from_db()
         self.assertEqual(second.status, SettlementCohort.Status.DRAFT)
+
+    def test_external_resident_has_the_same_approved_membership_overlap_guard(self):
+        first = self.create_cohort()
+        self.add_member(first, resident=self.external_resident)
+        self.approve(first)
+
+        second = self.create_cohort(period=self.overlap_period, fingerprint_char='2')
+        self.add_member(second, resident=self.external_resident, period=self.overlap_period)
+        with self.assertRaisesMessage(ValidationError, 'пересекающегося периода'):
+            self.approve(second)
+        second.refresh_from_db()
+        self.assertEqual(second.status, SettlementCohort.Status.DRAFT)
+
+    def test_one_resident_can_appear_only_once_in_a_cohort(self):
+        cohort = self.create_cohort()
+        self.add_member(cohort)
+        with self.assertRaises(ValidationError):
+            self.add_member(cohort)
+        self.assertEqual(cohort.members.count(), 1)
 
     def test_non_arrival_does_not_create_conflicting_accommodation_scope(self):
         first = self.create_cohort()
@@ -8712,7 +8943,7 @@ class M5CohortTests(TestCase):
 
         self.assertIn('unique_cohort_watch_period_version', cohort_constraints)
         self.assertIn('unique_approved_cohort_per_watch', cohort_constraints)
-        self.assertIn('unique_employee_per_cohort', member_constraints)
+        self.assertIn('unique_resident_per_cohort', member_constraints)
         self.assertIn('cohort_member_period_non_empty', member_constraints)
         self.assertEqual(
             cohort_indexes,
@@ -8720,7 +8951,7 @@ class M5CohortTests(TestCase):
         )
         self.assertEqual(
             member_indexes,
-            {'cohort_member_employee_idx', 'cohort_member_scope_idx'},
+            {'cohort_member_resident_idx', 'cohort_member_scope_idx'},
         )
 
     def test_m5_does_not_write_m4_or_occupancy_models(self):
@@ -8743,4 +8974,279 @@ class M5CohortTests(TestCase):
                 PhysicalBed.objects.count(),
                 EmployeeBedOccupancy.objects.count(),
             ),
+        )
+
+
+class ResidentSubjectTransitionMigrationTests(TransactionTestCase):
+    migrate_from = ('settlement', '0010_settlement_residents')
+    migrate_to = ('settlement', '0011_resident_subject_transition')
+
+    def setUp(self):
+        super().setUp()
+        self.addCleanup(self._restore_latest_migrations)
+        executor = MigrationExecutor(connection)
+        executor.migrate([self.migrate_from])
+        self.old_apps = executor.loader.project_state([self.migrate_from]).apps
+
+    def _restore_latest_migrations(self):
+        executor = MigrationExecutor(connection)
+        executor.migrate(executor.loader.graph.leaf_nodes())
+
+    def _migrate_to_target(self):
+        executor = MigrationExecutor(connection)
+        executor.migrate([self.migrate_to])
+        return executor.loader.project_state([self.migrate_to]).apps
+
+    def _create_old_subject_rows(self, *, create_wrapper=False):
+        EmployeeModel = self.old_apps.get_model('users', 'Employee')
+        WatchCompositionModel = self.old_apps.get_model('users', 'WatchComposition')
+        WatchPeriodModel = self.old_apps.get_model('shifts', 'WatchPeriod')
+        SourceModel = self.old_apps.get_model('settlement', 'SettlementSource')
+        RevisionModel = self.old_apps.get_model('settlement', 'SettlementRevision')
+        AnchorModel = self.old_apps.get_model('settlement', 'AccommodationAnchor')
+        SlotModel = self.old_apps.get_model('settlement', 'AccommodationAnchorCalendarSlot')
+        BindingModel = self.old_apps.get_model('settlement', 'EmployeeAccommodationBinding')
+        CohortModel = self.old_apps.get_model('settlement', 'SettlementCohort')
+        MemberModel = self.old_apps.get_model('settlement', 'SettlementCohortMember')
+        ResidentModel = self.old_apps.get_model('settlement', 'SettlementResident')
+
+        now = timezone.now().replace(microsecond=0)
+        composition = WatchCompositionModel.objects.create(
+            code=f'migration-resident-{uuid.uuid4()}',
+            name='Migration resident composition',
+        )
+        employee = EmployeeModel.objects.create(
+            full_name='ДЕМО Migration Resident Employee',
+            status='active',
+            is_active=True,
+            watch_composition=composition,
+        )
+        period = WatchPeriodModel.objects.create(
+            name='Migration resident period',
+            watch_composition=composition,
+            starts_on=datetime(2030, 1, 1).date(),
+            ends_on=datetime(2030, 1, 31).date(),
+        )
+        source = SourceModel.objects.create(
+            source_type='document',
+            title='Migration resident source',
+            status='confirmed',
+            confirmed_at=now,
+            confirmed_by_label='Migration test',
+        )
+        revision = RevisionModel.objects.create(
+            code=f'MIG-RES-{uuid.uuid4()}',
+            source=source,
+            status='confirmed',
+            effective_at=now,
+            confirmed_at=now,
+            confirmed_by_label='Migration test',
+            reason='Migration resident transition test',
+        )
+        anchor = AnchorModel.objects.create(
+            code=f'MIG-ANCHOR-{uuid.uuid4()}',
+            display_name='Migration resident anchor',
+            anchor_type='function',
+            function_key='migration-resident-anchor',
+            status='active',
+            created_revision=revision,
+        )
+        slot = SlotModel.objects.create(
+            anchor=anchor,
+            watch_composition=composition,
+            watch_period=period,
+            valid_from=period.starts_on,
+            valid_to=period.ends_on,
+            status='draft',
+            source_revision=revision,
+        )
+        binding = BindingModel.objects.create(
+            employee=employee,
+            anchor_calendar_slot=slot,
+            valid_from=period.starts_on,
+            valid_to=period.ends_on,
+            status='draft',
+            basis_type='migration_test',
+            basis_id='MIG-BINDING',
+            basis_snapshot={'employee_id': employee.pk},
+            source_revision=revision,
+        )
+        cohort = CohortModel.objects.create(
+            watch_composition=composition,
+            watch_period=period,
+            version=1,
+            status='draft',
+            source_revision=revision,
+            source_type='migration_test',
+            source_id='MIG-COHORT',
+            source_snapshot={'period_id': period.pk},
+            input_fingerprint='a' * 64,
+            created_by=employee,
+        )
+        member = MemberModel.objects.create(
+            cohort=cohort,
+            employee=employee,
+            arrival_at=timezone.make_aware(datetime(2030, 1, 1)),
+            departure_at=timezone.make_aware(datetime(2030, 2, 1)),
+            participation_status='participating',
+            source_revision=revision,
+            basis_type='migration_test',
+            basis_id='MIG-MEMBER',
+            basis_snapshot={'employee_id': employee.pk},
+            production_context_snapshot={},
+        )
+        wrapper = None
+        if create_wrapper:
+            wrapper = ResidentModel.objects.create(
+                employee=employee,
+                resident_type='EMPLOYEE',
+                status='ACTIVE',
+                revision=1,
+            )
+        return SimpleNamespace(
+            employee=employee,
+            binding=binding,
+            member=member,
+            slot=slot,
+            cohort=cohort,
+            wrapper=wrapper,
+        )
+
+    def test_empty_schema_can_cycle_0010_0011_0010_0011(self):
+        self._migrate_to_target()
+        executor = MigrationExecutor(connection)
+        executor.migrate([self.migrate_from])
+        executor = MigrationExecutor(connection)
+        executor.migrate([self.migrate_to])
+        apps = executor.loader.project_state([self.migrate_to]).apps
+        self.assertEqual(apps.get_model('settlement', 'SettlementResident').objects.count(), 0)
+
+    def test_forward_creates_one_internal_wrapper_and_no_access(self):
+        rows = self._create_old_subject_rows()
+        AccessModel = self.old_apps.get_model('users', 'EmployeeAccess')
+        access_count = AccessModel.objects.count()
+        apps = self._migrate_to_target()
+
+        ResidentModel = apps.get_model('settlement', 'SettlementResident')
+        BindingModel = apps.get_model('settlement', 'EmployeeAccommodationBinding')
+        MemberModel = apps.get_model('settlement', 'SettlementCohortMember')
+        residents = list(ResidentModel.objects.filter(employee_id=rows.employee.pk))
+        self.assertEqual(len(residents), 1)
+        self.assertEqual(residents[0].resident_type, 'EMPLOYEE')
+        self.assertIsNone(residents[0].created_by_access_id)
+        self.assertEqual(BindingModel.objects.get(pk=rows.binding.pk).resident_id, residents[0].pk)
+        self.assertEqual(MemberModel.objects.get(pk=rows.member.pk).resident_id, residents[0].pk)
+        self.assertEqual(apps.get_model('users', 'EmployeeAccess').objects.count(), access_count)
+        self.assertEqual(apps.get_model('settlement', 'PhysicalRoom').objects.count(), 0)
+        self.assertEqual(apps.get_model('settlement', 'PhysicalBed').objects.count(), 0)
+        self.assertEqual(apps.get_model('settlement', 'EmployeeBedOccupancy').objects.count(), 0)
+
+    def test_forward_reuses_existing_internal_wrapper(self):
+        rows = self._create_old_subject_rows(create_wrapper=True)
+        apps = self._migrate_to_target()
+        BindingModel = apps.get_model('settlement', 'EmployeeAccommodationBinding')
+        MemberModel = apps.get_model('settlement', 'SettlementCohortMember')
+        self.assertEqual(BindingModel.objects.get(pk=rows.binding.pk).resident_id, rows.wrapper.pk)
+        self.assertEqual(MemberModel.objects.get(pk=rows.member.pk).resident_id, rows.wrapper.pk)
+
+    def test_forward_fails_closed_for_conflicting_wrapper(self):
+        rows = self._create_old_subject_rows(create_wrapper=True)
+        table = self.old_apps.get_model('settlement', 'SettlementResident')._meta.db_table
+        with connection.cursor() as cursor:
+            cursor.execute('PRAGMA ignore_check_constraints = ON')
+            try:
+                cursor.execute(
+                    f'UPDATE "{table}" SET resident_type = %s WHERE id = %s',
+                    ['CONTRACTOR', rows.wrapper.pk],
+                )
+            finally:
+                cursor.execute('PRAGMA ignore_check_constraints = OFF')
+
+        executor = MigrationExecutor(connection)
+        with self.assertRaisesMessage(RuntimeError, 'конфликтует с Employee'):
+            executor.migrate([self.migrate_to])
+
+        executor = MigrationExecutor(connection)
+        self.assertNotIn(self.migrate_to, executor.loader.applied_migrations)
+        apps = executor.loader.project_state([self.migrate_from]).apps
+        self.assertEqual(
+            apps.get_model('settlement', 'EmployeeAccommodationBinding')
+            .objects.get(pk=rows.binding.pk).employee_id,
+            rows.employee.pk,
+        )
+        with connection.cursor() as cursor:
+            cursor.execute(
+                f'UPDATE "{table}" SET resident_type = %s WHERE id = %s',
+                ['EMPLOYEE', rows.wrapper.pk],
+            )
+
+    def test_reverse_restores_internal_employee_subjects(self):
+        rows = self._create_old_subject_rows()
+        self._migrate_to_target()
+        executor = MigrationExecutor(connection)
+        executor.migrate([self.migrate_from])
+        apps = executor.loader.project_state([self.migrate_from]).apps
+        self.assertEqual(
+            apps.get_model('settlement', 'EmployeeAccommodationBinding')
+            .objects.get(pk=rows.binding.pk).employee_id,
+            rows.employee.pk,
+        )
+        self.assertEqual(
+            apps.get_model('settlement', 'SettlementCohortMember')
+            .objects.get(pk=rows.member.pk).employee_id,
+            rows.employee.pk,
+        )
+
+    def test_reverse_fails_closed_for_external_subject_and_preserves_0011(self):
+        rows = self._create_old_subject_rows()
+        apps = self._migrate_to_target()
+        EmployeeModel = apps.get_model('users', 'Employee')
+        RoleModel = apps.get_model('users', 'Role')
+        AccessModel = apps.get_model('users', 'EmployeeAccess')
+        ResidentModel = apps.get_model('settlement', 'SettlementResident')
+        MemberModel = apps.get_model('settlement', 'SettlementCohortMember')
+        actor = EmployeeModel.objects.get(pk=rows.employee.pk)
+        role = RoleModel.objects.create(code='migration-resident-role', name='Migration role')
+        access = AccessModel.objects.create(
+            employee=actor,
+            role=role,
+            access_code='MIGRATION-RESIDENT-ACCESS',
+            status='activated',
+            is_active=True,
+        )
+        external = ResidentModel.objects.create(
+            resident_type='CONTRACTOR',
+            full_name='ДЕМО Migration External',
+            position_title='Подрядчик',
+            organization='ДЕМО Организация',
+            phone='+7 900 000-00-05',
+            status='ACTIVE',
+            revision=1,
+            created_by_access=access,
+        )
+        original = MemberModel.objects.get(pk=rows.member.pk)
+        MemberModel.objects.create(
+            cohort_id=original.cohort_id,
+            resident=external,
+            arrival_at=original.arrival_at,
+            departure_at=original.departure_at,
+            participation_status='additional',
+            reason='Migration external reverse guard',
+            source_revision_id=original.source_revision_id,
+            basis_type='migration_test',
+            basis_id='MIG-EXTERNAL-MEMBER',
+            basis_snapshot={'resident_id': external.pk},
+            production_context_snapshot={},
+        )
+
+        executor = MigrationExecutor(connection)
+        with self.assertRaisesMessage(RuntimeError, 'external resident subjects'):
+            executor.migrate([self.migrate_from])
+
+        executor = MigrationExecutor(connection)
+        self.assertIn(self.migrate_to, executor.loader.applied_migrations)
+        apps = executor.loader.project_state([self.migrate_to]).apps
+        self.assertTrue(
+            apps.get_model('settlement', 'SettlementCohortMember')
+            .objects.filter(resident_id=external.pk).exists()
         )

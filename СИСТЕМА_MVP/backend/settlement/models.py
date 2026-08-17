@@ -1480,9 +1480,9 @@ class EmployeeAccommodationBinding(StableIdentifierModel):
 
     objects = M4CalendarBindingQuerySet.as_manager()
 
-    employee = models.ForeignKey(
-        'users.Employee',
-        verbose_name='Сотрудник',
+    resident = models.ForeignKey(
+        'SettlementResident',
+        verbose_name='Жилец',
         on_delete=models.PROTECT,
         related_name='accommodation_bindings',
     )
@@ -1544,11 +1544,11 @@ class EmployeeAccommodationBinding(StableIdentifierModel):
     updated_at = models.DateTimeField('Изменено', auto_now=True)
 
     class Meta:
-        verbose_name = 'Постоянное жилищное закрепление сотрудника'
-        verbose_name_plural = 'Постоянные жилищные закрепления сотрудников'
-        ordering = ['employee_id', 'valid_from', 'pk']
+        verbose_name = 'Постоянное жилищное закрепление жильца'
+        verbose_name_plural = 'Постоянные жилищные закрепления жильцов'
+        ordering = ['resident_id', 'valid_from', 'pk']
         indexes = [
-            models.Index(fields=['employee', 'status', 'valid_from'], name='employee_binding_period_idx'),
+            models.Index(fields=['resident', 'status', 'valid_from'], name='resident_binding_period_idx'),
             models.Index(
                 fields=['anchor_calendar_slot', 'status', 'valid_from'],
                 name='slot_binding_period_idx',
@@ -1556,8 +1556,8 @@ class EmployeeAccommodationBinding(StableIdentifierModel):
         ]
         constraints = [
             models.UniqueConstraint(
-                fields=['employee', 'anchor_calendar_slot', 'valid_from'],
-                name='unique_employee_slot_binding_start',
+                fields=['resident', 'anchor_calendar_slot', 'valid_from'],
+                name='unique_resident_slot_binding_start',
             ),
             models.CheckConstraint(
                 condition=models.Q(valid_to__gte=models.F('valid_from')),
@@ -1615,8 +1615,31 @@ class EmployeeAccommodationBinding(StableIdentifierModel):
                 errors['anchor_calendar_slot'] = 'CalendarSlot устарел относительно WatchPeriod.'
             if self.valid_from < slot.valid_from or self.valid_to > slot.valid_to:
                 errors['valid_from'] = 'Период binding должен целиком находиться внутри CalendarSlot.'
-            if self.employee.watch_composition_id != slot.watch_composition_id:
-                errors['employee'] = 'Сотрудник не принадлежит WatchComposition календарного слота.'
+            resident = self.resident
+            if (
+                self._state.adding or self.status == self.Status.CONFIRMED
+            ) and resident.status != SettlementResident.Status.ACTIVE:
+                errors['resident'] = 'Архивный resident нельзя использовать для binding.'
+            if resident.resident_type == SettlementResident.ResidentType.EMPLOYEE:
+                if not resident.employee_id:
+                    errors['resident'] = 'Внутренний resident не связан с Employee.'
+                else:
+                    employee = resident.employee
+                    if not employee.is_active or employee.status != employee.Status.ACTIVE:
+                        errors['resident'] = 'Внутренний Employee неактивен или уволен.'
+                    elif employee.watch_composition_id != slot.watch_composition_id:
+                        errors['resident'] = (
+                            'Внутренний Employee не принадлежит WatchComposition календарного слота.'
+                        )
+            elif (
+                resident.resident_type not in {
+                    SettlementResident.ResidentType.CONTRACTOR,
+                    SettlementResident.ResidentType.BUSINESS_TRIP,
+                    SettlementResident.ResidentType.EXTERNAL_OTHER,
+                }
+                or resident.employee_id is not None
+            ):
+                errors['resident'] = 'Внешний resident имеет недопустимый источник.'
         if self.status in {self.Status.CONFIRMED, self.Status.CLOSED}:
             if self.source_revision.status != SettlementRevision.Status.CONFIRMED:
                 errors['source_revision'] = 'Подтверждённый binding требует подтверждённой ревизии.'
@@ -1628,8 +1651,8 @@ class EmployeeAccommodationBinding(StableIdentifierModel):
             if not self.approved_by_id or not self.approved_at:
                 errors['approved_by'] = 'Подтверждённый binding требует автора и времени подтверждения.'
             overlaps = self._overlapping_bindings()
-            if overlaps.filter(employee_id=self.employee_id).exists():
-                errors['employee'] = 'Сотрудник уже имеет подтверждённый binding в пересекающемся периоде.'
+            if overlaps.filter(resident_id=self.resident_id).exists():
+                errors['resident'] = 'Жилец уже имеет подтверждённый binding в пересекающемся периоде.'
             if overlaps.filter(anchor_calendar_slot_id=self.anchor_calendar_slot_id).exists():
                 errors['anchor_calendar_slot'] = 'CalendarSlot уже занят в пересекающемся периоде.'
             try:
@@ -1651,8 +1674,8 @@ class EmployeeAccommodationBinding(StableIdentifierModel):
         if self.supersedes_id:
             if self.supersedes_id == self.pk:
                 errors['supersedes'] = 'Binding не может заменять сам себя.'
-            elif self.supersedes.employee_id != self.employee_id:
-                errors['supersedes'] = 'Постоянная коррекция должна относиться к тому же сотруднику.'
+            elif self.supersedes.resident_id != self.resident_id:
+                errors['supersedes'] = 'Постоянная коррекция должна относиться к тому же жильцу.'
         if self.status == self.Status.CLOSED:
             if not self.closed_revision_id or not self.closed_by_id or not self.closed_at:
                 errors['closed_revision'] = 'Закрытый binding требует полной истории закрытия.'
@@ -1665,7 +1688,7 @@ class EmployeeAccommodationBinding(StableIdentifierModel):
         if not self.pk:
             return
         original = type(self)._base_manager.filter(pk=self.pk).values(
-            'stable_id', 'employee_id', 'anchor_calendar_slot_id', 'valid_from', 'valid_to',
+            'stable_id', 'resident_id', 'anchor_calendar_slot_id', 'valid_from', 'valid_to',
             'basis_type', 'basis_id', 'basis_snapshot', 'source_revision_id', 'supersedes_id',
             'status', 'approved_by_id', 'approved_at', 'closed_revision_id', 'closed_by_id', 'closed_at',
         ).first()
@@ -1673,7 +1696,7 @@ class EmployeeAccommodationBinding(StableIdentifierModel):
             return
         errors = {}
         for field_name in (
-            'stable_id', 'employee_id', 'anchor_calendar_slot_id', 'valid_from',
+            'stable_id', 'resident_id', 'anchor_calendar_slot_id', 'valid_from',
             'basis_type', 'basis_id', 'basis_snapshot', 'source_revision_id', 'supersedes_id',
         ):
             if original[field_name] != getattr(self, field_name):
@@ -1710,7 +1733,7 @@ class EmployeeAccommodationBinding(StableIdentifierModel):
             return super().save(*args, **kwargs)
 
     def __str__(self):
-        return f'{self.employee} → {self.anchor_calendar_slot}: {self.valid_from} — {self.valid_to}'
+        return f'{self.resident} → {self.anchor_calendar_slot}: {self.valid_from} — {self.valid_to}'
 
 
 @receiver(pre_delete, sender=AccommodationAnchorCalendarSlot)
@@ -1994,9 +2017,9 @@ class SettlementCohortMember(StableIdentifierModel):
         on_delete=models.CASCADE,
         related_name='members',
     )
-    employee = models.ForeignKey(
-        'users.Employee',
-        verbose_name='Сотрудник',
+    resident = models.ForeignKey(
+        'SettlementResident',
+        verbose_name='Жилец',
         on_delete=models.PROTECT,
         related_name='settlement_cohort_memberships',
     )
@@ -2034,11 +2057,11 @@ class SettlementCohortMember(StableIdentifierModel):
     class Meta:
         verbose_name = 'Строка жилищного состава заезда'
         verbose_name_plural = 'Строки жилищного состава заезда'
-        ordering = ['cohort_id', 'employee_id', 'pk']
+        ordering = ['cohort_id', 'resident_id', 'pk']
         indexes = [
             models.Index(
-                fields=['employee', 'participation_status', 'arrival_at'],
-                name='cohort_member_employee_idx',
+                fields=['resident', 'participation_status', 'arrival_at'],
+                name='cohort_member_resident_idx',
             ),
             models.Index(
                 fields=['cohort', 'participation_status'],
@@ -2047,8 +2070,8 @@ class SettlementCohortMember(StableIdentifierModel):
         ]
         constraints = [
             models.UniqueConstraint(
-                fields=['cohort', 'employee'],
-                name='unique_employee_per_cohort',
+                fields=['cohort', 'resident'],
+                name='unique_resident_per_cohort',
             ),
             models.CheckConstraint(
                 condition=models.Q(departure_at__gt=models.F('arrival_at')),
@@ -2097,8 +2120,29 @@ class SettlementCohortMember(StableIdentifierModel):
             if self._state.adding:
                 if cohort.status != SettlementCohort.Status.DRAFT:
                     errors['cohort'] = 'Membership добавляется только в DRAFT cohort.'
-                if self.employee.watch_composition_id != cohort.watch_composition_id:
-                    errors['employee'] = 'Сотрудник не принадлежит WatchComposition cohort.'
+                resident = self.resident
+                if resident.status != SettlementResident.Status.ACTIVE:
+                    errors['resident'] = 'Архивный resident нельзя добавить в cohort.'
+                if resident.resident_type == SettlementResident.ResidentType.EMPLOYEE:
+                    if not resident.employee_id:
+                        errors['resident'] = 'Внутренний resident не связан с Employee.'
+                    else:
+                        employee = resident.employee
+                        if not employee.is_active or employee.status != employee.Status.ACTIVE:
+                            errors['resident'] = 'Внутренний Employee неактивен или уволен.'
+                        elif employee.watch_composition_id != cohort.watch_composition_id:
+                            errors['resident'] = (
+                                'Внутренний Employee не принадлежит WatchComposition cohort.'
+                            )
+                elif (
+                    resident.resident_type not in {
+                        SettlementResident.ResidentType.CONTRACTOR,
+                        SettlementResident.ResidentType.BUSINESS_TRIP,
+                        SettlementResident.ResidentType.EXTERNAL_OTHER,
+                    }
+                    or resident.employee_id is not None
+                ):
+                    errors['resident'] = 'Внешний resident имеет недопустимый источник.'
         if errors:
             raise ValidationError(errors)
 
@@ -2106,7 +2150,7 @@ class SettlementCohortMember(StableIdentifierModel):
         if not self.pk:
             return
         original = type(self)._base_manager.filter(pk=self.pk).values(
-            'stable_id', 'cohort_id', 'employee_id', 'arrival_at', 'departure_at',
+            'stable_id', 'cohort_id', 'resident_id', 'arrival_at', 'departure_at',
             'participation_status', 'reason', 'expected_schedule_regime',
             'source_revision_id', 'basis_type', 'basis_id', 'basis_snapshot',
             'production_context_snapshot',
@@ -2129,7 +2173,7 @@ class SettlementCohortMember(StableIdentifierModel):
             return super().save(*args, **kwargs)
 
     def __str__(self):
-        return f'{self.cohort} / {self.employee}'
+        return f'{self.cohort} / {self.resident}'
 
 
 @receiver(pre_delete, sender=SettlementCohort)
