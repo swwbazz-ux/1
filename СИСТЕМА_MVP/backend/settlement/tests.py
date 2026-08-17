@@ -53,6 +53,11 @@ from .calendar_bindings import (
     create_employee_accommodation_binding,
     supersede_employee_accommodation_binding,
 )
+from .cohorts import (
+    add_settlement_cohort_member,
+    approve_settlement_cohort,
+    create_settlement_cohort,
+)
 from .control import SettlementControlWriteContext, acquire_control_lease
 from .fund import PHYSICAL_FUND_SPECS, expected_fund_totals
 from .models import (
@@ -65,6 +70,8 @@ from .models import (
     PhysicalRoom,
     SettlementControlEvent,
     SettlementControlLease,
+    SettlementCohort,
+    SettlementCohortMember,
     SettlementRevision,
     SettlementSource,
 )
@@ -8050,3 +8057,358 @@ class SettlementControlMigrationBootstrapTests(TransactionTestCase):
         self.assertIsNone(lease.acquired_at)
         self.assertIsNone(lease.heartbeat_at)
         self.assertIsNone(lease.expires_at)
+
+
+class M5CohortTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.now = timezone.now().replace(microsecond=0)
+        cls.composition = WatchComposition.objects.create(code='m5-a', name='M5 состав A')
+        cls.other_composition = WatchComposition.objects.create(code='m5-b', name='M5 состав B')
+        cls.period = WatchPeriod.objects.create(
+            name='M5 январь A',
+            watch_composition=cls.composition,
+            starts_on=datetime(2028, 1, 1).date(),
+            ends_on=datetime(2028, 1, 31).date(),
+        )
+        cls.overlap_period = WatchPeriod.objects.create(
+            name='M5 пересечение A',
+            watch_composition=cls.composition,
+            starts_on=datetime(2028, 1, 15).date(),
+            ends_on=datetime(2028, 2, 15).date(),
+        )
+        cls.next_period = WatchPeriod.objects.create(
+            name='M5 февраль A',
+            watch_composition=cls.composition,
+            starts_on=datetime(2028, 2, 1).date(),
+            ends_on=datetime(2028, 2, 29).date(),
+        )
+        cls.actor = Employee.objects.create(
+            full_name='ДЕМО M5 Делопроизводитель',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+            watch_composition=cls.composition,
+        )
+        cls.employee = Employee.objects.create(
+            full_name='ДЕМО M5 Сотрудник',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+            watch_composition=cls.composition,
+        )
+        cls.other_employee = Employee.objects.create(
+            full_name='ДЕМО M5 Дополнительный сотрудник',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+            watch_composition=cls.composition,
+        )
+        cls.foreign_employee = Employee.objects.create(
+            full_name='ДЕМО M5 Чужой состав',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+            watch_composition=cls.other_composition,
+        )
+        cls.source = SettlementSource.objects.create(
+            source_type=SettlementSource.SourceType.DOCUMENT,
+            title='M5 нормативное основание',
+            version='1',
+            file_sha256='c' * 64,
+            status=SettlementSource.Status.CONFIRMED,
+            confirmed_at=cls.now,
+            confirmed_by_label='Архитектор M5',
+        )
+        cls.revision = SettlementRevision.objects.create(
+            code='M5-REV-1',
+            source=cls.source,
+            status=SettlementRevision.Status.CONFIRMED,
+            effective_at=cls.now,
+            confirmed_at=cls.now,
+            confirmed_by_label='Архитектор M5',
+            reason='Авторитетный состав заезда M5.',
+        )
+
+    def period_bounds(self, period=None):
+        period = period or self.period
+        arrival = timezone.make_aware(datetime.combine(period.starts_on, datetime.min.time()))
+        departure = timezone.make_aware(
+            datetime.combine(period.ends_on + timedelta(days=1), datetime.min.time()),
+        )
+        return arrival, departure
+
+    def create_cohort(self, *, period=None, supersedes=None, revision=None, fingerprint_char='1'):
+        period = period or self.period
+        return create_settlement_cohort(
+            watch_period_id=period.pk,
+            source_revision_id=(revision or self.revision).pk,
+            source_type='rotation_collection',
+            source_id=f'M5-SOURCE-{period.pk}-{fingerprint_char}',
+            source_snapshot={'watch_period_id': period.pk, 'revision': self.revision.code},
+            input_fingerprint=fingerprint_char * 64,
+            created_by_id=self.actor.pk,
+            supersedes_id=supersedes.pk if supersedes else None,
+        )
+
+    def add_member(
+        self,
+        cohort,
+        *,
+        employee=None,
+        period=None,
+        participation_status=SettlementCohortMember.ParticipationStatus.PARTICIPATING,
+        reason='',
+        revision=None,
+    ):
+        period = period or cohort.watch_period
+        arrival, departure = self.period_bounds(period)
+        return add_settlement_cohort_member(
+            cohort_id=cohort.pk,
+            employee_id=(employee or self.employee).pk,
+            arrival_at=arrival,
+            departure_at=departure,
+            participation_status=participation_status,
+            reason=reason,
+            expected_schedule_regime='documented-only',
+            source_revision_id=(revision or self.revision).pk,
+            basis_type='rotation_response',
+            basis_id=f'M5-MEMBER-{cohort.pk}-{(employee or self.employee).pk}',
+            basis_snapshot={'employee_id': (employee or self.employee).pk, 'period_id': period.pk},
+            production_context_snapshot={'equipment_assignment': None},
+        )
+
+    def approve(self, cohort):
+        return approve_settlement_cohort(
+            cohort_id=cohort.pk,
+            approved_by_id=self.actor.pk,
+            approved_at=self.now,
+        )
+
+    def test_valid_cohort_and_membership_have_concrete_calendar_identity(self):
+        cohort = self.create_cohort()
+        member = self.add_member(cohort)
+
+        self.assertEqual(cohort.watch_period_id, self.period.pk)
+        self.assertEqual(cohort.watch_composition_id, self.composition.pk)
+        self.assertEqual(cohort.version, 1)
+        self.assertEqual(member.cohort_id, cohort.pk)
+        self.assertEqual(member.employee_id, self.employee.pk)
+        self.assertEqual(member.source_revision_id, self.revision.pk)
+        self.assertTrue(member.basis_snapshot)
+        with self.assertRaises(FieldDoesNotExist):
+            SettlementCohort._meta.get_field('shift_type')
+        with self.assertRaises(FieldDoesNotExist):
+            SettlementCohortMember._meta.get_field('physical_bed')
+
+    def test_cohort_rejects_watch_composition_mismatch_and_bad_fingerprint(self):
+        mismatched = SettlementCohort(
+            watch_composition=self.other_composition,
+            watch_period=self.period,
+            version=1,
+            source_revision=self.revision,
+            source_type='rotation_collection',
+            source_id='M5-MISMATCH',
+            source_snapshot={'period': self.period.pk},
+            input_fingerprint='2' * 64,
+            created_by=self.actor,
+        )
+        with self.assertRaises(ValidationError):
+            mismatched.save()
+
+        invalid_fingerprint = SettlementCohort(
+            watch_composition=self.composition,
+            watch_period=self.period,
+            version=1,
+            source_revision=self.revision,
+            source_type='rotation_collection',
+            source_id='M5-FINGERPRINT',
+            source_snapshot={'period': self.period.pk},
+            input_fingerprint='not-a-sha256',
+            created_by=self.actor,
+        )
+        with self.assertRaises(ValidationError):
+            invalid_fingerprint.save()
+
+    def test_membership_requires_provenance_reason_and_related_period(self):
+        cohort = self.create_cohort()
+        with self.assertRaises(ValidationError):
+            self.add_member(
+                cohort,
+                participation_status=SettlementCohortMember.ParticipationStatus.EXTENDED,
+                reason='',
+            )
+
+        unrelated_start = timezone.make_aware(datetime(2029, 1, 1))
+        unrelated_end = timezone.make_aware(datetime(2029, 1, 2))
+        with self.assertRaises(ValidationError):
+            add_settlement_cohort_member(
+                cohort_id=cohort.pk,
+                employee_id=self.employee.pk,
+                arrival_at=unrelated_start,
+                departure_at=unrelated_end,
+                participation_status=SettlementCohortMember.ParticipationStatus.PARTICIPATING,
+                source_revision_id=self.revision.pk,
+                basis_type='manual_confirmation',
+                basis_id='M5-UNRELATED',
+                basis_snapshot={'reason': 'unrelated'},
+            )
+        self.assertEqual(cohort.members.count(), 0)
+
+    def test_approval_revalidates_employee_composition_and_source_revision(self):
+        cohort = self.create_cohort()
+        self.add_member(cohort)
+        self.employee.watch_composition = self.other_composition
+        self.employee.save(update_fields=['watch_composition'])
+
+        with self.assertRaises(ValidationError):
+            self.approve(cohort)
+        cohort.refresh_from_db()
+        self.assertEqual(cohort.status, SettlementCohort.Status.DRAFT)
+
+    def test_approved_lifecycle_is_immutable_and_historical_rows_are_protected(self):
+        cohort = self.create_cohort()
+        member = self.add_member(cohort)
+        self.approve(cohort)
+        cohort.refresh_from_db()
+        self.assertEqual(cohort.status, SettlementCohort.Status.APPROVED)
+        self.assertEqual(cohort.approved_by_id, self.actor.pk)
+
+        cohort.status = SettlementCohort.Status.DRAFT
+        with self.assertRaises(ValidationError):
+            cohort.save()
+        member.reason = 'silent rewrite'
+        with self.assertRaises(ValidationError):
+            member.save()
+        with self.assertRaises(ProtectedError), transaction.atomic():
+            member.delete()
+        with self.assertRaises(ProtectedError), transaction.atomic():
+            cohort.delete()
+
+    def test_public_mass_writes_are_forbidden(self):
+        cohort = self.create_cohort()
+        member = self.add_member(cohort)
+        with self.assertRaisesMessage(ValidationError, 'Массовые изменения cohort'):
+            SettlementCohort.objects.filter(pk=cohort.pk).update(source_id='changed')
+        with self.assertRaisesMessage(ValidationError, 'Массовые изменения cohort'):
+            SettlementCohortMember.objects.bulk_update([member], ['reason'])
+
+    def test_employee_cannot_have_overlapping_approved_memberships(self):
+        first = self.create_cohort()
+        self.add_member(first)
+        self.approve(first)
+
+        second = self.create_cohort(period=self.overlap_period, fingerprint_char='2')
+        self.add_member(second, period=self.overlap_period)
+        with self.assertRaisesMessage(ValidationError, 'пересекающегося периода'):
+            self.approve(second)
+        second.refresh_from_db()
+        self.assertEqual(second.status, SettlementCohort.Status.DRAFT)
+
+    def test_non_arrival_does_not_create_conflicting_accommodation_scope(self):
+        first = self.create_cohort()
+        self.add_member(first)
+        self.approve(first)
+
+        second = self.create_cohort(period=self.overlap_period, fingerprint_char='2')
+        self.add_member(
+            second,
+            period=self.overlap_period,
+            participation_status=SettlementCohortMember.ParticipationStatus.NOT_ARRIVING,
+            reason='Подтверждённый незаезд',
+        )
+        self.approve(second)
+        second.refresh_from_db()
+        self.assertEqual(second.status, SettlementCohort.Status.APPROVED)
+
+    def test_non_overlapping_watch_periods_allow_separate_approved_memberships(self):
+        first = self.create_cohort()
+        self.add_member(first)
+        self.approve(first)
+
+        second = self.create_cohort(period=self.next_period, fingerprint_char='2')
+        self.add_member(second, period=self.next_period)
+        self.approve(second)
+        self.assertEqual(
+            SettlementCohort.objects.filter(status=SettlementCohort.Status.APPROVED).count(),
+            2,
+        )
+
+    def test_superseding_version_preserves_history_and_replaces_approved_scope(self):
+        first = self.create_cohort()
+        self.add_member(first)
+        self.approve(first)
+
+        replacement = self.create_cohort(supersedes=first, fingerprint_char='2')
+        self.add_member(replacement)
+        self.approve(replacement)
+
+        first.refresh_from_db()
+        replacement.refresh_from_db()
+        self.assertEqual(first.status, SettlementCohort.Status.SUPERSEDED)
+        self.assertIsNotNone(first.superseded_at)
+        self.assertEqual(replacement.status, SettlementCohort.Status.APPROVED)
+        self.assertEqual(replacement.version, 2)
+        self.assertEqual(replacement.supersedes_id, first.pk)
+        self.assertEqual(first.replacements.get().pk, replacement.pk)
+
+    def test_supersede_failure_rolls_back_previous_status(self):
+        first = self.create_cohort()
+        self.add_member(first)
+        self.approve(first)
+        replacement = self.create_cohort(supersedes=first, fingerprint_char='2')
+        self.add_member(replacement)
+
+        original_save = SettlementCohort.save
+
+        def fail_target(instance, *args, **kwargs):
+            if instance.pk == replacement.pk and instance.status == SettlementCohort.Status.APPROVED:
+                raise RuntimeError('M5 injected approval failure')
+            return original_save(instance, *args, **kwargs)
+
+        with mock.patch.object(SettlementCohort, 'save', autospec=True, side_effect=fail_target):
+            with self.assertRaisesMessage(RuntimeError, 'M5 injected approval failure'):
+                self.approve(replacement)
+
+        first.refresh_from_db()
+        replacement.refresh_from_db()
+        self.assertEqual(first.status, SettlementCohort.Status.APPROVED)
+        self.assertIsNone(first.superseded_at)
+        self.assertEqual(replacement.status, SettlementCohort.Status.DRAFT)
+
+    def test_deterministic_identity_constraints_and_indexes_are_declared(self):
+        cohort_constraints = {item.name for item in SettlementCohort._meta.constraints}
+        member_constraints = {item.name for item in SettlementCohortMember._meta.constraints}
+        cohort_indexes = {item.name for item in SettlementCohort._meta.indexes}
+        member_indexes = {item.name for item in SettlementCohortMember._meta.indexes}
+
+        self.assertIn('unique_cohort_watch_period_version', cohort_constraints)
+        self.assertIn('unique_approved_cohort_per_watch', cohort_constraints)
+        self.assertIn('unique_employee_per_cohort', member_constraints)
+        self.assertIn('cohort_member_period_non_empty', member_constraints)
+        self.assertEqual(
+            cohort_indexes,
+            {'cohort_period_status_ver_idx', 'cohort_composition_status_idx'},
+        )
+        self.assertEqual(
+            member_indexes,
+            {'cohort_member_employee_idx', 'cohort_member_scope_idx'},
+        )
+
+    def test_m5_does_not_write_m4_or_occupancy_models(self):
+        baseline = (
+            AccommodationAnchorCalendarSlot.objects.count(),
+            EmployeeAccommodationBinding.objects.count(),
+            PhysicalRoom.objects.count(),
+            PhysicalBed.objects.count(),
+            EmployeeBedOccupancy.objects.count(),
+        )
+        cohort = self.create_cohort()
+        self.add_member(cohort)
+        self.approve(cohort)
+        self.assertEqual(
+            baseline,
+            (
+                AccommodationAnchorCalendarSlot.objects.count(),
+                EmployeeAccommodationBinding.objects.count(),
+                PhysicalRoom.objects.count(),
+                PhysicalBed.objects.count(),
+                EmployeeBedOccupancy.objects.count(),
+            ),
+        )

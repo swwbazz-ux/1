@@ -1731,6 +1731,424 @@ def protect_historical_m4_rows(sender, instance, using, origin, **kwargs):
         )
 
 
+class M5CohortQuerySet(models.QuerySet):
+    MASS_WRITE_FORBIDDEN_CODE = 'settlement_cohort_mass_write_forbidden'
+    MASS_WRITE_FORBIDDEN_MESSAGE = (
+        'Массовые изменения cohort и membership запрещены. '
+        'Используйте доменные команды M5.'
+    )
+
+    def _raise_mass_write_forbidden(self):
+        raise ValidationError(
+            self.MASS_WRITE_FORBIDDEN_MESSAGE,
+            code=self.MASS_WRITE_FORBIDDEN_CODE,
+        )
+
+    def update(self, **kwargs):
+        self._raise_mass_write_forbidden()
+
+    def bulk_create(
+        self,
+        objs,
+        batch_size=None,
+        ignore_conflicts=False,
+        update_conflicts=False,
+        update_fields=None,
+        unique_fields=None,
+    ):
+        self._raise_mass_write_forbidden()
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        self._raise_mass_write_forbidden()
+
+
+class SettlementCohort(StableIdentifierModel):
+    class Status(models.TextChoices):
+        DRAFT = 'draft', 'Черновик'
+        APPROVED = 'approved', 'Утверждён'
+        SUPERSEDED = 'superseded', 'Заменён новой версией'
+
+    objects = M5CohortQuerySet.as_manager()
+
+    watch_composition = models.ForeignKey(
+        'users.WatchComposition',
+        verbose_name='Утверждённый состав вахты',
+        on_delete=models.PROTECT,
+        related_name='settlement_cohorts',
+    )
+    watch_period = models.ForeignKey(
+        'shifts.WatchPeriod',
+        verbose_name='Конкретный период вахты',
+        on_delete=models.PROTECT,
+        related_name='settlement_cohorts',
+    )
+    version = models.PositiveIntegerField('Версия состава')
+    status = models.CharField(
+        'Статус',
+        max_length=16,
+        choices=Status.choices,
+        default=Status.DRAFT,
+        db_index=True,
+    )
+    source_revision = models.ForeignKey(
+        SettlementRevision,
+        verbose_name='Ревизия-основание',
+        on_delete=models.PROTECT,
+        related_name='settlement_cohorts',
+    )
+    source_type = models.CharField('Тип источника', max_length=64)
+    source_id = models.CharField('Идентификатор источника', max_length=128)
+    source_snapshot = models.JSONField('Неизменяемый снимок источника')
+    input_fingerprint = models.CharField(
+        'Отпечаток входного состава',
+        max_length=64,
+        validators=[
+            RegexValidator(
+                regex=r'^[0-9a-f]{64}$',
+                message='Отпечаток состава должен быть SHA-256 в нижнем регистре.',
+            ),
+        ],
+    )
+    created_by = models.ForeignKey(
+        'users.Employee',
+        verbose_name='Кем зафиксирована версия',
+        on_delete=models.PROTECT,
+        related_name='created_settlement_cohorts',
+    )
+    approved_by = models.ForeignKey(
+        'users.Employee',
+        verbose_name='Кем утверждена версия',
+        on_delete=models.PROTECT,
+        related_name='approved_settlement_cohorts',
+        null=True,
+        blank=True,
+    )
+    approved_at = models.DateTimeField('Когда утверждена', null=True, blank=True)
+    supersedes = models.ForeignKey(
+        'self',
+        verbose_name='Заменяет версию состава',
+        on_delete=models.PROTECT,
+        related_name='replacements',
+        null=True,
+        blank=True,
+    )
+    superseded_at = models.DateTimeField('Когда заменена', null=True, blank=True)
+    created_at = models.DateTimeField('Создана', auto_now_add=True)
+    updated_at = models.DateTimeField('Изменена', auto_now=True)
+
+    class Meta:
+        verbose_name = 'Жилищная версия состава заезда'
+        verbose_name_plural = 'Жилищные версии составов заезда'
+        ordering = ['watch_period_id', 'version', 'pk']
+        indexes = [
+            models.Index(
+                fields=['watch_period', 'status', 'version'],
+                name='cohort_period_status_ver_idx',
+            ),
+            models.Index(
+                fields=['watch_composition', 'status'],
+                name='cohort_composition_status_idx',
+            ),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['watch_period', 'version'],
+                name='unique_cohort_watch_period_version',
+            ),
+            models.UniqueConstraint(
+                fields=['watch_period'],
+                condition=models.Q(status='approved'),
+                name='unique_approved_cohort_per_watch',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(version__gte=1),
+                name='cohort_version_gte_1',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        status='draft',
+                        approved_by__isnull=True,
+                        approved_at__isnull=True,
+                        superseded_at__isnull=True,
+                    )
+                    | models.Q(
+                        status='approved',
+                        approved_by__isnull=False,
+                        approved_at__isnull=False,
+                        superseded_at__isnull=True,
+                    )
+                    | models.Q(
+                        status='superseded',
+                        approved_by__isnull=False,
+                        approved_at__isnull=False,
+                        superseded_at__isnull=False,
+                    )
+                ),
+                name='cohort_lifecycle_metadata',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(supersedes__isnull=True) | ~models.Q(pk=models.F('supersedes_id')),
+                name='cohort_not_self_supersede',
+            ),
+        ]
+
+    @property
+    def calendar_relation_is_stale(self):
+        return self.watch_period.watch_composition_id != self.watch_composition_id
+
+    def clean(self):
+        super().clean()
+        errors = {}
+        if self._state.adding and self.status != self.Status.DRAFT:
+            errors['status'] = 'Cohort создаётся только как DRAFT и утверждается доменной командой.'
+        if self.watch_period_id and self.watch_composition_id:
+            if self.watch_period.watch_composition_id != self.watch_composition_id:
+                errors['watch_composition'] = 'WatchPeriod не принадлежит указанному WatchComposition.'
+        if not self.source_type:
+            errors['source_type'] = 'Тип источника cohort обязателен.'
+        if not self.source_id:
+            errors['source_id'] = 'Идентификатор источника cohort обязателен.'
+        if not isinstance(self.source_snapshot, dict) or not self.source_snapshot:
+            errors['source_snapshot'] = 'Снимок источника cohort должен быть непустым объектом.'
+        if self.status in {self.Status.APPROVED, self.Status.SUPERSEDED}:
+            if self.source_revision.status != SettlementRevision.Status.CONFIRMED:
+                errors['source_revision'] = 'Утверждённый cohort требует подтверждённой ревизии.'
+            if not self.approved_by_id or not self.approved_at:
+                errors['approved_by'] = 'Утверждённый cohort требует автора и времени утверждения.'
+        if self.supersedes_id:
+            previous = self.supersedes
+            if previous.watch_period_id != self.watch_period_id:
+                errors['supersedes'] = 'Новая версия cohort должна относиться к тому же WatchPeriod.'
+            elif previous.watch_composition_id != self.watch_composition_id:
+                errors['supersedes'] = 'Новая версия cohort должна сохранять WatchComposition.'
+            elif self.version != previous.version + 1:
+                errors['version'] = 'Версия cohort должна следовать непосредственно за заменяемой.'
+        elif self.version != 1:
+            errors['version'] = 'Первая версия cohort должна иметь номер 1.'
+        if errors:
+            raise ValidationError(errors)
+
+    def _validate_existing_state(self):
+        if not self.pk:
+            return
+        original = type(self)._base_manager.filter(pk=self.pk).values(
+            'stable_id', 'watch_composition_id', 'watch_period_id', 'version',
+            'source_revision_id', 'source_type', 'source_id', 'source_snapshot',
+            'input_fingerprint', 'created_by_id', 'supersedes_id', 'status',
+            'approved_by_id', 'approved_at', 'superseded_at',
+        ).first()
+        if original is None:
+            return
+        errors = {}
+        for field_name in (
+            'stable_id', 'watch_composition_id', 'watch_period_id', 'version',
+            'source_revision_id', 'source_type', 'source_id', 'source_snapshot',
+            'input_fingerprint', 'created_by_id', 'supersedes_id',
+        ):
+            if original[field_name] != getattr(self, field_name):
+                errors[field_name.removesuffix('_id')] = 'Смысловые поля cohort после создания неизменяемы.'
+        allowed = {
+            self.Status.DRAFT: {self.Status.DRAFT, self.Status.APPROVED},
+            self.Status.APPROVED: {self.Status.APPROVED, self.Status.SUPERSEDED},
+            self.Status.SUPERSEDED: {self.Status.SUPERSEDED},
+        }
+        if self.status not in allowed[original['status']]:
+            errors['status'] = 'Недопустимый переход статуса cohort.'
+        for field_name in ('approved_by_id', 'approved_at', 'superseded_at'):
+            if original[field_name] is not None and original[field_name] != getattr(self, field_name):
+                errors[field_name.removesuffix('_id')] = 'Исторические реквизиты cohort неизменяемы.'
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        with transaction.atomic():
+            if self.pk:
+                type(self)._base_manager.select_for_update().get(pk=self.pk)
+            self._validate_existing_state()
+            self.full_clean()
+            return super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f'{self.watch_period}: cohort v{self.version}'
+
+
+class SettlementCohortMember(StableIdentifierModel):
+    class ParticipationStatus(models.TextChoices):
+        PARTICIPATING = 'participating', 'Участвует в заезде'
+        NOT_ARRIVING = 'not_arriving', 'Не заезжает'
+        EXTENDED = 'extended', 'Продление'
+        ADDITIONAL = 'additional', 'Дополнительный сотрудник'
+
+    ACTIVE_PARTICIPATION_STATUSES = (
+        ParticipationStatus.PARTICIPATING,
+        ParticipationStatus.EXTENDED,
+        ParticipationStatus.ADDITIONAL,
+    )
+
+    objects = M5CohortQuerySet.as_manager()
+
+    cohort = models.ForeignKey(
+        SettlementCohort,
+        verbose_name='Версия состава заезда',
+        on_delete=models.CASCADE,
+        related_name='members',
+    )
+    employee = models.ForeignKey(
+        'users.Employee',
+        verbose_name='Сотрудник',
+        on_delete=models.PROTECT,
+        related_name='settlement_cohort_memberships',
+    )
+    arrival_at = models.DateTimeField('Прибытие')
+    departure_at = models.DateTimeField('Выбытие')
+    participation_status = models.CharField(
+        'Статус участия',
+        max_length=16,
+        choices=ParticipationStatus.choices,
+        default=ParticipationStatus.PARTICIPATING,
+        db_index=True,
+    )
+    reason = models.CharField('Причина изменения', max_length=255, blank=True)
+    expected_schedule_regime = models.CharField(
+        'Ожидаемый режим графика snapshot',
+        max_length=64,
+        blank=True,
+    )
+    source_revision = models.ForeignKey(
+        SettlementRevision,
+        verbose_name='Ревизия-основание строки',
+        on_delete=models.PROTECT,
+        related_name='settlement_cohort_members',
+    )
+    basis_type = models.CharField('Тип основания', max_length=64)
+    basis_id = models.CharField('Идентификатор основания', max_length=128)
+    basis_snapshot = models.JSONField('Неизменяемый снимок основания')
+    production_context_snapshot = models.JSONField(
+        'Снимок производственного контекста',
+        default=dict,
+        blank=True,
+    )
+    created_at = models.DateTimeField('Создана', auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Строка жилищного состава заезда'
+        verbose_name_plural = 'Строки жилищного состава заезда'
+        ordering = ['cohort_id', 'employee_id', 'pk']
+        indexes = [
+            models.Index(
+                fields=['employee', 'participation_status', 'arrival_at'],
+                name='cohort_member_employee_idx',
+            ),
+            models.Index(
+                fields=['cohort', 'participation_status'],
+                name='cohort_member_scope_idx',
+            ),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['cohort', 'employee'],
+                name='unique_employee_per_cohort',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(departure_at__gt=models.F('arrival_at')),
+                name='cohort_member_period_non_empty',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    participation_status__in=[
+                        'participating', 'not_arriving', 'extended', 'additional',
+                    ],
+                ),
+                name='cohort_member_status_valid',
+            ),
+        ]
+
+    @property
+    def participates_in_accommodation(self):
+        return self.participation_status in self.ACTIVE_PARTICIPATION_STATUSES
+
+    def clean(self):
+        super().clean()
+        errors = {}
+        if self.arrival_at and self.departure_at and self.departure_at <= self.arrival_at:
+            errors['departure_at'] = 'Выбытие должно быть позже прибытия.'
+        if not self.basis_type:
+            errors['basis_type'] = 'Тип основания membership обязателен.'
+        if not self.basis_id:
+            errors['basis_id'] = 'Идентификатор основания membership обязателен.'
+        if not isinstance(self.basis_snapshot, dict) or not self.basis_snapshot:
+            errors['basis_snapshot'] = 'Снимок основания membership должен быть непустым объектом.'
+        if self.participation_status != self.ParticipationStatus.PARTICIPATING and not self.reason:
+            errors['reason'] = 'Незаезд, продление или дополнительное участие требуют причины.'
+        if self.cohort_id:
+            cohort = self.cohort
+            period_start = timezone.make_aware(
+                datetime.combine(cohort.watch_period.starts_on, time.min),
+                timezone.get_current_timezone(),
+            )
+            period_end = timezone.make_aware(
+                datetime.combine(cohort.watch_period.ends_on + timedelta(days=1), time.min),
+                timezone.get_current_timezone(),
+            )
+            if self.arrival_at and self.departure_at:
+                if self.departure_at <= period_start or self.arrival_at >= period_end:
+                    errors['arrival_at'] = 'Период membership должен пересекать связанный WatchPeriod.'
+            if self._state.adding:
+                if cohort.status != SettlementCohort.Status.DRAFT:
+                    errors['cohort'] = 'Membership добавляется только в DRAFT cohort.'
+                if self.employee.watch_composition_id != cohort.watch_composition_id:
+                    errors['employee'] = 'Сотрудник не принадлежит WatchComposition cohort.'
+        if errors:
+            raise ValidationError(errors)
+
+    def _validate_existing_state(self):
+        if not self.pk:
+            return
+        original = type(self)._base_manager.filter(pk=self.pk).values(
+            'stable_id', 'cohort_id', 'employee_id', 'arrival_at', 'departure_at',
+            'participation_status', 'reason', 'expected_schedule_regime',
+            'source_revision_id', 'basis_type', 'basis_id', 'basis_snapshot',
+            'production_context_snapshot',
+        ).first()
+        if original is None:
+            return
+        errors = {}
+        for field_name, original_value in original.items():
+            if original_value != getattr(self, field_name):
+                errors[field_name.removesuffix('_id')] = 'Строка membership после создания неизменяема.'
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        with transaction.atomic():
+            if self.pk:
+                type(self)._base_manager.select_for_update().get(pk=self.pk)
+            self._validate_existing_state()
+            self.full_clean()
+            return super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f'{self.cohort} / {self.employee}'
+
+
+@receiver(pre_delete, sender=SettlementCohort)
+@receiver(pre_delete, sender=SettlementCohortMember)
+def protect_historical_m5_rows(sender, instance, using, origin, **kwargs):
+    cohort = instance if sender is SettlementCohort else instance.cohort
+    persisted_status = (
+        SettlementCohort._base_manager.using(using)
+        .filter(pk=cohort.pk)
+        .values_list('status', flat=True)
+        .first()
+    )
+    if persisted_status in {SettlementCohort.Status.APPROVED, SettlementCohort.Status.SUPERSEDED}:
+        raise ProtectedError(
+            'Утверждённые и заменённые строки M5 удалять нельзя.',
+            [instance],
+        )
+
+
 class PhysicalRoom(models.Model):
     class RoomType(models.TextChoices):
         STANDARD = 'standard', 'Стандартная'
