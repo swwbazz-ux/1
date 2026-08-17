@@ -43,7 +43,7 @@ from users.active_role import (
     ACTIVE_ROLE_GENERATION_SESSION_KEY,
     ACTIVE_ROLE_SESSION_KEY,
 )
-from users.models import Employee, EmployeeAccess, Role, WatchComposition
+from users.models import Employee, EmployeeAccess, PersonnelPosition, Role, WatchComposition
 
 from .admin import PhysicalRoomAdmin
 from .calendar_bindings import (
@@ -86,6 +86,7 @@ from .residents import (
     reactivate_external_resident,
     update_external_resident,
 )
+from .resolver import resolve_settlement_cohort
 from .services import (
     build_auto_settlement_preview,
     current_roster_resolution,
@@ -9250,3 +9251,842 @@ class ResidentSubjectTransitionMigrationTests(TransactionTestCase):
             apps.get_model('settlement', 'SettlementCohortMember')
             .objects.filter(resident_id=external.pk).exists()
         )
+
+
+class M6SettlementResolverTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.now = timezone.now().replace(microsecond=0)
+        cls.composition = WatchComposition.objects.create(
+            code='m6-composition',
+            name='M6 нормативный состав',
+        )
+        cls.period = WatchPeriod.objects.create(
+            name='M6 период',
+            watch_composition=cls.composition,
+            starts_on=datetime(2031, 1, 1).date(),
+            ends_on=datetime(2031, 1, 31).date(),
+        )
+        cls.actor = Employee.objects.create(
+            full_name='ДЕМО M6 Делопроизводитель',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+            watch_composition=cls.composition,
+        )
+        cls.role = Role.objects.create(code='m6-clerk', name='M6 actor')
+        cls.access = EmployeeAccess.objects.create(
+            employee=cls.actor,
+            role=cls.role,
+            access_code='M6-CLERK',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+        cls.source = SettlementSource.objects.create(
+            source_type=SettlementSource.SourceType.DOCUMENT,
+            title='M6 нормативное основание',
+            version='1',
+            file_sha256='6' * 64,
+            status=SettlementSource.Status.CONFIRMED,
+            confirmed_at=cls.now,
+            confirmed_by_label='Архитектор M6',
+        )
+        cls.revision = SettlementRevision.objects.create(
+            code='M6-REV-1',
+            source=cls.source,
+            status=SettlementRevision.Status.CONFIRMED,
+            effective_at=cls.now,
+            confirmed_at=cls.now,
+            confirmed_by_label='Архитектор M6',
+            reason='Read-only resolver M6.',
+        )
+        cls.dormitory = Dormitory.objects.create(number='M6')
+        cls.position = PersonnelPosition.objects.create(
+            code='m6-position',
+            name='M6 нормативная должность',
+        )
+        cls.rooms = []
+        cls.beds = []
+        cls.anchors = []
+        starts_at = timezone.make_aware(datetime(2031, 1, 1))
+        for room_number in range(1, 4):
+            room = PhysicalRoom.objects.create(
+                dormitory=cls.dormitory,
+                floor=1,
+                number=room_number,
+                transfer_status=PhysicalRoom.TransferStatus.TRANSFERRED,
+                capacity=3,
+                corridor_side=(
+                    PhysicalRoom.CorridorSide.LEFT
+                    if room_number % 2 else PhysicalRoom.CorridorSide.RIGHT
+                ),
+                side_position=(room_number + 1) // 2,
+            )
+            cls.rooms.append(room)
+            room_beds = []
+            room_anchors = []
+            for position in range(1, 4):
+                bed = PhysicalBed.objects.create(
+                    room=room,
+                    stable_id=f'M6-R{room_number:02d}-A{position}',
+                    block=PhysicalBed.Block.A,
+                    position=position,
+                )
+                anchor = AccommodationAnchor.objects.create(
+                    code=f'M6-ANCHOR-R{room_number:02d}-{position}',
+                    display_name=f'M6 место {room_number}/{position}',
+                    anchor_type=AccommodationAnchor.AnchorType.GROUP,
+                    group_key=f'm6-room-{room_number}',
+                    personnel_position=(cls.position if room_number == 3 else None),
+                    ordinal=position,
+                    status=AccommodationAnchor.Status.ACTIVE,
+                    created_revision=cls.revision,
+                )
+                AccommodationAnchorBedAssignment.objects.create(
+                    anchor=anchor,
+                    physical_bed=bed,
+                    valid_from=starts_at,
+                    status=AccommodationAnchorBedAssignment.Status.CONFIRMED,
+                    started_revision=cls.revision,
+                )
+                room_beds.append(bed)
+                room_anchors.append(anchor)
+            cls.beds.append(room_beds)
+            cls.anchors.append(room_anchors)
+
+        cls.employee = Employee.objects.create(
+            full_name='ДЕМО M6 Внутренний',
+            sex=Employee.Sex.MALE,
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+            watch_composition=cls.composition,
+        )
+        cls.internal_resident, _ = get_or_create_employee_resident(
+            employee_id=cls.employee.pk,
+        )
+        cls.position_employee = Employee.objects.create(
+            full_name='ДЕМО M6 Должностной anchor',
+            sex=Employee.Sex.MALE,
+            personnel_position=cls.position,
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+            watch_composition=cls.composition,
+        )
+        cls.position_resident, _ = get_or_create_employee_resident(
+            employee_id=cls.position_employee.pk,
+        )
+        cls.external_a = cls._external('ДЕМО M6 Внешний A', ' Организация Альфа ')
+        cls.external_a2 = cls._external('ДЕМО M6 Внешний A2', 'организация альфа')
+        cls.external_b = cls._external('ДЕМО M6 Внешний B', 'Организация Бета')
+        cls.external_c = cls._external('ДЕМО M6 Внешний C', 'Организация Гамма')
+
+    @classmethod
+    def _external(cls, name, organization):
+        return SettlementResident.objects.create(
+            resident_type=SettlementResident.ResidentType.CONTRACTOR,
+            full_name=name,
+            position_title='Подрядчик',
+            organization=organization,
+            phone='+7 900 000-00-06',
+            created_by_access=cls.access,
+        )
+
+    def _cohort(self, *residents, approve=True):
+        fingerprint_char = str((SettlementCohort.objects.count() % 9) + 1)
+        cohort = create_settlement_cohort(
+            watch_period_id=self.period.pk,
+            source_revision_id=self.revision.pk,
+            source_type='m6_test',
+            source_id=f'M6-COHORT-{SettlementCohort.objects.count() + 1}',
+            source_snapshot={'period_id': self.period.pk},
+            input_fingerprint=fingerprint_char * 64,
+            created_by_id=self.actor.pk,
+        )
+        arrival = timezone.make_aware(datetime(2031, 1, 1))
+        departure = timezone.make_aware(datetime(2031, 2, 1))
+        for resident in residents:
+            add_settlement_cohort_member(
+                cohort_id=cohort.pk,
+                resident_id=resident.pk,
+                arrival_at=arrival,
+                departure_at=departure,
+                participation_status=(
+                    SettlementCohortMember.ParticipationStatus.PARTICIPATING
+                ),
+                reason='',
+                expected_schedule_regime='',
+                source_revision_id=self.revision.pk,
+                basis_type='m6_test',
+                basis_id=f'M6-MEMBER-{cohort.pk}-{resident.pk}',
+                basis_snapshot={'resident_id': resident.pk},
+                production_context_snapshot={'must_not_be_authority': True},
+            )
+        if approve:
+            cohort = approve_settlement_cohort(
+                cohort_id=cohort.pk,
+                approved_by_id=self.actor.pk,
+                approved_at=self.now,
+            )
+        return cohort
+
+    def _slot(self, room_index, bed_index):
+        anchor = self.anchors[room_index][bed_index]
+        slot = create_calendar_slot(
+            anchor_id=anchor.pk,
+            watch_period_id=self.period.pk,
+            source_revision_id=self.revision.pk,
+        )
+        return confirm_calendar_slot(
+            slot_id=slot.pk,
+            approved_by_id=self.actor.pk,
+            approved_at=self.now,
+        )
+
+    def _binding(self, resident, slot):
+        binding = create_employee_accommodation_binding(
+            resident_id=resident.pk,
+            calendar_slot_id=slot.pk,
+            valid_from=self.period.starts_on,
+            valid_to=self.period.ends_on,
+            basis_type='m6_test_binding',
+            basis_id=f'M6-BINDING-{resident.pk}-{slot.pk}',
+            basis_snapshot={'resident_id': resident.pk, 'slot_id': slot.pk},
+            source_revision_id=self.revision.pk,
+        )
+        return confirm_employee_accommodation_binding(
+            binding_id=binding.pk,
+            approved_by_id=self.actor.pk,
+            approved_at=self.now,
+        )
+
+    def _seed_room(self, resident, room_index, *, free_slots=1):
+        slots = [self._slot(room_index, index) for index in range(free_slots + 1)]
+        self._binding(resident, slots[0])
+        return slots
+
+    def _equipment(self, suffix, *, active=True):
+        equipment_type, _ = EquipmentType.objects.get_or_create(
+            name=f'M6 Equipment Type {suffix}',
+        )
+        return Equipment.objects.create(
+            equipment_type=equipment_type,
+            garage_number=f'M6-EQ-{suffix}',
+            is_active=active,
+        )
+
+    def _equipment_assignment(
+        self,
+        employee,
+        equipment,
+        *,
+        shift_type=WorkShiftType.SHIFT_1,
+        status=AssignmentStatus.ACCEPTED,
+        accepted_at=None,
+    ):
+        return EquipmentAssignment.objects.create(
+            employee=employee,
+            role=self.role,
+            equipment=equipment,
+            shift_type=shift_type,
+            status=status,
+            accepted_at=accepted_at if accepted_at is not None else self.now,
+        )
+
+    def _equipment_route(
+        self,
+        equipment,
+        *,
+        physical_bed=None,
+        period=None,
+        anchor_status=AccommodationAnchor.Status.ACTIVE,
+        create_assignment=True,
+        create_slot=True,
+        suffix='1',
+    ):
+        if physical_bed is None:
+            physical_bed = self._equipment_bed(suffix)
+        anchor = AccommodationAnchor.objects.create(
+            code=f'M6-EQUIPMENT-ANCHOR-{suffix}',
+            display_name=f'M6 equipment anchor {suffix}',
+            anchor_type=AccommodationAnchor.AnchorType.EQUIPMENT,
+            equipment=equipment,
+            status=anchor_status,
+            created_revision=self.revision,
+        )
+        anchor_assignment = None
+        if create_assignment:
+            anchor_assignment = AccommodationAnchorBedAssignment.objects.create(
+                anchor=anchor,
+                physical_bed=physical_bed,
+                valid_from=timezone.make_aware(datetime(2031, 1, 1)),
+                status=AccommodationAnchorBedAssignment.Status.CONFIRMED,
+                started_revision=self.revision,
+            )
+        slot = None
+        if create_slot:
+            slot = create_calendar_slot(
+                anchor_id=anchor.pk,
+                watch_period_id=(period or self.period).pk,
+                source_revision_id=self.revision.pk,
+            )
+            slot = confirm_calendar_slot(
+                slot_id=slot.pk,
+                approved_by_id=self.actor.pk,
+                approved_at=self.now,
+            )
+        return anchor, anchor_assignment, slot
+
+    def _equipment_bed(self, suffix, *, room=None, block=PhysicalBed.Block.A, position=1):
+        if room is None:
+            sequence = PhysicalRoom.objects.count() + 100
+            room = PhysicalRoom.objects.create(
+                dormitory=self.dormitory,
+                floor=2,
+                number=sequence,
+                transfer_status=PhysicalRoom.TransferStatus.TRANSFERRED,
+                capacity=1,
+                corridor_side=PhysicalRoom.CorridorSide.LEFT,
+                side_position=sequence,
+            )
+        return PhysicalBed.objects.create(
+            room=room,
+            stable_id=f'M6-EQUIPMENT-BED-{suffix}',
+            block=block,
+            position=position,
+        )
+
+    def test_approved_cohort_is_required(self):
+        cohort = self._cohort(self.external_a, approve=False)
+        result = resolve_settlement_cohort(cohort_id=cohort.pk)
+        self.assertEqual(result.reason_codes, ('cohort_not_approved',))
+        self.assertEqual(result.placements, ())
+
+    def test_internal_resident_with_valid_binding_is_placed(self):
+        slot = self._slot(0, 0)
+        binding = self._binding(self.internal_resident, slot)
+        cohort = self._cohort(self.internal_resident)
+        result = resolve_settlement_cohort(cohort_id=cohort.pk)
+        self.assertEqual(len(result.placements), 1)
+        self.assertEqual(result.placements[0].binding_id, binding.pk)
+        self.assertEqual(result.placements[0].source_kind, 'confirmed_binding')
+
+    def test_internal_official_position_uses_matching_anchor(self):
+        self._slot(2, 0)
+        cohort = self._cohort(self.position_resident)
+        result = resolve_settlement_cohort(cohort_id=cohort.pk)
+        self.assertEqual(len(result.placements), 1)
+        self.assertEqual(result.placements[0].physical_room_id, self.rooms[2].pk)
+        self.assertEqual(result.placements[0].source_kind, 'official_position_anchor')
+
+    def test_internal_resident_uses_official_equipment_assignment(self):
+        equipment = self._equipment('ROUTE')
+        assignment = self._equipment_assignment(self.employee, equipment)
+        anchor, anchor_assignment, slot = self._equipment_route(
+            equipment,
+            suffix='ROUTE',
+        )
+        cohort = self._cohort(self.internal_resident)
+
+        result = resolve_settlement_cohort(cohort_id=cohort.pk)
+
+        self.assertEqual(len(result.placements), 1)
+        placement = result.placements[0]
+        self.assertEqual(placement.source_kind, 'official_equipment_assignment')
+        self.assertEqual(placement.equipment_assignment_id, assignment.pk)
+        self.assertEqual(placement.anchor_id, anchor.pk)
+        self.assertEqual(placement.anchor_bed_assignment_id, anchor_assignment.pk)
+        self.assertEqual(placement.calendar_slot_id, slot.pk)
+        self.assertEqual(
+            placement.physical_bed_id,
+            anchor_assignment.physical_bed_id,
+        )
+
+    def test_equipment_route_has_priority_over_position_route(self):
+        position_slot = self._slot(2, 0)
+        equipment = self._equipment('OVER-POSITION')
+        self._equipment_assignment(self.position_employee, equipment)
+        _anchor, route_assignment, _slot = self._equipment_route(
+            equipment,
+            suffix='OVER-POSITION',
+        )
+        cohort = self._cohort(self.position_resident)
+
+        result = resolve_settlement_cohort(cohort_id=cohort.pk)
+
+        self.assertEqual(result.placements[0].source_kind, 'official_equipment_assignment')
+        self.assertNotEqual(result.placements[0].calendar_slot_id, position_slot.pk)
+        self.assertEqual(
+            result.placements[0].physical_room_id,
+            route_assignment.physical_bed.room_id,
+        )
+
+    def test_confirmed_binding_has_priority_over_equipment_route(self):
+        binding_slot = self._slot(1, 0)
+        binding = self._binding(self.internal_resident, binding_slot)
+        equipment = self._equipment('UNDER-BINDING')
+        self._equipment_assignment(self.employee, equipment)
+        self._equipment_route(equipment, suffix='UNDER-BINDING')
+        cohort = self._cohort(self.internal_resident)
+
+        result = resolve_settlement_cohort(cohort_id=cohort.pk)
+
+        self.assertEqual(result.placements[0].source_kind, 'confirmed_binding')
+        self.assertEqual(result.placements[0].binding_id, binding.pk)
+        self.assertIsNone(result.placements[0].equipment_assignment_id)
+
+    def test_multiple_effective_equipment_assignments_are_controlled(self):
+        first_equipment = self._equipment('MULTI-1')
+        second_equipment = self._equipment('MULTI-2')
+        first = self._equipment_assignment(self.employee, first_equipment)
+        second = self._equipment_assignment(
+            self.employee,
+            second_equipment,
+            status=AssignmentStatus.PENDING,
+        )
+        second.status = AssignmentStatus.ACCEPTED
+        second.accepted_at = self.now
+        cohort = self._cohort(self.internal_resident)
+
+        with mock.patch(
+            'settlement.resolver._effective_equipment_assignments',
+            return_value=[second, first],
+        ):
+            result = resolve_settlement_cohort(cohort_id=cohort.pk)
+
+        self.assertEqual(
+            result.unresolved[0].reason_codes,
+            ('incomplete_authoritative_context',),
+        )
+        self.assertEqual(result.placements, ())
+
+    def test_ended_or_pending_equipment_assignment_is_not_used(self):
+        self._slot(2, 0)
+        equipment = self._equipment('INACTIVE-ASSIGNMENT')
+        pending = self._equipment_assignment(
+            self.position_employee,
+            equipment,
+            status=AssignmentStatus.PENDING,
+        )
+        EquipmentAssignment.objects.filter(pk=pending.pk).update(ended_at=self.now)
+        cohort = self._cohort(self.position_resident)
+
+        result = resolve_settlement_cohort(cohort_id=cohort.pk)
+
+        self.assertEqual(result.placements[0].source_kind, 'official_position_anchor')
+        self.assertIsNone(result.placements[0].equipment_assignment_id)
+
+    def test_inactive_equipment_is_controlled_without_position_fallback(self):
+        equipment = self._equipment('INACTIVE-EQUIPMENT', active=False)
+        self._equipment_assignment(self.position_employee, equipment)
+        self._equipment_route(equipment, suffix='INACTIVE-EQUIPMENT')
+        self._slot(2, 0)
+        cohort = self._cohort(self.position_resident)
+
+        result = resolve_settlement_cohort(cohort_id=cohort.pk)
+
+        self.assertEqual(
+            result.unresolved[0].reason_codes,
+            ('incomplete_authoritative_context',),
+        )
+        self.assertEqual(result.placements, ())
+
+    def test_missing_or_ambiguous_equipment_anchor_is_controlled(self):
+        equipment = self._equipment('ANCHOR-CONTROL')
+        self._equipment_assignment(self.employee, equipment)
+        cohort = self._cohort(self.internal_resident)
+        missing = resolve_settlement_cohort(cohort_id=cohort.pk)
+        self.assertEqual(missing.unresolved[0].reason_codes, ('resolver_not_configured',))
+
+        self._equipment_route(
+            equipment,
+            create_assignment=False,
+            create_slot=False,
+            suffix='ANCHOR-CONTROL-1',
+        )
+        self._equipment_route(
+            equipment,
+            create_assignment=False,
+            create_slot=False,
+            suffix='ANCHOR-CONTROL-2',
+        )
+        ambiguous = resolve_settlement_cohort(cohort_id=cohort.pk)
+        self.assertEqual(
+            ambiguous.unresolved[0].reason_codes,
+            ('incomplete_authoritative_context',),
+        )
+
+    def test_missing_or_ambiguous_anchor_bed_assignment_is_controlled(self):
+        equipment = self._equipment('BED-CONTROL')
+        self._equipment_assignment(self.employee, equipment)
+        anchor, _assignment, _slot = self._equipment_route(
+            equipment,
+            create_assignment=False,
+            create_slot=False,
+            suffix='BED-CONTROL',
+        )
+        cohort = self._cohort(self.internal_resident)
+        missing = resolve_settlement_cohort(cohort_id=cohort.pk)
+        self.assertEqual(missing.unresolved[0].reason_codes, ('resolver_not_configured',))
+
+        first_bed = self._equipment_bed('BED-CONTROL-1')
+        second_bed = self._equipment_bed('BED-CONTROL-2')
+        first = AccommodationAnchorBedAssignment.objects.create(
+            anchor=anchor,
+            physical_bed=first_bed,
+            valid_from=timezone.make_aware(datetime(2031, 1, 1)),
+            status=AccommodationAnchorBedAssignment.Status.CONFIRMED,
+            started_revision=self.revision,
+        )
+        second = AccommodationAnchorBedAssignment(
+            anchor=anchor,
+            physical_bed=second_bed,
+            valid_from=first.valid_from,
+            valid_to=timezone.make_aware(datetime(2031, 2, 1)),
+            status=AccommodationAnchorBedAssignment.Status.CONFIRMED,
+            started_revision=self.revision,
+            ended_revision=self.revision,
+        )
+        AccommodationAnchorBedAssignment._base_manager.bulk_create([second])
+        ambiguous = resolve_settlement_cohort(cohort_id=cohort.pk)
+        self.assertEqual(
+            ambiguous.unresolved[0].reason_codes,
+            ('incomplete_authoritative_context',),
+        )
+
+    def test_equipment_calendar_slot_must_match_cohort_period(self):
+        other_period = WatchPeriod.objects.create(
+            name='M6 другой период',
+            watch_composition=self.composition,
+            starts_on=datetime(2031, 2, 1).date(),
+            ends_on=datetime(2031, 2, 28).date(),
+        )
+        equipment = self._equipment('OTHER-PERIOD')
+        self._equipment_assignment(self.employee, equipment)
+        self._equipment_route(
+            equipment,
+            period=other_period,
+            suffix='OTHER-PERIOD',
+        )
+        cohort = self._cohort(self.internal_resident)
+
+        result = resolve_settlement_cohort(cohort_id=cohort.pk)
+
+        self.assertEqual(result.unresolved[0].reason_codes, ('resolver_not_configured',))
+
+    def test_equipment_calendar_slot_stale_relation_is_controlled(self):
+        equipment = self._equipment('STALE-SLOT')
+        self._equipment_assignment(self.employee, equipment)
+        self._equipment_route(equipment, suffix='STALE-SLOT')
+        cohort = self._cohort(self.internal_resident)
+        WatchPeriod.objects.filter(pk=self.period.pk).update(
+            ends_on=self.period.ends_on + timedelta(days=1),
+        )
+
+        result = resolve_settlement_cohort(cohort_id=cohort.pk)
+
+        self.assertEqual(result.unresolved[0].reason_codes, ('stale_calendar_relation',))
+
+    def test_equipment_route_preserves_transfer_sex_and_occupancy_guards(self):
+        equipment = self._equipment('HARD-GUARDS')
+        self._equipment_assignment(self.employee, equipment)
+        _anchor, route_assignment, _slot = self._equipment_route(
+            equipment,
+            suffix='HARD-GUARDS',
+        )
+        cohort = self._cohort(self.internal_resident)
+        route_room = route_assignment.physical_bed.room
+
+        route_room.sex_restriction = PhysicalRoom.SexRestriction.FEMALE_ONLY
+        route_room.save(update_fields=['sex_restriction'])
+        sex_result = resolve_settlement_cohort(cohort_id=cohort.pk)
+        self.assertEqual(sex_result.unresolved[0].reason_codes, ('hard_rule_conflict',))
+
+        route_room.sex_restriction = PhysicalRoom.SexRestriction.UNKNOWN
+        route_room.transfer_status = PhysicalRoom.TransferStatus.NOT_TRANSFERRED
+        route_room.save(update_fields=['sex_restriction', 'transfer_status'])
+        transfer_result = resolve_settlement_cohort(cohort_id=cohort.pk)
+        self.assertEqual(
+            transfer_result.unresolved[0].reason_codes,
+            ('hard_rule_conflict',),
+        )
+
+    def test_equipment_route_rejects_external_room_and_occupied_bed(self):
+        self._seed_room(self.external_a, 0, free_slots=1)
+        self.rooms[0].capacity = 6
+        self.rooms[0].save(update_fields=['capacity'])
+        equipment_bed = self._equipment_bed(
+            'ROOM-GUARDS',
+            room=self.rooms[0],
+            block=PhysicalBed.Block.B,
+            position=1,
+        )
+        equipment = self._equipment('ROOM-GUARDS')
+        self._equipment_assignment(self.employee, equipment)
+        self._equipment_route(
+            equipment,
+            physical_bed=equipment_bed,
+            suffix='ROOM-GUARDS',
+        )
+        cohort = self._cohort(self.external_a, self.internal_resident)
+        mixed = resolve_settlement_cohort(cohort_id=cohort.pk)
+        internal = next(
+            item for item in mixed.unresolved
+            if item.resident_id == self.internal_resident.pk
+        )
+        self.assertEqual(internal.reason_codes, ('hard_rule_conflict',))
+
+    def test_equipment_route_rejects_overlapping_occupancy(self):
+        equipment = self._equipment('OCCUPIED')
+        self._equipment_assignment(self.employee, equipment)
+        _anchor, route_assignment, _slot = self._equipment_route(
+            equipment,
+            suffix='OCCUPIED',
+        )
+        EmployeeBedOccupancy.objects.create(
+            employee=self.position_employee,
+            physical_bed=route_assignment.physical_bed,
+            assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
+            settled_by=self.actor,
+            starts_at=timezone.make_aware(datetime(2030, 12, 1)),
+        )
+        cohort = self._cohort(self.internal_resident)
+
+        result = resolve_settlement_cohort(cohort_id=cohort.pk)
+
+        self.assertEqual(result.unresolved[0].reason_codes, ('hard_rule_conflict',))
+        self.assertEqual(result.placements, ())
+
+    def test_day_and_night_never_create_two_identities_for_one_bed(self):
+        equipment = self._equipment('DAY-NIGHT')
+        self._equipment_assignment(
+            self.employee,
+            equipment,
+            shift_type=WorkShiftType.SHIFT_1,
+        )
+        self._equipment_assignment(
+            self.position_employee,
+            equipment,
+            shift_type=WorkShiftType.SHIFT_2,
+        )
+        self._equipment_route(equipment, suffix='DAY-NIGHT')
+        cohort = self._cohort(self.internal_resident, self.position_resident)
+
+        result = resolve_settlement_cohort(cohort_id=cohort.pk)
+
+        self.assertEqual(result.placements, ())
+        self.assertEqual(
+            {item.reason_codes for item in result.unresolved},
+            {('hard_rule_conflict',)},
+        )
+
+    def test_equipment_query_reordering_does_not_change_result(self):
+        first_equipment = self._equipment('ORDER-1')
+        second_equipment = self._equipment('ORDER-2')
+        self._equipment_assignment(self.employee, first_equipment)
+        self._equipment_assignment(self.position_employee, second_equipment)
+        self._equipment_route(first_equipment, suffix='ORDER-1')
+        self._equipment_route(second_equipment, suffix='ORDER-2')
+        cohort = self._cohort(self.internal_resident, self.position_resident)
+        baseline = resolve_settlement_cohort(cohort_id=cohort.pk)
+        from settlement import resolver as resolver_module
+
+        original = resolver_module._effective_equipment_assignments
+
+        def reversed_assignments(**kwargs):
+            return list(reversed(original(**kwargs)))
+
+        with mock.patch.object(
+            resolver_module,
+            '_effective_equipment_assignments',
+            reversed_assignments,
+        ):
+            reordered = resolve_settlement_cohort(cohort_id=cohort.pk)
+        self.assertEqual(reordered.normalized_json(), baseline.normalized_json())
+
+    def test_equipment_mapping_changes_fingerprint_and_resolver_writes_nothing(self):
+        equipment = self._equipment('FINGERPRINT-1')
+        replacement = self._equipment('FINGERPRINT-2')
+        assignment = self._equipment_assignment(self.employee, equipment)
+        self._equipment_route(equipment, suffix='FINGERPRINT-1')
+        cohort = self._cohort(self.internal_resident)
+        models_to_count = (
+            EquipmentAssignment,
+            AccommodationAnchor,
+            AccommodationAnchorBedAssignment,
+            AccommodationAnchorCalendarSlot,
+            EmployeeBedOccupancy,
+        )
+        before = tuple(model.objects.count() for model in models_to_count)
+
+        first = resolve_settlement_cohort(cohort_id=cohort.pk)
+        after_first = tuple(model.objects.count() for model in models_to_count)
+        EquipmentAssignment.objects.filter(pk=assignment.pk).update(
+            equipment=replacement,
+        )
+        second = resolve_settlement_cohort(cohort_id=cohort.pk)
+        after_second = tuple(model.objects.count() for model in models_to_count)
+
+        self.assertEqual(before, after_first)
+        self.assertEqual(after_first, after_second)
+        self.assertNotEqual(first.input_fingerprint, second.input_fingerprint)
+
+    def test_external_resident_without_employee_uses_proven_external_pool(self):
+        self._seed_room(self.external_a, 0)
+        cohort = self._cohort(self.external_a, self.external_a2)
+        result = resolve_settlement_cohort(cohort_id=cohort.pk)
+        placement = next(item for item in result.placements if item.resident_id == self.external_a2.pk)
+        self.assertEqual(placement.physical_room_id, self.rooms[0].pk)
+        self.assertIsNone(self.external_a2.employee_id)
+
+    def test_internal_and_external_are_never_mixed(self):
+        self._seed_room(self.external_a, 0)
+        cohort = self._cohort(self.external_a, self.internal_resident)
+        result = resolve_settlement_cohort(cohort_id=cohort.pk)
+        internal = next(item for item in result.unresolved if item.resident_id == self.internal_resident.pk)
+        self.assertIn('incomplete_authoritative_context', internal.reason_codes)
+        self.assertFalse(any(
+            item.resident_id == self.internal_resident.pk for item in result.placements
+        ))
+
+    def test_external_same_organization_is_preferred(self):
+        self._seed_room(self.external_a, 0)
+        self._seed_room(self.external_b, 1)
+        cohort = self._cohort(self.external_a, self.external_b, self.external_a2)
+        result = resolve_settlement_cohort(cohort_id=cohort.pk)
+        placement = next(item for item in result.placements if item.resident_id == self.external_a2.pk)
+        self.assertEqual(placement.physical_room_id, self.rooms[0].pk)
+
+    def test_external_different_organizations_may_mix_when_needed(self):
+        self._seed_room(self.external_b, 1)
+        cohort = self._cohort(self.external_b, self.external_a)
+        result = resolve_settlement_cohort(cohort_id=cohort.pk)
+        placement = next(item for item in result.placements if item.resident_id == self.external_a.pk)
+        self.assertEqual(placement.physical_room_id, self.rooms[1].pk)
+
+    def test_external_organization_normalization_is_trimmed_casefold_exact(self):
+        self._seed_room(self.external_a, 0)
+        self._seed_room(self.external_b, 1)
+        cohort = self._cohort(self.external_a, self.external_b, self.external_a2)
+        result = resolve_settlement_cohort(cohort_id=cohort.pk)
+        placement = next(item for item in result.placements if item.resident_id == self.external_a2.pk)
+        self.assertEqual(placement.physical_room_id, self.rooms[0].pk)
+
+    def test_gender_and_transfer_hard_rules_reject_invalid_binding(self):
+        self.rooms[0].sex_restriction = PhysicalRoom.SexRestriction.FEMALE_ONLY
+        self.rooms[0].save(update_fields=['sex_restriction'])
+        slot = self._slot(0, 0)
+        self._binding(self.internal_resident, slot)
+        cohort = self._cohort(self.internal_resident)
+        result = resolve_settlement_cohort(cohort_id=cohort.pk)
+        self.assertEqual(result.unresolved[0].reason_codes, ('hard_rule_conflict',))
+
+        PhysicalRoom.objects.filter(pk=self.rooms[0].pk).update(
+            transfer_status=PhysicalRoom.TransferStatus.NOT_TRANSFERRED,
+        )
+        result = resolve_settlement_cohort(cohort_id=cohort.pk)
+        self.assertEqual(result.unresolved[0].reason_codes, ('invalid_existing_binding',))
+
+    def test_stale_calendar_relation_is_controlled(self):
+        slot = self._slot(0, 0)
+        self._binding(self.internal_resident, slot)
+        cohort = self._cohort(self.internal_resident)
+        WatchPeriod.objects.filter(pk=self.period.pk).update(
+            ends_on=self.period.ends_on + timedelta(days=1),
+        )
+        result = resolve_settlement_cohort(cohort_id=cohort.pk)
+        self.assertEqual(result.unresolved[0].reason_codes, ('stale_calendar_relation',))
+
+    def test_missing_context_and_missing_configuration_are_distinct(self):
+        cohort = self._cohort(self.internal_resident, self.external_a)
+        result = resolve_settlement_cohort(cohort_id=cohort.pk)
+        by_resident = {item.resident_id: item.reason_codes for item in result.unresolved}
+        self.assertEqual(
+            by_resident[self.internal_resident.pk],
+            ('incomplete_authoritative_context',),
+        )
+        self.assertEqual(
+            by_resident[self.external_a.pk],
+            ('resolver_not_configured',),
+        )
+
+    def test_inactive_resident_is_controlled(self):
+        cohort = self._cohort(self.external_a)
+        SettlementResident._base_manager.filter(pk=self.external_a.pk).update(
+            status=SettlementResident.Status.ARCHIVED,
+            archived_at=self.now,
+        )
+        result = resolve_settlement_cohort(cohort_id=cohort.pk)
+        self.assertEqual(result.unresolved[0].reason_codes, ('resident_inactive',))
+
+    def test_binding_outside_cohort_reserves_room_and_slot(self):
+        self._seed_room(self.internal_resident, 0, free_slots=1)
+        cohort = self._cohort(self.external_a)
+        result = resolve_settlement_cohort(cohort_id=cohort.pk)
+        self.assertEqual(result.unresolved[0].reason_codes, ('resolver_not_configured',))
+        self.assertEqual(result.placements, ())
+
+    def test_equal_priority_scarcity_does_not_choose_by_identity_or_order(self):
+        self._seed_room(self.external_a, 0, free_slots=1)
+        cohort = self._cohort(self.external_a, self.external_b, self.external_c)
+        result = resolve_settlement_cohort(cohort_id=cohort.pk)
+        unresolved = {
+            item.resident_id: item.reason_codes
+            for item in result.unresolved
+        }
+        self.assertEqual(unresolved[self.external_b.pk], ('equal_priority_conflict',))
+        self.assertEqual(unresolved[self.external_c.pk], ('equal_priority_conflict',))
+        self.assertFalse(any(
+            item.resident_id in {self.external_b.pk, self.external_c.pk}
+            for item in result.placements
+        ))
+
+    def test_candidate_input_reordering_does_not_change_result(self):
+        self._seed_room(self.external_a, 0, free_slots=2)
+        cohort = self._cohort(self.external_a, self.external_b, self.external_c)
+        baseline = resolve_settlement_cohort(cohort_id=cohort.pk)
+        from settlement import resolver as resolver_module
+
+        original = resolver_module._slot_candidates
+
+        def reversed_candidates(selected_cohort):
+            candidates, snapshot = original(selected_cohort)
+            return dict(reversed(tuple(candidates.items()))), snapshot
+
+        with mock.patch.object(resolver_module, '_slot_candidates', reversed_candidates):
+            reordered = resolve_settlement_cohort(cohort_id=cohort.pk)
+        self.assertEqual(reordered.normalized_json(), baseline.normalized_json())
+
+    def test_repeated_resolution_is_byte_stable_and_read_only(self):
+        self._seed_room(self.external_a, 0, free_slots=2)
+        cohort = self._cohort(self.external_a, self.external_a2, self.external_b)
+        models_to_count = (
+            EmployeeBedOccupancy,
+            EmployeeAccommodationBinding,
+            SettlementCohort,
+            SettlementCohortMember,
+            PhysicalRoom,
+            PhysicalBed,
+            SettlementResident,
+        )
+        before = tuple(model.objects.count() for model in models_to_count)
+        first = resolve_settlement_cohort(cohort_id=cohort.pk)
+        second = resolve_settlement_cohort(cohort_id=cohort.pk)
+        after = tuple(model.objects.count() for model in models_to_count)
+        self.assertEqual(first.input_fingerprint, second.input_fingerprint)
+        self.assertEqual(first.normalized_json(), second.normalized_json())
+        self.assertEqual(after, before)
+
+    def test_controlled_error_leaves_database_unchanged(self):
+        cohort = self._cohort(self.external_a)
+        before = (
+            EmployeeBedOccupancy.objects.count(),
+            EmployeeAccommodationBinding.objects.count(),
+            SettlementCohortMember.objects.count(),
+        )
+        result = resolve_settlement_cohort(cohort_id=cohort.pk)
+        after = (
+            EmployeeBedOccupancy.objects.count(),
+            EmployeeAccommodationBinding.objects.count(),
+            SettlementCohortMember.objects.count(),
+        )
+        self.assertEqual(result.unresolved[0].reason_codes, ('resolver_not_configured',))
+        self.assertEqual(after, before)

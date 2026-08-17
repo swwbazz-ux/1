@@ -161,7 +161,15 @@ Migration `0011_resident_subject_transition` заменила subject `employee`
 
 Forward migration создаёт или переиспользует ровно один внутренний wrapper для существующих subject Employee и не создаёт `EmployeeAccess`. Reverse восстанавливает Employee subject только для internal resident и останавливается fail-closed при external subject. M4/M5 domain-команды используют полный порядок `Employee внутренних resident по PK → SettlementResident по PK с OF self → WatchPeriod → Cohort/Member → Slot/Binding → Anchor/Assignment/Bed → revalidation/write`.
 
-Внешний resident уже может быть subject cohort member и calendar binding. Не реализованы: UI создания внешней карточки, подключение external resident к preview, M6 resolver, saved preview, Apply, external occupancy и trainee adapter.
+Внешний resident уже может быть subject cohort member и calendar binding. Минимальное безопасное read-only ядро M6 для MVP реализовано. Не реализованы: UI создания внешней карточки, saved preview, Apply, external occupancy и trainee adapter.
+
+### 4.8. Read-only resolver M6
+
+`resolve_settlement_cohort(*, cohort_id)` возвращает immutable deterministic placements/unresolved и fingerprint без ORM writes. Для внутреннего resident порядок волн: `CONFIRMED binding → EquipmentAssignment → PersonnelPosition → controlled unresolved`.
+
+Equipment route применяет официальный selection contract: `ACCEPTED`, заполненная `role`, отсутствующая `shift`, `assigned_at` не позже начала WatchPeriod, `accepted_at` отсутствует либо уже наступила, `ended_at` отсутствует либо ещё не наступила. Полная цепочка: `SettlementResident/Employee → EquipmentAssignment → active Equipment → единственный active equipment AccommodationAnchor → единственный effective CONFIRMED AnchorBedAssignment → CONFIRMED CalendarSlot того же WatchPeriod → PhysicalBed`.
+
+Binding имеет приоритет над equipment route, equipment route — над position route. Множественные assignment/anchor/bed assignment не разрешаются первой строкой. DAY/NIGHT остаётся provenance/compatibility context и не создаёт две identity койки; равноправная конкуренция двух resident за одну bed возвращает `hard_rule_conflict`. Fingerprint включает assignment, equipment, anchor, anchor-bed assignment, slot и bed relations.
 
 ## 5. Фактическая трассировка preview
 
@@ -288,15 +296,15 @@ Preview группирует конкуренцию по `(physical_bed_id, shif
 | EmployeeAccommodationBinding | READY | Subject — `SettlementResident`; прямого subject-FK Employee нет; actor/audit остаются Employee |
 | Initial-binding provenance snapshot | READY/PARTIAL | Binding хранит immutable basis/source snapshot; автоматическое создание из будущего Apply отсутствует |
 | Конечная factual occupancy | PARTIAL | Интервалы есть; provenance/DB overlap отсутствуют |
-| Room profiles | PARTIAL | transfer/sex/type есть; режим и 2+1 отсутствуют |
-| Rule 2+1 | ABSENT | Нет модели, resolver или тестов |
-| Non-equipment resolvers | ABSENT | Preview использует только EQUIPMENT |
+| Room profiles | PARTIAL | transfer/sex/type есть; M6 умеет безопасно вычислить внешний residual pool только из подтверждённых M4 evidence; persistent режим и 2+1 отсутствуют |
+| Rule 2+1 | ABSENT | Нет нормативно однозначной модели/конфигурации; read-only resolver возвращает `resolver_not_configured` |
+| M6 resolver | READY/PARTIAL | Минимальное MVP-ядро COMPLETE: binding → equipment assignment → position → controlled unresolved; persistent RoomUseProfile/ResolverRule и специальные волны ещё отсутствуют |
 | Explicit category assignments | ABSENT | Нет версионируемого назначения RESERVE и аналогичных категорий |
 | Trainee structured-state route | ABSENT | Существующий authoritative trainee state/adapter не найден; Vacancy исключена ADR-030 |
 | Authoritative SettlementResident | READY | Migration `0010_settlement_residents` ввела resident lifecycle; migration `0011_resident_subject_transition` перевела M4 binding и M5 member на resident identity без создания EmployeeAccess |
-| Group capacity conflict | ABSENT | Preview не агрегирует потребность/дефицит и не защищает от скрытого выбора людей |
+| Group capacity conflict | PARTIAL | M6 read-only resolver не выбирает равноправного resident при дефиците и возвращает всей непосредственно конфликтующей группе `equal_priority_conflict`; полный configured group resolver ещё отсутствует |
 | Explicit KEEP | PARTIAL | Совпадение employee допускается, action/provenance нет |
-| Saved AutoSettlementRun | ABSENT | Модель отсутствует |
+| Saved AutoSettlementRun | ABSENT | Следующий milestone M7; модель отсутствует |
 | Immutable run rows | ABSENT | Отсутствуют |
 | Input hash/stale detection | ABSENT | Отсутствуют |
 | Transactional Apply | ABSENT | Endpoint/service отсутствуют |
