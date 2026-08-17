@@ -277,7 +277,8 @@ Preview группирует конкуренцию по `(physical_bed_id, shif
 | Rule 2+1 | ABSENT | Нет модели, resolver или тестов |
 | Non-equipment resolvers | ABSENT | Preview использует только EQUIPMENT |
 | Explicit category assignments | ABSENT | Нет версионируемого назначения RESERVE и аналогичных категорий |
-| Trainee target-vacancy route | ABSENT | Стажировка не связана с жилищным маршрутом будущей позиции |
+| Trainee structured-state route | ABSENT | Существующий authoritative trainee state/adapter не найден; Vacancy исключена ADR-030 |
+| Authoritative SettlementResident | READY | Internal Employee wrapper и внешние карточки с control/revision/provenance реализованы migration `0010`; M4/M5 ещё используют Employee FK |
 | Group capacity conflict | ABSENT | Preview не агрегирует потребность/дефицит и не защищает от скрытого выбора людей |
 | Explicit KEEP | PARTIAL | Совпадение employee допускается, action/provenance нет |
 | Saved AutoSettlementRun | ABSENT | Модель отсутствует |
@@ -314,7 +315,7 @@ Preview группирует конкуренцию по `(physical_bed_id, shif
 4. permanent employee binding;
 5. authoritative versioned cohort;
 6. snapshot первичного CrewPlan/EquipmentAssignment при создании binding;
-7. явные category assignments и маршрут стажёра через подтверждённую вакансию;
+7. явные category assignments и маршрут стажёра по настоящей должности через authoritative structured state/adapter;
 8. room profiles, resolver rules и групповые конфликты дефицита.
 
 Только после этого строятся saved preview и transactional Apply.

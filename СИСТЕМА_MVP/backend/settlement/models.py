@@ -2149,6 +2149,300 @@ def protect_historical_m5_rows(sender, instance, using, origin, **kwargs):
         )
 
 
+class SettlementResidentQuerySet(models.QuerySet):
+    WRITE_FORBIDDEN_CODE = 'settlement.resident.public_write_forbidden'
+    WRITE_FORBIDDEN_MESSAGE = (
+        'Массовые изменения и физическое удаление жильцов запрещены. '
+        'Используйте доменные команды SettlementResident.'
+    )
+
+    def _raise_write_forbidden(self):
+        raise ValidationError(
+            self.WRITE_FORBIDDEN_MESSAGE,
+            code=self.WRITE_FORBIDDEN_CODE,
+        )
+
+    def update(self, **kwargs):
+        self._raise_write_forbidden()
+
+    def bulk_create(
+        self,
+        objs,
+        batch_size=None,
+        ignore_conflicts=False,
+        update_conflicts=False,
+        update_fields=None,
+        unique_fields=None,
+    ):
+        self._raise_write_forbidden()
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        self._raise_write_forbidden()
+
+    def delete(self):
+        self._raise_write_forbidden()
+
+
+class SettlementResident(StableIdentifierModel):
+    class ResidentType(models.TextChoices):
+        EMPLOYEE = 'EMPLOYEE', 'Внутренний сотрудник'
+        CONTRACTOR = 'CONTRACTOR', 'Сотрудник подрядчика'
+        BUSINESS_TRIP = 'BUSINESS_TRIP', 'Командированный'
+        EXTERNAL_OTHER = 'EXTERNAL_OTHER', 'Другой внешний жилец'
+
+    class Status(models.TextChoices):
+        ACTIVE = 'ACTIVE', 'Активен'
+        ARCHIVED = 'ARCHIVED', 'В архиве'
+
+    objects = SettlementResidentQuerySet.as_manager()
+
+    employee = models.OneToOneField(
+        'users.Employee',
+        verbose_name='Внутренний сотрудник',
+        on_delete=models.PROTECT,
+        related_name='settlement_resident',
+        null=True,
+        blank=True,
+    )
+    resident_type = models.CharField(
+        'Тип жильца',
+        max_length=32,
+        choices=ResidentType.choices,
+        db_index=True,
+    )
+    full_name = models.CharField('ФИО внешнего жильца', max_length=255, blank=True)
+    photo = models.FileField(
+        'Фото внешнего жильца',
+        upload_to='settlement_residents/',
+        null=True,
+        blank=True,
+    )
+    position_title = models.CharField(
+        'Должность или профессия внешнего жильца',
+        max_length=255,
+        blank=True,
+    )
+    organization = models.CharField(
+        'Организация внешнего жильца',
+        max_length=255,
+        blank=True,
+    )
+    phone = models.CharField('Телефон внешнего жильца', max_length=64, blank=True)
+    status = models.CharField(
+        'Статус карточки',
+        max_length=16,
+        choices=Status.choices,
+        default=Status.ACTIVE,
+        db_index=True,
+    )
+    revision = models.PositiveBigIntegerField('Ревизия карточки', default=1)
+    archived_at = models.DateTimeField('Когда архивирована', null=True, blank=True)
+    created_by_access = models.ForeignKey(
+        'users.EmployeeAccess',
+        verbose_name='Доступ создателя',
+        on_delete=models.PROTECT,
+        related_name='created_settlement_residents',
+        null=True,
+        blank=True,
+    )
+    updated_by_access = models.ForeignKey(
+        'users.EmployeeAccess',
+        verbose_name='Доступ последнего редактора',
+        on_delete=models.PROTECT,
+        related_name='updated_settlement_residents',
+        null=True,
+        blank=True,
+    )
+    created_at = models.DateTimeField('Создана', auto_now_add=True)
+    updated_at = models.DateTimeField('Изменена', auto_now=True)
+
+    class Meta:
+        verbose_name = 'Жилец settlement'
+        verbose_name_plural = 'Жильцы settlement'
+        ordering = ['resident_type', 'pk']
+        indexes = [
+            models.Index(fields=['status', 'resident_type'], name='resident_status_type_idx'),
+            models.Index(fields=['organization', 'status'], name='resident_org_status_idx'),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(revision__gte=1),
+                name='settlement_resident_revision_positive',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(status='ACTIVE', archived_at__isnull=True)
+                    | models.Q(status='ARCHIVED', archived_at__isnull=False)
+                ),
+                name='settlement_resident_archive_state_valid',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    (
+                        models.Q(
+                            resident_type='EMPLOYEE',
+                            employee__isnull=False,
+                            full_name='',
+                            position_title='',
+                            organization='',
+                            phone='',
+                        )
+                        & (models.Q(photo__isnull=True) | models.Q(photo=''))
+                    )
+                    | (
+                        models.Q(
+                            resident_type__in=[
+                                'CONTRACTOR',
+                                'BUSINESS_TRIP',
+                                'EXTERNAL_OTHER',
+                            ],
+                            employee__isnull=True,
+                            created_by_access__isnull=False,
+                        )
+                        & ~models.Q(full_name='')
+                        & ~models.Q(position_title='')
+                        & ~models.Q(organization='')
+                        & ~models.Q(phone='')
+                    )
+                ),
+                name='settlement_resident_subject_valid',
+            ),
+        ]
+
+    EXTERNAL_MUTABLE_FIELDS = (
+        'full_name',
+        'photo',
+        'position_title',
+        'organization',
+        'phone',
+        'status',
+        'archived_at',
+    )
+
+    @property
+    def is_external(self):
+        return self.resident_type != self.ResidentType.EMPLOYEE
+
+    @property
+    def display_name(self):
+        if self.employee_id:
+            return self.employee.full_name
+        return self.full_name
+
+    @property
+    def display_identity(self):
+        return f'{self.stable_id} · {self.display_name}'
+
+    @classmethod
+    def _write_forbidden_error(cls):
+        return ValidationError(
+            SettlementResidentQuerySet.WRITE_FORBIDDEN_MESSAGE,
+            code=SettlementResidentQuerySet.WRITE_FORBIDDEN_CODE,
+        )
+
+    def clean(self):
+        super().clean()
+        for field_name in ('full_name', 'position_title', 'organization', 'phone'):
+            value = getattr(self, field_name)
+            if isinstance(value, str):
+                setattr(self, field_name, ' '.join(value.split()))
+
+        errors = {}
+        if self.resident_type == self.ResidentType.EMPLOYEE:
+            if not self.employee_id:
+                errors['employee'] = 'Внутренний resident требует Employee.'
+            for field_name in ('full_name', 'position_title', 'organization', 'phone'):
+                if getattr(self, field_name):
+                    errors[field_name] = (
+                        'Карточные поля не являются кадровым источником внутреннего Employee.'
+                    )
+            if self.photo:
+                errors['photo'] = (
+                    'Фото карточки не является кадровым источником внутреннего Employee.'
+                )
+        else:
+            if self.employee_id:
+                errors['employee'] = 'Внешний resident не может ссылаться на Employee.'
+            if self.resident_type not in {
+                self.ResidentType.CONTRACTOR,
+                self.ResidentType.BUSINESS_TRIP,
+                self.ResidentType.EXTERNAL_OTHER,
+            }:
+                errors['resident_type'] = 'Неизвестный тип внешнего жильца.'
+            for field_name in ('full_name', 'position_title', 'organization', 'phone'):
+                if not getattr(self, field_name):
+                    errors[field_name] = 'Поле обязательно для внешнего жильца.'
+            if not self.created_by_access_id:
+                errors['created_by_access'] = (
+                    'Внешняя карточка требует exact EmployeeAccess делопроизводителя.'
+                )
+        if self.revision < 1:
+            errors['revision'] = 'Ревизия карточки должна быть положительной.'
+        if self.status == self.Status.ACTIVE and self.archived_at is not None:
+            errors['archived_at'] = 'Активная карточка не может иметь время архивации.'
+        if self.status == self.Status.ARCHIVED and self.archived_at is None:
+            errors['archived_at'] = 'Архивная карточка требует время архивации.'
+        if errors:
+            raise ValidationError(errors)
+
+    def _validate_existing_state(self):
+        if not self.pk:
+            return
+        original = type(self)._base_manager.filter(pk=self.pk).values(
+            'stable_id',
+            'employee_id',
+            'resident_type',
+            'created_by_access_id',
+            'full_name',
+            'photo',
+            'position_title',
+            'organization',
+            'phone',
+            'status',
+            'archived_at',
+            'revision',
+            'updated_by_access_id',
+        ).first()
+        if original is None:
+            return
+
+        errors = {}
+        for field_name in ('stable_id', 'employee_id', 'resident_type', 'created_by_access_id'):
+            if original[field_name] != getattr(self, field_name):
+                errors[field_name.removesuffix('_id')] = (
+                    'Источник и тип SettlementResident после создания неизменяемы.'
+                )
+
+        changed = any(
+            original[field_name] != getattr(self, field_name)
+            for field_name in self.EXTERNAL_MUTABLE_FIELDS
+        )
+        if changed:
+            if self.revision != original['revision'] + 1:
+                errors['revision'] = 'Смысловое изменение требует увеличения ревизии ровно на 1.'
+            if not self.updated_by_access_id:
+                errors['updated_by_access'] = 'Изменение карточки требует exact EmployeeAccess.'
+        elif self.revision != original['revision']:
+            errors['revision'] = 'Ревизия меняется только вместе со смысловыми полями карточки.'
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        using = kwargs.get('using') or router.db_for_write(type(self), instance=self)
+        with transaction.atomic(using=using):
+            if self.pk:
+                type(self)._base_manager.using(using).select_for_update().get(pk=self.pk)
+            self._validate_existing_state()
+            self.full_clean()
+            return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise self._write_forbidden_error()
+
+    def __str__(self):
+        return self.display_identity
+
+
 class PhysicalRoom(models.Model):
     class RoomType(models.TextChoices):
         STANDARD = 'standard', 'Стандартная'

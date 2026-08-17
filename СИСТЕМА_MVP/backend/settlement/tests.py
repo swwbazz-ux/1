@@ -73,7 +73,15 @@ from .models import (
     SettlementCohort,
     SettlementCohortMember,
     SettlementRevision,
+    SettlementResident,
     SettlementSource,
+)
+from .residents import (
+    archive_external_resident,
+    create_external_resident,
+    get_or_create_employee_resident,
+    reactivate_external_resident,
+    update_external_resident,
 )
 from .services import (
     build_auto_settlement_preview,
@@ -85,6 +93,330 @@ from .services import (
     unsettled_current_roster_employees,
 )
 from .views import _occupancy_response
+
+
+class SettlementResidentTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.clerk = Employee.objects.create(
+            full_name='Делопроизводитель карточек жильцов',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        cls.other_clerk = Employee.objects.create(
+            full_name='Другой делопроизводитель карточек жильцов',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        cls.employee = Employee.objects.create(
+            full_name='Внутренний сотрудник для resident',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        cls.role = Role.objects.create(
+            code='settlement_clerk',
+            name='Делопроизводитель карточек жильцов',
+        )
+        cls.clerk_access = EmployeeAccess.objects.create(
+            employee=cls.clerk,
+            role=cls.role,
+            access_code='RESIDENT-CLERK',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+        cls.other_access = EmployeeAccess.objects.create(
+            employee=cls.other_clerk,
+            role=cls.role,
+            access_code='RESIDENT-OTHER-CLERK',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+
+    def setUp(self):
+        self.raw_session_key = f'resident-session-{self._testMethodName}'
+        grant = acquire_control_lease(
+            owner_access_id=self.clerk_access.pk,
+            raw_session_key=self.raw_session_key,
+            source='settlement-resident-test',
+        )
+        self.control_context = SettlementControlWriteContext(
+            owner_access_id=self.clerk_access.pk,
+            raw_session_key=self.raw_session_key,
+            lease_token=str(grant.lease_token),
+            fencing_revision=grant.fencing_revision,
+        )
+
+    def create_external(self, **overrides):
+        values = {
+            'resident_type': SettlementResident.ResidentType.CONTRACTOR,
+            'full_name': 'ДЕМО · Внешний Жилец',
+            'position_title': 'Монтажник технологического оборудования',
+            'organization': 'ООО «ДЕМО Подрядчик»',
+            'phone': '+7 900 000-00-00',
+            'control_context': self.control_context,
+        }
+        values.update(overrides)
+        return create_external_resident(**values)
+
+    def assert_validation_code(self, expected_code, callback):
+        with self.assertRaises(ValidationError) as raised:
+            callback()
+        self.assertEqual(raised.exception.code, expected_code)
+
+    def test_internal_employee_wrapper_is_stable_and_uses_employee_as_source(self):
+        first, created = get_or_create_employee_resident(employee_id=self.employee.pk)
+        second, created_again = get_or_create_employee_resident(employee_id=self.employee.pk)
+
+        self.assertTrue(created)
+        self.assertFalse(created_again)
+        self.assertEqual(first.pk, second.pk)
+        self.assertEqual(first.resident_type, SettlementResident.ResidentType.EMPLOYEE)
+        self.assertEqual(first.employee_id, self.employee.pk)
+        self.assertEqual(first.display_name, self.employee.full_name)
+        self.assertEqual(first.full_name, '')
+        self.assertFalse(first.photo)
+        self.assertIsNone(first.created_by_access_id)
+
+    def test_external_types_create_cards_without_employee_or_access(self):
+        access_count = EmployeeAccess.objects.count()
+        for index, resident_type in enumerate((
+            SettlementResident.ResidentType.CONTRACTOR,
+            SettlementResident.ResidentType.BUSINESS_TRIP,
+            SettlementResident.ResidentType.EXTERNAL_OTHER,
+        )):
+            with self.subTest(resident_type=resident_type):
+                resident = self.create_external(
+                    resident_type=resident_type,
+                    full_name=f'ДЕМО · Внешний Жилец {index}',
+                    phone=f'+7 900 000-00-0{index}',
+                )
+                self.assertIsNone(resident.employee_id)
+                self.assertTrue(resident.is_external)
+                self.assertEqual(resident.created_by_access_id, self.clerk_access.pk)
+                self.assertEqual(resident.updated_by_access_id, self.clerk_access.pk)
+                self.assertEqual(EmployeeAccess.objects.count(), access_count)
+
+    def test_external_required_fields_and_type_fail_closed(self):
+        for field_name in ('full_name', 'position_title', 'organization', 'phone'):
+            with self.subTest(field=field_name):
+                before = SettlementResident.objects.count()
+                self.assert_validation_code(
+                    'settlement.resident.required_field',
+                    lambda field_name=field_name: self.create_external(**{field_name: '   '}),
+                )
+                self.assertEqual(SettlementResident.objects.count(), before)
+
+        self.assert_validation_code(
+            'settlement.resident.invalid_type',
+            lambda: self.create_external(resident_type=SettlementResident.ResidentType.EMPLOYEE),
+        )
+
+    def test_database_constraints_enforce_subject_xor_and_unique_employee(self):
+        get_or_create_employee_resident(employee_id=self.employee.pk)
+        duplicate = SettlementResident(
+            employee=self.employee,
+            resident_type=SettlementResident.ResidentType.EMPLOYEE,
+        )
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            SettlementResident._base_manager.bulk_create([duplicate])
+
+        invalid_external = SettlementResident(
+            resident_type=SettlementResident.ResidentType.CONTRACTOR,
+            created_by_access=self.clerk_access,
+        )
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            SettlementResident._base_manager.bulk_create([invalid_external])
+
+        photo_employee = Employee.objects.create(
+            full_name='Внутренний сотрудник с запрещённой карточной фотографией',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        invalid_internal_photo = SettlementResident(
+            employee=photo_employee,
+            resident_type=SettlementResident.ResidentType.EMPLOYEE,
+            photo='settlement_residents/not-authoritative.jpg',
+        )
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            SettlementResident._base_manager.bulk_create([invalid_internal_photo])
+
+    def test_external_writes_require_exact_held_control_context(self):
+        self.assert_validation_code(
+            'settlement.resident.control_required',
+            lambda: self.create_external(control_context=None),
+        )
+        resident = self.create_external()
+        foreign_context = SettlementControlWriteContext(
+            owner_access_id=self.other_access.pk,
+            raw_session_key=self.raw_session_key,
+            lease_token=self.control_context.lease_token,
+            fencing_revision=self.control_context.fencing_revision,
+        )
+        before = (resident.full_name, resident.revision, resident.updated_by_access_id)
+        with self.assertRaises(ValidationError):
+            update_external_resident(
+                resident_id=resident.pk,
+                expected_revision=resident.revision,
+                full_name='Запрещённое изменение',
+                control_context=foreign_context,
+            )
+        resident.refresh_from_db()
+        self.assertEqual(
+            (resident.full_name, resident.revision, resident.updated_by_access_id),
+            before,
+        )
+        with self.assertRaises(ValidationError):
+            archive_external_resident(
+                resident_id=resident.pk,
+                expected_revision=resident.revision,
+                control_context=foreign_context,
+            )
+        resident.refresh_from_db()
+        self.assertEqual(resident.status, SettlementResident.Status.ACTIVE)
+        self.assertEqual(resident.revision, 1)
+
+    def test_update_uses_expected_revision_and_exact_access(self):
+        resident = self.create_external()
+        updated = update_external_resident(
+            resident_id=resident.pk,
+            expected_revision=1,
+            organization='  ООО   «Новая организация»  ',
+            phone='+7 999 111-22-33',
+            control_context=self.control_context,
+        )
+        self.assertEqual(updated.revision, 2)
+        self.assertEqual(updated.organization, 'ООО «Новая организация»')
+        self.assertEqual(updated.updated_by_access_id, self.clerk_access.pk)
+
+        self.assert_validation_code(
+            'settlement.resident.stale_revision',
+            lambda: update_external_resident(
+                resident_id=resident.pk,
+                expected_revision=1,
+                organization='ООО «Устаревшая запись»',
+                control_context=self.control_context,
+            ),
+        )
+        resident.refresh_from_db()
+        self.assertEqual(resident.organization, 'ООО «Новая организация»')
+        self.assertEqual(resident.revision, 2)
+
+    def test_internal_resident_cannot_be_edited_as_external(self):
+        resident, _created = get_or_create_employee_resident(employee_id=self.employee.pk)
+        self.assert_validation_code(
+            'settlement.resident.internal_read_only',
+            lambda: update_external_resident(
+                resident_id=resident.pk,
+                expected_revision=resident.revision,
+                full_name='Подмена кадрового ФИО',
+                control_context=self.control_context,
+            ),
+        )
+        resident.refresh_from_db()
+        self.assertEqual(resident.full_name, '')
+        self.assertEqual(resident.revision, 1)
+
+    def test_archive_and_reactivate_preserve_identity_and_history(self):
+        resident = self.create_external()
+        stable_id = resident.stable_id
+        archived = archive_external_resident(
+            resident_id=resident.pk,
+            expected_revision=1,
+            control_context=self.control_context,
+        )
+        self.assertEqual(archived.status, SettlementResident.Status.ARCHIVED)
+        self.assertIsNotNone(archived.archived_at)
+        self.assertEqual(archived.revision, 2)
+
+        restored = reactivate_external_resident(
+            resident_id=resident.pk,
+            expected_revision=2,
+            control_context=self.control_context,
+        )
+        self.assertEqual(restored.status, SettlementResident.Status.ACTIVE)
+        self.assertIsNone(restored.archived_at)
+        self.assertEqual(restored.revision, 3)
+        self.assertEqual(restored.stable_id, stable_id)
+        self.assert_validation_code(
+            'settlement.resident.public_write_forbidden',
+            restored.delete,
+        )
+        self.assert_validation_code(
+            'settlement.resident.public_write_forbidden',
+            lambda: SettlementResident.objects.filter(pk=restored.pk).delete(),
+        )
+
+    def test_source_and_type_are_immutable(self):
+        resident = self.create_external()
+        resident.employee = self.employee
+        resident.resident_type = SettlementResident.ResidentType.EMPLOYEE
+        resident.revision += 1
+        resident.updated_by_access = self.clerk_access
+        with self.assertRaises(ValidationError):
+            resident.save()
+        resident.refresh_from_db()
+        self.assertIsNone(resident.employee_id)
+        self.assertEqual(resident.resident_type, SettlementResident.ResidentType.CONTRACTOR)
+
+    def test_invalid_update_rolls_back_all_fields_and_revision(self):
+        resident = self.create_external()
+        before = (
+            resident.full_name,
+            resident.organization,
+            resident.phone,
+            resident.revision,
+        )
+        self.assert_validation_code(
+            'settlement.resident.required_field',
+            lambda: update_external_resident(
+                resident_id=resident.pk,
+                expected_revision=1,
+                full_name='ДЕМО · Уже изменённое имя',
+                organization=' ',
+                control_context=self.control_context,
+            ),
+        )
+        resident.refresh_from_db()
+        self.assertEqual(
+            (resident.full_name, resident.organization, resident.phone, resident.revision),
+            before,
+        )
+
+    def test_resident_operations_do_not_write_m4_m5_or_occupancy(self):
+        before = {
+            'slots': AccommodationAnchorCalendarSlot.objects.count(),
+            'bindings': EmployeeAccommodationBinding.objects.count(),
+            'cohorts': SettlementCohort.objects.count(),
+            'members': SettlementCohortMember.objects.count(),
+            'occupancies': EmployeeBedOccupancy.objects.count(),
+        }
+        get_or_create_employee_resident(employee_id=self.employee.pk)
+        resident = self.create_external()
+        archive_external_resident(
+            resident_id=resident.pk,
+            expected_revision=1,
+            control_context=self.control_context,
+        )
+        after = {
+            'slots': AccommodationAnchorCalendarSlot.objects.count(),
+            'bindings': EmployeeAccommodationBinding.objects.count(),
+            'cohorts': SettlementCohort.objects.count(),
+            'members': SettlementCohortMember.objects.count(),
+            'occupancies': EmployeeBedOccupancy.objects.count(),
+        }
+        self.assertEqual(after, before)
+
+    def test_access_provenance_is_protected(self):
+        self.create_external()
+        with self.assertRaises(ProtectedError):
+            self.clerk_access.delete()
+
+    def test_same_name_and_phone_are_not_global_identity(self):
+        first = self.create_external()
+        second = self.create_external()
+        self.assertNotEqual(first.pk, second.pk)
+        self.assertNotEqual(first.stable_id, second.stable_id)
+        self.assertNotEqual(first.display_identity, second.display_identity)
 
 
 class AccommodationAnchorDomainTests(TestCase):
