@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime, time, timedelta
 
 from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator, RegexValidator
@@ -1189,6 +1190,543 @@ def protect_historical_anchor_bed_assignment(sender, instance, using, origin, **
     }:
         raise ProtectedError(
             'Подтверждённые и отменённые закрепления жилищных якорей удалять нельзя.',
+            [instance],
+        )
+
+
+class M4CalendarBindingQuerySet(models.QuerySet):
+    MASS_WRITE_FORBIDDEN_CODE = 'm4_calendar_binding_mass_write_forbidden'
+    MASS_WRITE_FORBIDDEN_MESSAGE = (
+        'Массовые изменения календарных слотов и постоянных закреплений запрещены. '
+        'Используйте доменные команды M4.'
+    )
+
+    def _raise_mass_write_forbidden(self):
+        raise ValidationError(
+            self.MASS_WRITE_FORBIDDEN_MESSAGE,
+            code=self.MASS_WRITE_FORBIDDEN_CODE,
+        )
+
+    def update(self, **kwargs):
+        self._raise_mass_write_forbidden()
+
+    def bulk_create(
+        self,
+        objs,
+        batch_size=None,
+        ignore_conflicts=False,
+        update_conflicts=False,
+        update_fields=None,
+        unique_fields=None,
+    ):
+        self._raise_mass_write_forbidden()
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        self._raise_mass_write_forbidden()
+
+
+def _inclusive_date_bounds_as_datetimes(valid_from, valid_to):
+    current_timezone = timezone.get_current_timezone()
+    starts_at = timezone.make_aware(datetime.combine(valid_from, time.min), current_timezone)
+    ends_at = timezone.make_aware(
+        datetime.combine(valid_to + timedelta(days=1), time.min),
+        current_timezone,
+    )
+    return starts_at, ends_at
+
+
+def _confirmed_bed_assignment_for_slot(slot):
+    starts_at, ends_at = _inclusive_date_bounds_as_datetimes(slot.valid_from, slot.valid_to)
+    assignments = list(
+        AccommodationAnchorBedAssignment.objects.filter(
+            anchor_id=slot.anchor_id,
+            status=AccommodationAnchorBedAssignment.Status.CONFIRMED,
+            valid_from__lte=starts_at,
+        )
+        .filter(models.Q(valid_to__isnull=True) | models.Q(valid_to__gte=ends_at))
+        .order_by('pk')[:2]
+    )
+    if len(assignments) != 1:
+        raise ValidationError({
+            'anchor': (
+                'Подтверждённый календарный слот требует ровно одно доказанное '
+                'закрепление якоря за койкой на весь WatchPeriod.'
+            ),
+        })
+    return assignments[0]
+
+
+class AccommodationAnchorCalendarSlot(StableIdentifierModel):
+    class Status(models.TextChoices):
+        DRAFT = 'draft', 'Черновик'
+        CONFIRMED = 'confirmed', 'Подтверждён'
+        CLOSED = 'closed', 'Закрыт'
+
+    objects = M4CalendarBindingQuerySet.as_manager()
+
+    anchor = models.ForeignKey(
+        AccommodationAnchor,
+        verbose_name='Жилищный якорь',
+        on_delete=models.PROTECT,
+        related_name='calendar_slots',
+    )
+    watch_composition = models.ForeignKey(
+        'users.WatchComposition',
+        verbose_name='Утверждённый состав вахты',
+        on_delete=models.PROTECT,
+        related_name='accommodation_calendar_slots',
+    )
+    watch_period = models.ForeignKey(
+        'shifts.WatchPeriod',
+        verbose_name='Конкретный период вахты',
+        on_delete=models.PROTECT,
+        related_name='accommodation_calendar_slots',
+    )
+    valid_from = models.DateField('Действует с')
+    valid_to = models.DateField('Действует по')
+    status = models.CharField(
+        'Статус',
+        max_length=16,
+        choices=Status.choices,
+        default=Status.DRAFT,
+        db_index=True,
+    )
+    source_revision = models.ForeignKey(
+        SettlementRevision,
+        verbose_name='Ревизия-основание',
+        on_delete=models.PROTECT,
+        related_name='accommodation_calendar_slots',
+    )
+    approved_by = models.ForeignKey(
+        'users.Employee',
+        verbose_name='Кем подтверждён',
+        on_delete=models.PROTECT,
+        related_name='approved_accommodation_calendar_slots',
+        null=True,
+        blank=True,
+    )
+    approved_at = models.DateTimeField('Когда подтверждён', null=True, blank=True)
+    closed_revision = models.ForeignKey(
+        SettlementRevision,
+        verbose_name='Ревизия закрытия',
+        on_delete=models.PROTECT,
+        related_name='closed_accommodation_calendar_slots',
+        null=True,
+        blank=True,
+    )
+    closed_by = models.ForeignKey(
+        'users.Employee',
+        verbose_name='Кем закрыт',
+        on_delete=models.PROTECT,
+        related_name='closed_accommodation_calendar_slots',
+        null=True,
+        blank=True,
+    )
+    closed_at = models.DateTimeField('Когда закрыт', null=True, blank=True)
+    created_at = models.DateTimeField('Создан', auto_now_add=True)
+    updated_at = models.DateTimeField('Изменён', auto_now=True)
+
+    class Meta:
+        verbose_name = 'Календарный слот жилищного якоря'
+        verbose_name_plural = 'Календарные слоты жилищных якорей'
+        ordering = ['valid_from', 'anchor_id', 'pk']
+        indexes = [
+            models.Index(fields=['anchor', 'status', 'valid_from'], name='anchor_slot_anchor_period_idx'),
+            models.Index(
+                fields=['watch_composition', 'status', 'valid_from'],
+                name='anchor_slot_watch_period_idx',
+            ),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['anchor', 'watch_period'],
+                name='unique_anchor_slot_per_watch_period',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(valid_to__gte=models.F('valid_from')),
+                name='anchor_slot_period_non_empty',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        status='draft', approved_by__isnull=True, approved_at__isnull=True,
+                        closed_revision__isnull=True, closed_by__isnull=True, closed_at__isnull=True,
+                    )
+                    | models.Q(
+                        status='confirmed', approved_by__isnull=False, approved_at__isnull=False,
+                        closed_revision__isnull=True, closed_by__isnull=True, closed_at__isnull=True,
+                    )
+                    | models.Q(
+                        status='closed', approved_by__isnull=False, approved_at__isnull=False,
+                        closed_revision__isnull=False, closed_by__isnull=False, closed_at__isnull=False,
+                    )
+                ),
+                name='anchor_slot_lifecycle_metadata',
+            ),
+        ]
+
+    @property
+    def calendar_relation_is_stale(self):
+        period = self.watch_period
+        return (
+            period.watch_composition_id != self.watch_composition_id
+            or period.starts_on != self.valid_from
+            or period.ends_on != self.valid_to
+        )
+
+    def _overlapping_slots(self):
+        queryset = type(self).objects.filter(
+            status__in=[self.Status.CONFIRMED, self.Status.CLOSED],
+            valid_from__lte=self.valid_to,
+            valid_to__gte=self.valid_from,
+        )
+        if self.pk:
+            queryset = queryset.exclude(pk=self.pk)
+        return queryset.order_by('pk')
+
+    def clean(self):
+        super().clean()
+        errors = {}
+        if self._state.adding and self.status != self.Status.DRAFT:
+            errors['status'] = 'CalendarSlot создаётся только как DRAFT и подтверждается доменной командой.'
+        if self.watch_period_id:
+            period = self.watch_period
+            if period.watch_composition_id != self.watch_composition_id:
+                errors['watch_composition'] = 'WatchPeriod не принадлежит указанному WatchComposition.'
+            if period.starts_on != self.valid_from or period.ends_on != self.valid_to:
+                errors['valid_from'] = (
+                    'Границы CalendarSlot должны точно совпадать с каноническими границами WatchPeriod.'
+                )
+        if self.valid_from and self.valid_to and self.valid_to < self.valid_from:
+            errors['valid_to'] = 'Окончание периода не может быть раньше начала.'
+        if self.status in {self.Status.CONFIRMED, self.Status.CLOSED}:
+            if self.source_revision.status != SettlementRevision.Status.CONFIRMED:
+                errors['source_revision'] = 'Подтверждённый слот требует подтверждённой ревизии.'
+            if self.anchor.status != AccommodationAnchor.Status.ACTIVE:
+                errors['anchor'] = 'Подтверждённый слот требует действующего якоря.'
+            if not self.approved_by_id or not self.approved_at:
+                errors['approved_by'] = 'Подтверждённый слот требует автора и времени подтверждения.'
+            try:
+                own_assignment = _confirmed_bed_assignment_for_slot(self)
+            except ValidationError as error:
+                errors.update(error.message_dict)
+            else:
+                for other in self._overlapping_slots():
+                    try:
+                        other_assignment = _confirmed_bed_assignment_for_slot(other)
+                    except ValidationError:
+                        errors['anchor'] = 'Пересекающийся слот имеет недоказанную связь с физической койкой.'
+                        break
+                    if other_assignment.physical_bed_id == own_assignment.physical_bed_id:
+                        errors['valid_from'] = (
+                            'Пересекающиеся календарные интервалы одной физической койки запрещены.'
+                        )
+                        break
+        if self.status == self.Status.CLOSED:
+            if not self.closed_revision_id or not self.closed_by_id or not self.closed_at:
+                errors['closed_revision'] = 'Закрытый слот требует полной истории закрытия.'
+            elif self.closed_revision.status != SettlementRevision.Status.CONFIRMED:
+                errors['closed_revision'] = 'Закрытие требует подтверждённой ревизии.'
+        if errors:
+            raise ValidationError(errors)
+
+    def _validate_existing_state(self):
+        if not self.pk:
+            return
+        original = type(self)._base_manager.filter(pk=self.pk).values(
+            'stable_id', 'anchor_id', 'watch_composition_id', 'watch_period_id',
+            'valid_from', 'valid_to', 'source_revision_id', 'status',
+            'approved_by_id', 'approved_at', 'closed_revision_id', 'closed_by_id', 'closed_at',
+        ).first()
+        if original is None:
+            return
+        errors = {}
+        for field_name in (
+            'stable_id', 'anchor_id', 'watch_composition_id', 'watch_period_id',
+            'valid_from', 'valid_to', 'source_revision_id',
+        ):
+            if original[field_name] != getattr(self, field_name):
+                errors[field_name.removesuffix('_id')] = 'Смысловые поля CalendarSlot после создания неизменяемы.'
+        allowed = {
+            self.Status.DRAFT: {self.Status.DRAFT, self.Status.CONFIRMED},
+            self.Status.CONFIRMED: {self.Status.CONFIRMED, self.Status.CLOSED},
+            self.Status.CLOSED: {self.Status.CLOSED},
+        }
+        if self.status not in allowed[original['status']]:
+            errors['status'] = 'Недопустимый переход статуса CalendarSlot.'
+        for field_name in ('approved_by_id', 'approved_at', 'closed_revision_id', 'closed_by_id', 'closed_at'):
+            if original[field_name] is not None and original[field_name] != getattr(self, field_name):
+                errors[field_name.removesuffix('_id')] = 'Исторические реквизиты CalendarSlot неизменяемы.'
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        with transaction.atomic():
+            if self.pk:
+                type(self)._base_manager.select_for_update().get(pk=self.pk)
+            self._validate_existing_state()
+            self.full_clean()
+            return super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f'{self.anchor.code}: {self.watch_period.name} ({self.valid_from} — {self.valid_to})'
+
+
+class EmployeeAccommodationBinding(StableIdentifierModel):
+    class Status(models.TextChoices):
+        DRAFT = 'draft', 'Черновик'
+        CONFIRMED = 'confirmed', 'Подтверждено'
+        CLOSED = 'closed', 'Закрыто'
+
+    objects = M4CalendarBindingQuerySet.as_manager()
+
+    employee = models.ForeignKey(
+        'users.Employee',
+        verbose_name='Сотрудник',
+        on_delete=models.PROTECT,
+        related_name='accommodation_bindings',
+    )
+    anchor_calendar_slot = models.ForeignKey(
+        AccommodationAnchorCalendarSlot,
+        verbose_name='Календарный слот жилищного якоря',
+        on_delete=models.PROTECT,
+        related_name='employee_bindings',
+    )
+    valid_from = models.DateField('Действует с')
+    valid_to = models.DateField('Действует по')
+    status = models.CharField(
+        'Статус', max_length=16, choices=Status.choices, default=Status.DRAFT, db_index=True,
+    )
+    basis_type = models.CharField('Тип основания', max_length=64)
+    basis_id = models.CharField('Идентификатор основания', max_length=128)
+    basis_snapshot = models.JSONField('Неизменяемый снимок основания')
+    source_revision = models.ForeignKey(
+        SettlementRevision,
+        verbose_name='Ревизия-основание',
+        on_delete=models.PROTECT,
+        related_name='employee_accommodation_bindings',
+    )
+    approved_by = models.ForeignKey(
+        'users.Employee',
+        verbose_name='Кем подтверждено',
+        on_delete=models.PROTECT,
+        related_name='approved_employee_accommodation_bindings',
+        null=True,
+        blank=True,
+    )
+    approved_at = models.DateTimeField('Когда подтверждено', null=True, blank=True)
+    closed_revision = models.ForeignKey(
+        SettlementRevision,
+        verbose_name='Ревизия закрытия',
+        on_delete=models.PROTECT,
+        related_name='closed_employee_accommodation_bindings',
+        null=True,
+        blank=True,
+    )
+    closed_by = models.ForeignKey(
+        'users.Employee',
+        verbose_name='Кем закрыто',
+        on_delete=models.PROTECT,
+        related_name='closed_employee_accommodation_bindings',
+        null=True,
+        blank=True,
+    )
+    closed_at = models.DateTimeField('Когда закрыто', null=True, blank=True)
+    supersedes = models.ForeignKey(
+        'self',
+        verbose_name='Заменяет закрепление',
+        on_delete=models.PROTECT,
+        related_name='replacements',
+        null=True,
+        blank=True,
+    )
+    created_at = models.DateTimeField('Создано', auto_now_add=True)
+    updated_at = models.DateTimeField('Изменено', auto_now=True)
+
+    class Meta:
+        verbose_name = 'Постоянное жилищное закрепление сотрудника'
+        verbose_name_plural = 'Постоянные жилищные закрепления сотрудников'
+        ordering = ['employee_id', 'valid_from', 'pk']
+        indexes = [
+            models.Index(fields=['employee', 'status', 'valid_from'], name='employee_binding_period_idx'),
+            models.Index(
+                fields=['anchor_calendar_slot', 'status', 'valid_from'],
+                name='slot_binding_period_idx',
+            ),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['employee', 'anchor_calendar_slot', 'valid_from'],
+                name='unique_employee_slot_binding_start',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(valid_to__gte=models.F('valid_from')),
+                name='employee_binding_period_non_empty',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        status='draft', approved_by__isnull=True, approved_at__isnull=True,
+                        closed_revision__isnull=True, closed_by__isnull=True, closed_at__isnull=True,
+                    )
+                    | models.Q(
+                        status='confirmed', approved_by__isnull=False, approved_at__isnull=False,
+                        closed_revision__isnull=True, closed_by__isnull=True, closed_at__isnull=True,
+                    )
+                    | models.Q(
+                        status='closed', approved_by__isnull=False, approved_at__isnull=False,
+                        closed_revision__isnull=False, closed_by__isnull=False, closed_at__isnull=False,
+                    )
+                ),
+                name='employee_binding_lifecycle_metadata',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(supersedes__isnull=True) | ~models.Q(pk=models.F('supersedes_id')),
+                name='employee_binding_not_self_supersede',
+            ),
+        ]
+
+    def _overlapping_bindings(self):
+        queryset = type(self).objects.filter(
+            status__in=[self.Status.CONFIRMED, self.Status.CLOSED],
+            valid_from__lte=self.valid_to,
+            valid_to__gte=self.valid_from,
+        )
+        if self.pk:
+            queryset = queryset.exclude(pk=self.pk)
+        return queryset.order_by('pk')
+
+    def clean(self):
+        super().clean()
+        errors = {}
+        if self._state.adding and self.status != self.Status.DRAFT:
+            errors['status'] = 'Binding создаётся только как DRAFT и подтверждается доменной командой.'
+        if self.valid_from and self.valid_to and self.valid_to < self.valid_from:
+            errors['valid_to'] = 'Окончание binding не может быть раньше начала.'
+        if not self.basis_type:
+            errors['basis_type'] = 'Тип основания обязателен.'
+        if not self.basis_id:
+            errors['basis_id'] = 'Идентификатор основания обязателен.'
+        if not isinstance(self.basis_snapshot, dict) or not self.basis_snapshot:
+            errors['basis_snapshot'] = 'Неизменяемый снимок основания должен быть непустым объектом.'
+        if self.anchor_calendar_slot_id:
+            slot = self.anchor_calendar_slot
+            if slot.calendar_relation_is_stale:
+                errors['anchor_calendar_slot'] = 'CalendarSlot устарел относительно WatchPeriod.'
+            if self.valid_from < slot.valid_from or self.valid_to > slot.valid_to:
+                errors['valid_from'] = 'Период binding должен целиком находиться внутри CalendarSlot.'
+            if self.employee.watch_composition_id != slot.watch_composition_id:
+                errors['employee'] = 'Сотрудник не принадлежит WatchComposition календарного слота.'
+        if self.status in {self.Status.CONFIRMED, self.Status.CLOSED}:
+            if self.source_revision.status != SettlementRevision.Status.CONFIRMED:
+                errors['source_revision'] = 'Подтверждённый binding требует подтверждённой ревизии.'
+            if self.anchor_calendar_slot.status not in {
+                AccommodationAnchorCalendarSlot.Status.CONFIRMED,
+                AccommodationAnchorCalendarSlot.Status.CLOSED,
+            }:
+                errors['anchor_calendar_slot'] = 'Binding требует подтверждённого CalendarSlot.'
+            if not self.approved_by_id or not self.approved_at:
+                errors['approved_by'] = 'Подтверждённый binding требует автора и времени подтверждения.'
+            overlaps = self._overlapping_bindings()
+            if overlaps.filter(employee_id=self.employee_id).exists():
+                errors['employee'] = 'Сотрудник уже имеет подтверждённый binding в пересекающемся периоде.'
+            if overlaps.filter(anchor_calendar_slot_id=self.anchor_calendar_slot_id).exists():
+                errors['anchor_calendar_slot'] = 'CalendarSlot уже занят в пересекающемся периоде.'
+            try:
+                own_assignment = _confirmed_bed_assignment_for_slot(self.anchor_calendar_slot)
+            except ValidationError as error:
+                errors.update(error.message_dict)
+            else:
+                for other in overlaps.select_related('anchor_calendar_slot'):
+                    try:
+                        other_assignment = _confirmed_bed_assignment_for_slot(other.anchor_calendar_slot)
+                    except ValidationError:
+                        errors['anchor_calendar_slot'] = 'Пересекающийся binding имеет недоказанное физическое место.'
+                        break
+                    if other_assignment.physical_bed_id == own_assignment.physical_bed_id:
+                        errors['anchor_calendar_slot'] = (
+                            'Одна физическая койка не может иметь противоречащие подтверждённые binding.'
+                        )
+                        break
+        if self.supersedes_id:
+            if self.supersedes_id == self.pk:
+                errors['supersedes'] = 'Binding не может заменять сам себя.'
+            elif self.supersedes.employee_id != self.employee_id:
+                errors['supersedes'] = 'Постоянная коррекция должна относиться к тому же сотруднику.'
+        if self.status == self.Status.CLOSED:
+            if not self.closed_revision_id or not self.closed_by_id or not self.closed_at:
+                errors['closed_revision'] = 'Закрытый binding требует полной истории закрытия.'
+            elif self.closed_revision.status != SettlementRevision.Status.CONFIRMED:
+                errors['closed_revision'] = 'Закрытие требует подтверждённой ревизии.'
+        if errors:
+            raise ValidationError(errors)
+
+    def _validate_existing_state(self):
+        if not self.pk:
+            return
+        original = type(self)._base_manager.filter(pk=self.pk).values(
+            'stable_id', 'employee_id', 'anchor_calendar_slot_id', 'valid_from', 'valid_to',
+            'basis_type', 'basis_id', 'basis_snapshot', 'source_revision_id', 'supersedes_id',
+            'status', 'approved_by_id', 'approved_at', 'closed_revision_id', 'closed_by_id', 'closed_at',
+        ).first()
+        if original is None:
+            return
+        errors = {}
+        for field_name in (
+            'stable_id', 'employee_id', 'anchor_calendar_slot_id', 'valid_from',
+            'basis_type', 'basis_id', 'basis_snapshot', 'source_revision_id', 'supersedes_id',
+        ):
+            if original[field_name] != getattr(self, field_name):
+                errors[field_name.removesuffix('_id')] = 'Смысловые поля binding после создания неизменяемы.'
+        allowed = {
+            self.Status.DRAFT: {self.Status.DRAFT, self.Status.CONFIRMED},
+            self.Status.CONFIRMED: {self.Status.CONFIRMED, self.Status.CLOSED},
+            self.Status.CLOSED: {self.Status.CLOSED},
+        }
+        if self.status not in allowed[original['status']]:
+            errors['status'] = 'Недопустимый переход статуса binding.'
+        if original['valid_to'] != self.valid_to:
+            valid_close = (
+                original['status'] == self.Status.CONFIRMED
+                and self.status == self.Status.CLOSED
+                and self.valid_from <= self.valid_to <= original['valid_to']
+            )
+            if not valid_close:
+                errors['valid_to'] = (
+                    'Границу binding можно только однократно сократить явной командой закрытия.'
+                )
+        for field_name in ('approved_by_id', 'approved_at', 'closed_revision_id', 'closed_by_id', 'closed_at'):
+            if original[field_name] is not None and original[field_name] != getattr(self, field_name):
+                errors[field_name.removesuffix('_id')] = 'Исторические реквизиты binding неизменяемы.'
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        with transaction.atomic():
+            if self.pk:
+                type(self)._base_manager.select_for_update().get(pk=self.pk)
+            self._validate_existing_state()
+            self.full_clean()
+            return super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f'{self.employee} → {self.anchor_calendar_slot}: {self.valid_from} — {self.valid_to}'
+
+
+@receiver(pre_delete, sender=AccommodationAnchorCalendarSlot)
+@receiver(pre_delete, sender=EmployeeAccommodationBinding)
+def protect_historical_m4_rows(sender, instance, using, origin, **kwargs):
+    persisted_status = instance.status
+    if origin is instance:
+        persisted_status = (
+            sender._base_manager.using(using)
+            .filter(pk=instance.pk)
+            .values_list('status', flat=True)
+            .first()
+        )
+    if persisted_status in {sender.Status.CONFIRMED, sender.Status.CLOSED}:
+        raise ProtectedError(
+            'Подтверждённые и закрытые строки M4 удалять нельзя.',
             [instance],
         )
 

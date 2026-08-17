@@ -45,11 +45,21 @@ from users.active_role import (
 from users.models import Employee, EmployeeAccess, Role, WatchComposition
 
 from .admin import PhysicalRoomAdmin
+from .calendar_bindings import (
+    close_employee_accommodation_binding,
+    confirm_calendar_slot,
+    confirm_employee_accommodation_binding,
+    create_calendar_slot,
+    create_employee_accommodation_binding,
+    supersede_employee_accommodation_binding,
+)
 from .control import SettlementControlWriteContext, acquire_control_lease
 from .fund import PHYSICAL_FUND_SPECS, expected_fund_totals
 from .models import (
     AccommodationAnchor,
     AccommodationAnchorBedAssignment,
+    AccommodationAnchorCalendarSlot,
+    EmployeeAccommodationBinding,
     EmployeeBedOccupancy,
     PhysicalBed,
     PhysicalRoom,
@@ -7399,6 +7409,340 @@ class AutoSettlementPreviewTests(TestCase):
                 AccommodationAnchorBedAssignment.objects.values_list('pk', flat=True),
             ),
         })
+
+
+class M4CalendarBindingTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.now = timezone.now().replace(microsecond=0)
+        cls.composition_a = WatchComposition.objects.create(code='m4-a', name='M4 состав A')
+        cls.composition_b = WatchComposition.objects.create(code='m4-b', name='M4 состав B')
+        cls.period_a = WatchPeriod.objects.create(
+            name='M4 январь A',
+            watch_composition=cls.composition_a,
+            starts_on=datetime(2027, 1, 1).date(),
+            ends_on=datetime(2027, 1, 31).date(),
+        )
+        cls.period_overlap = WatchPeriod.objects.create(
+            name='M4 пересечение B',
+            watch_composition=cls.composition_b,
+            starts_on=datetime(2027, 1, 15).date(),
+            ends_on=datetime(2027, 2, 15).date(),
+        )
+        cls.period_next = WatchPeriod.objects.create(
+            name='M4 февраль B',
+            watch_composition=cls.composition_b,
+            starts_on=datetime(2027, 2, 1).date(),
+            ends_on=datetime(2027, 2, 28).date(),
+        )
+        cls.employee_a = Employee.objects.create(
+            full_name='ДЕМО M4 Сотрудник A',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+            watch_composition=cls.composition_a,
+        )
+        cls.employee_a_2 = Employee.objects.create(
+            full_name='ДЕМО M4 Сотрудник A2',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+            watch_composition=cls.composition_a,
+        )
+        cls.employee_b = Employee.objects.create(
+            full_name='ДЕМО M4 Сотрудник B',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+            watch_composition=cls.composition_b,
+        )
+        cls.source = SettlementSource.objects.create(
+            source_type=SettlementSource.SourceType.DOCUMENT,
+            title='M4 нормативное основание',
+            version='1',
+            file_sha256='b' * 64,
+            status=SettlementSource.Status.CONFIRMED,
+            confirmed_at=cls.now,
+            confirmed_by_label='Архитектор M4',
+        )
+        cls.revision = SettlementRevision.objects.create(
+            code='M4-REV-1',
+            source=cls.source,
+            status=SettlementRevision.Status.CONFIRMED,
+            effective_at=cls.now,
+            confirmed_at=cls.now,
+            confirmed_by_label='Архитектор M4',
+            reason='Календарные слоты и постоянные закрепления M4.',
+        )
+        cls.dormitory = Dormitory.objects.create(number='M4')
+        cls.room = PhysicalRoom.objects.create(
+            dormitory=cls.dormitory,
+            floor=1,
+            number=1,
+            transfer_status=PhysicalRoom.TransferStatus.TRANSFERRED,
+            capacity=6,
+            corridor_side=PhysicalRoom.CorridorSide.LEFT,
+            side_position=1,
+        )
+        cls.bed = PhysicalBed.objects.create(
+            room=cls.room,
+            stable_id='M4-F1-R01-A1',
+            block=PhysicalBed.Block.A,
+            position=1,
+        )
+        cls.bed_2 = PhysicalBed.objects.create(
+            room=cls.room,
+            stable_id='M4-F1-R01-A2',
+            block=PhysicalBed.Block.A,
+            position=2,
+        )
+        cls.anchor = AccommodationAnchor.objects.create(
+            code='M4-ANCHOR-1',
+            display_name='M4 атомарное место 1',
+            anchor_type=AccommodationAnchor.AnchorType.FUNCTION,
+            function_key='m4-place-1',
+            status=AccommodationAnchor.Status.ACTIVE,
+            created_revision=cls.revision,
+        )
+        cls.anchor_2 = AccommodationAnchor.objects.create(
+            code='M4-ANCHOR-2',
+            display_name='M4 атомарное место 2',
+            anchor_type=AccommodationAnchor.AnchorType.FUNCTION,
+            function_key='m4-place-2',
+            status=AccommodationAnchor.Status.ACTIVE,
+            created_revision=cls.revision,
+        )
+        starts_at = timezone.make_aware(datetime(2027, 1, 1))
+        AccommodationAnchorBedAssignment.objects.create(
+            anchor=cls.anchor,
+            physical_bed=cls.bed,
+            valid_from=starts_at,
+            status=AccommodationAnchorBedAssignment.Status.CONFIRMED,
+            started_revision=cls.revision,
+        )
+        AccommodationAnchorBedAssignment.objects.create(
+            anchor=cls.anchor_2,
+            physical_bed=cls.bed_2,
+            valid_from=starts_at,
+            status=AccommodationAnchorBedAssignment.Status.CONFIRMED,
+            started_revision=cls.revision,
+        )
+
+    def create_slot(self, *, anchor=None, period=None, confirm=True):
+        slot = create_calendar_slot(
+            anchor_id=(anchor or self.anchor).pk,
+            watch_period_id=(period or self.period_a).pk,
+            source_revision_id=self.revision.pk,
+        )
+        if confirm:
+            slot = confirm_calendar_slot(
+                slot_id=slot.pk,
+                approved_by_id=self.employee_a.pk,
+                approved_at=self.now,
+            )
+        return slot
+
+    def create_binding(
+        self,
+        *,
+        employee=None,
+        slot=None,
+        valid_from=None,
+        valid_to=None,
+        confirm=True,
+        supersedes=None,
+    ):
+        slot = slot or self.create_slot()
+        binding = create_employee_accommodation_binding(
+            employee_id=(employee or self.employee_a).pk,
+            calendar_slot_id=slot.pk,
+            valid_from=valid_from or slot.valid_from,
+            valid_to=valid_to or slot.valid_to,
+            basis_type='management_decision',
+            basis_id=f'M4-BASIS-{EmployeeAccommodationBinding.objects.count() + 1}',
+            basis_snapshot={'decision': 'M4', 'revision': self.revision.code},
+            source_revision_id=self.revision.pk,
+            supersedes_id=supersedes.pk if supersedes else None,
+        )
+        if confirm:
+            binding = confirm_employee_accommodation_binding(
+                binding_id=binding.pk,
+                approved_by_id=self.employee_a.pk,
+                approved_at=self.now,
+            )
+        return binding
+
+    def test_calendar_slot_is_exact_watch_period_instance(self):
+        slot = self.create_slot(confirm=False)
+        self.assertEqual(slot.anchor_id, self.anchor.pk)
+        self.assertEqual(slot.watch_composition_id, self.composition_a.pk)
+        self.assertEqual(slot.watch_period_id, self.period_a.pk)
+        self.assertEqual(slot.valid_from, self.period_a.starts_on)
+        self.assertEqual(slot.valid_to, self.period_a.ends_on)
+        self.assertFalse(slot.calendar_relation_is_stale)
+        with self.assertRaises(FieldDoesNotExist):
+            AccommodationAnchorCalendarSlot._meta.get_field('shift_type')
+
+    def test_slot_rejects_composition_or_boundary_mismatch(self):
+        mismatched = AccommodationAnchorCalendarSlot(
+            anchor=self.anchor,
+            watch_composition=self.composition_b,
+            watch_period=self.period_a,
+            valid_from=self.period_a.starts_on,
+            valid_to=self.period_a.ends_on,
+            source_revision=self.revision,
+        )
+        with self.assertRaises(ValidationError) as composition_error:
+            mismatched.save()
+        self.assertIn('watch_composition', composition_error.exception.message_dict)
+
+        mismatched.watch_composition = self.composition_a
+        mismatched.valid_to = self.period_a.ends_on - timedelta(days=1)
+        with self.assertRaises(ValidationError) as boundary_error:
+            mismatched.save()
+        self.assertIn('valid_from', boundary_error.exception.message_dict)
+
+    def test_slot_identity_is_unique_per_anchor_and_watch_period(self):
+        self.create_slot(confirm=False)
+        with self.assertRaises(ValidationError):
+            self.create_slot(confirm=False)
+
+    def test_slot_detects_stale_watch_period_without_rewriting_snapshot(self):
+        slot = self.create_slot(confirm=False)
+        WatchPeriod.objects.filter(pk=self.period_a.pk).update(
+            ends_on=self.period_a.ends_on + timedelta(days=1),
+        )
+        slot = AccommodationAnchorCalendarSlot.objects.select_related('watch_period').get(pk=slot.pk)
+        self.assertTrue(slot.calendar_relation_is_stale)
+        self.assertEqual(slot.valid_to, datetime(2027, 1, 31).date())
+        with self.assertRaises(ValidationError):
+            self.create_binding(slot=slot, confirm=False)
+
+    def test_overlapping_watch_periods_cannot_share_physical_bed(self):
+        self.create_slot()
+        overlapping = self.create_slot(period=self.period_overlap, confirm=False)
+        with self.assertRaises(ValidationError) as error:
+            confirm_calendar_slot(
+                slot_id=overlapping.pk,
+                approved_by_id=self.employee_a.pk,
+                approved_at=self.now,
+            )
+        self.assertIn('valid_from', error.exception.message_dict)
+
+    def test_non_overlapping_watch_periods_can_share_physical_bed(self):
+        self.create_slot()
+        next_slot = self.create_slot(period=self.period_next)
+        self.assertEqual(next_slot.status, AccommodationAnchorCalendarSlot.Status.CONFIRMED)
+
+    def test_binding_requires_slot_containment_and_matching_composition(self):
+        slot = self.create_slot()
+        with self.assertRaises(ValidationError):
+            self.create_binding(
+                slot=slot,
+                valid_from=slot.valid_from - timedelta(days=1),
+                confirm=False,
+            )
+        with self.assertRaises(ValidationError) as employee_error:
+            self.create_binding(employee=self.employee_b, slot=slot, confirm=False)
+        self.assertIn('employee', employee_error.exception.message_dict)
+
+    def test_confirmed_bindings_do_not_overlap_for_employee_or_slot(self):
+        slot = self.create_slot()
+        self.create_binding(slot=slot)
+        second_slot = self.create_slot(anchor=self.anchor_2)
+        employee_conflict = self.create_binding(
+            employee=self.employee_a,
+            slot=second_slot,
+            confirm=False,
+        )
+        with self.assertRaises(ValidationError) as employee_error:
+            confirm_employee_accommodation_binding(
+                binding_id=employee_conflict.pk,
+                approved_by_id=self.employee_a.pk,
+                approved_at=self.now,
+            )
+        self.assertIn('employee', employee_error.exception.message_dict)
+
+        slot_conflict = self.create_binding(
+            employee=self.employee_a_2,
+            slot=slot,
+            confirm=False,
+        )
+        with self.assertRaises(ValidationError) as slot_error:
+            confirm_employee_accommodation_binding(
+                binding_id=slot_conflict.pk,
+                approved_by_id=self.employee_a.pk,
+                approved_at=self.now,
+            )
+        self.assertIn('anchor_calendar_slot', slot_error.exception.message_dict)
+
+    def test_structural_fields_and_public_mass_writes_are_immutable(self):
+        slot = self.create_slot(confirm=False)
+        slot.valid_to -= timedelta(days=1)
+        with self.assertRaises(ValidationError):
+            slot.save()
+        with self.assertRaises(ValidationError) as slot_mass_error:
+            AccommodationAnchorCalendarSlot.objects.filter(pk=slot.pk).update(status='closed')
+        self.assertEqual(slot_mass_error.exception.code, 'm4_calendar_binding_mass_write_forbidden')
+
+        slot = AccommodationAnchorCalendarSlot.objects.get(pk=slot.pk)
+        binding = self.create_binding(slot=slot, confirm=False)
+        binding.basis_snapshot = {'changed': True}
+        with self.assertRaises(ValidationError):
+            binding.save()
+        with self.assertRaises(ValidationError):
+            EmployeeAccommodationBinding.objects.bulk_update([binding], ['basis_snapshot'])
+
+    def test_supersede_is_explicit_and_preserves_history(self):
+        slot = self.create_slot()
+        previous = self.create_binding(slot=slot)
+        replacement = supersede_employee_accommodation_binding(
+            binding_id=previous.pk,
+            replacement_calendar_slot_id=slot.pk,
+            replacement_valid_from=datetime(2027, 1, 16).date(),
+            replacement_valid_to=slot.valid_to,
+            basis_type='management_correction',
+            basis_id='M4-CORRECTION-1',
+            basis_snapshot={'decision': 'corrected', 'revision': self.revision.code},
+            source_revision_id=self.revision.pk,
+            approved_by_id=self.employee_a.pk,
+            approved_at=self.now,
+        )
+        previous.refresh_from_db()
+        self.assertEqual(previous.status, EmployeeAccommodationBinding.Status.CLOSED)
+        self.assertEqual(previous.valid_to, datetime(2027, 1, 15).date())
+        self.assertEqual(replacement.supersedes_id, previous.pk)
+        self.assertEqual(replacement.status, EmployeeAccommodationBinding.Status.CONFIRMED)
+
+    def test_invalid_supersede_rolls_back_without_partial_close(self):
+        slot = self.create_slot()
+        previous = self.create_binding(slot=slot)
+        with self.assertRaises(ValidationError):
+            supersede_employee_accommodation_binding(
+                binding_id=previous.pk,
+                replacement_calendar_slot_id=slot.pk,
+                replacement_valid_from=datetime(2027, 1, 16).date(),
+                replacement_valid_to=datetime(2027, 2, 1).date(),
+                basis_type='management_correction',
+                basis_id='M4-CORRECTION-BAD',
+                basis_snapshot={'decision': 'invalid'},
+                source_revision_id=self.revision.pk,
+                approved_by_id=self.employee_a.pk,
+                approved_at=self.now,
+            )
+        previous.refresh_from_db()
+        self.assertEqual(previous.status, EmployeeAccommodationBinding.Status.CONFIRMED)
+        self.assertEqual(previous.valid_to, self.period_a.ends_on)
+        self.assertEqual(EmployeeAccommodationBinding.objects.count(), 1)
+
+    def test_provenance_foreign_keys_and_historical_rows_are_protected(self):
+        slot = self.create_slot()
+        binding = self.create_binding(slot=slot)
+        with self.assertRaises(ProtectedError):
+            self.period_a.delete()
+        with self.assertRaises(ProtectedError):
+            self.composition_a.delete()
+        with self.assertRaises(ProtectedError):
+            self.anchor.delete()
+        with self.assertRaises(ProtectedError):
+            binding.delete()
 
 
 class SettlementControlSchemaTests(TestCase):
