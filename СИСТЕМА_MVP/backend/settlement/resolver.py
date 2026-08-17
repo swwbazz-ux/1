@@ -146,6 +146,65 @@ def _period_datetimes(cohort: SettlementCohort) -> tuple[datetime, datetime]:
     return starts_at, ends_at
 
 
+def _occupancy_overlaps_member(occupancy, member) -> bool:
+    return (
+        occupancy.starts_at < member.departure_at
+        and (occupancy.ends_at is None or occupancy.ends_at > member.arrival_at)
+        and (
+            occupancy.terminated_at is None
+            or occupancy.terminated_at > member.arrival_at
+        )
+    )
+
+
+def _replaceable_occupancy_kind(*, occupancy, cohort, member) -> str | None:
+    """Classify only fully proven current-cohort baseline rows as replaceable."""
+
+    if (
+        member is None
+        or occupancy.resident_id != member.resident_id
+        or occupancy.replaced_by_application_id is not None
+        or occupancy.replaced_by_occupancy_id is not None
+        or occupancy.ended_at is not None
+        or occupancy.terminated_at is not None
+        or not _occupancy_overlaps_member(occupancy, member)
+        or occupancy.watch_period_id != cohort.watch_period_id
+        or occupancy.cohort_member_id != member.pk
+        or member.cohort_id != cohort.pk
+    ):
+        return None
+
+    if occupancy.source_kind == EmployeeBedOccupancy.SourceKind.MANUAL:
+        if (
+            occupancy.source_application_id is None
+            and occupancy.source_preview_placement_id is None
+        ):
+            return 'manual_current_cohort'
+        return None
+
+    if occupancy.source_kind != EmployeeBedOccupancy.SourceKind.AUTO:
+        return None
+    application = occupancy.source_application
+    placement = occupancy.source_preview_placement
+    if application is None or placement is None:
+        return None
+    run = application.preview_run
+    if (
+        application.watch_period_id != cohort.watch_period_id
+        or application.cohort_id != cohort.pk
+        or run.pk != placement.run_id
+        or run.watch_period_id != cohort.watch_period_id
+        or run.cohort_id != cohort.pk
+        or placement.resident_id != occupancy.resident_id
+        or placement.physical_bed_id != occupancy.physical_bed_id
+        or placement.cohort_member_id_snapshot != member.pk
+        or occupancy.starts_at != member.arrival_at
+        or occupancy.ends_at != member.departure_at
+    ):
+        return None
+    return 'auto_current_cohort'
+
+
 def _effective_equipment_assignments(*, employee_ids, effective_date):
     """Mirror the accepted production criterion used by legacy preview."""
 
@@ -408,29 +467,52 @@ def resolve_settlement_cohort(*, cohort_id: int) -> SettlementResolverResult:
     for binding in bindings:
         bindings_by_resident[binding.resident_id].append(binding)
 
+    member_by_resident = {item.resident_id: item for item in active_members}
     occupancy_rows = list(
         EmployeeBedOccupancy.objects.filter(
             starts_at__lt=ends_at,
         )
         .filter(Q(ends_at__isnull=True) | Q(ends_at__gt=starts_at))
         .filter(Q(terminated_at__isnull=True) | Q(terminated_at__gt=starts_at))
-        .select_related('resident__employee', 'physical_bed__room')
+        .select_related(
+            'resident__employee',
+            'physical_bed__room',
+            'cohort_member',
+            'source_application__preview_run',
+            'source_preview_placement',
+        )
         .order_by('pk')
     )
-    occupied_bed_ids = {item.physical_bed_id for item in occupancy_rows}
+    occupancy_kinds = {
+        item.pk: _replaceable_occupancy_kind(
+            occupancy=item,
+            cohort=cohort,
+            member=member_by_resident.get(item.resident_id),
+        )
+        for item in occupancy_rows
+    }
+    blocking_occupancy_rows = [
+        item for item in occupancy_rows if occupancy_kinds[item.pk] is None
+    ]
+    blocking_resident_ids = {
+        item.resident_id for item in blocking_occupancy_rows
+    }
+    occupied_bed_ids = {
+        item.physical_bed_id for item in blocking_occupancy_rows
+    }
     internal_room_ids = {
         item.physical_bed.room_id
-        for item in occupancy_rows
+        for item in blocking_occupancy_rows
         if not item.resident.is_external
     }
 
     external_room_organizations: dict[int, set[str]] = defaultdict(set)
     external_room_ids: set[int] = {
         item.physical_bed.room_id
-        for item in occupancy_rows
+        for item in blocking_occupancy_rows
         if item.resident.is_external
     }
-    for occupancy in occupancy_rows:
+    for occupancy in blocking_occupancy_rows:
         if occupancy.resident.is_external:
             external_room_organizations[occupancy.physical_bed.room_id].add(
                 _normalize_organization(occupancy.resident.organization),
@@ -568,16 +650,44 @@ def resolve_settlement_cohort(*, cohort_id: int) -> SettlementResolverResult:
         'occupancies': [
             {
                 'id': item.pk,
+                'classification': occupancy_kinds[item.pk] or 'non_replaceable',
                 'resident_id': item.resident_id,
                 'resident_revision': item.resident.revision,
                 'bed_id': item.physical_bed_id,
+                'assignment_type': item.assignment_type,
+                'source_kind': item.source_kind,
+                'watch_period_id': item.watch_period_id,
+                'cohort_member_id': item.cohort_member_id,
+                'target_cohort_id': cohort.pk,
+                'target_watch_period_id': cohort.watch_period_id,
+                'source_application_id': item.source_application_id,
+                'source_application_cohort_id': (
+                    item.source_application.cohort_id
+                    if item.source_application_id else None
+                ),
+                'source_application_watch_period_id': (
+                    item.source_application.watch_period_id
+                    if item.source_application_id else None
+                ),
+                'source_preview_run_id': (
+                    item.source_application.preview_run_id
+                    if item.source_application_id else None
+                ),
+                'source_preview_placement_id': item.source_preview_placement_id,
+                'source_placement_run_id': (
+                    item.source_preview_placement.run_id
+                    if item.source_preview_placement_id else None
+                ),
                 'starts_at': item.starts_at.isoformat(),
                 'ends_at': item.ends_at.isoformat() if item.ends_at else None,
                 'terminated_at': (
                     item.terminated_at.isoformat() if item.terminated_at else None
                 ),
+                'ended_at': item.ended_at.isoformat() if item.ended_at else None,
+                'replaced_by_application_id': item.replaced_by_application_id,
+                'replaced_by_occupancy_id': item.replaced_by_occupancy_id,
             }
-            for item in occupancy_rows
+            for item in sorted(occupancy_rows, key=lambda row: row.pk)
         ],
     }
     fingerprint = _canonical_hash(snapshot)
@@ -646,6 +756,9 @@ def resolve_settlement_cohort(*, cohort_id: int) -> SettlementResolverResult:
             continue
         if member.departure_at <= member.arrival_at:
             reject(member, REASON_INCOMPLETE_CONTEXT)
+            continue
+        if resident.pk in blocking_resident_ids:
+            reject(member, REASON_HARD_CONFLICT)
             continue
         if resident.employee_id:
             employee = resident.employee

@@ -960,7 +960,6 @@ class AccommodationAnchorBedAssignmentQuerySet(models.QuerySet):
     def bulk_update(self, objs, fields, batch_size=None):
         self._raise_mass_write_forbidden()
 
-
 class AccommodationAnchorBedAssignment(StableIdentifierModel):
     class Status(models.TextChoices):
         DRAFT = 'draft', 'Черновик'
@@ -3164,6 +3163,133 @@ class SettlementPreviewUnresolved(StableIdentifierModel):
         _raise_preview_delete_forbidden()
 
 
+class M8ApplyQuerySet(models.QuerySet):
+    WRITE_FORBIDDEN_CODE = 'settlement.apply.public_write_forbidden'
+    WRITE_FORBIDDEN_MESSAGE = (
+        'Публичное изменение или удаление истории Apply запрещено. '
+        'Используйте canonical settlement Apply service.'
+    )
+
+    def _raise_write_forbidden(self):
+        raise ValidationError(
+            self.WRITE_FORBIDDEN_MESSAGE,
+            code=self.WRITE_FORBIDDEN_CODE,
+        )
+
+    def update(self, **kwargs):
+        self._raise_write_forbidden()
+
+    def bulk_create(
+        self,
+        objs,
+        batch_size=None,
+        ignore_conflicts=False,
+        update_conflicts=False,
+        update_fields=None,
+        unique_fields=None,
+    ):
+        self._raise_write_forbidden()
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        self._raise_write_forbidden()
+
+    def delete(self):
+        self._raise_write_forbidden()
+
+
+def _raise_apply_write_forbidden():
+    raise ValidationError(
+        M8ApplyQuerySet.WRITE_FORBIDDEN_MESSAGE,
+        code=M8ApplyQuerySet.WRITE_FORBIDDEN_CODE,
+    )
+
+
+class SettlementPreviewApplication(StableIdentifierModel):
+    objects = M8ApplyQuerySet.as_manager()
+
+    preview_run = models.OneToOneField(
+        SettlementPreviewRun,
+        verbose_name='Применённый preview',
+        on_delete=models.PROTECT,
+        related_name='application',
+    )
+    watch_period = models.ForeignKey(
+        'shifts.WatchPeriod',
+        verbose_name='Период вахты',
+        on_delete=models.PROTECT,
+        related_name='settlement_preview_applications',
+    )
+    cohort = models.ForeignKey(
+        SettlementCohort,
+        verbose_name='Утверждённый состав заезда',
+        on_delete=models.PROTECT,
+        related_name='settlement_preview_applications',
+    )
+    applied_by_access = models.ForeignKey(
+        'users.EmployeeAccess',
+        verbose_name='Точный доступ применившего',
+        on_delete=models.PROTECT,
+        related_name='settlement_preview_applications',
+    )
+    applied_at = models.DateTimeField('Применено', auto_now_add=True)
+    resolver_fingerprint = models.CharField(
+        'SHA-256 входов resolver',
+        max_length=64,
+        validators=[RegexValidator(regex=r'^[0-9a-f]{64}$')],
+    )
+    normalized_fingerprint = models.CharField(
+        'SHA-256 нормализованного результата',
+        max_length=64,
+        validators=[RegexValidator(regex=r'^[0-9a-f]{64}$')],
+    )
+    confirm_replace_manual = models.BooleanField(default=False)
+    created_occupancy_count = models.PositiveIntegerField(default=0)
+    closed_occupancy_count = models.PositiveIntegerField(default=0)
+    replaced_occupancy_count = models.PositiveIntegerField(default=0)
+    result_snapshot = models.JSONField('Неизменяемый снимок результата Apply')
+
+    class Meta:
+        verbose_name = 'Применение сохранённого preview'
+        verbose_name_plural = 'Применения сохранённых preview'
+        ordering = ['watch_period_id', 'applied_at', 'pk']
+        indexes = [
+            models.Index(
+                fields=['watch_period', 'applied_at'],
+                name='preview_apply_period_at_idx',
+            ),
+        ]
+
+    def clean(self):
+        super().clean()
+        errors = {}
+        if self.preview_run_id and self.watch_period_id and self.cohort_id:
+            if self.preview_run.watch_period_id != self.watch_period_id:
+                errors['watch_period'] = 'Application относится к другому WatchPeriod.'
+            if self.preview_run.cohort_id != self.cohort_id:
+                errors['cohort'] = 'Application относится к другому cohort.'
+        if not isinstance(self.result_snapshot, dict) or not self.result_snapshot:
+            errors['result_snapshot'] = 'Снимок результата Apply должен быть непустым объектом.'
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        with transaction.atomic():
+            if self.pk:
+                type(self)._base_manager.select_for_update().get(pk=self.pk)
+                self._validate_immutable_fields(
+                    'preview_run', 'watch_period', 'cohort', 'applied_by_access',
+                    'applied_at', 'resolver_fingerprint', 'normalized_fingerprint',
+                    'confirm_replace_manual', 'created_occupancy_count',
+                    'closed_occupancy_count', 'replaced_occupancy_count',
+                    'result_snapshot',
+                )
+            self.full_clean()
+            return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        _raise_apply_write_forbidden()
+
+
 class EmployeeBedOccupancyQuerySet(models.QuerySet):
     MASS_WRITE_FORBIDDEN_CODE = 'employee_bed_occupancy_mass_write_forbidden'
     MASS_WRITE_FORBIDDEN_MESSAGE = (
@@ -3195,6 +3321,17 @@ class EmployeeBedOccupancyQuerySet(models.QuerySet):
     def bulk_update(self, objs, fields, batch_size=None):
         self._raise_mass_write_forbidden()
 
+    def delete(self):
+        _raise_apply_write_forbidden()
+
+
+class EmployeeBedOccupancyManager(models.Manager.from_queryset(EmployeeBedOccupancyQuerySet)):
+    def get_queryset(self):
+        return super().get_queryset().filter(
+            replaced_by_application__isnull=True,
+            replaced_by_occupancy__isnull=True,
+        )
+
 
 class EmployeeBedOccupancy(models.Model):
     """Legacy technical name; authoritative accommodation subject is resident."""
@@ -3204,7 +3341,11 @@ class EmployeeBedOccupancy(models.Model):
         TEMPORARY = 'temporary', 'Временное'
         PROPOSED = 'proposed', 'Предложенное'
 
-    objects = EmployeeBedOccupancyQuerySet.as_manager()
+    class SourceKind(models.TextChoices):
+        MANUAL = 'manual', 'Ручное'
+        AUTO = 'auto', 'Авторосселение'
+
+    objects = EmployeeBedOccupancyManager()
 
     resident = models.ForeignKey(
         SettlementResident,
@@ -3222,6 +3363,61 @@ class EmployeeBedOccupancy(models.Model):
         'Тип закрепления',
         max_length=16,
         choices=AssignmentType.choices,
+    )
+    source_kind = models.CharField(
+        'Источник размещения',
+        max_length=16,
+        choices=SourceKind.choices,
+        default=SourceKind.MANUAL,
+        db_index=True,
+    )
+    source_application = models.ForeignKey(
+        SettlementPreviewApplication,
+        verbose_name='Application-источник AUTO',
+        on_delete=models.PROTECT,
+        related_name='created_occupancies',
+        null=True,
+        blank=True,
+    )
+    source_preview_placement = models.ForeignKey(
+        SettlementPreviewPlacement,
+        verbose_name='Placement-источник AUTO',
+        on_delete=models.PROTECT,
+        related_name='created_occupancies',
+        null=True,
+        blank=True,
+    )
+    replaced_by_application = models.ForeignKey(
+        SettlementPreviewApplication,
+        verbose_name='Application, заменивший размещение',
+        on_delete=models.PROTECT,
+        related_name='replaced_occupancies',
+        null=True,
+        blank=True,
+    )
+    replaced_by_occupancy = models.ForeignKey(
+        'self',
+        verbose_name='Ручная occupancy, заменившая эту строку',
+        on_delete=models.PROTECT,
+        related_name='replaced_occupancy_history',
+        null=True,
+        blank=True,
+    )
+    watch_period = models.ForeignKey(
+        'shifts.WatchPeriod',
+        verbose_name='Период вахты occupancy',
+        on_delete=models.PROTECT,
+        related_name='bed_occupancies',
+        null=True,
+        blank=True,
+    )
+    cohort_member = models.ForeignKey(
+        SettlementCohortMember,
+        verbose_name='Строка состава occupancy',
+        on_delete=models.PROTECT,
+        related_name='bed_occupancies',
+        null=True,
+        blank=True,
     )
     settled_at = models.DateTimeField('Заселён', default=timezone.now)
     starts_at = models.DateTimeField(
@@ -3277,9 +3473,31 @@ class EmployeeBedOccupancy(models.Model):
                 ),
                 name='occupancy_term_before_end',
             ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        source_kind='manual',
+                        source_application__isnull=True,
+                        source_preview_placement__isnull=True,
+                    )
+                    | models.Q(
+                        source_kind='auto',
+                        source_application__isnull=False,
+                        source_preview_placement__isnull=False,
+                        watch_period__isnull=False,
+                        cohort_member__isnull=False,
+                    )
+                ),
+                name='occupancy_auto_provenance_complete',
+            ),
         ]
 
     def is_active_at(self, moment):
+        if (
+            self.replaced_by_application_id is not None
+            or self.replaced_by_occupancy_id is not None
+        ):
+            return False
         if moment < self.starts_at:
             return False
         if self.ends_at is not None and moment >= self.ends_at:
@@ -3294,6 +3512,66 @@ class EmployeeBedOccupancy(models.Model):
 
     def __str__(self):
         return f'{self.resident} — {self.physical_bed}'
+
+    def delete(self, *args, **kwargs):
+        _raise_apply_write_forbidden()
+
+
+class SettlementPreviewApplicationItem(StableIdentifierModel):
+    class Action(models.TextChoices):
+        CREATED = 'created', 'Создано AUTO-размещение'
+        REUSED = 'reused', 'Переиспользовано AUTO-размещение'
+        REPLACED_AUTO = 'replaced_auto', 'Заменено прежнее AUTO-размещение'
+        REPLACED_MANUAL = 'replaced_manual', 'Заменена ручная корректировка'
+
+    objects = M8ApplyQuerySet.as_manager()
+
+    application = models.ForeignKey(
+        SettlementPreviewApplication,
+        verbose_name='Применение preview',
+        on_delete=models.PROTECT,
+        related_name='occupancy_items',
+    )
+    occupancy = models.ForeignKey(
+        EmployeeBedOccupancy,
+        verbose_name='Историческая или созданная occupancy',
+        on_delete=models.PROTECT,
+        related_name='application_items',
+    )
+    preview_placement = models.ForeignKey(
+        SettlementPreviewPlacement,
+        verbose_name='Строка preview',
+        on_delete=models.PROTECT,
+        related_name='application_items',
+        null=True,
+        blank=True,
+    )
+    action = models.CharField('Действие Apply', max_length=24, choices=Action.choices)
+    created_at = models.DateTimeField('Создано', auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Связь Application с occupancy'
+        verbose_name_plural = 'Связи Application с occupancy'
+        ordering = ['application_id', 'occupancy_id', 'action', 'pk']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['application', 'occupancy', 'action'],
+                name='unique_apply_occupancy_action',
+            ),
+        ]
+
+    def save(self, *args, **kwargs):
+        with transaction.atomic():
+            if self.pk:
+                type(self)._base_manager.select_for_update().get(pk=self.pk)
+                self._validate_immutable_fields(
+                    'application', 'occupancy', 'preview_placement', 'action',
+                )
+            self.full_clean()
+            return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        _raise_apply_write_forbidden()
 
 
 class SettlementControlLease(models.Model):

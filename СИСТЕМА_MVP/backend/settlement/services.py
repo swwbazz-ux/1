@@ -43,7 +43,9 @@ def _settlement_error(message, code):
 
 def effective_occupancy_at_q(moment):
     return (
-        Q(starts_at__lte=moment)
+        Q(replaced_by_application__isnull=True)
+        & Q(replaced_by_occupancy__isnull=True)
+        & Q(starts_at__lte=moment)
         & (Q(ends_at__isnull=True) | Q(ends_at__gt=moment))
         & (
             Q(terminated_at__isnull=True)
@@ -628,11 +630,21 @@ def _create_occupancy(
     ends_at,
     settled_by,
     using,
+    source_kind=EmployeeBedOccupancy.SourceKind.MANUAL,
+    source_application=None,
+    source_preview_placement=None,
+    watch_period=None,
+    cohort_member=None,
 ):
     return EmployeeBedOccupancy.objects.using(using).create(
         resident=resident,
         physical_bed=bed,
         assignment_type=assignment_type,
+        source_kind=source_kind,
+        source_application=source_application,
+        source_preview_placement=source_preview_placement,
+        watch_period=watch_period,
+        cohort_member=cohort_member,
         settled_at=starts_at,
         starts_at=starts_at,
         ends_at=ends_at,
@@ -781,6 +793,20 @@ def relocate_resident_to_bed(
             .values('pk', 'physical_bed_id')
             .order_by('pk')
         )
+        future_auto = False
+        if not active_occupancies:
+            active_occupancies = list(
+                EmployeeBedOccupancy.objects.using(using)
+                .filter(
+                    resident_id=resident_id,
+                    source_kind=EmployeeBedOccupancy.SourceKind.AUTO,
+                    starts_at__gt=moment,
+                    terminated_at__isnull=True,
+                )
+                .values('pk', 'physical_bed_id')
+                .order_by('pk')
+            )
+            future_auto = bool(active_occupancies)
         current_occupancy_id = (
             active_occupancies[0]['pk']
             if len(active_occupancies) == 1
@@ -886,7 +912,11 @@ def relocate_resident_to_bed(
             occupancy
             for occupancy in persisted_occupancies
             if occupancy.resident_id == resident.pk
-            and occupancy.is_active_at(moment)
+            and (
+                occupancy.pk == current_occupancy_id
+                if future_auto
+                else occupancy.is_active_at(moment)
+            )
         ]
         if not active_occupancies:
             raise _settlement_error(
@@ -907,7 +937,7 @@ def relocate_resident_to_bed(
                 'Состояние размещения изменилось. Повторите действие.',
                 'settlement_occupancy_changed',
             )
-        if current_occupancy.starts_at >= moment:
+        if current_occupancy.starts_at >= moment and not future_auto:
             raise _settlement_error(
                 'Переселение невозможно в момент начала текущего размещения.',
                 'settlement_relocation_same_moment',
@@ -915,23 +945,29 @@ def relocate_resident_to_bed(
         _validate_occupancy_conflicts(
             resident_id=resident.pk,
             bed=target_bed,
-            starts_at=moment,
-            ends_at=ends_at,
+            starts_at=(current_occupancy.starts_at if future_auto else moment),
+            ends_at=(current_occupancy.ends_at if future_auto else ends_at),
             persisted_occupancies=persisted_occupancies,
             current_occupancy_id=current_occupancy.pk,
         )
 
-        current_occupancy.terminated_at = moment
-        current_occupancy.save(update_fields=['terminated_at'])
+        if not future_auto:
+            current_occupancy.terminated_at = moment
+            current_occupancy.save(update_fields=['terminated_at'])
         occupancy = _create_occupancy(
             resident=resident,
             bed=target_bed,
             assignment_type=assignment_type,
-            starts_at=moment,
-            ends_at=ends_at,
+            starts_at=(current_occupancy.starts_at if future_auto else moment),
+            ends_at=(current_occupancy.ends_at if future_auto else ends_at),
             settled_by=settled_by,
             using=using,
+            watch_period=current_occupancy.watch_period,
+            cohort_member=current_occupancy.cohort_member,
         )
+        if future_auto:
+            current_occupancy.replaced_by_occupancy = occupancy
+            current_occupancy.save(update_fields=['replaced_by_occupancy'])
 
     return occupancy
 

@@ -55,6 +55,7 @@ from .calendar_bindings import (
     create_employee_accommodation_binding,
     supersede_employee_accommodation_binding,
 )
+from .apply import apply_confirmed_settlement_preview
 from .cohorts import (
     add_settlement_cohort_member,
     approve_settlement_cohort,
@@ -75,6 +76,8 @@ from .models import (
     SettlementCohort,
     SettlementCohortMember,
     SettlementPreviewPlacement,
+    SettlementPreviewApplication,
+    SettlementPreviewApplicationItem,
     SettlementPreviewRun,
     SettlementPreviewUnresolved,
     SettlementRevision,
@@ -6169,7 +6172,7 @@ class SettlementOccupancyWorkflowTests(TestCase):
         matching = self.post_settle()
 
         self.assertEqual(matching.status_code, 201)
-        EmployeeBedOccupancy.objects.all().delete()
+        EmployeeBedOccupancy._base_manager.all().delete()
         mismatched = self.post_settle(employee=self.second_candidate)
 
         self.assertEqual(mismatched.status_code, 409)
@@ -10812,6 +10815,764 @@ class M7SavedPreviewTests(TestCase):
                 ),
             )
         self.assertFalse(SettlementPreviewRun.objects.exists())
+
+
+class M8SettlementApplyTests(TestCase):
+    @classmethod
+    def _external(cls, name, organization):
+        return M6SettlementResolverTests._external.__func__(cls, name, organization)
+
+    @classmethod
+    def setUpTestData(cls):
+        M7SavedPreviewTests.setUpTestData.__func__(cls)
+
+    def setUp(self):
+        self.raw_session_key = f'm8-session-{self._testMethodName}'
+        grant = acquire_control_lease(
+            owner_access_id=self.control_access.pk,
+            raw_session_key=self.raw_session_key,
+            source='m8-apply-test',
+        )
+        self.control_context = SettlementControlWriteContext(
+            owner_access_id=self.control_access.pk,
+            raw_session_key=self.raw_session_key,
+            lease_token=str(grant.lease_token),
+            fencing_revision=grant.fencing_revision,
+        )
+
+    def _cohort(self, *residents, approve=True):
+        return M6SettlementResolverTests._cohort(
+            self,
+            *residents,
+            approve=approve,
+        )
+
+    def _slot(self, room_index, bed_index):
+        return M6SettlementResolverTests._slot(self, room_index, bed_index)
+
+    def _binding(self, resident, slot):
+        return M6SettlementResolverTests._binding(self, resident, slot)
+
+    def _seed_room(self, resident, room_index, *, free_slots=1):
+        return M6SettlementResolverTests._seed_room(
+            self,
+            resident,
+            room_index,
+            free_slots=free_slots,
+        )
+
+    def _equipment(self, suffix):
+        return M6SettlementResolverTests._equipment(self, suffix)
+
+    def _equipment_bed(self, suffix):
+        return M6SettlementResolverTests._equipment_bed(self, suffix)
+
+    def _equipment_assignment(self, employee, equipment):
+        return M6SettlementResolverTests._equipment_assignment(
+            self,
+            employee,
+            equipment,
+        )
+
+    def _equipment_route(self, equipment, *, physical_bed, suffix):
+        return M6SettlementResolverTests._equipment_route(
+            self,
+            equipment,
+            physical_bed=physical_bed,
+            suffix=suffix,
+        )
+
+    def _equipment_resident(self, suffix):
+        employee = Employee.objects.create(
+            full_name=f'ДЕМО M8 equipment resident {suffix}',
+            sex=Employee.Sex.MALE,
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+            watch_composition=self.composition,
+        )
+        resident, _created = get_or_create_employee_resident(employee_id=employee.pk)
+        equipment = self._equipment(suffix)
+        bed = self._equipment_bed(suffix)
+        self._equipment_route(equipment, physical_bed=bed, suffix=suffix)
+        assignment = self._equipment_assignment(employee, equipment)
+        return resident, employee, equipment, bed, assignment
+
+    def _confirmed_run_for_cohort(self, cohort):
+        run = create_settlement_preview_run(
+            cohort_id=cohort.pk,
+            control_context=self.control_context,
+        )
+        return confirm_settlement_preview_run(
+            run_id=run.pk,
+            control_context=self.control_context,
+        )
+
+    def _prepared_cohort(self, *, include_unresolved=True):
+        return M7SavedPreviewTests._prepared_cohort(
+            self,
+            include_unresolved=include_unresolved,
+        )
+
+    def _confirmed_run(self, *, include_unresolved=True):
+        cohort = self._prepared_cohort(include_unresolved=include_unresolved)
+        run = create_settlement_preview_run(
+            cohort_id=cohort.pk,
+            control_context=self.control_context,
+        )
+        run = confirm_settlement_preview_run(
+            run_id=run.pk,
+            control_context=self.control_context,
+        )
+        return cohort, run
+
+    def assert_apply_code(self, code, callback):
+        with self.assertRaises(ValidationError) as raised:
+            callback()
+        self.assertEqual(raised.exception.code, code)
+
+    def test_initial_apply_uses_exact_actor_and_finite_member_interval(self):
+        cohort, run = self._confirmed_run()
+        placement = run.placements.get()
+        member = cohort.members.get(pk=placement.cohort_member_id_snapshot)
+
+        application = apply_confirmed_settlement_preview(
+            run_id=run.pk,
+            control_context=self.control_context,
+        )
+
+        occupancy = EmployeeBedOccupancy._base_manager.get(
+            source_application=application,
+        )
+        self.assertEqual(application.applied_by_access_id, self.control_access.pk)
+        self.assertEqual(application.preview_run_id, run.pk)
+        self.assertEqual(application.created_occupancy_count, 1)
+        self.assertEqual(occupancy.resident_id, placement.resident_id)
+        self.assertEqual(occupancy.physical_bed_id, placement.physical_bed_id)
+        self.assertEqual(occupancy.starts_at, member.arrival_at)
+        self.assertEqual(occupancy.ends_at, member.departure_at)
+        self.assertEqual(occupancy.settled_at, member.arrival_at)
+        self.assertEqual(occupancy.source_kind, EmployeeBedOccupancy.SourceKind.AUTO)
+        self.assertEqual(occupancy.source_preview_placement_id, placement.pk)
+        self.assertEqual(occupancy.watch_period_id, cohort.watch_period_id)
+        self.assertEqual(occupancy.cohort_member_id, member.pk)
+        self.assertEqual(run.unresolved_rows.count(), 1)
+        self.assertFalse(
+            EmployeeBedOccupancy._base_manager.filter(
+                resident_id=run.unresolved_rows.get().resident_id,
+            ).exists()
+        )
+
+    def test_external_resident_is_applied_without_employee_or_access(self):
+        self._seed_room(self.external_a, 0)
+        cohort = self._cohort(self.external_a)
+        run = create_settlement_preview_run(
+            cohort_id=cohort.pk,
+            control_context=self.control_context,
+        )
+        confirm_settlement_preview_run(
+            run_id=run.pk,
+            control_context=self.control_context,
+        )
+        application = apply_confirmed_settlement_preview(
+            run_id=run.pk,
+            control_context=self.control_context,
+        )
+        occupancy = EmployeeBedOccupancy._base_manager.get(
+            source_application=application,
+        )
+        self.assertEqual(occupancy.resident_id, self.external_a.pk)
+        self.assertIsNone(occupancy.resident.employee_id)
+
+    def test_same_run_apply_is_idempotent(self):
+        _cohort, run = self._confirmed_run(include_unresolved=False)
+        first = apply_confirmed_settlement_preview(
+            run_id=run.pk,
+            control_context=self.control_context,
+        )
+        first_values = (
+            first.pk,
+            first.applied_at,
+            first.created_occupancy_count,
+            EmployeeBedOccupancy._base_manager.count(),
+            SettlementPreviewApplicationItem.objects.count(),
+        )
+        second = apply_confirmed_settlement_preview(
+            run_id=run.pk,
+            control_context=self.control_context,
+        )
+        self.assertEqual(second.pk, first.pk)
+        self.assertEqual(
+            (
+                second.pk,
+                second.applied_at,
+                second.created_occupancy_count,
+                EmployeeBedOccupancy._base_manager.count(),
+                SettlementPreviewApplicationItem.objects.count(),
+            ),
+            first_values,
+        )
+
+    def test_draft_and_missing_control_are_rejected_without_writes(self):
+        cohort = self._prepared_cohort(include_unresolved=False)
+        run = create_settlement_preview_run(
+            cohort_id=cohort.pk,
+            control_context=self.control_context,
+        )
+        self.assert_apply_code(
+            'settlement.apply.invalid_state',
+            lambda: apply_confirmed_settlement_preview(
+                run_id=run.pk,
+                control_context=self.control_context,
+            ),
+        )
+        with self.assertRaises(ValidationError) as raised:
+            apply_confirmed_settlement_preview(run_id=run.pk, control_context=None)
+        self.assertEqual(raised.exception.code, 'settlement.control.not_held')
+        self.assertFalse(SettlementPreviewApplication.objects.exists())
+        self.assertFalse(EmployeeBedOccupancy._base_manager.exists())
+
+    def test_stale_confirmed_preview_rolls_back(self):
+        _cohort, run = self._confirmed_run(include_unresolved=False)
+        self.position_employee.personnel_position = None
+        self.position_employee.save(update_fields=['personnel_position'])
+        self.assert_apply_code(
+            'settlement.apply.stale_preview',
+            lambda: apply_confirmed_settlement_preview(
+                run_id=run.pk,
+                control_context=self.control_context,
+            ),
+        )
+        self.assertFalse(SettlementPreviewApplication.objects.exists())
+        self.assertFalse(EmployeeBedOccupancy._base_manager.exists())
+
+    def test_unrelated_target_bed_occupancy_is_hard_conflict(self):
+        _cohort, run = self._confirmed_run(include_unresolved=False)
+        placement = run.placements.get()
+        member = SettlementCohortMember.objects.get(
+            pk=placement.cohort_member_id_snapshot,
+        )
+        EmployeeBedOccupancy.objects.create(
+            resident=self.internal_resident,
+            physical_bed_id=placement.physical_bed_id,
+            assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
+            starts_at=member.arrival_at,
+            settled_at=member.arrival_at,
+            ends_at=member.departure_at,
+            settled_by=self.control_actor,
+        )
+        self.assert_apply_code(
+            'settlement.apply.hard_conflict',
+            lambda: apply_confirmed_settlement_preview(
+                run_id=run.pk,
+                control_context=self.control_context,
+            ),
+        )
+        self.assertFalse(SettlementPreviewApplication.objects.exists())
+        self.assertEqual(EmployeeBedOccupancy._base_manager.count(), 1)
+
+    def test_repeat_apply_reuses_unchanged_auto_occupancy(self):
+        cohort, first_run = self._confirmed_run(include_unresolved=False)
+        first_application = apply_confirmed_settlement_preview(
+            run_id=first_run.pk,
+            control_context=self.control_context,
+        )
+        original = EmployeeBedOccupancy._base_manager.get(
+            source_application=first_application,
+        )
+        second_run = create_settlement_preview_run(
+            cohort_id=cohort.pk,
+            control_context=self.control_context,
+        )
+        confirm_settlement_preview_run(
+            run_id=second_run.pk,
+            control_context=self.control_context,
+        )
+        second_application = apply_confirmed_settlement_preview(
+            run_id=second_run.pk,
+            control_context=self.control_context,
+        )
+        self.assertEqual(second_application.created_occupancy_count, 0)
+        self.assertEqual(EmployeeBedOccupancy._base_manager.count(), 1)
+        self.assertTrue(
+            SettlementPreviewApplicationItem.objects.filter(
+                application=second_application,
+                occupancy=original,
+                action=SettlementPreviewApplicationItem.Action.REUSED,
+            ).exists()
+        )
+
+    def test_repeat_apply_moves_resident_to_new_equipment_bed(self):
+        resident, employee, _equipment, first_bed, assignment = (
+            self._equipment_resident('MOVE-1')
+        )
+        cohort = self._cohort(resident)
+        first_run = self._confirmed_run_for_cohort(cohort)
+        first_application = apply_confirmed_settlement_preview(
+            run_id=first_run.pk,
+            control_context=self.control_context,
+        )
+        first_occupancy = EmployeeBedOccupancy.objects.get(
+            source_application=first_application,
+        )
+        self.assertEqual(first_occupancy.physical_bed_id, first_bed.pk)
+
+        assignment.ended_at = timezone.make_aware(
+            datetime.combine(self.period.starts_on, datetime.min.time())
+        )
+        assignment.save(update_fields=['ended_at'])
+        second_equipment = self._equipment('MOVE-2')
+        second_bed = self._equipment_bed('MOVE-2')
+        self._equipment_route(
+            second_equipment,
+            physical_bed=second_bed,
+            suffix='MOVE-2',
+        )
+        self._equipment_assignment(employee, second_equipment)
+
+        second_run = self._confirmed_run_for_cohort(cohort)
+        second_application = apply_confirmed_settlement_preview(
+            run_id=second_run.pk,
+            control_context=self.control_context,
+        )
+        first_occupancy = EmployeeBedOccupancy._base_manager.get(
+            pk=first_occupancy.pk,
+        )
+        current = EmployeeBedOccupancy.objects.get(
+            source_application=second_application,
+        )
+        self.assertEqual(first_occupancy.replaced_by_application_id, second_application.pk)
+        self.assertEqual(current.physical_bed_id, second_bed.pk)
+
+    def test_repeat_apply_can_swap_two_replaceable_baseline_beds(self):
+        first = self._equipment_resident('SWAP-1')
+        second = self._equipment_resident('SWAP-2')
+        cohort = self._cohort(first[0], second[0])
+        first_run = self._confirmed_run_for_cohort(cohort)
+        first_application = apply_confirmed_settlement_preview(
+            run_id=first_run.pk,
+            control_context=self.control_context,
+        )
+        baseline = {
+            row.resident_id: row.physical_bed_id
+            for row in EmployeeBedOccupancy.objects.filter(
+                source_application=first_application,
+            )
+        }
+
+        for assignment in (first[4], second[4]):
+            assignment.ended_at = timezone.make_aware(
+                datetime.combine(self.period.starts_on, datetime.min.time())
+            )
+            assignment.save(update_fields=['ended_at'])
+        self._equipment_assignment(first[1], second[2])
+        self._equipment_assignment(second[1], first[2])
+
+        second_run = self._confirmed_run_for_cohort(cohort)
+        second_application = apply_confirmed_settlement_preview(
+            run_id=second_run.pk,
+            control_context=self.control_context,
+        )
+        current = {
+            row.resident_id: row.physical_bed_id
+            for row in EmployeeBedOccupancy.objects.filter(
+                source_application=second_application,
+            )
+        }
+        self.assertEqual(current[first[0].pk], baseline[second[0].pk])
+        self.assertEqual(current[second[0].pk], baseline[first[0].pk])
+        self.assertEqual(second_application.created_occupancy_count, 2)
+        self.assertEqual(second_application.closed_occupancy_count, 2)
+
+    def test_repeat_apply_leaves_newly_unresolved_resident_without_current_occupancy(self):
+        resident, _employee, _equipment, _bed, assignment = (
+            self._equipment_resident('UNRESOLVED')
+        )
+        cohort = self._cohort(resident)
+        first_run = self._confirmed_run_for_cohort(cohort)
+        first_application = apply_confirmed_settlement_preview(
+            run_id=first_run.pk,
+            control_context=self.control_context,
+        )
+        old = EmployeeBedOccupancy.objects.get(source_application=first_application)
+        assignment.ended_at = timezone.make_aware(
+            datetime.combine(self.period.starts_on, datetime.min.time())
+        )
+        assignment.save(update_fields=['ended_at'])
+
+        second_run = self._confirmed_run_for_cohort(cohort)
+        self.assertTrue(second_run.unresolved_rows.filter(resident=resident).exists())
+        second_application = apply_confirmed_settlement_preview(
+            run_id=second_run.pk,
+            control_context=self.control_context,
+        )
+        old = EmployeeBedOccupancy._base_manager.get(pk=old.pk)
+        self.assertEqual(old.replaced_by_application_id, second_application.pk)
+        self.assertFalse(EmployeeBedOccupancy.objects.filter(resident=resident).exists())
+
+    def test_other_period_auto_and_corrupt_auto_provenance_are_not_replaceable(self):
+        cohort, first_run = self._confirmed_run(include_unresolved=False)
+        first_application = apply_confirmed_settlement_preview(
+            run_id=first_run.pk,
+            control_context=self.control_context,
+        )
+        occupancy = EmployeeBedOccupancy.objects.get(
+            source_application=first_application,
+        )
+        other_period = WatchPeriod.objects.create(
+            name='M8 другой период',
+            watch_composition=self.composition,
+            starts_on=self.period.starts_on,
+            ends_on=self.period.ends_on,
+        )
+        occupancy.watch_period = other_period
+        occupancy.save(update_fields=['watch_period'])
+        result = resolve_settlement_cohort(cohort_id=cohort.pk)
+        self.assertEqual(result.unresolved[0].reason_codes, ('hard_rule_conflict',))
+
+        occupancy.watch_period = self.period
+        occupancy.source_preview_placement = None
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                occupancy.save(update_fields=['watch_period', 'source_preview_placement'])
+
+    def test_auto_from_other_cohort_is_non_replaceable_and_fails_closed(self):
+        cohort, first_run = self._confirmed_run(include_unresolved=False)
+        first_application = apply_confirmed_settlement_preview(
+            run_id=first_run.pk,
+            control_context=self.control_context,
+        )
+        other_cohort = SettlementCohort.objects.create(
+            watch_composition=self.composition,
+            watch_period=self.period,
+            version=2,
+            source_revision=self.revision,
+            source_type='m8_corrupt_provenance_test',
+            source_id='M8-OTHER-COHORT',
+            source_snapshot={'kind': 'corrupt_provenance_test'},
+            input_fingerprint='f' * 64,
+            created_by=self.actor,
+            supersedes=cohort,
+        )
+        with connection.cursor() as cursor:
+            cursor.execute(
+                'UPDATE settlement_settlementpreviewapplication '
+                'SET cohort_id = %s WHERE id = %s',
+                [other_cohort.pk, first_application.pk],
+            )
+        result = resolve_settlement_cohort(cohort_id=cohort.pk)
+        self.assertEqual(result.unresolved[0].reason_codes, ('hard_rule_conflict',))
+        self.assertFalse(result.placements)
+
+    def test_replaceable_occupancy_changes_fingerprint_and_makes_draft_stale(self):
+        cohort, first_run = self._confirmed_run(include_unresolved=False)
+        first_application = apply_confirmed_settlement_preview(
+            run_id=first_run.pk,
+            control_context=self.control_context,
+        )
+        draft = create_settlement_preview_run(
+            cohort_id=cohort.pk,
+            control_context=self.control_context,
+        )
+        before = resolve_settlement_cohort(cohort_id=cohort.pk)
+        occupancy = EmployeeBedOccupancy.objects.get(
+            source_application=first_application,
+        )
+        occupancy.assignment_type = EmployeeBedOccupancy.AssignmentType.TEMPORARY
+        occupancy.save(update_fields=['assignment_type'])
+        after = resolve_settlement_cohort(cohort_id=cohort.pk)
+        self.assertNotEqual(before.input_fingerprint, after.input_fingerprint)
+        self.assert_apply_code(
+            'settlement.preview.stale_source',
+            lambda: confirm_settlement_preview_run(
+                run_id=draft.pk,
+                control_context=self.control_context,
+            ),
+        )
+
+    def test_resolver_with_replaceable_baseline_is_order_stable_and_read_only(self):
+        cohort, first_run = self._confirmed_run(include_unresolved=False)
+        apply_confirmed_settlement_preview(
+            run_id=first_run.pk,
+            control_context=self.control_context,
+        )
+        before = EmployeeBedOccupancy._base_manager.count()
+        with CaptureQueriesContext(connection) as captured:
+            first = resolve_settlement_cohort(cohort_id=cohort.pk)
+            second = resolve_settlement_cohort(cohort_id=cohort.pk)
+        writes = [
+            query['sql'] for query in captured.captured_queries
+            if query['sql'].lstrip().upper().startswith(('INSERT', 'UPDATE', 'DELETE'))
+        ]
+        self.assertEqual(first.normalized_json(), second.normalized_json())
+        self.assertEqual(writes, [])
+        self.assertEqual(EmployeeBedOccupancy._base_manager.count(), before)
+
+    def test_manual_correction_requires_confirmation_and_is_preserved_as_history(self):
+        cohort, first_run = self._confirmed_run(include_unresolved=False)
+        first_application = apply_confirmed_settlement_preview(
+            run_id=first_run.pk,
+            control_context=self.control_context,
+        )
+        auto = EmployeeBedOccupancy._base_manager.get(
+            source_application=first_application,
+        )
+        manual = relocate_resident_to_bed(
+            resident_id=auto.resident_id,
+            bed_stable_id=self.beds[0][0].stable_id,
+            assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
+            control_context=self.control_context,
+        )
+        self.assertEqual(manual.watch_period_id, cohort.watch_period_id)
+        self.assertEqual(manual.source_kind, EmployeeBedOccupancy.SourceKind.MANUAL)
+        second_run = create_settlement_preview_run(
+            cohort_id=cohort.pk,
+            control_context=self.control_context,
+        )
+        confirm_settlement_preview_run(
+            run_id=second_run.pk,
+            control_context=self.control_context,
+        )
+        before = (
+            SettlementPreviewApplication.objects.count(),
+            EmployeeBedOccupancy._base_manager.count(),
+        )
+        self.assert_apply_code(
+            'settlement.apply.manual_replacement_confirmation_required',
+            lambda: apply_confirmed_settlement_preview(
+                run_id=second_run.pk,
+                control_context=self.control_context,
+            ),
+        )
+        self.assertEqual(
+            (
+                SettlementPreviewApplication.objects.count(),
+                EmployeeBedOccupancy._base_manager.count(),
+            ),
+            before,
+        )
+        application = apply_confirmed_settlement_preview(
+            run_id=second_run.pk,
+            control_context=self.control_context,
+            confirm_replace_manual=True,
+        )
+        manual = EmployeeBedOccupancy._base_manager.get(pk=manual.pk)
+        self.assertEqual(manual.replaced_by_application_id, application.pk)
+        self.assertTrue(application.confirm_replace_manual)
+
+    def test_public_apply_and_occupancy_delete_guards(self):
+        _cohort, run = self._confirmed_run(include_unresolved=False)
+        application = apply_confirmed_settlement_preview(
+            run_id=run.pk,
+            control_context=self.control_context,
+        )
+        occupancy = EmployeeBedOccupancy._base_manager.get(
+            source_application=application,
+        )
+        for callback in (
+            lambda: SettlementPreviewApplication.objects.filter(pk=application.pk).update(
+                created_occupancy_count=99,
+            ),
+            lambda: SettlementPreviewApplication.objects.filter(pk=application.pk).delete(),
+            lambda: occupancy.delete(),
+        ):
+            self.assert_apply_code('settlement.apply.public_write_forbidden', callback)
+
+    def test_application_item_failure_rolls_back_application_and_occupancy(self):
+        _cohort, run = self._confirmed_run(include_unresolved=False)
+        with mock.patch.object(
+            SettlementPreviewApplicationItem,
+            'save',
+            side_effect=ValidationError('ДЕМО M8 application item failure'),
+        ):
+            with self.assertRaises(ValidationError):
+                apply_confirmed_settlement_preview(
+                    run_id=run.pk,
+                    control_context=self.control_context,
+                )
+        self.assertFalse(SettlementPreviewApplication.objects.exists())
+        self.assertFalse(EmployeeBedOccupancy._base_manager.exists())
+
+
+class M8SettlementApplyMigrationTests(TransactionTestCase):
+    migrate_from = ('settlement', '0013_resident_occupancy_subject')
+    migrate_to = ('settlement', '0014_m8_apply_provenance')
+
+    def setUp(self):
+        self.addCleanup(self._restore_latest_migrations)
+        executor = MigrationExecutor(connection)
+        executor.migrate([self.migrate_from])
+        self.old_apps = executor.loader.project_state([self.migrate_from]).apps
+
+    def _restore_latest_migrations(self):
+        executor = MigrationExecutor(connection)
+        executor.migrate(executor.loader.graph.leaf_nodes())
+
+    def _migrate_to_target(self):
+        executor = MigrationExecutor(connection)
+        executor.migrate([self.migrate_to])
+        return executor.loader.project_state([self.migrate_to]).apps
+
+    def test_clean_schema_cycles_0013_0014_0013_0014(self):
+        m8_tables = {
+            'settlement_settlementpreviewapplication',
+            'settlement_settlementpreviewapplicationitem',
+        }
+        self.assertTrue(m8_tables.isdisjoint(set(connection.introspection.table_names())))
+        self._migrate_to_target()
+        self.assertTrue(m8_tables.issubset(set(connection.introspection.table_names())))
+
+        executor = MigrationExecutor(connection)
+        executor.migrate([self.migrate_from])
+        self.assertTrue(m8_tables.isdisjoint(set(connection.introspection.table_names())))
+        self._migrate_to_target()
+        self.assertTrue(m8_tables.issubset(set(connection.introspection.table_names())))
+
+    def test_existing_manual_occupancy_survives_forward_and_reverse(self):
+        EmployeeModel = self.old_apps.get_model('users', 'Employee')
+        ResidentModel = self.old_apps.get_model('settlement', 'SettlementResident')
+        OccupancyModel = self.old_apps.get_model('settlement', 'EmployeeBedOccupancy')
+        actor, _access = ResidentOccupancySubjectMigrationTests._actor_and_access(
+            self.old_apps,
+            'M8-PRESERVE',
+        )
+        employee = EmployeeModel.objects.create(
+            full_name='ДЕМО M8 migration occupancy resident',
+            status='active',
+            is_active=True,
+        )
+        resident = ResidentModel.objects.create(
+            resident_type='EMPLOYEE',
+            employee=employee,
+        )
+        bed = ResidentOccupancySubjectMigrationTests._bed(
+            self.old_apps,
+            'M8-PRESERVE',
+        )
+        occupancy = OccupancyModel.objects.create(
+            resident=resident,
+            physical_bed=bed,
+            assignment_type='permanent',
+            settled_by=actor,
+        )
+
+        apps = self._migrate_to_target()
+        migrated = apps.get_model('settlement', 'EmployeeBedOccupancy').objects.get(
+            pk=occupancy.pk,
+        )
+        self.assertEqual(migrated.source_kind, 'manual')
+        self.assertIsNone(migrated.source_application_id)
+        self.assertIsNone(migrated.source_preview_placement_id)
+
+        executor = MigrationExecutor(connection)
+        executor.migrate([self.migrate_from])
+        apps = executor.loader.project_state([self.migrate_from]).apps
+        self.assertTrue(
+            apps.get_model('settlement', 'EmployeeBedOccupancy')
+            .objects.filter(pk=occupancy.pk, resident_id=resident.pk)
+            .exists()
+        )
+
+    def test_reverse_with_application_fails_closed_without_history_loss(self):
+        apps = self._migrate_to_target()
+        EmployeeModel = apps.get_model('users', 'Employee')
+        RoleModel = apps.get_model('users', 'Role')
+        AccessModel = apps.get_model('users', 'EmployeeAccess')
+        CompositionModel = apps.get_model('users', 'WatchComposition')
+        PeriodModel = apps.get_model('shifts', 'WatchPeriod')
+        SourceModel = apps.get_model('settlement', 'SettlementSource')
+        RevisionModel = apps.get_model('settlement', 'SettlementRevision')
+        CohortModel = apps.get_model('settlement', 'SettlementCohort')
+        RunModel = apps.get_model('settlement', 'SettlementPreviewRun')
+        ApplicationModel = apps.get_model('settlement', 'SettlementPreviewApplication')
+
+        composition = CompositionModel.objects.create(
+            code='m8-migration-composition',
+            name='M8 migration composition',
+        )
+        period = PeriodModel.objects.create(
+            name='M8 migration period',
+            watch_composition=composition,
+            starts_on=datetime(2032, 1, 1).date(),
+            ends_on=datetime(2032, 1, 31).date(),
+        )
+        actor = EmployeeModel.objects.create(
+            full_name='ДЕМО M8 migration actor',
+            status='active',
+            is_active=True,
+        )
+        role = RoleModel.objects.create(
+            code='m8-migration-role',
+            name='M8 migration role',
+        )
+        access = AccessModel.objects.create(
+            employee=actor,
+            role=role,
+            access_code='M8-MIGRATION-ACCESS',
+            status='activated',
+            is_active=True,
+        )
+        source = SourceModel.objects.create(
+            source_type='document',
+            title='M8 migration source',
+            version='1',
+            file_sha256='8' * 64,
+            status='confirmed',
+            confirmed_at=timezone.now(),
+            confirmed_by_label='ДЕМО M8 migration',
+        )
+        revision = RevisionModel.objects.create(
+            code='M8-MIGRATION-REVISION',
+            source=source,
+            status='confirmed',
+            effective_at=timezone.now(),
+            confirmed_at=timezone.now(),
+            confirmed_by_label='ДЕМО M8 migration',
+            reason='M8 migration reverse guard.',
+        )
+        cohort = CohortModel.objects.create(
+            watch_composition=composition,
+            watch_period=period,
+            version=1,
+            status='draft',
+            source_revision=revision,
+            source_type='migration_test',
+            source_id='M8-MIGRATION-COHORT',
+            source_snapshot={'kind': 'migration_test'},
+            input_fingerprint='8' * 64,
+            created_by=actor,
+        )
+        run = RunModel.objects.create(
+            cohort=cohort,
+            watch_composition=composition,
+            watch_period=period,
+            version=1,
+            status='draft',
+            source_snapshot={'kind': 'migration_test'},
+            resolver_fingerprint='8' * 64,
+            result_fingerprint='9' * 64,
+            created_by_access=access,
+        )
+        application = ApplicationModel.objects.create(
+            preview_run=run,
+            watch_period=period,
+            cohort=cohort,
+            applied_by_access=access,
+            resolver_fingerprint='8' * 64,
+            normalized_fingerprint='9' * 64,
+            result_snapshot={'kind': 'migration_test'},
+        )
+
+        executor = MigrationExecutor(connection)
+        with self.assertRaisesRegex(RuntimeError, 'applications=1'):
+            executor.migrate([self.migrate_from])
+        executor = MigrationExecutor(connection)
+        self.assertIn(self.migrate_to, executor.loader.applied_migrations)
+        apps = executor.loader.project_state([self.migrate_to]).apps
+        self.assertTrue(
+            apps.get_model('settlement', 'SettlementPreviewApplication')
+            .objects.filter(pk=application.pk)
+            .exists()
+        )
 
 
 class M7SavedPreviewMigrationTests(TransactionTestCase):
