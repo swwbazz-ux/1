@@ -2665,6 +2665,466 @@ class PhysicalBed(models.Model):
         return f'{self.room}, {self.get_block_display()}-{self.position}'
 
 
+class M7SavedPreviewQuerySet(models.QuerySet):
+    WRITE_FORBIDDEN_CODE = 'settlement.preview.public_write_forbidden'
+    WRITE_FORBIDDEN_MESSAGE = (
+        'Массовые изменения и физическое удаление сохранённого preview запрещены. '
+        'Используйте доменные команды M7.'
+    )
+
+    def _raise_write_forbidden(self):
+        raise ValidationError(
+            self.WRITE_FORBIDDEN_MESSAGE,
+            code=self.WRITE_FORBIDDEN_CODE,
+        )
+
+    def update(self, **kwargs):
+        self._raise_write_forbidden()
+
+    def bulk_create(
+        self,
+        objs,
+        batch_size=None,
+        ignore_conflicts=False,
+        update_conflicts=False,
+        update_fields=None,
+        unique_fields=None,
+    ):
+        self._raise_write_forbidden()
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        self._raise_write_forbidden()
+
+    def delete(self):
+        self._raise_write_forbidden()
+
+
+def _raise_preview_delete_forbidden():
+    raise ValidationError(
+        M7SavedPreviewQuerySet.WRITE_FORBIDDEN_MESSAGE,
+        code=M7SavedPreviewQuerySet.WRITE_FORBIDDEN_CODE,
+    )
+
+
+class SettlementPreviewRun(StableIdentifierModel):
+    class Status(models.TextChoices):
+        DRAFT = 'draft', 'Черновик'
+        CONFIRMED = 'confirmed', 'Подтверждён'
+        SUPERSEDED = 'superseded', 'Заменён новым preview'
+
+    objects = M7SavedPreviewQuerySet.as_manager()
+
+    cohort = models.ForeignKey(
+        SettlementCohort,
+        verbose_name='Утверждённый состав заезда',
+        on_delete=models.PROTECT,
+        related_name='saved_preview_runs',
+    )
+    watch_period = models.ForeignKey(
+        'shifts.WatchPeriod',
+        verbose_name='Конкретный период вахты',
+        on_delete=models.PROTECT,
+        related_name='settlement_preview_runs',
+    )
+    watch_composition = models.ForeignKey(
+        'users.WatchComposition',
+        verbose_name='Утверждённый состав вахты',
+        on_delete=models.PROTECT,
+        related_name='settlement_preview_runs',
+    )
+    version = models.PositiveIntegerField('Версия preview')
+    status = models.CharField(
+        'Статус',
+        max_length=16,
+        choices=Status.choices,
+        default=Status.DRAFT,
+        db_index=True,
+    )
+    resolver_fingerprint = models.CharField(
+        'SHA-256 входов resolver',
+        max_length=64,
+        validators=[RegexValidator(regex=r'^[0-9a-f]{64}$')],
+    )
+    result_fingerprint = models.CharField(
+        'SHA-256 нормализованного результата',
+        max_length=64,
+        validators=[RegexValidator(regex=r'^[0-9a-f]{64}$')],
+    )
+    source_snapshot = models.JSONField('Неизменяемый снимок результата и источников')
+    base_confirmed_run = models.ForeignKey(
+        'self',
+        verbose_name='Подтверждённый preview на момент расчёта',
+        on_delete=models.PROTECT,
+        related_name='drafts_based_on',
+        null=True,
+        blank=True,
+    )
+    supersedes = models.ForeignKey(
+        'self',
+        verbose_name='Заменяемый подтверждённый preview',
+        on_delete=models.PROTECT,
+        related_name='replacements',
+        null=True,
+        blank=True,
+    )
+    created_by_access = models.ForeignKey(
+        'users.EmployeeAccess',
+        verbose_name='Точный доступ создателя',
+        on_delete=models.PROTECT,
+        related_name='created_settlement_preview_runs',
+    )
+    confirmed_by_access = models.ForeignKey(
+        'users.EmployeeAccess',
+        verbose_name='Точный доступ подтвердившего',
+        on_delete=models.PROTECT,
+        related_name='confirmed_settlement_preview_runs',
+        null=True,
+        blank=True,
+    )
+    revision = models.PositiveBigIntegerField('Ревизия preview', default=1)
+    created_at = models.DateTimeField('Создан', auto_now_add=True)
+    confirmed_at = models.DateTimeField('Подтверждён', null=True, blank=True)
+    superseded_at = models.DateTimeField('Заменён', null=True, blank=True)
+
+    class Meta:
+        verbose_name = 'Сохранённый preview расселения'
+        verbose_name_plural = 'Сохранённые preview расселения'
+        ordering = ['watch_period_id', 'version', 'pk']
+        indexes = [
+            models.Index(
+                fields=['watch_period', 'status', 'version'],
+                name='preview_period_status_ver_idx',
+            ),
+            models.Index(
+                fields=['cohort', 'status'],
+                name='preview_cohort_status_idx',
+            ),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['watch_period', 'version'],
+                name='unique_preview_watch_period_version',
+            ),
+            models.UniqueConstraint(
+                fields=['watch_period'],
+                condition=models.Q(status='confirmed'),
+                name='unique_confirmed_preview_per_watch',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(version__gte=1),
+                name='preview_version_gte_1',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(revision__gte=1),
+                name='preview_revision_gte_1',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        status='draft',
+                        confirmed_by_access__isnull=True,
+                        confirmed_at__isnull=True,
+                        superseded_at__isnull=True,
+                        supersedes__isnull=True,
+                    )
+                    | models.Q(
+                        status='confirmed',
+                        confirmed_by_access__isnull=False,
+                        confirmed_at__isnull=False,
+                        superseded_at__isnull=True,
+                    )
+                    | models.Q(
+                        status='superseded',
+                        confirmed_by_access__isnull=False,
+                        confirmed_at__isnull=False,
+                        superseded_at__isnull=False,
+                    )
+                ),
+                name='preview_lifecycle_metadata',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(base_confirmed_run__isnull=True)
+                    | ~models.Q(pk=models.F('base_confirmed_run_id'))
+                ),
+                name='preview_base_not_self',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(supersedes__isnull=True)
+                    | ~models.Q(pk=models.F('supersedes_id'))
+                ),
+                name='preview_supersedes_not_self',
+            ),
+        ]
+
+    def clean(self):
+        super().clean()
+        errors = {}
+        if self._state.adding and self.status != self.Status.DRAFT:
+            errors['status'] = 'SettlementPreviewRun создаётся только как DRAFT.'
+        if self.cohort_id and self.watch_period_id and self.watch_composition_id:
+            if self.cohort.watch_period_id != self.watch_period_id:
+                errors['cohort'] = 'Cohort относится к другому WatchPeriod.'
+            if self.cohort.watch_composition_id != self.watch_composition_id:
+                errors['cohort'] = 'Cohort относится к другому WatchComposition.'
+            if self.watch_period.watch_composition_id != self.watch_composition_id:
+                errors['watch_composition'] = 'WatchPeriod не принадлежит WatchComposition preview.'
+        if not isinstance(self.source_snapshot, dict) or not self.source_snapshot:
+            errors['source_snapshot'] = 'Снимок preview должен быть непустым объектом.'
+        if self.base_confirmed_run_id:
+            base = self.base_confirmed_run
+            if base.watch_period_id != self.watch_period_id:
+                errors['base_confirmed_run'] = 'Базовый preview относится к другому WatchPeriod.'
+            if base.status not in {self.Status.CONFIRMED, self.Status.SUPERSEDED}:
+                errors['base_confirmed_run'] = 'Базовый preview должен иметь подтверждённую историю.'
+        if self.supersedes_id:
+            previous = self.supersedes
+            if previous.watch_period_id != self.watch_period_id:
+                errors['supersedes'] = 'Заменяемый preview относится к другому WatchPeriod.'
+            if self.supersedes_id != self.base_confirmed_run_id:
+                errors['supersedes'] = 'Подтверждение может заменить только зафиксированный base preview.'
+        if self.status == self.Status.DRAFT:
+            if self.confirmed_by_access_id or self.confirmed_at or self.superseded_at or self.supersedes_id:
+                errors['status'] = 'DRAFT preview не содержит реквизиты подтверждения или замены.'
+        elif self.status == self.Status.CONFIRMED:
+            if not self.confirmed_by_access_id or not self.confirmed_at or self.superseded_at:
+                errors['status'] = 'CONFIRMED preview требует автора и время подтверждения.'
+        elif self.status == self.Status.SUPERSEDED:
+            if not self.confirmed_by_access_id or not self.confirmed_at or not self.superseded_at:
+                errors['status'] = 'SUPERSEDED preview требует полную историю lifecycle.'
+        if errors:
+            raise ValidationError(errors)
+
+    def _validate_existing_state(self):
+        if not self.pk:
+            return
+        original = type(self)._base_manager.filter(pk=self.pk).values(
+            'stable_id', 'cohort_id', 'watch_period_id', 'watch_composition_id',
+            'version', 'resolver_fingerprint', 'result_fingerprint',
+            'source_snapshot', 'base_confirmed_run_id', 'created_by_access_id',
+            'status', 'supersedes_id', 'confirmed_by_access_id',
+            'confirmed_at', 'superseded_at', 'revision',
+        ).first()
+        if original is None:
+            return
+        errors = {}
+        for field_name in (
+            'stable_id', 'cohort_id', 'watch_period_id', 'watch_composition_id',
+            'version', 'resolver_fingerprint', 'result_fingerprint',
+            'source_snapshot', 'base_confirmed_run_id', 'created_by_access_id',
+        ):
+            if original[field_name] != getattr(self, field_name):
+                errors[field_name.removesuffix('_id')] = 'Смысловые поля preview после создания неизменяемы.'
+        allowed = {
+            self.Status.DRAFT: {self.Status.DRAFT, self.Status.CONFIRMED},
+            self.Status.CONFIRMED: {self.Status.CONFIRMED, self.Status.SUPERSEDED},
+            self.Status.SUPERSEDED: {self.Status.SUPERSEDED},
+        }
+        if self.status not in allowed[original['status']]:
+            errors['status'] = 'Недопустимый переход статуса preview.'
+        transition = self.status != original['status']
+        expected_revision = original['revision'] + (1 if transition else 0)
+        if self.revision != expected_revision:
+            errors['revision'] = 'Ревизия preview должна увеличиваться ровно на один при смене статуса.'
+        if original['supersedes_id'] is not None and original['supersedes_id'] != self.supersedes_id:
+            errors['supersedes'] = 'Историческую связь supersedes менять нельзя.'
+        for field_name in ('confirmed_by_access_id', 'confirmed_at', 'superseded_at'):
+            if original[field_name] is not None and original[field_name] != getattr(self, field_name):
+                errors[field_name.removesuffix('_id')] = 'Исторические реквизиты preview неизменяемы.'
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        with transaction.atomic():
+            if self.pk:
+                type(self)._base_manager.select_for_update().get(pk=self.pk)
+            self._validate_existing_state()
+            self.full_clean()
+            return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        _raise_preview_delete_forbidden()
+
+    def __str__(self):
+        return f'{self.watch_period}: preview v{self.version}'
+
+
+class SettlementPreviewPlacement(StableIdentifierModel):
+    objects = M7SavedPreviewQuerySet.as_manager()
+
+    run = models.ForeignKey(
+        SettlementPreviewRun,
+        verbose_name='Сохранённый preview',
+        on_delete=models.PROTECT,
+        related_name='placements',
+    )
+    resident = models.ForeignKey(
+        SettlementResident,
+        verbose_name='Жилец',
+        on_delete=models.PROTECT,
+        related_name='saved_preview_placements',
+    )
+    calendar_slot = models.ForeignKey(
+        AccommodationAnchorCalendarSlot,
+        verbose_name='Календарный слот',
+        on_delete=models.PROTECT,
+        related_name='saved_preview_placements',
+    )
+    physical_bed = models.ForeignKey(
+        PhysicalBed,
+        verbose_name='Физическое койко-место',
+        on_delete=models.PROTECT,
+        related_name='saved_preview_placements',
+    )
+    action = models.CharField('Действие resolver', max_length=32)
+    source_kind = models.CharField('Волна resolver', max_length=64)
+    cohort_member_id_snapshot = models.PositiveBigIntegerField('PK membership snapshot')
+    physical_room_id_snapshot = models.PositiveBigIntegerField('PK комнаты snapshot')
+    binding_id_snapshot = models.PositiveBigIntegerField(null=True, blank=True)
+    equipment_assignment_id_snapshot = models.PositiveBigIntegerField(null=True, blank=True)
+    anchor_id_snapshot = models.PositiveBigIntegerField()
+    anchor_bed_assignment_id_snapshot = models.PositiveBigIntegerField()
+    normalized_provenance = models.JSONField('Неизменяемая нормализованная provenance')
+    created_at = models.DateTimeField('Создана', auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Строка размещения сохранённого preview'
+        verbose_name_plural = 'Строки размещения сохранённого preview'
+        ordering = ['run_id', 'resident_id', 'pk']
+        indexes = [
+            models.Index(fields=['run', 'source_kind'], name='preview_place_source_idx'),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['run', 'resident'],
+                name='unique_preview_placement_resident',
+            ),
+            models.UniqueConstraint(
+                fields=['run', 'calendar_slot'],
+                name='unique_preview_placement_slot',
+            ),
+            models.UniqueConstraint(
+                fields=['run', 'physical_bed'],
+                name='unique_preview_placement_bed',
+            ),
+        ]
+
+    def clean(self):
+        super().clean()
+        errors = {}
+        if self.run_id and self.run.status != SettlementPreviewRun.Status.DRAFT:
+            errors['run'] = 'Строки добавляются только в DRAFT preview.'
+        if self.calendar_slot_id and self.run_id:
+            if self.calendar_slot.watch_period_id != self.run.watch_period_id:
+                errors['calendar_slot'] = 'CalendarSlot относится к другому WatchPeriod.'
+        if not self.action:
+            errors['action'] = 'Действие resolver обязательно.'
+        if not self.source_kind:
+            errors['source_kind'] = 'Волна resolver обязательна.'
+        if not isinstance(self.normalized_provenance, dict) or not self.normalized_provenance:
+            errors['normalized_provenance'] = 'Нормализованная provenance обязательна.'
+        if self.run_id and self.resident_id:
+            if SettlementPreviewUnresolved.objects.filter(
+                run_id=self.run_id,
+                resident_id=self.resident_id,
+            ).exists():
+                errors['resident'] = 'Resident уже сохранён как unresolved в этом preview.'
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        with transaction.atomic():
+            if self.pk:
+                type(self)._base_manager.select_for_update().get(pk=self.pk)
+                self._validate_immutable_fields(
+                    'run', 'resident', 'calendar_slot', 'physical_bed', 'action',
+                    'source_kind', 'cohort_member_id_snapshot',
+                    'physical_room_id_snapshot', 'binding_id_snapshot',
+                    'equipment_assignment_id_snapshot', 'anchor_id_snapshot',
+                    'anchor_bed_assignment_id_snapshot', 'normalized_provenance',
+                )
+            self.full_clean()
+            return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        _raise_preview_delete_forbidden()
+
+
+class SettlementPreviewUnresolved(StableIdentifierModel):
+    objects = M7SavedPreviewQuerySet.as_manager()
+
+    run = models.ForeignKey(
+        SettlementPreviewRun,
+        verbose_name='Сохранённый preview',
+        on_delete=models.PROTECT,
+        related_name='unresolved_rows',
+    )
+    resident = models.ForeignKey(
+        SettlementResident,
+        verbose_name='Жилец',
+        on_delete=models.PROTECT,
+        related_name='saved_preview_unresolved_rows',
+    )
+    reason_code = models.CharField('Основной код причины', max_length=64)
+    reason_codes = models.JSONField('Все коды причин')
+    cohort_member_id_snapshot = models.PositiveBigIntegerField('PK membership snapshot')
+    structured_details = models.JSONField('Неизменяемые структурированные детали')
+    created_at = models.DateTimeField('Создана', auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Нерасселённая строка сохранённого preview'
+        verbose_name_plural = 'Нерасселённые строки сохранённого preview'
+        ordering = ['run_id', 'resident_id', 'pk']
+        indexes = [
+            models.Index(fields=['run', 'reason_code'], name='preview_unresolved_reason_idx'),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['run', 'resident'],
+                name='unique_preview_unresolved_resident',
+            ),
+        ]
+
+    def clean(self):
+        super().clean()
+        errors = {}
+        if self.run_id and self.run.status != SettlementPreviewRun.Status.DRAFT:
+            errors['run'] = 'Строки добавляются только в DRAFT preview.'
+        if not self.reason_code:
+            errors['reason_code'] = 'Код причины обязателен.'
+        if (
+            not isinstance(self.reason_codes, list)
+            or not self.reason_codes
+            or self.reason_code not in self.reason_codes
+        ):
+            errors['reason_codes'] = 'Полный непустой список причин должен содержать основной код.'
+        if not isinstance(self.structured_details, dict) or not self.structured_details:
+            errors['structured_details'] = 'Структурированные детали обязательны.'
+        if self.run_id and self.resident_id:
+            if SettlementPreviewPlacement.objects.filter(
+                run_id=self.run_id,
+                resident_id=self.resident_id,
+            ).exists():
+                errors['resident'] = 'Resident уже сохранён как placement в этом preview.'
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        with transaction.atomic():
+            if self.pk:
+                type(self)._base_manager.select_for_update().get(pk=self.pk)
+                self._validate_immutable_fields(
+                    'run', 'resident', 'reason_code', 'reason_codes',
+                    'cohort_member_id_snapshot', 'structured_details',
+                )
+            self.full_clean()
+            return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        _raise_preview_delete_forbidden()
+
+
 class EmployeeBedOccupancyQuerySet(models.QuerySet):
     MASS_WRITE_FORBIDDEN_CODE = 'employee_bed_occupancy_mass_write_forbidden'
     MASS_WRITE_FORBIDDEN_MESSAGE = (

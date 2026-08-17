@@ -1,3 +1,4 @@
+import inspect
 import re
 import threading
 import uuid
@@ -73,6 +74,9 @@ from .models import (
     SettlementControlLease,
     SettlementCohort,
     SettlementCohortMember,
+    SettlementPreviewPlacement,
+    SettlementPreviewRun,
+    SettlementPreviewUnresolved,
     SettlementRevision,
     SettlementResident,
     SettlementSource,
@@ -87,6 +91,11 @@ from .residents import (
     update_external_resident,
 )
 from .resolver import resolve_settlement_cohort
+from .saved_previews import (
+    confirm_settlement_preview_run,
+    create_settlement_preview_run,
+    settlement_preview_is_stale,
+)
 from .services import (
     build_auto_settlement_preview,
     current_roster_resolution,
@@ -10090,3 +10099,553 @@ class M6SettlementResolverTests(TestCase):
         )
         self.assertEqual(result.unresolved[0].reason_codes, ('resolver_not_configured',))
         self.assertEqual(after, before)
+
+
+class M7SavedPreviewTests(TestCase):
+    @classmethod
+    def _external(cls, name, organization):
+        return M6SettlementResolverTests._external.__func__(
+            cls,
+            name,
+            organization,
+        )
+
+    @classmethod
+    def setUpTestData(cls):
+        M6SettlementResolverTests.setUpTestData.__func__(cls)
+        cls.control_actor = Employee.objects.create(
+            full_name='ДЕМО M7 Делопроизводитель',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        cls.control_role = Role.objects.create(
+            code='settlement_clerk',
+            name='Делопроизводитель M7',
+        )
+        cls.control_access = EmployeeAccess.objects.create(
+            employee=cls.control_actor,
+            role=cls.control_role,
+            access_code='M7-CONTROL',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+        cls.foreign_actor = Employee.objects.create(
+            full_name='ДЕМО M7 Чужая сессия',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        cls.foreign_access = EmployeeAccess.objects.create(
+            employee=cls.foreign_actor,
+            role=cls.control_role,
+            access_code='M7-FOREIGN',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+
+    def setUp(self):
+        self.raw_session_key = f'm7-session-{self._testMethodName}'
+        grant = acquire_control_lease(
+            owner_access_id=self.control_access.pk,
+            raw_session_key=self.raw_session_key,
+            source='m7-saved-preview-test',
+        )
+        self.control_context = SettlementControlWriteContext(
+            owner_access_id=self.control_access.pk,
+            raw_session_key=self.raw_session_key,
+            lease_token=str(grant.lease_token),
+            fencing_revision=grant.fencing_revision,
+        )
+
+    def _cohort(self, *residents, approve=True):
+        return M6SettlementResolverTests._cohort(
+            self,
+            *residents,
+            approve=approve,
+        )
+
+    def _slot(self, room_index, bed_index):
+        return M6SettlementResolverTests._slot(self, room_index, bed_index)
+
+    def _prepared_cohort(self, *, include_unresolved=True):
+        self._slot(2, 0)
+        residents = [self.position_resident]
+        if include_unresolved:
+            residents.append(self.internal_resident)
+        return self._cohort(*residents)
+
+    def _create_run(self, *, include_unresolved=True):
+        cohort = self._prepared_cohort(include_unresolved=include_unresolved)
+        run = create_settlement_preview_run(
+            cohort_id=cohort.pk,
+            control_context=self.control_context,
+        )
+        return cohort, run
+
+    def assert_validation_code(self, expected_code, callback):
+        with self.assertRaises(ValidationError) as raised:
+            callback()
+        self.assertEqual(raised.exception.code, expected_code)
+
+    def test_create_draft_saves_placement_unresolved_and_exact_actor(self):
+        cohort, run = self._create_run()
+        self.assertEqual(run.status, SettlementPreviewRun.Status.DRAFT)
+        self.assertEqual(run.cohort_id, cohort.pk)
+        self.assertEqual(run.created_by_access_id, self.control_access.pk)
+        self.assertEqual(run.version, 1)
+        self.assertEqual(run.revision, 1)
+        self.assertEqual(run.placements.count(), 1)
+        self.assertEqual(run.unresolved_rows.count(), 1)
+        represented = {
+            *run.placements.values_list('resident_id', flat=True),
+            *run.unresolved_rows.values_list('resident_id', flat=True),
+        }
+        self.assertEqual(
+            represented,
+            set(cohort.members.filter(
+                participation_status__in=SettlementCohortMember.ACTIVE_PARTICIPATION_STATUSES,
+            ).values_list('resident_id', flat=True)),
+        )
+
+    def test_domain_api_requires_exact_server_control_context(self):
+        cohort = self._prepared_cohort()
+        self.assert_validation_code(
+            'settlement.control.not_held',
+            lambda: create_settlement_preview_run(
+                cohort_id=cohort.pk,
+                control_context=None,
+            ),
+        )
+        foreign = SettlementControlWriteContext(
+            owner_access_id=self.foreign_access.pk,
+            raw_session_key=self.raw_session_key,
+            lease_token=self.control_context.lease_token,
+            fencing_revision=self.control_context.fencing_revision,
+        )
+        with self.assertRaises(ValidationError) as raised:
+            create_settlement_preview_run(
+                cohort_id=cohort.pk,
+                control_context=foreign,
+            )
+        self.assertTrue(raised.exception.code.startswith('settlement.control.'))
+        self.assertFalse(SettlementPreviewRun.objects.exists())
+
+    def test_non_approved_cohort_is_controlled_and_creates_nothing(self):
+        cohort = self._cohort(self.internal_resident, approve=False)
+        self.assert_validation_code(
+            'settlement.preview.not_approved',
+            lambda: create_settlement_preview_run(
+                cohort_id=cohort.pk,
+                control_context=self.control_context,
+            ),
+        )
+        self.assertFalse(SettlementPreviewRun.objects.exists())
+
+    def test_public_api_accepts_no_actor_token_or_revision_arguments(self):
+        create_parameters = inspect.signature(create_settlement_preview_run).parameters
+        confirm_parameters = inspect.signature(confirm_settlement_preview_run).parameters
+        self.assertEqual(tuple(create_parameters), ('cohort_id', 'control_context'))
+        self.assertEqual(tuple(confirm_parameters), ('run_id', 'control_context'))
+        for forbidden in ('settled_by', 'employee', 'token', 'revision', 'session'):
+            self.assertNotIn(forbidden, create_parameters)
+            self.assertNotIn(forbidden, confirm_parameters)
+
+    def test_repeated_creation_is_versioned_and_does_not_change_confirmed_run(self):
+        cohort, first = self._create_run()
+        confirmed = confirm_settlement_preview_run(
+            run_id=first.pk,
+            control_context=self.control_context,
+        )
+        second = create_settlement_preview_run(
+            cohort_id=cohort.pk,
+            control_context=self.control_context,
+        )
+        confirmed.refresh_from_db()
+        self.assertEqual(confirmed.status, SettlementPreviewRun.Status.CONFIRMED)
+        self.assertEqual(second.status, SettlementPreviewRun.Status.DRAFT)
+        self.assertEqual(second.version, 2)
+        self.assertEqual(second.base_confirmed_run_id, confirmed.pk)
+        self.assertEqual(second.resolver_fingerprint, confirmed.resolver_fingerprint)
+        self.assertEqual(second.result_fingerprint, confirmed.result_fingerprint)
+
+    def test_confirmation_is_idempotent_and_records_exact_access(self):
+        _cohort, run = self._create_run()
+        first = confirm_settlement_preview_run(
+            run_id=run.pk,
+            control_context=self.control_context,
+        )
+        confirmed_at = first.confirmed_at
+        second = confirm_settlement_preview_run(
+            run_id=run.pk,
+            control_context=self.control_context,
+        )
+        self.assertEqual(second.pk, first.pk)
+        self.assertEqual(second.status, SettlementPreviewRun.Status.CONFIRMED)
+        self.assertEqual(second.confirmed_by_access_id, self.control_access.pk)
+        self.assertEqual(second.confirmed_at, confirmed_at)
+        self.assertEqual(second.revision, 2)
+
+    def test_source_change_after_draft_is_stale_without_partial_transition(self):
+        _cohort, run = self._create_run(include_unresolved=False)
+        self.position_employee.personnel_position = None
+        self.position_employee.save(update_fields=['personnel_position'])
+        self.assert_validation_code(
+            'settlement.preview.stale_source',
+            lambda: confirm_settlement_preview_run(
+                run_id=run.pk,
+                control_context=self.control_context,
+            ),
+        )
+        run.refresh_from_db()
+        self.assertEqual(run.status, SettlementPreviewRun.Status.DRAFT)
+        self.assertIsNone(run.confirmed_by_access_id)
+
+    def test_calendar_or_resident_change_after_draft_is_stale(self):
+        _cohort, run = self._create_run(include_unresolved=False)
+        self.period.is_active = False
+        self.period.save(update_fields=['is_active'])
+        self.assert_validation_code(
+            'settlement.preview.stale_source',
+            lambda: confirm_settlement_preview_run(
+                run_id=run.pk,
+                control_context=self.control_context,
+            ),
+        )
+        run.refresh_from_db()
+        self.assertEqual(run.status, SettlementPreviewRun.Status.DRAFT)
+
+    def test_changed_placement_is_stale_source(self):
+        cohort, run = self._create_run(include_unresolved=False)
+        current = resolve_settlement_cohort(cohort_id=cohort.pk)
+        changed_item = replace(
+            current.placements[0],
+            physical_bed_id=self.beds[2][1].pk,
+            bed_stable_id=self.beds[2][1].stable_id,
+        )
+        changed = replace(current, placements=(changed_item,))
+        with mock.patch(
+            'settlement.saved_previews.resolve_settlement_cohort',
+            return_value=changed,
+        ):
+            self.assert_validation_code(
+                'settlement.preview.stale_source',
+                lambda: confirm_settlement_preview_run(
+                    run_id=run.pk,
+                    control_context=self.control_context,
+                ),
+            )
+
+    def test_changed_unresolved_reason_is_stale_source(self):
+        cohort, run = self._create_run()
+        current = resolve_settlement_cohort(cohort_id=cohort.pk)
+        changed_item = replace(
+            current.unresolved[0],
+            reason_codes=('no_compatible_place',),
+        )
+        changed = replace(current, unresolved=(changed_item,))
+        with mock.patch(
+            'settlement.saved_previews.resolve_settlement_cohort',
+            return_value=changed,
+        ):
+            self.assert_validation_code(
+                'settlement.preview.stale_source',
+                lambda: confirm_settlement_preview_run(
+                    run_id=run.pk,
+                    control_context=self.control_context,
+                ),
+            )
+
+    def test_two_drafts_with_same_base_allow_only_first_confirmation(self):
+        cohort, base = self._create_run()
+        confirm_settlement_preview_run(
+            run_id=base.pk,
+            control_context=self.control_context,
+        )
+        first = create_settlement_preview_run(
+            cohort_id=cohort.pk,
+            control_context=self.control_context,
+        )
+        second = create_settlement_preview_run(
+            cohort_id=cohort.pk,
+            control_context=self.control_context,
+        )
+        winner = confirm_settlement_preview_run(
+            run_id=first.pk,
+            control_context=self.control_context,
+        )
+        self.assert_validation_code(
+            'settlement.preview.concurrent_confirmation',
+            lambda: confirm_settlement_preview_run(
+                run_id=second.pk,
+                control_context=self.control_context,
+            ),
+        )
+        base.refresh_from_db()
+        second.refresh_from_db()
+        self.assertEqual(base.status, SettlementPreviewRun.Status.SUPERSEDED)
+        self.assertEqual(winner.status, SettlementPreviewRun.Status.CONFIRMED)
+        self.assertEqual(winner.supersedes_id, base.pk)
+        self.assertEqual(second.status, SettlementPreviewRun.Status.DRAFT)
+        self.assertEqual(
+            SettlementPreviewRun.objects.filter(
+                watch_period=self.period,
+                status=SettlementPreviewRun.Status.CONFIRMED,
+            ).count(),
+            1,
+        )
+
+    def test_superseded_run_cannot_be_confirmed(self):
+        cohort, base = self._create_run()
+        confirm_settlement_preview_run(
+            run_id=base.pk,
+            control_context=self.control_context,
+        )
+        replacement = create_settlement_preview_run(
+            cohort_id=cohort.pk,
+            control_context=self.control_context,
+        )
+        confirm_settlement_preview_run(
+            run_id=replacement.pk,
+            control_context=self.control_context,
+        )
+        self.assert_validation_code(
+            'settlement.preview.invalid_state',
+            lambda: confirm_settlement_preview_run(
+                run_id=base.pk,
+                control_context=self.control_context,
+            ),
+        )
+
+    def test_create_rolls_back_if_a_result_row_cannot_be_saved(self):
+        cohort = self._prepared_cohort()
+        with mock.patch.object(
+            SettlementPreviewUnresolved,
+            'save',
+            side_effect=RuntimeError('synthetic row failure'),
+        ):
+            with self.assertRaisesRegex(RuntimeError, 'synthetic row failure'):
+                create_settlement_preview_run(
+                    cohort_id=cohort.pk,
+                    control_context=self.control_context,
+                )
+        self.assertFalse(SettlementPreviewRun.objects.exists())
+        self.assertFalse(SettlementPreviewPlacement.objects.exists())
+
+    def test_confirm_rolls_back_previous_supersede_if_new_audit_save_fails(self):
+        cohort, base = self._create_run()
+        confirm_settlement_preview_run(
+            run_id=base.pk,
+            control_context=self.control_context,
+        )
+        draft = create_settlement_preview_run(
+            cohort_id=cohort.pk,
+            control_context=self.control_context,
+        )
+        original_save = SettlementPreviewRun.save
+
+        def fail_new_confirmation(instance, *args, **kwargs):
+            if (
+                instance.pk == draft.pk
+                and instance.status == SettlementPreviewRun.Status.CONFIRMED
+            ):
+                raise RuntimeError('synthetic confirmation audit failure')
+            return original_save(instance, *args, **kwargs)
+
+        with mock.patch.object(
+            SettlementPreviewRun,
+            'save',
+            new=fail_new_confirmation,
+        ):
+            with self.assertRaisesRegex(RuntimeError, 'synthetic confirmation audit failure'):
+                confirm_settlement_preview_run(
+                    run_id=draft.pk,
+                    control_context=self.control_context,
+                )
+        base.refresh_from_db()
+        draft.refresh_from_db()
+        self.assertEqual(base.status, SettlementPreviewRun.Status.CONFIRMED)
+        self.assertEqual(draft.status, SettlementPreviewRun.Status.DRAFT)
+
+    def test_preview_create_and_confirm_do_not_write_domain_models(self):
+        cohort = self._prepared_cohort()
+        tracked_models = (
+            EmployeeBedOccupancy,
+            EmployeeAccommodationBinding,
+            SettlementCohort,
+            SettlementCohortMember,
+            SettlementResident,
+            PhysicalRoom,
+            PhysicalBed,
+            AccommodationAnchor,
+            AccommodationAnchorCalendarSlot,
+            AccommodationAnchorBedAssignment,
+        )
+        before = tuple(model.objects.count() for model in tracked_models)
+        run = create_settlement_preview_run(
+            cohort_id=cohort.pk,
+            control_context=self.control_context,
+        )
+        confirm_settlement_preview_run(
+            run_id=run.pk,
+            control_context=self.control_context,
+        )
+        after = tuple(model.objects.count() for model in tracked_models)
+        self.assertEqual(after, before)
+
+    def test_public_mass_mutation_delete_and_instance_delete_are_forbidden(self):
+        _cohort, run = self._create_run()
+        placement = run.placements.get()
+        unresolved = run.unresolved_rows.get()
+        for callback in (
+            lambda: SettlementPreviewRun.objects.filter(pk=run.pk).update(version=9),
+            lambda: SettlementPreviewPlacement.objects.filter(pk=placement.pk).delete(),
+            lambda: SettlementPreviewUnresolved.objects.bulk_update(
+                [unresolved],
+                ['reason_code'],
+            ),
+            run.delete,
+            placement.delete,
+            unresolved.delete,
+        ):
+            self.assert_validation_code(
+                'settlement.preview.public_write_forbidden',
+                callback,
+            )
+
+    def test_run_provenance_and_result_rows_are_immutable(self):
+        _cohort, run = self._create_run()
+        placement = run.placements.get()
+        unresolved = run.unresolved_rows.get()
+        run.result_fingerprint = 'f' * 64
+        with self.assertRaises(ValidationError):
+            run.save()
+        placement.source_kind = 'changed'
+        with self.assertRaises(ValidationError):
+            placement.save()
+        unresolved.reason_code = 'changed'
+        with self.assertRaises(ValidationError):
+            unresolved.save()
+
+    def test_cross_table_xor_is_enforced_by_domain_validation(self):
+        _cohort, run = self._create_run(include_unresolved=False)
+        placement = run.placements.get()
+        duplicate_role = SettlementPreviewUnresolved(
+            run=run,
+            resident=placement.resident,
+            reason_code='resolver_not_configured',
+            reason_codes=['resolver_not_configured'],
+            cohort_member_id_snapshot=placement.cohort_member_id_snapshot,
+            structured_details={'resident_id': placement.resident_id},
+        )
+        with self.assertRaises(ValidationError):
+            duplicate_role.save()
+
+    def test_stale_helper_is_read_only_and_detects_change(self):
+        _cohort, run = self._create_run(include_unresolved=False)
+        confirm_settlement_preview_run(
+            run_id=run.pk,
+            control_context=self.control_context,
+        )
+        before = (
+            SettlementPreviewRun.objects.count(),
+            SettlementPreviewPlacement.objects.count(),
+            SettlementPreviewUnresolved.objects.count(),
+        )
+        self.assertFalse(settlement_preview_is_stale(run_id=run.pk))
+        self.position_employee.personnel_position = None
+        self.position_employee.save(update_fields=['personnel_position'])
+        self.assertTrue(settlement_preview_is_stale(run_id=run.pk))
+        after = (
+            SettlementPreviewRun.objects.count(),
+            SettlementPreviewPlacement.objects.count(),
+            SettlementPreviewUnresolved.objects.count(),
+        )
+        self.assertEqual(after, before)
+        run.refresh_from_db()
+        self.assertEqual(run.status, SettlementPreviewRun.Status.CONFIRMED)
+
+    def test_incomplete_resolver_result_creates_no_partial_run(self):
+        cohort = self._prepared_cohort()
+        current = resolve_settlement_cohort(cohort_id=cohort.pk)
+        incomplete = replace(current, unresolved=())
+        with mock.patch(
+            'settlement.saved_previews.resolve_settlement_cohort',
+            return_value=incomplete,
+        ):
+            self.assert_validation_code(
+                'settlement.preview.incomplete_result',
+                lambda: create_settlement_preview_run(
+                    cohort_id=cohort.pk,
+                    control_context=self.control_context,
+                ),
+            )
+        self.assertFalse(SettlementPreviewRun.objects.exists())
+
+
+class M7SavedPreviewMigrationTests(TransactionTestCase):
+    migrate_from = ('settlement', '0011_resident_subject_transition')
+    migrate_to = ('settlement', '0012_m7_saved_previews')
+
+    def setUp(self):
+        self.addCleanup(self._restore_latest_migrations)
+        executor = MigrationExecutor(connection)
+        executor.migrate([self.migrate_from])
+
+    def _restore_latest_migrations(self):
+        executor = MigrationExecutor(connection)
+        executor.migrate(executor.loader.graph.leaf_nodes())
+
+    def test_clean_schema_cycles_0011_0012_0011_0012(self):
+        legacy_tables = {
+            'settlement_settlementresident',
+            'settlement_settlementcohort',
+            'settlement_settlementcohortmember',
+            'settlement_employeeaccommodationbinding',
+            'settlement_employeebedoccupancy',
+        }
+        m7_tables = {
+            'settlement_settlementpreviewrun',
+            'settlement_settlementpreviewplacement',
+            'settlement_settlementpreviewunresolved',
+        }
+        self.assertTrue(legacy_tables.issubset(set(connection.introspection.table_names())))
+        self.assertTrue(m7_tables.isdisjoint(set(connection.introspection.table_names())))
+
+        executor = MigrationExecutor(connection)
+        executor.migrate([self.migrate_to])
+        tables = set(connection.introspection.table_names())
+        self.assertTrue(legacy_tables.issubset(tables))
+        self.assertTrue(m7_tables.issubset(tables))
+        with connection.cursor() as cursor:
+            run_constraints = connection.introspection.get_constraints(
+                cursor,
+                'settlement_settlementpreviewrun',
+            )
+            placement_constraints = connection.introspection.get_constraints(
+                cursor,
+                'settlement_settlementpreviewplacement',
+            )
+        for name in (
+            'unique_preview_watch_period_version',
+            'unique_confirmed_preview_per_watch',
+            'preview_lifecycle_metadata',
+            'preview_period_status_ver_idx',
+        ):
+            self.assertIn(name, run_constraints)
+        for name in (
+            'unique_preview_placement_resident',
+            'unique_preview_placement_slot',
+            'unique_preview_placement_bed',
+        ):
+            self.assertIn(name, placement_constraints)
+
+        executor = MigrationExecutor(connection)
+        executor.migrate([self.migrate_from])
+        tables = set(connection.introspection.table_names())
+        self.assertTrue(legacy_tables.issubset(tables))
+        self.assertTrue(m7_tables.isdisjoint(tables))
+
+        executor = MigrationExecutor(connection)
+        executor.migrate([self.migrate_to])
+        tables = set(connection.introspection.table_names())
+        self.assertTrue(legacy_tables.issubset(tables))
+        self.assertTrue(m7_tables.issubset(tables))

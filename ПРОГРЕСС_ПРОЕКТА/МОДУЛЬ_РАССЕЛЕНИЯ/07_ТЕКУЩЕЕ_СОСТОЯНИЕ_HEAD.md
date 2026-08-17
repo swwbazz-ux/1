@@ -2,8 +2,8 @@
 
 Версия документа: 0.5
 Дата последней сверки отчётов: 17.08.2026
-Статус: актуализирован по HEAD `dd0459ee39b00a352ef0da0ff647f1d03ad59389` и принятому локальному шестфайловому M4/M5 resident transition; migration leaf рабочего дерева — `settlement.0011_resident_subject_transition`
-Источники доказательств: модели и domain-код M4/M5, migrations `0008`–`0011`, целевые resident/M4/M5/migration tests и чистый SQLite migration cycle `0010 → 0011 → 0010 → 0011`; production не проверялась и migration `0011` к ней не применялась
+Статус: актуализирован по base HEAD `43382d04b0c2d78e8d34e633d1192771bca10657` и принятой локальной реализации M7; migration leaf рабочего дерева — `settlement.0012_m7_saved_previews`
+Источники доказательств: модели и domain-код M4–M7, migrations `0008`–`0012`, целевые M7/M6/migration tests и чистый SQLite migration cycle `0011 → 0012 → 0011 → 0012`; production не проверялась и migration `0012` к ней не применялась
 
 ## 1. Репозиторий и baseline
 
@@ -161,7 +161,7 @@ Migration `0011_resident_subject_transition` заменила subject `employee`
 
 Forward migration создаёт или переиспользует ровно один внутренний wrapper для существующих subject Employee и не создаёт `EmployeeAccess`. Reverse восстанавливает Employee subject только для internal resident и останавливается fail-closed при external subject. M4/M5 domain-команды используют полный порядок `Employee внутренних resident по PK → SettlementResident по PK с OF self → WatchPeriod → Cohort/Member → Slot/Binding → Anchor/Assignment/Bed → revalidation/write`.
 
-Внешний resident уже может быть subject cohort member и calendar binding. Минимальное безопасное read-only ядро M6 для MVP реализовано. Не реализованы: UI создания внешней карточки, saved preview, Apply, external occupancy и trainee adapter.
+Внешний resident уже может быть subject cohort member и calendar binding. Минимальное безопасное read-only ядро M6 и сохраняемый immutable preview M7 реализованы. Не реализованы: UI создания внешней карточки, UI preview/confirm, Apply, external occupancy и trainee adapter.
 
 ### 4.8. Read-only resolver M6
 
@@ -304,9 +304,9 @@ Preview группирует конкуренцию по `(physical_bed_id, shif
 | Authoritative SettlementResident | READY | Migration `0010_settlement_residents` ввела resident lifecycle; migration `0011_resident_subject_transition` перевела M4 binding и M5 member на resident identity без создания EmployeeAccess |
 | Group capacity conflict | PARTIAL | M6 read-only resolver не выбирает равноправного resident при дефиците и возвращает всей непосредственно конфликтующей группе `equal_priority_conflict`; полный configured group resolver ещё отсутствует |
 | Explicit KEEP | PARTIAL | Совпадение employee допускается, action/provenance нет |
-| Saved AutoSettlementRun | ABSENT | Следующий milestone M7; модель отсутствует |
-| Immutable run rows | ABSENT | Отсутствуют |
-| Input hash/stale detection | ABSENT | Отсутствуют |
+| Saved preview M7 | READY | `SettlementPreviewRun` с version и lifecycle `DRAFT → CONFIRMED → SUPERSEDED`; один CONFIRMED на WatchPeriod |
+| Immutable run rows | READY | Отдельные `SettlementPreviewPlacement` и `SettlementPreviewUnresolved`, immutable provenance и public mass-mutation guards |
+| Input hash/stale detection | READY | Resolver/normalized fingerprints, source snapshot, повторный M6 при confirmation и read-only stale helper |
 | Transactional Apply | ABSENT | Endpoint/service отсутствуют |
 | Idempotency | ABSENT | Отсутствует |
 | Единственный активный управляющий | PARTIAL | Singleton lease, lifecycle и fencing реализованы внутренне; write gate, HTTP/session binding и server read-only enforcement отсутствуют |
@@ -330,7 +330,7 @@ Preview группирует конкуренцию по `(physical_bed_id, shif
 - CrewPlan, WatchComposition/WatchPeriod и RotationResponse как upstream-факты;
 - UI-каркас, панели и DnD.
 
-До нового preview необходимы:
+До полного Apply необходимы либо остаются отдельными конфигурационными этапами:
 
 1. усиление текущих interval/writer invariants;
 2. два atomic equipment slots и validation пары `An+Bn`;
@@ -341,4 +341,10 @@ Preview группирует конкуренцию по `(physical_bed_id, shif
 7. явные category assignments и маршрут стажёра по настоящей должности через authoritative structured state/adapter;
 8. room profiles, resolver rules и групповые конфликты дефицита.
 
-Только после этого строятся saved preview и transactional Apply.
+Saved preview M7 уже построен и подтверждается без occupancy writes. Следующий активный milestone — transactional Apply актуального `CONFIRMED` preview; специальные M6-конфигурации продолжают возвращать controlled unresolved и не должны маскироваться Apply.
+
+### 11.1. Фактический M7
+
+Migration leaf — `settlement.0012_m7_saved_previews`. Migration schema-only, зависит от `settlement.0011_resident_subject_transition`, не выполняет backfill и создаёт три M7-таблицы. Публичные API: `create_settlement_preview_run(*, cohort_id, control_context)`, `confirm_settlement_preview_run(*, run_id, control_context)` и `settlement_preview_is_stale(*, run_id)`.
+
+Подтверждение требует exact server-side control context, повторяет M6 и fail-closed сравнивает fingerprints/snapshot/rows. Unresolved residents сохраняются с reason codes и допускаются в `CONFIRMED` preview. M7 не меняет occupancy, M4/M5, residents или физический фонд. Apply, UI и production deployment отсутствуют.
