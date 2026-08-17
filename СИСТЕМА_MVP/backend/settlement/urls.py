@@ -6,6 +6,9 @@ from .views import (
     legacy_settlement_service_worker_view,
     settlement_employee_search_view,
     settlement_employee_detail_view,
+    settlement_control_acquire_view,
+    settlement_control_heartbeat_view,
+    settlement_control_release_view,
     settlement_login_view,
     settlement_manifest_view,
     settlement_map_view,
@@ -28,6 +31,21 @@ urlpatterns = [
     path('clerk/login/', settlement_login_view, name='clerk_login'),
     path('clerk/', settlement_map_view, name='clerk_home'),
     path('clerk/settlement/', settlement_map_view, name='settlement_map'),
+    path(
+        'clerk/settlement/control/acquire/',
+        settlement_control_acquire_view,
+        name='settlement_control_acquire',
+    ),
+    path(
+        'clerk/settlement/control/heartbeat/',
+        settlement_control_heartbeat_view,
+        name='settlement_control_heartbeat',
+    ),
+    path(
+        'clerk/settlement/control/release/',
+        settlement_control_release_view,
+        name='settlement_control_release',
+    ),
     path(
         'clerk/settlement/employees/search/',
         settlement_employee_search_view,

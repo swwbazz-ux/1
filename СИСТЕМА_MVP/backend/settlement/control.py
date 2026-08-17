@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -14,6 +14,7 @@ from django.utils.crypto import constant_time_compare, salted_hmac
 
 from users.employee_access_locks import (
     EmployeeAccessLockPlanError,
+    LockedEmployeeAccessRows,
     build_employee_access_lock_plan,
     lock_employee_access_plan,
 )
@@ -25,6 +26,14 @@ from .models import SettlementControlEvent, SettlementControlLease
 CONTROL_SCOPE = 'settlement'
 SESSION_HASH_SALT = 'settlement.control.session'
 DEFAULT_LEASE_TTL_SECONDS = 120
+CONTROL_SESSION_OWNER_ACCESS_ID_KEY = 'settlement_control_owner_access_id'
+CONTROL_SESSION_LEASE_TOKEN_KEY = 'settlement_control_lease_token'
+CONTROL_SESSION_FENCING_REVISION_KEY = 'settlement_control_fencing_revision'
+CONTROL_SESSION_CREDENTIAL_KEYS = (
+    CONTROL_SESSION_OWNER_ACCESS_ID_KEY,
+    CONTROL_SESSION_LEASE_TOKEN_KEY,
+    CONTROL_SESSION_FENCING_REVISION_KEY,
+)
 SAFE_SESSION_METADATA_FIELDS = frozenset({
     'session_kind',
     'request_id',
@@ -49,8 +58,76 @@ class ControlLeaseTransition:
     occurred_at: datetime
 
 
+@dataclass(frozen=True, slots=True)
+class ControlSessionCredentials:
+    owner_access_id: int
+    lease_token: str
+    fencing_revision: int
+
+
+@dataclass(frozen=True, slots=True)
+class SettlementControlWriteContext:
+    owner_access_id: int
+    raw_session_key: str = field(repr=False)
+    lease_token: str = field(repr=False)
+    fencing_revision: int
+
+
 def _validation_error(code: str, message: str) -> ValidationError:
     return ValidationError(message, code=f'settlement.control.{code}')
+
+
+def store_control_session_credentials(
+    session,
+    *,
+    owner_access_id: int,
+    grant: ControlLeaseGrant,
+) -> None:
+    session[CONTROL_SESSION_OWNER_ACCESS_ID_KEY] = owner_access_id
+    session[CONTROL_SESSION_LEASE_TOKEN_KEY] = str(grant.lease_token)
+    session[CONTROL_SESSION_FENCING_REVISION_KEY] = grant.fencing_revision
+
+
+def clear_control_session_credentials(session) -> None:
+    for key in CONTROL_SESSION_CREDENTIAL_KEYS:
+        session.pop(key, None)
+
+
+def control_session_credentials_from_session(session) -> ControlSessionCredentials:
+    owner_access_id = session.get(CONTROL_SESSION_OWNER_ACCESS_ID_KEY)
+    lease_token = session.get(CONTROL_SESSION_LEASE_TOKEN_KEY)
+    fencing_revision = session.get(CONTROL_SESSION_FENCING_REVISION_KEY)
+
+    if all(value is None for value in (
+        owner_access_id,
+        lease_token,
+        fencing_revision,
+    )):
+        raise _validation_error('not_held', 'Управление расселением свободно.')
+    if (
+        isinstance(owner_access_id, bool)
+        or not isinstance(owner_access_id, int)
+        or owner_access_id <= 0
+    ):
+        raise _validation_error('invalid_access', 'Доступ сотрудника не найден.')
+    try:
+        normalized_token = str(uuid.UUID(str(lease_token)))
+    except (AttributeError, TypeError, ValueError):
+        raise _validation_error('invalid_token', 'Токен управления недействителен.') from None
+    if (
+        isinstance(fencing_revision, bool)
+        or not isinstance(fencing_revision, int)
+        or fencing_revision < 0
+    ):
+        raise _validation_error(
+            'stale_revision',
+            'Ревизия управления устарела.',
+        )
+    return ControlSessionCredentials(
+        owner_access_id=owner_access_id,
+        lease_token=normalized_token,
+        fencing_revision=fencing_revision,
+    )
 
 
 def _session_hash(raw_session_key: str) -> str:
@@ -649,6 +726,102 @@ def _validated_held_lease(
             'stale_revision',
             'Ревизия управления устарела.',
         )
+
+
+def lock_settlement_write_lease(
+    *,
+    control_context: SettlementControlWriteContext | None,
+    using: str,
+) -> SettlementControlLease:
+    if not connections[using].in_atomic_block:
+        raise RuntimeError(
+            'Settlement write control must be checked inside transaction.atomic().',
+        )
+    if not isinstance(control_context, SettlementControlWriteContext):
+        raise _validation_error('not_held', 'Управление расселением свободно.')
+    if not control_context.raw_session_key:
+        raise _validation_error('not_held', 'Управление расселением свободно.')
+
+    lease = _ensure_control_lease_locked(scope=CONTROL_SCOPE, using=using)
+    _validated_held_lease(
+        lease,
+        owner_access_id=control_context.owner_access_id,
+        raw_session_key=control_context.raw_session_key,
+        lease_token=control_context.lease_token,
+        fencing_revision=control_context.fencing_revision,
+    )
+    if lease.expires_at <= timezone.now():
+        raise _validation_error('expired', 'Срок управления истёк.')
+    return lease
+
+
+def lock_settlement_write_access(
+    *,
+    lease: SettlementControlLease,
+    control_context: SettlementControlWriteContext,
+    employee_ids: tuple[int, ...],
+    using: str,
+) -> LockedEmployeeAccessRows:
+    if not connections[using].in_atomic_block:
+        raise RuntimeError(
+            'Settlement write access must be checked inside transaction.atomic().',
+        )
+    try:
+        expected_role_id = (
+            EmployeeAccess.objects.using(using)
+            .filter(pk=control_context.owner_access_id)
+            .values_list('role_id', flat=True)
+            .get()
+        )
+        plan = build_employee_access_lock_plan(
+            access_ids=(control_context.owner_access_id,),
+            employee_ids=employee_ids,
+            using=using,
+        )
+        locked_rows = lock_employee_access_plan(plan)
+        owner_access = locked_rows.access_by_id(control_context.owner_access_id)
+        owner_employee = locked_rows.employee_by_id(owner_access.employee_id)
+    except (EmployeeAccess.DoesNotExist, EmployeeAccessLockPlanError):
+        raise _validation_error(
+            'invalid_access',
+            'Доступ сотрудника не найден.',
+        ) from None
+
+    if owner_access.role_id != expected_role_id:
+        raise _validation_error(
+            'invalid_access',
+            'Доступ сотрудника не найден.',
+        )
+    if (
+        not owner_access.is_active
+        or owner_access.status != EmployeeAccess.Status.ACTIVATED
+        or not owner_employee.is_active
+        or owner_employee.status != Employee.Status.ACTIVE
+    ):
+        raise _validation_error(
+            'inactive_access',
+            'Доступ сотрудника не активен.',
+        )
+    if (
+        not owner_access.role.is_active
+        or owner_access.role.code
+        not in SettlementControlLease.ALLOWED_OWNER_ROLE_CODES
+    ):
+        raise _validation_error(
+            'invalid_role',
+            'Роль не разрешает управление расселением.',
+        )
+
+    _validated_held_lease(
+        lease,
+        owner_access_id=control_context.owner_access_id,
+        raw_session_key=control_context.raw_session_key,
+        lease_token=control_context.lease_token,
+        fencing_revision=control_context.fencing_revision,
+    )
+    if lease.expires_at <= timezone.now():
+        raise _validation_error('expired', 'Срок управления истёк.')
+    return locked_rows
 
 
 def heartbeat_control_lease(

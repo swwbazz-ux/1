@@ -2,7 +2,7 @@ from collections import defaultdict
 from datetime import datetime
 
 from django.core.exceptions import ValidationError
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, router, transaction
 from django.db.models import Count, Exists, OuterRef, Q, Subquery
 from django.utils import timezone
 
@@ -17,6 +17,11 @@ from .models import (
     EmployeeBedOccupancy,
     PhysicalBed,
     PhysicalRoom,
+)
+from .control import (
+    SettlementControlWriteContext,
+    lock_settlement_write_access,
+    lock_settlement_write_lease,
 )
 from .validator import (
     ActualPlacementType,
@@ -424,24 +429,45 @@ def _validate_room_sex_restriction(*, employee, room):
         )
 
 
-def _locked_employee(employee_id):
-    try:
-        return (
-            Employee.objects
-            .select_for_update(of=('self',))
-            .select_related('personnel_position')
-            .get(pk=employee_id)
-        )
-    except (Employee.DoesNotExist, TypeError, ValueError) as error:
+def _normalized_employee_id(employee_id):
+    if (
+        isinstance(employee_id, bool)
+        or not isinstance(employee_id, int)
+        or employee_id <= 0
+    ):
         raise _settlement_error(
             'Сотрудник не найден.',
             'settlement_employee_not_found',
+        )
+    return employee_id
+
+
+def _employee_exists(*, employee_id, using):
+    if not Employee.objects.using(using).filter(pk=employee_id).exists():
+        raise _settlement_error(
+            'Сотрудник не найден.',
+            'settlement_employee_not_found',
+        )
+
+
+def _bed_snapshot(*, bed_stable_id, using):
+    try:
+        return (
+            PhysicalBed.objects.using(using)
+            .filter(stable_id=bed_stable_id)
+            .values('pk', 'room_id', 'stable_id')
+            .get()
+        )
+    except PhysicalBed.DoesNotExist as error:
+        raise _settlement_error(
+            'Койко-место не найдено.',
+            'settlement_bed_not_found',
         ) from error
 
 
-def _locked_beds(*bed_ids):
+def _locked_beds(*bed_ids, using):
     beds = list(
-        PhysicalBed.objects
+        PhysicalBed.objects.using(using)
         .select_for_update(of=('self',))
         .select_related('room', 'room__dormitory')
         .filter(pk__in=bed_ids)
@@ -455,9 +481,9 @@ def _locked_beds(*bed_ids):
     return {bed.pk: bed for bed in beds}
 
 
-def _locked_rooms(*room_ids):
+def _locked_rooms(*room_ids, using):
     rooms = list(
-        PhysicalRoom.objects
+        PhysicalRoom.objects.using(using)
         .select_for_update(of=('self',))
         .filter(pk__in=room_ids)
         .order_by('pk')
@@ -484,13 +510,29 @@ def _validate_employee_and_destination(*, employee, room):
     _validate_room_sex_restriction(employee=employee, room=room)
 
 
-def _locked_related_occupancies(*, employee_id, bed_ids):
+def _locked_related_occupancies(*, employee_id, bed_ids, using):
     return list(
-        EmployeeBedOccupancy.objects
+        EmployeeBedOccupancy.objects.using(using)
         .select_for_update(of=('self',))
         .filter(Q(employee_id=employee_id) | Q(physical_bed_id__in=bed_ids))
         .select_related('physical_bed')
         .order_by('pk')
+    )
+
+
+def _related_occupancy_snapshot(*, employee_id, bed_ids, using):
+    return tuple(
+        EmployeeBedOccupancy.objects.using(using)
+        .filter(Q(employee_id=employee_id) | Q(physical_bed_id__in=bed_ids))
+        .values_list('pk', 'employee_id', 'physical_bed_id')
+        .order_by('pk')
+    )
+
+
+def _occupancy_identity(rows):
+    return tuple(
+        (row.pk, row.employee_id, row.physical_bed_id)
+        for row in rows
     )
 
 
@@ -534,8 +576,17 @@ def _validate_occupancy_conflicts(
         ])
 
 
-def _create_occupancy(*, employee, bed, assignment_type, starts_at, ends_at, settled_by):
-    return EmployeeBedOccupancy.objects.create(
+def _create_occupancy(
+    *,
+    employee,
+    bed,
+    assignment_type,
+    starts_at,
+    ends_at,
+    settled_by,
+    using,
+):
+    return EmployeeBedOccupancy.objects.using(using).create(
         employee=employee,
         physical_bed=bed,
         assignment_type=assignment_type,
@@ -553,25 +604,47 @@ def settle_employee_on_bed(
     bed_stable_id,
     employee_id,
     assignment_type,
-    settled_by,
+    control_context=None,
     ends_at=None,
 ):
-    with transaction.atomic():
-        employee = _locked_employee(employee_id)
-        try:
-            bed_id = (
-                PhysicalBed.objects
-                .filter(stable_id=bed_stable_id)
-                .values_list('pk', flat=True)
-                .get()
-            )
-        except PhysicalBed.DoesNotExist as error:
+    using = router.db_for_write(EmployeeBedOccupancy)
+    with transaction.atomic(using=using):
+        lease = lock_settlement_write_lease(
+            control_context=control_context,
+            using=using,
+        )
+        employee_id = _normalized_employee_id(employee_id)
+        _employee_exists(employee_id=employee_id, using=using)
+        bed_snapshot = _bed_snapshot(
+            bed_stable_id=bed_stable_id,
+            using=using,
+        )
+        occupancy_snapshot = _related_occupancy_snapshot(
+            employee_id=employee_id,
+            bed_ids=(bed_snapshot['pk'],),
+            using=using,
+        )
+        locked_rows = lock_settlement_write_access(
+            lease=lease,
+            control_context=control_context,
+            employee_ids=(employee_id,),
+            using=using,
+        )
+        employee = locked_rows.employee_by_id(employee_id)
+        owner_access = locked_rows.access_by_id(control_context.owner_access_id)
+        settled_by = locked_rows.employee_by_id(owner_access.employee_id)
+
+        bed_id = bed_snapshot['pk']
+        bed = _locked_beds(bed_id, using=using)[bed_id]
+        if (
+            bed.stable_id != bed_snapshot['stable_id']
+            or bed.room_id != bed_snapshot['room_id']
+        ):
             raise _settlement_error(
-                'Койко-место не найдено.',
-                'settlement_bed_not_found',
-            ) from error
-        bed = _locked_beds(bed_id)[bed_id]
-        room = _locked_rooms(bed.room_id)[bed.room_id]
+                'Состояние размещения изменилось. Повторите действие.',
+                'settlement_occupancy_changed',
+            )
+        room = _locked_rooms(bed.room_id, using=using)[bed.room_id]
         _validate_employee_and_destination(employee=employee, room=room)
         moment = timezone.now()
         _validate_assignment_interval(
@@ -582,7 +655,13 @@ def settle_employee_on_bed(
         persisted_occupancies = _locked_related_occupancies(
             employee_id=employee.pk,
             bed_ids=(bed.pk,),
+            using=using,
         )
+        if _occupancy_identity(persisted_occupancies) != occupancy_snapshot:
+            raise _settlement_error(
+                'Состояние размещения изменилось. Повторите действие.',
+                'settlement_occupancy_changed',
+            )
         _validate_occupancy_conflicts(
             employee_id=employee.pk,
             bed=bed,
@@ -592,7 +671,7 @@ def settle_employee_on_bed(
         )
 
         try:
-            with transaction.atomic():
+            with transaction.atomic(using=using):
                 occupancy = _create_occupancy(
                     employee=employee,
                     bed=bed,
@@ -600,9 +679,10 @@ def settle_employee_on_bed(
                     starts_at=moment,
                     ends_at=ends_at,
                     settled_by=settled_by,
+                    using=using,
                 )
         except IntegrityError as error:
-            if EmployeeBedOccupancy.objects.filter(
+            if EmployeeBedOccupancy.objects.using(using).filter(
                 effective_occupancy_at_q(moment),
                 physical_bed=bed,
             ).exists():
@@ -610,7 +690,7 @@ def settle_employee_on_bed(
                     'Койко-место уже занято.',
                     'settlement_bed_occupied',
                 ) from error
-            if EmployeeBedOccupancy.objects.filter(
+            if EmployeeBedOccupancy.objects.using(using).filter(
                 effective_occupancy_at_q(moment),
                 employee=employee,
             ).exists():
@@ -628,18 +708,68 @@ def relocate_employee_to_bed(
     bed_stable_id,
     employee_id,
     assignment_type,
-    settled_by,
+    control_context=None,
     ends_at=None,
 ):
-    with transaction.atomic():
-        employee = _locked_employee(employee_id)
+    using = router.db_for_write(EmployeeBedOccupancy)
+    with transaction.atomic(using=using):
+        lease = lock_settlement_write_lease(
+            control_context=control_context,
+            using=using,
+        )
+        employee_id = _normalized_employee_id(employee_id)
+        _employee_exists(employee_id=employee_id, using=using)
         moment = timezone.now()
         active_occupancies = list(
-            EmployeeBedOccupancy.objects
-            .filter(effective_occupancy_at_q(moment), employee=employee)
+            EmployeeBedOccupancy.objects.using(using)
+            .filter(effective_occupancy_at_q(moment), employee_id=employee_id)
             .values('pk', 'physical_bed_id')
             .order_by('pk')
         )
+        current_occupancy_id = (
+            active_occupancies[0]['pk']
+            if len(active_occupancies) == 1
+            else None
+        )
+        current_bed_id = (
+            active_occupancies[0]['physical_bed_id']
+            if len(active_occupancies) == 1
+            else None
+        )
+        target_bed_snapshot = _bed_snapshot(
+            bed_stable_id=bed_stable_id,
+            using=using,
+        )
+        target_bed_id = target_bed_snapshot['pk']
+
+        bed_snapshots = {
+            row['pk']: row
+            for row in (
+                PhysicalBed.objects.using(using)
+                .filter(pk__in=tuple(
+                    bed_id
+                    for bed_id in (current_bed_id, target_bed_id)
+                    if bed_id is not None
+                ))
+                .values('pk', 'room_id', 'stable_id')
+                .order_by('pk')
+            )
+        }
+        occupancy_snapshot = _related_occupancy_snapshot(
+            employee_id=employee_id,
+            bed_ids=(target_bed_id,),
+            using=using,
+        )
+        locked_rows = lock_settlement_write_access(
+            lease=lease,
+            control_context=control_context,
+            employee_ids=(employee_id,),
+            using=using,
+        )
+        employee = locked_rows.employee_by_id(employee_id)
+        owner_access = locked_rows.access_by_id(control_context.owner_access_id)
+        settled_by = locked_rows.employee_by_id(owner_access.employee_id)
+
         if not active_occupancies:
             raise _settlement_error(
                 'У сотрудника нет действующего размещения для переселения.',
@@ -650,29 +780,32 @@ def relocate_employee_to_bed(
                 'У сотрудника найдено несколько действующих размещений.',
                 'settlement_employee_multiple_active_occupancies',
             )
-        current_occupancy_id = active_occupancies[0]['pk']
-        current_bed_id = active_occupancies[0]['physical_bed_id']
-        try:
-            target_bed_id = (
-                PhysicalBed.objects
-                .filter(stable_id=bed_stable_id)
-                .values_list('pk', flat=True)
-                .get()
-            )
-        except PhysicalBed.DoesNotExist as error:
-            raise _settlement_error(
-                'Койко-место не найдено.',
-                'settlement_bed_not_found',
-            ) from error
         if target_bed_id == current_bed_id:
             raise _settlement_error(
                 'Нельзя переселить сотрудника на то же койко-место.',
                 'settlement_relocation_same_bed',
             )
+        if current_bed_id not in bed_snapshots:
+            raise _settlement_error(
+                'Состояние размещения изменилось. Повторите действие.',
+                'settlement_occupancy_changed',
+            )
 
-        beds = _locked_beds(current_bed_id, target_bed_id)
+        beds = _locked_beds(current_bed_id, target_bed_id, using=using)
+        if any(
+            bed.room_id != bed_snapshots[bed.pk]['room_id']
+            or bed.stable_id != bed_snapshots[bed.pk]['stable_id']
+            for bed in beds.values()
+        ):
+            raise _settlement_error(
+                'Состояние размещения изменилось. Повторите действие.',
+                'settlement_occupancy_changed',
+            )
         target_bed = beds[target_bed_id]
-        rooms = _locked_rooms(*(bed.room_id for bed in beds.values()))
+        rooms = _locked_rooms(
+            *(bed.room_id for bed in beds.values()),
+            using=using,
+        )
         target_room = rooms[target_bed.room_id]
         _validate_employee_and_destination(employee=employee, room=target_room)
         _validate_assignment_interval(
@@ -683,7 +816,13 @@ def relocate_employee_to_bed(
         persisted_occupancies = _locked_related_occupancies(
             employee_id=employee.pk,
             bed_ids=(target_bed.pk,),
+            using=using,
         )
+        if _occupancy_identity(persisted_occupancies) != occupancy_snapshot:
+            raise _settlement_error(
+                'Состояние размещения изменилось. Повторите действие.',
+                'settlement_occupancy_changed',
+            )
         active_occupancies = [
             occupancy
             for occupancy in persisted_occupancies
@@ -732,44 +871,54 @@ def relocate_employee_to_bed(
             starts_at=moment,
             ends_at=ends_at,
             settled_by=settled_by,
+            using=using,
         )
 
     return occupancy
 
 
-def release_employee_from_bed(*, bed_stable_id):
-    with transaction.atomic():
-        try:
-            bed_id = (
-                PhysicalBed.objects
-                .filter(stable_id=bed_stable_id)
-                .values_list('pk', flat=True)
-                .get()
-            )
-        except PhysicalBed.DoesNotExist as error:
-            raise _settlement_error(
-                'Койко-место не найдено.',
-                'settlement_bed_not_found',
-            ) from error
-
-        moment = timezone.now()
-        current_occupancy = (
-            EmployeeBedOccupancy.objects
-            .filter(effective_occupancy_at_q(moment), physical_bed_id=bed_id)
-            .order_by('pk')
-            .first()
+def release_employee_from_bed(*, bed_stable_id, control_context=None):
+    using = router.db_for_write(EmployeeBedOccupancy)
+    with transaction.atomic(using=using):
+        lease = lock_settlement_write_lease(
+            control_context=control_context,
+            using=using,
         )
-        if current_occupancy is None:
-            _locked_beds(bed_id)
-            raise _settlement_error(
-                'Койко-место уже свободно.',
-                'settlement_bed_already_free',
-            )
+        bed_snapshot = _bed_snapshot(
+            bed_stable_id=bed_stable_id,
+            using=using,
+        )
+        bed_id = bed_snapshot['pk']
+        moment = timezone.now()
+        occupancy_snapshot = tuple(
+            EmployeeBedOccupancy.objects.using(using)
+            .filter(effective_occupancy_at_q(moment), physical_bed_id=bed_id)
+            .values_list('pk', 'employee_id', 'physical_bed_id')
+            .order_by('pk')
+        )
+        planned_employee_ids = tuple(sorted({
+            employee_id
+            for _, employee_id, _ in occupancy_snapshot
+        }))
+        locked_rows = lock_settlement_write_access(
+            lease=lease,
+            control_context=control_context,
+            employee_ids=planned_employee_ids,
+            using=using,
+        )
 
-        employee = _locked_employee(current_occupancy.employee_id)
-        bed = _locked_beds(bed_id)[bed_id]
+        bed = _locked_beds(bed_id, using=using)[bed_id]
+        if (
+            bed.stable_id != bed_snapshot['stable_id']
+            or bed.room_id != bed_snapshot['room_id']
+        ):
+            raise _settlement_error(
+                'Состояние размещения изменилось. Повторите действие.',
+                'settlement_occupancy_changed',
+            )
+        _locked_rooms(bed.room_id, using=using)
         active_occupancies = list(
-            EmployeeBedOccupancy.objects
+            EmployeeBedOccupancy.objects.using(using)
             .select_for_update(of=('self',))
             .filter(effective_occupancy_at_q(moment), physical_bed=bed)
             .order_by('pk')
@@ -785,7 +934,8 @@ def release_employee_from_bed(*, bed_stable_id):
                 'settlement_bed_multiple_active_occupancies',
             )
         occupancy = active_occupancies[0]
-        if occupancy.employee_id != employee.pk:
+        locked_snapshot = _occupancy_identity(active_occupancies)
+        if locked_snapshot != occupancy_snapshot:
             raise _settlement_error(
                 'Состояние размещения изменилось. Повторите действие.',
                 'settlement_occupancy_changed',

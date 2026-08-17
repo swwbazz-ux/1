@@ -23,6 +23,15 @@ from users.role_apps import (
     role_app_service_worker_response,
 )
 
+from .control import (
+    SettlementControlWriteContext,
+    acquire_control_lease,
+    clear_control_session_credentials,
+    control_session_credentials_from_session,
+    heartbeat_control_lease,
+    release_control_lease,
+    store_control_session_credentials,
+)
 from .models import EmployeeBedOccupancy, PhysicalBed, PhysicalRoom
 from .services import (
     current_roster_resolution,
@@ -750,6 +759,154 @@ def _validation_error_details(error):
     return str(error), 'settlement_validation_error'
 
 
+def _control_access_denied_response(request):
+    clear_control_session_credentials(request.session)
+    return JsonResponse(
+        {
+            'ok': False,
+            'status': 'free',
+            'error': 'Нет доступа к управлению расселением.',
+            'code': 'settlement.control.invalid_access',
+        },
+        status=403,
+    )
+
+
+def _control_error_response(request, error):
+    message, code = _validation_error_details(error)
+    short_code = code.rsplit('.', 1)[-1]
+    clear_control_session_credentials(request.session)
+    return JsonResponse(
+        {
+            'ok': False,
+            'status': 'free' if short_code in {'not_held', 'expired'} else 'busy',
+            'error': message,
+            'code': code,
+        },
+        status=(
+            403
+            if short_code in {'invalid_access', 'inactive_access', 'invalid_role'}
+            else 409
+        ),
+    )
+
+
+def _control_credentials_for_access(request, access):
+    credentials = control_session_credentials_from_session(request.session)
+    if credentials.owner_access_id != access.pk:
+        raise ValidationError(
+            'Серверная сессия не владеет управлением расселением.',
+            code='settlement.control.session_mismatch',
+        )
+    return credentials
+
+
+def _settlement_write_control_context(request):
+    credentials = control_session_credentials_from_session(request.session)
+    owner_access_id = request.session.get('employee_access_id')
+    raw_session_key = request.session.session_key
+    if not raw_session_key:
+        raise ValidationError(
+            'Управление расселением свободно.',
+            code='settlement.control.not_held',
+        )
+    if credentials.owner_access_id != owner_access_id:
+        raise ValidationError(
+            'Серверная сессия не владеет управлением расселением.',
+            code='settlement.control.session_mismatch',
+        )
+    return SettlementControlWriteContext(
+        owner_access_id=owner_access_id,
+        raw_session_key=raw_session_key,
+        lease_token=credentials.lease_token,
+        fencing_revision=credentials.fencing_revision,
+    )
+
+
+@require_POST
+def settlement_control_acquire_view(request):
+    access = settlement_clerk_access_from_request(request)
+    if not access:
+        return _control_access_denied_response(request)
+
+    try:
+        grant = acquire_control_lease(
+            owner_access_id=access.pk,
+            raw_session_key=request.session.session_key,
+            source='http_acquire',
+            session_metadata={'session_kind': 'django'},
+        )
+    except ValidationError as error:
+        return _control_error_response(request, error)
+
+    store_control_session_credentials(
+        request.session,
+        owner_access_id=access.pk,
+        grant=grant,
+    )
+    return JsonResponse({
+        'ok': True,
+        'status': 'held',
+        'expires_at': grant.expires_at.isoformat(),
+    })
+
+
+@require_POST
+def settlement_control_heartbeat_view(request):
+    access = settlement_clerk_access_from_request(request)
+    if not access:
+        return _control_access_denied_response(request)
+
+    try:
+        credentials = _control_credentials_for_access(request, access)
+        grant = heartbeat_control_lease(
+            owner_access_id=credentials.owner_access_id,
+            raw_session_key=request.session.session_key,
+            lease_token=credentials.lease_token,
+            fencing_revision=credentials.fencing_revision,
+        )
+    except ValidationError as error:
+        return _control_error_response(request, error)
+
+    store_control_session_credentials(
+        request.session,
+        owner_access_id=access.pk,
+        grant=grant,
+    )
+    return JsonResponse({
+        'ok': True,
+        'status': 'held',
+        'expires_at': grant.expires_at.isoformat(),
+    })
+
+
+@require_POST
+def settlement_control_release_view(request):
+    access = settlement_clerk_access_from_request(request)
+    if not access:
+        return _control_access_denied_response(request)
+
+    try:
+        credentials = _control_credentials_for_access(request, access)
+        transition = release_control_lease(
+            owner_access_id=credentials.owner_access_id,
+            raw_session_key=request.session.session_key,
+            lease_token=credentials.lease_token,
+            fencing_revision=credentials.fencing_revision,
+            source='http_release',
+            session_metadata={'session_kind': 'django'},
+        )
+    except ValidationError as error:
+        return _control_error_response(request, error)
+
+    clear_control_session_credentials(request.session)
+    return JsonResponse({
+        'ok': True,
+        'status': 'free',
+        'occurred_at': transition.occurred_at.isoformat(),
+    })
+
+
 def _occupancy_response(occupancy):
     employee = occupancy.employee
     profile = _employee_profiles([employee])[employee.pk]
@@ -833,6 +990,11 @@ def settlement_occupancy_create_view(request):
             status=400,
         )
 
+    try:
+        control_context = _settlement_write_control_context(request)
+    except ValidationError as error:
+        return _control_error_response(request, error)
+
     action = payload.get('action', 'settle')
     try:
         if action == 'settle':
@@ -841,7 +1003,7 @@ def settlement_occupancy_create_view(request):
                 employee_id=payload.get('employee_id'),
                 assignment_type=payload.get('assignment_type', ''),
                 ends_at=_payload_ends_at(payload),
-                settled_by=access.employee,
+                control_context=control_context,
             )
         elif action == 'relocate':
             occupancy = relocate_employee_to_bed(
@@ -849,11 +1011,12 @@ def settlement_occupancy_create_view(request):
                 employee_id=payload.get('employee_id'),
                 assignment_type=payload.get('assignment_type', ''),
                 ends_at=_payload_ends_at(payload),
-                settled_by=access.employee,
+                control_context=control_context,
             )
         elif action == 'release':
             occupancy = release_employee_from_bed(
                 bed_stable_id=payload.get('bed_stable_id', ''),
+                control_context=control_context,
             )
         else:
             raise ValidationError(
@@ -862,6 +1025,8 @@ def settlement_occupancy_create_view(request):
             )
     except ValidationError as error:
         message, code = _validation_error_details(error)
+        if code.startswith('settlement.control.'):
+            return _control_error_response(request, error)
         status = 409 if code in {
             'settlement.bed.interval_overlap',
             'settlement.employee.interval_overlap',

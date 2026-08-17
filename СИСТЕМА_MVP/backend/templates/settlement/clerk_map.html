@@ -2,14 +2,17 @@
 {% load static %}
 
 {% block clerk_extra_head %}
-<link rel="stylesheet" href="{% static 'css/settlement-clerk.css' %}?v={{ static_asset_release }}-settlement-map-v29">
+<link rel="stylesheet" href="{% static 'css/settlement-clerk.css' %}?v={{ static_asset_release }}-settlement-map-v30">
 {% endblock %}
 
 {% block clerk_shell_class %}settlement-shell{% endblock %}
 {% block clerk_shell_attributes %}data-settlement-root
      data-employee-search-url="{% url 'settlement_employee_search' %}"
      data-employee-detail-url="{% url 'settlement_employee_detail' 0 %}"
-     data-occupancy-create-url="{% url 'settlement_occupancy_create' %}"{% endblock %}
+     data-occupancy-create-url="{% url 'settlement_occupancy_create' %}"
+     data-control-acquire-url="{% url 'settlement_control_acquire' %}"
+     data-control-heartbeat-url="{% url 'settlement_control_heartbeat' %}"
+     data-control-release-url="{% url 'settlement_control_release' %}"{% endblock %}
 
 {% block clerk_content %}
     <main class="admin-console-page settlement-page">
@@ -61,6 +64,21 @@
                     aria-expanded="false">
                 Авторасселение
             </button>
+
+            <section class="settlement-control-panel"
+                     data-control-panel
+                     data-control-state="free"
+                     aria-label="Управление расселением">
+                <i class="settlement-control-indicator" aria-hidden="true"></i>
+                <div class="settlement-control-copy" role="status" aria-live="polite" aria-atomic="true">
+                    <strong data-control-status>Управление не начато</strong>
+                    <small data-control-message>Проверяем состояние текущей сессии…</small>
+                </div>
+                <div class="settlement-control-actions">
+                    <button type="button" data-control-acquire disabled>Начать работу</button>
+                    <button type="button" data-control-release disabled>Завершить работу</button>
+                </div>
+            </section>
         </section>
 
         <section class="settlement-summary" aria-label="Статистика выбранного этажа" aria-live="polite">
@@ -400,10 +418,10 @@
                     </button>
                 </form>
                 <div class="settlement-occupied-actions" data-occupied-actions hidden>
-                    <button type="button" class="settlement-place-button" data-relocate-button>
+                    <button type="button" class="settlement-place-button" data-relocate-button disabled>
                         Переселить сотрудника
                     </button>
-                    <button type="button" class="settlement-release-button" data-release-button>
+                    <button type="button" class="settlement-release-button" data-release-button disabled>
                         Освободить койко-место
                     </button>
                 </div>
@@ -452,5 +470,5 @@
 {% endblock %}
 
 {% block clerk_scripts %}
-<script src="{% static 'js/settlement-clerk.js' %}?v={{ static_asset_release }}-settlement-map-v29"></script>
+<script src="{% static 'js/settlement-clerk.js' %}?v={{ static_asset_release }}-settlement-map-v30"></script>
 {% endblock %}

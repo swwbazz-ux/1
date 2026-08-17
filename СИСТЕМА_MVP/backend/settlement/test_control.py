@@ -1,4 +1,5 @@
 import json
+import inspect
 import logging
 import threading
 import time
@@ -8,18 +9,22 @@ from dataclasses import FrozenInstanceError
 from datetime import timedelta
 from unittest import mock
 
+from django.contrib.staticfiles import finders
 from django.core.exceptions import ValidationError
 from django.db import close_old_connections, connection, connections, transaction
-from django.test import TestCase, TransactionTestCase
+from django.test import Client, TestCase, TransactionTestCase
 from django.test.utils import CaptureQueriesContext
+from django.urls import Resolver404, resolve, reverse
 from django.utils import timezone
 
+from references.models import Dormitory
 from users import employee_access_locks
 from users.models import Employee, EmployeeAccess, Role
 
 from . import control as control_module
 from .control import (
     ControlLeaseGrant,
+    SettlementControlWriteContext,
     acquire_control_lease,
     ensure_control_lease,
     expire_control_lease,
@@ -27,7 +32,19 @@ from .control import (
     release_control_lease,
     takeover_control_lease,
 )
-from .models import SettlementControlEvent, SettlementControlLease
+from .models import (
+    EmployeeBedOccupancy,
+    PhysicalBed,
+    PhysicalRoom,
+    SettlementControlEvent,
+    SettlementControlLease,
+)
+from .services import (
+    relocate_employee_to_bed,
+    release_employee_from_bed,
+    settle_employee_on_bed,
+)
+from . import services as settlement_services
 
 
 class SettlementControlFixtureMixin:
@@ -1135,6 +1152,915 @@ class SettlementControlLifecycleTests(
         self.assertEqual(SettlementControlEvent.objects.count(), 2)
         event.refresh_from_db()
         self.assertEqual(event.source, 'test-control')
+
+
+class SettlementControlHttpLifecycleTests(
+    SettlementControlFixtureMixin,
+    TestCase,
+):
+    @classmethod
+    def setUpTestData(cls):
+        cls.create_control_fixtures()
+        cls.same_employee_clerk_access = EmployeeAccess.objects.create(
+            employee=cls.clerk_access.employee,
+            role=cls.clerk_role,
+            access_code='CONTROL-ACCESS-SAME-EMPLOYEE',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+
+    def setUp(self):
+        SettlementControlLease.objects.filter(scope='settlement').update(
+            owner_access=None,
+            owner_session_hash='',
+            lease_token=None,
+            fencing_revision=0,
+            acquired_at=None,
+            heartbeat_at=None,
+            expires_at=None,
+        )
+        self.acquire_url = reverse('settlement_control_acquire')
+        self.heartbeat_url = reverse('settlement_control_heartbeat')
+        self.release_url = reverse('settlement_control_release')
+
+    @staticmethod
+    def authenticate(client, access):
+        session = client.session
+        session['employee_access_id'] = access.pk
+        session.save()
+
+    @staticmethod
+    def set_session_value(client, key, value):
+        session = client.session
+        session[key] = value
+        session.save()
+
+    def assert_no_control_credentials(self, client):
+        session = client.session
+        for key in control_module.CONTROL_SESSION_CREDENTIAL_KEYS:
+            self.assertNotIn(key, session)
+
+    def control_credentials(self, client):
+        session = client.session
+        return {
+            key: session[key]
+            for key in control_module.CONTROL_SESSION_CREDENTIAL_KEYS
+        }
+
+    def test_get_and_csrf_rejection_do_not_change_lease_or_events(self):
+        baseline_lease = self.lease_state()
+        baseline_events = self.event_state()
+
+        for url in (self.acquire_url, self.heartbeat_url, self.release_url):
+            with self.subTest(url=url):
+                response = self.client.get(url)
+                self.assertEqual(response.status_code, 405)
+                self.assertEqual(self.lease_state(), baseline_lease)
+                self.assertEqual(self.event_state(), baseline_events)
+
+        csrf_client = Client(enforce_csrf_checks=True)
+        self.authenticate(csrf_client, self.clerk_access)
+        response = csrf_client.post(self.acquire_url)
+        self.assertEqual(response.status_code, 403, response.content)
+        self.assertEqual(self.lease_state(), baseline_lease)
+        self.assertEqual(self.event_state(), baseline_events)
+
+    def test_acquire_uses_exact_session_access_and_stores_only_server_credentials(self):
+        self.authenticate(self.client, self.clerk_access)
+        response = self.client.post(
+            self.acquire_url,
+            data=json.dumps({
+                'owner_access_id': self.second_clerk_access.pk,
+                'lease_token': str(uuid.uuid4()),
+                'fencing_revision': 999,
+            }),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(set(response.json()), {'ok', 'status', 'expires_at'})
+        self.assertEqual(response.json()['status'], 'held')
+        lease = SettlementControlLease.objects.get(scope='settlement')
+        self.assertEqual(lease.owner_access_id, self.clerk_access.pk)
+        credentials = self.control_credentials(self.client)
+        self.assertEqual(
+            credentials[control_module.CONTROL_SESSION_OWNER_ACCESS_ID_KEY],
+            self.clerk_access.pk,
+        )
+        self.assertEqual(
+            credentials[control_module.CONTROL_SESSION_LEASE_TOKEN_KEY],
+            str(lease.lease_token),
+        )
+        self.assertEqual(
+            credentials[control_module.CONTROL_SESSION_FENCING_REVISION_KEY],
+            lease.fencing_revision,
+        )
+        response_text = response.content.decode()
+        self.assertNotIn(str(lease.lease_token), response_text)
+        self.assertNotIn(self.client.session.session_key, response_text)
+        self.assertNotEqual(lease.owner_session_hash, self.client.session.session_key)
+        self.assertEqual(
+            list(SettlementControlEvent.objects.values_list('event_type', flat=True)),
+            [SettlementControlEvent.EventType.ACQUIRED],
+        )
+
+    def test_inactive_exact_access_is_not_replaced_by_second_access_of_employee(self):
+        self.authenticate(self.client, self.clerk_access)
+        EmployeeAccess.objects.filter(pk=self.clerk_access.pk).update(is_active=False)
+
+        response = self.client.post(self.acquire_url)
+
+        self.assertEqual(response.status_code, 409)
+        self.assertContains(
+            response,
+            'Роль неактивна — доступен только просмотр',
+            status_code=409,
+        )
+        self.assertIsNone(SettlementControlLease.objects.get().owner_access_id)
+        self.assertFalse(SettlementControlEvent.objects.exists())
+        self.assert_no_control_credentials(self.client)
+
+    def test_other_clerk_gets_busy_without_credentials(self):
+        self.authenticate(self.client, self.clerk_access)
+        self.assertEqual(self.client.post(self.acquire_url).status_code, 200)
+        other_client = Client()
+        self.authenticate(other_client, self.second_clerk_access)
+
+        response = other_client.post(self.acquire_url)
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()['code'], 'settlement.control.busy')
+        self.assertEqual(response.json()['status'], 'busy')
+        self.assert_no_control_credentials(other_client)
+        self.assertEqual(SettlementControlLease.objects.get().owner_access_id, self.clerk_access.pk)
+        self.assertEqual(SettlementControlEvent.objects.count(), 1)
+
+    def test_owner_heartbeat_renews_without_new_event_or_secret_response(self):
+        self.authenticate(self.client, self.clerk_access)
+        self.client.post(self.acquire_url)
+        lease = SettlementControlLease.objects.get()
+        previous_expiry = lease.expires_at
+        SettlementControlLease.objects.filter(pk=lease.pk).update(
+            expires_at=timezone.now() + timedelta(seconds=10),
+        )
+
+        response = self.client.post(self.heartbeat_url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(set(response.json()), {'ok', 'status', 'expires_at'})
+        lease.refresh_from_db()
+        self.assertGreater(lease.expires_at, previous_expiry)
+        self.assertEqual(SettlementControlEvent.objects.count(), 1)
+        self.assertNotIn(str(lease.lease_token), response.content.decode())
+
+    def test_other_session_cannot_use_copied_server_credentials(self):
+        self.authenticate(self.client, self.clerk_access)
+        self.client.post(self.acquire_url)
+        baseline_lease = self.lease_state()
+        credentials = self.control_credentials(self.client)
+        other_session = Client()
+        self.authenticate(other_session, self.clerk_access)
+        session = other_session.session
+        session.update(credentials)
+        session.save()
+
+        response = other_session.post(self.heartbeat_url)
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()['code'], 'settlement.control.session_mismatch')
+        self.assertEqual(self.lease_state(), baseline_lease)
+        self.assert_no_control_credentials(other_session)
+
+    def test_heartbeat_rejects_stale_revision_and_clears_credentials(self):
+        self.authenticate(self.client, self.clerk_access)
+        self.client.post(self.acquire_url)
+        baseline_lease = self.lease_state()
+        key = control_module.CONTROL_SESSION_FENCING_REVISION_KEY
+        self.set_session_value(self.client, key, baseline_lease['fencing_revision'] + 1)
+
+        response = self.client.post(self.heartbeat_url)
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()['code'], 'settlement.control.stale_revision')
+        self.assertEqual(self.lease_state(), baseline_lease)
+        self.assert_no_control_credentials(self.client)
+
+    def test_heartbeat_rejects_invalid_token_and_clears_credentials(self):
+        self.authenticate(self.client, self.clerk_access)
+        self.client.post(self.acquire_url)
+        baseline_lease = self.lease_state()
+        self.set_session_value(
+            self.client,
+            control_module.CONTROL_SESSION_LEASE_TOKEN_KEY,
+            str(uuid.uuid4()),
+        )
+
+        response = self.client.post(self.heartbeat_url)
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()['code'], 'settlement.control.invalid_token')
+        self.assertEqual(self.lease_state(), baseline_lease)
+        self.assert_no_control_credentials(self.client)
+
+    def test_heartbeat_expires_lease_with_controlled_result_and_clears_credentials(self):
+        self.authenticate(self.client, self.clerk_access)
+        self.client.post(self.acquire_url)
+        expired_at = timezone.now() - timedelta(seconds=1)
+        SettlementControlLease.objects.update(
+            acquired_at=expired_at - timedelta(minutes=2),
+            heartbeat_at=expired_at - timedelta(minutes=1),
+            expires_at=expired_at,
+        )
+
+        response = self.client.post(self.heartbeat_url)
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()['code'], 'settlement.control.expired')
+        self.assertEqual(response.json()['status'], 'free')
+        lease = SettlementControlLease.objects.get()
+        self.assertIsNone(lease.owner_access_id)
+        self.assertIsNone(lease.lease_token)
+        self.assert_no_control_credentials(self.client)
+        self.assertEqual(
+            list(SettlementControlEvent.objects.order_by('pk').values_list('event_type', flat=True)),
+            [
+                SettlementControlEvent.EventType.ACQUIRED,
+                SettlementControlEvent.EventType.EXPIRED,
+            ],
+        )
+
+    def test_owner_release_frees_lease_clears_credentials_and_repeat_is_safe(self):
+        self.authenticate(self.client, self.clerk_access)
+        self.client.post(self.acquire_url)
+
+        response = self.client.post(self.release_url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(set(response.json()), {'ok', 'status', 'occurred_at'})
+        self.assertEqual(response.json()['status'], 'free')
+        lease = SettlementControlLease.objects.get()
+        self.assertIsNone(lease.owner_access_id)
+        self.assertIsNone(lease.lease_token)
+        self.assert_no_control_credentials(self.client)
+        self.assertEqual(
+            list(SettlementControlEvent.objects.order_by('pk').values_list('event_type', flat=True)),
+            [
+                SettlementControlEvent.EventType.ACQUIRED,
+                SettlementControlEvent.EventType.RELEASED,
+            ],
+        )
+
+        repeated = self.client.post(self.release_url)
+        self.assertEqual(repeated.status_code, 409)
+        self.assertEqual(repeated.json()['code'], 'settlement.control.not_held')
+        self.assertEqual(SettlementControlEvent.objects.count(), 2)
+
+    def test_foreign_release_cannot_free_owner_lease(self):
+        self.authenticate(self.client, self.clerk_access)
+        self.client.post(self.acquire_url)
+        baseline_lease = self.lease_state()
+        credentials = self.control_credentials(self.client)
+        foreign_client = Client()
+        self.authenticate(foreign_client, self.second_clerk_access)
+        foreign_session = foreign_client.session
+        foreign_session.update(credentials)
+        foreign_session.save()
+
+        response = foreign_client.post(self.release_url)
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()['code'], 'settlement.control.session_mismatch')
+        self.assertEqual(self.lease_state(), baseline_lease)
+        self.assertEqual(SettlementControlEvent.objects.count(), 1)
+        self.assert_no_control_credentials(foreign_client)
+
+    def test_event_failure_after_lease_lock_rolls_back_lease_and_session(self):
+        self.authenticate(self.client, self.clerk_access)
+        baseline_lease = self.lease_state()
+        baseline_events = self.event_state()
+        forced_error = ValidationError(
+            'Контрольная ошибка аудита.',
+            code='settlement.control.audit_failed',
+        )
+
+        with mock.patch.object(control_module, '_create_event', side_effect=forced_error):
+            response = self.client.post(self.acquire_url)
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()['code'], 'settlement.control.audit_failed')
+        self.assertEqual(self.lease_state(), baseline_lease)
+        self.assertEqual(self.event_state(), baseline_events)
+        self.assert_no_control_credentials(self.client)
+
+    def test_map_renders_read_only_control_panel_without_exposing_credentials(self):
+        self.authenticate(self.client, self.clerk_access)
+        session = self.client.session
+        secret_token = '00000000-0000-4000-8000-000000000123'
+        secret_revision = 987654321
+        session[control_module.CONTROL_SESSION_OWNER_ACCESS_ID_KEY] = self.clerk_access.pk
+        session[control_module.CONTROL_SESSION_LEASE_TOKEN_KEY] = secret_token
+        session[control_module.CONTROL_SESSION_FENCING_REVISION_KEY] = secret_revision
+        session.save()
+        baseline_lease = self.lease_state()
+        baseline_events = self.event_state()
+
+        response = self.client.get(reverse('settlement_map'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-control-panel')
+        self.assertContains(response, 'data-control-state="free"')
+        self.assertContains(response, 'data-control-acquire disabled')
+        self.assertContains(response, 'data-control-release disabled')
+        self.assertContains(response, self.acquire_url)
+        self.assertContains(response, self.heartbeat_url)
+        self.assertContains(response, self.release_url)
+        self.assertEqual(response.content.count(b'-settlement-map-v30'), 2)
+        self.assertNotContains(response, '-settlement-map-v29')
+        response_text = response.content.decode()
+        self.assertNotIn(secret_token, response_text)
+        self.assertNotIn(str(secret_revision), response_text)
+        self.assertNotIn(self.client.session.session_key, response_text)
+        self.assertNotIn('settlement_control_lease_token', response_text)
+        self.assertNotIn('settlement_control_fencing_revision', response_text)
+        self.assertNotIn('settlement_control_owner_access_id', response_text)
+        self.assertEqual(self.lease_state(), baseline_lease)
+        self.assertEqual(self.event_state(), baseline_events)
+
+    def test_map_script_uses_explicit_nonparallel_lifecycle_without_client_secrets(self):
+        script_path = finders.find('js/settlement-clerk.js')
+        self.assertIsNotNone(script_path)
+        with open(script_path, encoding='utf-8') as script_file:
+            script = script_file.read()
+
+        for required_fragment in (
+            'function initializeControlLifecycle()',
+            'function acquireControl()',
+            'function heartbeatControl()',
+            'function releaseControl()',
+            'heartbeatRetryDelays = [2500, 6000]',
+            'if (heartbeatInFlight || controlActionInFlight) return;',
+            'if (controlHeld || controlActionInFlight || heartbeatInFlight || controlAccessDenied) return;',
+            'if (!controlHeld)',
+            'data-bed-drag-handle',
+            'Управление не начато',
+            'Вы управляете расселением',
+            'Управление занято другим сотрудником',
+            'Связь с управлением потеряна',
+        ):
+            self.assertIn(required_fragment, script)
+        for forbidden_fragment in (
+            'beforeunload',
+            'settlement_control_lease_token',
+            'settlement_control_fencing_revision',
+            'settlement_control_owner_access_id',
+            'owner_session_hash',
+        ):
+            self.assertNotIn(forbidden_fragment, script)
+        initialization = script.split(
+            'function initializeControlLifecycle()',
+            1,
+        )[1].split('function updateMapAfterSettlement', 1)[0]
+        self.assertIn('heartbeatControl();', initialization)
+        self.assertNotIn('acquireControl();', initialization)
+
+    def test_writer_rejects_session_access_switch_and_copied_credentials(self):
+        self.authenticate(self.client, self.clerk_access)
+        self.assertEqual(self.client.post(self.acquire_url).status_code, 200)
+        credentials = self.control_credentials(self.client)
+        session = self.client.session
+        session['employee_access_id'] = self.same_employee_clerk_access.pk
+        session.save()
+
+        switched = self.client.post(
+            reverse('settlement_occupancy_create'),
+            data={'action': 'release', 'bed_stable_id': 'CONTROL-NOT-USED'},
+            content_type='application/json',
+        )
+
+        self.assertEqual(switched.status_code, 409)
+        self.assertEqual(
+            switched.json()['code'],
+            'settlement.control.session_mismatch',
+        )
+        self.assertFalse(EmployeeBedOccupancy.objects.exists())
+
+        copied_client = Client()
+        self.authenticate(copied_client, self.clerk_access)
+        copied_session = copied_client.session
+        copied_session.update(credentials)
+        copied_session.save()
+        copied = copied_client.post(
+            reverse('settlement_occupancy_create'),
+            data={'action': 'release', 'bed_stable_id': 'CONTROL-NOT-USED'},
+            content_type='application/json',
+        )
+
+        self.assertEqual(copied.status_code, 409)
+        self.assertEqual(
+            copied.json()['code'],
+            'settlement.control.session_mismatch',
+        )
+        self.assertFalse(EmployeeBedOccupancy.objects.exists())
+
+    def test_no_takeover_endpoint_was_added(self):
+        with self.assertRaises(Resolver404):
+            resolve('/clerk/settlement/control/takeover/')
+
+
+class SettlementControlledWriterTests(
+    SettlementControlFixtureMixin,
+    TestCase,
+):
+    @classmethod
+    def setUpTestData(cls):
+        cls.create_control_fixtures()
+        cls.same_employee_access = EmployeeAccess.objects.create(
+            employee=cls.clerk_access.employee,
+            role=cls.clerk_role,
+            access_code='CONTROL-WRITER-SAME-EMPLOYEE',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+        cls.subject = Employee.objects.create(
+            full_name='Control writer subject',
+            personnel_number='CONTROL-WRITER-SUBJECT',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        cls.dormitory = Dormitory.objects.create(number='CONTROL-WRITER')
+        cls.first_room = PhysicalRoom.objects.create(
+            dormitory=cls.dormitory,
+            floor=1,
+            number=1,
+            room_type=PhysicalRoom.RoomType.STANDARD,
+            transfer_status=PhysicalRoom.TransferStatus.TRANSFERRED,
+            capacity=1,
+            corridor_side=PhysicalRoom.CorridorSide.LEFT,
+            side_position=1,
+        )
+        cls.second_room = PhysicalRoom.objects.create(
+            dormitory=cls.dormitory,
+            floor=1,
+            number=2,
+            room_type=PhysicalRoom.RoomType.STANDARD,
+            transfer_status=PhysicalRoom.TransferStatus.TRANSFERRED,
+            capacity=1,
+            corridor_side=PhysicalRoom.CorridorSide.RIGHT,
+            side_position=1,
+        )
+        cls.first_bed = PhysicalBed.objects.create(
+            room=cls.first_room,
+            stable_id='CONTROL-WRITER-A1',
+            block=PhysicalBed.Block.A,
+            position=1,
+        )
+        cls.second_bed = PhysicalBed.objects.create(
+            room=cls.second_room,
+            stable_id='CONTROL-WRITER-B1',
+            block=PhysicalBed.Block.B,
+            position=1,
+        )
+
+    def setUp(self):
+        SettlementControlLease.objects.filter(scope='settlement').update(
+            owner_access=None,
+            owner_session_hash='',
+            lease_token=None,
+            fencing_revision=0,
+            acquired_at=None,
+            heartbeat_at=None,
+            expires_at=None,
+        )
+        self.raw_session_key = 'controlled-writer-session'
+
+    def write_context(self, access=None):
+        access = access or self.clerk_access
+        grant = acquire_control_lease(
+            owner_access_id=access.pk,
+            raw_session_key=self.raw_session_key,
+            source='controlled-writer-test',
+        )
+        return SettlementControlWriteContext(
+            owner_access_id=access.pk,
+            raw_session_key=self.raw_session_key,
+            lease_token=str(grant.lease_token),
+            fencing_revision=grant.fencing_revision,
+        )
+
+    @staticmethod
+    def error_code(error):
+        return error.exception.error_list[0].code
+
+    def settle(self, *, control_context):
+        return settle_employee_on_bed(
+            bed_stable_id=self.first_bed.stable_id,
+            employee_id=self.subject.pk,
+            assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
+            control_context=control_context,
+        )
+
+    def create_existing_occupancy(self):
+        return EmployeeBedOccupancy.objects.create(
+            employee=self.subject,
+            physical_bed=self.first_bed,
+            assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
+            settled_at=timezone.now() - timedelta(minutes=5),
+            starts_at=timezone.now() - timedelta(minutes=5),
+            settled_by=self.clerk_access.employee,
+        )
+
+    def test_write_context_is_frozen_and_contains_only_server_credentials(self):
+        context = self.write_context()
+
+        self.assertEqual(
+            set(context.__dataclass_fields__),
+            {
+                'owner_access_id',
+                'raw_session_key',
+                'lease_token',
+                'fencing_revision',
+            },
+        )
+        self.assertNotIn(context.raw_session_key, repr(context))
+        self.assertNotIn(context.lease_token, repr(context))
+        with self.assertRaises(FrozenInstanceError):
+            context.fencing_revision = 999
+
+    def test_all_public_writers_fail_closed_without_context(self):
+        operations = (
+            lambda: self.settle(control_context=None),
+            lambda: relocate_employee_to_bed(
+                bed_stable_id=self.second_bed.stable_id,
+                employee_id=self.subject.pk,
+                assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
+                control_context=None,
+            ),
+            lambda: release_employee_from_bed(
+                bed_stable_id=self.first_bed.stable_id,
+                control_context=None,
+            ),
+        )
+
+        for operation in operations:
+            with self.subTest(operation=operation):
+                with self.assertRaises(ValidationError) as error:
+                    operation()
+                self.assertEqual(
+                    self.error_code(error),
+                    'settlement.control.not_held',
+                )
+                self.assertFalse(EmployeeBedOccupancy.objects.exists())
+
+    def test_exact_owner_employee_is_settled_by_and_unrelated_access_is_not_planned(self):
+        context = self.write_context()
+        plans = []
+        original_builder = control_module.build_employee_access_lock_plan
+
+        def observed_builder(**kwargs):
+            plan = original_builder(**kwargs)
+            plans.append(plan)
+            return plan
+
+        with mock.patch.object(
+            control_module,
+            'build_employee_access_lock_plan',
+            side_effect=observed_builder,
+        ):
+            occupancy = self.settle(control_context=context)
+
+        self.assertEqual(occupancy.settled_by_id, self.clerk_access.employee_id)
+        self.assertEqual(plans[-1].access_ids, (self.clerk_access.pk,))
+        self.assertNotIn(self.same_employee_access.pk, plans[-1].access_ids)
+        self.assertEqual(
+            plans[-1].employee_ids,
+            tuple(sorted({self.clerk_access.employee_id, self.subject.pk})),
+        )
+
+    def test_inactive_exact_access_is_not_replaced_by_second_access(self):
+        context = self.write_context()
+        EmployeeAccess.objects.filter(pk=self.clerk_access.pk).update(is_active=False)
+
+        with self.assertRaises(ValidationError) as error:
+            self.settle(control_context=context)
+
+        self.assertEqual(
+            self.error_code(error),
+            'settlement.control.inactive_access',
+        )
+        self.assertFalse(EmployeeBedOccupancy.objects.exists())
+
+        EmployeeAccess.objects.filter(pk=self.clerk_access.pk).update(
+            is_active=True,
+            status=EmployeeAccess.Status.DEACTIVATED,
+        )
+        with self.assertRaises(ValidationError) as status_error:
+            self.settle(control_context=context)
+        self.assertEqual(
+            self.error_code(status_error),
+            'settlement.control.inactive_access',
+        )
+        self.assertFalse(EmployeeBedOccupancy.objects.exists())
+
+    def test_wrong_session_token_revision_and_expiry_never_write(self):
+        context = self.write_context()
+        invalid_contexts = (
+            SettlementControlWriteContext(
+                owner_access_id=context.owner_access_id,
+                raw_session_key='different-controlled-writer-session',
+                lease_token=context.lease_token,
+                fencing_revision=context.fencing_revision,
+            ),
+            SettlementControlWriteContext(
+                owner_access_id=context.owner_access_id,
+                raw_session_key=context.raw_session_key,
+                lease_token=str(uuid.uuid4()),
+                fencing_revision=context.fencing_revision,
+            ),
+            SettlementControlWriteContext(
+                owner_access_id=context.owner_access_id,
+                raw_session_key=context.raw_session_key,
+                lease_token=context.lease_token,
+                fencing_revision=context.fencing_revision + 1,
+            ),
+        )
+        expected_codes = (
+            'settlement.control.session_mismatch',
+            'settlement.control.invalid_token',
+            'settlement.control.stale_revision',
+        )
+
+        for invalid_context, expected_code in zip(invalid_contexts, expected_codes):
+            with self.subTest(expected_code=expected_code):
+                with self.assertRaises(ValidationError) as error:
+                    self.settle(control_context=invalid_context)
+                self.assertEqual(self.error_code(error), expected_code)
+                self.assertFalse(EmployeeBedOccupancy.objects.exists())
+
+        expired_at = timezone.now() - timedelta(seconds=1)
+        SettlementControlLease.objects.update(
+            acquired_at=expired_at - timedelta(minutes=2),
+            heartbeat_at=expired_at - timedelta(minutes=1),
+            expires_at=expired_at,
+        )
+        with self.assertRaises(ValidationError) as error:
+            self.settle(control_context=context)
+        self.assertEqual(self.error_code(error), 'settlement.control.expired')
+        self.assertFalse(EmployeeBedOccupancy.objects.exists())
+
+    def test_inactive_owner_employee_and_role_fail_without_write(self):
+        context = self.write_context()
+        Employee.objects.filter(pk=self.clerk_access.employee_id).update(is_active=False)
+        with self.assertRaises(ValidationError) as employee_error:
+            self.settle(control_context=context)
+        self.assertEqual(
+            self.error_code(employee_error),
+            'settlement.control.inactive_access',
+        )
+        self.assertFalse(EmployeeBedOccupancy.objects.exists())
+
+        Employee.objects.filter(pk=self.clerk_access.employee_id).update(
+            is_active=True,
+            status=Employee.Status.DEACTIVATED,
+        )
+        with self.assertRaises(ValidationError) as status_error:
+            self.settle(control_context=context)
+        self.assertEqual(
+            self.error_code(status_error),
+            'settlement.control.inactive_access',
+        )
+        self.assertFalse(EmployeeBedOccupancy.objects.exists())
+
+        Employee.objects.filter(pk=self.clerk_access.employee_id).update(
+            status=Employee.Status.ACTIVE,
+        )
+        Role.objects.filter(pk=self.clerk_role.pk).update(is_active=False)
+        with self.assertRaises(ValidationError) as role_error:
+            self.settle(control_context=context)
+        self.assertEqual(
+            self.error_code(role_error),
+            'settlement.control.invalid_role',
+        )
+        self.assertFalse(EmployeeBedOccupancy.objects.exists())
+
+        Role.objects.filter(pk=self.clerk_role.pk).update(
+            is_active=True,
+            code='control_writer_forbidden',
+        )
+        with self.assertRaises(ValidationError) as role_code_error:
+            self.settle(control_context=context)
+        self.assertEqual(
+            self.error_code(role_code_error),
+            'settlement.control.invalid_role',
+        )
+        self.assertFalse(EmployeeBedOccupancy.objects.exists())
+
+    def test_writer_lock_sequence_uses_common_sorted_plan_before_domain_rows(self):
+        context = self.write_context()
+        sequence = []
+        plans = []
+        original_lease = settlement_services.lock_settlement_write_lease
+        original_access = settlement_services.lock_settlement_write_access
+        original_beds = settlement_services._locked_beds
+        original_rooms = settlement_services._locked_rooms
+        original_occupancies = settlement_services._locked_related_occupancies
+
+        def observed_lease(**kwargs):
+            sequence.append('lease')
+            return original_lease(**kwargs)
+
+        def observed_access(**kwargs):
+            sequence.append('employee_access')
+            result = original_access(**kwargs)
+            plans.append(tuple(employee.pk for employee in result.employees))
+            return result
+
+        def observed_beds(*bed_ids, **kwargs):
+            sequence.append('beds')
+            return original_beds(*bed_ids, **kwargs)
+
+        def observed_rooms(*room_ids, **kwargs):
+            sequence.append('rooms')
+            return original_rooms(*room_ids, **kwargs)
+
+        def observed_occupancies(**kwargs):
+            sequence.append('occupancies')
+            return original_occupancies(**kwargs)
+
+        with (
+            mock.patch.object(
+                settlement_services,
+                'lock_settlement_write_lease',
+                side_effect=observed_lease,
+            ),
+            mock.patch.object(
+                settlement_services,
+                'lock_settlement_write_access',
+                side_effect=observed_access,
+            ),
+            mock.patch.object(
+                settlement_services,
+                '_locked_beds',
+                side_effect=observed_beds,
+            ),
+            mock.patch.object(
+                settlement_services,
+                '_locked_rooms',
+                side_effect=observed_rooms,
+            ),
+            mock.patch.object(
+                settlement_services,
+                '_locked_related_occupancies',
+                side_effect=observed_occupancies,
+            ),
+        ):
+            self.settle(control_context=context)
+
+        self.assertEqual(
+            sequence,
+            ['lease', 'employee_access', 'beds', 'rooms', 'occupancies'],
+        )
+        self.assertEqual(plans[0], tuple(sorted(plans[0])))
+        access_source = inspect.getsource(employee_access_locks._lock_accesses)
+        self.assertIn("select_for_update(of=('self',))", access_source)
+        self.assertIn("order_by('pk')", access_source)
+        for helper in (
+            settlement_services._locked_beds,
+            settlement_services._locked_rooms,
+            settlement_services._locked_related_occupancies,
+        ):
+            self.assertIn("order_by('pk')", inspect.getsource(helper))
+
+    def test_every_writer_requires_context_and_orders_control_before_domain_locks(self):
+        for writer in (
+            settle_employee_on_bed,
+            relocate_employee_to_bed,
+            release_employee_from_bed,
+        ):
+            with self.subTest(writer=writer.__name__):
+                parameters = inspect.signature(writer).parameters
+                self.assertIn('control_context', parameters)
+                self.assertNotIn('settled_by', parameters)
+                source = inspect.getsource(writer)
+                positions = tuple(
+                    source.index(fragment)
+                    for fragment in (
+                        'lock_settlement_write_lease(',
+                        'lock_settlement_write_access(',
+                        '_locked_beds(',
+                        '_locked_rooms(',
+                        'select_for_update(of=(\'self\',))'
+                        if writer is release_employee_from_bed
+                        else '_locked_related_occupancies(',
+                    )
+                )
+                self.assertEqual(positions, tuple(sorted(positions)))
+
+    def test_stale_access_employee_and_role_mapping_roll_back_without_write(self):
+        context = self.write_context()
+        original_builder = control_module.build_employee_access_lock_plan
+
+        def reassign_employee(**kwargs):
+            plan = original_builder(**kwargs)
+            EmployeeAccess.objects.filter(pk=self.clerk_access.pk).update(
+                employee=self.subject,
+            )
+            return plan
+
+        with mock.patch.object(
+            control_module,
+            'build_employee_access_lock_plan',
+            side_effect=reassign_employee,
+        ):
+            with self.assertRaises(ValidationError) as employee_error:
+                self.settle(control_context=context)
+        self.assertEqual(
+            self.error_code(employee_error),
+            'settlement.control.invalid_access',
+        )
+        self.clerk_access.refresh_from_db()
+        self.assertNotEqual(self.clerk_access.employee_id, self.subject.pk)
+        self.assertFalse(EmployeeBedOccupancy.objects.exists())
+
+        def reassign_role(**kwargs):
+            plan = original_builder(**kwargs)
+            EmployeeAccess.objects.filter(pk=self.clerk_access.pk).update(
+                role=self.other_role,
+            )
+            return plan
+
+        with mock.patch.object(
+            control_module,
+            'build_employee_access_lock_plan',
+            side_effect=reassign_role,
+        ):
+            with self.assertRaises(ValidationError) as role_error:
+                self.settle(control_context=context)
+        self.assertEqual(
+            self.error_code(role_error),
+            'settlement.control.invalid_access',
+        )
+        self.clerk_access.refresh_from_db()
+        self.assertEqual(self.clerk_access.role_id, self.clerk_role.pk)
+        self.assertFalse(EmployeeBedOccupancy.objects.exists())
+
+    def test_stale_domain_plan_is_rejected_and_rolled_back(self):
+        context = self.write_context()
+        original_access_lock = settlement_services.lock_settlement_write_access
+
+        def move_bed_after_preread(**kwargs):
+            result = original_access_lock(**kwargs)
+            PhysicalBed.objects.filter(pk=self.first_bed.pk).update(
+                room=self.second_room,
+            )
+            return result
+
+        with mock.patch.object(
+            settlement_services,
+            'lock_settlement_write_access',
+            side_effect=move_bed_after_preread,
+        ):
+            with self.assertRaises(ValidationError) as bed_error:
+                self.settle(control_context=context)
+        self.assertEqual(
+            self.error_code(bed_error),
+            'settlement_occupancy_changed',
+        )
+        self.first_bed.refresh_from_db()
+        self.assertEqual(self.first_bed.room_id, self.first_room.pk)
+        self.assertFalse(EmployeeBedOccupancy.objects.exists())
+
+        def add_occupancy_after_preread(**kwargs):
+            result = original_access_lock(**kwargs)
+            self.create_existing_occupancy()
+            return result
+
+        with mock.patch.object(
+            settlement_services,
+            'lock_settlement_write_access',
+            side_effect=add_occupancy_after_preread,
+        ):
+            with self.assertRaises(ValidationError) as occupancy_error:
+                self.settle(control_context=context)
+        self.assertEqual(
+            self.error_code(occupancy_error),
+            'settlement_occupancy_changed',
+        )
+        self.assertFalse(EmployeeBedOccupancy.objects.exists())
+
+    def test_exception_after_all_locks_rolls_back_without_partial_occupancy(self):
+        context = self.write_context()
+        forced_error = RuntimeError('controlled writer failure after locks')
+
+        with mock.patch.object(
+            settlement_services,
+            '_create_occupancy',
+            side_effect=forced_error,
+        ):
+            with self.assertRaises(RuntimeError) as error:
+                self.settle(control_context=context)
+
+        self.assertIs(error.exception, forced_error)
+        self.assertFalse(EmployeeBedOccupancy.objects.exists())
 
 
 class SettlementControlLockOrderTests(

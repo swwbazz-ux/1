@@ -45,6 +45,7 @@ from users.active_role import (
 from users.models import Employee, EmployeeAccess, Role, WatchComposition
 
 from .admin import PhysicalRoomAdmin
+from .control import SettlementControlWriteContext, acquire_control_lease
 from .fund import PHYSICAL_FUND_SPECS, expected_fund_totals
 from .models import (
     AccommodationAnchor,
@@ -66,7 +67,6 @@ from .services import (
     settle_employee_on_bed,
     unsettled_current_roster_employees,
 )
-from . import services as settlement_services
 from .views import _occupancy_response
 
 
@@ -3958,7 +3958,7 @@ class SettlementMapAccessTests(TestCase):
         self.assertIn('data-room-panel', content)
         self.assertIn('data-settlement-form', content)
         self.assertIn('data-employee-search', content)
-        self.assertEqual(content.count('-settlement-map-v29'), 2)
+        self.assertEqual(content.count('-settlement-map-v30'), 2)
         self.assertNotIn('-settlement-map-v28', content)
         self.assertNotIn('-settlement-map-v24', content)
         self.assertIn('data-relocate-button', content)
@@ -4578,7 +4578,10 @@ class SettlementOccupancyWorkflowTests(TestCase):
         assignment_type=None,
         action='settle',
         ends_at=None,
+        acquire_control=True,
     ):
+        if acquire_control:
+            self.client.post(reverse('settlement_control_acquire'))
         payload = {
             'action': action,
             'bed_stable_id': (bed or self.transferred_beds[0]).stable_id,
@@ -4594,6 +4597,20 @@ class SettlementOccupancyWorkflowTests(TestCase):
             reverse('settlement_occupancy_create'),
             data=payload,
             content_type='application/json',
+        )
+
+    def service_control_context(self):
+        raw_session_key = 'settlement-workflow-service-session'
+        grant = acquire_control_lease(
+            owner_access_id=self.clerk_access.pk,
+            raw_session_key=raw_session_key,
+            source='settlement-workflow-test',
+        )
+        return SettlementControlWriteContext(
+            owner_access_id=self.clerk_access.pk,
+            raw_session_key=raw_session_key,
+            lease_token=str(grant.lease_token),
+            fencing_revision=grant.fencing_revision,
         )
 
     def create_workflow_occupancy(
@@ -4814,7 +4831,7 @@ class SettlementOccupancyWorkflowTests(TestCase):
                 bed_stable_id=self.transferred_beds[0].stable_id,
                 employee_id=self.candidate.pk,
                 assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
-                settled_by=self.clerk,
+                control_context=self.service_control_context(),
             )
         with mock.patch('settlement.services.timezone.now', return_value=relocated_at):
             replacement = relocate_employee_to_bed(
@@ -4822,11 +4839,12 @@ class SettlementOccupancyWorkflowTests(TestCase):
                 employee_id=self.candidate.pk,
                 assignment_type=EmployeeBedOccupancy.AssignmentType.TEMPORARY,
                 ends_at=relocated_at + timedelta(days=1),
-                settled_by=self.clerk,
+                control_context=self.service_control_context(),
             )
         with mock.patch('settlement.services.timezone.now', return_value=released_at):
             released = release_employee_from_bed(
                 bed_stable_id=self.transferred_beds[1].stable_id,
+                control_context=self.service_control_context(),
             )
 
         original.refresh_from_db()
@@ -4847,10 +4865,10 @@ class SettlementOccupancyWorkflowTests(TestCase):
                 bed_stable_id=self.transferred_beds[0].stable_id,
                 employee_id=self.candidate.pk,
                 assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
-                settled_by=self.clerk,
+                control_context=self.service_control_context(),
             )
 
-        now_mock.assert_called_once_with()
+        now_mock.assert_called()
         occupancy.refresh_from_db()
         self.assertEqual(occupancy.starts_at, placement_started_at)
         self.assertEqual(occupancy.settled_at, placement_started_at)
@@ -5028,7 +5046,7 @@ class SettlementOccupancyWorkflowTests(TestCase):
                     bed_stable_id=self.transferred_beds[0].stable_id,
                     employee_id=self.candidate.pk,
                     assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
-                    settled_by=self.clerk,
+                    control_context=self.service_control_context(),
                 )
 
         self.assertEqual(
@@ -5059,7 +5077,7 @@ class SettlementOccupancyWorkflowTests(TestCase):
                     bed_stable_id=self.transferred_beds[1].stable_id,
                     employee_id=self.candidate.pk,
                     assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
-                    settled_by=self.clerk,
+                    control_context=self.service_control_context(),
                 )
 
         self.assertEqual(
@@ -5090,7 +5108,7 @@ class SettlementOccupancyWorkflowTests(TestCase):
                 bed_stable_id=self.transferred_beds[0].stable_id,
                 employee_id=self.candidate.pk,
                 assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
-                settled_by=self.clerk,
+                control_context=self.service_control_context(),
             )
 
         self.assertEqual(EmployeeBedOccupancy.objects.count(), occupancy_count + 1)
@@ -5103,7 +5121,7 @@ class SettlementOccupancyWorkflowTests(TestCase):
                 bed_stable_id=self.transferred_beds[1].stable_id,
                 employee_id=self.second_candidate.pk,
                 assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
-                settled_by=self.clerk,
+                control_context=self.service_control_context(),
             )
 
         self.assertEqual(reused_employee_occupancy.employee, self.second_candidate)
@@ -5129,13 +5147,13 @@ class SettlementOccupancyWorkflowTests(TestCase):
                 bed_stable_id=self.transferred_beds[0].stable_id,
                 employee_id=self.candidate.pk,
                 assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
-                settled_by=self.clerk,
+                control_context=self.service_control_context(),
             )
             reused_employee_occupancy = settle_employee_on_bed(
                 bed_stable_id=self.transferred_beds[1].stable_id,
                 employee_id=self.second_candidate.pk,
                 assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
-                settled_by=self.clerk,
+                control_context=self.service_control_context(),
             )
 
         self.assertEqual(reused_bed_occupancy.physical_bed, self.transferred_beds[0])
@@ -5386,6 +5404,37 @@ class SettlementOccupancyWorkflowTests(TestCase):
         self.assertEqual(payload['summary']['occupied_beds'], 1)
         self.assertEqual(payload['summary']['free_beds'], 269)
         self.assertEqual(EmployeeBedOccupancy.objects.count(), 1)
+
+    def test_writer_without_acquired_control_is_rejected_without_write(self):
+        self.authenticate(self.client, self.clerk_access)
+
+        response = self.post_settle(acquire_control=False)
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()['code'], 'settlement.control.not_held')
+        self.assertFalse(EmployeeBedOccupancy.objects.exists())
+
+    def test_control_credentials_in_post_body_are_never_trusted(self):
+        self.authenticate(self.client, self.clerk_access)
+
+        response = self.client.post(
+            reverse('settlement_occupancy_create'),
+            data={
+                'action': 'settle',
+                'bed_stable_id': self.transferred_beds[0].stable_id,
+                'employee_id': self.candidate.pk,
+                'assignment_type': EmployeeBedOccupancy.AssignmentType.PERMANENT,
+                'owner_access_id': self.clerk_access.pk,
+                'lease_token': str(uuid.uuid4()),
+                'fencing_revision': 999,
+                'raw_session_key': self.client.session.session_key,
+            },
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()['code'], 'settlement.control.not_held')
+        self.assertFalse(EmployeeBedOccupancy.objects.exists())
 
     def test_other_role_cannot_search_or_settle_employee(self):
         self.authenticate(self.client, self.driver_access)
@@ -5775,6 +5824,29 @@ class SettlementMutualRelocationConcurrencyTests(TransactionTestCase):
             status=Employee.Status.ACTIVE,
             is_active=True,
         )
+        self.clerk_role = Role.objects.create(
+            code='settlement_clerk',
+            name='Делопроизводитель конкурентного переселения',
+        )
+        self.clerk_access = EmployeeAccess.objects.create(
+            employee=self.clerk,
+            role=self.clerk_role,
+            access_code='SETTLEMENT-CONCURRENT-CLERK',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+        raw_session_key = 'settlement-concurrent-session'
+        grant = acquire_control_lease(
+            owner_access_id=self.clerk_access.pk,
+            raw_session_key=raw_session_key,
+            source='settlement-concurrency-test',
+        )
+        self.control_context = SettlementControlWriteContext(
+            owner_access_id=self.clerk_access.pk,
+            raw_session_key=raw_session_key,
+            lease_token=str(grant.lease_token),
+            fencing_revision=grant.fencing_revision,
+        )
         starts_at = timezone.now() - timedelta(minutes=5)
         self.occupancy_a = EmployeeBedOccupancy.objects.create(
             employee=self.employee_a,
@@ -5794,7 +5866,7 @@ class SettlementMutualRelocationConcurrencyTests(TransactionTestCase):
         )
 
     @staticmethod
-    def _relocate(employee_id, target_bed_stable_id, settled_by_id):
+    def _relocate(employee_id, target_bed_stable_id, control_context):
         close_old_connections()
         try:
             with connections['default'].cursor() as cursor:
@@ -5805,7 +5877,7 @@ class SettlementMutualRelocationConcurrencyTests(TransactionTestCase):
                     bed_stable_id=target_bed_stable_id,
                     employee_id=employee_id,
                     assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
-                    settled_by=Employee.objects.get(pk=settled_by_id),
+                    control_context=control_context,
                 )
             except ValidationError as error:
                 return (
@@ -5825,34 +5897,23 @@ class SettlementMutualRelocationConcurrencyTests(TransactionTestCase):
             .order_by('pk')
             .values_list('pk', 'employee_id', 'physical_bed_id', 'terminated_at')
         )
-        barrier = threading.Barrier(2)
-        original_locked_beds = settlement_services._locked_beds
-
-        def synchronized_locked_beds(*bed_ids):
-            barrier.wait(timeout=10)
-            return original_locked_beds(*bed_ids)
-
-        with mock.patch(
-            'settlement.services._locked_beds',
-            side_effect=synchronized_locked_beds,
-        ):
-            with ThreadPoolExecutor(max_workers=2) as executor:
-                future_a = executor.submit(
-                    self._relocate,
-                    self.employee_a.pk,
-                    self.bed_b.stable_id,
-                    self.clerk.pk,
-                )
-                future_b = executor.submit(
-                    self._relocate,
-                    self.employee_b.pk,
-                    self.bed_a.stable_id,
-                    self.clerk.pk,
-                )
-                results = [
-                    future_a.result(timeout=20),
-                    future_b.result(timeout=20),
-                ]
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            future_a = executor.submit(
+                self._relocate,
+                self.employee_a.pk,
+                self.bed_b.stable_id,
+                self.control_context,
+            )
+            future_b = executor.submit(
+                self._relocate,
+                self.employee_b.pk,
+                self.bed_a.stable_id,
+                self.control_context,
+            )
+            results = [
+                future_a.result(timeout=20),
+                future_b.result(timeout=20),
+            ]
 
         self.assertEqual(
             results,

@@ -70,6 +70,11 @@
     var unsettledFilterEmpty = root.querySelector("[data-unsettled-filter-empty]");
     var unsettledEmployees = Array.from(root.querySelectorAll("[data-unsettled-employee]"));
     var unsettledShiftButtons = Array.from(root.querySelectorAll("[data-unsettled-shift-filter]"));
+    var controlPanel = root.querySelector("[data-control-panel]");
+    var controlStatus = root.querySelector("[data-control-status]");
+    var controlMessage = root.querySelector("[data-control-message]");
+    var controlAcquireButton = root.querySelector("[data-control-acquire]");
+    var controlReleaseButton = root.querySelector("[data-control-release]");
     var activeRoom = null;
     var selectedBed = null;
     var selectedEmployee = null;
@@ -80,6 +85,15 @@
     var unsettledShift = "all";
     var unsettledPanelTrigger = null;
     var autoPreviewOpenOnceKey = "settlement:auto-preview-open-once";
+    var controlHeld = false;
+    var controlState = "free";
+    var controlActionInFlight = false;
+    var heartbeatInFlight = false;
+    var heartbeatTimer = null;
+    var heartbeatRetryCount = 0;
+    var heartbeatRecoveryPending = false;
+    var controlAccessDenied = false;
+    var heartbeatRetryDelays = [2500, 6000];
 
     function hasFloorSelection(dormitory, floor) {
         return floorSections.some(function (section) {
@@ -322,7 +336,7 @@
             dragHandle.classList.remove("is-dragging");
             dragHandle.removeAttribute("aria-grabbed");
             dragHandle.style.removeProperty("pointer-events");
-            if (occupied && !unavailable) {
+            if (controlHeld && occupied && !unavailable) {
                 dragHandle.setAttribute("data-bed-drag-handle", "");
                 dragHandle.setAttribute("draggable", "true");
             } else {
@@ -631,6 +645,12 @@
         if (occupiedActions) occupiedActions.hidden = true;
         updateEmployeeSearchAvailability();
 
+        if (!controlHeld) {
+            if (placementTitle) placementTitle.textContent = "Действия недоступны";
+            placementHint.textContent = "Сначала начните работу и дождитесь подтверждения управления.";
+            return;
+        }
+
         if (!selectedBed) {
             if (placementTitle) {
                 placementTitle.textContent = relocationSourceBed
@@ -929,7 +949,8 @@
             && (!assignmentEndInput || !assignmentEndInput.value)
         );
         settleButton.disabled = Boolean(
-            saving
+            !controlHeld
+            || saving
             || !selectedEmployee
             || !selectedBed
             || !assignmentType
@@ -940,7 +961,8 @@
 
     function configureRelocation(sourceBed, destinationBed) {
         if (
-            !sourceBed
+            !controlHeld
+            || !sourceBed
             || !isTransferredBed(sourceBed)
             || sourceBed.dataset.occupied !== "true"
             || saving
@@ -995,7 +1017,7 @@
     }
 
     function startRelocation() {
-        if (!selectedBed || selectedBed.dataset.occupied !== "true" || saving) return;
+        if (!controlHeld || !selectedBed || selectedBed.dataset.occupied !== "true" || saving) return;
         configureRelocation(selectedBed, null);
     }
 
@@ -1004,6 +1026,216 @@
         if (input && input.value) return input.value;
         var match = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/);
         return match ? decodeURIComponent(match[1]) : "";
+    }
+
+    function stopHeartbeatTimer() {
+        if (heartbeatTimer !== null) {
+            window.clearTimeout(heartbeatTimer);
+            heartbeatTimer = null;
+        }
+    }
+
+    function syncControlInteractivity() {
+        if (controlAcquireButton) {
+            controlAcquireButton.disabled = Boolean(
+                controlHeld
+                || controlActionInFlight
+                || heartbeatInFlight
+                || heartbeatRecoveryPending
+                || controlAccessDenied
+            );
+        }
+        if (controlReleaseButton) {
+            controlReleaseButton.disabled = Boolean(
+                !controlHeld || controlActionInFlight || heartbeatInFlight
+            );
+        }
+        if (relocateButton) relocateButton.disabled = Boolean(!controlHeld || saving);
+        if (releaseButton) releaseButton.disabled = Boolean(!controlHeld || saving);
+        updateSettleButton();
+        root.querySelectorAll("[data-bed]").forEach(renderMapBed);
+        if (!controlHeld) clearDragState();
+        if (placementHint && settlementForm) updatePlacementPanel();
+    }
+
+    function setControlState(nextState, message) {
+        var labels = {
+            free: "Управление не начато",
+            held: "Вы управляете расселением",
+            busy: "Управление занято другим сотрудником",
+            lost: "Связь с управлением потеряна"
+        };
+        controlState = labels[nextState] ? nextState : "lost";
+        controlHeld = controlState === "held";
+        root.dataset.controlState = controlState;
+        root.classList.toggle("is-control-held", controlHeld);
+        if (controlPanel) controlPanel.dataset.controlState = controlState;
+        if (controlStatus) controlStatus.textContent = labels[controlState];
+        if (controlMessage) controlMessage.textContent = message || "";
+        syncControlInteractivity();
+    }
+
+    function controlRequestError(response, payload) {
+        var error = new Error(
+            payload && payload.error
+                ? payload.error
+                : "Не удалось подтвердить управление расселением."
+        );
+        error.controlCode = payload && payload.code ? payload.code : "";
+        error.controlStatus = payload && payload.status ? payload.status : "";
+        error.httpStatus = response.status;
+        error.isControlled = Boolean(error.controlCode || response.status === 403);
+        return error;
+    }
+
+    function postControl(url) {
+        return fetch(url, {
+            method: "POST",
+            credentials: "same-origin",
+            headers: {
+                "X-CSRFToken": csrfToken(),
+                "X-Requested-With": "XMLHttpRequest"
+            }
+        }).then(function (response) {
+            return response.json()
+                .catch(function () { return {}; })
+                .then(function (payload) {
+                    if (!response.ok) throw controlRequestError(response, payload);
+                    return payload;
+                });
+        });
+    }
+
+    function scheduleHeartbeat(expiresAt) {
+        stopHeartbeatTimer();
+        heartbeatRetryCount = 0;
+        heartbeatRecoveryPending = false;
+        var expiresAtMs = Date.parse(expiresAt || "");
+        var remainingMs = Number.isFinite(expiresAtMs) ? expiresAtMs - Date.now() : 60000;
+        var delay = Math.max(1000, Math.min(45000, Math.floor(remainingMs / 2)));
+        heartbeatTimer = window.setTimeout(heartbeatControl, delay);
+    }
+
+    function applyControlledControlError(error) {
+        stopHeartbeatTimer();
+        heartbeatRetryCount = 0;
+        heartbeatRecoveryPending = false;
+        if (error.httpStatus === 403) {
+            controlAccessDenied = true;
+            setControlState("lost", "Текущая сессия больше не допускает управление расселением.");
+            return;
+        }
+        controlAccessDenied = false;
+        if (
+            error.controlCode === "settlement.control.busy"
+            || error.controlCode === "settlement.control.session_mismatch"
+        ) {
+            setControlState("busy", error.message);
+            return;
+        }
+        setControlState("free", error.message);
+    }
+
+    function scheduleHeartbeatRetry() {
+        stopHeartbeatTimer();
+        controlHeld = false;
+        if (heartbeatRetryCount >= heartbeatRetryDelays.length) {
+            heartbeatRecoveryPending = false;
+            setControlState(
+                "lost",
+                "Не удалось восстановить связь. Можно повторить подключение вручную."
+            );
+            return;
+        }
+        var delay = heartbeatRetryDelays[heartbeatRetryCount];
+        heartbeatRetryCount += 1;
+        heartbeatRecoveryPending = true;
+        setControlState("lost", "Проверяем связь с управлением повторно…");
+        heartbeatTimer = window.setTimeout(function () {
+            heartbeatTimer = null;
+            heartbeatRecoveryPending = false;
+            heartbeatControl();
+        }, delay);
+    }
+
+    function heartbeatControl() {
+        if (heartbeatInFlight || controlActionInFlight) return;
+        stopHeartbeatTimer();
+        heartbeatInFlight = true;
+        syncControlInteractivity();
+        postControl(root.dataset.controlHeartbeatUrl)
+            .then(function (payload) {
+                controlAccessDenied = false;
+                setControlState("held", "Управление подтверждено. Изменяющие действия доступны.");
+                scheduleHeartbeat(payload.expires_at);
+            })
+            .catch(function (error) {
+                if (error.isControlled) {
+                    applyControlledControlError(error);
+                    return;
+                }
+                scheduleHeartbeatRetry();
+            })
+            .finally(function () {
+                heartbeatInFlight = false;
+                syncControlInteractivity();
+            });
+    }
+
+    function acquireControl() {
+        if (controlHeld || controlActionInFlight || heartbeatInFlight || controlAccessDenied) return;
+        stopHeartbeatTimer();
+        controlActionInFlight = true;
+        heartbeatRetryCount = 0;
+        heartbeatRecoveryPending = false;
+        syncControlInteractivity();
+        postControl(root.dataset.controlAcquireUrl)
+            .then(function (payload) {
+                setControlState("held", "Управление получено. Изменяющие действия доступны.");
+                scheduleHeartbeat(payload.expires_at);
+            })
+            .catch(function (error) {
+                if (error.isControlled) {
+                    applyControlledControlError(error);
+                    return;
+                }
+                scheduleHeartbeatRetry();
+            })
+            .finally(function () {
+                controlActionInFlight = false;
+                syncControlInteractivity();
+            });
+    }
+
+    function releaseControl() {
+        if (!controlHeld || controlActionInFlight || heartbeatInFlight) return;
+        stopHeartbeatTimer();
+        controlActionInFlight = true;
+        syncControlInteractivity();
+        postControl(root.dataset.controlReleaseUrl)
+            .then(function () {
+                heartbeatRetryCount = 0;
+                heartbeatRecoveryPending = false;
+                setControlState("free", "Работа завершена. Карта доступна только для просмотра.");
+            })
+            .catch(function (error) {
+                if (error.isControlled) {
+                    applyControlledControlError(error);
+                    return;
+                }
+                scheduleHeartbeatRetry();
+            })
+            .finally(function () {
+                controlActionInFlight = false;
+                syncControlInteractivity();
+            });
+    }
+
+    function initializeControlLifecycle() {
+        controlAccessDenied = false;
+        heartbeatRecoveryPending = false;
+        setControlState("free", "Проверяем состояние текущей сессии…");
+        heartbeatControl();
     }
 
     function updateMapAfterSettlement(payload) {
@@ -1052,7 +1284,7 @@
     }
 
     function submitPlacement() {
-        if (!selectedBed || !selectedEmployee || !assignmentType.value || saving) return;
+        if (!controlHeld || !selectedBed || !selectedEmployee || !assignmentType.value || saving) return;
         saving = true;
         updateSettleButton();
         showFeedback("Сохраняем заселение…", false);
@@ -1099,7 +1331,7 @@
     }
 
     function confirmPlacement() {
-        if (!selectedBed || !selectedEmployee || !assignmentType.value || saving) return;
+        if (!controlHeld || !selectedBed || !selectedEmployee || !assignmentType.value || saving) return;
         var destination = [
             selectedBed.dataset.dormitoryLabel,
             selectedBed.dataset.floorLabel,
@@ -1124,7 +1356,7 @@
     }
 
     function submitRelease() {
-        if (!selectedBed || selectedBed.dataset.occupied !== "true" || saving) return;
+        if (!controlHeld || !selectedBed || selectedBed.dataset.occupied !== "true" || saving) return;
         saving = true;
         if (releaseButton) releaseButton.disabled = true;
         if (relocateButton) relocateButton.disabled = true;
@@ -1157,14 +1389,12 @@
             })
             .finally(function () {
                 saving = false;
-                if (releaseButton) releaseButton.disabled = false;
-                if (relocateButton) relocateButton.disabled = false;
-                updateSettleButton();
+                syncControlInteractivity();
             });
     }
 
     function confirmRelease() {
-        if (!selectedBed || selectedBed.dataset.occupied !== "true" || saving) return;
+        if (!controlHeld || !selectedBed || selectedBed.dataset.occupied !== "true" || saving) return;
         var message = "Освободить " + bedLabel(selectedBed) + " и завершить текущее размещение?";
         if (typeof window.openAppConfirmDialog === "function") {
             window.openAppConfirmDialog(
@@ -1232,7 +1462,7 @@
     root.addEventListener("dragstart", function (event) {
         var handle = event.target.closest("[data-bed-drag-handle]");
         var bed = handle && handle.closest("[data-bed]");
-        if (!bed || !isTransferredBed(bed) || bed.dataset.occupied !== "true" || saving) {
+        if (!controlHeld || !bed || !isTransferredBed(bed) || bed.dataset.occupied !== "true" || saving) {
             event.preventDefault();
             return;
         }
@@ -1253,7 +1483,8 @@
     root.addEventListener("dragover", function (event) {
         var bed = event.target.closest("[data-bed]");
         if (
-            !dragSourceBed
+            !controlHeld
+            || !dragSourceBed
             || !bed
             || bed === dragSourceBed
             || !isTransferredBed(bed)
@@ -1272,7 +1503,8 @@
     root.addEventListener("drop", function (event) {
         var targetBed = event.target.closest("[data-bed]");
         if (
-            !dragSourceBed
+            !controlHeld
+            || !dragSourceBed
             || !targetBed
             || targetBed === dragSourceBed
             || !isTransferredBed(targetBed)
@@ -1318,6 +1550,8 @@
     });
     if (relocateButton) relocateButton.addEventListener("click", startRelocation);
     if (releaseButton) releaseButton.addEventListener("click", confirmRelease);
+    if (controlAcquireButton) controlAcquireButton.addEventListener("click", acquireControl);
+    if (controlReleaseButton) controlReleaseButton.addEventListener("click", releaseControl);
     unsettledPanelToggles.forEach(function (toggle) {
         toggle.addEventListener("click", toggleUnsettledPanel);
     });
@@ -1374,6 +1608,7 @@
 
     restoreMapSelection();
     applyFilters();
+    initializeControlLifecycle();
     if (consumeAutoPreviewOpenOnce()) {
         setAutoPreviewModal(true);
     }
