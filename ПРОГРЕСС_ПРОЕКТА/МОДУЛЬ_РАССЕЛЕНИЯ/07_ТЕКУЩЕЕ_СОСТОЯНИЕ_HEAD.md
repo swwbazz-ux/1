@@ -2,8 +2,8 @@
 
 Версия документа: 0.5
 Дата последней сверки отчётов: 17.08.2026
-Статус: актуализирован по base HEAD `43382d04b0c2d78e8d34e633d1192771bca10657` и принятой локальной реализации M7; migration leaf рабочего дерева — `settlement.0012_m7_saved_previews`
-Источники доказательств: модели и domain-код M4–M7, migrations `0008`–`0012`, целевые M7/M6/migration tests и чистый SQLite migration cycle `0011 → 0012 → 0011 → 0012`; production не проверялась и migration `0012` к ней не применялась
+Статус: актуализирован по base HEAD `8265ab361dc49afc569d5a9f3eca8eed06f09ee1` и принятой локальной реализации resident occupancy transition; migration leaf рабочего дерева — `settlement.0013_resident_occupancy_subject`
+Источники доказательств: модели и domain-код M4–M7/occupancy, migrations `0008`–`0013` и принятые целевые resident occupancy/migration проверки; production не проверялась и migration `0013` к ней не применялась
 
 ## 1. Репозиторий и baseline
 
@@ -123,7 +123,7 @@ DB-level conditional unique покрывает только открытые con
 
 ### 4.4. EmployeeBedOccupancy
 
-Поля включают employee, physical bed, тип permanent/temporary/proposed, legacy `settled_at/ended_at` и canonical `starts_at/ends_at/terminated_at`.
+Класс сохраняет legacy-имя, но обязательный subject — `resident` → `SettlementResident`; прямого subject-FK Employee больше нет. Поля включают physical bed, тип permanent/temporary/proposed, legacy `settled_at/ended_at` и canonical `starts_at/ends_at/terminated_at`. `settled_by` и другие actor/audit-поля остаются Employee.
 
 Runtime использует единую полуоткрытую семантику:
 
@@ -131,7 +131,7 @@ Runtime использует единую полуоткрытую семант�
 
 Legacy `ended_at` в runtime activity больше не участвует.
 
-После миграции `0006` DB-level защита overlap bed/employee отсутствует. Модель не имеет FK на cohort, anchor, binding, source, revision или run; отсутствуют reason, release actor и idempotency key. Публичные `update/bulk_create/bulk_update` запрещены специализированным QuerySet с кодом `employee_bed_occupancy_mass_write_forbidden`. Разрешённые `create/save/delete`, private ORM API, raw SQL и внешний DB-клиент всё ещё требуют дисциплины writer/следующих DB-гарантий.
+После migration `0013` uniqueness, overlap и interval guards используют resident identity. DB-level защита всех конечных interval overlap по-прежнему неполна. Модель не имеет FK на cohort, anchor, binding, source, revision или run; отсутствуют reason, release actor и idempotency key. Публичные `update/bulk_create/bulk_update` запрещены специализированным QuerySet с кодом `employee_bed_occupancy_mass_write_forbidden`. Разрешённые `create/save/delete`, private ORM API, raw SQL и внешний DB-клиент всё ещё требуют дисциплины writer/следующих DB-гарантий.
 
 ### 4.5. CrewPlan и EquipmentAssignment
 
@@ -161,7 +161,9 @@ Migration `0011_resident_subject_transition` заменила subject `employee`
 
 Forward migration создаёт или переиспользует ровно один внутренний wrapper для существующих subject Employee и не создаёт `EmployeeAccess`. Reverse восстанавливает Employee subject только для internal resident и останавливается fail-closed при external subject. M4/M5 domain-команды используют полный порядок `Employee внутренних resident по PK → SettlementResident по PK с OF self → WatchPeriod → Cohort/Member → Slot/Binding → Anchor/Assignment/Bed → revalidation/write`.
 
-Внешний resident уже может быть subject cohort member и calendar binding. Минимальное безопасное read-only ядро M6 и сохраняемый immutable preview M7 реализованы. Не реализованы: UI создания внешней карточки, UI preview/confirm, Apply, external occupancy и trainee adapter.
+Внешний resident уже может быть subject cohort member, calendar binding и фактической occupancy через canonical resident API. Migration `0013_resident_occupancy_subject` переводит существующие Employee occupancy на internal wrappers без EmployeeAccess; forward fail-closed при external resident без authoritative sex, reverse — при external occupancy. Минимальное безопасное read-only ядро M6 и сохраняемый immutable preview M7 реализованы. Не реализованы: UI создания внешней карточки, UI ручного внешнего заселения, UI preview/confirm/apply, Apply, AUTO replacement и trainee adapter.
+
+Canonical occupancy API: `settle_resident_on_bed`, `relocate_resident_to_bed`, `release_resident_from_bed`. Employee-based функции — совместимые адаптеры внутреннего HTTP UI и не создают resident скрыто. Internal sex берётся только из `Employee.sex`; external resident обязан иметь `external_sex=male/female`. Unknown sex не обходит room guard, несовместимое изменение пола при открытой occupancy отклоняется, а изменение external sex влияет на M6 fingerprint и stale M7 preview.
 
 ### 4.8. Read-only resolver M6
 

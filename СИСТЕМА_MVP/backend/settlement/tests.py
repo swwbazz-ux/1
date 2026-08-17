@@ -82,6 +82,7 @@ from .models import (
     SettlementSource,
 )
 from .residents import (
+    authoritative_resident_sex,
     archive_external_resident,
     build_settlement_resident_lock_plan,
     create_external_resident,
@@ -101,11 +102,19 @@ from .services import (
     current_roster_resolution,
     effective_occupancy_at_q,
     relocate_employee_to_bed,
+    relocate_resident_to_bed,
     release_employee_from_bed,
+    release_resident_from_bed,
     settle_employee_on_bed,
+    settle_resident_on_bed,
     unsettled_current_roster_employees,
 )
 from .views import _occupancy_response
+
+
+def _resident_for_employee(employee):
+    resident, _created = get_or_create_employee_resident(employee_id=employee.pk)
+    return resident
 
 
 class SettlementResidentTests(TestCase):
@@ -166,6 +175,7 @@ class SettlementResidentTests(TestCase):
             'position_title': 'Монтажник технологического оборудования',
             'organization': 'ООО «ДЕМО Подрядчик»',
             'phone': '+7 900 000-00-00',
+            'sex': Employee.Sex.MALE,
             'control_context': self.control_context,
         }
         values.update(overrides)
@@ -175,6 +185,25 @@ class SettlementResidentTests(TestCase):
         with self.assertRaises(ValidationError) as raised:
             callback()
         self.assertEqual(raised.exception.code, expected_code)
+
+    def create_transferred_bed(self, *, sex_restriction):
+        dormitory = Dormitory.objects.create(number=f'R{Dormitory.objects.count() + 1}')
+        room = PhysicalRoom.objects.create(
+            dormitory=dormitory,
+            floor=1,
+            number='1',
+            transfer_status=PhysicalRoom.TransferStatus.TRANSFERRED,
+            sex_restriction=sex_restriction,
+            capacity=1,
+            corridor_side=PhysicalRoom.CorridorSide.LEFT,
+            side_position=1,
+        )
+        return PhysicalBed.objects.create(
+            room=room,
+            stable_id=f'RESIDENT-SEX-{room.pk}',
+            block=PhysicalBed.Block.A,
+            position=1,
+        )
 
     def test_internal_employee_wrapper_is_stable_and_uses_employee_as_source(self):
         first, created = get_or_create_employee_resident(employee_id=self.employee.pk)
@@ -189,6 +218,8 @@ class SettlementResidentTests(TestCase):
         self.assertEqual(first.full_name, '')
         self.assertFalse(first.photo)
         self.assertIsNone(first.created_by_access_id)
+        self.assertIsNone(first.external_sex)
+        self.assertEqual(authoritative_resident_sex(first), self.employee.sex)
 
     def test_external_types_create_cards_without_employee_or_access(self):
         access_count = EmployeeAccess.objects.count()
@@ -207,6 +238,8 @@ class SettlementResidentTests(TestCase):
                 self.assertTrue(resident.is_external)
                 self.assertEqual(resident.created_by_access_id, self.clerk_access.pk)
                 self.assertEqual(resident.updated_by_access_id, self.clerk_access.pk)
+                self.assertEqual(resident.external_sex, Employee.Sex.MALE)
+                self.assertEqual(authoritative_resident_sex(resident), Employee.Sex.MALE)
                 self.assertEqual(EmployeeAccess.objects.count(), access_count)
 
     def test_external_required_fields_and_type_fail_closed(self):
@@ -222,6 +255,26 @@ class SettlementResidentTests(TestCase):
         self.assert_validation_code(
             'settlement.resident.invalid_type',
             lambda: self.create_external(resident_type=SettlementResident.ResidentType.EMPLOYEE),
+        )
+        self.assert_validation_code(
+            'settlement.resident.invalid_sex',
+            lambda: self.create_external(sex=''),
+        )
+        self.assert_validation_code(
+            'settlement.resident.invalid_sex',
+            lambda: self.create_external(sex='unknown'),
+        )
+        values = {
+            'resident_type': SettlementResident.ResidentType.CONTRACTOR,
+            'full_name': 'ДЕМО · Без пола',
+            'position_title': 'Подрядчик',
+            'organization': 'ДЕМО',
+            'phone': '+7 900 000-00-09',
+            'control_context': self.control_context,
+        }
+        self.assert_validation_code(
+            'settlement.resident.invalid_sex',
+            lambda: create_external_resident(**values),
         )
 
     def test_database_constraints_enforce_subject_xor_and_unique_employee(self):
@@ -239,6 +292,30 @@ class SettlementResidentTests(TestCase):
         )
         with self.assertRaises(IntegrityError), transaction.atomic():
             SettlementResident._base_manager.bulk_create([invalid_external])
+
+        missing_external_sex = SettlementResident(
+            resident_type=SettlementResident.ResidentType.CONTRACTOR,
+            full_name='ДЕМО · Внешний без пола',
+            position_title='Подрядчик',
+            organization='ДЕМО',
+            phone='+7 900 000-00-10',
+            created_by_access=self.clerk_access,
+        )
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            SettlementResident._base_manager.bulk_create([missing_external_sex])
+
+        internal_with_external_sex_employee = Employee.objects.create(
+            full_name='Внутренний сотрудник с внешним полом',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        internal_with_external_sex = SettlementResident(
+            employee=internal_with_external_sex_employee,
+            resident_type=SettlementResident.ResidentType.EMPLOYEE,
+            external_sex=Employee.Sex.MALE,
+        )
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            SettlementResident._base_manager.bulk_create([internal_with_external_sex])
 
         photo_employee = Employee.objects.create(
             full_name='Внутренний сотрудник с запрещённой карточной фотографией',
@@ -295,11 +372,14 @@ class SettlementResidentTests(TestCase):
             expected_revision=1,
             organization='  ООО   «Новая организация»  ',
             phone='+7 999 111-22-33',
+            sex=Employee.Sex.FEMALE,
             control_context=self.control_context,
         )
         self.assertEqual(updated.revision, 2)
         self.assertEqual(updated.organization, 'ООО «Новая организация»')
         self.assertEqual(updated.updated_by_access_id, self.clerk_access.pk)
+        self.assertEqual(updated.external_sex, Employee.Sex.FEMALE)
+        self.assertEqual(authoritative_resident_sex(updated), Employee.Sex.FEMALE)
 
         self.assert_validation_code(
             'settlement.resident.stale_revision',
@@ -313,6 +393,117 @@ class SettlementResidentTests(TestCase):
         resident.refresh_from_db()
         self.assertEqual(resident.organization, 'ООО «Новая организация»')
         self.assertEqual(resident.revision, 2)
+
+    def test_external_sex_change_revalidates_open_occupancy(self):
+        resident = self.create_external(sex=Employee.Sex.MALE)
+        bed = self.create_transferred_bed(
+            sex_restriction=PhysicalRoom.SexRestriction.MALE_ONLY,
+        )
+        occupancy = settle_resident_on_bed(
+            bed_stable_id=bed.stable_id,
+            resident_id=resident.pk,
+            assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
+            control_context=self.control_context,
+        )
+
+        self.assert_validation_code(
+            'settlement.resident.sex_occupancy_conflict',
+            lambda: update_external_resident(
+                resident_id=resident.pk,
+                expected_revision=resident.revision,
+                sex=Employee.Sex.FEMALE,
+                control_context=self.control_context,
+            ),
+        )
+        resident.refresh_from_db()
+        occupancy.refresh_from_db()
+        self.assertEqual(resident.external_sex, Employee.Sex.MALE)
+        self.assertEqual(resident.revision, 1)
+        self.assertIsNone(occupancy.terminated_at)
+
+    def test_external_sex_change_is_allowed_for_compatible_open_occupancy(self):
+        resident = self.create_external(sex=Employee.Sex.MALE)
+        bed = self.create_transferred_bed(
+            sex_restriction=PhysicalRoom.SexRestriction.UNKNOWN,
+        )
+        settle_resident_on_bed(
+            bed_stable_id=bed.stable_id,
+            resident_id=resident.pk,
+            assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
+            control_context=self.control_context,
+        )
+
+        updated = update_external_resident(
+            resident_id=resident.pk,
+            expected_revision=1,
+            sex=Employee.Sex.FEMALE,
+            control_context=self.control_context,
+        )
+        self.assertEqual(updated.external_sex, Employee.Sex.FEMALE)
+        self.assertEqual(updated.revision, 2)
+
+    def test_external_resident_uses_existing_room_sex_guard(self):
+        resident = self.create_external(sex=Employee.Sex.FEMALE)
+        male_bed = self.create_transferred_bed(
+            sex_restriction=PhysicalRoom.SexRestriction.MALE_ONLY,
+        )
+        with self.assertRaises(ValidationError) as raised:
+            settle_resident_on_bed(
+                bed_stable_id=male_bed.stable_id,
+                resident_id=resident.pk,
+                assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
+                control_context=self.control_context,
+            )
+        self.assertEqual(raised.exception.code, 'settlement_room_sex_mismatch')
+        self.assertFalse(EmployeeBedOccupancy.objects.exists())
+
+    def test_external_resident_uses_canonical_settle_relocate_release(self):
+        resident = self.create_external(sex=Employee.Sex.MALE)
+        source_bed = self.create_transferred_bed(
+            sex_restriction=PhysicalRoom.SexRestriction.UNKNOWN,
+        )
+        target_bed = self.create_transferred_bed(
+            sex_restriction=PhysicalRoom.SexRestriction.MALE_ONLY,
+        )
+        employee_count = Employee.objects.count()
+        access_count = EmployeeAccess.objects.count()
+
+        original = settle_resident_on_bed(
+            bed_stable_id=source_bed.stable_id,
+            resident_id=resident.pk,
+            assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
+            control_context=self.control_context,
+        )
+        original.starts_at = timezone.now() - timedelta(minutes=1)
+        original.settled_at = original.starts_at
+        original.save(update_fields=['starts_at', 'settled_at'])
+        replacement = relocate_resident_to_bed(
+            bed_stable_id=target_bed.stable_id,
+            resident_id=resident.pk,
+            assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
+            control_context=self.control_context,
+        )
+        response_payload = _occupancy_response(replacement)
+        released = release_resident_from_bed(
+            bed_stable_id=target_bed.stable_id,
+            control_context=self.control_context,
+        )
+
+        original.refresh_from_db()
+        replacement.refresh_from_db()
+        released.refresh_from_db()
+        self.assertIsNotNone(original.terminated_at)
+        self.assertEqual(replacement.pk, released.pk)
+        self.assertIsNotNone(released.terminated_at)
+        self.assertEqual(replacement.resident_id, resident.pk)
+        self.assertEqual(replacement.settled_by_id, self.clerk.pk)
+        self.assertEqual(
+            response_payload['occupancy']['occupant_name'],
+            resident.full_name,
+        )
+        self.assertEqual(response_payload['occupancy']['work_label'], resident.organization)
+        self.assertEqual(Employee.objects.count(), employee_count)
+        self.assertEqual(EmployeeAccess.objects.count(), access_count)
 
     def test_internal_resident_cannot_be_edited_as_external(self):
         resident, _created = get_or_create_employee_resident(employee_id=self.employee.pk)
@@ -456,6 +647,8 @@ class SettlementResidentTests(TestCase):
             None,
             resident.created_by_access_id,
             resident.status,
+            resident.revision,
+            resident.external_sex,
         )
         stale_plan = replace(plan, expected_subjects=(stale_subject,))
         with transaction.atomic(), self.assertRaisesMessage(ValidationError, 'изменился'):
@@ -3741,7 +3934,7 @@ class UnsettledCurrentRosterSelectorTests(TestCase):
         housed = self.create_employee('occupied', composition=composition)
         waiting = self.create_employee('waiting', composition=composition)
         EmployeeBedOccupancy.objects.create(
-            employee=housed,
+            resident=_resident_for_employee(housed),
             physical_bed=self.bed,
             assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
             settled_at=self.moment - timedelta(days=1),
@@ -4691,7 +4884,7 @@ class AutoSettlementPreviewPageTests(TestCase):
         self.authenticate(self.client, self.clerk_access)
         bed = PhysicalBed.objects.order_by('pk').first()
         EmployeeBedOccupancy.objects.create(
-            employee=self.clerk,
+            resident=_resident_for_employee(self.clerk),
             physical_bed=bed,
             assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
             settled_by=self.admin,
@@ -4921,6 +5114,9 @@ class SettlementOccupancyWorkflowTests(TestCase):
             status=Employee.Status.DEACTIVATED,
             is_active=False,
         )
+        cls.candidate_resident = _resident_for_employee(cls.candidate)
+        cls.second_candidate_resident = _resident_for_employee(cls.second_candidate)
+        cls.inactive_candidate_resident = _resident_for_employee(cls.inactive_candidate)
         cls.clerk_access = EmployeeAccess.objects.create(
             employee=cls.clerk,
             role=cls.clerk_role,
@@ -5021,7 +5217,7 @@ class SettlementOccupancyWorkflowTests(TestCase):
         ):
             ends_at = starts_at + timedelta(days=1)
         return EmployeeBedOccupancy.objects.create(
-            employee=employee or self.candidate,
+            resident=_resident_for_employee(employee or self.candidate),
             physical_bed=bed or self.transferred_beds[0],
             assignment_type=assignment_type,
             settled_at=starts_at,
@@ -5108,7 +5304,7 @@ class SettlementOccupancyWorkflowTests(TestCase):
         starts_at = timezone.now()
         candidates = [
             EmployeeBedOccupancy(
-                employee=self.candidate,
+                resident=self.candidate_resident,
                 physical_bed=self.transferred_beds[0],
                 assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
                 settled_at=starts_at,
@@ -5116,7 +5312,7 @@ class SettlementOccupancyWorkflowTests(TestCase):
                 settled_by=self.clerk,
             ),
             EmployeeBedOccupancy(
-                employee=self.second_candidate,
+                resident=self.second_candidate_resident,
                 physical_bed=self.transferred_beds[1],
                 assignment_type=EmployeeBedOccupancy.AssignmentType.TEMPORARY,
                 settled_at=starts_at,
@@ -5185,7 +5381,7 @@ class SettlementOccupancyWorkflowTests(TestCase):
 
         starts_at = timezone.now()
         candidate = EmployeeBedOccupancy(
-            employee=self.candidate,
+            resident=self.candidate_resident,
             physical_bed=self.transferred_beds[2],
             assignment_type=EmployeeBedOccupancy.AssignmentType.TEMPORARY,
             settled_at=starts_at,
@@ -5271,7 +5467,7 @@ class SettlementOccupancyWorkflowTests(TestCase):
 
     def test_clerk_can_read_occupied_employee_card_with_actual_bed(self):
         occupancy = EmployeeBedOccupancy.objects.create(
-            employee=self.candidate,
+            resident=_resident_for_employee(self.candidate),
             physical_bed=self.transferred_beds[0],
             assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
             starts_at=timezone.now() - timedelta(minutes=1),
@@ -5307,7 +5503,7 @@ class SettlementOccupancyWorkflowTests(TestCase):
         future_start = timezone.now() + timedelta(days=30)
 
         occupancy = EmployeeBedOccupancy.objects.create(
-            employee=self.candidate,
+            resident=_resident_for_employee(self.candidate),
             physical_bed=self.transferred_beds[0],
             assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
             starts_at=future_start,
@@ -5324,7 +5520,7 @@ class SettlementOccupancyWorkflowTests(TestCase):
             with self.subTest(ends_at=ends_at):
                 with self.assertRaises(IntegrityError), transaction.atomic():
                     EmployeeBedOccupancy.objects.create(
-                        employee=self.candidate,
+                        resident=_resident_for_employee(self.candidate),
                         physical_bed=self.transferred_beds[0],
                         assignment_type=(
                             EmployeeBedOccupancy.AssignmentType.PERMANENT
@@ -5343,7 +5539,7 @@ class SettlementOccupancyWorkflowTests(TestCase):
             with self.subTest(terminated_at=terminated_at):
                 with self.assertRaises(IntegrityError), transaction.atomic():
                     EmployeeBedOccupancy.objects.create(
-                        employee=self.candidate,
+                        resident=_resident_for_employee(self.candidate),
                         physical_bed=self.transferred_beds[0],
                         assignment_type=(
                             EmployeeBedOccupancy.AssignmentType.PERMANENT
@@ -5363,7 +5559,7 @@ class SettlementOccupancyWorkflowTests(TestCase):
             with self.subTest(terminated_at=terminated_at):
                 with self.assertRaises(IntegrityError), transaction.atomic():
                     EmployeeBedOccupancy.objects.create(
-                        employee=self.candidate,
+                        resident=_resident_for_employee(self.candidate),
                         physical_bed=self.transferred_beds[0],
                         assignment_type=(
                             EmployeeBedOccupancy.AssignmentType.PERMANENT
@@ -5382,7 +5578,7 @@ class SettlementOccupancyWorkflowTests(TestCase):
         ends_at = starts_at + timedelta(days=10)
 
         occupancy = EmployeeBedOccupancy.objects.create(
-            employee=self.candidate,
+            resident=_resident_for_employee(self.candidate),
             physical_bed=self.transferred_beds[0],
             assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
             starts_at=starts_at,
@@ -5398,20 +5594,20 @@ class SettlementOccupancyWorkflowTests(TestCase):
 
     def test_database_no_longer_uses_legacy_ended_at_uniqueness(self):
         EmployeeBedOccupancy.objects.create(
-            employee=self.candidate,
+            resident=_resident_for_employee(self.candidate),
             physical_bed=self.transferred_beds[0],
             assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
             settled_by=self.clerk,
         )
 
         EmployeeBedOccupancy.objects.create(
-            employee=self.second_candidate,
+            resident=_resident_for_employee(self.second_candidate),
             physical_bed=self.transferred_beds[0],
             assignment_type=EmployeeBedOccupancy.AssignmentType.TEMPORARY,
             settled_by=self.clerk,
         )
         EmployeeBedOccupancy.objects.create(
-            employee=self.candidate,
+            resident=_resident_for_employee(self.candidate),
             physical_bed=self.transferred_beds[1],
             assignment_type=EmployeeBedOccupancy.AssignmentType.PROPOSED,
             settled_by=self.clerk,
@@ -5423,7 +5619,7 @@ class SettlementOccupancyWorkflowTests(TestCase):
         moment = datetime(2026, 8, 5, 12, tzinfo=datetime_timezone.utc)
         starts_at = moment - timedelta(days=1)
         EmployeeBedOccupancy.objects.create(
-            employee=self.second_candidate,
+            resident=_resident_for_employee(self.second_candidate),
             physical_bed=self.transferred_beds[0],
             assignment_type=EmployeeBedOccupancy.AssignmentType.TEMPORARY,
             settled_at=starts_at,
@@ -5447,14 +5643,14 @@ class SettlementOccupancyWorkflowTests(TestCase):
         )
         self.assertEqual(EmployeeBedOccupancy.objects.count(), occupancy_count)
         self.assertFalse(
-            EmployeeBedOccupancy.objects.filter(employee=self.candidate).exists()
+            EmployeeBedOccupancy.objects.filter(resident__employee=self.candidate).exists()
         )
 
     def test_service_rejects_same_employee_interval_overlap_without_partial_write(self):
         moment = datetime(2026, 8, 5, 12, tzinfo=datetime_timezone.utc)
         starts_at = moment - timedelta(days=1)
         EmployeeBedOccupancy.objects.create(
-            employee=self.candidate,
+            resident=_resident_for_employee(self.candidate),
             physical_bed=self.transferred_beds[0],
             assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
             settled_at=starts_at,
@@ -5483,7 +5679,7 @@ class SettlementOccupancyWorkflowTests(TestCase):
         starts_at = moment - timedelta(days=10)
         terminated_at = moment - timedelta(days=1)
         historical = EmployeeBedOccupancy.objects.create(
-            employee=self.second_candidate,
+            resident=_resident_for_employee(self.second_candidate),
             physical_bed=self.transferred_beds[0],
             assignment_type=EmployeeBedOccupancy.AssignmentType.TEMPORARY,
             settled_at=starts_at,
@@ -5505,7 +5701,7 @@ class SettlementOccupancyWorkflowTests(TestCase):
 
         self.assertEqual(EmployeeBedOccupancy.objects.count(), occupancy_count + 1)
         self.assertNotEqual(occupancy.pk, historical.pk)
-        self.assertEqual(occupancy.employee, self.candidate)
+        self.assertEqual(occupancy.resident.employee, self.candidate)
         self.assertEqual(occupancy.physical_bed, self.transferred_beds[0])
 
         with mock.patch('settlement.services.timezone.now', return_value=moment):
@@ -5516,7 +5712,7 @@ class SettlementOccupancyWorkflowTests(TestCase):
                 control_context=self.service_control_context(),
             )
 
-        self.assertEqual(reused_employee_occupancy.employee, self.second_candidate)
+        self.assertEqual(reused_employee_occupancy.resident.employee, self.second_candidate)
         self.assertEqual(reused_employee_occupancy.physical_bed, self.transferred_beds[1])
 
     def test_service_allows_after_planned_end_without_false_conflict(self):
@@ -5524,7 +5720,7 @@ class SettlementOccupancyWorkflowTests(TestCase):
         starts_at = moment - timedelta(days=10)
         ends_at = moment - timedelta(days=1)
         EmployeeBedOccupancy.objects.create(
-            employee=self.second_candidate,
+            resident=_resident_for_employee(self.second_candidate),
             physical_bed=self.transferred_beds[0],
             assignment_type=EmployeeBedOccupancy.AssignmentType.TEMPORARY,
             settled_at=starts_at,
@@ -5549,7 +5745,7 @@ class SettlementOccupancyWorkflowTests(TestCase):
             )
 
         self.assertEqual(reused_bed_occupancy.physical_bed, self.transferred_beds[0])
-        self.assertEqual(reused_employee_occupancy.employee, self.second_candidate)
+        self.assertEqual(reused_employee_occupancy.resident.employee, self.second_candidate)
 
     def test_map_panel_shows_occupant_shift_equipment_and_assignment_type(self):
         equipment_type = EquipmentType.objects.create(name='Тестовый самосвал')
@@ -5567,7 +5763,7 @@ class SettlementOccupancyWorkflowTests(TestCase):
             accepted_at=timezone.now(),
         )
         EmployeeBedOccupancy.objects.create(
-            employee=self.candidate,
+            resident=_resident_for_employee(self.candidate),
             physical_bed=self.transferred_beds[0],
             assignment_type=EmployeeBedOccupancy.AssignmentType.TEMPORARY,
             settled_by=self.clerk,
@@ -5611,13 +5807,13 @@ class SettlementOccupancyWorkflowTests(TestCase):
                 SimpleUploadedFile('settlement-map.gif', image_bytes, content_type='image/gif'),
             )
             photo_occupancy = EmployeeBedOccupancy.objects.create(
-                employee=self.candidate,
+                resident=_resident_for_employee(self.candidate),
                 physical_bed=self.transferred_beds[0],
                 assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
                 settled_by=self.clerk,
             )
             EmployeeBedOccupancy.objects.create(
-                employee=self.second_candidate,
+                resident=_resident_for_employee(self.second_candidate),
                 physical_bed=self.transferred_beds[1],
                 assignment_type=EmployeeBedOccupancy.AssignmentType.TEMPORARY,
                 settled_by=self.clerk,
@@ -5668,7 +5864,7 @@ class SettlementOccupancyWorkflowTests(TestCase):
             is_active=True,
         )
         EmployeeBedOccupancy.objects.create(
-            employee=self.candidate,
+            resident=_resident_for_employee(self.candidate),
             physical_bed=self.transferred_beds[0],
             assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
             settled_by=self.clerk,
@@ -5756,7 +5952,7 @@ class SettlementOccupancyWorkflowTests(TestCase):
             is_active=True,
         )
         EmployeeBedOccupancy.objects.create(
-            employee=self.candidate,
+            resident=_resident_for_employee(self.candidate),
             physical_bed=self.transferred_beds[0],
             assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
             settled_by=self.clerk,
@@ -5779,7 +5975,7 @@ class SettlementOccupancyWorkflowTests(TestCase):
 
         self.assertEqual(response.status_code, 201)
         occupancy = EmployeeBedOccupancy.objects.get()
-        self.assertEqual(occupancy.employee, self.candidate)
+        self.assertEqual(occupancy.resident.employee, self.candidate)
         self.assertEqual(occupancy.physical_bed, self.transferred_beds[0])
         self.assertEqual(occupancy.settled_by, self.clerk)
         self.assertEqual(
@@ -5884,7 +6080,7 @@ class SettlementOccupancyWorkflowTests(TestCase):
 
     def test_occupied_bed_cannot_receive_second_employee(self):
         EmployeeBedOccupancy.objects.create(
-            employee=self.second_candidate,
+            resident=_resident_for_employee(self.second_candidate),
             physical_bed=self.transferred_beds[0],
             assignment_type=EmployeeBedOccupancy.AssignmentType.TEMPORARY,
             settled_by=self.clerk,
@@ -5902,7 +6098,7 @@ class SettlementOccupancyWorkflowTests(TestCase):
 
     def test_employee_with_active_bed_cannot_receive_another(self):
         EmployeeBedOccupancy.objects.create(
-            employee=self.candidate,
+            resident=_resident_for_employee(self.candidate),
             physical_bed=self.transferred_beds[0],
             assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
             settled_by=self.clerk,
@@ -6001,7 +6197,7 @@ class SettlementOccupancyWorkflowTests(TestCase):
         self.candidate.sex = Employee.Sex.MALE
         self.candidate.save(update_fields=['sex'])
         original = EmployeeBedOccupancy.objects.create(
-            employee=self.candidate,
+            resident=_resident_for_employee(self.candidate),
             physical_bed=self.transferred_beds[0],
             assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
             settled_at=moment - timedelta(hours=1),
@@ -6027,7 +6223,7 @@ class SettlementOccupancyWorkflowTests(TestCase):
     def test_relocation_terminates_old_occupancy_and_preserves_history(self):
         moment = datetime(2026, 8, 5, 12, tzinfo=datetime_timezone.utc)
         original = EmployeeBedOccupancy.objects.create(
-            employee=self.candidate,
+            resident=_resident_for_employee(self.candidate),
             physical_bed=self.transferred_beds[0],
             assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
             settled_at=moment - timedelta(days=1),
@@ -6058,7 +6254,7 @@ class SettlementOccupancyWorkflowTests(TestCase):
     def test_relocation_rolls_back_when_target_is_occupied_or_same_bed(self):
         moment = datetime(2026, 8, 5, 12, tzinfo=datetime_timezone.utc)
         original = EmployeeBedOccupancy.objects.create(
-            employee=self.candidate,
+            resident=_resident_for_employee(self.candidate),
             physical_bed=self.transferred_beds[0],
             assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
             settled_at=moment - timedelta(days=1),
@@ -6066,7 +6262,7 @@ class SettlementOccupancyWorkflowTests(TestCase):
             settled_by=self.clerk,
         )
         EmployeeBedOccupancy.objects.create(
-            employee=self.second_candidate,
+            resident=_resident_for_employee(self.second_candidate),
             physical_bed=self.transferred_beds[1],
             assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
             settled_at=moment - timedelta(days=1),
@@ -6099,7 +6295,7 @@ class SettlementOccupancyWorkflowTests(TestCase):
     def test_release_frees_bed_and_employee_for_immediate_reuse(self):
         moment = datetime(2026, 8, 5, 12, tzinfo=datetime_timezone.utc)
         original = EmployeeBedOccupancy.objects.create(
-            employee=self.candidate,
+            resident=_resident_for_employee(self.candidate),
             physical_bed=self.transferred_beds[0],
             assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
             settled_at=moment - timedelta(days=1),
@@ -6241,7 +6437,7 @@ class SettlementMutualRelocationConcurrencyTests(TransactionTestCase):
         )
         starts_at = timezone.now() - timedelta(minutes=5)
         self.occupancy_a = EmployeeBedOccupancy.objects.create(
-            employee=self.employee_a,
+            resident=_resident_for_employee(self.employee_a),
             physical_bed=self.bed_a,
             assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
             settled_at=starts_at,
@@ -6249,7 +6445,7 @@ class SettlementMutualRelocationConcurrencyTests(TransactionTestCase):
             settled_by=self.clerk,
         )
         self.occupancy_b = EmployeeBedOccupancy.objects.create(
-            employee=self.employee_b,
+            resident=_resident_for_employee(self.employee_b),
             physical_bed=self.bed_b,
             assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
             settled_at=starts_at,
@@ -6379,7 +6575,7 @@ class EffectiveOccupancyAtQueryTests(TestCase):
         ended_at=None,
     ):
         return EmployeeBedOccupancy.objects.create(
-            employee=self.employee,
+            resident=_resident_for_employee(self.employee),
             physical_bed=self.bed,
             assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
             settled_at=starts_at,
@@ -6598,7 +6794,7 @@ class ClerkMapEffectiveOccupancyTests(TestCase):
         ended_at=None,
     ):
         return EmployeeBedOccupancy.objects.create(
-            employee=self.employees[index],
+            resident=_resident_for_employee(self.employees[index]),
             physical_bed=self.beds[index],
             assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
             settled_at=starts_at,
@@ -6776,7 +6972,7 @@ class OccupancyResponseEffectiveOccupancyTests(TestCase):
             is_active=True,
         )
         EmployeeBedOccupancy.objects.create(
-            employee=baseline_employee,
+            resident=_resident_for_employee(baseline_employee),
             physical_bed=baseline_bed,
             assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
             settled_at=cls.moment - timedelta(days=2),
@@ -6797,7 +6993,7 @@ class OccupancyResponseEffectiveOccupancyTests(TestCase):
         ended_at=None,
     ):
         return EmployeeBedOccupancy.objects.create(
-            employee=self.employees[index],
+            resident=_resident_for_employee(self.employees[index]),
             physical_bed=self.beds[index],
             assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
             settled_at=starts_at,
@@ -6999,7 +7195,7 @@ class EmployeeSearchEffectiveOccupancyTests(TestCase):
         ended_at=None,
     ):
         return EmployeeBedOccupancy.objects.create(
-            employee=self.employees[index],
+            resident=_resident_for_employee(self.employees[index]),
             physical_bed=self.beds[index],
             assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
             settled_at=starts_at,
@@ -7744,7 +7940,7 @@ class AutoSettlementPreviewTests(TestCase):
             shift_type=WorkShiftType.SHIFT_1,
         )
         EmployeeBedOccupancy.objects.create(
-            employee=self.second_employee,
+            resident=_resident_for_employee(self.second_employee),
             physical_bed=self.bed_1,
             assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
             settled_by=self.third_employee,
@@ -7852,6 +8048,7 @@ class M4CalendarBindingTests(TestCase):
             position_title='Подрядчик',
             organization='ДЕМО Подрядчик',
             phone='+7 900 000-00-01',
+            external_sex=Employee.Sex.MALE,
             created_by_access=cls.resident_access,
         )
         cls.source = SettlementSource.objects.create(
@@ -8061,6 +8258,7 @@ class M4CalendarBindingTests(TestCase):
             position_title='Командированный',
             organization='ДЕМО Организация',
             phone='+7 900 000-00-02',
+            external_sex=Employee.Sex.FEMALE,
             status=SettlementResident.Status.ARCHIVED,
             archived_at=self.now,
             created_by_access=self.resident_access,
@@ -8600,6 +8798,7 @@ class M5CohortTests(TestCase):
             position_title='Подрядчик',
             organization='ДЕМО Подрядчик',
             phone='+7 900 000-00-03',
+            external_sex=Employee.Sex.MALE,
             created_by_access=cls.resident_access,
         )
         cls.source = SettlementSource.objects.create(
@@ -8710,6 +8909,7 @@ class M5CohortTests(TestCase):
             position_title='Внешний специалист',
             organization='ДЕМО Организация',
             phone='+7 900 000-00-04',
+            external_sex=Employee.Sex.FEMALE,
             status=SettlementResident.Status.ARCHIVED,
             archived_at=self.now,
             created_by_access=self.resident_access,
@@ -9396,6 +9596,7 @@ class M6SettlementResolverTests(TestCase):
             position_title='Подрядчик',
             organization=organization,
             phone='+7 900 000-00-06',
+            external_sex=Employee.Sex.MALE,
             created_by_access=cls.access,
         )
 
@@ -9851,7 +10052,7 @@ class M6SettlementResolverTests(TestCase):
             suffix='OCCUPIED',
         )
         EmployeeBedOccupancy.objects.create(
-            employee=self.position_employee,
+            resident=_resident_for_employee(self.position_employee),
             physical_bed=route_assignment.physical_bed,
             assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
             settled_by=self.actor,
@@ -10313,6 +10514,38 @@ class M7SavedPreviewTests(TestCase):
         run.refresh_from_db()
         self.assertEqual(run.status, SettlementPreviewRun.Status.DRAFT)
 
+    def test_external_authoritative_sex_change_makes_draft_stale(self):
+        cohort = self._cohort(self.external_a)
+        run = create_settlement_preview_run(
+            cohort_id=cohort.pk,
+            control_context=self.control_context,
+        )
+        changed_sex = (
+            Employee.Sex.FEMALE
+            if self.external_a.external_sex == Employee.Sex.MALE
+            else Employee.Sex.MALE
+        )
+        update_external_resident(
+            resident_id=self.external_a.pk,
+            expected_revision=self.external_a.revision,
+            sex=changed_sex,
+            control_context=self.control_context,
+        )
+
+        self.assertNotEqual(
+            resolve_settlement_cohort(cohort_id=cohort.pk).input_fingerprint,
+            run.resolver_fingerprint,
+        )
+        self.assert_validation_code(
+            'settlement.preview.stale_source',
+            lambda: confirm_settlement_preview_run(
+                run_id=run.pk,
+                control_context=self.control_context,
+            ),
+        )
+        run.refresh_from_db()
+        self.assertEqual(run.status, SettlementPreviewRun.Status.DRAFT)
+
     def test_changed_placement_is_stale_source(self):
         cohort, run = self._create_run(include_unresolved=False)
         current = resolve_settlement_cohort(cohort_id=cohort.pk)
@@ -10649,3 +10882,169 @@ class M7SavedPreviewMigrationTests(TransactionTestCase):
         tables = set(connection.introspection.table_names())
         self.assertTrue(legacy_tables.issubset(tables))
         self.assertTrue(m7_tables.issubset(tables))
+
+
+class ResidentOccupancySubjectMigrationTests(TransactionTestCase):
+    migrate_from = ('settlement', '0012_m7_saved_previews')
+    migrate_to = ('settlement', '0013_resident_occupancy_subject')
+
+    def setUp(self):
+        self.addCleanup(self._restore_latest_migrations)
+        executor = MigrationExecutor(connection)
+        executor.migrate([self.migrate_from])
+        self.old_apps = executor.loader.project_state([self.migrate_from]).apps
+
+    def _restore_latest_migrations(self):
+        executor = MigrationExecutor(connection)
+        executor.migrate(executor.loader.graph.leaf_nodes())
+
+    def _migrate_to_target(self):
+        executor = MigrationExecutor(connection)
+        executor.migrate([self.migrate_to])
+        return executor.loader.project_state([self.migrate_to]).apps
+
+    @staticmethod
+    def _actor_and_access(apps, suffix):
+        EmployeeModel = apps.get_model('users', 'Employee')
+        RoleModel = apps.get_model('users', 'Role')
+        AccessModel = apps.get_model('users', 'EmployeeAccess')
+        actor = EmployeeModel.objects.create(
+            full_name=f'ДЕМО migration actor {suffix}',
+            status='active',
+            is_active=True,
+        )
+        role = RoleModel.objects.create(
+            code=f'migration-settlement-{suffix}',
+            name=f'Migration settlement {suffix}',
+        )
+        access = AccessModel.objects.create(
+            employee=actor,
+            role=role,
+            access_code=f'MIG-{suffix}',
+            status='activated',
+            is_active=True,
+        )
+        return actor, access
+
+    @staticmethod
+    def _bed(apps, suffix):
+        DormitoryModel = apps.get_model('references', 'Dormitory')
+        RoomModel = apps.get_model('settlement', 'PhysicalRoom')
+        BedModel = apps.get_model('settlement', 'PhysicalBed')
+        dormitory = DormitoryModel.objects.create(number=f'M{suffix}')
+        room = RoomModel.objects.create(
+            dormitory=dormitory,
+            floor=1,
+            number='1',
+            transfer_status='transferred',
+            sex_restriction='unknown',
+            capacity=1,
+            corridor_side='left',
+            side_position=1,
+        )
+        return BedModel.objects.create(
+            room=room,
+            stable_id=f'MIGRATION-RESIDENT-BED-{suffix}',
+            block='A',
+            position=1,
+        )
+
+    def test_clean_schema_cycles_0012_0013_0012_0013(self):
+        self._migrate_to_target()
+        executor = MigrationExecutor(connection)
+        executor.migrate([self.migrate_from])
+        executor = MigrationExecutor(connection)
+        executor.migrate([self.migrate_to])
+        apps = executor.loader.project_state([self.migrate_to]).apps
+        self.assertEqual(apps.get_model('settlement', 'EmployeeBedOccupancy').objects.count(), 0)
+
+    def test_forward_reuses_internal_wrapper_without_creating_access(self):
+        EmployeeModel = self.old_apps.get_model('users', 'Employee')
+        ResidentModel = self.old_apps.get_model('settlement', 'SettlementResident')
+        OccupancyModel = self.old_apps.get_model('settlement', 'EmployeeBedOccupancy')
+        actor, _access = self._actor_and_access(self.old_apps, 'FORWARD')
+        employee = EmployeeModel.objects.create(
+            full_name='ДЕМО migration occupancy employee',
+            status='active',
+            is_active=True,
+        )
+        wrapper = ResidentModel.objects.create(
+            resident_type='EMPLOYEE',
+            employee=employee,
+        )
+        bed = self._bed(self.old_apps, 'FORWARD')
+        occupancy = OccupancyModel.objects.create(
+            employee=employee,
+            physical_bed=bed,
+            assignment_type='permanent',
+            settled_by=actor,
+        )
+        access_count = self.old_apps.get_model('users', 'EmployeeAccess').objects.count()
+
+        apps = self._migrate_to_target()
+        migrated = apps.get_model('settlement', 'EmployeeBedOccupancy').objects.get(
+            pk=occupancy.pk,
+        )
+        self.assertEqual(migrated.resident_id, wrapper.pk)
+        self.assertEqual(
+            apps.get_model('users', 'EmployeeAccess').objects.count(),
+            access_count,
+        )
+
+    def test_forward_fails_closed_for_existing_external_without_sex(self):
+        ResidentModel = self.old_apps.get_model('settlement', 'SettlementResident')
+        _actor, access = self._actor_and_access(self.old_apps, 'EXTERNAL')
+        resident = ResidentModel.objects.create(
+            resident_type='CONTRACTOR',
+            full_name='ДЕМО external without authoritative sex',
+            position_title='Подрядчик',
+            organization='ДЕМО',
+            phone='+7 900 000-01-01',
+            created_by_access=access,
+            updated_by_access=access,
+        )
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            rf'count=1, pk=\[{resident.pk}\]',
+        ):
+            self._migrate_to_target()
+        self.assertEqual(
+            self.old_apps.get_model('settlement', 'SettlementResident').objects.count(),
+            1,
+        )
+        ResidentModel.objects.filter(pk=resident.pk).delete()
+
+    def test_reverse_fails_closed_for_external_occupancy(self):
+        apps = self._migrate_to_target()
+        ResidentModel = apps.get_model('settlement', 'SettlementResident')
+        OccupancyModel = apps.get_model('settlement', 'EmployeeBedOccupancy')
+        actor, access = self._actor_and_access(apps, 'REVERSE')
+        resident = ResidentModel.objects.create(
+            resident_type='CONTRACTOR',
+            full_name='ДЕМО external reverse blocker',
+            position_title='Подрядчик',
+            organization='ДЕМО',
+            phone='+7 900 000-01-02',
+            external_sex='male',
+            created_by_access=access,
+            updated_by_access=access,
+        )
+        bed = self._bed(apps, 'REVERSE')
+        occupancy = OccupancyModel.objects.create(
+            resident=resident,
+            physical_bed=bed,
+            assignment_type='permanent',
+            settled_by=actor,
+        )
+
+        executor = MigrationExecutor(connection)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            rf'count=1.*\({occupancy.pk}, {resident.pk}\)',
+        ):
+            executor.migrate([self.migrate_from])
+        self.assertEqual(
+            apps.get_model('settlement', 'EmployeeBedOccupancy').objects.count(),
+            1,
+        )

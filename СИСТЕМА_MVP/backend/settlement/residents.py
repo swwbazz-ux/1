@@ -2,6 +2,7 @@ from dataclasses import dataclass
 
 from django.core.exceptions import ValidationError
 from django.db import DEFAULT_DB_ALIAS, connections, transaction
+from django.db.models import Q
 from django.utils import timezone
 from users.models import Employee
 
@@ -10,7 +11,7 @@ from .control import (
     lock_settlement_write_access,
     lock_settlement_write_lease,
 )
-from .models import SettlementResident
+from .models import EmployeeBedOccupancy, PhysicalBed, PhysicalRoom, SettlementResident
 
 
 _UNSET = object()
@@ -21,7 +22,9 @@ class SettlementResidentLockPlan:
     using: str
     resident_ids: tuple[int, ...]
     employee_ids: tuple[int, ...]
-    expected_subjects: tuple[tuple[int, str, int | None, int | None, str], ...]
+    expected_subjects: tuple[
+        tuple[int, str, int | None, int | None, str, int, str | None], ...
+    ]
     active_resident_ids: tuple[int, ...]
 
 
@@ -63,6 +66,56 @@ def _normalized_ids(values, *, field_label):
     return tuple(sorted(set(normalized)))
 
 
+def _normalized_external_sex(value):
+    if not isinstance(value, str):
+        raise _validation_error(
+            'invalid_sex',
+            'Для внешнего resident требуется пол male/female.',
+        )
+    normalized = value.strip().lower()
+    if normalized not in {Employee.Sex.MALE, Employee.Sex.FEMALE}:
+        raise _validation_error(
+            'invalid_sex',
+            'Для внешнего resident требуется пол male/female.',
+        )
+    return normalized
+
+
+def authoritative_resident_sex(resident):
+    """Return the sole authoritative sex source for a resident."""
+    if resident.resident_type == SettlementResident.ResidentType.EMPLOYEE:
+        if resident.employee_id is None:
+            raise _validation_error(
+                'invalid_subject',
+                'Внутренний resident не связан с Employee.',
+            )
+        try:
+            employee = resident.employee
+        except Employee.DoesNotExist:
+            raise _validation_error(
+                'invalid_subject',
+                'Внутренний resident не связан с Employee.',
+            ) from None
+        if employee.sex not in Employee.Sex.values:
+            raise _validation_error(
+                'invalid_sex',
+                'Authoritative пол внутреннего Employee повреждён.',
+            )
+        return employee.sex
+    if resident.resident_type not in {
+        SettlementResident.ResidentType.CONTRACTOR,
+        SettlementResident.ResidentType.BUSINESS_TRIP,
+        SettlementResident.ResidentType.EXTERNAL_OTHER,
+    } or resident.employee_id is not None:
+        raise _validation_error('invalid_subject', 'Тип resident не поддерживается.')
+    if resident.external_sex not in {Employee.Sex.MALE, Employee.Sex.FEMALE}:
+        raise _validation_error(
+            'invalid_sex',
+            'Для внешнего resident не указан authoritative пол.',
+        )
+    return resident.external_sex
+
+
 def build_settlement_resident_lock_plan(
     *,
     resident_ids,
@@ -82,6 +135,7 @@ def build_settlement_resident_lock_plan(
         .order_by('pk')
         .values_list(
             'pk', 'resident_type', 'employee_id', 'created_by_access_id', 'status',
+            'revision', 'external_sex',
         )
     )
     if tuple(item[0] for item in expected_subjects) != normalized_resident_ids:
@@ -94,6 +148,8 @@ def build_settlement_resident_lock_plan(
         employee_id,
         created_by_access_id,
         _status,
+        _revision,
+        external_sex,
     ) in expected_subjects:
         if resident_type == SettlementResident.ResidentType.EMPLOYEE:
             if employee_id is None:
@@ -102,12 +158,21 @@ def build_settlement_resident_lock_plan(
                     'Внутренний resident не связан с Employee.',
                 )
             internal_employee_ids.append(employee_id)
+            if external_sex is not None:
+                raise _validation_error(
+                    'invalid_subject',
+                    'Внутренний resident не хранит внешний пол.',
+                )
         elif resident_type in {
             SettlementResident.ResidentType.CONTRACTOR,
             SettlementResident.ResidentType.BUSINESS_TRIP,
             SettlementResident.ResidentType.EXTERNAL_OTHER,
         }:
-            if employee_id is not None or created_by_access_id is None:
+            if (
+                employee_id is not None
+                or created_by_access_id is None
+                or external_sex not in {Employee.Sex.MALE, Employee.Sex.FEMALE}
+            ):
                 raise _validation_error(
                     'invalid_subject',
                     'Внешний resident имеет недопустимый источник.',
@@ -137,18 +202,12 @@ def build_settlement_resident_lock_plan(
     )
 
 
-def lock_settlement_resident_plan(plan):
+def _lock_residents_with_employees(plan, *, employees):
     if not isinstance(plan, SettlementResidentLockPlan):
         raise _validation_error('invalid_plan', 'Передан неверный Resident lock plan.')
     if not connections[plan.using].in_atomic_block:
         raise RuntimeError('Resident lock plan должен применяться внутри transaction.atomic().')
 
-    employees = tuple(
-        Employee.objects.using(plan.using)
-        .select_for_update(of=('self',))
-        .filter(pk__in=plan.employee_ids)
-        .order_by('pk')
-    )
     if tuple(employee.pk for employee in employees) != plan.employee_ids:
         raise _validation_error('invalid_plan', 'Resident lock plan содержит отсутствующего Employee.')
 
@@ -169,6 +228,8 @@ def lock_settlement_resident_plan(plan):
             resident.employee_id,
             resident.created_by_access_id,
             resident.status,
+            resident.revision,
+            resident.external_sex,
         )
         for resident in residents
     )
@@ -188,8 +249,38 @@ def lock_settlement_resident_plan(plan):
                 raise _validation_error('inactive_employee', 'Внутренний Employee неактивен или уволен.')
         elif resident.employee_id is not None:
             raise _validation_error('invalid_subject', 'Внешний resident не может ссылаться на Employee.')
+        authoritative_resident_sex(resident)
 
     return LockedSettlementResidentRows(residents=residents, employees=employees)
+
+
+def lock_settlement_resident_plan(plan):
+    if not isinstance(plan, SettlementResidentLockPlan):
+        raise _validation_error('invalid_plan', 'Передан неверный Resident lock plan.')
+    if not connections[plan.using].in_atomic_block:
+        raise RuntimeError('Resident lock plan должен применяться внутри transaction.atomic().')
+    employees = tuple(
+        Employee.objects.using(plan.using)
+        .select_for_update(of=('self',))
+        .filter(pk__in=plan.employee_ids)
+        .order_by('pk')
+    )
+    return _lock_residents_with_employees(plan, employees=employees)
+
+
+def lock_settlement_residents_after_access(plan, *, locked_employees):
+    """Lock only residents after the complete Employee/Access plan is locked."""
+    if not isinstance(plan, SettlementResidentLockPlan):
+        raise _validation_error('invalid_plan', 'Передан неверный Resident lock plan.')
+    employees_by_id = {employee.pk: employee for employee in locked_employees}
+    try:
+        employees = tuple(employees_by_id[employee_id] for employee_id in plan.employee_ids)
+    except KeyError:
+        raise _validation_error(
+            'invalid_plan',
+            'Employee plan был заблокирован не полностью до EmployeeAccess.',
+        ) from None
+    return _lock_residents_with_employees(plan, employees=employees)
 
 
 def _locked_control_access(*, control_context, using):
@@ -223,7 +314,65 @@ def _locked_external_resident(*, resident_id, expected_revision, using):
         )
     if resident.revision != expected_revision:
         raise _validation_error('stale_revision', 'Карточка жильца уже изменена.')
+    authoritative_resident_sex(resident)
     return resident
+
+
+def _validate_external_sex_against_open_occupancies(*, resident, using):
+    moment = timezone.now()
+    active_filter = (
+        Q(starts_at__lte=moment)
+        & (Q(ends_at__isnull=True) | Q(ends_at__gt=moment))
+        & (Q(terminated_at__isnull=True) | Q(terminated_at__gt=moment))
+    )
+    snapshot = tuple(
+        EmployeeBedOccupancy.objects.using(using)
+        .filter(active_filter, resident_id=resident.pk)
+        .values_list('pk', 'physical_bed_id')
+        .order_by('pk')
+    )
+    bed_ids = tuple(sorted({bed_id for _, bed_id in snapshot}))
+    beds = tuple(
+        PhysicalBed.objects.using(using)
+        .select_for_update(of=('self',))
+        .filter(pk__in=bed_ids)
+        .order_by('pk')
+    )
+    if tuple(bed.pk for bed in beds) != bed_ids:
+        raise _validation_error('stale_occupancy', 'Фактическое проживание изменилось.')
+    room_ids = tuple(sorted({bed.room_id for bed in beds}))
+    rooms = tuple(
+        PhysicalRoom.objects.using(using)
+        .select_for_update(of=('self',))
+        .filter(pk__in=room_ids)
+        .order_by('pk')
+    )
+    if tuple(room.pk for room in rooms) != room_ids:
+        raise _validation_error('stale_occupancy', 'Фактическое проживание изменилось.')
+    occupancies = tuple(
+        EmployeeBedOccupancy.objects.using(using)
+        .select_for_update(of=('self',))
+        .filter(active_filter, resident_id=resident.pk)
+        .order_by('pk')
+    )
+    if tuple((item.pk, item.physical_bed_id) for item in occupancies) != snapshot:
+        raise _validation_error('stale_occupancy', 'Фактическое проживание изменилось.')
+
+    room_by_id = {room.pk: room for room in rooms}
+    bed_room_by_id = {bed.pk: bed.room_id for bed in beds}
+    sex = authoritative_resident_sex(resident)
+    for occupancy in occupancies:
+        restriction = room_by_id[bed_room_by_id[occupancy.physical_bed_id]].sex_restriction
+        if restriction == PhysicalRoom.SexRestriction.MALE_ONLY and sex != Employee.Sex.MALE:
+            raise _validation_error(
+                'sex_occupancy_conflict',
+                'Новый пол несовместим с текущей комнатой жильца.',
+            )
+        if restriction == PhysicalRoom.SexRestriction.FEMALE_ONLY and sex != Employee.Sex.FEMALE:
+            raise _validation_error(
+                'sex_occupancy_conflict',
+                'Новый пол несовместим с текущей комнатой жильца.',
+            )
 
 
 @transaction.atomic
@@ -260,6 +409,7 @@ def create_external_resident(
     organization,
     phone,
     control_context,
+    sex=_UNSET,
     photo=None,
     using=DEFAULT_DB_ALIAS,
 ):
@@ -276,6 +426,7 @@ def create_external_resident(
         position_title=_normalized_required(position_title, 'Должность или профессия'),
         organization=_normalized_required(organization, 'Организация'),
         phone=_normalized_required(phone, 'Телефон'),
+        external_sex=_normalized_external_sex(sex),
         photo=photo,
         created_by_access=actor_access,
         updated_by_access=actor_access,
@@ -294,6 +445,7 @@ def update_external_resident(
     position_title=_UNSET,
     organization=_UNSET,
     phone=_UNSET,
+    sex=_UNSET,
     photo=_UNSET,
     using=DEFAULT_DB_ALIAS,
 ):
@@ -311,19 +463,28 @@ def update_external_resident(
         'position_title': position_title,
         'organization': organization,
         'phone': phone,
+        'external_sex': sex,
         'photo': photo,
     }
     changed_fields = []
     for field_name, value in updates.items():
         if value is _UNSET:
             continue
-        if field_name != 'photo':
+        if field_name == 'external_sex':
+            value = _normalized_external_sex(value)
+        elif field_name != 'photo':
             value = _normalized_required(value, resident._meta.get_field(field_name).verbose_name)
         if getattr(resident, field_name) != value:
             setattr(resident, field_name, value)
             changed_fields.append(field_name)
     if not changed_fields:
         return resident
+
+    if 'external_sex' in changed_fields:
+        _validate_external_sex_against_open_occupancies(
+            resident=resident,
+            using=using,
+        )
 
     resident.revision += 1
     resident.updated_by_access = actor_access

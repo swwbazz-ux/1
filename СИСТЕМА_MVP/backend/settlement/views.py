@@ -160,7 +160,7 @@ def _attach_auto_settlement_preview(rooms, preview):
                 **row,
                 'unchanged': bool(
                     active_occupancy
-                    and active_occupancy.employee_id == row['employee_id']
+                    and active_occupancy.resident.employee_id == row['employee_id']
                 ),
             }
         )
@@ -180,6 +180,17 @@ def _employee_photo_url(employee):
         return ''
     try:
         return employee.photo.url
+    except ValueError:
+        return ''
+
+
+def _resident_photo_url(resident):
+    if resident.employee_id:
+        return _employee_photo_url(resident.employee)
+    if not resident.photo:
+        return ''
+    try:
+        return resident.photo.url
     except ValueError:
         return ''
 
@@ -327,8 +338,9 @@ def _attach_occupancy_view(rooms):
         if bed.active_occupancies
     ]
     profiles = _employee_profiles(
-        occupancy.employee
+        occupancy.resident.employee
         for occupancy in occupancies
+        if occupancy.resident.employee_id
     )
 
     for room in rooms:
@@ -347,14 +359,21 @@ def _attach_occupancy_view(rooms):
                 bed.assignment_type_label = UNKNOWN_LABEL
                 continue
 
-            profile = profiles[occupancy.employee_id]
+            resident = occupancy.resident
             room.occupied_bed_count += 1
-            bed.occupant_name = occupancy.employee.full_name
-            bed.occupant_short_name = _person_short_label(occupancy.employee.full_name)
-            bed.occupant_photo_url = profile['photo_url']
-            bed.shift_label = profile['shift_label']
-            bed.work_label = profile['work_label']
-            bed.position_label = profile['position_label']
+            bed.occupant_name = resident.display_name
+            bed.occupant_short_name = _person_short_label(resident.display_name)
+            if resident.employee_id:
+                profile = profiles[resident.employee_id]
+                bed.occupant_photo_url = profile['photo_url']
+                bed.shift_label = profile['shift_label']
+                bed.work_label = profile['work_label']
+                bed.position_label = profile['position_label']
+            else:
+                bed.occupant_photo_url = _resident_photo_url(resident)
+                bed.shift_label = UNKNOWN_LABEL
+                bed.work_label = resident.organization or UNKNOWN_LABEL
+                bed.position_label = resident.position_title or UNKNOWN_LABEL
             bed.assignment_type_label = occupancy.get_assignment_type_display()
         room.free_bed_count = len(room.beds.all()) - room.occupied_bed_count
 
@@ -582,7 +601,11 @@ def settlement_map_view(request):
                             queryset=(
                                 EmployeeBedOccupancy.objects
                                 .filter(effective_occupancy_at_q(moment))
-                                .select_related('employee', 'employee__personnel_position')
+                                .select_related(
+                                    'resident',
+                                    'resident__employee',
+                                    'resident__employee__personnel_position',
+                                )
                             ),
                             to_attr='active_occupancies',
                         )
@@ -716,7 +739,7 @@ def settlement_employee_detail_view(request, employee_id):
 
     occupancy = (
         EmployeeBedOccupancy.objects
-        .filter(effective_occupancy_at_q(timezone.now()), employee=employee)
+        .filter(effective_occupancy_at_q(timezone.now()), resident__employee=employee)
         .select_related('physical_bed__room__dormitory')
         .order_by('pk')
         .first()
@@ -908,8 +931,17 @@ def settlement_control_release_view(request):
 
 
 def _occupancy_response(occupancy):
-    employee = occupancy.employee
-    profile = _employee_profiles([employee])[employee.pk]
+    resident = occupancy.resident
+    if resident.employee_id:
+        employee = resident.employee
+        profile = _employee_profiles([employee])[employee.pk]
+        photo_url = profile['photo_url']
+        shift_label = profile['shift_label']
+        work_label = profile['work_label']
+    else:
+        photo_url = _resident_photo_url(resident)
+        shift_label = UNKNOWN_LABEL
+        work_label = resident.organization or UNKNOWN_LABEL
     bed = occupancy.physical_bed
     room = bed.room
     moment = timezone.now()
@@ -931,10 +963,10 @@ def _occupancy_response(occupancy):
         'occupancy': {
             'id': occupancy.pk,
             'bed_stable_id': bed.stable_id,
-            'occupant_name': employee.full_name,
-            'photo_url': profile['photo_url'],
-            'shift_label': profile['shift_label'],
-            'work_label': profile['work_label'],
+            'occupant_name': resident.display_name,
+            'photo_url': photo_url,
+            'shift_label': shift_label,
+            'work_label': work_label,
             'assignment_type': occupancy.assignment_type,
             'assignment_type_label': occupancy.get_assignment_type_display(),
         },

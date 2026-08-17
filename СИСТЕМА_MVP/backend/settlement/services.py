@@ -17,11 +17,17 @@ from .models import (
     EmployeeBedOccupancy,
     PhysicalBed,
     PhysicalRoom,
+    SettlementResident,
 )
 from .control import (
     SettlementControlWriteContext,
     lock_settlement_write_access,
     lock_settlement_write_lease,
+)
+from .residents import (
+    authoritative_resident_sex,
+    build_settlement_resident_lock_plan,
+    lock_settlement_residents_after_access,
 )
 from .validator import (
     ActualPlacementType,
@@ -278,7 +284,7 @@ def build_auto_settlement_preview(*, effective_date):
         for occupancy in (
             EmployeeBedOccupancy.objects
             .filter(effective_occupancy_at_q(effective_date), physical_bed_id__in=candidate_bed_ids)
-            .select_related('employee', 'physical_bed__room')
+            .select_related('resident__employee', 'physical_bed__room')
             .order_by('pk')
         ):
             occupancies_by_bed[occupancy.physical_bed_id].append(occupancy)
@@ -291,7 +297,7 @@ def build_auto_settlement_preview(*, effective_date):
         incompatible_occupancies = [
             occupancy
             for occupancy in occupancies_by_bed[row['bed'].pk]
-            if occupancy.employee_id != assignment.employee_id
+            if occupancy.resident.employee_id != assignment.employee_id
         ]
         if incompatible_occupancies:
             conflicts.append(
@@ -362,7 +368,7 @@ def unsettled_current_roster_employees(moment=None):
     )
     effective_occupancy = EmployeeBedOccupancy.objects.filter(
         effective_occupancy_at_q(moment),
-        employee_id=OuterRef('pk'),
+        resident__employee_id=OuterRef('pk'),
     )
     return (
         Employee.objects
@@ -408,7 +414,7 @@ def _validate_assignment_interval(*, assignment_type, starts_at, ends_at):
             )
 
 
-def _validate_room_sex_restriction(*, employee, room):
+def _validate_room_sex_restriction(*, resident, room):
     restriction = room.sex_restriction
     if restriction == PhysicalRoom.SexRestriction.UNKNOWN:
         return
@@ -417,12 +423,13 @@ def _validate_room_sex_restriction(*, employee, room):
         PhysicalRoom.SexRestriction.MALE_ONLY: Employee.Sex.MALE,
         PhysicalRoom.SexRestriction.FEMALE_ONLY: Employee.Sex.FEMALE,
     }.get(restriction)
-    if employee.sex == Employee.Sex.UNKNOWN:
+    sex = authoritative_resident_sex(resident)
+    if sex == Employee.Sex.UNKNOWN:
         raise _settlement_error(
             'Нельзя заселить сотрудника с неуказанным полом в комнату с ограничением по полу.',
             'settlement_employee_sex_unknown',
         )
-    if employee.sex != required_sex:
+    if sex != required_sex:
         raise _settlement_error(
             'Пол сотрудника не соответствует ограничению выбранной комнаты.',
             'settlement_room_sex_mismatch',
@@ -448,6 +455,35 @@ def _employee_exists(*, employee_id, using):
             'Сотрудник не найден.',
             'settlement_employee_not_found',
         )
+
+
+def _normalized_resident_id(resident_id):
+    if (
+        isinstance(resident_id, bool)
+        or not isinstance(resident_id, int)
+        or resident_id <= 0
+    ):
+        raise _settlement_error(
+            'Жилец не найден.',
+            'settlement_resident_not_found',
+        )
+    return resident_id
+
+
+def _resident_id_for_employee(*, employee_id, using):
+    employee_id = _normalized_employee_id(employee_id)
+    _employee_exists(employee_id=employee_id, using=using)
+    subject = tuple(
+        SettlementResident.objects.using(using)
+        .filter(employee_id=employee_id)
+        .values_list('pk', 'resident_type')
+    )
+    if len(subject) != 1 or subject[0][1] != SettlementResident.ResidentType.EMPLOYEE:
+        raise _settlement_error(
+            'Карточка жильца для сотрудника не найдена.',
+            'settlement_resident_not_found',
+        )
+    return subject[0][0]
 
 
 def _bed_snapshot(*, bed_stable_id, using):
@@ -496,49 +532,56 @@ def _locked_rooms(*room_ids, using):
     return {room.pk: room for room in rooms}
 
 
-def _validate_employee_and_destination(*, employee, room):
+def _validate_resident_and_destination(*, resident, room):
     if room.transfer_status != PhysicalRoom.TransferStatus.TRANSFERRED:
         raise _settlement_error(
             'Комната не передана для расселения.',
             'settlement_room_not_transferred',
         )
-    if not employee.is_active or employee.status != Employee.Status.ACTIVE:
+    if resident.status != SettlementResident.Status.ACTIVE:
         raise _settlement_error(
-            'Для заселения доступен только активный сотрудник.',
-            'settlement_employee_inactive',
+            'Для заселения доступен только активный жилец.',
+            'settlement_resident_inactive',
         )
-    _validate_room_sex_restriction(employee=employee, room=room)
+    if resident.employee_id:
+        employee = resident.employee
+        if not employee.is_active or employee.status != Employee.Status.ACTIVE:
+            raise _settlement_error(
+                'Для заселения доступен только активный сотрудник.',
+                'settlement_employee_inactive',
+            )
+    _validate_room_sex_restriction(resident=resident, room=room)
 
 
-def _locked_related_occupancies(*, employee_id, bed_ids, using):
+def _locked_related_occupancies(*, resident_id, bed_ids, using):
     return list(
         EmployeeBedOccupancy.objects.using(using)
         .select_for_update(of=('self',))
-        .filter(Q(employee_id=employee_id) | Q(physical_bed_id__in=bed_ids))
+        .filter(Q(resident_id=resident_id) | Q(physical_bed_id__in=bed_ids))
         .select_related('physical_bed')
         .order_by('pk')
     )
 
 
-def _related_occupancy_snapshot(*, employee_id, bed_ids, using):
+def _related_occupancy_snapshot(*, resident_id, bed_ids, using):
     return tuple(
         EmployeeBedOccupancy.objects.using(using)
-        .filter(Q(employee_id=employee_id) | Q(physical_bed_id__in=bed_ids))
-        .values_list('pk', 'employee_id', 'physical_bed_id')
+        .filter(Q(resident_id=resident_id) | Q(physical_bed_id__in=bed_ids))
+        .values_list('pk', 'resident_id', 'physical_bed_id')
         .order_by('pk')
     )
 
 
 def _occupancy_identity(rows):
     return tuple(
-        (row.pk, row.employee_id, row.physical_bed_id)
+        (row.pk, row.resident_id, row.physical_bed_id)
         for row in rows
     )
 
 
 def _validate_occupancy_conflicts(
     *,
-    employee_id,
+    resident_id,
     bed,
     starts_at,
     ends_at,
@@ -548,7 +591,7 @@ def _validate_occupancy_conflicts(
     effective_placement_intervals = tuple(
         EffectivePlacementInterval(
             occupancy_id=occupancy.pk,
-            employee_id=occupancy.employee_id,
+            employee_id=occupancy.resident_id,
             bed_id=occupancy.physical_bed_id,
             placement_type=ActualPlacementType(occupancy.assignment_type),
             starts_at=occupancy.starts_at,
@@ -560,7 +603,7 @@ def _validate_occupancy_conflicts(
     )
     conflict_result = validate_placement_conflicts(
         PlacementConflictValidationRequest(
-            employee_id=employee_id,
+            employee_id=resident_id,
             bed_stable_id=bed.stable_id,
             starts_at=starts_at,
             ends_at=ends_at,
@@ -578,7 +621,7 @@ def _validate_occupancy_conflicts(
 
 def _create_occupancy(
     *,
-    employee,
+    resident,
     bed,
     assignment_type,
     starts_at,
@@ -587,7 +630,7 @@ def _create_occupancy(
     using,
 ):
     return EmployeeBedOccupancy.objects.using(using).create(
-        employee=employee,
+        resident=resident,
         physical_bed=bed,
         assignment_type=assignment_type,
         settled_at=starts_at,
@@ -599,10 +642,10 @@ def _create_occupancy(
     )
 
 
-def settle_employee_on_bed(
+def settle_resident_on_bed(
     *,
     bed_stable_id,
-    employee_id,
+    resident_id,
     assignment_type,
     control_context=None,
     ends_at=None,
@@ -613,26 +656,34 @@ def settle_employee_on_bed(
             control_context=control_context,
             using=using,
         )
-        employee_id = _normalized_employee_id(employee_id)
-        _employee_exists(employee_id=employee_id, using=using)
+        resident_id = _normalized_resident_id(resident_id)
+        resident_plan = build_settlement_resident_lock_plan(
+            resident_ids=(resident_id,),
+            require_active=False,
+            using=using,
+        )
         bed_snapshot = _bed_snapshot(
             bed_stable_id=bed_stable_id,
             using=using,
         )
         occupancy_snapshot = _related_occupancy_snapshot(
-            employee_id=employee_id,
+            resident_id=resident_id,
             bed_ids=(bed_snapshot['pk'],),
             using=using,
         )
         locked_rows = lock_settlement_write_access(
             lease=lease,
             control_context=control_context,
-            employee_ids=(employee_id,),
+            employee_ids=resident_plan.employee_ids,
             using=using,
         )
-        employee = locked_rows.employee_by_id(employee_id)
         owner_access = locked_rows.access_by_id(control_context.owner_access_id)
         settled_by = locked_rows.employee_by_id(owner_access.employee_id)
+        resident_rows = lock_settlement_residents_after_access(
+            resident_plan,
+            locked_employees=locked_rows.employees,
+        )
+        resident = resident_rows.resident_by_id(resident_id)
 
         bed_id = bed_snapshot['pk']
         bed = _locked_beds(bed_id, using=using)[bed_id]
@@ -645,7 +696,7 @@ def settle_employee_on_bed(
                 'settlement_occupancy_changed',
             )
         room = _locked_rooms(bed.room_id, using=using)[bed.room_id]
-        _validate_employee_and_destination(employee=employee, room=room)
+        _validate_resident_and_destination(resident=resident, room=room)
         moment = timezone.now()
         _validate_assignment_interval(
             assignment_type=assignment_type,
@@ -653,7 +704,7 @@ def settle_employee_on_bed(
             ends_at=ends_at,
         )
         persisted_occupancies = _locked_related_occupancies(
-            employee_id=employee.pk,
+            resident_id=resident.pk,
             bed_ids=(bed.pk,),
             using=using,
         )
@@ -663,7 +714,7 @@ def settle_employee_on_bed(
                 'settlement_occupancy_changed',
             )
         _validate_occupancy_conflicts(
-            employee_id=employee.pk,
+            resident_id=resident.pk,
             bed=bed,
             starts_at=moment,
             ends_at=ends_at,
@@ -673,7 +724,7 @@ def settle_employee_on_bed(
         try:
             with transaction.atomic(using=using):
                 occupancy = _create_occupancy(
-                    employee=employee,
+                    resident=resident,
                     bed=bed,
                     assignment_type=assignment_type,
                     starts_at=moment,
@@ -692,10 +743,10 @@ def settle_employee_on_bed(
                 ) from error
             if EmployeeBedOccupancy.objects.using(using).filter(
                 effective_occupancy_at_q(moment),
-                employee=employee,
+                resident=resident,
             ).exists():
                 raise _settlement_error(
-                    'Сотрудник уже занимает другое активное место.',
+                    'Жилец уже занимает другое активное место.',
                     'settlement_employee_already_housed',
                 ) from error
             raise
@@ -703,10 +754,10 @@ def settle_employee_on_bed(
     return occupancy
 
 
-def relocate_employee_to_bed(
+def relocate_resident_to_bed(
     *,
     bed_stable_id,
-    employee_id,
+    resident_id,
     assignment_type,
     control_context=None,
     ends_at=None,
@@ -717,12 +768,16 @@ def relocate_employee_to_bed(
             control_context=control_context,
             using=using,
         )
-        employee_id = _normalized_employee_id(employee_id)
-        _employee_exists(employee_id=employee_id, using=using)
+        resident_id = _normalized_resident_id(resident_id)
+        resident_plan = build_settlement_resident_lock_plan(
+            resident_ids=(resident_id,),
+            require_active=False,
+            using=using,
+        )
         moment = timezone.now()
         active_occupancies = list(
             EmployeeBedOccupancy.objects.using(using)
-            .filter(effective_occupancy_at_q(moment), employee_id=employee_id)
+            .filter(effective_occupancy_at_q(moment), resident_id=resident_id)
             .values('pk', 'physical_bed_id')
             .order_by('pk')
         )
@@ -756,19 +811,23 @@ def relocate_employee_to_bed(
             )
         }
         occupancy_snapshot = _related_occupancy_snapshot(
-            employee_id=employee_id,
+            resident_id=resident_id,
             bed_ids=(target_bed_id,),
             using=using,
         )
         locked_rows = lock_settlement_write_access(
             lease=lease,
             control_context=control_context,
-            employee_ids=(employee_id,),
+            employee_ids=resident_plan.employee_ids,
             using=using,
         )
-        employee = locked_rows.employee_by_id(employee_id)
         owner_access = locked_rows.access_by_id(control_context.owner_access_id)
         settled_by = locked_rows.employee_by_id(owner_access.employee_id)
+        resident_rows = lock_settlement_residents_after_access(
+            resident_plan,
+            locked_employees=locked_rows.employees,
+        )
+        resident = resident_rows.resident_by_id(resident_id)
 
         if not active_occupancies:
             raise _settlement_error(
@@ -807,14 +866,14 @@ def relocate_employee_to_bed(
             using=using,
         )
         target_room = rooms[target_bed.room_id]
-        _validate_employee_and_destination(employee=employee, room=target_room)
+        _validate_resident_and_destination(resident=resident, room=target_room)
         _validate_assignment_interval(
             assignment_type=assignment_type,
             starts_at=moment,
             ends_at=ends_at,
         )
         persisted_occupancies = _locked_related_occupancies(
-            employee_id=employee.pk,
+            resident_id=resident.pk,
             bed_ids=(target_bed.pk,),
             using=using,
         )
@@ -826,7 +885,7 @@ def relocate_employee_to_bed(
         active_occupancies = [
             occupancy
             for occupancy in persisted_occupancies
-            if occupancy.employee_id == employee.pk
+            if occupancy.resident_id == resident.pk
             and occupancy.is_active_at(moment)
         ]
         if not active_occupancies:
@@ -854,7 +913,7 @@ def relocate_employee_to_bed(
                 'settlement_relocation_same_moment',
             )
         _validate_occupancy_conflicts(
-            employee_id=employee.pk,
+            resident_id=resident.pk,
             bed=target_bed,
             starts_at=moment,
             ends_at=ends_at,
@@ -865,7 +924,7 @@ def relocate_employee_to_bed(
         current_occupancy.terminated_at = moment
         current_occupancy.save(update_fields=['terminated_at'])
         occupancy = _create_occupancy(
-            employee=employee,
+            resident=resident,
             bed=target_bed,
             assignment_type=assignment_type,
             starts_at=moment,
@@ -877,7 +936,7 @@ def relocate_employee_to_bed(
     return occupancy
 
 
-def release_employee_from_bed(*, bed_stable_id, control_context=None):
+def release_resident_from_bed(*, bed_stable_id, control_context=None):
     using = router.db_for_write(EmployeeBedOccupancy)
     with transaction.atomic(using=using):
         lease = lock_settlement_write_lease(
@@ -893,19 +952,33 @@ def release_employee_from_bed(*, bed_stable_id, control_context=None):
         occupancy_snapshot = tuple(
             EmployeeBedOccupancy.objects.using(using)
             .filter(effective_occupancy_at_q(moment), physical_bed_id=bed_id)
-            .values_list('pk', 'employee_id', 'physical_bed_id')
+            .values_list('pk', 'resident_id', 'physical_bed_id')
             .order_by('pk')
         )
-        planned_employee_ids = tuple(sorted({
-            employee_id
-            for _, employee_id, _ in occupancy_snapshot
+        planned_resident_ids = tuple(sorted({
+            resident_id
+            for _, resident_id, _ in occupancy_snapshot
         }))
+        resident_plan = (
+            build_settlement_resident_lock_plan(
+                resident_ids=planned_resident_ids,
+                require_active=False,
+                using=using,
+            )
+            if planned_resident_ids
+            else None
+        )
         locked_rows = lock_settlement_write_access(
             lease=lease,
             control_context=control_context,
-            employee_ids=planned_employee_ids,
+            employee_ids=resident_plan.employee_ids if resident_plan else (),
             using=using,
         )
+        if resident_plan:
+            lock_settlement_residents_after_access(
+                resident_plan,
+                locked_employees=locked_rows.employees,
+            )
 
         bed = _locked_beds(bed_id, using=using)[bed_id]
         if (
@@ -949,3 +1022,48 @@ def release_employee_from_bed(*, bed_stable_id, control_context=None):
         occupancy.save(update_fields=['terminated_at'])
 
     return occupancy
+
+
+def settle_employee_on_bed(
+    *,
+    bed_stable_id,
+    employee_id,
+    assignment_type,
+    control_context=None,
+    ends_at=None,
+):
+    using = router.db_for_write(EmployeeBedOccupancy)
+    resident_id = _resident_id_for_employee(employee_id=employee_id, using=using)
+    return settle_resident_on_bed(
+        bed_stable_id=bed_stable_id,
+        resident_id=resident_id,
+        assignment_type=assignment_type,
+        control_context=control_context,
+        ends_at=ends_at,
+    )
+
+
+def relocate_employee_to_bed(
+    *,
+    bed_stable_id,
+    employee_id,
+    assignment_type,
+    control_context=None,
+    ends_at=None,
+):
+    using = router.db_for_write(EmployeeBedOccupancy)
+    resident_id = _resident_id_for_employee(employee_id=employee_id, using=using)
+    return relocate_resident_to_bed(
+        bed_stable_id=bed_stable_id,
+        resident_id=resident_id,
+        assignment_type=assignment_type,
+        control_context=control_context,
+        ends_at=ends_at,
+    )
+
+
+def release_employee_from_bed(*, bed_stable_id, control_context=None):
+    return release_resident_from_bed(
+        bed_stable_id=bed_stable_id,
+        control_context=control_context,
+    )

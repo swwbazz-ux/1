@@ -2272,6 +2272,16 @@ class SettlementResident(StableIdentifierModel):
         blank=True,
     )
     phone = models.CharField('Телефон внешнего жильца', max_length=64, blank=True)
+    external_sex = models.CharField(
+        'Пол внешнего жильца',
+        max_length=7,
+        choices=(
+            ('male', 'Мужской'),
+            ('female', 'Женский'),
+        ),
+        null=True,
+        blank=True,
+    )
     status = models.CharField(
         'Статус карточки',
         max_length=16,
@@ -2330,6 +2340,7 @@ class SettlementResident(StableIdentifierModel):
                             position_title='',
                             organization='',
                             phone='',
+                            external_sex__isnull=True,
                         )
                         & (models.Q(photo__isnull=True) | models.Q(photo=''))
                     )
@@ -2351,6 +2362,24 @@ class SettlementResident(StableIdentifierModel):
                 ),
                 name='settlement_resident_subject_valid',
             ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        resident_type='EMPLOYEE',
+                        external_sex__isnull=True,
+                    )
+                    | models.Q(
+                        resident_type__in=[
+                            'CONTRACTOR',
+                            'BUSINESS_TRIP',
+                            'EXTERNAL_OTHER',
+                        ],
+                        external_sex__isnull=False,
+                        external_sex__in=['male', 'female'],
+                    )
+                ),
+                name='settlement_resident_external_sex_valid',
+            ),
         ]
 
     EXTERNAL_MUTABLE_FIELDS = (
@@ -2359,6 +2388,7 @@ class SettlementResident(StableIdentifierModel):
         'position_title',
         'organization',
         'phone',
+        'external_sex',
         'status',
         'archived_at',
     )
@@ -2404,6 +2434,10 @@ class SettlementResident(StableIdentifierModel):
                 errors['photo'] = (
                     'Фото карточки не является кадровым источником внутреннего Employee.'
                 )
+            if self.external_sex is not None:
+                errors['external_sex'] = (
+                    'Пол внутреннего resident хранится только в Employee.'
+                )
         else:
             if self.employee_id:
                 errors['employee'] = 'Внешний resident не может ссылаться на Employee.'
@@ -2419,6 +2453,10 @@ class SettlementResident(StableIdentifierModel):
             if not self.created_by_access_id:
                 errors['created_by_access'] = (
                     'Внешняя карточка требует exact EmployeeAccess делопроизводителя.'
+                )
+            if self.external_sex not in {'male', 'female'}:
+                errors['external_sex'] = (
+                    'Для внешнего жильца требуется authoritative пол male/female.'
                 )
         if self.revision < 1:
             errors['revision'] = 'Ревизия карточки должна быть положительной.'
@@ -2442,6 +2480,7 @@ class SettlementResident(StableIdentifierModel):
             'position_title',
             'organization',
             'phone',
+            'external_sex',
             'status',
             'archived_at',
             'revision',
@@ -3158,6 +3197,8 @@ class EmployeeBedOccupancyQuerySet(models.QuerySet):
 
 
 class EmployeeBedOccupancy(models.Model):
+    """Legacy technical name; authoritative accommodation subject is resident."""
+
     class AssignmentType(models.TextChoices):
         PERMANENT = 'permanent', 'Постоянное'
         TEMPORARY = 'temporary', 'Временное'
@@ -3165,9 +3206,9 @@ class EmployeeBedOccupancy(models.Model):
 
     objects = EmployeeBedOccupancyQuerySet.as_manager()
 
-    employee = models.ForeignKey(
-        'users.Employee',
-        verbose_name='Сотрудник',
+    resident = models.ForeignKey(
+        SettlementResident,
+        verbose_name='Жилец',
         on_delete=models.PROTECT,
         related_name='bed_occupancies',
     )
@@ -3210,8 +3251,8 @@ class EmployeeBedOccupancy(models.Model):
     )
 
     class Meta:
-        verbose_name = 'Размещение сотрудника на койко-месте'
-        verbose_name_plural = 'Размещения сотрудников на койко-местах'
+        verbose_name = 'Размещение жильца на койко-месте'
+        verbose_name_plural = 'Размещения жильцов на койко-местах'
         ordering = ['-settled_at', '-id']
         constraints = [
             models.CheckConstraint(
@@ -3252,7 +3293,7 @@ class EmployeeBedOccupancy(models.Model):
         return self.is_active_at(timezone.now())
 
     def __str__(self):
-        return f'{self.employee} — {self.physical_bed}'
+        return f'{self.resident} — {self.physical_bed}'
 
 
 class SettlementControlLease(models.Model):

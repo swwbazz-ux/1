@@ -13,6 +13,7 @@ import json
 from collections import defaultdict, deque
 from dataclasses import asdict, dataclass
 from datetime import datetime, time, timedelta
+from django.core.exceptions import ValidationError
 from django.db.models import Q
 from django.utils import timezone
 
@@ -29,6 +30,7 @@ from .models import (
     SettlementCohortMember,
     SettlementResident,
 )
+from .residents import authoritative_resident_sex
 
 
 REASON_COHORT_NOT_APPROVED = 'cohort_not_approved'
@@ -255,18 +257,26 @@ def _slot_candidates(cohort: SettlementCohort) -> tuple[dict[int, _SlotCandidate
     return candidates, snapshot
 
 
-def _room_accepts_employee(candidate: _SlotCandidate, employee) -> bool:
+def _resident_authoritative_sex(resident):
+    try:
+        return authoritative_resident_sex(resident)
+    except ValidationError:
+        return None
+
+
+def _room_accepts_resident(candidate: _SlotCandidate, resident) -> bool:
     restriction = candidate.room_sex_restriction
     if restriction == PhysicalRoom.SexRestriction.UNKNOWN:
         return True
-    if employee.sex == employee.Sex.UNKNOWN:
+    sex = _resident_authoritative_sex(resident)
+    if sex not in {'male', 'female'}:
         return False
     return (
         restriction == PhysicalRoom.SexRestriction.MALE_ONLY
-        and employee.sex == employee.Sex.MALE
+        and sex == 'male'
     ) or (
         restriction == PhysicalRoom.SexRestriction.FEMALE_ONLY
-        and employee.sex == employee.Sex.FEMALE
+        and sex == 'female'
     )
 
 
@@ -404,14 +414,27 @@ def resolve_settlement_cohort(*, cohort_id: int) -> SettlementResolverResult:
         )
         .filter(Q(ends_at__isnull=True) | Q(ends_at__gt=starts_at))
         .filter(Q(terminated_at__isnull=True) | Q(terminated_at__gt=starts_at))
-        .select_related('employee', 'physical_bed__room')
+        .select_related('resident__employee', 'physical_bed__room')
         .order_by('pk')
     )
     occupied_bed_ids = {item.physical_bed_id for item in occupancy_rows}
-    internal_room_ids = {item.physical_bed.room_id for item in occupancy_rows}
+    internal_room_ids = {
+        item.physical_bed.room_id
+        for item in occupancy_rows
+        if not item.resident.is_external
+    }
 
     external_room_organizations: dict[int, set[str]] = defaultdict(set)
-    external_room_ids: set[int] = set()
+    external_room_ids: set[int] = {
+        item.physical_bed.room_id
+        for item in occupancy_rows
+        if item.resident.is_external
+    }
+    for occupancy in occupancy_rows:
+        if occupancy.resident.is_external:
+            external_room_organizations[occupancy.physical_bed.room_id].add(
+                _normalize_organization(occupancy.resident.organization),
+            )
     binding_slot_ids = {
         binding.anchor_calendar_slot_id for binding in all_period_bindings
     }
@@ -450,6 +473,8 @@ def resolve_settlement_cohort(*, cohort_id: int) -> SettlementResolverResult:
                 'resident_type': item.resident.resident_type,
                 'resident_status': item.resident.status,
                 'resident_revision': item.resident.revision,
+                'authoritative_sex': _resident_authoritative_sex(item.resident),
+                'external_sex': item.resident.external_sex,
                 'organization': (
                     _normalize_organization(item.resident.organization)
                     if item.resident.is_external else ''
@@ -543,7 +568,8 @@ def resolve_settlement_cohort(*, cohort_id: int) -> SettlementResolverResult:
         'occupancies': [
             {
                 'id': item.pk,
-                'employee_id': item.employee_id,
+                'resident_id': item.resident_id,
+                'resident_revision': item.resident.revision,
                 'bed_id': item.physical_bed_id,
                 'starts_at': item.starts_at.isoformat(),
                 'ends_at': item.ends_at.isoformat() if item.ends_at else None,
@@ -612,6 +638,12 @@ def resolve_settlement_cohort(*, cohort_id: int) -> SettlementResolverResult:
         if resident.status != SettlementResident.Status.ACTIVE:
             reject(member, REASON_RESIDENT_INACTIVE)
             continue
+        if (
+            resident.is_external
+            and _resident_authoritative_sex(resident) not in {'male', 'female'}
+        ):
+            reject(member, REASON_INCOMPLETE_CONTEXT)
+            continue
         if member.departure_at <= member.arrival_at:
             reject(member, REASON_INCOMPLETE_CONTEXT)
             continue
@@ -656,7 +688,7 @@ def resolve_settlement_cohort(*, cohort_id: int) -> SettlementResolverResult:
             invalid_reason = REASON_HARD_CONFLICT
         elif not resident.is_external and candidate.room_id in external_room_ids:
             invalid_reason = REASON_HARD_CONFLICT
-        elif resident.employee_id and not _room_accepts_employee(candidate, resident.employee):
+        elif not _room_accepts_resident(candidate, resident):
             invalid_reason = REASON_HARD_CONFLICT
         if invalid_reason:
             reject(member, invalid_reason)
@@ -761,7 +793,7 @@ def resolve_settlement_cohort(*, cohort_id: int) -> SettlementResolverResult:
             continue
         if (
             candidate.room_id in external_room_ids
-            or not _room_accepts_employee(candidate, employee)
+            or not _room_accepts_resident(candidate, resident)
         ):
             reject(member, REASON_HARD_CONFLICT)
             continue
@@ -816,6 +848,7 @@ def resolve_settlement_cohort(*, cohort_id: int) -> SettlementResolverResult:
                 candidate for candidate in available
                 if candidate.room_id in external_room_ids
                 and candidate.room_id not in internal_room_ids
+                and _room_accepts_resident(candidate, resident)
             ]
             if not external_room_ids:
                 reject(member, REASON_RESOLVER_NOT_CONFIGURED)
@@ -835,7 +868,7 @@ def resolve_settlement_cohort(*, cohort_id: int) -> SettlementResolverResult:
                 candidate for candidate in available
                 if candidate.personnel_position_id == employee.personnel_position_id
                 and candidate.room_id not in external_room_ids
-                and _room_accepts_employee(candidate, employee)
+                and _room_accepts_resident(candidate, resident)
             ]
             available.sort(key=lambda candidate: (
                 candidate.room_order,
