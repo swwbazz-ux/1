@@ -22,6 +22,7 @@ from users import employee_access_locks
 from users.models import Employee, EmployeeAccess, Role
 
 from . import control as control_module
+from . import residents as settlement_residents
 from .control import (
     ControlLeaseGrant,
     SettlementControlWriteContext,
@@ -38,6 +39,7 @@ from .models import (
     PhysicalRoom,
     SettlementControlEvent,
     SettlementControlLease,
+    SettlementResident,
 )
 from .services import (
     relocate_employee_to_bed,
@@ -1225,6 +1227,178 @@ class SettlementControlHttpLifecycleTests(
         self.assertEqual(self.lease_state(), baseline_lease)
         self.assertEqual(self.event_state(), baseline_events)
 
+    def test_auto_mutations_are_post_only_and_csrf_protected(self):
+        urls = (
+            reverse('settlement_auto_preview_create'),
+            reverse('settlement_auto_preview_confirm'),
+            reverse('settlement_auto_preview_apply'),
+        )
+        for url in urls:
+            with self.subTest(url=url):
+                self.assertEqual(self.client.get(url).status_code, 405)
+
+        csrf_client = Client(enforce_csrf_checks=True)
+        self.authenticate(csrf_client, self.clerk_access)
+        for url in urls:
+            with self.subTest(url=url):
+                self.assertEqual(
+                    csrf_client.post(url, data='{}', content_type='application/json').status_code,
+                    403,
+                )
+
+    def test_auto_state_has_safe_empty_state_without_approved_cohort(self):
+        self.authenticate(self.client, self.clerk_access)
+
+        response = self.client.get(reverse('settlement_auto_state'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {
+            'ok': True,
+            'state': 'no_cohort',
+            'cohorts': [],
+            'preview': None,
+        })
+        rendered = json.dumps(response.json())
+        for forbidden in (
+            'lease_token', 'fencing_revision', 'owner_access_id',
+            'raw_session_key', 'session_binding', 'employee_access_id',
+        ):
+            self.assertNotIn(forbidden, rendered)
+
+    def test_auto_create_uses_exact_session_context_and_ignores_post_credentials(self):
+        self.authenticate(self.client, self.clerk_access)
+        self.assertEqual(self.client.post(self.acquire_url).status_code, 200)
+        secret = str(uuid.uuid4())
+        fake_run = mock.sentinel.auto_run
+        response_payload = {'id': 41, 'status': 'draft', 'placements': [], 'unresolved': []}
+
+        with (
+            mock.patch('settlement.views.create_settlement_preview_run', return_value=fake_run) as create,
+            mock.patch('settlement.views._auto_settlement_run_payload', return_value=response_payload),
+        ):
+            response = self.client.post(
+                reverse('settlement_auto_preview_create'),
+                data=json.dumps({
+                    'cohort_id': 17,
+                    'owner_access_id': self.second_clerk_access.pk,
+                    'lease_token': secret,
+                    'fencing_revision': 999,
+                    'raw_session_key': 'spoofed-session',
+                }),
+                content_type='application/json',
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['preview'], response_payload)
+        kwargs = create.call_args.kwargs
+        self.assertEqual(kwargs['cohort_id'], 17)
+        context = kwargs['control_context']
+        self.assertEqual(context.owner_access_id, self.clerk_access.pk)
+        self.assertEqual(context.raw_session_key, self.client.session.session_key)
+        self.assertNotEqual(str(context.lease_token), secret)
+        response_text = response.content.decode()
+        self.assertNotIn(secret, response_text)
+        self.assertNotIn(str(context.lease_token), response_text)
+        self.assertNotIn(context.raw_session_key, response_text)
+
+    def test_auto_confirm_and_apply_forward_only_run_and_explicit_manual_flag(self):
+        self.authenticate(self.client, self.clerk_access)
+        self.assertEqual(self.client.post(self.acquire_url).status_code, 200)
+        fake_run = mock.sentinel.auto_run
+        fake_application = mock.MagicMock(preview_run_id=51)
+        response_payload = {'id': 51, 'status': 'confirmed', 'application': None}
+
+        with (
+            mock.patch('settlement.views.confirm_settlement_preview_run', return_value=fake_run) as confirm,
+            mock.patch('settlement.views._auto_settlement_run_payload', return_value=response_payload),
+        ):
+            confirmed = self.client.post(
+                reverse('settlement_auto_preview_confirm'),
+                data=json.dumps({'run_id': 51, 'lease_token': 'ignored'}),
+                content_type='application/json',
+            )
+        self.assertEqual(confirmed.status_code, 200)
+        self.assertEqual(confirm.call_args.kwargs['run_id'], 51)
+        self.assertEqual(
+            confirm.call_args.kwargs['control_context'].owner_access_id,
+            self.clerk_access.pk,
+        )
+
+        fake_queryset = mock.MagicMock()
+        fake_queryset.get.return_value = fake_run
+        with (
+            mock.patch('settlement.views.apply_confirmed_settlement_preview', return_value=fake_application) as apply,
+            mock.patch('settlement.views._auto_settlement_run_queryset', return_value=fake_queryset),
+            mock.patch('settlement.views._auto_settlement_run_payload', return_value=response_payload),
+        ):
+            applied = self.client.post(
+                reverse('settlement_auto_preview_apply'),
+                data=json.dumps({'run_id': 51, 'confirm_replace_manual': True}),
+                content_type='application/json',
+            )
+        self.assertEqual(applied.status_code, 200)
+        self.assertEqual(apply.call_args.kwargs['run_id'], 51)
+        self.assertIs(apply.call_args.kwargs['confirm_replace_manual'], True)
+        self.assertEqual(
+            apply.call_args.kwargs['control_context'].owner_access_id,
+            self.clerk_access.pk,
+        )
+
+    def test_auto_confirmation_conflicts_are_controlled(self):
+        self.authenticate(self.client, self.clerk_access)
+        self.assertEqual(self.client.post(self.acquire_url).status_code, 200)
+        for code in (
+            'settlement.preview.stale_source',
+            'settlement.preview.concurrent_confirmation',
+        ):
+            with self.subTest(code=code), mock.patch(
+                'settlement.views.confirm_settlement_preview_run',
+                side_effect=ValidationError('Контролируемый конфликт.', code=code),
+            ):
+                response = self.client.post(
+                    reverse('settlement_auto_preview_confirm'),
+                    data=json.dumps({'run_id': 51}),
+                    content_type='application/json',
+                )
+                self.assertEqual(response.status_code, 409)
+                self.assertEqual(response.json()['code'], code)
+
+    def test_auto_mutations_require_held_control_and_report_controlled_loss(self):
+        self.authenticate(self.client, self.clerk_access)
+
+        response = self.client.post(
+            reverse('settlement_auto_preview_create'),
+            data=json.dumps({'cohort_id': 1}),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()['code'], 'settlement.control.not_held')
+
+    def test_auto_apply_returns_manual_replacement_count_without_ids(self):
+        self.authenticate(self.client, self.clerk_access)
+        self.assertEqual(self.client.post(self.acquire_url).status_code, 200)
+        error = ValidationError(
+            'Повторный Apply затронет ручные корректировки.',
+            code='settlement.apply.manual_replacement_confirmation_required',
+            params={'manual_occupancy_count': 3, 'manual_occupancy_ids': (10, 11, 12)},
+        )
+
+        with mock.patch('settlement.views.apply_confirmed_settlement_preview', side_effect=error):
+            response = self.client.post(
+                reverse('settlement_auto_preview_apply'),
+                data=json.dumps({'run_id': 8, 'confirm_replace_manual': False}),
+                content_type='application/json',
+            )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(
+            response.json()['code'],
+            'settlement.apply.manual_replacement_confirmation_required',
+        )
+        self.assertEqual(response.json()['details'], {'manual_occupancy_count': 3})
+        self.assertNotIn('manual_occupancy_ids', response.content.decode())
+
     def test_acquire_uses_exact_session_access_and_stores_only_server_credentials(self):
         self.authenticate(self.client, self.clerk_access)
         response = self.client.post(
@@ -1474,8 +1648,8 @@ class SettlementControlHttpLifecycleTests(
         self.assertContains(response, self.acquire_url)
         self.assertContains(response, self.heartbeat_url)
         self.assertContains(response, self.release_url)
-        self.assertEqual(response.content.count(b'-settlement-map-v30'), 2)
-        self.assertNotContains(response, '-settlement-map-v29')
+        self.assertEqual(response.content.count(b'-settlement-map-v31'), 2)
+        self.assertNotContains(response, '-settlement-map-v30')
         response_text = response.content.decode()
         self.assertNotIn(secret_token, response_text)
         self.assertNotIn(str(secret_revision), response_text)
@@ -1506,6 +1680,10 @@ class SettlementControlHttpLifecycleTests(
             'Вы управляете расселением',
             'Управление занято другим сотрудником',
             'Связь с управлением потеряна',
+            'function loadAutoState(cohortId, retryCount)',
+            'function runAutoMutation(url, payload)',
+            'manual_replacement_confirmation_required',
+            'if (autoMutationInFlight || !controlHeld) return Promise.resolve(null);',
         ):
             self.assertIn(required_fragment, script)
         for forbidden_fragment in (
@@ -1514,6 +1692,7 @@ class SettlementControlHttpLifecycleTests(
             'settlement_control_fencing_revision',
             'settlement_control_owner_access_id',
             'owner_session_hash',
+            'data-auto-preview-form',
         ):
             self.assertNotIn(forbidden_fragment, script)
         initialization = script.split(
@@ -1584,8 +1763,30 @@ class SettlementControlledWriterTests(
         cls.subject = Employee.objects.create(
             full_name='Control writer subject',
             personnel_number='CONTROL-WRITER-SUBJECT',
+            sex=Employee.Sex.MALE,
             status=Employee.Status.ACTIVE,
             is_active=True,
+        )
+        cls.subject_resident = SettlementResident.objects.create(
+            resident_type=SettlementResident.ResidentType.EMPLOYEE,
+            employee=cls.subject,
+            status=SettlementResident.Status.ACTIVE,
+            external_sex=None,
+            created_by_access=cls.clerk_access,
+        )
+        cls.unrelated_subject = Employee.objects.create(
+            full_name='Control writer unrelated subject',
+            personnel_number='CONTROL-WRITER-UNRELATED',
+            sex=Employee.Sex.MALE,
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        cls.unrelated_resident = SettlementResident.objects.create(
+            resident_type=SettlementResident.ResidentType.EMPLOYEE,
+            employee=cls.unrelated_subject,
+            status=SettlementResident.Status.ACTIVE,
+            external_sex=None,
+            created_by_access=cls.clerk_access,
         )
         cls.dormitory = Dormitory.objects.create(number='CONTROL-WRITER')
         cls.first_room = PhysicalRoom.objects.create(
@@ -1661,7 +1862,7 @@ class SettlementControlledWriterTests(
 
     def create_existing_occupancy(self):
         return EmployeeBedOccupancy.objects.create(
-            employee=self.subject,
+            resident=self.subject_resident,
             physical_bed=self.first_bed,
             assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
             settled_at=timezone.now() - timedelta(minutes=5),
@@ -1714,27 +1915,114 @@ class SettlementControlledWriterTests(
     def test_exact_owner_employee_is_settled_by_and_unrelated_access_is_not_planned(self):
         context = self.write_context()
         plans = []
+        resident_plans = []
         original_builder = control_module.build_employee_access_lock_plan
+        original_resident_builder = settlement_services.build_settlement_resident_lock_plan
 
         def observed_builder(**kwargs):
             plan = original_builder(**kwargs)
             plans.append(plan)
             return plan
 
-        with mock.patch.object(
-            control_module,
-            'build_employee_access_lock_plan',
-            side_effect=observed_builder,
+        def observed_resident_builder(**kwargs):
+            plan = original_resident_builder(**kwargs)
+            resident_plans.append(plan)
+            return plan
+
+        with (
+            mock.patch.object(
+                control_module,
+                'build_employee_access_lock_plan',
+                side_effect=observed_builder,
+            ),
+            mock.patch.object(
+                settlement_services,
+                'build_settlement_resident_lock_plan',
+                side_effect=observed_resident_builder,
+            ),
         ):
             occupancy = self.settle(control_context=context)
 
         self.assertEqual(occupancy.settled_by_id, self.clerk_access.employee_id)
+        self.assertEqual(occupancy.resident_id, self.subject_resident.pk)
         self.assertEqual(plans[-1].access_ids, (self.clerk_access.pk,))
         self.assertNotIn(self.same_employee_access.pk, plans[-1].access_ids)
         self.assertEqual(
             plans[-1].employee_ids,
             tuple(sorted({self.clerk_access.employee_id, self.subject.pk})),
         )
+        self.assertEqual(resident_plans[-1].resident_ids, (self.subject_resident.pk,))
+        self.assertEqual(resident_plans[-1].employee_ids, (self.subject.pk,))
+        self.assertNotIn(self.unrelated_resident.pk, resident_plans[-1].resident_ids)
+
+    def test_employee_adapter_requires_exact_existing_resident_without_fallback(self):
+        context = self.write_context()
+        employee_without_resident = Employee.objects.create(
+            full_name='Control writer missing resident',
+            personnel_number='CONTROL-WRITER-MISSING-RESIDENT',
+            sex=Employee.Sex.MALE,
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+
+        with self.assertRaises(ValidationError) as error:
+            settle_employee_on_bed(
+                bed_stable_id=self.first_bed.stable_id,
+                employee_id=employee_without_resident.pk,
+                assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
+                control_context=context,
+            )
+
+        self.assertEqual(self.error_code(error), 'settlement_resident_not_found')
+        self.assertFalse(EmployeeBedOccupancy.objects.exists())
+        self.assertFalse(
+            SettlementResident.objects.filter(employee=employee_without_resident).exists(),
+        )
+
+    def test_archived_or_inactive_subject_is_rejected_without_write(self):
+        context = self.write_context()
+        SettlementResident._base_manager.filter(pk=self.subject_resident.pk).update(
+            status=SettlementResident.Status.ARCHIVED,
+            archived_at=timezone.now(),
+        )
+        with self.assertRaises(ValidationError) as archived_error:
+            self.settle(control_context=context)
+        self.assertEqual(self.error_code(archived_error), 'settlement_resident_inactive')
+        self.assertFalse(EmployeeBedOccupancy.objects.exists())
+
+        SettlementResident._base_manager.filter(pk=self.subject_resident.pk).update(
+            status=SettlementResident.Status.ACTIVE,
+            archived_at=None,
+        )
+        Employee.objects.filter(pk=self.subject.pk).update(is_active=False)
+        with self.assertRaises(ValidationError) as employee_error:
+            self.settle(control_context=context)
+        self.assertEqual(self.error_code(employee_error), 'settlement_employee_inactive')
+        self.assertFalse(EmployeeBedOccupancy.objects.exists())
+
+    def test_stale_resident_plan_is_rejected_and_rolled_back(self):
+        context = self.write_context()
+        original_builder = settlement_services.build_settlement_resident_lock_plan
+
+        def mutate_resident_after_preread(**kwargs):
+            plan = original_builder(**kwargs)
+            SettlementResident._base_manager.filter(pk=self.subject_resident.pk).update(
+                revision=self.subject_resident.revision + 1,
+            )
+            return plan
+
+        with mock.patch.object(
+            settlement_services,
+            'build_settlement_resident_lock_plan',
+            side_effect=mutate_resident_after_preread,
+        ):
+            with self.assertRaises(ValidationError) as error:
+                self.settle(control_context=context)
+
+        self.assertEqual(self.error_code(error), 'settlement.resident.stale_subject')
+        self.subject_resident.refresh_from_db()
+        self.assertEqual(self.subject_resident.revision, 1)
+        self.assertFalse(EmployeeBedOccupancy.objects.exists())
 
     def test_inactive_exact_access_is_not_replaced_by_second_access(self):
         context = self.write_context()
@@ -1860,6 +2148,7 @@ class SettlementControlledWriterTests(
         plans = []
         original_lease = settlement_services.lock_settlement_write_lease
         original_access = settlement_services.lock_settlement_write_access
+        original_residents = settlement_services.lock_settlement_residents_after_access
         original_beds = settlement_services._locked_beds
         original_rooms = settlement_services._locked_rooms
         original_occupancies = settlement_services._locked_related_occupancies
@@ -1873,6 +2162,10 @@ class SettlementControlledWriterTests(
             result = original_access(**kwargs)
             plans.append(tuple(employee.pk for employee in result.employees))
             return result
+
+        def observed_residents(*args, **kwargs):
+            sequence.append('residents')
+            return original_residents(*args, **kwargs)
 
         def observed_beds(*bed_ids, **kwargs):
             sequence.append('beds')
@@ -1899,6 +2192,11 @@ class SettlementControlledWriterTests(
             ),
             mock.patch.object(
                 settlement_services,
+                'lock_settlement_residents_after_access',
+                side_effect=observed_residents,
+            ),
+            mock.patch.object(
+                settlement_services,
                 '_locked_beds',
                 side_effect=observed_beds,
             ),
@@ -1917,12 +2215,19 @@ class SettlementControlledWriterTests(
 
         self.assertEqual(
             sequence,
-            ['lease', 'employee_access', 'beds', 'rooms', 'occupancies'],
+            ['lease', 'employee_access', 'residents', 'beds', 'rooms', 'occupancies'],
         )
         self.assertEqual(plans[0], tuple(sorted(plans[0])))
         access_source = inspect.getsource(employee_access_locks._lock_accesses)
         self.assertIn("select_for_update(of=('self',))", access_source)
         self.assertIn("order_by('pk')", access_source)
+        self.assertNotIn('Role.objects', access_source)
+        resident_source = inspect.getsource(
+            settlement_residents._lock_residents_with_employees,
+        )
+        self.assertIn("select_for_update(of=('self',))", resident_source)
+        self.assertIn("order_by('pk')", resident_source)
+        self.assertNotIn('Employee.objects', resident_source)
         for helper in (
             settlement_services._locked_beds,
             settlement_services._locked_rooms,
@@ -1931,25 +2236,32 @@ class SettlementControlledWriterTests(
             self.assertIn("order_by('pk')", inspect.getsource(helper))
 
     def test_every_writer_requires_context_and_orders_control_before_domain_locks(self):
-        for writer in (
-            settle_employee_on_bed,
-            relocate_employee_to_bed,
-            release_employee_from_bed,
-        ):
-            with self.subTest(writer=writer.__name__):
-                parameters = inspect.signature(writer).parameters
+        writer_pairs = (
+            (settle_employee_on_bed, settlement_services.settle_resident_on_bed),
+            (relocate_employee_to_bed, settlement_services.relocate_resident_to_bed),
+            (release_employee_from_bed, settlement_services.release_resident_from_bed),
+        )
+        for adapter, writer in writer_pairs:
+            with self.subTest(writer=adapter.__name__):
+                parameters = inspect.signature(adapter).parameters
                 self.assertIn('control_context', parameters)
                 self.assertNotIn('settled_by', parameters)
+                adapter_source = inspect.getsource(adapter)
+                if adapter is not release_employee_from_bed:
+                    self.assertIn('_resident_id_for_employee(', adapter_source)
+                    self.assertNotIn('get_or_create', adapter_source)
                 source = inspect.getsource(writer)
                 positions = tuple(
                     source.index(fragment)
                     for fragment in (
                         'lock_settlement_write_lease(',
+                        'build_settlement_resident_lock_plan(',
                         'lock_settlement_write_access(',
+                        'lock_settlement_residents_after_access(',
                         '_locked_beds(',
                         '_locked_rooms(',
                         'select_for_update(of=(\'self\',))'
-                        if writer is release_employee_from_bed
+                        if writer is settlement_services.release_resident_from_bed
                         else '_locked_related_occupancies(',
                     )
                 )

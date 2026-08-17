@@ -9,6 +9,10 @@ from .views import (
     settlement_control_acquire_view,
     settlement_control_heartbeat_view,
     settlement_control_release_view,
+    settlement_auto_preview_apply_view,
+    settlement_auto_preview_confirm_view,
+    settlement_auto_preview_create_view,
+    settlement_auto_state_view,
     settlement_login_view,
     settlement_manifest_view,
     settlement_map_view,
@@ -45,6 +49,26 @@ urlpatterns = [
         'clerk/settlement/control/release/',
         settlement_control_release_view,
         name='settlement_control_release',
+    ),
+    path(
+        'clerk/settlement/auto/state/',
+        settlement_auto_state_view,
+        name='settlement_auto_state',
+    ),
+    path(
+        'clerk/settlement/auto/preview/create/',
+        settlement_auto_preview_create_view,
+        name='settlement_auto_preview_create',
+    ),
+    path(
+        'clerk/settlement/auto/preview/confirm/',
+        settlement_auto_preview_confirm_view,
+        name='settlement_auto_preview_confirm',
+    ),
+    path(
+        'clerk/settlement/auto/preview/apply/',
+        settlement_auto_preview_apply_view,
+        name='settlement_auto_preview_apply',
     ),
     path(
         'clerk/settlement/employees/search/',

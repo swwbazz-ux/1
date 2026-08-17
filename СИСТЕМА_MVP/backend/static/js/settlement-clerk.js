@@ -61,7 +61,16 @@
     var autoPreviewModalOpen = root.querySelector("[data-auto-preview-modal-open]");
     var autoPreviewModalClose = root.querySelector("[data-auto-preview-modal-close]");
     var autoPreviewModalCancel = root.querySelector("[data-auto-preview-modal-cancel]");
-    var autoPreviewForm = root.querySelector("[data-auto-preview-form]");
+    var autoLoading = root.querySelector("[data-auto-loading]");
+    var autoFeedback = root.querySelector("[data-auto-feedback]");
+    var autoEmpty = root.querySelector("[data-auto-empty]");
+    var autoContent = root.querySelector("[data-auto-content]");
+    var autoCohort = root.querySelector("[data-auto-cohort]");
+    var autoStage = root.querySelector("[data-auto-stage]");
+    var autoResult = root.querySelector("[data-auto-result]");
+    var autoCalculateButton = root.querySelector("[data-auto-calculate]");
+    var autoConfirmButton = root.querySelector("[data-auto-confirm]");
+    var autoApplyButton = root.querySelector("[data-auto-apply]");
     var unsettledPanelToggles = Array.from(root.querySelectorAll("[data-unsettled-panel-toggle]"));
     var unsettledPanel = root.querySelector("[data-unsettled-panel]");
     var unsettledPanelClose = root.querySelector("[data-unsettled-panel-close]");
@@ -85,6 +94,9 @@
     var unsettledShift = "all";
     var unsettledPanelTrigger = null;
     var autoPreviewOpenOnceKey = "settlement:auto-preview-open-once";
+    var autoStatePayload = null;
+    var autoMutationInFlight = false;
+    var autoReadSequence = 0;
     var controlHeld = false;
     var controlState = "free";
     var controlActionInFlight = false;
@@ -802,6 +814,290 @@
         }
     }
 
+    var autoReasonLabels = {
+        cohort_not_approved: "Состав заезда ещё не утверждён.",
+        resolver_not_configured: "Для этого случая ещё не настроено правило размещения.",
+        resident_inactive: "Карточка жильца неактивна.",
+        incomplete_authoritative_context: "Не хватает подтверждённых исходных данных.",
+        stale_calendar_relation: "Календарное основание устарело.",
+        invalid_existing_binding: "Существующее закрепление противоречит текущим данным.",
+        no_compatible_place: "Подходящее свободное место не найдено.",
+        equal_priority_conflict: "Найдено несколько равноприоритетных вариантов.",
+        hard_rule_conflict: "Размещение нарушает обязательное правило.",
+        not_approved: "Состав заезда не утверждён.",
+        invalid_state: "Операция недоступна в текущем состоянии.",
+        stale_source: "Исходные данные изменились. Выполните расчёт заново.",
+        concurrent_confirmation: "Результат уже изменён другой операцией.",
+        incomplete_result: "Результат расчёта неполон.",
+        stale_preview: "Подтверждённый результат устарел. Выполните расчёт заново.",
+        incomplete_preview: "Подтверждённый результат неполон.",
+        hard_conflict: "Фактическое расселение изменилось и конфликтует с результатом.",
+        manual_replacement_confirmation_required: "Нужно отдельно подтвердить замену ручных изменений."
+    };
+    var autoSourceLabels = {
+        binding: "Закрепление",
+        equipment: "Техника",
+        position: "Должность",
+        residual: "Свободный остаток"
+    };
+
+    function autoShortCode(code) {
+        var parts = String(code || "").split(".");
+        return parts[parts.length - 1] || "unknown";
+    }
+
+    function autoSetFeedback(message, kind, code) {
+        if (!autoFeedback) return;
+        autoFeedback.hidden = !message;
+        autoFeedback.className = "settlement-auto-feedback" + (kind ? " is-" + kind : "");
+        autoFeedback.textContent = "";
+        if (!message) return;
+        autoFeedback.appendChild(element("strong", "", message));
+        if (code) {
+            var details = document.createElement("details");
+            details.appendChild(element("summary", "", "Техническая диагностика"));
+            details.appendChild(element("code", "", code));
+            autoFeedback.appendChild(details);
+        }
+    }
+
+    function autoSyncButtons() {
+        var preview = autoStatePayload && autoStatePayload.preview;
+        var canMutate = controlHeld && !autoMutationInFlight;
+        if (autoCalculateButton) {
+            autoCalculateButton.disabled = !canMutate || !autoStatePayload || autoStatePayload.state === "no_cohort";
+        }
+        if (autoConfirmButton) {
+            autoConfirmButton.hidden = !preview || preview.status !== "draft";
+            autoConfirmButton.disabled = !canMutate;
+        }
+        if (autoApplyButton) {
+            autoApplyButton.hidden = !preview || preview.status !== "confirmed" || Boolean(preview.application);
+            autoApplyButton.disabled = !canMutate || Boolean(preview && preview.stale);
+        }
+    }
+
+    function autoSummaryCard(label, value, className) {
+        var card = element("article", className || "");
+        card.appendChild(element("span", "", label));
+        card.appendChild(element("strong", "", String(value)));
+        return card;
+    }
+
+    function autoResidentLabel(resident) {
+        var label = resident.name + " · " + resident.kind_label;
+        if (resident.organization) label += " · " + resident.organization;
+        return label;
+    }
+
+    function renderAutoPreview(preview) {
+        if (!autoStage || !autoResult) return;
+        autoStage.textContent = "";
+        autoResult.textContent = "";
+        if (!preview) {
+            autoStage.appendChild(element("p", "settlement-auto-preview-empty", "Расчёт ещё не выполнен. Выберите состав и запустите расчёт."));
+            autoSyncButtons();
+            return;
+        }
+        var statusLabels = {draft: "DRAFT", confirmed: "CONFIRMED", superseded: "SUPERSEDED"};
+        var heading = element("div", "settlement-auto-run-heading");
+        var title = element("div", "");
+        title.appendChild(element("strong", "", "Preview v" + preview.version));
+        title.appendChild(element("span", "", "Создан " + new Date(preview.created_at).toLocaleString("ru-RU") + " · " + preview.created_by));
+        heading.appendChild(title);
+        heading.appendChild(element("span", "settlement-auto-status is-" + preview.status, statusLabels[preview.status] || preview.status));
+        autoStage.appendChild(heading);
+        var summary = element("section", "settlement-auto-preview-summary");
+        summary.appendChild(autoSummaryCard("Участников", preview.member_count));
+        summary.appendChild(autoSummaryCard("Размещено", preview.placement_count, "is-success"));
+        summary.appendChild(autoSummaryCard("Без места", preview.unresolved_count, preview.unresolved_count ? "is-conflict" : ""));
+        summary.appendChild(autoSummaryCard("Диагностика", preview.diagnostic_id));
+        autoStage.appendChild(summary);
+        if (preview.stale) {
+            autoSetFeedback("Результат устарел. Выполните расчёт заново.", "warning", "settlement.preview.stale_source");
+        }
+        if (preview.placements.length) {
+            var placed = element("section", "settlement-auto-list");
+            placed.appendChild(element("h3", "", "Предлагаемое размещение"));
+            preview.placements.forEach(function (row) {
+                var item = element("article", "settlement-auto-row");
+                var copy = element("div", "");
+                copy.appendChild(element("strong", "", autoResidentLabel(row.resident)));
+                copy.appendChild(element("span", "", row.room + " · койка " + row.bed));
+                copy.appendChild(element("small", "", row.arrival_at + " — " + row.departure_at));
+                item.appendChild(copy);
+                item.appendChild(element("b", "", autoSourceLabels[row.source] || row.source));
+                placed.appendChild(item);
+            });
+            autoResult.appendChild(placed);
+        }
+        if (preview.unresolved.length) {
+            var unresolved = element("section", "settlement-auto-list is-unresolved");
+            unresolved.appendChild(element("h3", "", "Пока без места"));
+            preview.unresolved.forEach(function (row) {
+                var code = row.reason_code;
+                var item = element("article", "settlement-auto-row");
+                var copy = element("div", "");
+                copy.appendChild(element("strong", "", autoResidentLabel(row.resident)));
+                copy.appendChild(element("span", "", autoReasonLabels[autoShortCode(code)] || "Требуется уточнение данных."));
+                var details = document.createElement("details");
+                details.appendChild(element("summary", "", "Техническая причина"));
+                details.appendChild(element("code", "", code));
+                copy.appendChild(details);
+                item.appendChild(copy);
+                unresolved.appendChild(item);
+            });
+            autoResult.appendChild(unresolved);
+        }
+        if (preview.application) {
+            var applied = preview.application;
+            var result = element("section", "settlement-auto-application");
+            result.appendChild(element("h3", "", "Расселение применено"));
+            result.appendChild(element("p", "", new Date(applied.applied_at).toLocaleString("ru-RU") + " · " + applied.actor));
+            var counts = element("div", "settlement-auto-application-counts");
+            [["Создано", applied.created], ["Переиспользовано", applied.reused], ["Заменено AUTO", applied.replaced_auto], ["Заменено MANUAL", applied.replaced_manual], ["Без места", applied.unresolved]].forEach(function (row) {
+                counts.appendChild(autoSummaryCard(row[0], row[1]));
+            });
+            result.appendChild(counts);
+            autoResult.insertBefore(result, autoResult.firstChild);
+        }
+        autoSyncButtons();
+    }
+
+    function renderAutoState(payload) {
+        autoStatePayload = payload;
+        if (autoLoading) autoLoading.hidden = true;
+        if (autoEmpty) autoEmpty.hidden = payload.state !== "no_cohort";
+        if (autoContent) autoContent.hidden = payload.state === "no_cohort";
+        if (payload.state === "no_cohort") {
+            autoSyncButtons();
+            return;
+        }
+        if (autoCohort) {
+            var selected = String(payload.selected_cohort_id || "");
+            autoCohort.textContent = "";
+            payload.cohorts.forEach(function (cohort) {
+                var period = cohort.watch_period;
+                var option = new Option(
+                    period.name + " · " + period.starts_on + " — " + period.ends_on + " · v" + cohort.version + " · " + cohort.member_count + " чел.",
+                    String(cohort.id),
+                    false,
+                    String(cohort.id) === selected
+                );
+                autoCohort.appendChild(option);
+            });
+        }
+        renderAutoPreview(payload.preview);
+    }
+
+    function autoResponseError(response, payload) {
+        var error = new Error(payload && payload.error ? payload.error : "Не удалось выполнить операцию авторасселения.");
+        error.code = payload && payload.code ? payload.code : "";
+        error.details = payload && payload.details ? payload.details : {};
+        error.httpStatus = response.status;
+        error.status = payload && payload.status ? payload.status : "";
+        return error;
+    }
+
+    function loadAutoState(cohortId, retryCount) {
+        if (!root.dataset.autoStateUrl) return Promise.resolve();
+        var sequence = ++autoReadSequence;
+        if (autoLoading) autoLoading.hidden = false;
+        var url = root.dataset.autoStateUrl;
+        if (cohortId) url += "?cohort_id=" + encodeURIComponent(cohortId);
+        return fetch(url, {credentials: "same-origin", headers: {"X-Requested-With": "XMLHttpRequest"}})
+            .then(function (response) {
+                return response.json().then(function (payload) {
+                    if (!response.ok || !payload.ok) throw autoResponseError(response, payload);
+                    return payload;
+                });
+            })
+            .then(function (payload) {
+                if (sequence !== autoReadSequence) return;
+                autoSetFeedback("", "", "");
+                renderAutoState(payload);
+            })
+            .catch(function (error) {
+                if (sequence !== autoReadSequence) return;
+                if ((retryCount || 0) < 1 && !error.httpStatus) {
+                    return loadAutoState(cohortId, (retryCount || 0) + 1);
+                }
+                if (autoLoading) autoLoading.hidden = true;
+                autoSetFeedback(error.message || "Не удалось загрузить состояние авторасселения.", "error", error.code || "network_error");
+            });
+    }
+
+    function runAutoMutation(url, payload) {
+        if (autoMutationInFlight || !controlHeld) return Promise.resolve(null);
+        autoMutationInFlight = true;
+        autoSyncButtons();
+        return fetch(url, {
+            method: "POST",
+            credentials: "same-origin",
+            headers: {"Content-Type": "application/json", "X-CSRFToken": csrfToken(), "X-Requested-With": "XMLHttpRequest"},
+            body: JSON.stringify(payload)
+        })
+            .then(function (response) {
+                return response.json().then(function (body) {
+                    if (!response.ok || !body.ok) throw autoResponseError(response, body);
+                    return body;
+                });
+            })
+            .then(function (body) {
+                if (body && body.preview && autoStatePayload) {
+                    autoStatePayload.preview = body.preview;
+                    renderAutoPreview(body.preview);
+                }
+                autoSetFeedback("Операция выполнена.", "success", "");
+                return body;
+            })
+            .catch(function (error) {
+                if (String(error.code).indexOf("settlement.control.") === 0) {
+                    setControlState(error.status === "busy" ? "busy" : "lost", error.message);
+                }
+                autoSetFeedback(autoReasonLabels[autoShortCode(error.code)] || error.message, error.httpStatus === 409 ? "warning" : "error", error.code || "network_error");
+                throw error;
+            })
+            .finally(function () {
+                autoMutationInFlight = false;
+                autoSyncButtons();
+            });
+    }
+
+    function calculateAutoPreview() {
+        if (!autoCohort || !autoCohort.value) return;
+        autoSetFeedback("Выполняем расчёт…", "progress", "");
+        runAutoMutation(root.dataset.autoCreateUrl, {cohort_id: Number(autoCohort.value)}).catch(function () {});
+    }
+
+    function confirmAutoPreview() {
+        var preview = autoStatePayload && autoStatePayload.preview;
+        if (!preview || !window.confirm("Подтвердить результат? Он будет зафиксирован, но фактическая карта ещё не изменится.")) return;
+        autoSetFeedback("Фиксируем результат…", "progress", "");
+        runAutoMutation(root.dataset.autoConfirmUrl, {run_id: preview.id}).catch(function () {});
+    }
+
+    function applyAutoPreview(confirmReplaceManual) {
+        var preview = autoStatePayload && autoStatePayload.preview;
+        if (!preview) return;
+        if (!confirmReplaceManual && !window.confirm("После применения сотрудники будут записаны на карту расселения. Продолжить?")) return;
+        autoSetFeedback("Применяем подтверждённое расселение…", "progress", "");
+        runAutoMutation(root.dataset.autoApplyUrl, {run_id: preview.id, confirm_replace_manual: Boolean(confirmReplaceManual)})
+            .then(function (body) {
+                if (!body) return;
+                markAutoPreviewOpenOnce();
+                window.setTimeout(function () { window.location.reload(); }, 700);
+            })
+            .catch(function (error) {
+                if (autoShortCode(error.code) !== "manual_replacement_confirmation_required") return;
+                var count = Number(error.details.manual_occupancy_count || 0);
+                var message = "Будет заменено ручных размещений: " + count + ".\n\nРучные изменения сохранятся в истории. Изменения затронут только выбранный WatchPeriod и cohort.";
+                if (window.confirm(message + "\n\nЗаменить ручные изменения и применить?")) {
+                    applyAutoPreview(true);
+                }
+            });
+    }
+
     function consumeAutoPreviewOpenOnce() {
         try {
             if (window.sessionStorage.getItem(autoPreviewOpenOnceKey) !== "1") return false;
@@ -1052,6 +1348,7 @@
         }
         if (relocateButton) relocateButton.disabled = Boolean(!controlHeld || saving);
         if (releaseButton) releaseButton.disabled = Boolean(!controlHeld || saving);
+        autoSyncButtons();
         updateSettleButton();
         root.querySelectorAll("[data-bed]").forEach(renderMapBed);
         if (!controlHeld) clearDragState();
@@ -1537,6 +1834,7 @@
     if (relocationModalBackdrop) relocationModalBackdrop.addEventListener("click", closeRelocationModal);
     if (autoPreviewModalOpen) autoPreviewModalOpen.addEventListener("click", function () {
         setAutoPreviewModal(true);
+        loadAutoState(autoCohort && autoCohort.value, 0);
     });
     if (autoPreviewModalClose) autoPreviewModalClose.addEventListener("click", function () {
         setAutoPreviewModal(false);
@@ -1544,7 +1842,14 @@
     if (autoPreviewModalCancel) autoPreviewModalCancel.addEventListener("click", function () {
         setAutoPreviewModal(false);
     });
-    if (autoPreviewForm) autoPreviewForm.addEventListener("submit", markAutoPreviewOpenOnce);
+    if (autoCohort) autoCohort.addEventListener("change", function () {
+        loadAutoState(autoCohort.value, 0);
+    });
+    if (autoCalculateButton) autoCalculateButton.addEventListener("click", calculateAutoPreview);
+    if (autoConfirmButton) autoConfirmButton.addEventListener("click", confirmAutoPreview);
+    if (autoApplyButton) autoApplyButton.addEventListener("click", function () {
+        applyAutoPreview(false);
+    });
     if (autoPreviewModalBackdrop) autoPreviewModalBackdrop.addEventListener("click", function () {
         setAutoPreviewModal(false);
     });
@@ -1611,5 +1916,6 @@
     initializeControlLifecycle();
     if (consumeAutoPreviewOpenOnce()) {
         setAutoPreviewModal(true);
+        loadAutoState("", 0);
     }
 }());

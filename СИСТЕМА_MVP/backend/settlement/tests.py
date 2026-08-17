@@ -4546,7 +4546,7 @@ class SettlementMapAccessTests(TestCase):
         self.assertIn('data-room-panel', content)
         self.assertIn('data-settlement-form', content)
         self.assertIn('data-employee-search', content)
-        self.assertEqual(content.count('-settlement-map-v30'), 2)
+        self.assertEqual(content.count('-settlement-map-v31'), 2)
         self.assertNotIn('-settlement-map-v28', content)
         self.assertNotIn('-settlement-map-v24', content)
         self.assertIn('data-relocate-button', content)
@@ -11391,6 +11391,123 @@ class M8SettlementApplyTests(TestCase):
                 )
         self.assertFalse(SettlementPreviewApplication.objects.exists())
         self.assertFalse(EmployeeBedOccupancy._base_manager.exists())
+
+
+class AutoSettlementM7M8HttpTests(TestCase):
+    @classmethod
+    def _external(cls, name, organization):
+        return M6SettlementResolverTests._external.__func__(
+            cls,
+            name,
+            organization,
+        )
+
+    @classmethod
+    def setUpTestData(cls):
+        M8SettlementApplyTests.setUpTestData.__func__(cls)
+
+    def setUp(self):
+        SettlementControlLease.objects.filter(scope='settlement').update(
+            owner_access=None,
+            owner_session_hash='',
+            lease_token=None,
+            fencing_revision=0,
+            acquired_at=None,
+            heartbeat_at=None,
+            expires_at=None,
+        )
+        session = self.client.session
+        session['employee_access_id'] = self.control_access.pk
+        session.save()
+        self.assertEqual(
+            self.client.post(reverse('settlement_control_acquire')).status_code,
+            200,
+        )
+
+    def _cohort(self, *residents, approve=True):
+        return M6SettlementResolverTests._cohort(
+            self,
+            *residents,
+            approve=approve,
+        )
+
+    def _slot(self, room_index, bed_index):
+        return M6SettlementResolverTests._slot(self, room_index, bed_index)
+
+    def _prepared_cohort(self, *, include_unresolved=True):
+        return M7SavedPreviewTests._prepared_cohort(
+            self,
+            include_unresolved=include_unresolved,
+        )
+
+    def test_state_lists_approved_cohort_and_serializes_no_secrets(self):
+        approved = self._prepared_cohort()
+
+        response = self.client.get(reverse('settlement_auto_state'))
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual([row['id'] for row in payload['cohorts']], [approved.pk])
+        self.assertEqual(payload['selected_cohort_id'], approved.pk)
+        self.assertIsNone(payload['preview'])
+        serialized = response.content.decode()
+        for forbidden in (
+            'lease_token', 'fencing_revision', 'owner_access_id',
+            'raw_session_key', 'session_binding', 'employee_access_id',
+        ):
+            self.assertNotIn(forbidden, serialized)
+
+    def test_http_workflow_creates_confirms_applies_and_reuses_idempotently(self):
+        cohort = self._prepared_cohort()
+        created = self.client.post(
+            reverse('settlement_auto_preview_create'),
+            data={'cohort_id': cohort.pk},
+            content_type='application/json',
+        )
+        self.assertEqual(created.status_code, 200, created.content)
+        draft = created.json()['preview']
+        self.assertEqual(draft['status'], SettlementPreviewRun.Status.DRAFT)
+        self.assertEqual(draft['member_count'], 2)
+        self.assertEqual(draft['placement_count'], 1)
+        self.assertEqual(draft['unresolved_count'], 1)
+        self.assertEqual(draft['placements'][0]['source'], 'position')
+        self.assertTrue(draft['unresolved'][0]['reason_code'])
+
+        confirmed = self.client.post(
+            reverse('settlement_auto_preview_confirm'),
+            data={'run_id': draft['id']},
+            content_type='application/json',
+        )
+        self.assertEqual(confirmed.status_code, 200, confirmed.content)
+        self.assertEqual(
+            confirmed.json()['preview']['status'],
+            SettlementPreviewRun.Status.CONFIRMED,
+        )
+        self.assertFalse(confirmed.json()['preview']['stale'])
+
+        first = self.client.post(
+            reverse('settlement_auto_preview_apply'),
+            data={'run_id': draft['id'], 'confirm_replace_manual': False},
+            content_type='application/json',
+        )
+        self.assertEqual(first.status_code, 200, first.content)
+        first_application = first.json()['preview']['application']
+        self.assertEqual(first_application['created'], 1)
+        self.assertEqual(first_application['reused'], 0)
+        self.assertEqual(first_application['unresolved'], 1)
+        self.assertEqual(first_application['actor'], self.control_actor.full_name)
+
+        repeated = self.client.post(
+            reverse('settlement_auto_preview_apply'),
+            data={'run_id': draft['id'], 'confirm_replace_manual': False},
+            content_type='application/json',
+        )
+        self.assertEqual(repeated.status_code, 200, repeated.content)
+        self.assertEqual(
+            repeated.json()['preview']['application']['id'],
+            first_application['id'],
+        )
+        self.assertEqual(SettlementPreviewApplication.objects.count(), 1)
 
 
 class M8SettlementApplyMigrationTests(TransactionTestCase):

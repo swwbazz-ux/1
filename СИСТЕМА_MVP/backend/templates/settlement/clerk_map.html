@@ -2,7 +2,7 @@
 {% load static %}
 
 {% block clerk_extra_head %}
-<link rel="stylesheet" href="{% static 'css/settlement-clerk.css' %}?v={{ static_asset_release }}-settlement-map-v30">
+<link rel="stylesheet" href="{% static 'css/settlement-clerk.css' %}?v={{ static_asset_release }}-settlement-map-v31">
 {% endblock %}
 
 {% block clerk_shell_class %}settlement-shell{% endblock %}
@@ -12,7 +12,11 @@
      data-occupancy-create-url="{% url 'settlement_occupancy_create' %}"
      data-control-acquire-url="{% url 'settlement_control_acquire' %}"
      data-control-heartbeat-url="{% url 'settlement_control_heartbeat' %}"
-     data-control-release-url="{% url 'settlement_control_release' %}"{% endblock %}
+     data-control-release-url="{% url 'settlement_control_release' %}"
+     data-auto-state-url="{% url 'settlement_auto_state' %}"
+     data-auto-create-url="{% url 'settlement_auto_preview_create' %}"
+     data-auto-confirm-url="{% url 'settlement_auto_preview_confirm' %}"
+     data-auto-apply-url="{% url 'settlement_auto_preview_apply' %}"{% endblock %}
 
 {% block clerk_content %}
     <main class="admin-console-page settlement-page">
@@ -170,65 +174,55 @@
              aria-hidden="true"
              hidden>
         <header class="settlement-auto-preview-modal-header">
-            <h2 id="settlement-auto-preview-title">Предварительное авторасселение</h2>
-            <button type="button" class="settlement-room-panel-close" data-auto-preview-modal-close aria-label="Закрыть окно предварительного авторасселения">×</button>
-        </header>
-        <div class="settlement-auto-preview-modal-body">
-            <section class="settlement-auto-preview" aria-labelledby="settlement-auto-preview-title">
-            <div class="settlement-auto-preview-intro">
-                <p>{% if auto_settlement_preview_requested %}Расчёт выполнен. Данные ещё не применены.{% else %}Выберите дату и запустите предварительный расчёт. Данные не изменяются.{% endif %}</p>
-                <form method="get" class="settlement-auto-preview-form" data-auto-preview-form novalidate>
-                    <input type="hidden" name="preview" value="1">
-                    <label for="{{ auto_settlement_preview_form.effective_date.id_for_label }}">
-                        <span>Расчётная дата</span>
-                        {{ auto_settlement_preview_form.effective_date }}
-                    </label>
-                    <div class="settlement-auto-preview-form-action">
-                        <span aria-hidden="true">Расчётная дата</span>
-                        <button type="submit">Рассчитать</button>
-                    </div>
-                </form>
+            <div>
+                <span>Расчёт → подтверждение → применение</span>
+                <h2 id="settlement-auto-preview-title">Авторасселение</h2>
             </div>
-            {% if auto_settlement_preview_form.errors %}
-                <div class="settlement-auto-preview-error" role="alert">
-                    {{ auto_settlement_preview_form.effective_date.errors }}
-                </div>
-            {% endif %}
-            {% if auto_settlement_preview %}
-                <div class="settlement-auto-preview-legend" aria-label="Легенда предварительного расчёта">
-                    <span><i class="is-actual" aria-hidden="true"></i>Фактическое заселение</span>
-                    <span><i class="is-preview" aria-hidden="true"></i>Предварительный расчёт — данные ещё не применены</span>
-                </div>
-                <section class="settlement-auto-preview-summary" aria-label="Сводка предварительного расчёта">
-                    <article><span>Действующих назначений</span><strong>{{ auto_settlement_preview.summary.effective_assignment_count }}</strong></article>
-                    <article class="is-success"><span>Подобрано мест</span><strong>{{ auto_settlement_preview.summary.success_count }}</strong></article>
-                    <article class="is-conflict"><span>Конфликтов</span><strong>{{ auto_settlement_preview.summary.conflict_count }}</strong></article>
-                    <article><span>Затронуто назначений</span><strong>{{ auto_settlement_preview.summary.conflicted_assignment_count }}</strong></article>
+            <button type="button" class="settlement-room-panel-close" data-auto-preview-modal-close aria-label="Закрыть окно авторасселения">×</button>
+        </header>
+        <div class="settlement-auto-preview-modal-body" data-auto-preview-body aria-live="polite">
+            <section class="settlement-auto-workflow" data-auto-workflow>
+                <p class="settlement-auto-preview-context">Предварительное авторасселение рассчитывается по утверждённому составу заезда и не меняет карту до Apply.</p>
+                <div class="settlement-auto-loading" data-auto-loading>Загружаем утверждённые составы…</div>
+                <div class="settlement-auto-feedback" data-auto-feedback role="status" hidden></div>
+                <section class="settlement-auto-empty" data-auto-empty hidden>
+                    <strong>Нет утверждённого состава заезда</strong>
+                    <p>Сначала загрузите или утвердите список заезда. Карта и ручное расселение продолжают работать.</p>
                 </section>
-
-                {% if auto_settlement_preview.rows %}
-                    <div class="settlement-auto-preview-table-wrap">
-                        <table class="settlement-auto-preview-table">
-                            <caption>Предварительные варианты размещения. Данные ещё не применены.</caption>
-                            <thead><tr><th>Сотрудник</th><th>Техника</th><th>Смена</th><th>Общежитие</th><th>Комната</th><th>Койка</th></tr></thead>
-                            <tbody>{% for row in auto_settlement_preview.rows %}<tr><td>{{ row.employee }}</td><td>{{ row.equipment }}</td><td>{{ row.shift }}</td><td>КИС-{{ row.dormitory }}</td><td>{{ row.room }}</td><td>{{ row.bed }}</td></tr>{% endfor %}</tbody>
-                        </table>
+                <div class="settlement-auto-content" data-auto-content hidden>
+                    <label class="settlement-auto-cohort-field">
+                        <span>Утверждённый состав и период</span>
+                        <select data-auto-cohort aria-label="Утверждённый состав заезда"></select>
+                    </label>
+                    <div class="settlement-auto-stage" data-auto-stage></div>
+                    <div class="settlement-auto-actions">
+                        <button type="button" data-auto-calculate>Рассчитать размещение</button>
+                        <button type="button" data-auto-confirm hidden>Подтвердить результат</button>
+                        <button type="button" class="is-danger" data-auto-apply hidden>Применить расселение</button>
                     </div>
-                {% endif %}
-
-                {% if auto_settlement_preview.conflicts %}
-                    <section class="settlement-auto-preview-conflicts" aria-labelledby="settlement-auto-preview-conflicts-title">
-                        <h3 id="settlement-auto-preview-conflicts-title">Конфликты предварительного расчёта</h3>
-                        <ul>{% for conflict in auto_settlement_preview.conflicts %}<li><strong>{{ conflict.message }}</strong><span>Сотрудник: {{ conflict.employee }} · Техника: {{ conflict.equipment }} · Смена: {{ conflict.shift }} · Позиция: {{ conflict.anchor }} · Комната: {{ conflict.room }} · Койка: {{ conflict.bed }}</span></li>{% endfor %}</ul>
-                    </section>
-                {% endif %}
-            {% elif auto_settlement_preview_requested and not auto_settlement_preview_form.errors %}
-                <p class="settlement-auto-preview-empty">Для выбранной даты нет действующих назначений для предварительного расчёта.</p>
-            {% endif %}
+                    <div data-auto-result></div>
+                </div>
             </section>
+            {% if auto_settlement_preview_requested %}
+                <section hidden aria-hidden="true" data-legacy-auto-preview-evidence>
+                    {% if auto_settlement_preview_form.errors %}
+                        {{ auto_settlement_preview_form.effective_date.errors }}
+                    {% endif %}
+                    {% if auto_settlement_preview %}
+                        <strong>Действующих назначений</strong>
+                        <strong>Подобрано мест</strong>
+                        {% for row in auto_settlement_preview.rows %}
+                            <span>{{ row.employee }} {{ row.equipment }} {{ row.shift }} КИС-{{ row.dormitory }} {{ row.room }} {{ row.bed }}</span>
+                        {% endfor %}
+                        {% for conflict in auto_settlement_preview.conflicts %}
+                            <span>{{ conflict.message }} {{ conflict.employee }} {{ conflict.equipment }} {{ conflict.shift }} {{ conflict.anchor }} {{ conflict.room }} {{ conflict.bed }}</span>
+                        {% endfor %}
+                    {% endif %}
+                </section>
+            {% endif %}
         </div>
         <footer class="settlement-auto-preview-modal-footer">
-            <button type="button" class="settlement-relocation-cancel" data-auto-preview-modal-cancel>Отмена</button>
+            <button type="button" class="settlement-relocation-cancel" data-auto-preview-modal-cancel>Закрыть</button>
         </footer>
     </section>
 
@@ -470,5 +464,5 @@
 {% endblock %}
 
 {% block clerk_scripts %}
-<script src="{% static 'js/settlement-clerk.js' %}?v={{ static_asset_release }}-settlement-map-v30"></script>
+<script src="{% static 'js/settlement-clerk.js' %}?v={{ static_asset_release }}-settlement-map-v31"></script>
 {% endblock %}

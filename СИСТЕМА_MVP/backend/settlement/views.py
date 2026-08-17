@@ -1,5 +1,5 @@
 import json
-from collections import defaultdict
+from collections import Counter, defaultdict
 from urllib.parse import urlencode
 
 from django import forms
@@ -32,7 +32,21 @@ from .control import (
     release_control_lease,
     store_control_session_credentials,
 )
-from .models import EmployeeBedOccupancy, PhysicalBed, PhysicalRoom
+from .apply import apply_confirmed_settlement_preview
+from .models import (
+    EmployeeBedOccupancy,
+    PhysicalBed,
+    PhysicalRoom,
+    SettlementCohort,
+    SettlementCohortMember,
+    SettlementPreviewApplication,
+    SettlementPreviewRun,
+)
+from .saved_previews import (
+    confirm_settlement_preview_run,
+    create_settlement_preview_run,
+    settlement_preview_is_stale,
+)
 from .services import (
     current_roster_resolution,
     build_auto_settlement_preview,
@@ -844,6 +858,283 @@ def _settlement_write_control_context(request):
         lease_token=credentials.lease_token,
         fencing_revision=credentials.fencing_revision,
     )
+
+
+def _auto_settlement_json_payload(request):
+    try:
+        payload = json.loads(request.body or b'{}')
+    except (TypeError, ValueError) as error:
+        raise ValidationError(
+            'Некорректные данные запроса.',
+            code='settlement.auto.invalid_payload',
+        ) from error
+    if not isinstance(payload, dict):
+        raise ValidationError(
+            'Некорректные данные запроса.',
+            code='settlement.auto.invalid_payload',
+        )
+    return payload
+
+
+def _auto_settlement_positive_id(payload, key):
+    value = payload.get(key)
+    if isinstance(value, bool):
+        value = None
+    try:
+        value = int(value)
+    except (TypeError, ValueError) as error:
+        raise ValidationError(
+            'Не указан объект авторасселения.',
+            code='settlement.auto.invalid_identifier',
+        ) from error
+    if value < 1:
+        raise ValidationError(
+            'Не указан объект авторасселения.',
+            code='settlement.auto.invalid_identifier',
+        )
+    return value
+
+
+def _auto_settlement_error_payload(error):
+    message, code = _validation_error_details(error)
+    params = {}
+    if hasattr(error, 'error_list') and error.error_list:
+        params = error.error_list[0].params or {}
+    return {
+        'ok': False,
+        'error': message,
+        'code': code,
+        'details': {
+            key: value
+            for key, value in params.items()
+            if key in {'manual_occupancy_count'}
+        },
+    }
+
+
+def _auto_settlement_control_context(request, access):
+    context = _settlement_write_control_context(request)
+    if context.owner_access_id != access.pk:
+        raise ValidationError(
+            'Серверная сессия не владеет управлением расселением.',
+            code='settlement.control.session_mismatch',
+        )
+    return context
+
+
+def _auto_settlement_cohort_payload(cohort):
+    period = cohort.watch_period
+    return {
+        'id': cohort.pk,
+        'version': cohort.version,
+        'member_count': cohort.members.count(),
+        'watch_period': {
+            'id': period.pk,
+            'name': period.name,
+            'starts_on': period.starts_on.isoformat(),
+            'ends_on': period.ends_on.isoformat(),
+        },
+    }
+
+
+def _auto_settlement_resident_payload(resident):
+    return {
+        'id': resident.pk,
+        'name': resident.display_name,
+        'kind': 'internal' if resident.employee_id else 'external',
+        'kind_label': 'Внутренний' if resident.employee_id else 'Внешний',
+        'organization': '' if resident.employee_id else (resident.organization or ''),
+    }
+
+
+def _auto_settlement_application_payload(application, unresolved_count):
+    action_counts = Counter(
+        application.occupancy_items.values_list('action', flat=True)
+    )
+    return {
+        'id': application.pk,
+        'applied_at': application.applied_at.isoformat(),
+        'actor': application.applied_by_access.employee.full_name,
+        'created': action_counts.get('created', 0),
+        'reused': action_counts.get('reused', 0),
+        'replaced_auto': action_counts.get('replaced_auto', 0),
+        'replaced_manual': action_counts.get('replaced_manual', 0),
+        'unresolved': unresolved_count,
+    }
+
+
+def _auto_settlement_run_payload(run):
+    source_labels = {
+        'confirmed_binding': 'binding',
+        'official_equipment_assignment': 'equipment',
+        'official_position_anchor': 'position',
+        'external_residual_pool': 'residual',
+    }
+    member_ids = {
+        row.cohort_member_id_snapshot for row in run.placements.all()
+    }
+    member_ids.update(
+        row.cohort_member_id_snapshot for row in run.unresolved_rows.all()
+    )
+    members = {
+        row.pk: row
+        for row in SettlementCohortMember.objects.filter(pk__in=member_ids)
+    }
+    placements = []
+    for row in run.placements.all():
+        member = members.get(row.cohort_member_id_snapshot)
+        bed = row.physical_bed
+        room = bed.room
+        placements.append({
+            'resident': _auto_settlement_resident_payload(row.resident),
+            'room': f'КИС-{room.dormitory.number}, комната {room.number}',
+            'bed': bed.stable_id,
+            'arrival_at': member.arrival_at.isoformat() if member else '',
+            'departure_at': member.departure_at.isoformat() if member else '',
+            'source': source_labels.get(row.source_kind, row.source_kind),
+        })
+    unresolved = []
+    for row in run.unresolved_rows.all():
+        unresolved.append({
+            'resident': _auto_settlement_resident_payload(row.resident),
+            'reason_code': row.reason_code,
+            'reason_codes': row.reason_codes,
+        })
+    try:
+        application = run.application
+    except SettlementPreviewApplication.DoesNotExist:
+        application = None
+    stale = (
+        settlement_preview_is_stale(run_id=run.pk)
+        if run.status == SettlementPreviewRun.Status.CONFIRMED and application is None
+        else False
+    )
+    return {
+        'id': run.pk,
+        'version': run.version,
+        'status': run.status,
+        'created_at': run.created_at.isoformat(),
+        'created_by': run.created_by_access.employee.full_name,
+        'member_count': run.cohort.members.count(),
+        'placement_count': len(placements),
+        'unresolved_count': len(unresolved),
+        'diagnostic_id': run.result_fingerprint[:12],
+        'stale': stale,
+        'placements': placements,
+        'unresolved': unresolved,
+        'application': (
+            _auto_settlement_application_payload(application, len(unresolved))
+            if application else None
+        ),
+    }
+
+
+def _auto_settlement_run_queryset():
+    return (
+        SettlementPreviewRun.objects
+        .select_related(
+            'cohort', 'watch_period',
+            'created_by_access__employee',
+            'application__applied_by_access__employee',
+        )
+        .prefetch_related(
+            'application__occupancy_items',
+            'placements__resident__employee',
+            'placements__physical_bed__room__dormitory',
+            'unresolved_rows__resident__employee',
+        )
+    )
+
+
+@require_GET
+def settlement_auto_state_view(request):
+    if not settlement_clerk_access_from_request(request):
+        return JsonResponse({'ok': False, 'error': 'Нет доступа к расселению.'}, status=403)
+    cohorts = list(
+        SettlementCohort.objects
+        .filter(status=SettlementCohort.Status.APPROVED)
+        .select_related('watch_period', 'watch_composition')
+        .prefetch_related('members')
+        .order_by('-watch_period__starts_on', '-version', '-pk')
+    )
+    if not cohorts:
+        return JsonResponse({'ok': True, 'state': 'no_cohort', 'cohorts': [], 'preview': None})
+    try:
+        cohort_id = int(request.GET.get('cohort_id') or cohorts[0].pk)
+    except (TypeError, ValueError):
+        cohort_id = cohorts[0].pk
+    selected = next((row for row in cohorts if row.pk == cohort_id), cohorts[0])
+    run = (
+        _auto_settlement_run_queryset()
+        .filter(cohort=selected)
+        .exclude(status=SettlementPreviewRun.Status.SUPERSEDED)
+        .order_by('-version', '-pk')
+        .first()
+    )
+    return JsonResponse({
+        'ok': True,
+        'state': 'ready',
+        'cohorts': [_auto_settlement_cohort_payload(row) for row in cohorts],
+        'selected_cohort_id': selected.pk,
+        'preview': _auto_settlement_run_payload(run) if run else None,
+    })
+
+
+def _auto_settlement_mutation(request, callback):
+    access = settlement_clerk_access_from_request(request)
+    if not access:
+        return _control_access_denied_response(request)
+    try:
+        payload = _auto_settlement_json_payload(request)
+        control_context = _auto_settlement_control_context(request, access)
+        result = callback(payload, control_context)
+    except ValidationError as error:
+        _message, code = _validation_error_details(error)
+        if code.startswith('settlement.control.'):
+            return _control_error_response(request, error)
+        return JsonResponse(_auto_settlement_error_payload(error), status=409)
+    return JsonResponse({'ok': True, 'preview': _auto_settlement_run_payload(result)})
+
+
+@require_POST
+def settlement_auto_preview_create_view(request):
+    return _auto_settlement_mutation(
+        request,
+        lambda payload, context: create_settlement_preview_run(
+            cohort_id=_auto_settlement_positive_id(payload, 'cohort_id'),
+            control_context=context,
+        ),
+    )
+
+
+@require_POST
+def settlement_auto_preview_confirm_view(request):
+    return _auto_settlement_mutation(
+        request,
+        lambda payload, context: confirm_settlement_preview_run(
+            run_id=_auto_settlement_positive_id(payload, 'run_id'),
+            control_context=context,
+        ),
+    )
+
+
+@require_POST
+def settlement_auto_preview_apply_view(request):
+    def apply(payload, context):
+        confirm_replace_manual = payload.get('confirm_replace_manual', False)
+        if not isinstance(confirm_replace_manual, bool):
+            raise ValidationError(
+                'Подтверждение замены ручных изменений указано некорректно.',
+                code='settlement.auto.invalid_confirmation',
+            )
+        application = apply_confirmed_settlement_preview(
+            run_id=_auto_settlement_positive_id(payload, 'run_id'),
+            control_context=context,
+            confirm_replace_manual=confirm_replace_manual,
+        )
+        return _auto_settlement_run_queryset().get(pk=application.preview_run_id)
+
+    return _auto_settlement_mutation(request, apply)
 
 
 @require_POST
