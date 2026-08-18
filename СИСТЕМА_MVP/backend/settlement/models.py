@@ -3301,6 +3301,211 @@ class SettlementPreviewUnresolved(StableIdentifierModel):
         _raise_preview_delete_forbidden()
 
 
+class SettlementPreviewCorrectionQuerySet(models.QuerySet):
+    WRITE_FORBIDDEN_CODE = 'settlement.preview_correction.public_write_forbidden'
+    WRITE_FORBIDDEN_MESSAGE = (
+        'Публичное изменение или удаление точечных исправлений запрещено. '
+        'Используйте доменные команды исправления плана.'
+    )
+
+    def _raise_write_forbidden(self):
+        raise ValidationError(
+            self.WRITE_FORBIDDEN_MESSAGE,
+            code=self.WRITE_FORBIDDEN_CODE,
+        )
+
+    def update(self, **kwargs):
+        self._raise_write_forbidden()
+
+    def bulk_create(self, objs, batch_size=None, ignore_conflicts=False,
+                    update_conflicts=False, update_fields=None, unique_fields=None):
+        self._raise_write_forbidden()
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        self._raise_write_forbidden()
+
+    def delete(self):
+        self._raise_write_forbidden()
+
+
+class SettlementPreviewCorrection(StableIdentifierModel):
+    class Action(models.TextChoices):
+        MOVE = 'move', 'Переставить'
+        EXCLUDE = 'exclude', 'Исключить'
+        RESTORE = 'restore', 'Вернуть исходное решение'
+
+    objects = SettlementPreviewCorrectionQuerySet.as_manager()
+
+    preview_run = models.ForeignKey(
+        SettlementPreviewRun,
+        on_delete=models.PROTECT,
+        related_name='corrections',
+    )
+    resident = models.ForeignKey(
+        SettlementResident,
+        on_delete=models.PROTECT,
+        related_name='preview_corrections',
+    )
+    work_shift = models.CharField(
+        max_length=16,
+        choices=SettlementCohortMember.WorkShift.choices,
+    )
+    action = models.CharField(max_length=16, choices=Action.choices)
+    source_placement = models.ForeignKey(
+        SettlementPreviewPlacement,
+        on_delete=models.PROTECT,
+        related_name='corrections',
+        null=True,
+        blank=True,
+    )
+    source_unresolved = models.ForeignKey(
+        SettlementPreviewUnresolved,
+        on_delete=models.PROTECT,
+        related_name='corrections',
+        null=True,
+        blank=True,
+    )
+    target_calendar_slot = models.ForeignKey(
+        AccommodationAnchorCalendarSlot,
+        on_delete=models.PROTECT,
+        related_name='preview_corrections',
+        null=True,
+        blank=True,
+    )
+    target_physical_bed = models.ForeignKey(
+        PhysicalBed,
+        on_delete=models.PROTECT,
+        related_name='preview_corrections',
+        null=True,
+        blank=True,
+    )
+    actor_access = models.ForeignKey(
+        'users.EmployeeAccess',
+        on_delete=models.PROTECT,
+        related_name='settlement_preview_corrections',
+    )
+    reason = models.TextField()
+    created_at = models.DateTimeField(default=timezone.now, editable=False)
+    supersedes = models.ForeignKey(
+        'self',
+        on_delete=models.PROTECT,
+        related_name='superseded_by',
+        null=True,
+        blank=True,
+    )
+    source_snapshot = models.JSONField()
+    fingerprint = models.CharField(
+        max_length=64,
+        validators=[RegexValidator(regex=r'^[0-9a-f]{64}$')],
+    )
+
+    class Meta:
+        ordering = ['preview_run_id', 'resident_id', 'work_shift', 'created_at', 'pk']
+        indexes = [
+            models.Index(
+                fields=['preview_run', 'resident', 'work_shift', 'created_at'],
+                name='preview_corr_effective_idx',
+            ),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(source_placement__isnull=False, source_unresolved__isnull=True)
+                    | models.Q(source_placement__isnull=True, source_unresolved__isnull=False)
+                ),
+                name='preview_corr_source_xor',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        action='move',
+                        target_calendar_slot__isnull=False,
+                        target_physical_bed__isnull=False,
+                    )
+                    | models.Q(
+                        action__in=['exclude', 'restore'],
+                        target_calendar_slot__isnull=True,
+                        target_physical_bed__isnull=True,
+                    )
+                ),
+                name='preview_corr_target_by_action',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(supersedes__isnull=True) | ~models.Q(pk=models.F('supersedes_id')),
+                name='preview_corr_not_self',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    ~models.Q(action='restore')
+                    | models.Q(supersedes__isnull=False)
+                ),
+                name='preview_corr_restore_has_previous',
+            ),
+            models.UniqueConstraint(
+                fields=['supersedes'],
+                condition=models.Q(supersedes__isnull=False),
+                name='unique_preview_corr_successor',
+            ),
+        ]
+
+    def clean(self):
+        super().clean()
+        errors = {}
+        source = self.source_placement or self.source_unresolved
+        if bool(self.source_placement_id) == bool(self.source_unresolved_id):
+            errors['source_placement'] = 'Исправление требует ровно одну исходную строку.'
+        elif (
+            source.run_id != self.preview_run_id
+            or source.resident_id != self.resident_id
+            or source.work_shift != self.work_shift
+        ):
+            errors['resident'] = 'Исходная строка не соответствует плану, жильцу или смене.'
+        if self.action == self.Action.MOVE:
+            if not self.target_calendar_slot_id or not self.target_physical_bed_id:
+                errors['target_physical_bed'] = 'Перестановка требует точный слот и койку.'
+        elif self.target_calendar_slot_id or self.target_physical_bed_id:
+            errors['target_physical_bed'] = 'Это действие не допускает целевое место.'
+        if self.action == self.Action.RESTORE and not self.supersedes_id:
+            errors['supersedes'] = 'Возврат требует предыдущее действующее исправление.'
+        if self.supersedes_id:
+            previous = self.supersedes
+            if (
+                previous.preview_run_id != self.preview_run_id
+                or previous.resident_id != self.resident_id
+                or previous.work_shift != self.work_shift
+                or previous.source_placement_id != self.source_placement_id
+                or previous.source_unresolved_id != self.source_unresolved_id
+            ):
+                errors['supersedes'] = 'Цепочка исправлений относится к другому решению.'
+        if not str(self.reason or '').strip():
+            errors['reason'] = 'Причина исправления обязательна.'
+        if not isinstance(self.source_snapshot, dict) or not self.source_snapshot:
+            errors['source_snapshot'] = 'Неизменяемый снимок источника обязателен.'
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            raise ValidationError(
+                SettlementPreviewCorrectionQuerySet.WRITE_FORBIDDEN_MESSAGE,
+                code=SettlementPreviewCorrectionQuerySet.WRITE_FORBIDDEN_CODE,
+            )
+        if not getattr(self, '_allow_domain_insert', False):
+            raise ValidationError(
+                SettlementPreviewCorrectionQuerySet.WRITE_FORBIDDEN_MESSAGE,
+                code=SettlementPreviewCorrectionQuerySet.WRITE_FORBIDDEN_CODE,
+            )
+        self.reason = str(self.reason).strip()
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError(
+            SettlementPreviewCorrectionQuerySet.WRITE_FORBIDDEN_MESSAGE,
+            code=SettlementPreviewCorrectionQuerySet.WRITE_FORBIDDEN_CODE,
+        )
+
+
 class M8ApplyQuerySet(models.QuerySet):
     WRITE_FORBIDDEN_CODE = 'settlement.apply.public_write_forbidden'
     WRITE_FORBIDDEN_MESSAGE = (
@@ -3621,6 +3826,14 @@ class EmployeeBedOccupancy(models.Model):
         null=True,
         blank=True,
     )
+    source_preview_correction = models.ForeignKey(
+        SettlementPreviewCorrection,
+        verbose_name='Точечное исправление-источник AUTO',
+        on_delete=models.PROTECT,
+        related_name='created_occupancies',
+        null=True,
+        blank=True,
+    )
     replaced_by_application = models.ForeignKey(
         SettlementPreviewApplication,
         verbose_name='Application, заменивший размещение',
@@ -3713,13 +3926,19 @@ class EmployeeBedOccupancy(models.Model):
                         source_kind='manual',
                         source_application__isnull=True,
                         source_preview_placement__isnull=True,
+                        source_preview_correction__isnull=True,
                     )
-                    | models.Q(
-                        source_kind='auto',
-                        source_application__isnull=False,
-                        source_preview_placement__isnull=False,
-                        watch_period__isnull=False,
-                        cohort_member__isnull=False,
+                    | (
+                        models.Q(
+                            source_kind='auto',
+                            source_application__isnull=False,
+                            watch_period__isnull=False,
+                            cohort_member__isnull=False,
+                        )
+                        & (
+                            models.Q(source_preview_placement__isnull=False)
+                            | models.Q(source_preview_correction__isnull=False)
+                        )
                     )
                 ),
                 name='occupancy_auto_provenance_complete',
@@ -3776,29 +3995,52 @@ class EmployeeBedOccupancy(models.Model):
         if self.shift_source_kind == self.ShiftSourceKind.AUTO_PREVIEW:
             application = self.source_application
             placement = self.source_preview_placement
+            correction = self.source_preview_correction
+            correction_source = (
+                correction.source_placement or correction.source_unresolved
+                if correction else None
+            )
+            correction_bed_id = (
+                correction.target_physical_bed_id
+                if correction and correction.action == SettlementPreviewCorrection.Action.MOVE
+                else correction.source_placement.physical_bed_id
+                if correction and correction.source_placement_id else None
+            )
             member = self.cohort_member
             if not application or application.legacy_whole_run:
                 errors['source_application'] = 'AUTO shift требует сменную Application.'
-            if not placement or not member:
-                errors['source_preview_placement'] = 'AUTO shift требует Placement и membership.'
+            if (not placement and not correction) or not member:
+                errors['source_preview_placement'] = 'AUTO shift требует исходную строку и membership.'
             elif (
                 application
                 and (
                     self.work_shift != application.work_shift
-                    or self.work_shift != placement.work_shift
-                    or application.preview_run_id != placement.run_id
+                    or self.work_shift != (correction.work_shift if correction else placement.work_shift)
+                    or application.preview_run_id != (
+                        correction.preview_run_id if correction else placement.run_id
+                    )
                     or application.watch_period_id != self.watch_period_id
                     or application.cohort_id != member.cohort_id
-                    or placement.resident_id != self.resident_id
-                    or placement.physical_bed_id != self.physical_bed_id
-                    or placement.cohort_member_id_snapshot != member.pk
+                    or (correction.resident_id if correction else placement.resident_id)
+                    != self.resident_id
+                    or (
+                        correction_bed_id
+                        if correction else placement.physical_bed_id
+                    ) != self.physical_bed_id
+                    or (
+                        correction_source.cohort_member_id_snapshot
+                        if correction_source else placement.cohort_member_id_snapshot
+                    ) != member.pk
                 )
             ):
                 errors['work_shift'] = 'AUTO shift provenance не соответствует Application и Placement.'
             if (
-                placement
+                (placement or correction)
                 and self.shift_source_fingerprint
-                != placement.normalized_provenance.get('shift_source_fingerprint')
+                != (
+                    correction.source_snapshot.get('shift_source_fingerprint')
+                    if correction else placement.normalized_provenance.get('shift_source_fingerprint')
+                )
             ):
                 errors['shift_source_fingerprint'] = 'Fingerprint смены не соответствует membership.'
         if errors:
@@ -3824,6 +4066,7 @@ class EmployeeBedOccupancy(models.Model):
                 type(self)._base_manager.select_for_update(of=('self',)).get(pk=self.pk)
                 self._validate_immutable_fields(
                     'source_kind', 'source_application', 'source_preview_placement',
+                    'source_preview_correction',
                     'watch_period', 'cohort_member', 'work_shift', 'shift_source_kind',
                     'shift_source_fingerprint', 'shift_official_assignment',
                     'shift_selected_by_access', 'shift_selected_at',
@@ -3863,6 +4106,7 @@ class SettlementPreviewApplicationItem(StableIdentifierModel):
         REUSED = 'reused', 'Переиспользовано AUTO-размещение'
         REPLACED_AUTO = 'replaced_auto', 'Заменено прежнее AUTO-размещение'
         REPLACED_MANUAL = 'replaced_manual', 'Заменена ручная корректировка'
+        EXCLUDED = 'excluded', 'Жилец намеренно исключён из применения'
 
     objects = M8ApplyQuerySet.as_manager()
 
@@ -3877,6 +4121,8 @@ class SettlementPreviewApplicationItem(StableIdentifierModel):
         verbose_name='Историческая или созданная occupancy',
         on_delete=models.PROTECT,
         related_name='application_items',
+        null=True,
+        blank=True,
     )
     preview_placement = models.ForeignKey(
         SettlementPreviewPlacement,
@@ -3886,6 +4132,23 @@ class SettlementPreviewApplicationItem(StableIdentifierModel):
         null=True,
         blank=True,
     )
+    preview_unresolved = models.ForeignKey(
+        SettlementPreviewUnresolved,
+        on_delete=models.PROTECT,
+        related_name='application_items',
+        null=True,
+        blank=True,
+    )
+    effective_correction = models.ForeignKey(
+        SettlementPreviewCorrection,
+        on_delete=models.PROTECT,
+        related_name='application_items',
+        null=True,
+        blank=True,
+    )
+    correction_fingerprint = models.CharField(max_length=64, blank=True, default='')
+    source_decision_snapshot = models.JSONField(default=dict, blank=True)
+    effective_decision_snapshot = models.JSONField(default=dict, blank=True)
     action = models.CharField('Действие Apply', max_length=24, choices=Action.choices)
     created_at = models.DateTimeField('Создано', auto_now_add=True)
 
@@ -3898,6 +4161,17 @@ class SettlementPreviewApplicationItem(StableIdentifierModel):
                 fields=['application', 'occupancy', 'action'],
                 name='unique_apply_occupancy_action',
             ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        action='excluded',
+                        occupancy__isnull=True,
+                        effective_correction__isnull=False,
+                    )
+                    | (~models.Q(action='excluded') & models.Q(occupancy__isnull=False))
+                ),
+                name='apply_item_occupancy_by_action',
+            ),
         ]
 
     def save(self, *args, **kwargs):
@@ -3905,7 +4179,10 @@ class SettlementPreviewApplicationItem(StableIdentifierModel):
             if self.pk:
                 type(self)._base_manager.select_for_update().get(pk=self.pk)
                 self._validate_immutable_fields(
-                    'application', 'occupancy', 'preview_placement', 'action',
+                    'application', 'occupancy', 'preview_placement',
+                    'preview_unresolved', 'effective_correction',
+                    'correction_fingerprint', 'source_decision_snapshot',
+                    'effective_decision_snapshot', 'action',
                 )
             self.full_clean()
             return super().save(*args, **kwargs)

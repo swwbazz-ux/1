@@ -86,6 +86,7 @@ from .models import (
     SettlementPreviewPlacement,
     SettlementPreviewApplication,
     SettlementPreviewApplicationItem,
+    SettlementPreviewCorrection,
     SettlementPreviewRun,
     SettlementPreviewUnresolved,
     SettlementRevision,
@@ -101,6 +102,12 @@ from .residents import (
     lock_settlement_resident_plan,
     reactivate_external_resident,
     update_external_resident,
+)
+from .preview_corrections import (
+    exclude_settlement_preview_resident,
+    get_effective_settlement_preview_plan,
+    move_settlement_preview_resident,
+    restore_settlement_preview_resident,
 )
 from .resolver import resolve_settlement_cohort
 from .saved_previews import (
@@ -12585,6 +12592,439 @@ class M8SettlementApplyTests(TestCase):
         self.assertFalse(EmployeeBedOccupancy._base_manager.exists())
 
 
+class M9PreviewCorrectionTests(TestCase):
+    _DEFAULT_CONTROL = M8SettlementApplyTests._DEFAULT_CONTROL
+
+    @classmethod
+    def _external(cls, name, organization):
+        return M8SettlementApplyTests._external.__func__(cls, name, organization)
+
+    @classmethod
+    def setUpTestData(cls):
+        M8SettlementApplyTests.setUpTestData.__func__(cls)
+
+    def setUp(self):
+        M8SettlementApplyTests.setUp(self)
+
+    def _slot(self, room_index, bed_index):
+        return M8SettlementApplyTests._slot(self, room_index, bed_index)
+
+    def _binding(self, resident, slot):
+        return M8SettlementApplyTests._binding(self, resident, slot)
+
+    def _cohort(self, *residents, approve=True, supersedes=None, arrivals=None):
+        return M8SettlementApplyTests._cohort(
+            self,
+            *residents,
+            approve=approve,
+            supersedes=supersedes,
+            arrivals=arrivals,
+        )
+
+    def _equipment(self, suffix):
+        return M8SettlementApplyTests._equipment(self, suffix)
+
+    def _equipment_assignment(self, employee, equipment, **kwargs):
+        return M8SettlementApplyTests._equipment_assignment(
+            self,
+            employee,
+            equipment,
+            **kwargs,
+        )
+
+    def _equipment_bed(self, suffix):
+        return M8SettlementApplyTests._equipment_bed(self, suffix)
+
+    def _equipment_route(self, equipment, *, physical_bed, suffix):
+        return M8SettlementApplyTests._equipment_route(
+            self,
+            equipment,
+            physical_bed=physical_bed,
+            suffix=suffix,
+        )
+
+    def _equipment_resident(self, suffix, *, shift_type=WorkShiftType.SHIFT_1):
+        return M8SettlementApplyTests._equipment_resident(
+            self,
+            suffix,
+            shift_type=shift_type,
+        )
+
+    def _prepared_cohort(self, *, include_unresolved=True):
+        return M8SettlementApplyTests._prepared_cohort(
+            self,
+            include_unresolved=include_unresolved,
+        )
+
+    def _confirmed_run_for_cohort(self, cohort):
+        return M8SettlementApplyTests._confirmed_run_for_cohort(self, cohort)
+
+    def _apply(self, **kwargs):
+        return M8SettlementApplyTests._apply(self, **kwargs)
+
+    def assert_correction_code(self, code, callback):
+        with self.assertRaises(ValidationError) as raised:
+            callback()
+        self.assertEqual(raised.exception.code, code)
+
+    def _run_with_target(self, *, include_unresolved=True, target=(0, 0)):
+        cohort = self._prepared_cohort(include_unresolved=include_unresolved)
+        slot = self._slot(*target)
+        run = self._confirmed_run_for_cohort(cohort)
+        return cohort, run, slot
+
+    def test_move_placement_is_append_only_and_apply_uses_effective_target(self):
+        cohort, run, target = self._run_with_target(
+            include_unresolved=False,
+            target=(2, 1),
+        )
+        base = run.placements.get()
+        correction = move_settlement_preview_resident(
+            run_id=run.pk,
+            resident_id=base.resident_id,
+            target_calendar_slot_id=target.pk,
+            target_physical_bed_id=self.beds[2][1].pk,
+            reason='Переставить в подтверждённое место.',
+            control_context=self.control_context,
+        )
+        effective = get_effective_settlement_preview_plan(run_id=run.pk)
+        decision = effective.decisions[0]
+        self.assertEqual(decision.effective_correction_id, correction.pk)
+        self.assertEqual(decision.physical_bed_id, self.beds[2][1].pk)
+        self.assertEqual(run.placements.get().physical_bed_id, base.physical_bed_id)
+
+        application = self._apply(run_id=run.pk)
+        occupancy = application.created_occupancies.get()
+        self.assertEqual(occupancy.physical_bed_id, self.beds[2][1].pk)
+        self.assertEqual(occupancy.source_preview_correction_id, correction.pk)
+        self.assertEqual(application.normalized_fingerprint, effective.fingerprint)
+        item = application.occupancy_items.get(action='created')
+        self.assertEqual(item.effective_correction_id, correction.pk)
+        self.assertEqual(item.correction_fingerprint, correction.fingerprint)
+
+    def test_move_unresolved_becomes_effective_placement(self):
+        cohort, run, target = self._run_with_target(target=(0, 0))
+        unresolved = run.unresolved_rows.get()
+        correction = move_settlement_preview_resident(
+            run_id=run.pk,
+            resident_id=unresolved.resident_id,
+            target_calendar_slot_id=target.pk,
+            target_physical_bed_id=self.beds[0][0].pk,
+            reason='Назначено точное место после проверки.',
+            control_context=self.control_context,
+        )
+        application = self._apply(run_id=run.pk)
+        occupancy = application.created_occupancies.get(
+            resident_id=unresolved.resident_id,
+        )
+        self.assertIsNone(occupancy.source_preview_placement_id)
+        self.assertEqual(occupancy.source_preview_correction_id, correction.pk)
+        self.assertEqual(
+            application.occupancy_items.get(occupancy=occupancy).preview_unresolved_id,
+            unresolved.pk,
+        )
+
+    def test_exclude_placement_closes_replaceable_row_without_new_occupancy(self):
+        cohort, first_run = M8SettlementApplyTests._confirmed_run(
+            self,
+            include_unresolved=False,
+        )
+        first_application = self._apply(run_id=first_run.pk)
+        old_occupancy = first_application.created_occupancies.get()
+        second_run = create_settlement_preview_run(
+            cohort_id=cohort.pk,
+            control_context=self.control_context,
+        )
+        second_run = confirm_settlement_preview_run(
+            run_id=second_run.pk,
+            control_context=self.control_context,
+        )
+        base = second_run.placements.get()
+        correction = exclude_settlement_preview_resident(
+            run_id=second_run.pk,
+            resident_id=base.resident_id,
+            reason='Исключить из планового заселения.',
+            control_context=self.control_context,
+        )
+        application = self._apply(run_id=second_run.pk)
+        old_occupancy.refresh_from_db()
+        self.assertEqual(old_occupancy.replaced_by_application_id, application.pk)
+        self.assertFalse(application.created_occupancies.exists())
+        item = application.occupancy_items.get(action='excluded')
+        self.assertIsNone(item.occupancy_id)
+        self.assertEqual(item.effective_correction_id, correction.pk)
+
+    def test_exclude_unresolved_and_restore_keep_full_history(self):
+        cohort, run = M8SettlementApplyTests._confirmed_run(self)
+        unresolved = run.unresolved_rows.get()
+        excluded = exclude_settlement_preview_resident(
+            run_id=run.pk,
+            resident_id=unresolved.resident_id,
+            reason='Временно исключить.',
+            control_context=self.control_context,
+        )
+        restored = restore_settlement_preview_resident(
+            run_id=run.pk,
+            resident_id=unresolved.resident_id,
+            reason='Вернуть исходное состояние.',
+            control_context=self.control_context,
+        )
+        self.assertEqual(restored.supersedes_id, excluded.pk)
+        self.assertEqual(SettlementPreviewCorrection.objects.count(), 2)
+        decision = next(
+            row for row in get_effective_settlement_preview_plan(run_id=run.pk).decisions
+            if row.resident_id == unresolved.resident_id
+        )
+        self.assertEqual(decision.state, 'unresolved')
+        self.assertEqual(decision.effective_correction_action, 'restore')
+
+    def test_second_move_supersedes_current_effective_correction(self):
+        cohort = self._prepared_cohort(include_unresolved=False)
+        first_target = self._slot(2, 1)
+        second_target = self._slot(2, 2)
+        run = self._confirmed_run_for_cohort(cohort)
+        resident_id = run.placements.get().resident_id
+        first = move_settlement_preview_resident(
+            run_id=run.pk,
+            resident_id=resident_id,
+            target_calendar_slot_id=first_target.pk,
+            target_physical_bed_id=self.beds[2][1].pk,
+            reason='Первое исправление.',
+            control_context=self.control_context,
+        )
+        second = move_settlement_preview_resident(
+            run_id=run.pk,
+            resident_id=resident_id,
+            target_calendar_slot_id=second_target.pk,
+            target_physical_bed_id=self.beds[2][2].pk,
+            reason='Второе исправление.',
+            control_context=self.control_context,
+        )
+        self.assertEqual(second.supersedes_id, first.pk)
+        self.assertEqual(
+            get_effective_settlement_preview_plan(run_id=run.pk)
+            .decisions[0].physical_bed_id,
+            self.beds[2][2].pk,
+        )
+
+    def test_restore_after_move_returns_original_placement(self):
+        cohort, run, target = self._run_with_target(
+            include_unresolved=False,
+            target=(2, 1),
+        )
+        base = run.placements.get()
+        moved = move_settlement_preview_resident(
+            run_id=run.pk,
+            resident_id=base.resident_id,
+            target_calendar_slot_id=target.pk,
+            target_physical_bed_id=self.beds[2][1].pk,
+            reason='Временная перестановка.',
+            control_context=self.control_context,
+        )
+        restored = restore_settlement_preview_resident(
+            run_id=run.pk,
+            resident_id=base.resident_id,
+            reason='Вернуть исходную койку.',
+            control_context=self.control_context,
+        )
+        decision = get_effective_settlement_preview_plan(run_id=run.pk).decisions[0]
+        self.assertEqual(restored.supersedes_id, moved.pk)
+        self.assertEqual(decision.physical_bed_id, base.physical_bed_id)
+        self.assertEqual(decision.calendar_slot_id, base.calendar_slot_id)
+
+    def test_correction_after_own_shift_apply_is_controlled(self):
+        cohort, run = M8SettlementApplyTests._confirmed_run(
+            self,
+            include_unresolved=False,
+        )
+        resident_id = run.placements.get().resident_id
+        self._apply(run_id=run.pk)
+        self.assert_correction_code(
+            'settlement.preview_correction.shift_already_applied',
+            lambda: exclude_settlement_preview_resident(
+                run_id=run.pk,
+                resident_id=resident_id,
+                reason='Слишком поздно.',
+                control_context=self.control_context,
+            ),
+        )
+
+    def test_correction_remains_allowed_after_opposite_shift_apply(self):
+        day = self._equipment_resident('CORRECTION-DAY')
+        night = self._equipment_resident(
+            'CORRECTION-NIGHT',
+            shift_type=WorkShiftType.SHIFT_2,
+        )
+        target = self._slot(0, 0)
+        night_arrival = timezone.make_aware(
+            datetime.combine(
+                self.period.starts_on - timedelta(days=1),
+                datetime.min.time(),
+            )
+        )
+        cohort = self._cohort(
+            day[0],
+            night[0],
+            arrivals={night[0].pk: night_arrival},
+        )
+        run = self._confirmed_run_for_cohort(cohort)
+        self._apply(
+            run_id=run.pk,
+            work_shift=SettlementCohortMember.WorkShift.NIGHT,
+            now=night_arrival,
+        )
+        correction = move_settlement_preview_resident(
+            run_id=run.pk,
+            resident_id=day[0].pk,
+            target_calendar_slot_id=target.pk,
+            target_physical_bed_id=self.beds[0][0].pk,
+            reason='Исправить ещё не применённую дневную смену.',
+            control_context=self.control_context,
+        )
+        self.assertEqual(correction.work_shift, SettlementCohortMember.WorkShift.DAY)
+
+    def test_target_bed_used_by_effective_plan_is_rejected(self):
+        self._slot(2, 0)
+        second_slot = self._slot(2, 1)
+        cohort = M8SettlementApplyTests._cohort(
+            self,
+            self.position_resident,
+            self.internal_resident,
+        )
+        self._binding(self.internal_resident, second_slot)
+        run = self._confirmed_run_for_cohort(cohort)
+        rows = list(run.placements.order_by('resident_id'))
+        self.assertEqual(len(rows), 2)
+        target_row = rows[1]
+        occupied_row = rows[0]
+        self.assert_correction_code(
+            'settlement.preview_correction.target_conflict',
+            lambda: move_settlement_preview_resident(
+                run_id=run.pk,
+                resident_id=target_row.resident_id,
+                target_calendar_slot_id=occupied_row.calendar_slot_id,
+                target_physical_bed_id=occupied_row.physical_bed_id,
+                reason='Конфликтующее место.',
+                control_context=self.control_context,
+            ),
+        )
+
+    def test_public_writes_and_delete_are_forbidden(self):
+        cohort, run = M8SettlementApplyTests._confirmed_run(
+            self,
+            include_unresolved=False,
+        )
+        source = run.placements.get()
+        candidate = SettlementPreviewCorrection(
+            preview_run=run,
+            resident_id=source.resident_id,
+            work_shift=source.work_shift,
+            action=SettlementPreviewCorrection.Action.EXCLUDE,
+            source_placement=source,
+            actor_access=self.control_access,
+            reason='Публичная запись запрещена.',
+            source_snapshot={'source': source.pk},
+            fingerprint='a' * 64,
+        )
+        for callback in (
+            candidate.save,
+            lambda: SettlementPreviewCorrection.objects.bulk_create([candidate]),
+        ):
+            self.assert_correction_code(
+                'settlement.preview_correction.public_write_forbidden',
+                callback,
+            )
+        correction = exclude_settlement_preview_resident(
+            run_id=run.pk,
+            resident_id=source.resident_id,
+            reason='Доменные данные.',
+            control_context=self.control_context,
+        )
+        for callback in (
+            lambda: SettlementPreviewCorrection.objects.filter(pk=correction.pk).update(
+                reason='Подмена',
+            ),
+            lambda: SettlementPreviewCorrection.objects.bulk_update(
+                [correction], ['reason'],
+            ),
+            lambda: SettlementPreviewCorrection.objects.filter(
+                pk=correction.pk,
+            ).delete(),
+            correction.delete,
+        ):
+            self.assert_correction_code(
+                'settlement.preview_correction.public_write_forbidden',
+                callback,
+            )
+
+    def test_stale_target_slot_is_rejected_again_during_apply(self):
+        cohort, run, target = self._run_with_target(
+            include_unresolved=False,
+            target=(2, 1),
+        )
+        resident_id = run.placements.get().resident_id
+        move_settlement_preview_resident(
+            run_id=run.pk,
+            resident_id=resident_id,
+            target_calendar_slot_id=target.pk,
+            target_physical_bed_id=self.beds[2][1].pk,
+            reason='Проверить повторную валидацию.',
+            control_context=self.control_context,
+        )
+        AccommodationAnchorCalendarSlot._base_manager.filter(pk=target.pk).update(
+            valid_from=target.valid_from + timedelta(days=1),
+        )
+        self.assert_correction_code(
+            'settlement.apply.stale_preview',
+            lambda: self._apply(run_id=run.pk),
+        )
+        self.assertFalse(SettlementPreviewApplication.objects.exists())
+        self.assertFalse(EmployeeBedOccupancy._base_manager.exists())
+
+    def test_application_item_failure_rolls_back_apply_but_keeps_correction(self):
+        cohort, run, target = self._run_with_target(
+            include_unresolved=False,
+            target=(2, 1),
+        )
+        correction = move_settlement_preview_resident(
+            run_id=run.pk,
+            resident_id=run.placements.get().resident_id,
+            target_calendar_slot_id=target.pk,
+            target_physical_bed_id=self.beds[2][1].pk,
+            reason='Проверить атомарный откат.',
+            control_context=self.control_context,
+        )
+        with mock.patch.object(
+            SettlementPreviewApplicationItem,
+            'save',
+            side_effect=ValidationError('ДЕМО M9 application item failure'),
+        ):
+            with self.assertRaises(ValidationError):
+                self._apply(run_id=run.pk)
+        self.assertTrue(SettlementPreviewCorrection.objects.filter(pk=correction.pk).exists())
+        self.assertFalse(SettlementPreviewApplication.objects.exists())
+        self.assertFalse(EmployeeBedOccupancy._base_manager.exists())
+
+    def test_effective_fingerprint_is_deterministic_and_chain_sensitive(self):
+        cohort, run = M8SettlementApplyTests._confirmed_run(self)
+        resident_id = run.unresolved_rows.get().resident_id
+        first = get_effective_settlement_preview_plan(run_id=run.pk)
+        self.assertEqual(
+            first.fingerprint,
+            get_effective_settlement_preview_plan(run_id=run.pk).fingerprint,
+        )
+        exclude_settlement_preview_resident(
+            run_id=run.pk,
+            resident_id=resident_id,
+            reason='Изменить effective plan.',
+            control_context=self.control_context,
+        )
+        self.assertNotEqual(
+            first.fingerprint,
+            get_effective_settlement_preview_plan(run_id=run.pk).fingerprint,
+        )
+
+
 class AutoSettlementM7M8HttpTests(TestCase):
     @classmethod
     def _external(cls, name, organization):
@@ -13556,3 +13996,85 @@ class ShiftScopedApplyMigrationTests(TransactionTestCase):
             executor.migrate([self.migrate_from])
         self.assertTrue(ApplicationModel.objects.filter(pk=application.pk).exists())
         self.assertTrue(OccupancyModel.objects.filter(pk=occupancy.pk).exists())
+
+
+class PreviewCorrectionMigrationTests(TransactionTestCase):
+    migrate_from = ('settlement', '0016_shift_scoped_apply_and_occupancy')
+    migrate_to = ('settlement', '0017_m9_preview_corrections')
+
+    def setUp(self):
+        self.addCleanup(self._restore_latest_migrations)
+        executor = MigrationExecutor(connection)
+        executor.migrate([self.migrate_from])
+
+    def _restore_latest_migrations(self):
+        executor = MigrationExecutor(connection)
+        executor.migrate(executor.loader.graph.leaf_nodes())
+
+    def _migrate_to_target(self):
+        executor = MigrationExecutor(connection)
+        executor.migrate([self.migrate_to])
+        return executor.loader.project_state([self.migrate_to]).apps
+
+    def test_forward_reverse_forward_without_corrections(self):
+        apps = self._migrate_to_target()
+        self.assertIsNotNone(
+            apps.get_model('settlement', 'SettlementPreviewCorrection')
+        )
+        executor = MigrationExecutor(connection)
+        executor.migrate([self.migrate_from])
+        executor = MigrationExecutor(connection)
+        executor.migrate([self.migrate_to])
+        self.assertIsNotNone(
+            executor.loader.project_state([self.migrate_to]).apps.get_model(
+                'settlement', 'SettlementPreviewCorrection'
+            )
+        )
+
+    def test_reverse_fails_closed_and_preserves_correction(self):
+        apps = self._migrate_to_target()
+        actor, access, period, cohort, run = ShiftScopedApplyMigrationTests._context(
+            apps,
+            'm17-guard',
+        )
+        ResidentModel = apps.get_model('settlement', 'SettlementResident')
+        UnresolvedModel = apps.get_model('settlement', 'SettlementPreviewUnresolved')
+        CorrectionModel = apps.get_model('settlement', 'SettlementPreviewCorrection')
+        resident = ResidentModel.objects.create(
+            resident_type='CONTRACTOR',
+            full_name='ДЕМО M17 reverse guard',
+            position_title='Подрядчик',
+            organization='ДЕМО',
+            phone='+7 900 000-17-17',
+            external_sex='male',
+            created_by_access=access,
+            updated_by_access=access,
+        )
+        unresolved = UnresolvedModel.objects.create(
+            run=run,
+            resident=resident,
+            reason_code='resolver_not_configured',
+            reason_codes=['resolver_not_configured'],
+            work_shift='day',
+            cohort_member_id_snapshot=1,
+            structured_details={'shift_source_fingerprint': '7' * 64},
+        )
+        correction = CorrectionModel.objects.create(
+            preview_run=run,
+            resident=resident,
+            work_shift='day',
+            action='exclude',
+            source_unresolved=unresolved,
+            actor_access=access,
+            reason='Сохранить историю.',
+            source_snapshot={'kind': 'unresolved', 'id': unresolved.pk},
+            fingerprint='8' * 64,
+        )
+
+        executor = MigrationExecutor(connection)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            rf'count=1.*{correction.pk}',
+        ):
+            executor.migrate([self.migrate_from])
+        self.assertTrue(CorrectionModel.objects.filter(pk=correction.pk).exists())

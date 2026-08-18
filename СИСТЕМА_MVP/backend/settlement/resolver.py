@@ -30,6 +30,7 @@ from .models import (
     PhysicalRoom,
     SettlementCohort,
     SettlementCohortMember,
+    SettlementPreviewCorrection,
     SettlementResident,
 )
 from .residents import authoritative_resident_sex
@@ -187,6 +188,7 @@ def _replaceable_occupancy_kind(*, occupancy, cohort, member) -> str | None:
         if (
             occupancy.source_application_id is None
             and occupancy.source_preview_placement_id is None
+            and occupancy.source_preview_correction_id is None
             and occupancy.shift_source_fingerprint == member.shift_source_fingerprint
             and occupancy.shift_source_kind in {
                 EmployeeBedOccupancy.ShiftSourceKind.OFFICIAL_ASSIGNMENT,
@@ -200,30 +202,69 @@ def _replaceable_occupancy_kind(*, occupancy, cohort, member) -> str | None:
         return None
     application = occupancy.source_application
     placement = occupancy.source_preview_placement
-    if application is None or placement is None:
+    correction = occupancy.source_preview_correction
+    if application is None or (placement is None and correction is None):
         return None
     run = application.preview_run
+    source_run_id = correction.preview_run_id if correction else placement.run_id
+    source_resident_id = correction.resident_id if correction else placement.resident_id
+    source_bed_id = (
+        correction.target_physical_bed_id
+        if correction and correction.action == SettlementPreviewCorrection.Action.MOVE
+        else correction.source_placement.physical_bed_id
+        if correction and correction.source_placement_id
+        else placement.physical_bed_id
+        if placement else None
+    )
+    source_member_id = (
+        correction.source_placement.cohort_member_id_snapshot
+        if correction and correction.source_placement_id
+        else correction.source_unresolved.cohort_member_id_snapshot
+        if correction else placement.cohort_member_id_snapshot
+    )
+    source_shift_fingerprint = (
+        correction.source_snapshot.get('shift_source_fingerprint')
+        if correction else placement.normalized_provenance.get('shift_source_fingerprint')
+    )
     if (
         application.legacy_whole_run
         or application.work_shift != member.work_shift
         or occupancy.shift_source_kind
         != EmployeeBedOccupancy.ShiftSourceKind.AUTO_PREVIEW
-        or placement.work_shift != member.work_shift
+        or (correction.work_shift if correction else placement.work_shift) != member.work_shift
         or occupancy.shift_source_fingerprint
-        != placement.normalized_provenance.get('shift_source_fingerprint')
+        != source_shift_fingerprint
         or application.watch_period_id != cohort.watch_period_id
         or application.cohort_id != cohort.pk
-        or run.pk != placement.run_id
+        or run.pk != source_run_id
         or run.watch_period_id != cohort.watch_period_id
         or run.cohort_id != cohort.pk
-        or placement.resident_id != occupancy.resident_id
-        or placement.physical_bed_id != occupancy.physical_bed_id
-        or placement.cohort_member_id_snapshot != member.pk
+        or source_resident_id != occupancy.resident_id
+        or source_bed_id != occupancy.physical_bed_id
+        or source_member_id != member.pk
         or occupancy.starts_at != member.arrival_at
         or occupancy.ends_at != member.departure_at
     ):
         return None
     return 'auto_current_cohort'
+
+
+def validate_preview_correction_target(*, cohort, resident, calendar_slot_id, physical_bed_id):
+    """Validate one exact M4 target without choosing any fallback row."""
+
+    candidates, _snapshot = _slot_candidates(cohort)
+    candidate = candidates.get(calendar_slot_id)
+    if candidate is None or candidate.bed_id != physical_bed_id:
+        raise ValidationError(
+            'Целевой календарный слот не доказывает указанную койку.',
+            code='settlement.preview_correction.target_invalid',
+        )
+    if not _room_accepts_resident(candidate, resident):
+        raise ValidationError(
+            'Целевое место не соответствует полу жильца.',
+            code='settlement.preview_correction.target_conflict',
+        )
+    return candidate
 
 
 def _effective_equipment_assignments(*, employee_ids, effective_date):
@@ -515,6 +556,8 @@ def resolve_settlement_cohort(
             'cohort_member',
             'source_application__preview_run',
             'source_preview_placement',
+            'source_preview_correction__source_placement',
+            'source_preview_correction__source_unresolved',
         )
         .order_by('pk')
     )
@@ -753,6 +796,11 @@ def resolve_settlement_cohort(
                     if item.source_application_id else None
                 ),
                 'source_preview_placement_id': item.source_preview_placement_id,
+                'source_preview_correction_id': item.source_preview_correction_id,
+                'source_preview_correction_fingerprint': (
+                    item.source_preview_correction.fingerprint
+                    if item.source_preview_correction_id else None
+                ),
                 'source_placement_run_id': (
                     item.source_preview_placement.run_id
                     if item.source_preview_placement_id else None

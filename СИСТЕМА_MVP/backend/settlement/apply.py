@@ -17,6 +17,8 @@ from .control import (
     lock_settlement_write_lease,
 )
 from .models import (
+    AccommodationAnchorBedAssignment,
+    AccommodationAnchorCalendarSlot,
     EmployeeBedOccupancy,
     PhysicalBed,
     PhysicalRoom,
@@ -24,10 +26,12 @@ from .models import (
     SettlementCohortMember,
     SettlementPreviewApplication,
     SettlementPreviewApplicationItem,
+    SettlementPreviewCorrection,
     SettlementPreviewPlacement,
     SettlementPreviewRun,
     SettlementPreviewUnresolved,
 )
+from .preview_corrections import build_effective_settlement_preview_plan
 from .residents import (
     build_settlement_resident_lock_plan,
     lock_settlement_residents_after_access,
@@ -37,7 +41,11 @@ from .saved_previews import (
     _validate_approved_cohort,
     _validate_resolver_result,
 )
-from .resolver import resolve_settlement_cohort
+from .resolver import (
+    _replaceable_occupancy_kind,
+    resolve_settlement_cohort,
+    validate_preview_correction_target,
+)
 from .services import (
     _validate_occupancy_conflicts,
     _validate_resident_and_destination,
@@ -141,6 +149,7 @@ def _occupancy_snapshot(rows):
             row.ended_at,
             row.source_application_id,
             row.source_preview_placement_id,
+            row.source_preview_correction_id,
             row.replaced_by_application_id,
             row.replaced_by_occupancy_id,
             row.watch_period_id,
@@ -165,10 +174,154 @@ class _ApplyLockPlan:
     member_snapshot: tuple
     placement_snapshot: tuple
     unresolved_snapshot: tuple
+    correction_snapshot: tuple
+    calendar_slot_snapshot: tuple
     bed_snapshot: tuple
     room_snapshot: tuple
     occupancy_snapshot: tuple
     application_snapshot: tuple
+
+
+@dataclass(frozen=True, slots=True)
+class _EffectiveApplyPlacement:
+    resident_id: int
+    work_shift: str
+    calendar_slot_id: int
+    physical_bed_id: int
+    cohort_member_id_snapshot: int
+    source_placement: SettlementPreviewPlacement | None
+    source_unresolved: SettlementPreviewUnresolved | None
+    effective_correction: SettlementPreviewCorrection | None
+
+
+def _effective_rows(locked):
+    placements_by_id = {row.pk: row for row in locked['placements']}
+    unresolved_by_id = {row.pk: row for row in locked['unresolved']}
+    corrections_by_id = {row.pk: row for row in locked['corrections']}
+    placements = []
+    excluded = []
+    unresolved = []
+    for decision in locked['effective_plan'].decisions:
+        source_placement = placements_by_id.get(decision.source_placement_id)
+        source_unresolved = unresolved_by_id.get(decision.source_unresolved_id)
+        source = source_placement or source_unresolved
+        if source is None:
+            raise _apply_error('incomplete_preview', 'Effective plan потерял исходную строку.')
+        correction = corrections_by_id.get(decision.effective_correction_id)
+        row = {
+            'decision': decision,
+            'source_placement': source_placement,
+            'source_unresolved': source_unresolved,
+            'effective_correction': correction,
+            'cohort_member_id_snapshot': source.cohort_member_id_snapshot,
+        }
+        if decision.state == 'placement':
+            placements.append(_EffectiveApplyPlacement(
+                resident_id=decision.resident_id,
+                work_shift=decision.work_shift,
+                calendar_slot_id=decision.calendar_slot_id,
+                physical_bed_id=decision.physical_bed_id,
+                cohort_member_id_snapshot=source.cohort_member_id_snapshot,
+                source_placement=source_placement,
+                source_unresolved=source_unresolved,
+                effective_correction=correction,
+            ))
+        elif decision.state == 'excluded':
+            excluded.append(row)
+        elif decision.state == 'unresolved':
+            unresolved.append(row)
+        else:
+            raise _apply_error('incomplete_preview', 'Effective plan содержит неизвестное состояние.')
+    return placements, excluded, unresolved
+
+
+def _source_decision_snapshot(placement):
+    if placement.source_placement is not None:
+        row = placement.source_placement
+        return {
+            'state': 'placement',
+            'placement_id': row.pk,
+            'resident_id': row.resident_id,
+            'work_shift': row.work_shift,
+            'calendar_slot_id': row.calendar_slot_id,
+            'physical_bed_id': row.physical_bed_id,
+        }
+    row = placement.source_unresolved
+    return {
+        'state': 'unresolved',
+        'unresolved_id': row.pk,
+        'resident_id': row.resident_id,
+        'work_shift': row.work_shift,
+        'reason_code': row.reason_code,
+    }
+
+
+def _effective_decision_snapshot(placement):
+    correction = placement.effective_correction
+    return {
+        'state': 'placement',
+        'resident_id': placement.resident_id,
+        'work_shift': placement.work_shift,
+        'calendar_slot_id': placement.calendar_slot_id,
+        'physical_bed_id': placement.physical_bed_id,
+        'correction_id': correction.pk if correction else None,
+        'correction_action': correction.action if correction else None,
+        'correction_fingerprint': correction.fingerprint if correction else '',
+    }
+
+
+def _base_snapshot_for_item(source_placement, source_unresolved):
+    if source_placement is not None:
+        return {
+            'state': 'placement',
+            'placement_id': source_placement.pk,
+            'resident_id': source_placement.resident_id,
+            'work_shift': source_placement.work_shift,
+            'calendar_slot_id': source_placement.calendar_slot_id,
+            'physical_bed_id': source_placement.physical_bed_id,
+        }
+    if source_unresolved is not None:
+        return {
+            'state': 'unresolved',
+            'unresolved_id': source_unresolved.pk,
+            'resident_id': source_unresolved.resident_id,
+            'work_shift': source_unresolved.work_shift,
+            'reason_code': source_unresolved.reason_code,
+        }
+    return {}
+
+
+def _effective_snapshot_for_item(
+    *, effective_placement, effective_excluded, effective_unresolved=None,
+):
+    if effective_placement is not None:
+        return _effective_decision_snapshot(effective_placement)
+    row = effective_excluded or effective_unresolved
+    if row is None:
+        return {}
+    decision = row['decision']
+    correction = row['effective_correction']
+    return {
+        'state': decision.state,
+        'resident_id': decision.resident_id,
+        'work_shift': decision.work_shift,
+        'correction_id': correction.pk if correction else None,
+        'correction_action': correction.action if correction else None,
+        'correction_fingerprint': correction.fingerprint if correction else '',
+    }
+
+
+def _correction_snapshot(rows):
+    return tuple(
+        (
+            row.pk, row.preview_run_id, row.resident_id, row.work_shift,
+            row.action, row.source_placement_id, row.source_unresolved_id,
+            row.target_calendar_slot_id, row.target_physical_bed_id,
+            row.actor_access_id, row.reason, row.created_at,
+            row.supersedes_id, row.source_snapshot, row.fingerprint,
+        )
+        for row in rows
+    )
 
 
 def _build_apply_lock_plan(*, run_id: int, work_shift: str) -> _ApplyLockPlan:
@@ -223,8 +376,29 @@ def _build_apply_lock_plan(*, run_id: int, work_shift: str) -> _ApplyLockPlan:
         .filter(run_id=run_id, work_shift=work_shift)
         .order_by('pk')
     )
-
-    target_bed_ids = tuple(sorted({row.physical_bed_id for row in placements}))
+    corrections = list(
+        SettlementPreviewCorrection._base_manager.using(using)
+        .filter(preview_run_id=run_id, work_shift=work_shift)
+        .order_by('resident_id', 'work_shift', 'created_at', 'pk')
+    )
+    run_for_effective = SettlementPreviewRun._base_manager.using(using).get(pk=run_id)
+    effective_plan = build_effective_settlement_preview_plan(
+        run=run_for_effective,
+        placements=placements,
+        unresolved=unresolved,
+        corrections=corrections,
+    )
+    target_bed_ids = tuple(sorted({
+        row.physical_bed_id for row in effective_plan.decisions if row.physical_bed_id
+    }))
+    calendar_slot_ids = tuple(sorted({
+        row.calendar_slot_id for row in effective_plan.decisions if row.calendar_slot_id
+    }))
+    calendar_slots = tuple(
+        AccommodationAnchorCalendarSlot._base_manager.using(using)
+        .filter(pk__in=calendar_slot_ids).order_by('pk')
+        .values_list('pk', 'anchor_id', 'watch_period_id', 'status', 'valid_from', 'valid_to')
+    )
     active_resident_ids = tuple(sorted({row.resident_id for row in members}))
     if members:
         scope_start = min(row.arrival_at for row in members)
@@ -248,6 +422,8 @@ def _build_apply_lock_plan(*, run_id: int, work_shift: str) -> _ApplyLockPlan:
         .select_related(
             'source_application__preview_run',
             'source_preview_placement',
+            'source_preview_correction__source_placement',
+            'source_preview_correction__source_unresolved',
             'cohort_member',
         )
         .order_by('pk')
@@ -309,6 +485,8 @@ def _build_apply_lock_plan(*, run_id: int, work_shift: str) -> _ApplyLockPlan:
         member_snapshot=_member_snapshot(members),
         placement_snapshot=_placement_snapshot(placements),
         unresolved_snapshot=_unresolved_snapshot(unresolved),
+        correction_snapshot=_correction_snapshot(corrections),
+        calendar_slot_snapshot=calendar_slots,
         bed_snapshot=tuple(beds),
         room_snapshot=rooms,
         occupancy_snapshot=_occupancy_snapshot(occupancies),
@@ -365,6 +543,25 @@ def _lock_and_revalidate_plan(
         .filter(run_id=run.pk, work_shift=plan.work_shift)
         .order_by('pk')
     )
+    corrections = list(
+        SettlementPreviewCorrection._base_manager.using(using)
+        .select_for_update(of=('self',))
+        .filter(preview_run_id=run.pk, work_shift=plan.work_shift)
+        .order_by('resident_id', 'work_shift', 'created_at', 'pk')
+    )
+    calendar_slot_ids = tuple(row[0] for row in plan.calendar_slot_snapshot)
+    calendar_slots = list(
+        AccommodationAnchorCalendarSlot._base_manager.using(using)
+        .select_for_update(of=('self',))
+        .select_related('watch_period')
+        .filter(pk__in=calendar_slot_ids).order_by('pk')
+    )
+    list(
+        AccommodationAnchorBedAssignment._base_manager.using(using)
+        .select_for_update(of=('self',))
+        .filter(anchor_id__in=sorted({row.anchor_id for row in calendar_slots}))
+        .order_by('pk')
+    )
     bed_ids = tuple(row[0] for row in plan.bed_snapshot)
     beds = list(
         PhysicalBed.objects.using(using)
@@ -388,6 +585,8 @@ def _lock_and_revalidate_plan(
             'physical_bed',
             'source_application__preview_run',
             'source_preview_placement',
+            'source_preview_correction__source_placement',
+            'source_preview_correction__source_unresolved',
             'cohort_member',
         )
         .filter(pk__in=occupancy_ids)
@@ -450,6 +649,10 @@ def _lock_and_revalidate_plan(
         )
         for row in rooms
     )
+    actual_calendar_slot_snapshot = tuple(
+        (row.pk, row.anchor_id, row.watch_period_id, row.status, row.valid_from, row.valid_to)
+        for row in calendar_slots
+    )
     if (
         actual_run_snapshot != plan.run_snapshot
         or actual_cohort_snapshot != plan.cohort_snapshot
@@ -457,6 +660,8 @@ def _lock_and_revalidate_plan(
         or _member_snapshot(members) != plan.member_snapshot
         or _placement_snapshot(placements) != plan.placement_snapshot
         or _unresolved_snapshot(unresolved) != plan.unresolved_snapshot
+        or _correction_snapshot(corrections) != plan.correction_snapshot
+        or actual_calendar_slot_snapshot != plan.calendar_slot_snapshot
         or actual_bed_snapshot != plan.bed_snapshot
         or actual_room_snapshot != plan.room_snapshot
         or _occupancy_snapshot(occupancies) != plan.occupancy_snapshot
@@ -475,6 +680,14 @@ def _lock_and_revalidate_plan(
         'members': members,
         'placements': placements,
         'unresolved': unresolved,
+        'corrections': corrections,
+        'calendar_slots': calendar_slots,
+        'effective_plan': build_effective_settlement_preview_plan(
+            run=run,
+            placements=placements,
+            unresolved=unresolved,
+            corrections=corrections,
+        ),
         'beds': beds,
         'rooms': rooms,
         'occupancies': occupancies,
@@ -559,17 +772,21 @@ def _validate_shift_scope(locked):
             or member.resident_id != row.resident_id
         ):
             raise _apply_error('incomplete_preview', 'Строка результата содержит stale смену.')
-    for placement in locked['placements']:
-        member = members_by_id[placement.cohort_member_id_snapshot]
-        slot = placement.calendar_slot
+    effective_placements, excluded, effective_unresolved = _effective_rows(locked)
+    slots_by_id = {row.pk: row for row in locked['calendar_slots']}
+    for placement in effective_placements:
+        member = members_by_id.get(placement.cohort_member_id_snapshot)
+        slot = slots_by_id.get(placement.calendar_slot_id)
+        if member is None or member.resident_id != placement.resident_id or slot is None:
+            raise _apply_error('incomplete_preview', 'Effective placement содержит stale ссылки.')
         arrival_date = timezone.localdate(member.arrival_at)
         early_night = (
             work_shift == SettlementCohortMember.WorkShift.NIGHT
             and arrival_date == period.starts_on - timedelta(days=1)
         )
         if (
-            placement.run_id != run.pk
-            or slot.watch_period_id != period.pk
+            slot.watch_period_id != period.pk
+            or slot.status != AccommodationAnchorCalendarSlot.Status.CONFIRMED
             or slot.calendar_relation_is_stale
         ):
             raise _apply_error('stale_preview', 'CalendarSlot смены устарел.')
@@ -578,6 +795,23 @@ def _validate_shift_scope(locked):
                 'stale_preview',
                 'Начало размещения находится раньше допустимой границы CalendarSlot.',
             )
+        if placement.effective_correction is not None:
+            resident = locked['resident_rows'].resident_by_id(placement.resident_id)
+            try:
+                validate_preview_correction_target(
+                    cohort=locked['cohort'],
+                    resident=resident,
+                    calendar_slot_id=placement.calendar_slot_id,
+                    physical_bed_id=placement.physical_bed_id,
+                )
+            except ValidationError as error:
+                raise _apply_error(
+                    'stale_preview',
+                    'Целевое место точечного исправления устарело.',
+                ) from error
+    locked['effective_placements'] = effective_placements
+    locked['effective_excluded'] = excluded
+    locked['effective_unresolved'] = effective_unresolved
 
 
 def _classify_changes(*, locked, confirm_replace_manual):
@@ -586,61 +820,35 @@ def _classify_changes(*, locked, confirm_replace_manual):
     work_shift = locked['work_shift']
     members_by_id = {row.pk: row for row in locked['members']}
     members_by_resident = {row.resident_id: row for row in locked['members']}
-    placements_by_resident = {row.resident_id: row for row in locked['placements']}
-    if len(placements_by_resident) != len(locked['placements']):
-        raise _apply_error('incomplete_preview', 'Preview содержит duplicate resident.')
-    if len({row.physical_bed_id for row in locked['placements']}) != len(locked['placements']):
-        raise _apply_error('incomplete_preview', 'Preview содержит duplicate PhysicalBed.')
+    placements_by_resident = {
+        row.resident_id: row for row in locked['effective_placements']
+    }
+    if len(placements_by_resident) != len(locked['effective_placements']):
+        raise _apply_error('incomplete_preview', 'Effective plan содержит duplicate resident.')
+    if (
+        len({row.physical_bed_id for row in locked['effective_placements']})
+        != len(locked['effective_placements'])
+    ):
+        raise _apply_error('incomplete_preview', 'Effective plan содержит duplicate PhysicalBed.')
     all_result_residents = {
         *(row.resident_id for row in locked['placements']),
         *(row.resident_id for row in locked['unresolved']),
     }
     if all_result_residents != set(members_by_resident):
         raise _apply_error('incomplete_preview', 'Каждый member должен иметь ровно одну строку.')
-    for placement in locked['placements']:
+    for placement in locked['effective_placements']:
         member = members_by_id.get(placement.cohort_member_id_snapshot)
         if member is None or member.resident_id != placement.resident_id:
-            raise _apply_error('incomplete_preview', 'Placement содержит stale membership.')
+            raise _apply_error('incomplete_preview', 'Effective placement содержит stale membership.')
 
     target_scope = []
     for occupancy in locked['occupancies']:
-        is_previous_auto = (
-            occupancy.source_kind == EmployeeBedOccupancy.SourceKind.AUTO
-            and occupancy.shift_source_kind
-            == EmployeeBedOccupancy.ShiftSourceKind.AUTO_PREVIEW
-            and occupancy.work_shift == work_shift
-            and occupancy.source_application_id is not None
-            and not occupancy.source_application.legacy_whole_run
-            and occupancy.source_application.work_shift == work_shift
-            and occupancy.source_application.watch_period_id == period.pk
-            and occupancy.source_preview_placement_id is not None
-            and occupancy.source_preview_placement.work_shift == work_shift
-            and occupancy.cohort_member_id is not None
-            and occupancy.shift_source_fingerprint
-            == occupancy.source_preview_placement.normalized_provenance.get(
-                'shift_source_fingerprint'
-            )
-            and occupancy.replaced_by_application_id is None
-            and occupancy.replaced_by_occupancy_id is None
-            and occupancy.terminated_at is None
-            and occupancy.ended_at is None
-        )
-        is_target_manual = (
-            occupancy.source_kind == EmployeeBedOccupancy.SourceKind.MANUAL
-            and occupancy.shift_source_kind in {
-                EmployeeBedOccupancy.ShiftSourceKind.OFFICIAL_ASSIGNMENT,
-                EmployeeBedOccupancy.ShiftSourceKind.CLERK_SELECTED,
-            }
-            and occupancy.work_shift == work_shift
-            and occupancy.watch_period_id == period.pk
-            and occupancy.resident_id in members_by_resident
-            and occupancy.cohort_member_id == members_by_resident[occupancy.resident_id].pk
-            and occupancy.replaced_by_application_id is None
-            and occupancy.replaced_by_occupancy_id is None
-            and occupancy.terminated_at is None
-            and occupancy.ended_at is None
-        )
-        if is_previous_auto or is_target_manual:
+        member = members_by_resident.get(occupancy.resident_id)
+        if _replaceable_occupancy_kind(
+            occupancy=occupancy,
+            cohort=locked['cohort'],
+            member=member,
+        ) is not None:
             target_scope.append(occupancy)
 
     reusable_by_resident = {}
@@ -651,17 +859,6 @@ def _classify_changes(*, locked, confirm_replace_manual):
             occupancy.source_kind == EmployeeBedOccupancy.SourceKind.AUTO
             and placement is not None
             and member is not None
-            and occupancy.source_application.cohort_id == run.cohort_id
-            and occupancy.source_application.work_shift == work_shift
-            and occupancy.work_shift == work_shift
-            and occupancy.source_preview_placement.work_shift == work_shift
-            and occupancy.source_preview_placement_id is not None
-            and occupancy.source_preview_placement.run_id
-            == occupancy.source_application.preview_run_id
-            and occupancy.source_preview_placement.resident_id == occupancy.resident_id
-            and occupancy.source_preview_placement.physical_bed_id
-            == occupancy.physical_bed_id
-            and occupancy.source_preview_placement.cohort_member_id_snapshot == member.pk
             and occupancy.physical_bed_id == placement.physical_bed_id
             and occupancy.starts_at == member.arrival_at
             and occupancy.ends_at == member.departure_at
@@ -704,7 +901,7 @@ def _classify_changes(*, locked, confirm_replace_manual):
                     'hard_conflict',
                     'Resident выбранной смены имеет unrelated occupancy.',
                 )
-        for placement in locked['placements']:
+        for placement in locked['effective_placements']:
             member = members_by_resident[placement.resident_id]
             overlaps = (
                 occupancy.starts_at < member.departure_at
@@ -726,7 +923,7 @@ def _classify_changes(*, locked, confirm_replace_manual):
                 )
 
     create_placements = [
-        row for row in locked['placements']
+        row for row in locked['effective_placements']
         if row.resident_id not in reusable_by_resident
     ]
     replaced_with_new = sum(
@@ -738,6 +935,7 @@ def _classify_changes(*, locked, confirm_replace_manual):
         'replace_rows': replace_rows,
         'manual_rows': manual_rows,
         'create_placements': create_placements,
+        'excluded': locked['effective_excluded'],
         'replaced_with_new': replaced_with_new,
     }
 
@@ -802,9 +1000,34 @@ def apply_confirmed_settlement_preview(
         snapshot = {
             'preview_run_id': run.pk,
             'work_shift': work_shift,
+            'base_result_fingerprint': run.result_fingerprint,
+            'effective_result_fingerprint': locked['effective_plan'].fingerprint,
             'placement_ids': [row.pk for row in locked['placements']],
             'unresolved_ids': [row.pk for row in locked['unresolved']],
-            'create_placement_ids': [row.pk for row in changes['create_placements']],
+            'correction_ids': list(locked['effective_plan'].correction_ids),
+            'effective_decisions': [
+                {
+                    'resident_id': row.resident_id,
+                    'work_shift': row.work_shift,
+                    'state': row.state,
+                    'source_placement_id': row.source_placement_id,
+                    'source_unresolved_id': row.source_unresolved_id,
+                    'calendar_slot_id': row.calendar_slot_id,
+                    'physical_bed_id': row.physical_bed_id,
+                    'effective_correction_id': row.effective_correction_id,
+                    'effective_correction_action': row.effective_correction_action,
+                    'effective_correction_fingerprint': (
+                        row.effective_correction_fingerprint
+                    ),
+                }
+                for row in locked['effective_plan'].decisions
+            ],
+            'create_resident_ids': [
+                row.resident_id for row in changes['create_placements']
+            ],
+            'excluded_resident_ids': [
+                row['decision'].resident_id for row in changes['excluded']
+            ],
             'reused_occupancy_ids': list(reused_ids),
             'replaced_auto_occupancy_ids': list(auto_ids),
             'replaced_manual_occupancy_ids': list(manual_ids),
@@ -817,7 +1040,7 @@ def apply_confirmed_settlement_preview(
             cohort=locked['cohort'],
             applied_by_access=actor_access,
             resolver_fingerprint=run.resolver_fingerprint,
-            normalized_fingerprint=run.result_fingerprint,
+            normalized_fingerprint=locked['effective_plan'].fingerprint,
             confirm_replace_manual=confirm_replace_manual,
             created_occupancy_count=len(changes['create_placements']),
             closed_occupancy_count=len(replace_rows),
@@ -852,29 +1075,107 @@ def apply_confirmed_settlement_preview(
                 if occupancy.source_kind == EmployeeBedOccupancy.SourceKind.MANUAL
                 else SettlementPreviewApplicationItem.Action.REPLACED_AUTO
             )
+            effective_placement = next(
+                (
+                    row for row in locked['effective_placements']
+                    if row.resident_id == occupancy.resident_id
+                ),
+                None,
+            )
+            effective_excluded = next(
+                (
+                    row for row in changes['excluded']
+                    if row['decision'].resident_id == occupancy.resident_id
+                ),
+                None,
+            )
+            effective_unresolved = next(
+                (
+                    row for row in locked['effective_unresolved']
+                    if row['decision'].resident_id == occupancy.resident_id
+                ),
+                None,
+            )
+            correction = (
+                effective_placement.effective_correction
+                if effective_placement else effective_excluded['effective_correction']
+                if effective_excluded else effective_unresolved['effective_correction']
+                if effective_unresolved else None
+            )
+            source_placement = (
+                effective_placement.source_placement
+                if effective_placement else effective_excluded['source_placement']
+                if effective_excluded else effective_unresolved['source_placement']
+                if effective_unresolved else None
+            )
+            source_unresolved = (
+                effective_placement.source_unresolved
+                if effective_placement else effective_excluded['source_unresolved']
+                if effective_excluded else effective_unresolved['source_unresolved']
+                if effective_unresolved else None
+            )
             SettlementPreviewApplicationItem(
                 application=application,
                 occupancy=occupancy,
-                preview_placement=next(
-                    (
-                        row for row in locked['placements']
-                        if row.resident_id == occupancy.resident_id
-                    ),
-                    None,
+                preview_placement=source_placement,
+                preview_unresolved=source_unresolved,
+                effective_correction=correction,
+                correction_fingerprint=correction.fingerprint if correction else '',
+                source_decision_snapshot=(
+                    _base_snapshot_for_item(source_placement, source_unresolved)
+                ),
+                effective_decision_snapshot=(
+                    _effective_snapshot_for_item(
+                        effective_placement=effective_placement,
+                        effective_excluded=effective_excluded,
+                        effective_unresolved=effective_unresolved,
+                    )
                 ),
                 action=action,
             ).save()
 
         for resident_id, occupancy in changes['reusable_by_resident'].items():
             placement = next(
-                row for row in locked['placements']
+                row for row in locked['effective_placements']
                 if row.resident_id == resident_id
             )
             SettlementPreviewApplicationItem(
                 application=application,
                 occupancy=occupancy,
-                preview_placement=placement,
+                preview_placement=placement.source_placement,
+                preview_unresolved=placement.source_unresolved,
+                effective_correction=placement.effective_correction,
+                correction_fingerprint=(
+                    placement.effective_correction.fingerprint
+                    if placement.effective_correction else ''
+                ),
+                source_decision_snapshot=_source_decision_snapshot(placement),
+                effective_decision_snapshot=_effective_decision_snapshot(placement),
                 action=SettlementPreviewApplicationItem.Action.REUSED,
+            ).save()
+
+        for excluded in changes['excluded']:
+            correction = excluded['effective_correction']
+            decision = excluded['decision']
+            SettlementPreviewApplicationItem(
+                application=application,
+                occupancy=None,
+                preview_placement=excluded['source_placement'],
+                preview_unresolved=excluded['source_unresolved'],
+                effective_correction=correction,
+                correction_fingerprint=correction.fingerprint,
+                source_decision_snapshot=_base_snapshot_for_item(
+                    excluded['source_placement'], excluded['source_unresolved'],
+                ),
+                effective_decision_snapshot={
+                    'state': 'excluded',
+                    'resident_id': decision.resident_id,
+                    'work_shift': decision.work_shift,
+                    'correction_id': correction.pk,
+                    'correction_action': correction.action,
+                    'correction_fingerprint': correction.fingerprint,
+                },
+                action=SettlementPreviewApplicationItem.Action.EXCLUDED,
             ).save()
 
         effective_rows = [
@@ -913,7 +1214,8 @@ def apply_confirmed_settlement_preview(
                     shift_source_kind=EmployeeBedOccupancy.ShiftSourceKind.AUTO_PREVIEW,
                     shift_source_fingerprint=member.shift_source_fingerprint,
                     source_application=application,
-                    source_preview_placement=placement,
+                    source_preview_placement=placement.source_placement,
+                    source_preview_correction=placement.effective_correction,
                     watch_period=locked['period'],
                     cohort_member=member,
                     settled_at=member.arrival_at,
@@ -932,7 +1234,15 @@ def apply_confirmed_settlement_preview(
             SettlementPreviewApplicationItem(
                 application=application,
                 occupancy=occupancy,
-                preview_placement=placement,
+                preview_placement=placement.source_placement,
+                preview_unresolved=placement.source_unresolved,
+                effective_correction=placement.effective_correction,
+                correction_fingerprint=(
+                    placement.effective_correction.fingerprint
+                    if placement.effective_correction else ''
+                ),
+                source_decision_snapshot=_source_decision_snapshot(placement),
+                effective_decision_snapshot=_effective_decision_snapshot(placement),
                 action=SettlementPreviewApplicationItem.Action.CREATED,
             ).save()
             effective_rows.append(occupancy)
