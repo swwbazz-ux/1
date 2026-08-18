@@ -2,7 +2,7 @@
 {% load static %}
 
 {% block clerk_extra_head %}
-<link rel="stylesheet" href="{% static 'css/settlement-clerk.css' %}?v={{ static_asset_release }}-settlement-map-v33">
+<link rel="stylesheet" href="{% static 'css/settlement-clerk.css' %}?v={{ static_asset_release }}-settlement-map-v34">
 {% endblock %}
 
 {% block clerk_shell_class %}settlement-shell{% endblock %}
@@ -16,11 +16,35 @@
      data-auto-state-url="{% url 'settlement_auto_state' %}"
      data-auto-create-url="{% url 'settlement_auto_preview_create' %}"
      data-auto-confirm-url="{% url 'settlement_auto_preview_confirm' %}"
+     data-auto-move-url="{% url 'settlement_auto_preview_move' %}"
+     data-auto-exclude-url="{% url 'settlement_auto_preview_exclude' %}"
+     data-auto-restore-url="{% url 'settlement_auto_preview_restore' %}"
      data-auto-apply-night-url="{% url 'settlement_auto_preview_apply_night' %}"
      data-auto-apply-day-url="{% url 'settlement_auto_preview_apply_day' %}"{% endblock %}
 
 {% block clerk_content %}
     <main class="admin-console-page settlement-page">
+        <nav class="settlement-map-modes" aria-label="Режим карты">
+            <button type="button" class="is-active" data-map-mode="current" aria-pressed="true">Текущая вахта</button>
+            <button type="button" data-map-mode="next" aria-pressed="false">Следующий заезд</button>
+        </nav>
+
+        <section class="settlement-control-panel"
+                 data-control-panel
+                 data-control-state="free"
+                 aria-label="Управление расселением">
+            <i class="settlement-control-indicator" aria-hidden="true"></i>
+            <div class="settlement-control-copy" role="status" aria-live="polite" aria-atomic="true">
+                <strong data-control-status>Управление не начато</strong>
+                <small data-control-message>Проверяем состояние текущей сессии…</small>
+            </div>
+            <div class="settlement-control-actions">
+                <button type="button" data-control-acquire disabled>Начать работу</button>
+                <button type="button" data-control-release disabled>Завершить работу</button>
+            </div>
+        </section>
+
+        <section class="settlement-map-mode-panel" data-map-mode-panel="current">
         <section class="settlement-toolbar" aria-label="Фильтры физической карты">
             <time class="settlement-current-date" datetime="{{ current_date|date:'Y-m-d' }}">
                 <span>Дата проверки</span>
@@ -62,28 +86,6 @@
                 <span>Нерасселённые</span>
                 <b data-unsettled-toggle-count>{{ unsettled_employee_count }}</b>
             </button>
-            <button type="button"
-                    class="settlement-auto-preview-trigger"
-                    data-auto-preview-modal-open
-                    aria-controls="settlement-auto-preview-modal"
-                    aria-expanded="false">
-                Авторасселение
-            </button>
-
-            <section class="settlement-control-panel"
-                     data-control-panel
-                     data-control-state="free"
-                     aria-label="Управление расселением">
-                <i class="settlement-control-indicator" aria-hidden="true"></i>
-                <div class="settlement-control-copy" role="status" aria-live="polite" aria-atomic="true">
-                    <strong data-control-status>Управление не начато</strong>
-                    <small data-control-message>Проверяем состояние текущей сессии…</small>
-                </div>
-                <div class="settlement-control-actions">
-                    <button type="button" data-control-acquire disabled>Начать работу</button>
-                    <button type="button" data-control-release disabled>Завершить работу</button>
-                </div>
-            </section>
         </section>
 
         <section class="settlement-summary" aria-label="Статистика выбранного этажа" aria-live="polite">
@@ -162,6 +164,46 @@
                 <p>Запустите подготовку подтверждённого фонда КИС-5 и КИС-6.</p>
             </section>
         {% endif %}
+        </section>
+
+        <section class="settlement-map-mode-panel settlement-next-arrival" data-map-mode-panel="next" hidden>
+            <header class="settlement-next-arrival-toolbar">
+                <div>
+                    <span>План без изменения фактического проживания</span>
+                    <h2>Следующий заезд</h2>
+                </div>
+                <fieldset class="settlement-filter-group">
+                    <legend>Общежитие</legend>
+                    <div class="settlement-filter-buttons">
+                        <button type="button" class="is-active" data-dorm-filter="5" aria-pressed="true">КИС-5</button>
+                        <button type="button" data-dorm-filter="6" aria-pressed="false">КИС-6</button>
+                    </div>
+                </fieldset>
+                <fieldset class="settlement-filter-group">
+                    <legend>Этаж</legend>
+                    <div class="settlement-filter-buttons compact">
+                        <button type="button" class="is-active" data-floor-filter="1" aria-pressed="true">1 этаж</button>
+                        <button type="button" data-floor-filter="2" aria-pressed="false">2 этаж</button>
+                    </div>
+                </fieldset>
+                <button type="button"
+                        class="settlement-auto-preview-trigger"
+                        data-auto-preview-modal-open
+                        aria-controls="settlement-auto-preview-modal"
+                        aria-expanded="false">
+                    Подготовить план
+                </button>
+            </header>
+            <div class="settlement-plan-status" data-plan-status role="status" aria-live="polite">
+                Выберите утверждённый состав и подготовьте план следующего заезда.
+            </div>
+            <section class="settlement-plan-map" id="settlement-plan-map" data-plan-map aria-label="Плановая карта следующего заезда"></section>
+            <section class="settlement-plan-lists" data-plan-lists hidden>
+                <div data-plan-unresolved></div>
+                <div data-plan-excluded></div>
+                <div data-plan-history></div>
+            </section>
+        </section>
 
     </main>
 
@@ -482,5 +524,5 @@
 {% endblock %}
 
 {% block clerk_scripts %}
-<script src="{% static 'js/settlement-clerk.js' %}?v={{ static_asset_release }}-settlement-map-v33"></script>
+<script src="{% static 'js/settlement-clerk.js' %}?v={{ static_asset_release }}-settlement-map-v34"></script>
 {% endblock %}

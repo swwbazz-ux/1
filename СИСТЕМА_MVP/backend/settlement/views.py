@@ -40,8 +40,16 @@ from .models import (
     PhysicalRoom,
     SettlementCohort,
     SettlementCohortMember,
+    SettlementPreviewCorrection,
     SettlementPreviewRun,
 )
+from .preview_corrections import (
+    exclude_settlement_preview_resident,
+    get_effective_settlement_preview_plan,
+    move_settlement_preview_resident,
+    restore_settlement_preview_resident,
+)
+from .resolver import _slot_candidates as _resolver_slot_candidates
 from .saved_previews import (
     confirm_settlement_preview_run,
     create_settlement_preview_run,
@@ -67,6 +75,18 @@ SHIFT_FILTER_VALUES = {
     'День': 'day',
     'Ночь': 'night',
     'Ранняя': 'early',
+}
+
+AUTO_SETTLEMENT_REASON_LABELS = {
+    'cohort_not_approved': 'Состав заезда ещё не утверждён.',
+    'resolver_not_configured': 'Для этого случая ещё не настроено правило размещения.',
+    'resident_inactive': 'Карточка жильца неактивна.',
+    'incomplete_authoritative_context': 'Не хватает подтверждённых исходных данных.',
+    'stale_calendar_relation': 'Календарное основание устарело.',
+    'invalid_existing_binding': 'Существующее закрепление противоречит текущим данным.',
+    'no_compatible_place': 'Подходящее свободное место не найдено.',
+    'equal_priority_conflict': 'Найдено несколько равноприоритетных вариантов.',
+    'hard_rule_conflict': 'Размещение нарушает обязательное правило.',
 }
 
 
@@ -958,7 +978,6 @@ def _auto_settlement_application_payload(application, unresolved_count):
         application.occupancy_items.values_list('action', flat=True)
     )
     return {
-        'id': application.pk,
         'applied_at': application.applied_at.isoformat(),
         'actor': application.applied_by_access.employee.full_name,
         'created': action_counts.get('created', 0),
@@ -966,6 +985,215 @@ def _auto_settlement_application_payload(application, unresolved_count):
         'replaced_auto': action_counts.get('replaced_auto', 0),
         'replaced_manual': action_counts.get('replaced_manual', 0),
         'unresolved': unresolved_count,
+    }
+
+
+def _auto_settlement_work_shift_label(work_shift):
+    return (
+        'Дневная смена'
+        if work_shift == SettlementCohortMember.WorkShift.DAY
+        else 'Ночная смена'
+    )
+
+
+def _auto_settlement_reason_label(reason_code):
+    short_code = str(reason_code or '').rsplit('.', 1)[-1]
+    return AUTO_SETTLEMENT_REASON_LABELS.get(
+        short_code,
+        'Требуется уточнение данных.',
+    )
+
+
+def _auto_settlement_bed_place(bed):
+    if bed is None:
+        return 'Без назначенного места'
+    room = bed.room
+    return (
+        f'КИС-{room.dormitory.number}, комната {room.number}, '
+        f'койка {bed.get_block_display()}-{bed.position}'
+    )
+
+
+def _auto_settlement_plan_map(cohort):
+    candidates, _snapshot = _resolver_slot_candidates(cohort)
+    candidates_by_bed = defaultdict(list)
+    for candidate in candidates.values():
+        candidates_by_bed[candidate.bed_id].append(candidate)
+    rooms = (
+        PhysicalRoom.objects
+        .select_related('dormitory')
+        .prefetch_related('beds')
+        .order_by(
+            'dormitory__number', 'floor', 'corridor_side',
+            'side_position', 'number', 'pk',
+        )
+    )
+    payload = []
+    for room in rooms:
+        beds = []
+        for bed in room.beds.all().order_by('block', 'position', 'pk'):
+            exact_candidates = candidates_by_bed.get(bed.pk, [])
+            target = exact_candidates[0] if len(exact_candidates) == 1 else None
+            beds.append({
+                'stable_id': bed.stable_id,
+                'display': f'{bed.get_block_display()}-{bed.position}',
+                'target_calendar_slot_id': target.slot_id if target else None,
+                'target_physical_bed_id': bed.pk if target else None,
+            })
+        payload.append({
+            'stable_id': (
+                f'KIS-{room.dormitory.number}-F{room.floor}-R{room.number}'
+            ),
+            'display': f'КИС-{room.dormitory.number}, комната {room.number}',
+            'dormitory': str(room.dormitory.number),
+            'floor': room.floor,
+            'corridor_side': room.corridor_side,
+            'side_position': room.side_position,
+            'transferred': room.is_transferred,
+            'beds': beds,
+        })
+    return payload
+
+
+def _auto_settlement_effective_plan_payload(run, *, stale, shift_apply):
+    if run.status != SettlementPreviewRun.Status.CONFIRMED:
+        return None
+    placements = list(run.placements.all())
+    unresolved_rows = list(run.unresolved_rows.all())
+    corrections = list(run.corrections.all())
+    effective = get_effective_settlement_preview_plan(run_id=run.pk)
+    base_by_key = {
+        (row.resident_id, row.work_shift): row
+        for row in (*placements, *unresolved_rows)
+    }
+    residents = {
+        row.resident_id: row.resident
+        for row in (*placements, *unresolved_rows)
+    }
+    corrections_by_id = {row.pk: row for row in corrections}
+    bed_ids = {
+        *(row.physical_bed_id for row in placements),
+        *(row.target_physical_bed_id for row in corrections if row.target_physical_bed_id),
+        *(row.physical_bed_id for row in effective.decisions if row.physical_bed_id),
+    }
+    beds_by_id = {
+        row.pk: row
+        for row in PhysicalBed.objects.filter(pk__in=bed_ids)
+        .select_related('room__dormitory')
+    }
+    placed = []
+    unresolved = []
+    excluded = []
+    for decision in effective.decisions:
+        key = (decision.resident_id, decision.work_shift)
+        source = base_by_key[key]
+        resident = residents[decision.resident_id]
+        correction = corrections_by_id.get(decision.effective_correction_id)
+        applied = shift_apply[decision.work_shift]['status'] == 'applied'
+        correction_action = correction.action if correction else ''
+        common = {
+            'resident': _auto_settlement_resident_payload(resident),
+            'work_shift': decision.work_shift,
+            'work_shift_label': _auto_settlement_work_shift_label(decision.work_shift),
+            'manually_changed': correction_action in {
+                SettlementPreviewCorrection.Action.MOVE,
+                SettlementPreviewCorrection.Action.EXCLUDE,
+            },
+            'action_description': {
+                SettlementPreviewCorrection.Action.MOVE: 'Перемещён в плане',
+                SettlementPreviewCorrection.Action.EXCLUDE: 'Исключён из плана',
+                SettlementPreviewCorrection.Action.RESTORE: 'Исходное решение восстановлено',
+            }.get(correction_action, ''),
+            'shift_applied': applied,
+            'editable': not stale and not applied,
+            'can_restore': (
+                not applied
+                and correction_action in {
+                    SettlementPreviewCorrection.Action.MOVE,
+                    SettlementPreviewCorrection.Action.EXCLUDE,
+                }
+            ),
+        }
+        if decision.state == 'placement':
+            bed = beds_by_id.get(decision.physical_bed_id)
+            base_bed = beds_by_id.get(getattr(source, 'physical_bed_id', None))
+            placed.append({
+                **common,
+                'room_stable_id': (
+                    f'KIS-{bed.room.dormitory.number}-F{bed.room.floor}-R{bed.room.number}'
+                    if bed else ''
+                ),
+                'room': (
+                    f'КИС-{bed.room.dormitory.number}, комната {bed.room.number}'
+                    if bed else ''
+                ),
+                'bed_stable_id': bed.stable_id if bed else '',
+                'bed': f'{bed.get_block_display()}-{bed.position}' if bed else '',
+                'target_calendar_slot_id': decision.calendar_slot_id,
+                'target_physical_bed_id': decision.physical_bed_id,
+                'original_place': (
+                    _auto_settlement_bed_place(base_bed)
+                    if correction_action == SettlementPreviewCorrection.Action.MOVE
+                    else ''
+                ),
+            })
+        else:
+            row = {
+                **common,
+                'excluded': decision.state == 'excluded',
+                'reason': (
+                    correction.reason
+                    if decision.state == 'excluded' and correction
+                    else _auto_settlement_reason_label(getattr(source, 'reason_code', ''))
+                ),
+            }
+            (excluded if row['excluded'] else unresolved).append(row)
+
+    history = []
+    current_places = {
+        key: _auto_settlement_bed_place(
+            beds_by_id.get(getattr(source, 'physical_bed_id', None)),
+        )
+        for key, source in base_by_key.items()
+    }
+    for correction in sorted(
+        corrections,
+        key=lambda row: (row.resident_id, row.work_shift, row.created_at, row.pk),
+    ):
+        key = (correction.resident_id, correction.work_shift)
+        source = base_by_key[key]
+        previous_place = current_places[key]
+        if correction.action == SettlementPreviewCorrection.Action.MOVE:
+            new_place = _auto_settlement_bed_place(
+                beds_by_id.get(correction.target_physical_bed_id),
+            )
+        elif correction.action == SettlementPreviewCorrection.Action.EXCLUDE:
+            new_place = 'Исключён из плана'
+        else:
+            new_place = _auto_settlement_bed_place(
+                beds_by_id.get(getattr(source, 'physical_bed_id', None)),
+            )
+        current_places[key] = new_place
+        history.append({
+            'action': {
+                SettlementPreviewCorrection.Action.MOVE: 'Перемещение в плане',
+                SettlementPreviewCorrection.Action.EXCLUDE: 'Исключение из плана',
+                SettlementPreviewCorrection.Action.RESTORE: 'Возврат исходного решения',
+            }[correction.action],
+            'resident': residents[correction.resident_id].display_name,
+            'work_shift': _auto_settlement_work_shift_label(correction.work_shift),
+            'previous_place': previous_place,
+            'new_place': new_place,
+            'actor': correction.actor_access.employee.full_name,
+            'created_at': correction.created_at.isoformat(),
+            'reason': correction.reason,
+        })
+    return {
+        'placements': placed,
+        'unresolved': unresolved,
+        'excluded': excluded,
+        'history': history,
+        'rooms': _auto_settlement_plan_map(run.cohort),
     }
 
 
@@ -1047,8 +1275,7 @@ def _auto_settlement_run_payload(run):
     for row in run.unresolved_rows.all():
         unresolved.append({
             'resident': _auto_settlement_resident_payload(row.resident),
-            'reason_code': row.reason_code,
-            'reason_codes': row.reason_codes,
+            'reason': _auto_settlement_reason_label(row.reason_code),
         })
     applications = list(run.applications.all())
     application = next(iter(applications), None)
@@ -1068,6 +1295,18 @@ def _auto_settlement_run_payload(run):
         )
         else False
     )
+    shift_apply = {
+        'night': _auto_settlement_shift_apply_payload(
+            run,
+            SettlementCohortMember.WorkShift.NIGHT,
+            stale=stale,
+        ),
+        'day': _auto_settlement_shift_apply_payload(
+            run,
+            SettlementCohortMember.WorkShift.DAY,
+            stale=stale,
+        ),
+    }
     return {
         'id': run.pk,
         'version': run.version,
@@ -1077,7 +1316,6 @@ def _auto_settlement_run_payload(run):
         'member_count': run.cohort.members.count(),
         'placement_count': len(placements),
         'unresolved_count': len(unresolved),
-        'diagnostic_id': run.result_fingerprint[:12],
         'stale': stale,
         'placements': placements,
         'unresolved': unresolved,
@@ -1085,18 +1323,12 @@ def _auto_settlement_run_payload(run):
             _auto_settlement_application_payload(application, len(unresolved))
             if application else None
         ),
-        'shift_apply': {
-            'night': _auto_settlement_shift_apply_payload(
-                run,
-                SettlementCohortMember.WorkShift.NIGHT,
-                stale=stale,
-            ),
-            'day': _auto_settlement_shift_apply_payload(
-                run,
-                SettlementCohortMember.WorkShift.DAY,
-                stale=stale,
-            ),
-        },
+        'shift_apply': shift_apply,
+        'effective_plan': _auto_settlement_effective_plan_payload(
+            run,
+            stale=stale,
+            shift_apply=shift_apply,
+        ),
     }
 
 
@@ -1113,6 +1345,11 @@ def _auto_settlement_run_queryset():
             'placements__resident__employee',
             'placements__physical_bed__room__dormitory',
             'unresolved_rows__resident__employee',
+            'corrections__resident__employee',
+            'corrections__actor_access__employee',
+            'corrections__source_placement__physical_bed__room__dormitory',
+            'corrections__source_unresolved',
+            'corrections__target_physical_bed__room__dormitory',
         )
     )
 
@@ -1185,6 +1422,74 @@ def settlement_auto_preview_confirm_view(request):
         lambda payload, context: confirm_settlement_preview_run(
             run_id=_auto_settlement_positive_id(payload, 'run_id'),
             control_context=context,
+        ),
+    )
+
+
+def _auto_settlement_correction_result(callback):
+    correction = callback()
+    return _auto_settlement_run_queryset().get(pk=correction.preview_run_id)
+
+
+def _auto_settlement_reason(payload):
+    reason = payload.get('reason')
+    if not isinstance(reason, str) or not reason.strip():
+        raise ValidationError(
+            'Укажите причину изменения.',
+            code='settlement.preview_correction.target_invalid',
+        )
+    return reason.strip()
+
+
+@require_POST
+def settlement_auto_preview_move_view(request):
+    return _auto_settlement_mutation(
+        request,
+        lambda payload, context: _auto_settlement_correction_result(
+            lambda: move_settlement_preview_resident(
+                run_id=_auto_settlement_positive_id(payload, 'run_id'),
+                resident_id=_auto_settlement_positive_id(payload, 'resident_id'),
+                target_calendar_slot_id=_auto_settlement_positive_id(
+                    payload,
+                    'target_calendar_slot_id',
+                ),
+                target_physical_bed_id=_auto_settlement_positive_id(
+                    payload,
+                    'target_physical_bed_id',
+                ),
+                reason=_auto_settlement_reason(payload),
+                control_context=context,
+            ),
+        ),
+    )
+
+
+@require_POST
+def settlement_auto_preview_exclude_view(request):
+    return _auto_settlement_mutation(
+        request,
+        lambda payload, context: _auto_settlement_correction_result(
+            lambda: exclude_settlement_preview_resident(
+                run_id=_auto_settlement_positive_id(payload, 'run_id'),
+                resident_id=_auto_settlement_positive_id(payload, 'resident_id'),
+                reason=_auto_settlement_reason(payload),
+                control_context=context,
+            ),
+        ),
+    )
+
+
+@require_POST
+def settlement_auto_preview_restore_view(request):
+    return _auto_settlement_mutation(
+        request,
+        lambda payload, context: _auto_settlement_correction_result(
+            lambda: restore_settlement_preview_resident(
+                run_id=_auto_settlement_positive_id(payload, 'run_id'),
+                resident_id=_auto_settlement_positive_id(payload, 'resident_id'),
+                reason=_auto_settlement_reason(payload),
+                control_context=context,
+            ),
         ),
     )
 

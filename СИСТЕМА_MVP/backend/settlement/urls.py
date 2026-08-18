@@ -14,6 +14,9 @@ from .views import (
     settlement_auto_preview_apply_night_view,
     settlement_auto_preview_confirm_view,
     settlement_auto_preview_create_view,
+    settlement_auto_preview_exclude_view,
+    settlement_auto_preview_move_view,
+    settlement_auto_preview_restore_view,
     settlement_auto_state_view,
     settlement_login_view,
     settlement_manifest_view,
@@ -66,6 +69,21 @@ urlpatterns = [
         'clerk/settlement/auto/preview/confirm/',
         settlement_auto_preview_confirm_view,
         name='settlement_auto_preview_confirm',
+    ),
+    path(
+        'clerk/settlement/auto/preview/move/',
+        settlement_auto_preview_move_view,
+        name='settlement_auto_preview_move',
+    ),
+    path(
+        'clerk/settlement/auto/preview/exclude/',
+        settlement_auto_preview_exclude_view,
+        name='settlement_auto_preview_exclude',
+    ),
+    path(
+        'clerk/settlement/auto/preview/restore/',
+        settlement_auto_preview_restore_view,
+        name='settlement_auto_preview_restore',
     ),
     path(
         'clerk/settlement/auto/preview/apply/',

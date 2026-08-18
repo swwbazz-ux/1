@@ -1235,6 +1235,9 @@ class SettlementControlHttpLifecycleTests(
         urls = (
             reverse('settlement_auto_preview_create'),
             reverse('settlement_auto_preview_confirm'),
+            reverse('settlement_auto_preview_move'),
+            reverse('settlement_auto_preview_exclude'),
+            reverse('settlement_auto_preview_restore'),
             reverse('settlement_auto_preview_apply'),
             reverse('settlement_auto_preview_apply_night'),
             reverse('settlement_auto_preview_apply_day'),
@@ -1437,6 +1440,124 @@ class SettlementControlHttpLifecycleTests(
                 )
                 self.assertEqual(response.status_code, 409)
                 self.assertEqual(response.json()['code'], code)
+
+    def test_preview_corrections_use_fixed_actions_and_exact_server_context(self):
+        self.authenticate(self.client, self.clerk_access)
+        self.assertEqual(self.client.post(self.acquire_url).status_code, 200)
+        secret = str(uuid.uuid4())
+        fake_correction = mock.Mock(preview_run_id=71)
+        fake_run = mock.sentinel.correction_run
+        response_payload = {'id': 71, 'status': 'confirmed', 'effective_plan': {}}
+        cases = (
+            (
+                'settlement_auto_preview_move',
+                'move_settlement_preview_resident',
+                {
+                    'run_id': 71,
+                    'resident_id': 81,
+                    'target_calendar_slot_id': 91,
+                    'target_physical_bed_id': 101,
+                    'reason': 'Переставить в плане.',
+                },
+                {
+                    'run_id': 71,
+                    'resident_id': 81,
+                    'target_calendar_slot_id': 91,
+                    'target_physical_bed_id': 101,
+                    'reason': 'Переставить в плане.',
+                },
+            ),
+            (
+                'settlement_auto_preview_exclude',
+                'exclude_settlement_preview_resident',
+                {'run_id': 71, 'resident_id': 81, 'reason': 'Исключить из плана.'},
+                {'run_id': 71, 'resident_id': 81, 'reason': 'Исключить из плана.'},
+            ),
+            (
+                'settlement_auto_preview_restore',
+                'restore_settlement_preview_resident',
+                {'run_id': 71, 'resident_id': 81, 'reason': 'Вернуть решение.'},
+                {'run_id': 71, 'resident_id': 81, 'reason': 'Вернуть решение.'},
+            ),
+        )
+        spoofed = {
+            'action': 'restore',
+            'work_shift': 'night',
+            'source_placement_id': 999,
+            'source_unresolved_id': 999,
+            'correction_id': 999,
+            'watch_period_id': 999,
+            'cohort_id': 999,
+            'fingerprint': 'spoofed',
+            'owner_access_id': self.second_clerk_access.pk,
+            'employee_access_id': self.second_clerk_access.pk,
+            'lease_token': secret,
+            'fencing_revision': 999,
+            'raw_session_key': 'spoofed-session',
+            'session_binding': 'spoofed-binding',
+        }
+
+        for route_name, domain_name, payload, expected in cases:
+            queryset = mock.Mock()
+            queryset.get.return_value = fake_run
+            with (
+                mock.patch(
+                    f'settlement.views.{domain_name}',
+                    return_value=fake_correction,
+                ) as domain_call,
+                mock.patch(
+                    'settlement.views._auto_settlement_run_queryset',
+                    return_value=queryset,
+                ),
+                mock.patch(
+                    'settlement.views._auto_settlement_run_payload',
+                    return_value=response_payload,
+                ),
+            ):
+                response = self.client.post(
+                    reverse(route_name) + '?action=move&work_shift=day&revision=777',
+                    data=json.dumps({**spoofed, **payload}),
+                    content_type='application/json',
+                )
+
+            self.assertEqual(response.status_code, 200, response.content)
+            kwargs = domain_call.call_args.kwargs
+            context = kwargs.pop('control_context')
+            self.assertEqual(kwargs, expected)
+            self.assertEqual(context.owner_access_id, self.clerk_access.pk)
+            self.assertEqual(context.raw_session_key, self.client.session.session_key)
+            self.assertNotEqual(str(context.lease_token), secret)
+            rendered = response.content.decode()
+            self.assertNotIn(secret, rendered)
+            self.assertNotIn(context.raw_session_key, rendered)
+
+    def test_preview_correction_conflicts_are_controlled_and_do_not_retry(self):
+        self.authenticate(self.client, self.clerk_access)
+        self.assertEqual(self.client.post(self.acquire_url).status_code, 200)
+        for code in (
+            'settlement.preview_correction.shift_already_applied',
+            'settlement.preview_correction.stale_preview',
+            'settlement.preview_correction.target_conflict',
+            'settlement.preview_correction.target_invalid',
+        ):
+            with self.subTest(code=code), mock.patch(
+                'settlement.views.move_settlement_preview_resident',
+                side_effect=ValidationError('Контролируемый отказ.', code=code),
+            ) as domain_call:
+                response = self.client.post(
+                    reverse('settlement_auto_preview_move'),
+                    data=json.dumps({
+                        'run_id': 71,
+                        'resident_id': 81,
+                        'target_calendar_slot_id': 91,
+                        'target_physical_bed_id': 101,
+                        'reason': 'Проверить конфликт.',
+                    }),
+                    content_type='application/json',
+                )
+            self.assertEqual(response.status_code, 409)
+            self.assertEqual(response.json()['code'], code)
+            self.assertEqual(domain_call.call_count, 1)
 
     def test_auto_mutations_require_held_control_and_report_controlled_loss(self):
         self.authenticate(self.client, self.clerk_access)
@@ -1731,8 +1852,8 @@ class SettlementControlHttpLifecycleTests(
         self.assertContains(response, self.acquire_url)
         self.assertContains(response, self.heartbeat_url)
         self.assertContains(response, self.release_url)
-        self.assertEqual(response.content.count(b'-settlement-map-v32'), 2)
-        self.assertNotContains(response, '-settlement-map-v31')
+        self.assertEqual(response.content.count(b'-settlement-map-v34'), 2)
+        self.assertNotContains(response, '-settlement-map-v33')
         self.assertContains(response, 'data-auto-apply-night-url')
         self.assertContains(response, 'data-auto-apply-day-url')
         self.assertContains(response, 'Применить ночную смену')

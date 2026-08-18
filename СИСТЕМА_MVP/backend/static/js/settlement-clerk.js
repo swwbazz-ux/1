@@ -72,6 +72,14 @@
     var autoConfirmButton = root.querySelector("[data-auto-confirm]");
     var autoShiftActions = root.querySelector("[data-auto-shift-actions]");
     var autoShiftButtons = Array.from(root.querySelectorAll("[data-auto-apply-shift]"));
+    var mapModeButtons = Array.from(root.querySelectorAll("[data-map-mode]"));
+    var mapModePanels = Array.from(root.querySelectorAll("[data-map-mode-panel]"));
+    var planMap = root.querySelector("[data-plan-map]");
+    var planStatus = root.querySelector("[data-plan-status]");
+    var planLists = root.querySelector("[data-plan-lists]");
+    var planUnresolved = root.querySelector("[data-plan-unresolved]");
+    var planExcluded = root.querySelector("[data-plan-excluded]");
+    var planHistory = root.querySelector("[data-plan-history]");
     var unsettledPanelToggles = Array.from(root.querySelectorAll("[data-unsettled-panel-toggle]"));
     var unsettledPanel = root.querySelector("[data-unsettled-panel]");
     var unsettledPanelClose = root.querySelector("[data-unsettled-panel-close]");
@@ -98,6 +106,8 @@
     var autoStatePayload = null;
     var autoMutationInFlight = false;
     var autoReadSequence = 0;
+    var activeMapMode = "current";
+    var planDragSource = null;
     var controlHeld = false;
     var controlState = "free";
     var controlActionInFlight = false;
@@ -511,6 +521,12 @@
             room.classList.toggle("is-filter-muted", selectedFloor && !match);
             room.setAttribute("data-filter-match", String(match));
         });
+        root.querySelectorAll("[data-plan-room]").forEach(function (room) {
+            room.hidden = (
+                room.dataset.dormitory !== state.dormitory
+                || room.dataset.floor !== state.floor
+            );
+        });
         if (activeRoom && !selectedFloorRooms().includes(activeRoom)) closePanel();
         updateSelectionSummary();
     }
@@ -854,12 +870,6 @@
         autoFeedback.textContent = "";
         if (!message) return;
         autoFeedback.appendChild(element("strong", "", message));
-        if (code) {
-            var details = document.createElement("details");
-            details.appendChild(element("summary", "", "Техническая диагностика"));
-            details.appendChild(element("code", "", code));
-            autoFeedback.appendChild(details);
-        }
     }
 
     function autoSyncButtons() {
@@ -876,6 +886,7 @@
             var shiftState = preview && preview.shift_apply && preview.shift_apply[button.dataset.autoApplyShift];
             button.disabled = !canMutate || !shiftState || shiftState.status !== "ready";
         });
+        syncPlanInteractivity();
     }
 
     function autoSummaryCard(label, value, className) {
@@ -895,6 +906,198 @@
         if (!value) return "—";
         var parts = String(value).split("-");
         return parts.length === 3 ? parts[2] + "." + parts[1] + "." + parts[0] : value;
+    }
+
+    function setMapMode(mode) {
+        activeMapMode = mode === "next" ? "next" : "current";
+        mapModeButtons.forEach(function (button) {
+            var active = button.dataset.mapMode === activeMapMode;
+            button.classList.toggle("is-active", active);
+            button.setAttribute("aria-pressed", String(active));
+        });
+        mapModePanels.forEach(function (section) {
+            section.hidden = section.dataset.mapModePanel !== activeMapMode;
+        });
+        clearDragState();
+        clearPlanDragState();
+        if (activeMapMode === "next") {
+            loadAutoState(autoCohort && autoCohort.value, 0);
+        }
+    }
+
+    function planResidentCard(row) {
+        var card = element("article", "settlement-plan-resident");
+        card.dataset.planResident = String(row.resident.id);
+        card.dataset.planEditable = String(Boolean(row.editable));
+        card.dataset.planDraggable = String(Boolean(row.editable && !row.excluded));
+        card.dataset.planApplied = String(Boolean(row.shift_applied));
+        card.dataset.planResidentName = row.resident.name;
+        var heading = element("div", "settlement-plan-resident-heading");
+        heading.appendChild(element("strong", "", row.resident.name));
+        heading.appendChild(element("span", "settlement-plan-shift", row.work_shift_label));
+        card.appendChild(heading);
+        if (row.manually_changed) {
+            card.appendChild(element("small", "settlement-plan-manual", "Изменено вручную"));
+        }
+        if (row.original_place) {
+            card.appendChild(element("small", "", "Исходное место: " + row.original_place));
+        }
+        if (row.shift_applied) {
+            card.appendChild(element("small", "settlement-plan-readonly", "Смена уже применена. Используйте переселение на карте текущей вахты."));
+        }
+        var actions = element("div", "settlement-plan-resident-actions");
+        if (!row.shift_applied && !row.excluded) {
+            var exclude = element("button", "", "Исключить из плана");
+            exclude.type = "button";
+            exclude.dataset.planExclude = String(row.resident.id);
+            actions.appendChild(exclude);
+        }
+        if (row.can_restore) {
+            var restore = element("button", "", "Вернуть исходное решение");
+            restore.type = "button";
+            restore.dataset.planRestore = String(row.resident.id);
+            actions.appendChild(restore);
+        }
+        if (actions.children.length) card.appendChild(actions);
+        return card;
+    }
+
+    function renderPlanList(container, title, rows, kind) {
+        if (!container) return;
+        container.replaceChildren();
+        var section = element("section", "settlement-plan-side-list is-" + kind);
+        section.appendChild(element("h3", "", title));
+        if (!rows.length) {
+            section.appendChild(element("p", "settlement-plan-list-empty", "Список пуст."));
+        }
+        rows.forEach(function (row) {
+            var card = planResidentCard(row);
+            card.appendChild(element("p", "settlement-plan-reason", row.reason));
+            section.appendChild(card);
+        });
+        container.appendChild(section);
+    }
+
+    function renderPlanHistory(rows) {
+        if (!planHistory) return;
+        planHistory.replaceChildren();
+        var section = element("section", "settlement-plan-history");
+        section.appendChild(element("h3", "", "История точечных изменений"));
+        if (!rows.length) {
+            section.appendChild(element("p", "settlement-plan-list-empty", "Ручных изменений ещё нет."));
+        }
+        rows.forEach(function (row) {
+            var item = element("article", "settlement-plan-history-item");
+            item.appendChild(element("strong", "", row.action + " · " + row.resident));
+            item.appendChild(element("span", "", row.work_shift));
+            item.appendChild(element("span", "", row.previous_place + " → " + row.new_place));
+            item.appendChild(element("small", "", row.actor + " · " + new Date(row.created_at).toLocaleString("ru-RU")));
+            item.appendChild(element("p", "", "Причина: " + row.reason));
+            section.appendChild(item);
+        });
+        planHistory.appendChild(section);
+    }
+
+    function renderPlanMap(preview) {
+        if (!planMap) return;
+        planMap.replaceChildren();
+        var plan = preview && preview.effective_plan;
+        if (planLists) planLists.hidden = !plan;
+        if (!plan) {
+            if (planStatus) {
+                planStatus.textContent = preview && preview.status === "draft"
+                    ? "Подтвердите рассчитанный план, чтобы открыть плановую карту."
+                    : "Нет утверждённого состава заезда или подтверждённого плана.";
+            }
+            return;
+        }
+        if (planStatus) {
+            planStatus.textContent = controlHeld
+                ? "Переместить в плане: перетащите жильца на нужную койку и укажите причину."
+                : "План доступен для просмотра. Начните работу, чтобы вносить изменения.";
+        }
+        var placementsByBed = {};
+        plan.placements.forEach(function (row) {
+            placementsByBed[String(row.target_physical_bed_id)] = row;
+        });
+        plan.rooms.forEach(function (room) {
+            var roomCard = element("article", "settlement-plan-room");
+            roomCard.dataset.planRoom = room.stable_id;
+            roomCard.dataset.dormitory = room.dormitory;
+            roomCard.dataset.floor = String(room.floor);
+            roomCard.appendChild(element("h3", "", room.display));
+            var bedList = element("div", "settlement-plan-beds");
+            room.beds.forEach(function (bed) {
+                var bedNode = element("div", "settlement-plan-bed");
+                bedNode.dataset.planBed = bed.stable_id;
+                bedNode.dataset.targetCalendarSlotId = String(bed.target_calendar_slot_id || "");
+                bedNode.dataset.targetPhysicalBedId = String(bed.target_physical_bed_id || "");
+                bedNode.classList.toggle("is-unavailable", !bed.target_calendar_slot_id);
+                bedNode.appendChild(element("span", "settlement-plan-bed-label", "Койка " + bed.display));
+                var placement = placementsByBed[String(bed.target_physical_bed_id)];
+                if (placement) bedNode.appendChild(planResidentCard(placement));
+                bedList.appendChild(bedNode);
+            });
+            roomCard.appendChild(bedList);
+            planMap.appendChild(roomCard);
+        });
+        renderPlanList(planUnresolved, "Требуют проверки", plan.unresolved, "unresolved");
+        renderPlanList(planExcluded, "Исключены из плана", plan.excluded, "excluded");
+        renderPlanHistory(plan.history);
+        syncPlanInteractivity();
+        applyFilters();
+    }
+
+    function syncPlanInteractivity() {
+        root.querySelectorAll("[data-plan-resident]").forEach(function (card) {
+            var editable = card.dataset.planEditable === "true";
+            var allowed = controlHeld && editable && !autoMutationInFlight;
+            if (allowed && card.dataset.planDraggable === "true") {
+                card.setAttribute("draggable", "true");
+            } else {
+                card.removeAttribute("draggable");
+            }
+            card.querySelectorAll("button").forEach(function (button) {
+                button.disabled = !allowed;
+            });
+        });
+        root.querySelectorAll("[data-plan-bed]").forEach(function (bed) {
+            bed.classList.toggle(
+                "is-drop-disabled",
+                !controlHeld || autoMutationInFlight || !bed.dataset.targetCalendarSlotId
+            );
+        });
+    }
+
+    function clearPlanDragState() {
+        root.querySelectorAll(".is-plan-drag-source, .is-plan-drop-target").forEach(function (node) {
+            node.classList.remove("is-plan-drag-source", "is-plan-drop-target");
+        });
+        planDragSource = null;
+    }
+
+    function askPlanReason() {
+        var value = window.prompt("Причина изменения");
+        if (value === null) return null;
+        value = String(value).trim();
+        if (!value) {
+            if (planStatus) planStatus.textContent = "Причина изменения обязательна.";
+            return null;
+        }
+        return value;
+    }
+
+    function runPlanCorrection(url, payload) {
+        if (!controlHeld || autoMutationInFlight) return;
+        if (planStatus) planStatus.textContent = "Сохраняем точечное изменение…";
+        runAutoMutation(url, payload)
+            .then(function (body) {
+                if (!body) return null;
+                return loadAutoState(autoCohort && autoCohort.value, 0);
+            })
+            .catch(function (error) {
+                if (planStatus) planStatus.textContent = error.message || "Изменение не сохранено.";
+            });
     }
 
     function renderAutoShiftState(preview) {
@@ -947,7 +1150,6 @@
         summary.appendChild(autoSummaryCard("Участников", preview.member_count));
         summary.appendChild(autoSummaryCard("Размещено", preview.placement_count, "is-success"));
         summary.appendChild(autoSummaryCard("Без места", preview.unresolved_count, preview.unresolved_count ? "is-conflict" : ""));
-        summary.appendChild(autoSummaryCard("Диагностика", preview.diagnostic_id));
         autoStage.appendChild(summary);
         if (preview.stale) {
             autoSetFeedback("Результат устарел. Выполните расчёт заново.", "warning", "settlement.preview.stale_source");
@@ -971,21 +1173,17 @@
             var unresolved = element("section", "settlement-auto-list is-unresolved");
             unresolved.appendChild(element("h3", "", "Пока без места"));
             preview.unresolved.forEach(function (row) {
-                var code = row.reason_code;
                 var item = element("article", "settlement-auto-row");
                 var copy = element("div", "");
                 copy.appendChild(element("strong", "", autoResidentLabel(row.resident)));
-                copy.appendChild(element("span", "", autoReasonLabels[autoShortCode(code)] || "Требуется уточнение данных."));
-                var details = document.createElement("details");
-                details.appendChild(element("summary", "", "Техническая причина"));
-                details.appendChild(element("code", "", code));
-                copy.appendChild(details);
+                copy.appendChild(element("span", "", row.reason || "Требуется уточнение данных."));
                 item.appendChild(copy);
                 unresolved.appendChild(item);
             });
             autoResult.appendChild(unresolved);
         }
         renderAutoShiftState(preview);
+        renderPlanMap(preview);
         autoSyncButtons();
     }
 
@@ -995,6 +1193,7 @@
         if (autoEmpty) autoEmpty.hidden = payload.state !== "no_cohort";
         if (autoContent) autoContent.hidden = payload.state === "no_cohort";
         if (payload.state === "no_cohort") {
+            renderPlanMap(null);
             autoSyncButtons();
             return;
         }
@@ -1754,6 +1953,12 @@
         if (window.confirm(message)) submitRelease();
     }
 
+    mapModeButtons.forEach(function (button) {
+        button.addEventListener("click", function () {
+            setMapMode(button.dataset.mapMode);
+        });
+    });
+
     [
         ["[data-dorm-filter]", "dormitory", "dormFilter"],
         ["[data-floor-filter]", "floor", "floorFilter"]
@@ -1805,6 +2010,7 @@
     }
 
     root.addEventListener("dragstart", function (event) {
+        if (event.target.closest("[data-plan-resident]")) return;
         var handle = event.target.closest("[data-bed-drag-handle]");
         var bed = handle && handle.closest("[data-bed]");
         if (!controlHeld || !bed || !isTransferredBed(bed) || bed.dataset.occupied !== "true" || saving) {
@@ -1864,6 +2070,91 @@
     });
 
     root.addEventListener("dragend", clearDragState);
+
+    root.addEventListener("dragstart", function (event) {
+        var card = event.target.closest("[data-plan-resident]");
+        if (
+            !card
+            || !controlHeld
+            || autoMutationInFlight
+            || card.dataset.planDraggable !== "true"
+            || activeMapMode !== "next"
+        ) return;
+        planDragSource = card;
+        card.classList.add("is-plan-drag-source");
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData("text/plain", card.dataset.planResident);
+        event.dataTransfer.setData("application/x-settlement-plan-resident", card.dataset.planResident);
+    });
+
+    root.addEventListener("dragover", function (event) {
+        var target = event.target.closest("[data-plan-bed]");
+        if (
+            !target
+            || !planDragSource
+            || !controlHeld
+            || autoMutationInFlight
+            || activeMapMode !== "next"
+            || !target.dataset.targetCalendarSlotId
+            || target.contains(planDragSource)
+        ) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "move";
+        root.querySelectorAll(".is-plan-drop-target").forEach(function (node) {
+            if (node !== target) node.classList.remove("is-plan-drop-target");
+        });
+        target.classList.add("is-plan-drop-target");
+    });
+
+    root.addEventListener("drop", function (event) {
+        var target = event.target.closest("[data-plan-bed]");
+        if (
+            !target
+            || !planDragSource
+            || !controlHeld
+            || autoMutationInFlight
+            || activeMapMode !== "next"
+            || !target.dataset.targetCalendarSlotId
+            || target.contains(planDragSource)
+        ) return;
+        event.preventDefault();
+        var residentId = Number(planDragSource.dataset.planResident);
+        clearPlanDragState();
+        var reason = askPlanReason();
+        if (!reason) return;
+        runPlanCorrection(root.dataset.autoMoveUrl, {
+            run_id: autoStatePayload.preview.id,
+            resident_id: residentId,
+            target_calendar_slot_id: Number(target.dataset.targetCalendarSlotId),
+            target_physical_bed_id: Number(target.dataset.targetPhysicalBedId),
+            reason: reason
+        });
+    });
+
+    root.addEventListener("dragend", clearPlanDragState);
+
+    if (planLists) {
+        planLists.addEventListener("dragover", function (event) {
+            if (event.target.closest("[data-plan-bed]")) event.preventDefault();
+        });
+    }
+
+    root.addEventListener("click", function (event) {
+        var exclude = event.target.closest("[data-plan-exclude]");
+        var restore = event.target.closest("[data-plan-restore]");
+        if (!exclude && !restore) return;
+        if (!controlHeld || autoMutationInFlight || activeMapMode !== "next") return;
+        var reason = askPlanReason();
+        if (!reason) return;
+        runPlanCorrection(
+            exclude ? root.dataset.autoExcludeUrl : root.dataset.autoRestoreUrl,
+            {
+                run_id: autoStatePayload.preview.id,
+                resident_id: Number((exclude || restore).dataset[exclude ? "planExclude" : "planRestore"]),
+                reason: reason
+            }
+        );
+    });
 
     root.addEventListener("dblclick", function (event) {
         var handle = event.target.closest("[data-bed-photo-slot], [data-bed-hover-card]");
@@ -1963,6 +2254,7 @@
 
     restoreMapSelection();
     applyFilters();
+    setMapMode("current");
     initializeControlLifecycle();
     if (consumeAutoPreviewOpenOnce()) {
         setAutoPreviewModal(true);

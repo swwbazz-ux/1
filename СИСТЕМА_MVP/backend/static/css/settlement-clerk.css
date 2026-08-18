@@ -3148,3 +3148,327 @@ body.settlement-auto-preview-modal-open {
         grid-template-columns: 1fr;
     }
 }
+
+.settlement-map-modes {
+    display: inline-flex;
+    justify-self: start;
+    overflow: hidden;
+    border: var(--settlement-line) solid var(--admin-line);
+    border-radius: calc(8 * var(--settlement-density-unit));
+    background: var(--admin-panel-soft);
+    box-shadow: var(--admin-shadow);
+}
+
+.settlement-map-modes button {
+    min-height: var(--settlement-control-height);
+    padding: 0 calc(16 * var(--settlement-density-unit));
+    border: 0;
+    border-left: var(--settlement-line) solid var(--admin-line-soft);
+    background: transparent;
+    color: var(--admin-muted);
+    font: inherit;
+    font-size: calc(12 * var(--settlement-density-unit));
+    font-weight: 900;
+    cursor: pointer;
+}
+
+.settlement-map-modes button:first-child {
+    border-left: 0;
+}
+
+.settlement-map-modes button:hover,
+.settlement-map-modes button:focus-visible {
+    outline: 0;
+    color: var(--settlement-accent);
+}
+
+.settlement-map-modes button.is-active {
+    background: var(--settlement-accent);
+    color: #fff;
+}
+
+.settlement-page > .settlement-control-panel {
+    border: var(--settlement-line) solid var(--admin-line);
+    border-radius: calc(8 * var(--settlement-density-unit));
+    box-shadow: var(--admin-shadow);
+}
+
+.settlement-map-mode-panel {
+    display: grid;
+    gap: clamp(2px, .5dvh, calc(6 * var(--settlement-density-unit)));
+    min-height: 0;
+}
+
+.settlement-map-mode-panel[hidden] {
+    display: none;
+}
+
+.settlement-next-arrival {
+    display: grid;
+    gap: calc(8 * var(--settlement-density-unit));
+}
+
+.settlement-next-arrival-toolbar,
+.settlement-plan-status,
+.settlement-plan-map,
+.settlement-plan-side-list {
+    border: var(--settlement-line) solid var(--admin-line);
+    border-radius: calc(8 * var(--settlement-density-unit));
+    background: var(--admin-panel);
+    box-shadow: var(--admin-shadow);
+}
+
+.settlement-next-arrival-toolbar {
+    display: grid;
+    grid-template-columns: minmax(220px, 1fr) auto auto auto;
+    gap: calc(8 * var(--settlement-density-unit));
+    align-items: end;
+    padding: calc(8 * var(--settlement-density-unit));
+}
+
+.settlement-next-arrival-toolbar > div:first-child {
+    display: grid;
+    gap: calc(2 * var(--settlement-density-unit));
+}
+
+.settlement-next-arrival-toolbar > div:first-child h2 {
+    margin: 0;
+    color: var(--admin-ink);
+    font-size: calc(14 * var(--settlement-density-unit));
+}
+
+.settlement-next-arrival-toolbar > div:first-child span,
+.settlement-plan-status small,
+.settlement-plan-empty,
+.settlement-plan-list-empty {
+    color: var(--admin-muted);
+    font-size: calc(11 * var(--settlement-density-unit));
+    line-height: 1.35;
+}
+
+.settlement-plan-status {
+    display: grid;
+    gap: calc(3 * var(--settlement-density-unit));
+    padding: calc(10 * var(--settlement-density-unit));
+    border-left: calc(4 * var(--settlement-density-unit)) solid var(--admin-gray);
+}
+
+.settlement-plan-status[data-state="ready"] {
+    border-left-color: var(--admin-green);
+}
+
+.settlement-plan-status[data-state="readonly"] {
+    border-left-color: var(--admin-orange);
+}
+
+.settlement-plan-lists {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: calc(8 * var(--settlement-density-unit));
+    align-items: start;
+}
+
+.settlement-plan-lists[hidden] {
+    display: none;
+}
+
+.settlement-plan-map {
+    display: grid;
+    gap: calc(10 * var(--settlement-density-unit));
+    min-width: 0;
+    padding: calc(10 * var(--settlement-density-unit));
+}
+
+.settlement-plan-room {
+    display: grid;
+    gap: calc(7 * var(--settlement-density-unit));
+    min-width: 0;
+    padding: calc(8 * var(--settlement-density-unit));
+    border: var(--settlement-line) solid var(--admin-line-soft);
+    border-radius: calc(7 * var(--settlement-density-unit));
+    background: var(--admin-panel-soft);
+}
+
+.settlement-plan-room[hidden] {
+    display: none;
+}
+
+.settlement-plan-room > header {
+    display: flex;
+    gap: calc(8 * var(--settlement-density-unit));
+    align-items: baseline;
+    justify-content: space-between;
+}
+
+.settlement-plan-room > header strong {
+    color: var(--admin-ink);
+    font-size: calc(13 * var(--settlement-density-unit));
+}
+
+.settlement-plan-beds {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: calc(7 * var(--settlement-density-unit));
+}
+
+.settlement-plan-bed {
+    display: grid;
+    gap: calc(5 * var(--settlement-density-unit));
+    min-height: calc(88 * var(--settlement-density-unit));
+    padding: calc(7 * var(--settlement-density-unit));
+    border: var(--settlement-line) dashed var(--admin-line);
+    border-radius: calc(6 * var(--settlement-density-unit));
+    background: var(--admin-panel);
+}
+
+.settlement-plan-bed.is-drop-target {
+    border-color: var(--settlement-accent);
+    background: var(--settlement-accent-soft);
+}
+
+.settlement-plan-bed > span {
+    color: var(--admin-muted);
+    font-size: calc(10 * var(--settlement-density-unit));
+    font-weight: 900;
+}
+
+.settlement-plan-resident {
+    display: grid;
+    gap: calc(4 * var(--settlement-density-unit));
+    padding: calc(7 * var(--settlement-density-unit));
+    border: var(--settlement-line) solid var(--admin-line-soft);
+    border-radius: calc(6 * var(--settlement-density-unit));
+    background: var(--admin-panel);
+    color: var(--admin-ink);
+}
+
+.settlement-plan-resident[draggable="true"] {
+    cursor: grab;
+}
+
+.settlement-plan-resident.is-dragging {
+    opacity: .5;
+}
+
+.settlement-plan-resident.is-manually-changed {
+    border-color: var(--settlement-accent);
+    box-shadow: inset calc(3 * var(--settlement-density-unit)) 0 0 var(--settlement-accent);
+}
+
+.settlement-plan-resident strong {
+    font-size: calc(12 * var(--settlement-density-unit));
+}
+
+.settlement-plan-resident small,
+.settlement-plan-history small {
+    color: var(--admin-muted);
+    font-size: calc(10 * var(--settlement-density-unit));
+    line-height: 1.35;
+}
+
+.settlement-plan-resident-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: calc(5 * var(--settlement-density-unit));
+}
+
+.settlement-plan-resident-actions button {
+    min-height: calc(28 * var(--settlement-density-unit));
+    padding: 0 calc(8 * var(--settlement-density-unit));
+    border: var(--settlement-line) solid var(--admin-line);
+    border-radius: calc(5 * var(--settlement-density-unit));
+    background: var(--admin-panel-soft);
+    color: var(--admin-ink);
+    font: inherit;
+    font-size: calc(10 * var(--settlement-density-unit));
+    font-weight: 900;
+    cursor: pointer;
+}
+
+.settlement-plan-resident-actions button:hover:not(:disabled),
+.settlement-plan-resident-actions button:focus-visible:not(:disabled) {
+    outline: 0;
+    border-color: var(--settlement-accent);
+    color: var(--settlement-accent);
+}
+
+.settlement-plan-resident-actions button:disabled {
+    cursor: not-allowed;
+    opacity: .5;
+}
+
+.settlement-plan-side {
+    display: grid;
+    gap: calc(8 * var(--settlement-density-unit));
+}
+
+.settlement-plan-side-list {
+    display: grid;
+    gap: calc(7 * var(--settlement-density-unit));
+    padding: calc(9 * var(--settlement-density-unit));
+}
+
+.settlement-plan-side-list > header {
+    display: flex;
+    gap: calc(8 * var(--settlement-density-unit));
+    align-items: center;
+    justify-content: space-between;
+}
+
+.settlement-plan-side-list > header h3,
+.settlement-plan-side-list > h3,
+.settlement-plan-history > h3 {
+    margin: 0;
+    color: var(--admin-ink);
+    font-size: calc(13 * var(--settlement-density-unit));
+}
+
+.settlement-plan-list-items,
+.settlement-plan-history {
+    display: grid;
+    gap: calc(6 * var(--settlement-density-unit));
+}
+
+.settlement-plan-history article {
+    display: grid;
+    gap: calc(2 * var(--settlement-density-unit));
+    padding-top: calc(6 * var(--settlement-density-unit));
+    border-top: var(--settlement-line) solid var(--admin-line-soft);
+}
+
+@media (max-width: 980px) {
+    .settlement-next-arrival-toolbar {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .settlement-plan-lists {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 720px) {
+    .settlement-map-modes {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        width: 100%;
+    }
+
+    .settlement-map-modes button {
+        padding: 0 calc(8 * var(--settlement-density-unit));
+    }
+
+    .settlement-page > .settlement-control-panel,
+    .settlement-next-arrival-toolbar {
+        grid-template-columns: minmax(0, 1fr);
+        align-items: stretch;
+    }
+
+    .settlement-control-actions {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .settlement-plan-lists {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}

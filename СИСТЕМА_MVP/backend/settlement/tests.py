@@ -4702,13 +4702,27 @@ class SettlementMapAccessTests(TestCase):
         self.assertIn('data-room-panel', content)
         self.assertIn('data-settlement-form', content)
         self.assertIn('data-employee-search', content)
-        self.assertEqual(content.count('-settlement-map-v33'), 2)
+        self.assertEqual(content.count('-settlement-map-v34'), 2)
+        self.assertNotIn('-settlement-map-v33', content)
         self.assertNotIn('-settlement-map-v31', content)
         self.assertNotIn('-settlement-map-v28', content)
         self.assertNotIn('-settlement-map-v24', content)
         self.assertIn('data-relocate-button', content)
         self.assertIn('data-release-button', content)
         self.assertIn('data-assignment-end-input', content)
+        self.assertIn('data-map-mode="current"', content)
+        self.assertIn('data-map-mode="next"', content)
+        self.assertIn('Текущая вахта', content)
+        self.assertIn('Следующий заезд', content)
+        self.assertIn('data-map-mode-panel="current"', content)
+        self.assertIn('data-map-mode-panel="next"', content)
+        self.assertIn('data-plan-map', content)
+        self.assertIn('data-plan-unresolved', content)
+        self.assertIn('data-plan-excluded', content)
+        self.assertIn('data-plan-history', content)
+        self.assertIn('data-auto-move-url=', content)
+        self.assertIn('data-auto-exclude-url=', content)
+        self.assertIn('data-auto-restore-url=', content)
         self.assertNotIn('data-dorm-filter="all"', content)
         self.assertNotIn('data-floor-filter="all"', content)
         self.assertNotIn('data-status-filter', content)
@@ -8105,6 +8119,52 @@ class SettlementFrontendContractTests(TestCase):
         self.assertIn('.clerk-workplace-screen .app-confirm-modal', stylesheet)
         self.assertIn('z-index: 1300', stylesheet)
         self.assertIn('min-height:', stylesheet)
+
+    def test_next_arrival_assets_keep_plan_and_actual_maps_separate(self):
+        javascript_path = finders.find('js/settlement-clerk.js')
+        stylesheet_path = finders.find('css/settlement-clerk.css')
+        template_path = (
+            Path(__file__).resolve().parents[1]
+            / 'templates' / 'settlement' / 'clerk_map.html'
+        )
+        javascript = Path(javascript_path).read_text(encoding='utf-8')
+        stylesheet = Path(stylesheet_path).read_text(encoding='utf-8')
+        template = template_path.read_text(encoding='utf-8')
+
+        for visible_text in (
+            'Текущая вахта',
+            'Следующий заезд',
+            'Исключить из плана',
+            'Вернуть исходное решение',
+            'Причина изменения',
+            'Изменено вручную',
+            'Дневная смена',
+            'Ночная смена',
+        ):
+            self.assertIn(visible_text, template + javascript)
+        self.assertIn('data-map-mode-panel="current"', template)
+        self.assertIn('data-map-mode-panel="next"', template)
+        self.assertIn('data-plan-map', template)
+        self.assertIn('id="settlement-map-list"', template)
+        self.assertIn('root.dataset.autoMoveUrl', javascript)
+        self.assertIn('root.dataset.autoExcludeUrl', javascript)
+        self.assertIn('root.dataset.autoRestoreUrl', javascript)
+        self.assertIn('window.prompt("Причина изменения")', javascript)
+        self.assertIn('if (value === null) return null;', javascript)
+        self.assertIn('if (!value) {', javascript)
+        self.assertIn('activeMapMode !== "next"', javascript)
+        self.assertIn('if (event.target.closest("[data-plan-resident]")) return;', javascript)
+        self.assertIn('application/x-settlement-plan-resident', javascript)
+        self.assertIn('var allowed = controlHeld && editable && !autoMutationInFlight;', javascript)
+        self.assertIn('card.dataset.planDraggable === "true"', javascript)
+        self.assertIn('renderPlanMap(preview);', javascript)
+        self.assertIn('return loadAutoState(autoCohort && autoCohort.value, 0);', javascript)
+        self.assertNotIn('beforeunload', javascript)
+        self.assertNotIn('settlementControlAcquireUrl)', javascript)
+        self.assertIn('.settlement-plan-map', stylesheet)
+        self.assertIn('.settlement-plan-resident.is-manually-changed', stylesheet)
+        self.assertEqual(template.count('settlement-map-v34'), 2)
+        self.assertNotIn('settlement-map-v33', template)
 
 
 class AutoSettlementPreviewTests(TestCase):
@@ -13089,7 +13149,7 @@ class AutoSettlementM7M8HttpTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
-        self.assertEqual(payload['occupancy']['resident_id'], self.candidate_resident.pk)
+        self.assertNotIn('occupancy', payload)
         self.assertEqual([row['id'] for row in payload['cohorts']], [approved.pk])
         self.assertEqual(payload['selected_cohort_id'], approved.pk)
         self.assertIsNone(payload['preview'])
@@ -13114,7 +13174,7 @@ class AutoSettlementM7M8HttpTests(TestCase):
         self.assertEqual(draft['placement_count'], 1)
         self.assertEqual(draft['unresolved_count'], 1)
         self.assertEqual(draft['placements'][0]['source'], 'position')
-        self.assertTrue(draft['unresolved'][0]['reason_code'])
+        self.assertTrue(draft['unresolved'][0]['reason'])
 
         confirmed = self.client.post(
             reverse('settlement_auto_preview_confirm'),
@@ -13148,6 +13208,154 @@ class AutoSettlementM7M8HttpTests(TestCase):
         )
         self.assertFalse(SettlementPreviewApplication.objects.exists())
         self.assertFalse(EmployeeBedOccupancy._base_manager.exists())
+
+    def test_http_plan_corrections_update_effective_plan_without_occupancy_writes(self):
+        cohort = self._prepared_cohort()
+        target_slot = self._slot(2, 1)
+        created = self.client.post(
+            reverse('settlement_auto_preview_create'),
+            data={'cohort_id': cohort.pk},
+            content_type='application/json',
+        )
+        run_id = created.json()['preview']['id']
+        confirmed = self.client.post(
+            reverse('settlement_auto_preview_confirm'),
+            data={'run_id': run_id},
+            content_type='application/json',
+        )
+        self.assertEqual(confirmed.status_code, 200, confirmed.content)
+        run = SettlementPreviewRun.objects.get(pk=run_id)
+        placement = run.placements.get()
+        occupancy_before = EmployeeBedOccupancy._base_manager.count()
+        secret = str(uuid.uuid4())
+        spoofed = {
+            'action': 'restore',
+            'work_shift': 'night',
+            'source_placement_id': 999999,
+            'source_unresolved_id': 999999,
+            'correction_id': 999999,
+            'owner_access_id': 999999,
+            'lease_token': secret,
+            'fencing_revision': 999999,
+            'session_binding': 'spoofed-session',
+            'fingerprint': 'spoofed-fingerprint',
+        }
+
+        moved = self.client.post(
+            reverse('settlement_auto_preview_move'),
+            data={
+                **spoofed,
+                'run_id': run_id,
+                'resident_id': placement.resident_id,
+                'target_calendar_slot_id': target_slot.pk,
+                'target_physical_bed_id': self.beds[2][1].pk,
+                'reason': 'Переместить в плане после проверки.',
+            },
+            content_type='application/json',
+        )
+        self.assertEqual(moved.status_code, 200, moved.content)
+        effective = moved.json()['preview']['effective_plan']
+        moved_row = next(
+            row for row in effective['placements']
+            if row['resident']['id'] == placement.resident_id
+        )
+        self.assertTrue(moved_row['manually_changed'])
+        self.assertEqual(moved_row['target_physical_bed_id'], self.beds[2][1].pk)
+        self.assertTrue(moved_row['original_place'])
+        self.assertEqual(len(effective['history']), 1)
+
+        excluded = self.client.post(
+            reverse('settlement_auto_preview_exclude'),
+            data={
+                **spoofed,
+                'run_id': run_id,
+                'resident_id': placement.resident_id,
+                'reason': 'Исключить из будущего плана.',
+            },
+            content_type='application/json',
+        )
+        self.assertEqual(excluded.status_code, 200, excluded.content)
+        effective = excluded.json()['preview']['effective_plan']
+        self.assertEqual(
+            [row['resident']['id'] for row in effective['excluded']],
+            [placement.resident_id],
+        )
+        self.assertTrue(effective['excluded'][0]['can_restore'])
+
+        restored = self.client.post(
+            reverse('settlement_auto_preview_restore'),
+            data={
+                **spoofed,
+                'run_id': run_id,
+                'resident_id': placement.resident_id,
+                'reason': 'Вернуть исходное решение.',
+            },
+            content_type='application/json',
+        )
+        self.assertEqual(restored.status_code, 200, restored.content)
+        effective = restored.json()['preview']['effective_plan']
+        restored_row = next(
+            row for row in effective['placements']
+            if row['resident']['id'] == placement.resident_id
+        )
+        self.assertFalse(restored_row['manually_changed'])
+        self.assertEqual(
+            restored_row['target_physical_bed_id'],
+            placement.physical_bed_id,
+        )
+        self.assertEqual(len(effective['history']), 3)
+        self.assertEqual(
+            EmployeeBedOccupancy._base_manager.count(),
+            occupancy_before,
+        )
+        serialized = restored.content.decode()
+        for forbidden in (
+            secret, 'lease_token', 'fencing_revision', 'owner_access_id',
+            'employee_access_id', 'session_binding', 'fingerprint',
+            'source_snapshot', 'correction_id', 'phone',
+            'official_assignment_id', 'source_crew_plan_slot_id',
+        ):
+            self.assertNotIn(forbidden, serialized)
+
+    def test_http_correction_of_applied_shift_is_controlled(self):
+        cohort = self._prepared_cohort(include_unresolved=False)
+        created = self.client.post(
+            reverse('settlement_auto_preview_create'),
+            data={'cohort_id': cohort.pk},
+            content_type='application/json',
+        )
+        run_id = created.json()['preview']['id']
+        confirmed = self.client.post(
+            reverse('settlement_auto_preview_confirm'),
+            data={'run_id': run_id},
+            content_type='application/json',
+        )
+        resident_id = SettlementPreviewRun.objects.get(pk=run_id).placements.get().resident_id
+        with (
+            mock.patch('settlement.apply._validate_apply_date'),
+            mock.patch('settlement.views.timezone.localdate', return_value=self.period.starts_on),
+        ):
+            applied = self.client.post(
+                reverse('settlement_auto_preview_apply_day'),
+                data={'run_id': run_id},
+                content_type='application/json',
+            )
+        self.assertEqual(applied.status_code, 200, applied.content)
+
+        response = self.client.post(
+            reverse('settlement_auto_preview_exclude'),
+            data={
+                'run_id': run_id,
+                'resident_id': resident_id,
+                'reason': 'Попытка изменить применённую смену.',
+            },
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 409, response.content)
+        self.assertEqual(
+            response.json()['code'],
+            'settlement.preview_correction.shift_already_applied',
+        )
 
     def test_http_day_apply_uses_server_date_and_is_idempotent(self):
         cohort = self._prepared_cohort(include_unresolved=False)
