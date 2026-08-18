@@ -1305,14 +1305,16 @@
         }
         relocationSourceBed = sourceBed;
         selectedEmployee = {
-            id: Number(sourceBed.dataset.occupantId),
+            id: Number(sourceBed.dataset.residentId),
+            resident_id: Number(sourceBed.dataset.residentId),
+            employee_id: Number(sourceBed.dataset.occupantId),
             full_name: sourceBed.dataset.occupantName,
             personnel_number: "Не указано",
             shift_label: sourceBed.dataset.shiftLabel,
             work_label: sourceBed.dataset.workLabel
         };
-        if (!selectedEmployee.id) {
-            showFeedback("Не удалось определить сотрудника текущего размещения.", true);
+        if (!Number(sourceBed.dataset.occupancyId) || !selectedEmployee.id) {
+            showFeedback("Не удалось определить точное текущее размещение.", true);
             resetRelocation();
             return;
         }
@@ -1565,10 +1567,13 @@
 
     function updateMapAfterSettlement(payload) {
         var occupancy = payload.occupancy;
-        var movedEmployeeId = selectedEmployee && selectedEmployee.id;
+        var movedEmployeeId = occupancy.employee_id;
+        var movedResidentId = occupancy.resident_id;
         clearDragState();
         if (relocationSourceBed) {
             relocationSourceBed.dataset.occupied = "false";
+            relocationSourceBed.dataset.occupancyId = "";
+            relocationSourceBed.dataset.residentId = "";
             relocationSourceBed.dataset.occupantId = "";
             relocationSourceBed.dataset.occupantName = "";
             relocationSourceBed.dataset.occupantPhotoUrl = "";
@@ -1581,6 +1586,8 @@
             renderMapBed(relocationSourceBed);
         }
         selectedBed.dataset.occupied = "true";
+        selectedBed.dataset.occupancyId = String(occupancy.id || "");
+        selectedBed.dataset.residentId = String(movedResidentId || "");
         selectedBed.dataset.occupantId = String(movedEmployeeId || "");
         selectedBed.dataset.occupantName = occupancy.occupant_name;
         selectedBed.dataset.occupantPhotoUrl = occupancy.photo_url || "";
@@ -1610,6 +1617,10 @@
 
     function submitPlacement() {
         if (!controlHeld || !selectedBed || !selectedEmployee || !assignmentType.value || saving) return;
+        if (relocationSourceBed && !Number(relocationSourceBed.dataset.occupancyId)) {
+            showFeedback("Не удалось определить точное текущее размещение.", true);
+            return;
+        }
         saving = true;
         updateSettleButton();
         showFeedback("Сохраняем заселение…", false);
@@ -1622,10 +1633,14 @@
                 "X-CSRFToken": csrfToken(),
                 "X-Requested-With": "XMLHttpRequest"
             },
-            body: JSON.stringify({
-                action: relocationSourceBed ? "relocate" : "settle",
+            body: JSON.stringify(relocationSourceBed ? {
+                action: "relocate",
+                occupancy_id: Number(relocationSourceBed.dataset.occupancyId),
+                bed_stable_id: selectedBed.dataset.bedId
+            } : {
+                action: "settle",
+                resident_id: selectedEmployee.id,
                 bed_stable_id: selectedBed.dataset.bedId,
-                employee_id: selectedEmployee.id,
                 assignment_type: assignmentType.value,
                 ends_at: assignmentEndInput && assignmentEndInput.value
                     ? new Date(assignmentEndInput.value).toISOString()
@@ -1682,6 +1697,11 @@
 
     function submitRelease() {
         if (!controlHeld || !selectedBed || selectedBed.dataset.occupied !== "true" || saving) return;
+        var occupancyId = Number(selectedBed.dataset.occupancyId);
+        if (!occupancyId) {
+            showFeedback("Не удалось определить точное текущее размещение.", true);
+            return;
+        }
         saving = true;
         if (releaseButton) releaseButton.disabled = true;
         if (relocateButton) relocateButton.disabled = true;
@@ -1696,7 +1716,7 @@
             },
             body: JSON.stringify({
                 action: "release",
-                bed_stable_id: selectedBed.dataset.bedId
+                occupancy_id: occupancyId
             })
         })
             .then(function (response) {

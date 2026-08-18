@@ -67,10 +67,16 @@ def _eligible_official_assignments(*, employee_id, period):
     )
 
 
-def _internal_shift_source(*, resident, period, assignment_id):
+def resolve_internal_official_shift_source(
+    *,
+    resident,
+    period,
+    expected_assignment_id=None,
+    require_expected_assignment=False,
+):
     if not resident.employee_id:
         raise _shift_review_required('внутренний жилец не связан с Employee.')
-    if assignment_id is None:
+    if require_expected_assignment and expected_assignment_id is None:
         raise _shift_review_required('не указано точное официальное назначение.')
     assignments = _eligible_official_assignments(
         employee_id=resident.employee_id,
@@ -81,7 +87,10 @@ def _internal_shift_source(*, resident, period, assignment_id):
             'на начало WatchPeriod требуется ровно одно официальное назначение.',
         )
     assignment = assignments[0]
-    if assignment.pk != assignment_id:
+    if (
+        expected_assignment_id is not None
+        and assignment.pk != expected_assignment_id
+    ):
         raise _shift_review_required('переданное назначение не является единственным действующим.')
     slot = assignment.source_crew_plan_slot
     if (
@@ -124,6 +133,15 @@ def _internal_shift_source(*, resident, period, assignment_id):
         'shift_selected_at': None,
         'shift_selection_basis': '',
     }
+
+
+def _internal_shift_source(*, resident, period, assignment_id):
+    return resolve_internal_official_shift_source(
+        resident=resident,
+        period=period,
+        expected_assignment_id=assignment_id,
+        require_expected_assignment=True,
+    )
 
 
 def _external_shift_source(*, work_shift, access_id, basis, selected_at=None, for_update=True):

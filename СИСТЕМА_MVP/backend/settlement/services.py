@@ -1,9 +1,9 @@
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, router, transaction
-from django.db.models import Count, Exists, OuterRef, Q, Subquery
+from django.db.models import Count, Exists, F, OuterRef, Q, Subquery
 from django.utils import timezone
 
 from core.production_time import production_work_date
@@ -17,8 +17,12 @@ from .models import (
     EmployeeBedOccupancy,
     PhysicalBed,
     PhysicalRoom,
+    SettlementCohortMember,
+    SettlementPreviewApplication,
+    SettlementPreviewRun,
     SettlementResident,
 )
+from .cohorts import resolve_internal_official_shift_source
 from .control import (
     SettlementControlWriteContext,
     lock_settlement_write_access,
@@ -472,6 +476,191 @@ def _normalized_resident_id(resident_id):
     return resident_id
 
 
+def _normalized_occupancy_id(occupancy_id):
+    if (
+        isinstance(occupancy_id, bool)
+        or not isinstance(occupancy_id, int)
+        or occupancy_id <= 0
+    ):
+        raise _settlement_error(
+            'Размещение не найдено.',
+            'settlement.manual.occupancy_not_found',
+        )
+    return occupancy_id
+
+
+def _manual_application_snapshot(*, resident_id, moment, using):
+    today = timezone.localdate(moment)
+    return tuple(
+        SettlementPreviewApplication._base_manager.using(using)
+        .filter(
+            legacy_whole_run=False,
+            preview_run__status=SettlementPreviewRun.Status.CONFIRMED,
+            watch_period__is_active=True,
+            cohort__members__resident_id=resident_id,
+            cohort__members__participation_status__in=(
+                SettlementCohortMember.ACTIVE_PARTICIPATION_STATUSES
+            ),
+            cohort__members__work_shift=F('work_shift'),
+        )
+        .filter(
+            Q(
+                work_shift=SettlementCohortMember.WorkShift.DAY,
+                watch_period__starts_on__lte=today,
+                watch_period__ends_on__gte=today,
+            )
+            | Q(
+                work_shift=SettlementCohortMember.WorkShift.NIGHT,
+                watch_period__starts_on__lte=today + timedelta(days=1),
+                watch_period__ends_on__gte=today,
+            )
+        )
+        .values_list(
+            'pk', 'watch_period_id', 'cohort_id', 'preview_run_id',
+            'work_shift', 'cohort__members__pk',
+        )
+        .order_by('pk')
+    )
+
+
+def _lock_manual_application_context(
+    *,
+    resident,
+    application_snapshot,
+    moment,
+    using,
+):
+    if not resident.employee_id:
+        raise _settlement_error(
+            'Ручное заселение внешнего жильца ещё не подключено.',
+            'settlement.manual.external_unavailable',
+        )
+    if not application_snapshot:
+        raise _settlement_error(
+            'Соответствующая смена ещё не применена.',
+            'settlement.manual.shift_not_applied',
+        )
+    if len(application_snapshot) != 1:
+        raise _settlement_error(
+            'Требуется проверка периода вахты.',
+            'settlement.manual.period_ambiguous',
+        )
+
+    application_id, period_id, _cohort_id, _run_id, work_shift, member_id = (
+        application_snapshot[0]
+    )
+    period = (
+        WatchPeriod.objects.using(using)
+        .select_for_update(of=('self',))
+        .get(pk=period_id)
+    )
+    application = (
+        SettlementPreviewApplication._base_manager.using(using)
+        .select_for_update(of=('self',))
+        .get(pk=application_id)
+    )
+    if _manual_application_snapshot(
+        resident_id=resident.pk,
+        moment=moment,
+        using=using,
+    ) != application_snapshot:
+        raise _settlement_error(
+            'Состояние применённой смены изменилось. Повторите действие.',
+            'settlement.manual.period_stale',
+        )
+    member = (
+        SettlementCohortMember._base_manager.using(using)
+        .select_related('resident')
+        .get(pk=member_id)
+    )
+    source = resolve_internal_official_shift_source(
+        resident=resident,
+        period=period,
+        expected_assignment_id=member.official_equipment_assignment_id,
+        require_expected_assignment=True,
+    )
+    if (
+        source['work_shift'] != work_shift
+        or member.resident_id != resident.pk
+        or member.cohort_id != application.cohort_id
+        or member.work_shift != application.work_shift
+        or member.shift_source_fingerprint != source['shift_source_fingerprint']
+    ):
+        raise _settlement_error(
+            'Требуется проверка официальной смены сотрудника.',
+            'settlement.cohort.shift_review_required',
+        )
+    return application, period, member, source
+
+
+def _occupancy_snapshot_by_id(*, occupancy_id, using):
+    snapshot = (
+        EmployeeBedOccupancy._base_manager.using(using)
+        .filter(pk=occupancy_id)
+        .values_list(
+            'pk', 'resident_id', 'physical_bed_id', 'watch_period_id',
+            'cohort_member_id', 'work_shift', 'shift_source_kind',
+            'shift_source_fingerprint', 'shift_official_assignment_id',
+            'source_application_id', 'starts_at', 'ends_at', 'terminated_at',
+            'ended_at', 'replaced_by_application_id', 'replaced_by_occupancy_id',
+        )
+        .first()
+    )
+    if snapshot is None:
+        raise _settlement_error(
+            'Размещение не найдено.',
+            'settlement.manual.occupancy_not_found',
+        )
+    return snapshot
+
+
+def _lock_occupancy_context_rows(*, snapshot, using):
+    period_id = snapshot[3]
+    application_id = snapshot[9]
+    if period_id is not None:
+        WatchPeriod.objects.using(using).select_for_update(of=('self',)).get(pk=period_id)
+    if application_id is not None:
+        SettlementPreviewApplication._base_manager.using(using).select_for_update(
+            of=('self',),
+        ).get(pk=application_id)
+
+
+def _official_manual_source_for_occupancy(*, occupancy, resident):
+    if (
+        occupancy.work_shift not in SettlementCohortMember.WorkShift.values
+        or occupancy.watch_period_id is None
+        or occupancy.shift_source_kind
+        == EmployeeBedOccupancy.ShiftSourceKind.UNVERIFIED_LEGACY
+    ):
+        raise _settlement_error(
+            'Историческое размещение без проверенной смены нельзя переселить.',
+            'settlement.manual.legacy_relocation_forbidden',
+        )
+    if not resident.employee_id:
+        raise _settlement_error(
+            'Ручное переселение внешнего жильца ещё не подключено.',
+            'settlement.manual.external_unavailable',
+        )
+    expected_assignment_id = occupancy.shift_official_assignment_id
+    if expected_assignment_id is None and occupancy.cohort_member_id is not None:
+        expected_assignment_id = occupancy.cohort_member.official_equipment_assignment_id
+    source = resolve_internal_official_shift_source(
+        resident=resident,
+        period=occupancy.watch_period,
+        expected_assignment_id=expected_assignment_id,
+        require_expected_assignment=True,
+    )
+    if (
+        source['work_shift'] != occupancy.work_shift
+        or source['shift_source_fingerprint'] != occupancy.shift_source_fingerprint
+    ):
+        raise _settlement_error(
+            'Требуется проверка официальной смены сотрудника.',
+            'settlement.cohort.shift_review_required',
+        )
+    return source
+
+
 def _resident_id_for_employee(*, employee_id, using):
     employee_id = _normalized_employee_id(employee_id)
     _employee_exists(employee_id=employee_id, using=using)
@@ -534,12 +723,7 @@ def _locked_rooms(*room_ids, using):
     return {room.pk: room for room in rooms}
 
 
-def _validate_resident_and_destination(*, resident, room):
-    if room.transfer_status != PhysicalRoom.TransferStatus.TRANSFERRED:
-        raise _settlement_error(
-            'Комната не передана для расселения.',
-            'settlement_room_not_transferred',
-        )
+def _validate_resident_state(*, resident):
     if resident.status != SettlementResident.Status.ACTIVE:
         raise _settlement_error(
             'Для заселения доступен только активный жилец.',
@@ -552,6 +736,15 @@ def _validate_resident_and_destination(*, resident, room):
                 'Для заселения доступен только активный сотрудник.',
                 'settlement_employee_inactive',
             )
+
+
+def _validate_resident_and_destination(*, resident, room):
+    if room.transfer_status != PhysicalRoom.TransferStatus.TRANSFERRED:
+        raise _settlement_error(
+            'Комната не передана для расселения.',
+            'settlement_room_not_transferred',
+        )
+    _validate_resident_state(resident=resident)
     _validate_room_sex_restriction(resident=resident, room=room)
 
 
@@ -635,6 +828,13 @@ def _create_occupancy(
     source_preview_placement=None,
     watch_period=None,
     cohort_member=None,
+    work_shift=None,
+    shift_source_kind=EmployeeBedOccupancy.ShiftSourceKind.UNVERIFIED_LEGACY,
+    shift_source_fingerprint='',
+    shift_official_assignment=None,
+    shift_selected_by_access=None,
+    shift_selected_at=None,
+    shift_selection_basis='',
 ):
     return EmployeeBedOccupancy.objects.using(using).create(
         resident=resident,
@@ -645,6 +845,13 @@ def _create_occupancy(
         source_preview_placement=source_preview_placement,
         watch_period=watch_period,
         cohort_member=cohort_member,
+        work_shift=work_shift,
+        shift_source_kind=shift_source_kind,
+        shift_source_fingerprint=shift_source_fingerprint,
+        shift_official_assignment=shift_official_assignment,
+        shift_selected_by_access=shift_selected_by_access,
+        shift_selected_at=shift_selected_at,
+        shift_selection_basis=shift_selection_basis,
         settled_at=starts_at,
         starts_at=starts_at,
         ends_at=ends_at,
@@ -674,6 +881,12 @@ def settle_resident_on_bed(
             require_active=False,
             using=using,
         )
+        moment = timezone.now()
+        application_snapshot = _manual_application_snapshot(
+            resident_id=resident_id,
+            moment=moment,
+            using=using,
+        )
         bed_snapshot = _bed_snapshot(
             bed_stable_id=bed_stable_id,
             using=using,
@@ -696,6 +909,13 @@ def settle_resident_on_bed(
             locked_employees=locked_rows.employees,
         )
         resident = resident_rows.resident_by_id(resident_id)
+        _validate_resident_state(resident=resident)
+        _application, period, member, shift_source = _lock_manual_application_context(
+            resident=resident,
+            application_snapshot=application_snapshot,
+            moment=moment,
+            using=using,
+        )
 
         bed_id = bed_snapshot['pk']
         bed = _locked_beds(bed_id, using=using)[bed_id]
@@ -709,7 +929,6 @@ def settle_resident_on_bed(
             )
         room = _locked_rooms(bed.room_id, using=using)[bed.room_id]
         _validate_resident_and_destination(resident=resident, room=room)
-        moment = timezone.now()
         _validate_assignment_interval(
             assignment_type=assignment_type,
             starts_at=moment,
@@ -743,6 +962,18 @@ def settle_resident_on_bed(
                     ends_at=ends_at,
                     settled_by=settled_by,
                     using=using,
+                    watch_period=period,
+                    cohort_member=member,
+                    work_shift=shift_source['work_shift'],
+                    shift_source_kind=(
+                        EmployeeBedOccupancy.ShiftSourceKind.OFFICIAL_ASSIGNMENT
+                    ),
+                    shift_source_fingerprint=(
+                        shift_source['shift_source_fingerprint']
+                    ),
+                    shift_official_assignment=(
+                        shift_source['official_equipment_assignment']
+                    ),
                 )
         except IntegrityError as error:
             if EmployeeBedOccupancy.objects.using(using).filter(
@@ -769,10 +1000,8 @@ def settle_resident_on_bed(
 def relocate_resident_to_bed(
     *,
     bed_stable_id,
-    resident_id,
-    assignment_type,
+    occupancy_id,
     control_context=None,
-    ends_at=None,
 ):
     using = router.db_for_write(EmployeeBedOccupancy)
     with transaction.atomic(using=using):
@@ -780,63 +1009,25 @@ def relocate_resident_to_bed(
             control_context=control_context,
             using=using,
         )
-        resident_id = _normalized_resident_id(resident_id)
+        occupancy_id = _normalized_occupancy_id(occupancy_id)
+        occupancy_snapshot = _occupancy_snapshot_by_id(
+            occupancy_id=occupancy_id,
+            using=using,
+        )
+        resident_id = occupancy_snapshot[1]
+        current_bed_id = occupancy_snapshot[2]
         resident_plan = build_settlement_resident_lock_plan(
             resident_ids=(resident_id,),
             require_active=False,
             using=using,
         )
         moment = timezone.now()
-        active_occupancies = list(
-            EmployeeBedOccupancy.objects.using(using)
-            .filter(effective_occupancy_at_q(moment), resident_id=resident_id)
-            .values('pk', 'physical_bed_id')
-            .order_by('pk')
-        )
-        future_auto = False
-        if not active_occupancies:
-            active_occupancies = list(
-                EmployeeBedOccupancy.objects.using(using)
-                .filter(
-                    resident_id=resident_id,
-                    source_kind=EmployeeBedOccupancy.SourceKind.AUTO,
-                    starts_at__gt=moment,
-                    terminated_at__isnull=True,
-                )
-                .values('pk', 'physical_bed_id')
-                .order_by('pk')
-            )
-            future_auto = bool(active_occupancies)
-        current_occupancy_id = (
-            active_occupancies[0]['pk']
-            if len(active_occupancies) == 1
-            else None
-        )
-        current_bed_id = (
-            active_occupancies[0]['physical_bed_id']
-            if len(active_occupancies) == 1
-            else None
-        )
         target_bed_snapshot = _bed_snapshot(
             bed_stable_id=bed_stable_id,
             using=using,
         )
         target_bed_id = target_bed_snapshot['pk']
-
-        bed_snapshots = {
-            row['pk']: row
-            for row in (
-                PhysicalBed.objects.using(using)
-                .filter(pk__in=tuple(
-                    bed_id
-                    for bed_id in (current_bed_id, target_bed_id)
-                    if bed_id is not None
-                ))
-                .values('pk', 'room_id', 'stable_id')
-                .order_by('pk')
-            )
-        }
-        occupancy_snapshot = _related_occupancy_snapshot(
+        related_snapshot = _related_occupancy_snapshot(
             resident_id=resident_id,
             bed_ids=(target_bed_id,),
             using=using,
@@ -854,200 +1045,158 @@ def relocate_resident_to_bed(
             locked_employees=locked_rows.employees,
         )
         resident = resident_rows.resident_by_id(resident_id)
-
-        if not active_occupancies:
-            raise _settlement_error(
-                'У сотрудника нет действующего размещения для переселения.',
-                'settlement_employee_not_housed',
-            )
-        if len(active_occupancies) != 1:
-            raise _settlement_error(
-                'У сотрудника найдено несколько действующих размещений.',
-                'settlement_employee_multiple_active_occupancies',
-            )
+        _lock_occupancy_context_rows(snapshot=occupancy_snapshot, using=using)
         if target_bed_id == current_bed_id:
             raise _settlement_error(
                 'Нельзя переселить сотрудника на то же койко-место.',
                 'settlement_relocation_same_bed',
             )
-        if current_bed_id not in bed_snapshots:
-            raise _settlement_error(
-                'Состояние размещения изменилось. Повторите действие.',
-                'settlement_occupancy_changed',
-            )
-
         beds = _locked_beds(current_bed_id, target_bed_id, using=using)
-        if any(
-            bed.room_id != bed_snapshots[bed.pk]['room_id']
-            or bed.stable_id != bed_snapshots[bed.pk]['stable_id']
-            for bed in beds.values()
-        ):
+        target_bed = beds[target_bed_id]
+        if target_bed.stable_id != target_bed_snapshot['stable_id']:
             raise _settlement_error(
                 'Состояние размещения изменилось. Повторите действие.',
                 'settlement_occupancy_changed',
             )
-        target_bed = beds[target_bed_id]
         rooms = _locked_rooms(
             *(bed.room_id for bed in beds.values()),
             using=using,
         )
         target_room = rooms[target_bed.room_id]
         _validate_resident_and_destination(resident=resident, room=target_room)
-        _validate_assignment_interval(
-            assignment_type=assignment_type,
-            starts_at=moment,
-            ends_at=ends_at,
-        )
         persisted_occupancies = _locked_related_occupancies(
             resident_id=resident.pk,
             bed_ids=(target_bed.pk,),
             using=using,
         )
-        if _occupancy_identity(persisted_occupancies) != occupancy_snapshot:
+        if _occupancy_identity(persisted_occupancies) != related_snapshot:
             raise _settlement_error(
                 'Состояние размещения изменилось. Повторите действие.',
                 'settlement_occupancy_changed',
             )
-        active_occupancies = [
-            occupancy
-            for occupancy in persisted_occupancies
-            if occupancy.resident_id == resident.pk
-            and (
-                occupancy.pk == current_occupancy_id
-                if future_auto
-                else occupancy.is_active_at(moment)
-            )
-        ]
-        if not active_occupancies:
-            raise _settlement_error(
-                'У сотрудника нет действующего размещения для переселения.',
-                'settlement_employee_not_housed',
-            )
-        if len(active_occupancies) != 1:
-            raise _settlement_error(
-                'У сотрудника найдено несколько действующих размещений.',
-                'settlement_employee_multiple_active_occupancies',
-            )
-        current_occupancy = active_occupancies[0]
+        current_occupancy = next(
+            (row for row in persisted_occupancies if row.pk == occupancy_id),
+            None,
+        )
         if (
-            current_occupancy.pk != current_occupancy_id
-            or current_occupancy.physical_bed_id != current_bed_id
+            current_occupancy is None
+            or _occupancy_snapshot_by_id(occupancy_id=occupancy_id, using=using)
+            != occupancy_snapshot
         ):
             raise _settlement_error(
-                'Состояние размещения изменилось. Повторите действие.',
-                'settlement_occupancy_changed',
+                'Размещение изменилось или уже закрыто.',
+                'settlement.manual.occupancy_stale',
             )
-        if current_occupancy.starts_at >= moment and not future_auto:
+        if not current_occupancy.is_active_at(moment):
+            raise _settlement_error(
+                'Размещение изменилось или уже закрыто.',
+                'settlement.manual.occupancy_stale',
+            )
+        if current_occupancy.starts_at >= moment:
             raise _settlement_error(
                 'Переселение невозможно в момент начала текущего размещения.',
                 'settlement_relocation_same_moment',
             )
+        shift_source = _official_manual_source_for_occupancy(
+            occupancy=current_occupancy,
+            resident=resident,
+        )
+        _validate_assignment_interval(
+            assignment_type=current_occupancy.assignment_type,
+            starts_at=moment,
+            ends_at=current_occupancy.ends_at,
+        )
         _validate_occupancy_conflicts(
             resident_id=resident.pk,
             bed=target_bed,
-            starts_at=(current_occupancy.starts_at if future_auto else moment),
-            ends_at=(current_occupancy.ends_at if future_auto else ends_at),
+            starts_at=moment,
+            ends_at=current_occupancy.ends_at,
             persisted_occupancies=persisted_occupancies,
             current_occupancy_id=current_occupancy.pk,
         )
 
-        if not future_auto:
-            current_occupancy.terminated_at = moment
-            current_occupancy.save(update_fields=['terminated_at'])
+        current_occupancy.terminated_at = moment
+        current_occupancy.save(update_fields=['terminated_at'])
         occupancy = _create_occupancy(
             resident=resident,
             bed=target_bed,
-            assignment_type=assignment_type,
-            starts_at=(current_occupancy.starts_at if future_auto else moment),
-            ends_at=(current_occupancy.ends_at if future_auto else ends_at),
+            assignment_type=current_occupancy.assignment_type,
+            starts_at=moment,
+            ends_at=current_occupancy.ends_at,
             settled_by=settled_by,
             using=using,
             watch_period=current_occupancy.watch_period,
             cohort_member=current_occupancy.cohort_member,
+            work_shift=current_occupancy.work_shift,
+            shift_source_kind=EmployeeBedOccupancy.ShiftSourceKind.OFFICIAL_ASSIGNMENT,
+            shift_source_fingerprint=shift_source['shift_source_fingerprint'],
+            shift_official_assignment=shift_source['official_equipment_assignment'],
         )
-        if future_auto:
-            current_occupancy.replaced_by_occupancy = occupancy
-            current_occupancy.save(update_fields=['replaced_by_occupancy'])
+        current_occupancy.replaced_by_occupancy = occupancy
+        current_occupancy.save(update_fields=['replaced_by_occupancy'])
 
     return occupancy
 
 
-def release_resident_from_bed(*, bed_stable_id, control_context=None):
+def release_resident_from_bed(
+    *,
+    occupancy_id,
+    bed_stable_id=None,
+    control_context=None,
+):
     using = router.db_for_write(EmployeeBedOccupancy)
     with transaction.atomic(using=using):
         lease = lock_settlement_write_lease(
             control_context=control_context,
             using=using,
         )
-        bed_snapshot = _bed_snapshot(
-            bed_stable_id=bed_stable_id,
+        occupancy_id = _normalized_occupancy_id(occupancy_id)
+        occupancy_snapshot = _occupancy_snapshot_by_id(
+            occupancy_id=occupancy_id,
             using=using,
         )
-        bed_id = bed_snapshot['pk']
+        resident_id = occupancy_snapshot[1]
+        bed_id = occupancy_snapshot[2]
+        resident_plan = build_settlement_resident_lock_plan(
+            resident_ids=(resident_id,),
+            require_active=False,
+            using=using,
+        )
         moment = timezone.now()
-        occupancy_snapshot = tuple(
-            EmployeeBedOccupancy.objects.using(using)
-            .filter(effective_occupancy_at_q(moment), physical_bed_id=bed_id)
-            .values_list('pk', 'resident_id', 'physical_bed_id')
-            .order_by('pk')
-        )
-        planned_resident_ids = tuple(sorted({
-            resident_id
-            for _, resident_id, _ in occupancy_snapshot
-        }))
-        resident_plan = (
-            build_settlement_resident_lock_plan(
-                resident_ids=planned_resident_ids,
-                require_active=False,
-                using=using,
-            )
-            if planned_resident_ids
-            else None
-        )
         locked_rows = lock_settlement_write_access(
             lease=lease,
             control_context=control_context,
-            employee_ids=resident_plan.employee_ids if resident_plan else (),
+            employee_ids=resident_plan.employee_ids,
             using=using,
         )
-        if resident_plan:
-            lock_settlement_residents_after_access(
-                resident_plan,
-                locked_employees=locked_rows.employees,
-            )
+        lock_settlement_residents_after_access(
+            resident_plan,
+            locked_employees=locked_rows.employees,
+        )
+        _lock_occupancy_context_rows(snapshot=occupancy_snapshot, using=using)
 
         bed = _locked_beds(bed_id, using=using)[bed_id]
-        if (
-            bed.stable_id != bed_snapshot['stable_id']
-            or bed.room_id != bed_snapshot['room_id']
-        ):
+        if bed_stable_id not in (None, '', str(bed.stable_id), bed.stable_id):
             raise _settlement_error(
                 'Состояние размещения изменилось. Повторите действие.',
                 'settlement_occupancy_changed',
             )
         _locked_rooms(bed.room_id, using=using)
-        active_occupancies = list(
-            EmployeeBedOccupancy.objects.using(using)
+        occupancy = (
+            EmployeeBedOccupancy._base_manager.using(using)
             .select_for_update(of=('self',))
-            .filter(effective_occupancy_at_q(moment), physical_bed=bed)
-            .order_by('pk')
+            .filter(pk=occupancy_id)
+            .first()
         )
-        if not active_occupancies:
+        if (
+            occupancy is None
+            or _occupancy_snapshot_by_id(occupancy_id=occupancy_id, using=using)
+            != occupancy_snapshot
+            or not occupancy.is_active_at(moment)
+        ):
             raise _settlement_error(
-                'Койко-место уже свободно.',
-                'settlement_bed_already_free',
-            )
-        if len(active_occupancies) != 1:
-            raise _settlement_error(
-                'Для койко-места найдено несколько действующих размещений.',
-                'settlement_bed_multiple_active_occupancies',
-            )
-        occupancy = active_occupancies[0]
-        locked_snapshot = _occupancy_identity(active_occupancies)
-        if locked_snapshot != occupancy_snapshot:
-            raise _settlement_error(
-                'Состояние размещения изменилось. Повторите действие.',
-                'settlement_occupancy_changed',
+                'Размещение изменилось или уже закрыто.',
+                'settlement.manual.occupancy_stale',
             )
         if occupancy.starts_at >= moment:
             raise _settlement_error(
@@ -1082,24 +1231,24 @@ def settle_employee_on_bed(
 def relocate_employee_to_bed(
     *,
     bed_stable_id,
-    employee_id,
-    assignment_type,
+    occupancy_id,
     control_context=None,
-    ends_at=None,
 ):
-    using = router.db_for_write(EmployeeBedOccupancy)
-    resident_id = _resident_id_for_employee(employee_id=employee_id, using=using)
     return relocate_resident_to_bed(
         bed_stable_id=bed_stable_id,
-        resident_id=resident_id,
-        assignment_type=assignment_type,
+        occupancy_id=occupancy_id,
         control_context=control_context,
-        ends_at=ends_at,
     )
 
 
-def release_employee_from_bed(*, bed_stable_id, control_context=None):
+def release_employee_from_bed(
+    *,
+    occupancy_id,
+    bed_stable_id=None,
+    control_context=None,
+):
     return release_resident_from_bed(
+        occupancy_id=occupancy_id,
         bed_stable_id=bed_stable_id,
         control_context=control_context,
     )

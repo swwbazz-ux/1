@@ -51,9 +51,9 @@ from .services import (
     current_roster_resolution,
     build_auto_settlement_preview,
     effective_occupancy_at_q,
-    relocate_employee_to_bed,
-    release_employee_from_bed,
-    settle_employee_on_bed,
+    relocate_resident_to_bed,
+    release_resident_from_bed,
+    settle_resident_on_bed,
     unsettled_current_roster_employees,
 )
 
@@ -702,12 +702,16 @@ def settlement_employee_search_view(request):
     employees = list(
         unsettled_current_roster_employees(moment)
         .filter(
-            Q(full_name__icontains=query)
-            | Q(personnel_number__icontains=query)
-            | Q(position__icontains=query)
-            | Q(personnel_position__name__icontains=query)
+            Q(
+                Q(full_name__icontains=query)
+                | Q(personnel_number__icontains=query)
+                | Q(position__icontains=query)
+                | Q(personnel_position__name__icontains=query)
+            ),
+            settlement_resident__resident_type='EMPLOYEE',
+            settlement_resident__status='ACTIVE',
         )
-        .select_related('personnel_position')
+        .select_related('personnel_position', 'settlement_resident')
         .order_by('full_name', 'pk')[:12]
     )
     profiles = _employee_profiles(employees)
@@ -715,7 +719,9 @@ def settlement_employee_search_view(request):
         'ok': True,
         'results': [
             {
-                'id': employee.pk,
+                'id': employee.settlement_resident.pk,
+                'resident_id': employee.settlement_resident.pk,
+                'employee_id': employee.pk,
                 'full_name': employee.full_name,
                 'personnel_number': employee.personnel_number or UNKNOWN_LABEL,
                 'shift_label': profiles[employee.pk]['shift_label'],
@@ -1339,6 +1345,8 @@ def _occupancy_response(occupancy):
         'ok': True,
         'occupancy': {
             'id': occupancy.pk,
+            'resident_id': resident.pk,
+            'employee_id': resident.employee_id,
             'bed_stable_id': bed.stable_id,
             'occupant_name': resident.display_name,
             'photo_url': photo_url,
@@ -1407,24 +1415,23 @@ def settlement_occupancy_create_view(request):
     action = payload.get('action', 'settle')
     try:
         if action == 'settle':
-            occupancy = settle_employee_on_bed(
+            occupancy = settle_resident_on_bed(
                 bed_stable_id=payload.get('bed_stable_id', ''),
-                employee_id=payload.get('employee_id'),
+                resident_id=payload.get('resident_id'),
                 assignment_type=payload.get('assignment_type', ''),
                 ends_at=_payload_ends_at(payload),
                 control_context=control_context,
             )
         elif action == 'relocate':
-            occupancy = relocate_employee_to_bed(
+            occupancy = relocate_resident_to_bed(
                 bed_stable_id=payload.get('bed_stable_id', ''),
-                employee_id=payload.get('employee_id'),
-                assignment_type=payload.get('assignment_type', ''),
-                ends_at=_payload_ends_at(payload),
+                occupancy_id=payload.get('occupancy_id'),
                 control_context=control_context,
             )
         elif action == 'release':
-            occupancy = release_employee_from_bed(
-                bed_stable_id=payload.get('bed_stable_id', ''),
+            occupancy = release_resident_from_bed(
+                occupancy_id=payload.get('occupancy_id'),
+                bed_stable_id=payload.get('bed_stable_id'),
                 control_context=control_context,
             )
         else:
@@ -1449,10 +1456,22 @@ def settlement_occupancy_create_view(request):
             'settlement_relocation_same_bed',
             'settlement_relocation_same_moment',
             'settlement_release_same_moment',
+            'settlement.manual.shift_not_applied',
+            'settlement.manual.period_ambiguous',
+            'settlement.manual.period_stale',
+            'settlement.manual.legacy_relocation_forbidden',
+            'settlement.manual.occupancy_stale',
+            'settlement.manual.external_unavailable',
+            'settlement.cohort.shift_review_required',
             'settlement_employee_sex_unknown',
             'settlement_room_sex_mismatch',
         } else 400
-        if code in {'settlement_bed_not_found', 'settlement_employee_not_found'}:
+        if code in {
+            'settlement_bed_not_found',
+            'settlement_employee_not_found',
+            'settlement_resident_not_found',
+            'settlement.manual.occupancy_not_found',
+        }:
             status = 404
         return JsonResponse(
             {'ok': False, 'error': message, 'code': code},

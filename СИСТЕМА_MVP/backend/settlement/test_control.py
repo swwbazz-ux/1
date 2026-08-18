@@ -18,8 +18,9 @@ from django.urls import Resolver404, resolve, reverse
 from django.utils import timezone
 
 from references.models import Dormitory
+from shifts.models import WatchPeriod
 from users import employee_access_locks
-from users.models import Employee, EmployeeAccess, Role
+from users.models import Employee, EmployeeAccess, Role, WatchComposition
 
 from . import control as control_module
 from . import residents as settlement_residents
@@ -49,6 +50,7 @@ from .services import (
     settle_employee_on_bed,
 )
 from . import services as settlement_services
+from .tests import _create_manual_shift_application
 
 
 class SettlementControlFixtureMixin:
@@ -1843,6 +1845,19 @@ class SettlementControlledWriterTests(
     @classmethod
     def setUpTestData(cls):
         cls.create_control_fixtures()
+        cls.watch_composition = WatchComposition.objects.create(
+            code='control-writer-composition',
+            name='Control writer composition',
+            is_active=True,
+        )
+        today = timezone.localdate()
+        cls.watch_period = WatchPeriod.objects.create(
+            name='Control writer period',
+            watch_composition=cls.watch_composition,
+            starts_on=today,
+            ends_on=today + timedelta(days=14),
+            is_active=True,
+        )
         cls.same_employee_access = EmployeeAccess.objects.create(
             employee=cls.clerk_access.employee,
             role=cls.clerk_role,
@@ -1854,6 +1869,7 @@ class SettlementControlledWriterTests(
             full_name='Control writer subject',
             personnel_number='CONTROL-WRITER-SUBJECT',
             sex=Employee.Sex.MALE,
+            watch_composition=cls.watch_composition,
             status=Employee.Status.ACTIVE,
             is_active=True,
         )
@@ -1868,6 +1884,7 @@ class SettlementControlledWriterTests(
             full_name='Control writer unrelated subject',
             personnel_number='CONTROL-WRITER-UNRELATED',
             sex=Employee.Sex.MALE,
+            watch_composition=cls.watch_composition,
             status=Employee.Status.ACTIVE,
             is_active=True,
         )
@@ -1877,6 +1894,14 @@ class SettlementControlledWriterTests(
             status=SettlementResident.Status.ACTIVE,
             external_sex=None,
             created_by_access=cls.clerk_access,
+        )
+        cls.manual_context = _create_manual_shift_application(
+            resident=cls.subject_resident,
+            period=cls.watch_period,
+            actor=cls.clerk_access.employee,
+            access=cls.clerk_access,
+            suffix='control-writer',
+            additional_residents=(cls.unrelated_resident,),
         )
         cls.dormitory = Dormitory.objects.create(number='CONTROL-WRITER')
         cls.first_room = PhysicalRoom.objects.create(
@@ -1982,12 +2007,11 @@ class SettlementControlledWriterTests(
             lambda: self.settle(control_context=None),
             lambda: relocate_employee_to_bed(
                 bed_stable_id=self.second_bed.stable_id,
-                employee_id=self.subject.pk,
-                assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
+                occupancy_id=1,
                 control_context=None,
             ),
             lambda: release_employee_from_bed(
-                bed_stable_id=self.first_bed.stable_id,
+                occupancy_id=1,
                 control_context=None,
             ),
         )
@@ -2337,9 +2361,11 @@ class SettlementControlledWriterTests(
                 self.assertIn('control_context', parameters)
                 self.assertNotIn('settled_by', parameters)
                 adapter_source = inspect.getsource(adapter)
-                if adapter is not release_employee_from_bed:
+                if adapter is settle_employee_on_bed:
                     self.assertIn('_resident_id_for_employee(', adapter_source)
                     self.assertNotIn('get_or_create', adapter_source)
+                else:
+                    self.assertIn('occupancy_id=occupancy_id', adapter_source)
                 source = inspect.getsource(writer)
                 positions = tuple(
                     source.index(fragment)
