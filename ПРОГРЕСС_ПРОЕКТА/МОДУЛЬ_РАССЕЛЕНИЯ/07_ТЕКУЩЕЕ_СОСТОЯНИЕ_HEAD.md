@@ -1,9 +1,9 @@
 # Текущее состояние реализации settlement
 
-Версия документа: 0.5
+Версия документа: 0.6
 Дата последней сверки отчётов: 18.08.2026
-Статус: актуализирован по clean HEAD `7c21f3ec4248ad216e9cdb323ac207b0f3e0ffab`; migration leaf — `settlement.0014_m8_apply_provenance`
-Источники доказательств: принятые M4–M8, control-контур, whole-run HTTP/UI workflow и нормативное решение ADR-031; production в этой актуализации не проверялась
+Статус: актуализирован по clean HEAD `c52ae35f2a204556320541cfa989e4d2e71b2725`; migration leaves — `assignments.0007_equipment_assignment_provenance` и `settlement.0016_shift_scoped_apply_and_occupancy`
+Источники доказательств: принятые M4–M8, официальный источник смены, раздельное применение ночной и дневной смены, ручной сменный контур и нормативное решение ADR-031; production в этой актуализации не проверялась и не объявляется равной локальному HEAD
 
 ## 1. Репозиторий и baseline
 
@@ -16,13 +16,15 @@
 | Служебная синхронизация v0.4 | `31f09903ca8682e9e8635ca1b593e8dbd0d394cf` |
 | Предыдущий baseline документации v0.3 | `aba37c44e39b6f6f3bc0ab2caa51d9dae4c4ed9c` |
 | Кодовый baseline | `e71dc4e0b7ca26c0402e6e2ac990c8cae5fd1d1b` |
-| Текущий base HEAD | `5ad6a1bd4203371d6a8ef9b032f5645ab081cf0a` |
-| Рабочее дерево | Принятый локальный M8: четыре modified code/test-файла и два новых файла `apply.py`/migration `0014`; документационная актуализация выполняется поверх него |
-| Целевые M6/M7/M8/migration tests | 74/74 PASS; непосредственно затронутые occupancy tests 85/85 PASS; SQLite `0013 ↔ 0014` PASS |
-| origin/main | Ahead 29, behind 0; локальная цепочка не опубликована |
-| Публикация | Push/merge/deploy не выполнялись |
+| Текущий локальный HEAD | `c52ae35f2a204556320541cfa989e4d2e71b2725` |
+| Ветка | `main` |
+| Рабочее дерево до документальных изменений | Чистое; staged/unstaged/untracked = 0/0/0 |
+| Migration leaves | `assignments.0007_equipment_assignment_provenance`; `settlement.0016_shift_scoped_apply_and_occupancy` |
+| Версия ресурсов карты | `settlement-map-v33` |
+| origin/main | Ahead 6, behind 0 |
+| Публикация | Шесть текущих локальных commits не pushed/deployed; production не объявляется равной локальному HEAD |
 
-После прежнего checkpoint реализованы control-контур, M4 calendar slots/bindings (`0008`), M5 authoritative cohorts (`0009`), общий `SettlementResident` (`0010`), resident transitions M4/M5/occupancy (`0011`/`0013`), M6 resolver, M7 saved preview (`0012`) и backend M8 Apply с provenance (`0014`). Migration `0014` проверена только в изолированной SQLite-среде и не объявляется применённой к production. Локальная цепочка не опубликована в `origin/main`.
+После прежнего checkpoint реализованы официальный источник смены (`assignments.0007`), структурированная смена участника состава (`settlement.0015`), независимое применение ночной и дневной смены, сменная идентичность фактического проживания (`settlement.0016`), две команды интерфейса и серверная классификация ручного проживания. Эти изменения находятся только в локальной цепочке из шести commits и не объявляются опубликованными или развёрнутыми в production.
 
 Резервный patch до ADR-014: SHA-256 `8D34729F75247EEFCE37535F35C1CE8D7D0C4D8CC7ABAE3997A956821C6BBC47`.
 
@@ -78,20 +80,20 @@
 | `SettlementSource/SettlementRevision` | Источники и версии с сильной ORM-защитой | READY/PARTIAL |
 | `AccommodationAnchor` | Типы equipment/function/reserve/group/service/protected; Equipment→Anchor = 1:N | PARTIAL |
 | `AccommodationAnchorBedAssignment` | Версионированная interval-связь anchor→bed; публичные mass-write API запрещены | PARTIAL |
-| `EmployeeBedOccupancy` | Canonical интервалы, manual lifecycle; публичные mass-write API запрещены | PARTIAL |
+| `EmployeeBedOccupancy` | Subject — `SettlementResident`; смена и неизменяемое происхождение ручных и автоматических записей; исторические строки без смены сохраняются | READY/PARTIAL |
 | `SettlementResident` | Единый subject: internal wrapper Employee и внешняя карточка без Employee/Access/Role/PIN | READY |
 | `AccommodationAnchorCalendarSlot/EmployeeAccommodationBinding` | M4 реализован; binding ссылается на resident, actor/audit остаются Employee | READY |
-| `SettlementCohort/SettlementCohortMember` | M5 реализован; member ссылается на resident, APPROVED overlap проверяется по resident | READY |
+| `SettlementCohort/SettlementCohortMember` | M5 реализован; member ссылается на resident, хранит структурированную смену и доказуемое происхождение, APPROVED overlap проверяется по resident | READY |
 | `build_auto_settlement_preview()` | Узкий GET-only in-memory preview по EquipmentAssignment | PARTIAL/CONTRADICTED |
 | `settle_employee_on_bed()` | Атомарный ручной writer | PARTIAL |
 | `relocate_employee_to_bed()` | Атомарный ручной перенос | PARTIAL |
 | release | Досрочное прекращение через `terminated_at` | PARTIAL |
 | Карта/панели/drawer/DnD | Рабочий ручной интерфейс | READY/PARTIAL |
-| Применение предварительного плана | Сохранённый run, backend service, HTTP/UI whole-run workflow и immutable Application history реализованы | READY/PARTIAL: нет раздельного применения смен |
+| Применение предварительного плана | Один утверждённый план применяется независимо по ночной и дневной смене; отдельные Application и неизменяемая история | READY |
 | `SettlementControlLease/SettlementControlEvent` | Schema, migration `0007` и bootstrap FREE singleton присутствуют в репозитории | PRESENT |
 | Control lifecycle | Внутренние ensure/acquire/heartbeat/release/expire, HMAC session binding, token/fencing и audit events реализованы | PRESENT |
 | Административный takeover | Внутренняя атомарная команда с обязательной причиной и fencing реализована | PRESENT |
-| Settlement write gate | Manual occupancy writers и whole-run применение требуют server-side control context и общий кадровый lock plan | READY |
+| Settlement write gate | Ручные writers и каждое сменное применение требуют server-side control context и общий кадровый lock plan | READY |
 | Control HTTP/session integration | Lifecycle и credentials привязаны к server-side session; browser payload не получает secrets | READY |
 | Control UI integration | Панель управления, heartbeat, read-only режим и потеря lease реализованы; административный takeover остаётся отдельным контуром | READY/PARTIAL |
 
@@ -137,9 +139,9 @@ Legacy `ended_at` в runtime activity больше не участвует.
 
 `CrewPlan` имеет work date, role, revision, status, version и publication metadata. `CrewPlanSlot` хранит equipment, shift, employee и `baseline_employee`.
 
-`publish_crew_plan()` закрывает старые и создаёт новые accepted `EquipmentAssignment`, но новый EquipmentAssignment не хранит FK на CrewPlan или его ревизию. Provenance публикации теряется.
+`publish_crew_plan()` закрывает прежние и создаёт новые принятые `EquipmentAssignment` с `source_kind=deputy_published_plan` и точным `source_crew_plan_slot`. Миграция `assignments.0007_equipment_assignment_provenance` помечает старые и ручные назначения как `unverified` без угадывания происхождения.
 
-`EquipmentAssignment` не хранит provenance опубликованного CrewPlan и сам по себе не является сохранённым жилищным основанием. Целевая версия допускает использовать текущий опубликованный контекст только при создании первого binding с обязательным snapshot; такого механизма в HEAD нет.
+Официальное происхождение нельзя установить через публичные `save`, `create`, `bulk_create`, `update` или `bulk_update`; доверенный внутренний путь публикации повторно проверяет сотрудника, технику, роль, смену и статус плана. История прежнего назначения не переписывается.
 
 ### 4.6. Вахта и приезд
 
@@ -151,7 +153,7 @@ Legacy `ended_at` в runtime activity больше не участвует.
 - `EmployeeShift`;
 - `RotationResponse` с arrival/departure/намерением.
 
-M5 использует эти upstream-факты через отдельные `SettlementCohort/SettlementCohortMember`: cohort имеет версию, lifecycle и immutable provenance, а member хранит конкретный resident и конечный интервал участия. APPROVED cohort подключён к M6 resolver, M7 saved preview и M8 применению; обязательная authoritative смена по ADR-031 ещё не материализована.
+M5 использует эти upstream-факты через отдельные `SettlementCohort/SettlementCohortMember`: cohort имеет версию, lifecycle и immutable provenance, а member хранит конкретного resident, конечный интервал участия, структурированную смену и её доказуемое происхождение. Для внутреннего жильца смена допускается только от единственного назначения `deputy_published_plan` с точным `source_crew_plan_slot`; для внешнего — от явного выбора делопроизводителя с точным Access и основанием. Исторические значения не угадываются.
 
 ### 4.7. SettlementResident и subject transition M4/M5
 
@@ -161,7 +163,7 @@ Migration `0011_resident_subject_transition` заменила subject `employee`
 
 Forward migration создаёт или переиспользует ровно один внутренний wrapper для существующих subject Employee и не создаёт `EmployeeAccess`. Reverse восстанавливает Employee subject только для internal resident и останавливается fail-closed при external subject. M4/M5 domain-команды используют полный порядок `Employee внутренних resident по PK → SettlementResident по PK с OF self → WatchPeriod → Cohort/Member → Slot/Binding → Anchor/Assignment/Bed → revalidation/write`.
 
-Внешний resident уже может быть subject cohort member, calendar binding и фактической occupancy через canonical resident API. Migration `0013_resident_occupancy_subject` переводит существующие Employee occupancy на internal wrappers без EmployeeAccess; forward fail-closed при external resident без authoritative sex, reverse — при external occupancy. Минимальное безопасное read-only ядро M6, сохраняемый immutable preview M7 и backend M8 Apply/AUTO replacement реализованы. Не реализованы: UI создания внешней карточки, UI ручного внешнего заселения, HTTP/UI preview-confirm-apply и trainee adapter.
+Внешний resident уже может быть subject cohort member, calendar binding и фактического проживания через canonical resident API. Migration `0013_resident_occupancy_subject` переводит существующие Employee occupancy на internal wrappers без EmployeeAccess; forward fail-closed при external resident без authoritative sex, reverse — при external occupancy. M6, M7, применение по сменам и ручной сменный контур реализованы. Не реализованы: UI создания и выбора внешней карточки, полноценная отдельная плановая карта, точечные исправления будущего плана и trainee adapter.
 
 Canonical occupancy API: `settle_resident_on_bed`, `relocate_resident_to_bed`, `release_resident_from_bed`. Employee-based функции — совместимые адаптеры внутреннего HTTP UI и не создают resident скрыто. Internal sex берётся только из `Employee.sex`; external resident обязан иметь `external_sex=male/female`. Unknown sex не обходит room guard, несовместимое изменение пола при открытой occupancy отклоняется, а изменение external sex влияет на M6 fingerprint и stale M7 preview.
 
@@ -246,7 +248,7 @@ Preview группирует конкуренцию по `(physical_bed_id, shif
 
 Текущий `settlement_clerk_access_from_request()` проверяет session `employee_access_id`, активность `EmployeeAccess`/Employee/Role и допускает к settlement роли `settlement_clerk` и `admin`. `role_session_state()` ограничивает активную роль внутри одной сессии/сотрудника, но не между разными сотрудниками и устройствами. В schema уже существуют singleton `SettlementControlLease`, session hash, token и fencing revision, а внутренние lifecycle/takeover команды меняют их атомарно и создают `SettlementControlEvent`.
 
-Однако runtime HTTP-контур не вызывает эти команды: manual POST по-прежнему напрямую запускает `settle_employee_on_bed()`, `relocate_employee_to_bed()` или `release_employee_from_bed()` без write gate. Control endpoints/URLs, хранение credentials в пользовательской session и UI отсутствуют. Кроме того, общий порядок `Lease → все Employee → все EmployeeAccess → доменные строки` ещё не реализован: acquire/takeover используют существующий access-root lock и должны быть приведены к утверждённому кадровому префиксу до подключения gate.
+В том историческом runtime baseline HTTP-контур ещё не вызывал эти команды: manual POST напрямую запускал `settle_employee_on_bed()`, `relocate_employee_to_bed()` или `release_employee_from_bed()` без write gate. Control endpoints/URLs, хранение credentials в пользовательской session и UI тогда отсутствовали. Этот абзац не описывает текущий HEAD: control gate, exact resident/occupancy и сменная классификация ручных операций впоследствии реализованы.
 
 Следствия для исторического runtime в implementation baseline `902e3886` (не описание текущего M8 HEAD):
 
@@ -309,8 +311,8 @@ Preview группирует конкуренцию по `(physical_bed_id, shif
 | Saved preview M7 | READY | `SettlementPreviewRun` с version и lifecycle `DRAFT → CONFIRMED → SUPERSEDED`; один CONFIRMED на WatchPeriod |
 | Immutable run rows | READY | Отдельные `SettlementPreviewPlacement` и `SettlementPreviewUnresolved`, immutable provenance и public mass-mutation guards |
 | Input hash/stale detection | READY | Resolver/normalized fingerprints, source snapshot, повторный M6 при confirmation и read-only stale helper |
-| Transactional Apply | READY/PARTIAL | Backend M8 service атомарен и stale-safe; HTTP endpoint/UI отсутствуют |
-| Idempotency | READY | Один M7 run имеет один immutable Application; повтор возвращает прежний результат |
+| Транзакционное применение | READY | M8 атомарен; ночная и дневная смены применяются независимо через server-side команды и интерфейс |
+| Idempotency | READY | Один M7 run имеет не более одного immutable Application на каждую смену; повтор возвращает прежний результат |
 | Единственный активный управляющий | PARTIAL | Singleton lease, lifecycle и fencing реализованы внутренне; write gate, HTTP/session binding и server read-only enforcement отсутствуют |
 | Административный takeover | PARTIAL | Внутренняя команда реализована; endpoint, UI подтверждения и fencing действующих manual writers отсутствуют |
 | Единый полный COMMIT validator | PARTIAL | Подключены только overlap rules |
@@ -343,7 +345,7 @@ Preview группирует конкуренцию по `(physical_bed_id, shif
 7. явные category assignments и маршрут стажёра по настоящей должности через authoritative structured state/adapter;
 8. room profiles, resolver rules и групповые конфликты дефицита.
 
-Saved preview M7 подтверждается без occupancy writes, а M8/HTTP/UI-контур атомарно применяет актуальный `CONFIRMED` run целиком. Специальные M6-конфигурации продолжают возвращать controlled unresolved. Следующий активный этап — ADR-031: плановая карта следующего заезда, authoritative смена, точечные исправления и раздельное календарно защищённое применение.
+Сохранённый M7-план подтверждается без изменения фактического проживания, а M8/HTTP/UI-контур атомарно применяет актуальный `CONFIRMED` план отдельно по ночной и дневной смене. Специальные M6-конфигурации продолжают возвращать controlled unresolved. Следующий активный этап ADR-031 — точечные исправления будущего плана и полноценная отдельная плановая карта следующего заезда.
 
 ### 11.1. Фактический M7
 
@@ -351,16 +353,16 @@ Migration leaf — `settlement.0012_m7_saved_previews`. Migration schema-only, �
 
 Подтверждение требует exact server-side control context, повторяет M6 и fail-closed сравнивает fingerprints/snapshot/rows. Unresolved residents сохраняются с reason codes и допускаются в `CONFIRMED` preview. M7 сам не меняет occupancy, M4/M5, residents или физический фонд.
 
-### 11.2. Фактический backend M8
+### 11.2. Фактический M8
 
-Migration leaf — `settlement.0014_m8_apply_provenance`; migration schema-only, зависит от `settlement.0013_resident_occupancy_subject`, не выполняет backfill и добавляет Application/ApplicationItem и nullable occupancy provenance. Canonical API `apply_confirmed_settlement_preview(*, run_id, control_context, confirm_replace_manual=False)` использует exact Access, повторно сверяет run/fingerprints/rows и выполняет один атомарный resident-based batch.
+Текущий migration leaf — `settlement.0016_shift_scoped_apply_and_occupancy`; он следует после `settlement.0015_cohort_member_work_shift`. Canonical API `apply_confirmed_settlement_preview(*, run_id, work_shift, control_context, confirm_replace_manual=False)` использует exact Access, повторно сверяет план, отпечатки и строки выбранной смены и выполняет один атомарный пакет.
 
-Unchanged AUTO переиспользуется как `REUSED`; relocation, swap и unresolved заменяют только доказанный baseline текущего cohort/WatchPeriod. MANUAL требует явного `confirm_replace_manual=True`; история не удаляется. Resolver включает replaceable baseline в fingerprint, поэтому изменение после DRAFT делает preview stale. Whole-run HTTP/UI workflow реализован; UI внешнего resident и логика ADR-031 не реализованы.
+Неизменившееся автоматическое проживание переиспользуется как `REUSED`; переселение, обмен местами и переход в unresolved заменяют только доказанную основу текущего состава, периода и выбранной смены. Ручная запись требует явного `confirm_replace_manual=True`; история не удаляется. Старый endpoint применения всего плана возвращает controlled HTTP 409. UI внешнего жильца не реализован.
 
-### 11.3. Следующий этап по ADR-031
+### 11.3. Состояние ADR-031
 
-Реализованы: текущая карта фактического проживания, сохранённый DRAFT/CONFIRMED план, повторная stale-проверка, whole-run применение и неизменяемая история Application.
+Реализованы: официальный источник смены, структурированная смена участника M5–M7, независимое применение ночной и дневной смены, две календарно защищённые команды интерфейса, неизменяемая история применения и сменная идентичность ручного фактического проживания.
 
-Не реализованы и не помечаются `COMPLETE`: отдельная плановая карта «Следующий заезд», обязательная authoritative DAY/NIGHT для каждого участника, состояние «Требуется проверка», точечные исправления поверх `CONFIRMED` run, независимые применения ночной смены 13-го и дневной 14-го, server-side календарный запрет досрочного применения и безопасный переход планового права без изменения фактической occupancy до своей команды.
+Не реализованы и не помечаются `COMPLETE`: точечные исправления поверх `CONFIRMED` плана, полноценная отдельная плановая карта «Следующий заезд», UI создания/поиска/выбора внешнего жильца, загрузка списка табельщика, модуль табельщика и reconciliation исторических записей фактического проживания без смены.
 
-Отдельное состояние «Активирован» не планируется. Доказательством применения должны служить сменные Application-записи; после применения дальнейшие действия выполняются как фактические settle/relocate/release в режиме «Текущая вахта».
+Отдельное состояние «Активирован» не вводится. Доказательством применения служат сменные Application-записи; после применения дальнейшие действия выполняются как фактическое ручное заселение, переселение или освобождение в режиме «Текущая вахта».
