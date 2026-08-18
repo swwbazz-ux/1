@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Рабочее место табельщика{% endblock %}
+{% block body_class %}rotation-workplace-screen{% endblock %}
+{% block extra_head %}
+{% include "includes/role_app_pwa_head.html" with role_code="timekeeper" manifest_url="/timekeeper.webmanifest" service_worker_url="/timekeeper-sw.js" legacy_scope="/timekeeper/" theme_color="#176B73" apple_title="Табельщик" icon_180="img/pwa/timekeeper-180.png" %}
+<link rel="stylesheet" href="{% static 'css/rotation-workplace-v2.css' %}?v=3">
+{% endblock %}
+
+{% block body %}
+<div class="admin-shell admin-exports-shell admin-day rotation-shell" data-admin-theme>
+    <header class="admin-console-header rotation-console-header">
+        <section class="admin-console-identity">
+            <span class="admin-console-avatar" aria-hidden="true">{{ access.employee.full_name|default:"Т"|first }}</span>
+            <span><strong>{{ access.employee.full_name }}</strong><em>Табельщик</em></span>
+        </section>
+        <section class="admin-console-main">
+            <div class="admin-console-title">
+                <span>Рабочее место табельщика</span>
+                <h1>Перевахта и состав заезда</h1>
+                <p>Здесь подготавливается состав заезда. Остальные функции учёта рабочего времени будут добавляться позже.</p>
+            </div>
+            <nav class="admin-console-nav" aria-label="Разделы перевахты">
+                <a href="{% url 'rotation_timekeeper_dashboard' %}">Сбор данных</a>
+                <a class="is-active" href="{% url 'arrival_roster_index' %}" aria-current="page">Перевахта и состав заезда</a>
+            </nav>
+        </section>
+        <section class="admin-console-actions rotation-console-actions">
+            <a class="admin-utility-link" href="{% url 'logout' %}">Выйти</a>
+        </section>
+    </header>
+
+    <main class="admin-console-page rotation-page">
+        {% for message in messages %}<div class="message {{ message.tags }}" role="status">{{ message }}</div>{% endfor %}
+        <section class="rotation-page-heading">
+            <div>
+                <span class="rotation-eyebrow">Подготовка следующего заезда</span>
+                <h2>Сформировать новую версию списка</h2>
+                <p>Новая версия сохраняется отдельно и не изменяет предыдущие списки.</p>
+            </div>
+        </section>
+
+        <section class="rotation-form-card">
+            <form method="post" action="{% url 'arrival_roster_pool_create' %}">
+                {% csrf_token %}
+                {{ pool_form.non_field_errors }}
+                {% for field in pool_form %}
+                    <div class="rotation-form-field">
+                        <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                        {{ field }}
+                        {% for error in field.errors %}<div class="message error" role="alert">{{ error }}</div>{% endfor %}
+                    </div>
+                {% endfor %}
+                <button class="admin-button admin-button-primary" type="submit">Сформировать список из сотрудников</button>
+                <a class="admin-button" href="{% url 'arrival_roster_upload_form' %}">Загрузить Excel для сверки</a>
+            </form>
+        </section>
+
+        <section class="rotation-table-card" aria-label="Периоды и версии реестра">
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Период</th>
+                            <th>Целевая вахта</th>
+                            <th>Версия</th>
+                            <th>Источник</th>
+                            <th>Состояние</th>
+                            <th>Людей</th>
+                            <th>Открытые вопросы</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for period in periods %}
+                            {% for version in period.roster_versions %}
+                                <tr>
+                                    <td>{{ period.starts_on|date:"d.m.Y" }}–{{ period.ends_on|date:"d.m.Y" }}{% if period.is_current %}<br><small>Текущий период</small>{% else %}<br><small>Будущий период</small>{% endif %}</td>
+                                    <td>{{ period.watch_composition.name|default:"Не указана" }}</td>
+                                    <td>№ {{ version.version_number }}</td>
+                                    <td>{% if version.source_kind == 'employee_pool' %}Из базы сотрудников{% else %}Из Excel{% endif %}</td>
+                                    <td>{{ version.get_status_display }}</td>
+                                    <td>{{ version.people_count }}</td>
+                                    <td>
+                                        Табельщик: {{ version.responsibility_counts.timekeeper }}<br>
+                                        ОУП: {{ version.responsibility_counts.oup }}<br>
+                                        Делопроизводитель: {{ version.responsibility_counts.clerk }}<br>
+                                        Заместитель начальника участка: {{ version.responsibility_counts.deputy }}
+                                    </td>
+                                    <td><a href="{% url 'arrival_roster_review' version.pk %}">Проверить версию</a></td>
+                                </tr>
+                            {% empty %}
+                                <tr>
+                                    <td>{{ period.starts_on|date:"d.m.Y" }}–{{ period.ends_on|date:"d.m.Y" }}</td>
+                                    <td>{{ period.watch_composition.name|default:"Не указана" }}</td>
+                                    <td colspan="6">Версий реестра пока нет.</td>
+                                </tr>
+                            {% endfor %}
+                        {% empty %}
+                            <tr><td colspan="8">Текущие и будущие периоды вахты не найдены.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </main>
+</div>
+{% endblock %}

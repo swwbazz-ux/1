@@ -34,6 +34,73 @@ class ArrivalRosterUploadForm(forms.Form):
         return workbook
 
 
+class ArrivalRosterPoolCreateForm(forms.Form):
+    watch_period = forms.ModelChoiceField(
+        label='Период вахты',
+        queryset=WatchPeriod.objects.none(),
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['watch_period'].queryset = (
+            WatchPeriod.objects
+            .filter(is_active=True, watch_composition__is_active=True)
+            .select_related('watch_composition')
+            .order_by('-starts_on', '-pk')
+        )
+
+
+class ArrivalRosterEmployeeSearchForm(forms.Form):
+    query = forms.CharField(
+        label='ФИО или должность',
+        min_length=2,
+        max_length=255,
+    )
+    watch_composition = forms.ChoiceField(
+        label='Текущая вахта',
+        choices=(),
+        required=False,
+    )
+    employment_status = forms.ChoiceField(
+        label='Состояние карточки',
+        choices=(
+            ('active', 'Действующие'),
+            ('dismissed', 'Уволенные'),
+            ('all', 'Все'),
+        ),
+        initial='active',
+    )
+
+    def __init__(self, *args, watch_compositions=(), **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['watch_composition'].choices = [
+            ('', 'Все вахты'),
+            *((str(item.pk), item.name) for item in watch_compositions),
+        ]
+
+
+class ArrivalRosterExternalSearchForm(forms.Form):
+    external_query = forms.CharField(
+        label='ФИО, организация или профессия',
+        min_length=2,
+        max_length=255,
+    )
+
+
+class ArrivalRosterEmployeeAddForm(forms.Form):
+    employee_id = forms.IntegerField(min_value=1, widget=forms.HiddenInput)
+
+
+class ArrivalRosterExternalAddForm(forms.Form):
+    resident_id = forms.IntegerField(min_value=1, widget=forms.HiddenInput)
+    basis = forms.CharField(
+        label='Основание добавления',
+        min_length=1,
+        max_length=1000,
+        widget=forms.Textarea(attrs={'rows': 2}),
+    )
+
+
 class ArrivalRosterExpectedRevisionForm(forms.Form):
     expected_revision = forms.IntegerField(min_value=0, widget=forms.HiddenInput)
 

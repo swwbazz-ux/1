@@ -1,11 +1,16 @@
 from django.urls import path
 
 from .views import (
+    arrival_roster_confirm_unambiguous_view,
     arrival_roster_dates_view,
+    arrival_roster_employee_add_view,
+    arrival_roster_external_add_view,
+    arrival_roster_index_view,
     arrival_roster_issue_reopen_view,
     arrival_roster_issue_resolve_view,
     arrival_roster_notes_view,
     arrival_roster_participation_view,
+    arrival_roster_pool_create_view,
     arrival_roster_review_view,
     arrival_roster_resident_clear_view,
     arrival_roster_resident_search_view,
@@ -34,6 +39,16 @@ from .views import (
 urlpatterns = [
     path('timekeeper/', timekeeper_dashboard_view, name='rotation_timekeeper_dashboard'),
     path(
+        'timekeeper/arrival-rosters/',
+        arrival_roster_index_view,
+        name='arrival_roster_index',
+    ),
+    path(
+        'timekeeper/arrival-rosters/from-employees/',
+        arrival_roster_pool_create_view,
+        name='arrival_roster_pool_create',
+    ),
+    path(
         'timekeeper/arrival-rosters/new/',
         arrival_roster_upload_form_view,
         name='arrival_roster_upload_form',
@@ -47,6 +62,21 @@ urlpatterns = [
         'timekeeper/arrival-rosters/<int:version_id>/',
         arrival_roster_review_view,
         name='arrival_roster_review',
+    ),
+    path(
+        'timekeeper/arrival-rosters/<int:version_id>/employees/add/',
+        arrival_roster_employee_add_view,
+        name='arrival_roster_employee_add',
+    ),
+    path(
+        'timekeeper/arrival-rosters/<int:version_id>/external/add/',
+        arrival_roster_external_add_view,
+        name='arrival_roster_external_add',
+    ),
+    path(
+        'timekeeper/arrival-rosters/<int:version_id>/confirm-unambiguous/',
+        arrival_roster_confirm_unambiguous_view,
+        name='arrival_roster_confirm_unambiguous',
     ),
     path(
         'timekeeper/arrival-rosters/<int:version_id>/rows/<int:match_id>/residents/search/',

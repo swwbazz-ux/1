@@ -6,7 +6,12 @@ from django.db.models import Count, Q
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.utils import timezone
 from django.views.decorators.http import require_POST
+
+from settlement.models import SettlementResident
+from shifts.models import WatchPeriod
+from users.models import Employee, WatchComposition
 
 from users.role_apps import (
     get_role_app_for_request,
@@ -30,12 +35,23 @@ from .arrival_rosters import (
     set_arrival_roster_participation,
     upload_arrival_roster,
 )
+from .arrival_roster_pool import (
+    add_employee_to_arrival_roster,
+    add_external_resident_to_arrival_roster,
+    confirm_unambiguous_arrival_roster_rows,
+    create_arrival_roster_from_employee_pool,
+)
 from .forms import (
     ArrivalRosterDatesForm,
+    ArrivalRosterEmployeeAddForm,
+    ArrivalRosterEmployeeSearchForm,
     ArrivalRosterExpectedRevisionForm,
+    ArrivalRosterExternalAddForm,
+    ArrivalRosterExternalSearchForm,
     ArrivalRosterIssueResolutionForm,
     ArrivalRosterNotesForm,
     ArrivalRosterParticipationForm,
+    ArrivalRosterPoolCreateForm,
     ArrivalRosterResidentSearchForm,
     ArrivalRosterResidentSelectionForm,
     ArrivalRosterUploadForm,
@@ -46,6 +62,7 @@ from .models import (
     ArrivalRosterIssue,
     ArrivalRosterMatch,
     ArrivalRosterNormalizedRow,
+    ArrivalRosterPoolRow,
     ArrivalRosterRowReview,
     ArrivalRosterVersion,
     RotationCollectionCycle,
@@ -87,15 +104,98 @@ def _validation_message(error):
     return ' '.join(error.messages) if getattr(error, 'messages', None) else str(error)
 
 
+def _private_no_store(response):
+    response['Cache-Control'] = 'private, no-store'
+    return response
+
+
+def _version_responsibility_counts(version):
+    counts = {'ready': 0, 'timekeeper': 0, 'oup': 0, 'clerk': 0, 'deputy': 0}
+    for match_id in version.matches.order_by('pk').values_list('pk', flat=True):
+        readiness = arrival_roster_match_readiness(match_id=match_id)
+        code = readiness['code'] if readiness['code'] in counts else 'timekeeper'
+        counts[code] += 1
+    return counts
+
+
+def _arrival_roster_index_context(*, pool_form=None):
+    today = timezone.localdate()
+    periods = list(
+        WatchPeriod.objects
+        .filter(is_active=True, ends_on__gte=today)
+        .select_related('watch_composition')
+        .prefetch_related('arrival_roster_versions')
+        .order_by('starts_on', 'pk')
+    )
+    for period in periods:
+        versions = list(period.arrival_roster_versions.all())
+        for version in versions:
+            version.people_count = version.matches.count()
+            version.responsibility_counts = _version_responsibility_counts(version)
+        period.roster_versions = versions
+        period.is_current = period.starts_on <= today <= period.ends_on
+    return {
+        'periods': periods,
+        'pool_form': pool_form or ArrivalRosterPoolCreateForm(),
+    }
+
+
+def arrival_roster_index_view(request):
+    access, response = _role_access(request, 'timekeeper')
+    if response:
+        return response
+    context = _arrival_roster_index_context()
+    context['access'] = access
+    return _private_no_store(render(
+        request,
+        'rotations/arrival_roster_index.html',
+        context,
+    ))
+
+
+@require_POST
+def arrival_roster_pool_create_view(request):
+    access, response = _role_access(request, 'timekeeper')
+    if response:
+        return response
+    form = ArrivalRosterPoolCreateForm(request.POST)
+    if not form.is_valid():
+        context = _arrival_roster_index_context(pool_form=form)
+        context['access'] = access
+        return _private_no_store(render(
+            request,
+            'rotations/arrival_roster_index.html',
+            context,
+            status=400,
+        ))
+    try:
+        version = create_arrival_roster_from_employee_pool(
+            watch_period_id=form.cleaned_data['watch_period'].pk,
+            actor_access_id=access.pk,
+        )
+    except ValidationError as error:
+        form.add_error(None, _validation_message(error))
+        context = _arrival_roster_index_context(pool_form=form)
+        context['access'] = access
+        return _private_no_store(render(
+            request,
+            'rotations/arrival_roster_index.html',
+            context,
+            status=400,
+        ))
+    messages.success(request, 'Новая историческая версия списка сформирована из карточек сотрудников.')
+    return redirect('arrival_roster_review', version_id=version.pk)
+
+
 def arrival_roster_upload_form_view(request):
     access, response = _role_access(request, 'timekeeper')
     if response:
         return response
-    return render(
+    return _private_no_store(render(
         request,
         'rotations/arrival_roster_upload.html',
         {'access': access, 'form': ArrivalRosterUploadForm()},
-    )
+    ))
 
 
 @require_POST
@@ -157,11 +257,26 @@ def arrival_roster_review_view(request, version_id):
         )
         .order_by('source_row__sheet_name', 'source_row__row_number')
     )
+    pool_rows = list(
+        ArrivalRosterPoolRow.objects
+        .filter(version=version)
+        .select_related(
+            'employee__personnel_position', 'employee__watch_composition',
+            'resident__employee', 'watch_composition',
+            'match__matched_resident__employee',
+            'match__row_review__selected_resident__employee',
+        )
+        .prefetch_related(
+            'match__issues__resolution',
+            'match__candidates__resident__employee',
+        )
+        .order_by('employee__full_name', 'resident__full_name', 'pk')
+    )
     search_state = request.session.pop(f'arrival_roster_search_{version.pk}', None)
     review_rows = []
     reviewed_match_ids = set()
     readiness_by_match = {}
-    summary = {'ready': 0, 'oup': 0, 'clerk': 0, 'timekeeper': 0}
+    summary = {'ready': 0, 'oup': 0, 'clerk': 0, 'deputy': 0, 'timekeeper': 0}
     for row in normalized_rows:
         match = row.match_link.match
         is_review_lead = match.pk not in reviewed_match_ids
@@ -200,6 +315,7 @@ def arrival_roster_review_view(request, version_id):
             row_search_results = search_state.get('results', [])
         review_rows.append({
             'row': row,
+            'pool_row': None,
             'match': match,
             'row_review': row_review,
             'is_review_lead': is_review_lead,
@@ -227,6 +343,89 @@ def arrival_roster_review_view(request, version_id):
                 'basis': row_review.basis if row_review else '',
                 'comment': row_review.comment if row_review else '',
             }),
+            'source_label': f'{row.source_row.sheet_name} · строка {row.source_row.row_number}',
+            'display_name': row.normalized_full_name,
+            'display_position': row.source_position or '—',
+            'display_date': row.arrival_date_candidate,
+            'display_shift_hint': row.raw_shift_hint or '—',
+            'display_phone': row.masked_phone or '—',
+            'photo': None,
+        })
+
+    for pool_row in pool_rows:
+        match = pool_row.match
+        try:
+            row_review = match.row_review
+        except ArrivalRosterRowReview.DoesNotExist:
+            row_review = None
+        revision = row_review.revision if row_review else 0
+        effective_resident = None
+        if row_review and row_review.resident_resolution == ArrivalRosterRowReview.ResidentResolution.SELECTED:
+            effective_resident = row_review.selected_resident
+        elif not row_review or row_review.resident_resolution != ArrivalRosterRowReview.ResidentResolution.CLEARED:
+            effective_resident = match.matched_resident
+        readiness = arrival_roster_match_readiness(match_id=match.pk)
+        readiness_by_match[match.pk] = readiness
+        summary_key = readiness['code'] if readiness['code'] in summary else 'timekeeper'
+        summary[summary_key] += 1
+        employee = pool_row.employee
+        resident = pool_row.resident
+        if employee is not None:
+            display_name = employee.full_name
+            display_position = (
+                employee.personnel_position.name
+                if employee.personnel_position_id
+                else employee.position
+            ) or '—'
+            display_phone = employee.phone or '—'
+            photo = employee.photo if employee.photo else None
+        else:
+            display_name = resident.display_name
+            display_position = resident.position_title or '—'
+            display_phone = resident.phone or '—'
+            photo = resident.photo if resident.photo else None
+        issues = list(match.issues.all())
+        for issue in issues:
+            resolution = getattr(issue, 'resolution', None)
+            issue.current_revision = resolution.revision if resolution else 0
+            issue.is_currently_resolved = bool(resolution and resolution.is_resolved)
+        review_rows.append({
+            'row': None,
+            'pool_row': pool_row,
+            'match': match,
+            'row_review': row_review,
+            'is_review_lead': True,
+            'revision': revision,
+            'resident_name': effective_resident.display_name if effective_resident else '',
+            'issues': issues,
+            'open_blocking': readiness['blocking_codes'],
+            'candidates': list(match.candidates.all()),
+            'candidate_count': match.candidates.count(),
+            'responsibility': readiness['label'],
+            'search_results': [],
+            'search_form': ArrivalRosterResidentSearchForm(),
+            'participation_form': ArrivalRosterParticipationForm(initial={
+                'expected_revision': revision,
+                'participation_status': row_review.participation_status if row_review else '',
+                'arrival_mode': row_review.arrival_mode if row_review else '',
+            }),
+            'dates_form': ArrivalRosterDatesForm(initial={
+                'expected_revision': revision,
+                'arrival_on': row_review.arrival_on if row_review else None,
+                'departure_on': row_review.departure_on if row_review else None,
+            }),
+            'notes_form': ArrivalRosterNotesForm(initial={
+                'expected_revision': revision,
+                'basis': row_review.basis if row_review else '',
+                'comment': row_review.comment if row_review else '',
+            }),
+            'source_label': pool_row.get_origin_kind_display(),
+            'display_name': display_name,
+            'display_position': display_position,
+            'display_date': row_review.arrival_on if row_review else None,
+            'display_shift_hint': '—',
+            'display_phone': display_phone,
+            'photo': photo,
         })
     version_issues = list(
         version.issues.filter(normalized_row__isnull=True)
@@ -240,7 +439,95 @@ def arrival_roster_review_view(request, version_id):
     open_blocking_count = sum(
         1 for readiness in readiness_by_match.values() if not readiness['ready']
     )
-    return render(
+
+    group_specs = (
+        ('expected', 'Ожидаются к заезду'),
+        ('timekeeper', 'Требуют решения табельщика'),
+        ('extended', 'Продлеваются'),
+        ('not_arriving', 'Не заезжают'),
+        ('new', 'Новые сотрудники'),
+        ('oup', 'Требуют действий ОУП'),
+        ('clerk', 'Требуют действий делопроизводителя'),
+        ('deputy', 'Требуют назначения заместителем начальника участка'),
+    )
+    grouped = {key: [] for key, _label in group_specs}
+    for item in review_rows:
+        review = item['row_review']
+        participation = review.participation_status if review else None
+        readiness_code = readiness_by_match[item['match'].pk]['code']
+        if readiness_code in {'oup', 'clerk', 'deputy'}:
+            group_key = readiness_code
+        elif participation == ArrivalRosterRowReview.ParticipationStatus.EXTENDED:
+            group_key = 'extended'
+        elif participation == ArrivalRosterRowReview.ParticipationStatus.NOT_ARRIVING:
+            group_key = 'not_arriving'
+        elif item['pool_row'] and item['pool_row'].origin_kind in {
+            ArrivalRosterPoolRow.OriginKind.MANUAL_EMPLOYEE,
+            ArrivalRosterPoolRow.OriginKind.MANUAL_EXTERNAL,
+        }:
+            group_key = 'new'
+        elif readiness_code == 'ready':
+            group_key = 'expected'
+        else:
+            group_key = 'timekeeper'
+        grouped[group_key].append(item)
+    review_groups = [
+        {'key': key, 'label': label, 'items': grouped[key]}
+        for key, label in group_specs
+    ]
+
+    watch_compositions = list(WatchComposition.objects.order_by('name', 'pk'))
+    employee_search_requested = 'employee_search' in request.GET
+    employee_search_form = ArrivalRosterEmployeeSearchForm(
+        request.GET if employee_search_requested else None,
+        watch_compositions=watch_compositions,
+    )
+    employee_results = []
+    if employee_search_requested and employee_search_form.is_valid():
+        employee_query = Employee.objects.select_related(
+            'personnel_position', 'watch_composition',
+        )
+        query = employee_search_form.cleaned_data['query']
+        if query:
+            employee_query = employee_query.filter(
+                Q(full_name__icontains=query)
+                | Q(position__icontains=query)
+                | Q(personnel_position__name__icontains=query)
+            )
+        watch_composition = employee_search_form.cleaned_data['watch_composition']
+        if watch_composition:
+            employee_query = employee_query.filter(watch_composition_id=watch_composition)
+        employment_status = employee_search_form.cleaned_data['employment_status']
+        if employment_status == 'active':
+            employee_query = employee_query.filter(
+                status=Employee.Status.ACTIVE,
+                is_active=True,
+            )
+        elif employment_status == 'dismissed':
+            employee_query = employee_query.filter(
+                Q(status=Employee.Status.DISMISSED) | Q(is_active=False)
+            )
+        employee_results = list(employee_query.order_by('full_name', 'pk')[:30])
+
+    external_search_requested = 'external_search' in request.GET
+    external_search_form = ArrivalRosterExternalSearchForm(
+        request.GET if external_search_requested else None,
+    )
+    external_results = []
+    if external_search_requested and external_search_form.is_valid():
+        query = external_search_form.cleaned_data['external_query']
+        external_results = list(
+            SettlementResident.objects
+            .filter(employee__isnull=True)
+            .filter(
+                Q(full_name__icontains=query)
+                | Q(organization__icontains=query)
+                | Q(position_title__icontains=query)
+            )
+            .order_by('full_name', 'pk')[:30]
+        )
+
+    response = render(
         request,
         'rotations/arrival_roster_review.html',
         {
@@ -250,8 +537,14 @@ def arrival_roster_review_view(request, version_id):
             'version_issues': version_issues,
             'open_blocking_count': open_blocking_count,
             'review_summary': summary,
+            'review_groups': review_groups,
+            'employee_search_form': employee_search_form,
+            'employee_results': employee_results,
+            'external_search_form': external_search_form,
+            'external_results': external_results,
         },
     )
+    return _private_no_store(response)
 
 
 def _arrival_roster_redirect(version_id):
@@ -260,6 +553,70 @@ def _arrival_roster_redirect(version_id):
 
 def _arrival_roster_error(request, error):
     messages.error(request, _validation_message(error))
+
+
+@require_POST
+def arrival_roster_employee_add_view(request, version_id):
+    access, response = _role_access(request, 'timekeeper')
+    if response:
+        return response
+    form = ArrivalRosterEmployeeAddForm(request.POST)
+    if not form.is_valid():
+        messages.error(request, 'Не удалось определить сотрудника. Обновите страницу.')
+        return _arrival_roster_redirect(version_id)
+    try:
+        add_employee_to_arrival_roster(
+            version_id=version_id,
+            employee_id=form.cleaned_data['employee_id'],
+            basis='Добавлен табельщиком из поиска сотрудников.',
+            actor_access_id=access.pk,
+        )
+        messages.success(request, 'Сотрудник добавлен в текущую версию реестра.')
+    except ValidationError as error:
+        _arrival_roster_error(request, error)
+    return _arrival_roster_redirect(version_id)
+
+
+@require_POST
+def arrival_roster_external_add_view(request, version_id):
+    access, response = _role_access(request, 'timekeeper')
+    if response:
+        return response
+    form = ArrivalRosterExternalAddForm(request.POST)
+    if not form.is_valid():
+        messages.error(request, 'Выберите внешнего жильца и укажите основание.')
+        return _arrival_roster_redirect(version_id)
+    try:
+        add_external_resident_to_arrival_roster(
+            version_id=version_id,
+            resident_id=form.cleaned_data['resident_id'],
+            basis=form.cleaned_data['basis'],
+            actor_access_id=access.pk,
+        )
+        messages.success(request, 'Внешний жилец добавлен в текущую версию реестра.')
+    except ValidationError as error:
+        _arrival_roster_error(request, error)
+    return _arrival_roster_redirect(version_id)
+
+
+@require_POST
+def arrival_roster_confirm_unambiguous_view(request, version_id):
+    access, response = _role_access(request, 'timekeeper')
+    if response:
+        return response
+    try:
+        confirmed = confirm_unambiguous_arrival_roster_rows(
+            version_id=version_id,
+            actor_access_id=access.pk,
+        )
+    except ValidationError as error:
+        _arrival_roster_error(request, error)
+        return _arrival_roster_redirect(version_id)
+    if confirmed:
+        messages.success(request, f'Однозначные строки подтверждены: {confirmed}.')
+    else:
+        messages.info(request, 'Однозначных строк для массового подтверждения нет.')
+    return _arrival_roster_redirect(version_id)
 
 
 def _match_for_version(version_id, match_id):

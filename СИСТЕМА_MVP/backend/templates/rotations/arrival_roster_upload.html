@@ -17,13 +17,13 @@
         </section>
         <section class="admin-console-main">
             <div class="admin-console-title">
-                <span>Единый реестр заезда</span>
-                <h1>Загрузка книги</h1>
-                <p>Исходный файл сохраняется без изменений, затем выполняется предварительная проверка.</p>
+                <span>Рабочее место табельщика</span>
+                <h1>Перевахта и состав заезда</h1>
+                <p>Excel используется для сверки с подготовленным составом и сохраняется без изменений.</p>
             </div>
             <nav class="admin-console-nav" aria-label="Разделы перевахты">
                 <a href="{% url 'rotation_timekeeper_dashboard' %}">Сбор данных</a>
-                <a class="is-active" href="{% url 'arrival_roster_upload_form' %}" aria-current="page">Реестр заезда</a>
+                <a class="is-active" href="{% url 'arrival_roster_index' %}" aria-current="page">Перевахта и состав заезда</a>
             </nav>
         </section>
         <section class="admin-console-actions rotation-console-actions">
@@ -35,7 +35,8 @@
         <section class="rotation-page-heading">
             <div>
                 <span class="rotation-eyebrow">Предварительная проверка</span>
-                <h2>Загрузить список заезда</h2>
+                <a class="rotation-back-link" href="{% url 'arrival_roster_index' %}">← Вернуться к периодам и версиям</a>
+                <h2>Загрузить Excel для сверки</h2>
                 <p>Загрузка не создаёт сотрудников, жильцов, назначения или фактическое проживание.</p>
             </div>
         </section>
@@ -52,7 +53,7 @@
                         {% for error in field.errors %}<div class="message error" role="alert">{{ error }}</div>{% endfor %}
                     </div>
                 {% endfor %}
-                <button class="admin-button admin-button-primary" type="submit">Сохранить и проверить</button>
+                <button class="admin-button admin-button-primary" type="submit">Загрузить Excel для сверки</button>
             </form>
         </section>
     </main>

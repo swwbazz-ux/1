@@ -1,3 +1,5 @@
+from dataclasses import dataclass
+
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 
@@ -30,6 +32,19 @@ from .models import (
 
 def _validation_error(code, message):
     return ValidationError(message, code=code)
+
+
+@dataclass(frozen=True, slots=True)
+class ArrivalRosterBulkConfirmationResult:
+    changed: int
+    already_confirmed: int
+    skipped: int
+
+    def __bool__(self):
+        return self.changed > 0
+
+    def __str__(self):
+        return str(self.changed)
 
 
 def _employee_snapshot(employee):
@@ -470,7 +485,7 @@ def create_arrival_roster_from_employee_pool(*, watch_period_id, actor_access_id
             resident=resident,
             method='employee_pool_exact' if resident else 'employee_pool_unresolved',
             evidence={'employee_id': employee.pk},
-            participation=participation,
+            participation=None,
         )
         pool_rows.append(_trusted_create_pool_row(
             version=version,
@@ -588,6 +603,11 @@ def add_employee_to_arrival_roster(*, version_id, employee_id, basis,
             'arrival_roster.pool_basis_required',
             'Укажите основание добавления сотрудника.',
         )
+    if employee.dismissed_at is not None and employee.dismissed_at < period.starts_on:
+        raise _validation_error(
+            'arrival_roster.employee_dismissed_before_period',
+            'Сотрудник уволен до начала выбранного периода и не может быть добавлен.',
+        )
     issue_specs = _issue_specs_for_employee(
         employee,
         period,
@@ -693,8 +713,106 @@ def add_external_resident_to_arrival_roster(*, version_id, resident_id, basis,
     return row
 
 
+@transaction.atomic
+def confirm_unambiguous_arrival_roster_rows(*, version_id, actor_access_id):
+    version, actor_context = _lock_version(
+        version_id=version_id,
+        actor_access_id=actor_access_id,
+    )
+    actor_access = _verified_timekeeper_access(actor_context)
+    has_version_blocker = version.issues.filter(
+        severity=ArrivalRosterIssue.Severity.ERROR,
+        match__isnull=True,
+    ).exists()
+
+    rows = list(
+        ArrivalRosterPoolRow.objects
+        .select_related(
+            'employee', 'resident', 'match', 'match__row_review',
+            'watch_composition',
+        )
+        .prefetch_related('match__issues')
+        .filter(
+            version=version,
+            origin_kind=ArrivalRosterPoolRow.OriginKind.AUTOMATIC_EMPLOYEE,
+        )
+        .order_by('employee_id', 'pk')
+    )
+    reviews_by_match_id = {
+        review.match_id: review
+        for review in (
+            ArrivalRosterRowReview.objects
+            .select_for_update()
+            .filter(version=version, match_id__in=[row.match_id for row in rows])
+            .order_by('match_id', 'pk')
+        )
+    }
+    changed = 0
+    already_confirmed = 0
+    skipped = 0
+    for row in rows:
+        employee = row.employee
+        resident = row.resident
+        review = reviews_by_match_id.get(row.match_id)
+        has_blocker = any(
+            issue.severity == ArrivalRosterIssue.Severity.ERROR
+            for issue in row.match.issues.all()
+        )
+        if (
+            has_version_blocker
+            or row.suggested_participation != ArrivalRosterPoolRow.SuggestedParticipation.ARRIVING
+            or employee is None
+            or resident is None
+            or review is None
+            or has_blocker
+            or row.watch_composition_id != version.watch_period.watch_composition_id
+            or employee.watch_composition_id != version.watch_period.watch_composition_id
+            or employee.status != Employee.Status.ACTIVE
+            or not employee.is_active
+            or (
+                employee.dismissed_at is not None
+                and employee.dismissed_at < version.watch_period.starts_on
+            )
+            or resident.resident_type != SettlementResident.ResidentType.EMPLOYEE
+            or resident.employee_id != employee.pk
+            or resident.status != SettlementResident.Status.ACTIVE
+            or row.match.status != ArrivalRosterMatch.Status.EXACT
+            or row.match.matched_resident_id != resident.pk
+            or review.resident_resolution != ArrivalRosterRowReview.ResidentResolution.SELECTED
+            or review.selected_resident_id != resident.pk
+        ):
+            skipped += 1
+            continue
+        if review.participation_status == ArrivalRosterRowReview.ParticipationStatus.ARRIVING:
+            already_confirmed += 1
+            continue
+        if review.participation_status or review.arrival_mode:
+            skipped += 1
+            continue
+
+        review.participation_status = ArrivalRosterRowReview.ParticipationStatus.ARRIVING
+        review.revision += 1
+        review.updated_by_access = actor_access
+        _trusted_write_review(review=review, creating=False)
+        _trusted_create_arrival_roster_event(
+            version=version,
+            actor_context=actor_context,
+            match=row.match,
+            review_revision=review.revision,
+            action=ArrivalRosterEvent.Action.PARTICIPATION_CHANGED,
+            details={},
+        )
+        changed += 1
+    return ArrivalRosterBulkConfirmationResult(
+        changed=changed,
+        already_confirmed=already_confirmed,
+        skipped=skipped,
+    )
+
+
 __all__ = [
     'add_employee_to_arrival_roster',
     'add_external_resident_to_arrival_roster',
+    'confirm_unambiguous_arrival_roster_rows',
     'create_arrival_roster_from_employee_pool',
 ]

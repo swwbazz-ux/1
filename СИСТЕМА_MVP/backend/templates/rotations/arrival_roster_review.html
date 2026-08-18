@@ -17,13 +17,13 @@
         </section>
         <section class="admin-console-main">
             <div class="admin-console-title">
-                <span>Единый реестр заезда</span>
-                <h1>Результат проверки</h1>
-                <p>На этом этапе версия ещё не утверждается и не передаётся в расселение.</p>
+                <span>Рабочее место табельщика</span>
+                <h1>Перевахта и состав заезда</h1>
+                <p>Проверка состава не утверждает версию и не передаёт её в расселение.</p>
             </div>
             <nav class="admin-console-nav" aria-label="Разделы перевахты">
                 <a href="{% url 'rotation_timekeeper_dashboard' %}">Сбор данных</a>
-                <a class="is-active" href="{% url 'arrival_roster_upload_form' %}" aria-current="page">Реестр заезда</a>
+                <a class="is-active" href="{% url 'arrival_roster_index' %}" aria-current="page">Перевахта и состав заезда</a>
             </nav>
         </section>
         <section class="admin-console-actions rotation-console-actions">
@@ -35,25 +35,88 @@
         {% for message in messages %}<div class="message {{ message.tags }}" role="status">{{ message }}</div>{% endfor %}
         <section class="rotation-page-heading">
             <div>
-                <a class="rotation-back-link" href="{% url 'arrival_roster_upload_form' %}">← Загрузить другой файл</a>
+                <a class="rotation-back-link" href="{% url 'arrival_roster_index' %}">← К периодам и версиям</a>
+                <span class="rotation-eyebrow">Результат проверки</span>
                 <h2>{{ version.watch_period }} · версия {{ version.version_number }}</h2>
-                <p>{{ version.get_status_display }} · {{ version.source_file.original_name }}</p>
+                <p>{{ version.get_status_display }} · {% if version.source_kind == 'employee_pool' %}из базы сотрудников{% else %}из Excel: {{ version.source_file.original_name }}{% endif %}</p>
             </div>
+            {% if version.source_kind == 'employee_pool' %}
+                <form method="post" action="{% url 'arrival_roster_confirm_unambiguous' version.pk %}">
+                    {% csrf_token %}
+                    <button class="admin-button admin-button-primary" type="submit">Подтвердить однозначные строки</button>
+                </form>
+            {% endif %}
         </section>
 
         <section class="rotation-summary-strip" aria-label="Итоги проверки">
             <article class="rotation-summary-item"><span>Исходных строк</span><strong>{{ version.source_row_count }}</strong></article>
-            <article class="rotation-summary-item"><span>Распознано строк</span><strong>{{ version.normalized_row_count }}</strong></article>
+            <article class="rotation-summary-item"><span>Людей</span><strong>{{ version.matches.count }}</strong></article>
             <article class="rotation-summary-item is-warning"><span>Открытых вопросов</span><strong>{{ open_blocking_count }}</strong></article>
             <article class="rotation-summary-item"><span>Предупреждения</span><strong>{{ version.warning_count }}</strong></article>
         </section>
 
-        <section class="rotation-summary-strip" aria-label="Готовность строк">
+        <section class="rotation-summary-strip" aria-label="Ответственные за вопросы">
             <article class="rotation-summary-item"><span>Готовы</span><strong>{{ review_summary.ready }}</strong></article>
+            <article class="rotation-summary-item is-warning"><span>Решает табельщик</span><strong>{{ review_summary.timekeeper }}</strong></article>
             <article class="rotation-summary-item"><span>Требуют ОУП</span><strong>{{ review_summary.oup }}</strong></article>
             <article class="rotation-summary-item"><span>Требуют делопроизводителя</span><strong>{{ review_summary.clerk }}</strong></article>
-            <article class="rotation-summary-item is-warning"><span>Решает табельщик</span><strong>{{ review_summary.timekeeper }}</strong></article>
+            <article class="rotation-summary-item"><span>Требуют назначения</span><strong>{{ review_summary.deputy }}</strong></article>
         </section>
+
+        {% if version.source_kind == 'employee_pool' %}
+            <section class="rotation-form-card" aria-label="Поиск сотрудников">
+                <h3>Добавить сотрудника из общей базы</h3>
+                <p>Поиск охватывает все карточки сотрудников, в том числе другую вахту.</p>
+                <form method="get" action="{% url 'arrival_roster_review' version.pk %}">
+                    {{ employee_search_form.as_p }}
+                    <button class="admin-button" type="submit" name="employee_search" value="1">Найти сотрудника</button>
+                </form>
+                {% if employee_results %}
+                    <div class="table-wrap">
+                        <table>
+                            <thead><tr><th>Фото</th><th>Сотрудник</th><th>Должность</th><th>Вахта</th><th>Состояние</th><th>Кадровые даты</th><th>Рабочий телефон</th><th></th></tr></thead>
+                            <tbody>
+                            {% for employee in employee_results %}
+                                <tr>
+                                    <td>{% if employee.photo %}<img src="{{ employee.photo.url }}" alt="Фото сотрудника" width="48" height="48">{% else %}Нет фото{% endif %}</td>
+                                    <td>{{ employee.full_name }}</td>
+                                    <td>{% if employee.personnel_position %}{{ employee.personnel_position.name }}{% else %}{{ employee.position|default:"Не указана" }}{% endif %}</td>
+                                    <td>{{ employee.watch_composition.name|default:"Не указана" }}</td>
+                                    <td>{{ employee.get_status_display }}</td>
+                                    <td>Принят: {{ employee.hired_at|date:"d.m.Y"|default:"не указано" }}{% if employee.dismissed_at %}<br>Уволен: {{ employee.dismissed_at|date:"d.m.Y" }}{% endif %}</td>
+                                    <td>{{ employee.phone|default:"Не указан" }}</td>
+                                    <td><form method="post" action="{% url 'arrival_roster_employee_add' version.pk %}">{% csrf_token %}<input type="hidden" name="employee_id" value="{{ employee.pk }}"><button type="submit">Добавить в заезд</button></form></td>
+                                </tr>
+                            {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                {% elif request.GET.employee_search %}<p>Подходящие сотрудники не найдены.</p>{% endif %}
+            </section>
+
+            <section class="rotation-form-card" aria-label="Поиск внешних жильцов">
+                <h3>Добавить существующего внешнего жильца</h3>
+                <form method="get" action="{% url 'arrival_roster_review' version.pk %}">
+                    {{ external_search_form.as_p }}
+                    <button class="admin-button" type="submit" name="external_search" value="1">Найти внешнего жильца</button>
+                </form>
+                {% if external_results %}
+                    <div class="table-wrap">
+                        <table>
+                            <thead><tr><th>ФИО</th><th>Организация</th><th>Профессия</th><th>Пол</th><th>Состояние</th><th>Телефон</th><th>Основание и действие</th></tr></thead>
+                            <tbody>
+                            {% for resident in external_results %}
+                                <tr>
+                                    <td>{{ resident.full_name }}</td><td>{{ resident.organization|default:"Не указана" }}</td><td>{{ resident.position_title|default:"Не указана" }}</td><td>{{ resident.get_external_sex_display|default:"Не указан" }}</td><td>{{ resident.get_status_display }}</td><td>{{ resident.phone|default:"Не указан" }}</td>
+                                    <td>{% if resident.status == 'ACTIVE' %}<form method="post" action="{% url 'arrival_roster_external_add' version.pk %}">{% csrf_token %}<input type="hidden" name="resident_id" value="{{ resident.pk }}"><label>Основание <textarea name="basis" rows="2" required></textarea></label><button type="submit">Добавить внешнего жильца</button></form>{% else %}Карточка недоступна для добавления{% endif %}</td>
+                                </tr>
+                            {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                {% elif request.GET.external_search %}<p>Подходящие внешние жильцы не найдены.</p>{% endif %}
+            </section>
+        {% endif %}
 
         {% if version_issues %}
             <section class="rotation-form-card" aria-label="Общие замечания">
@@ -61,122 +124,48 @@
                 {% for item in version_issues %}
                     <div class="message {% if item.severity == 'error' %}error{% else %}warning{% endif %}">
                         {{ item.message }}
-                        <form method="post" action="{% if item.is_currently_resolved %}{% url 'arrival_roster_issue_reopen' version.pk item.pk %}{% else %}{% url 'arrival_roster_issue_resolve' version.pk item.pk %}{% endif %}">
-                            {% csrf_token %}
-                            <input type="hidden" name="expected_revision" value="{{ item.current_revision }}">
-                            <label>Пояснение <textarea name="resolution_note" required></textarea></label>
-                            <button type="submit">{% if item.is_currently_resolved %}Вернуть на проверку{% else %}Вопрос решён{% endif %}</button>
-                        </form>
+                        <form method="post" action="{% if item.is_currently_resolved %}{% url 'arrival_roster_issue_reopen' version.pk item.pk %}{% else %}{% url 'arrival_roster_issue_resolve' version.pk item.pk %}{% endif %}">{% csrf_token %}<input type="hidden" name="expected_revision" value="{{ item.current_revision }}"><label>Пояснение <textarea name="resolution_note" required></textarea></label><button type="submit">{% if item.is_currently_resolved %}Вернуть на проверку{% else %}Вопрос решён{% endif %}</button></form>
                     </div>
                 {% endfor %}
             </section>
         {% endif %}
 
-        <section class="rotation-table-card">
-            <div class="table-wrap">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Источник</th>
-                            <th>ФИО</th>
-                            <th>Должность</th>
-                            <th>Дата</th>
-                            <th>Смена-подсказка</th>
-                            <th>Телефон</th>
-                            <th>Сопоставление</th>
-                            <th>Замечания</th>
-                            <th>Ручная проверка</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for item in review_rows %}
-                            <tr>
-                                <td>{{ item.row.source_row.sheet_name }} · строка {{ item.row.source_row.row_number }}</td>
-                                <td>{{ item.row.normalized_full_name }}</td>
-                                <td>{{ item.row.source_position|default:"—" }}</td>
-                                <td>{% if item.row.arrival_date_candidate %}{{ item.row.arrival_date_candidate|date:"d.m.Y" }}{% else %}Требуется проверка{% endif %}</td>
-                                <td>{{ item.row.raw_shift_hint|default:"—" }}</td>
-                                <td>{{ item.row.masked_phone|default:"—" }}</td>
-                                <td>
-                                    {{ item.match.get_status_display }}
-                                    {% if item.resident_name %}<br><small>{{ item.resident_name }}</small>{% endif %}
-                                    {% if item.candidate_count %}<br><small>Возможных карточек: {{ item.candidate_count }}</small>{% endif %}
-                                    <br><strong>{{ item.responsibility }}</strong>
-                                </td>
-                                <td>
-                                    {% for issue in item.issues %}
-                                        <div class="message {% if issue.severity == 'error' %}error{% else %}warning{% endif %}">
-                                            {{ issue.message }}
-                                            <form method="post" action="{% if issue.is_currently_resolved %}{% url 'arrival_roster_issue_reopen' version.pk issue.pk %}{% else %}{% url 'arrival_roster_issue_resolve' version.pk issue.pk %}{% endif %}">
-                                                {% csrf_token %}
-                                                <input type="hidden" name="expected_revision" value="{{ issue.current_revision }}">
-                                                <label>Пояснение <textarea name="resolution_note" required></textarea></label>
-                                                <button type="submit">{% if issue.is_currently_resolved %}Вернуть на проверку{% else %}Вопрос решён{% endif %}</button>
-                                            </form>
-                                        </div>
-                                    {% empty %}Нет замечаний{% endfor %}
-                                </td>
-                                <td>
-                                    {% if item.is_review_lead %}
-                                    <details>
-                                        <summary>Выбрать жильца</summary>
-                                        {% for candidate in item.candidates %}
-                                            <form method="post" action="{% url 'arrival_roster_resident_select' version.pk item.match.pk %}">
-                                                {% csrf_token %}
-                                                <input type="hidden" name="expected_revision" value="{{ item.revision }}">
-                                                <input type="hidden" name="resident_id" value="{{ candidate.resident.pk }}">
-                                                <span>{{ candidate.resident.display_name }}</span>
-                                                <button type="submit">Выбрать</button>
-                                            </form>
-                                        {% endfor %}
-                                        <form method="post" action="{% url 'arrival_roster_resident_search' version.pk item.match.pk %}">
-                                            {% csrf_token %}
-                                            <label>ФИО <input name="query" minlength="3" maxlength="255" required></label>
-                                            <button type="submit">Найти</button>
-                                        </form>
-                                        {% for found in item.search_results %}
-                                            <form method="post" action="{% url 'arrival_roster_resident_select' version.pk item.match.pk %}">
-                                                {% csrf_token %}
-                                                <input type="hidden" name="expected_revision" value="{{ item.revision }}">
-                                                <input type="hidden" name="resident_id" value="{{ found.id }}">
-                                                <span>{{ found.name }} · {{ found.description }}</span>
-                                                <button type="submit">Выбрать</button>
-                                            </form>
-                                        {% endfor %}
-                                        <form method="post" action="{% url 'arrival_roster_resident_clear' version.pk item.match.pk %}">
-                                            {% csrf_token %}
-                                            <input type="hidden" name="expected_revision" value="{{ item.revision }}">
-                                            <button type="submit">Отменить сопоставление</button>
-                                        </form>
-                                    </details>
-
-                                    <form method="post" action="{% url 'arrival_roster_participation' version.pk item.match.pk %}">
-                                        {% csrf_token %}
-                                        {{ item.participation_form.as_p }}
-                                        <button type="submit">Сохранить участие</button>
-                                    </form>
-                                    <form method="post" action="{% url 'arrival_roster_dates' version.pk item.match.pk %}">
-                                        {% csrf_token %}
-                                        {{ item.dates_form.as_p }}
-                                        <button type="submit">Сохранить даты</button>
-                                    </form>
-                                    <form method="post" action="{% url 'arrival_roster_notes' version.pk item.match.pk %}">
-                                        {% csrf_token %}
-                                        {{ item.notes_form.as_p }}
-                                        <button type="submit">Сохранить пояснение</button>
-                                    </form>
-                                    {% else %}
-                                        Решение вводится в первой строке этого человека.
-                                    {% endif %}
-                                </td>
-                            </tr>
-                        {% empty %}
-                            <tr><td colspan="9">Строки для проверки не найдены.</td></tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-        </section>
+        {% for group in review_groups %}
+            <section class="rotation-table-card" aria-labelledby="group-{{ group.key }}">
+                <h3 id="group-{{ group.key }}">{{ group.label }} · {{ group.items|length }}</h3>
+                {% if group.items %}
+                    <div class="table-wrap">
+                        <table>
+                            <thead><tr><th>Источник</th><th>Человек</th><th>Дата</th><th>Телефон</th><th>Состояние</th><th>Замечания</th><th>Ручная проверка</th></tr></thead>
+                            <tbody>
+                            {% for item in group.items %}
+                                <tr>
+                                    <td>{{ item.source_label }}</td>
+                                    <td>{% if item.photo %}<img src="{{ item.photo.url }}" alt="Фото" width="40" height="40"><br>{% endif %}<strong>{{ item.display_name }}</strong><br><small>{{ item.display_position }}</small></td>
+                                    <td>{% if item.display_date %}{{ item.display_date|date:"d.m.Y" }}{% else %}Требуется проверка{% endif %}</td><td>{{ item.display_phone }}</td>
+                                    <td>{{ item.match.get_status_display }}<br><small>{{ item.responsibility }}</small>{% if item.resident_name %}<br><small>{{ item.resident_name }}</small>{% endif %}</td>
+                                    <td>{% for issue in item.issues %}<div class="message {% if issue.severity == 'error' %}error{% else %}warning{% endif %}">{{ issue.message }}<form method="post" action="{% if issue.is_currently_resolved %}{% url 'arrival_roster_issue_reopen' version.pk issue.pk %}{% else %}{% url 'arrival_roster_issue_resolve' version.pk issue.pk %}{% endif %}">{% csrf_token %}<input type="hidden" name="expected_revision" value="{{ issue.current_revision }}"><label>Пояснение <textarea name="resolution_note" required></textarea></label><button type="submit">{% if issue.is_currently_resolved %}Вернуть на проверку{% else %}Вопрос решён{% endif %}</button></form></div>{% empty %}Нет замечаний{% endfor %}</td>
+                                    <td>
+                                        {% if item.is_review_lead %}
+                                            <details><summary>Выбрать жильца</summary>
+                                                {% for candidate in item.candidates %}<form method="post" action="{% url 'arrival_roster_resident_select' version.pk item.match.pk %}">{% csrf_token %}<input type="hidden" name="expected_revision" value="{{ item.revision }}"><input type="hidden" name="resident_id" value="{{ candidate.resident.pk }}"><span>{{ candidate.resident.display_name }}</span><button type="submit">Выбрать</button></form>{% endfor %}
+                                                <form method="post" action="{% url 'arrival_roster_resident_search' version.pk item.match.pk %}">{% csrf_token %}<label>ФИО <input name="query" minlength="3" maxlength="255" required></label><button type="submit">Найти</button></form>
+                                                {% for found in item.search_results %}<form method="post" action="{% url 'arrival_roster_resident_select' version.pk item.match.pk %}">{% csrf_token %}<input type="hidden" name="expected_revision" value="{{ item.revision }}"><input type="hidden" name="resident_id" value="{{ found.id }}"><span>{{ found.name }} · {{ found.description }}</span><button type="submit">Выбрать</button></form>{% endfor %}
+                                                <form method="post" action="{% url 'arrival_roster_resident_clear' version.pk item.match.pk %}">{% csrf_token %}<input type="hidden" name="expected_revision" value="{{ item.revision }}"><button type="submit">Отменить сопоставление</button></form>
+                                            </details>
+                                            <form method="post" action="{% url 'arrival_roster_participation' version.pk item.match.pk %}">{% csrf_token %}{{ item.participation_form.as_p }}<button type="submit">Сохранить участие</button></form>
+                                            <form method="post" action="{% url 'arrival_roster_dates' version.pk item.match.pk %}">{% csrf_token %}{{ item.dates_form.as_p }}<button type="submit">Сохранить даты</button></form>
+                                            <form method="post" action="{% url 'arrival_roster_notes' version.pk item.match.pk %}">{% csrf_token %}{{ item.notes_form.as_p }}<button type="submit">Сохранить пояснение</button></form>
+                                        {% else %}Решение вводится в первой строке этого человека.{% endif %}
+                                    </td>
+                                </tr>
+                            {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                {% else %}<p>В этой группе пока нет строк.</p>{% endif %}
+            </section>
+        {% endfor %}
     </main>
 </div>
 {% endblock %}
