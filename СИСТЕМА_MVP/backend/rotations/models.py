@@ -466,6 +466,18 @@ class ArrivalRosterImmutableQuerySet(models.QuerySet):
     def delete(self):
         self._raise_write_forbidden()
 
+    def select_related(self, *fields):
+        # T1.3a renamed the version actor field.  Keep the existing T1.1/T1.2
+        # read-only view working until its separate UI stage is changed.
+        if self.model.__name__ == 'ArrivalRosterVersion':
+            fields = tuple(
+                'created_by_access__employee'
+                if field == 'uploaded_by_access__employee'
+                else field
+                for field in fields
+            )
+        return super().select_related(*fields)
+
 
 class ArrivalRosterImmutableModel(models.Model):
     objects = ArrivalRosterImmutableQuerySet.as_manager()
@@ -586,13 +598,17 @@ class ArrivalRosterParserProfile(ArrivalRosterImmutableModel):
 
 
 class ArrivalRosterVersion(ArrivalRosterImmutableModel):
+    class SourceKind(models.TextChoices):
+        EXCEL = 'excel', 'Excel'
+        EMPLOYEE_POOL = 'employee_pool', 'Из базы сотрудников'
+
     class Status(models.TextChoices):
         DRAFT = 'draft', 'Черновик'
         REVIEW_REQUIRED = 'review_required', 'Требуется проверка'
 
     IMMUTABLE_FIELDS = (
-        'watch_period_id', 'version_number', 'source_file_id', 'parser_profile_id',
-        'uploaded_by_access_id',
+        'watch_period_id', 'version_number', 'source_kind', 'source_file_id',
+        'parser_profile_id', 'created_by_access_id', 'source_fingerprint',
     )
 
     watch_period = models.ForeignKey(
@@ -609,23 +625,38 @@ class ArrivalRosterVersion(ArrivalRosterImmutableModel):
         default=Status.REVIEW_REQUIRED,
         db_index=True,
     )
+    source_kind = models.CharField(
+        'Источник версии',
+        max_length=24,
+        choices=SourceKind.choices,
+        db_index=True,
+    )
     source_file = models.ForeignKey(
         ArrivalRosterSourceFile,
         verbose_name='Исходный файл',
         on_delete=models.PROTECT,
         related_name='roster_versions',
+        null=True,
+        blank=True,
     )
     parser_profile = models.ForeignKey(
         ArrivalRosterParserProfile,
         verbose_name='Профиль разбора',
         on_delete=models.PROTECT,
         related_name='roster_versions',
+        null=True,
+        blank=True,
     )
-    uploaded_by_access = models.ForeignKey(
+    created_by_access = models.ForeignKey(
         'users.EmployeeAccess',
-        verbose_name='Точный доступ загрузившего версию',
+        verbose_name='Точный доступ создавшего версию',
         on_delete=models.PROTECT,
-        related_name='uploaded_arrival_roster_versions',
+        related_name='created_arrival_roster_versions',
+    )
+    source_fingerprint = models.CharField(
+        'SHA-256 исходного состава',
+        max_length=64,
+        validators=[RegexValidator(regex=r'^[0-9a-f]{64}$')],
     )
     source_row_count = models.PositiveIntegerField('Исходных строк', default=0)
     normalized_row_count = models.PositiveIntegerField('Распознано строк', default=0)
@@ -658,6 +689,7 @@ class ArrivalRosterVersion(ArrivalRosterImmutableModel):
             ),
             models.UniqueConstraint(
                 fields=['watch_period', 'source_file', 'parser_profile'],
+                condition=models.Q(source_kind='excel'),
                 name='uniq_arrival_period_file_profile',
             ),
             models.CheckConstraint(
@@ -668,10 +700,50 @@ class ArrivalRosterVersion(ArrivalRosterImmutableModel):
                 condition=models.Q(status__in=['draft', 'review_required']),
                 name='arrival_version_status_t11',
             ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        source_kind='excel',
+                        source_file__isnull=False,
+                        parser_profile__isnull=False,
+                    )
+                    | models.Q(
+                        source_kind='employee_pool',
+                        source_file__isnull=True,
+                        parser_profile__isnull=True,
+                    )
+                ),
+                name='arrival_version_source_shape',
+            ),
         ]
 
     def __str__(self):
         return f'{self.watch_period} / версия {self.version_number}'
+
+    @property
+    def uploaded_by_access(self):
+        """Read-only compatibility alias for the existing T1.1/T1.2 view."""
+        return self.created_by_access
+
+    @property
+    def uploaded_by_access_id(self):
+        return self.created_by_access_id
+
+    def clean(self):
+        super().clean()
+        errors = {}
+        if self.source_kind == self.SourceKind.EXCEL:
+            if not self.source_file_id:
+                errors['source_file'] = 'Версия из Excel требует исходный файл.'
+            if not self.parser_profile_id:
+                errors['parser_profile'] = 'Версия из Excel требует профиль разбора.'
+        elif self.source_kind == self.SourceKind.EMPLOYEE_POOL:
+            if self.source_file_id:
+                errors['source_file'] = 'Версия из базы сотрудников не использует Excel-файл.'
+            if self.parser_profile_id:
+                errors['parser_profile'] = 'Версия из базы сотрудников не использует профиль Excel.'
+        if errors:
+            raise ValidationError(errors)
 
     def _validate_immutable_fields(self):
         super()._validate_immutable_fields()
@@ -810,6 +882,7 @@ class ArrivalRosterNormalizedRow(ArrivalRosterImmutableModel):
 
 
 class ArrivalRosterMatch(ArrivalRosterImmutableModel):
+    PUBLIC_CREATE_FORBIDDEN = True
     class Status(models.TextChoices):
         EXACT = 'exact', 'Точное сопоставление'
         PROBABLE = 'probable', 'Вероятное сопоставление'
@@ -819,7 +892,7 @@ class ArrivalRosterMatch(ArrivalRosterImmutableModel):
 
     IMMUTABLE_FIELDS = (
         'version_id', 'status', 'method', 'quality', 'matched_resident_id',
-        'evidence',
+        'evidence', 'created_at',
     )
 
     version = models.ForeignKey(
@@ -866,7 +939,8 @@ class ArrivalRosterMatch(ArrivalRosterImmutableModel):
 
 
 class ArrivalRosterMatchRow(ArrivalRosterImmutableModel):
-    IMMUTABLE_FIELDS = ('match_id', 'normalized_row_id')
+    PUBLIC_CREATE_FORBIDDEN = True
+    IMMUTABLE_FIELDS = ('match_id', 'normalized_row_id', 'created_at')
 
     match = models.ForeignKey(
         ArrivalRosterMatch,
@@ -888,7 +962,8 @@ class ArrivalRosterMatchRow(ArrivalRosterImmutableModel):
 
 
 class ArrivalRosterMatchCandidate(ArrivalRosterImmutableModel):
-    IMMUTABLE_FIELDS = ('match_id', 'resident_id', 'evidence')
+    PUBLIC_CREATE_FORBIDDEN = True
+    IMMUTABLE_FIELDS = ('match_id', 'resident_id', 'evidence', 'created_at')
 
     match = models.ForeignKey(
         ArrivalRosterMatch,
@@ -916,14 +991,198 @@ class ArrivalRosterMatchCandidate(ArrivalRosterImmutableModel):
         ]
 
 
+class ArrivalRosterPoolRow(ArrivalRosterImmutableModel):
+    PUBLIC_CREATE_FORBIDDEN = True
+
+    class OriginKind(models.TextChoices):
+        AUTOMATIC_EMPLOYEE = 'automatic_employee', 'Автоматически из карточки сотрудника'
+        MANUAL_EMPLOYEE = 'manual_employee', 'Сотрудник добавлен вручную'
+        MANUAL_EXTERNAL = 'manual_external', 'Внешний жилец добавлен вручную'
+
+    class SuggestedParticipation(models.TextChoices):
+        ARRIVING = 'arriving', 'Заезжает'
+        NOT_ARRIVING = 'not_arriving', 'Не заезжает'
+        EXTENDED = 'extended', 'Продлевается'
+        ADDITIONAL = 'additional', 'Дополнительный человек'
+
+    IMMUTABLE_FIELDS = (
+        'version_id', 'resident_id', 'employee_id', 'watch_composition_id',
+        'match_id', 'origin_kind', 'suggested_participation',
+        'employee_snapshot', 'resident_snapshot', 'snapshot_sha256',
+        'created_by_access_id', 'created_at', 'basis',
+    )
+
+    version = models.ForeignKey(
+        ArrivalRosterVersion,
+        verbose_name='Версия реестра',
+        on_delete=models.PROTECT,
+        related_name='pool_rows',
+    )
+    resident = models.ForeignKey(
+        'settlement.SettlementResident',
+        verbose_name='Жилец',
+        on_delete=models.PROTECT,
+        related_name='arrival_roster_pool_rows',
+        null=True,
+        blank=True,
+    )
+    employee = models.ForeignKey(
+        'users.Employee',
+        verbose_name='Сотрудник',
+        on_delete=models.PROTECT,
+        related_name='arrival_roster_pool_rows',
+        null=True,
+        blank=True,
+    )
+    watch_composition = models.ForeignKey(
+        'users.WatchComposition',
+        verbose_name='Зафиксированная принадлежность к вахте',
+        on_delete=models.PROTECT,
+        related_name='arrival_roster_pool_rows',
+        null=True,
+        blank=True,
+    )
+    match = models.OneToOneField(
+        ArrivalRosterMatch,
+        verbose_name='Точное сопоставление',
+        on_delete=models.PROTECT,
+        related_name='pool_row',
+    )
+    origin_kind = models.CharField(
+        'Способ добавления',
+        max_length=24,
+        choices=OriginKind.choices,
+    )
+    suggested_participation = models.CharField(
+        'Предлагаемое участие',
+        max_length=16,
+        choices=SuggestedParticipation.choices,
+        null=True,
+        blank=True,
+    )
+    employee_snapshot = models.JSONField('Кадровый снимок', default=dict, blank=True)
+    resident_snapshot = models.JSONField('Снимок карточки жильца', default=dict, blank=True)
+    snapshot_sha256 = models.CharField(
+        'SHA-256 снимка строки',
+        max_length=64,
+        validators=[RegexValidator(regex=r'^[0-9a-f]{64}$')],
+    )
+    created_by_access = models.ForeignKey(
+        'users.EmployeeAccess',
+        verbose_name='Точный доступ табельщика',
+        on_delete=models.PROTECT,
+        related_name='created_arrival_roster_pool_rows',
+    )
+    created_at = models.DateTimeField('Добавлено', auto_now_add=True)
+    basis = models.TextField('Основание', blank=True)
+
+    class Meta:
+        verbose_name = 'Строка пула реестра заезда'
+        verbose_name_plural = 'Строки пула реестра заезда'
+        ordering = ['version_id', 'employee_id', 'resident_id']
+        indexes = [
+            models.Index(fields=['version', 'origin_kind'], name='arrival_pool_origin_idx'),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['version', 'resident'],
+                condition=models.Q(resident__isnull=False),
+                name='uniq_arrival_pool_resident',
+            ),
+            models.UniqueConstraint(
+                fields=['version', 'employee'],
+                condition=models.Q(employee__isnull=False),
+                name='uniq_arrival_pool_employee',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        origin_kind='automatic_employee',
+                        employee__isnull=False,
+                        watch_composition__isnull=False,
+                    )
+                    | models.Q(
+                        origin_kind='manual_employee',
+                        employee__isnull=False,
+                    )
+                    | models.Q(
+                        origin_kind='manual_external',
+                        resident__isnull=False,
+                        employee__isnull=True,
+                        watch_composition__isnull=True,
+                    )
+                ),
+                name='arrival_pool_subject_shape',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(employee__isnull=False)
+                    | models.Q(resident__isnull=False)
+                ),
+                name='arrival_pool_subject_required',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(origin_kind='automatic_employee')
+                    | ~models.Q(basis='')
+                ),
+                name='arrival_pool_manual_basis_required',
+            ),
+        ]
+
+    def clean(self):
+        super().clean()
+        errors = {}
+        if not self.employee_id and not self.resident_id:
+            errors['resident'] = 'Строка пула требует сотрудника или жильца.'
+        if self.match_id and self.version_id and self.match.version_id != self.version_id:
+            errors['match'] = 'Сопоставление относится к другой версии реестра.'
+        if self.resident_id and self.match_id:
+            if (
+                self.match.status != ArrivalRosterMatch.Status.EXACT
+                or self.match.matched_resident_id != self.resident_id
+            ):
+                errors['match'] = 'Строка пула требует точное сопоставление с указанным жильцом.'
+        elif self.match_id and (
+            self.match.status != ArrivalRosterMatch.Status.UNMATCHED
+            or self.match.matched_resident_id is not None
+        ):
+            errors['match'] = 'Строка без жильца требует несопоставленный результат.'
+        if self.origin_kind in {
+            self.OriginKind.AUTOMATIC_EMPLOYEE,
+            self.OriginKind.MANUAL_EMPLOYEE,
+        }:
+            if not self.employee_id:
+                errors['employee'] = 'Строка внутреннего сотрудника требует Employee.'
+            elif self.resident_id and (
+                self.resident.resident_type != self.resident.ResidentType.EMPLOYEE
+                or self.resident.employee_id != self.employee_id
+            ):
+                errors['resident'] = 'Внутренний жилец не соответствует Employee.'
+            if self.origin_kind == self.OriginKind.AUTOMATIC_EMPLOYEE and not self.watch_composition_id:
+                errors['watch_composition'] = 'Автоматическая строка требует принадлежность к вахте.'
+        elif self.origin_kind == self.OriginKind.MANUAL_EXTERNAL:
+            if self.employee_id or self.watch_composition_id:
+                errors['employee'] = 'Внешний жилец не получает Employee или кадровую вахту.'
+            if not self.resident_id:
+                errors['resident'] = 'Для внешней строки требуется карточка жильца.'
+            elif not self.resident.is_external:
+                errors['resident'] = 'Для внешней строки требуется внешняя карточка жильца.'
+            if not self.basis.strip():
+                errors['basis'] = 'Для внешнего жильца требуется основание.'
+        if errors:
+            raise ValidationError(errors)
+
+
 class ArrivalRosterIssue(ArrivalRosterImmutableModel):
+    PUBLIC_CREATE_FORBIDDEN = True
     class Severity(models.TextChoices):
         ERROR = 'error', 'Ошибка'
         WARNING = 'warning', 'Предупреждение'
 
     IMMUTABLE_FIELDS = (
         'version_id', 'source_row_id', 'normalized_row_id', 'match_id',
-        'severity', 'code', 'message', 'details',
+        'severity', 'code', 'message', 'details', 'created_at',
     )
 
     version = models.ForeignKey(
@@ -1149,6 +1408,9 @@ class ArrivalRosterEvent(ArrivalRosterImmutableModel):
         NOTES_CHANGED = 'notes_changed', 'Основание или комментарий изменены'
         ISSUE_RESOLVED = 'issue_resolved', 'Вопрос решён'
         ISSUE_REOPENED = 'issue_reopened', 'Вопрос возвращён на проверку'
+        POOL_CREATED = 'pool_created', 'Список сформирован из карточек сотрудников'
+        POOL_EMPLOYEE_ADDED = 'pool_employee_added', 'Сотрудник добавлен в список'
+        POOL_EXTERNAL_ADDED = 'pool_external_added', 'Внешний жилец добавлен в список'
 
     IMMUTABLE_FIELDS = (
         'version_id', 'actor_access_id', 'match_id', 'issue_id',

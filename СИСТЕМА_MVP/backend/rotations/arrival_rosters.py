@@ -31,6 +31,7 @@ from .models import (
     ArrivalRosterMatchRow,
     ArrivalRosterNormalizedRow,
     ArrivalRosterParserProfile,
+    ArrivalRosterPoolRow,
     ArrivalRosterRowReview,
     ArrivalRosterSourceFile,
     ArrivalRosterSourceRow,
@@ -64,6 +65,11 @@ _EVENT_DETAIL_KEYS = {
     ArrivalRosterEvent.Action.NOTES_CHANGED: set(),
     ArrivalRosterEvent.Action.ISSUE_RESOLVED: set(),
     ArrivalRosterEvent.Action.ISSUE_REOPENED: set(),
+    ArrivalRosterEvent.Action.POOL_CREATED: {
+        'source_fingerprint', 'employees', 'pool_rows', 'blocking_issues',
+    },
+    ArrivalRosterEvent.Action.POOL_EMPLOYEE_ADDED: {'employee_id', 'resident_id'},
+    ArrivalRosterEvent.Action.POOL_EXTERNAL_ADDED: {'resident_id'},
 }
 
 _GENERIC_ISSUE_RESOLUTION_FORBIDDEN_CODES = {
@@ -235,6 +241,113 @@ def _canonical_sha256(value):
     ).hexdigest()
 
 
+_PRIVATE_METADATA_KEYS = {
+    'access', 'access_id', 'full_name', 'password', 'phone', 'pin',
+    'raw_phone', 'session', 'token',
+}
+
+
+def _validate_safe_metadata(value, *, code):
+    try:
+        encoded = json.dumps(value, ensure_ascii=False, sort_keys=True)
+    except (TypeError, ValueError) as error:
+        raise _validation_error(code, 'Служебные доказательства имеют недопустимый формат.') from error
+    if len(encoded.encode('utf-8')) > 16 * 1024:
+        raise _validation_error(code, 'Служебные доказательства превышают допустимый размер.')
+
+    def walk(item):
+        if isinstance(item, dict):
+            for key, nested in item.items():
+                normalized_key = str(key).casefold()
+                if normalized_key in _PRIVATE_METADATA_KEYS:
+                    raise _validation_error(
+                        code,
+                        'Служебные доказательства содержат закрытые сведения.',
+                    )
+                walk(nested)
+        elif isinstance(item, list):
+            for nested in item:
+                walk(nested)
+        elif not isinstance(item, (str, int, float, bool, type(None))):
+            raise _validation_error(code, 'Служебные доказательства имеют недопустимый формат.')
+
+    walk(value)
+
+
+def _trusted_create_arrival_roster_match(*, version, status, method, quality,
+                                         matched_resident=None, evidence=None):
+    evidence = dict(evidence or {})
+    _validate_safe_metadata(evidence, code='arrival_roster.unsafe_match_evidence')
+    if not ArrivalRosterVersion._base_manager.filter(pk=version.pk).exists():
+        raise _validation_error('arrival_roster.match_version_required', 'Версия реестра не найдена.')
+    match = ArrivalRosterMatch(
+        version=version,
+        status=status,
+        method=method,
+        quality=quality,
+        matched_resident=matched_resident,
+        evidence=evidence,
+    )
+    match.full_clean()
+    ArrivalRosterMatch._base_manager.bulk_create([match])
+    return match
+
+
+def _trusted_create_arrival_roster_match_row(*, match, normalized_row):
+    if normalized_row.source_row.version_id != match.version_id:
+        raise _validation_error(
+            'arrival_roster.match_row_version_mismatch',
+            'Исходная строка относится к другой версии реестра.',
+        )
+    link = ArrivalRosterMatchRow(match=match, normalized_row=normalized_row)
+    link.full_clean()
+    ArrivalRosterMatchRow._base_manager.bulk_create([link])
+    return link
+
+
+def _trusted_create_arrival_roster_match_candidate(*, match, resident, evidence=None):
+    evidence = dict(evidence or {})
+    _validate_safe_metadata(evidence, code='arrival_roster.unsafe_match_evidence')
+    candidate = ArrivalRosterMatchCandidate(
+        match=match,
+        resident=resident,
+        evidence=evidence,
+    )
+    candidate.full_clean()
+    ArrivalRosterMatchCandidate._base_manager.bulk_create([candidate])
+    return candidate
+
+
+def _trusted_create_arrival_roster_issue(*, version, severity, code, message,
+                                         source_row=None, normalized_row=None,
+                                         match=None, details=None):
+    details = dict(details or {})
+    _validate_safe_metadata(details, code='arrival_roster.unsafe_issue_details')
+    related_versions = {
+        source_row.version_id if source_row is not None else None,
+        normalized_row.source_row.version_id if normalized_row is not None else None,
+        match.version_id if match is not None else None,
+    } - {None}
+    if related_versions - {version.pk}:
+        raise _validation_error(
+            'arrival_roster.issue_version_mismatch',
+            'Вопрос относится к другой версии реестра.',
+        )
+    issue = ArrivalRosterIssue(
+        version=version,
+        source_row=source_row,
+        normalized_row=normalized_row,
+        match=match,
+        severity=severity,
+        code=code,
+        message=message,
+        details=details,
+    )
+    issue.full_clean()
+    ArrivalRosterIssue._base_manager.bulk_create([issue])
+    return issue
+
+
 def _read_uploaded_xlsx(uploaded_file):
     original_name = Path(str(uploaded_file.name or '')).name
     if not original_name.casefold().endswith('.xlsx'):
@@ -282,8 +395,31 @@ def _access_snapshot(actor_access_id):
     return snapshot
 
 
-def _lock_timekeeper_access(snapshot):
-    Employee.objects.select_for_update(of=('self',)).get(pk=snapshot['employee_id'])
+def _lock_employee_plan(employee_ids):
+    planned_ids = sorted({int(employee_id) for employee_id in employee_ids})
+    employees = list(
+        Employee.objects
+        .select_for_update(of=('self',))
+        .select_related('watch_composition')
+        .filter(pk__in=planned_ids)
+        .order_by('pk')
+    )
+    if [employee.pk for employee in employees] != planned_ids:
+        raise _validation_error(
+            'arrival_roster.employee_plan_changed',
+            'Состав сотрудников изменился. Повторите операцию.',
+        )
+    return {employee.pk: employee for employee in employees}
+
+
+def _lock_timekeeper_access(snapshot, *, locked_employees=None):
+    if locked_employees is None:
+        _lock_employee_plan([snapshot['employee_id']])
+    elif snapshot['employee_id'] not in locked_employees:
+        raise _validation_error(
+            'arrival_roster.employee_plan_changed',
+            'Состав сотрудников изменился. Повторите операцию.',
+        )
     try:
         access = (
             EmployeeAccess.objects
@@ -512,6 +648,18 @@ def select_arrival_roster_resident(*, match_id, resident_id, expected_revision,
                 'arrival_roster.resident_unavailable',
                 'Выбранный жилец не найден или недоступен.',
             )
+        pool_row = (
+            ArrivalRosterPoolRow._base_manager
+            .filter(match_id=match_id)
+            .only('employee_id')
+            .first()
+        )
+        if pool_row is not None and pool_row.employee_id is not None:
+            if resident.employee_id != pool_row.employee_id:
+                raise _validation_error(
+                    'arrival_roster.pool_employee_resident_mismatch',
+                    'Жилец не соответствует сотруднику исходного списка.',
+                )
         review.resident_resolution = ArrivalRosterRowReview.ResidentResolution.SELECTED
         review.selected_resident = resident
 
@@ -1178,7 +1326,7 @@ def _persist_parse_result(*, version, parsed):
                 normalized.source_row.sheet_name == 'Список сотрудников'
                 and any(row.source_row.sheet_name == 'Список сотрудников' for row in previous_rows)
             ):
-                ArrivalRosterIssue(
+                _trusted_create_arrival_roster_issue(
                     version=version,
                     source_row=normalized.source_row,
                     normalized_row=normalized,
@@ -1186,7 +1334,7 @@ def _persist_parse_result(*, version, parsed):
                     severity=ArrivalRosterIssue.Severity.ERROR,
                     code='duplicate_primary_resident',
                     message='Один жилец повторяется в основном списке.',
-                ).save()
+                )
             prior_shifts = {row.raw_shift_hint for row in previous_rows if row.raw_shift_hint}
             prior_dates = {
                 row.arrival_date_candidate
@@ -1194,7 +1342,7 @@ def _persist_parse_result(*, version, parsed):
                 if row.arrival_date_candidate
             }
             if normalized.raw_shift_hint and prior_shifts and normalized.raw_shift_hint not in prior_shifts:
-                ArrivalRosterIssue(
+                _trusted_create_arrival_roster_issue(
                     version=version,
                     source_row=normalized.source_row,
                     normalized_row=normalized,
@@ -1202,13 +1350,13 @@ def _persist_parse_result(*, version, parsed):
                     severity=ArrivalRosterIssue.Severity.ERROR,
                     code='conflicting_shift_hints',
                     message='В разных листах указаны разные смены-подсказки.',
-                ).save()
+                )
             if (
                 normalized.arrival_date_candidate
                 and prior_dates
                 and normalized.arrival_date_candidate not in prior_dates
             ):
-                ArrivalRosterIssue(
+                _trusted_create_arrival_roster_issue(
                     version=version,
                     source_row=normalized.source_row,
                     normalized_row=normalized,
@@ -1216,10 +1364,10 @@ def _persist_parse_result(*, version, parsed):
                     severity=ArrivalRosterIssue.Severity.ERROR,
                     code='conflicting_arrival_dates',
                     message='В разных листах указаны разные даты прибытия.',
-                ).save()
+                )
             previous_rows.append(normalized)
         else:
-            match = ArrivalRosterMatch(
+            match = _trusted_create_arrival_roster_match(
                 version=version,
                 status=status,
                 method=method,
@@ -1234,13 +1382,12 @@ def _persist_parse_result(*, version, parsed):
                     'source_row': normalized.source_row.row_number,
                 },
             )
-            match.save()
             if exact_record is not None:
                 exact_match_by_resident[exact_record['resident'].pk] = match
                 exact_rows_by_resident[exact_record['resident'].pk] = [normalized]
                 proven_residents_by_name[normalized.normalized_name_key] = exact_record
             for candidate in candidates:
-                ArrivalRosterMatchCandidate(
+                _trusted_create_arrival_roster_match_candidate(
                     match=match,
                     resident=candidate['resident'],
                     evidence={
@@ -1254,7 +1401,7 @@ def _persist_parse_result(*, version, parsed):
                         ),
                         'resident_active': candidate['active'],
                     },
-                ).save()
+                )
             if status != ArrivalRosterMatch.Status.EXACT:
                 messages = {
                     'probable': 'Найден вероятный жилец; требуется подтверждение табельщиком.',
@@ -1262,7 +1409,7 @@ def _persist_parse_result(*, version, parsed):
                     'unmatched': 'Жилец не найден; создавать новую карточку автоматически запрещено.',
                     'conflict': 'Идентификаторы строки противоречат данным жильцов.',
                 }
-                ArrivalRosterIssue(
+                _trusted_create_arrival_roster_issue(
                     version=version,
                     source_row=normalized.source_row,
                     normalized_row=normalized,
@@ -1271,8 +1418,8 @@ def _persist_parse_result(*, version, parsed):
                     code=f'match_{status}',
                     message=messages[status],
                     details={'candidate_count': len(candidates)},
-                ).save()
-        ArrivalRosterMatchRow(match=match, normalized_row=normalized).save()
+                )
+        _trusted_create_arrival_roster_match_row(match=match, normalized_row=normalized)
 
     for parsed_issue in parsed.issues:
         source_row = source_by_key.get((parsed_issue.sheet_name, parsed_issue.row_number))
@@ -1288,7 +1435,7 @@ def _persist_parse_result(*, version, parsed):
                     match = normalized_row.match_link.match
                 except ArrivalRosterMatchRow.DoesNotExist:
                     match = None
-        ArrivalRosterIssue(
+        _trusted_create_arrival_roster_issue(
             version=version,
             source_row=source_row,
             normalized_row=normalized_row,
@@ -1297,7 +1444,7 @@ def _persist_parse_result(*, version, parsed):
             code=parsed_issue.code,
             message=parsed_issue.message,
             details=parsed_issue.details or {},
-        ).save()
+        )
 
 
 @transaction.atomic
@@ -1356,9 +1503,11 @@ def upload_arrival_roster(*, uploaded_file, watch_period_id, actor_access_id):
             watch_period=period,
             version_number=(last_version.version_number + 1) if last_version else 1,
             status=ArrivalRosterVersion.Status.REVIEW_REQUIRED,
+            source_kind=ArrivalRosterVersion.SourceKind.EXCEL,
             source_file=source_file,
             parser_profile=profile,
-            uploaded_by_access=actor_access,
+            created_by_access=actor_access,
+            source_fingerprint=source_file.sha256,
         )
         version.save()
         _persist_parse_result(version=version, parsed=parsed)
