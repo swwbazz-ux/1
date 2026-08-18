@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import timedelta
 
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, router, transaction
 from django.db.models import Q
+from django.utils import timezone
 from shifts.models import WatchPeriod
 
 from .control import (
@@ -34,11 +36,9 @@ from .saved_previews import (
     _assert_stored_result_matches,
     _validate_approved_cohort,
     _validate_resolver_result,
-    settlement_preview_is_stale,
 )
 from .resolver import resolve_settlement_cohort
 from .services import (
-    _create_occupancy,
     _validate_occupancy_conflicts,
     _validate_resident_and_destination,
 )
@@ -71,6 +71,13 @@ def _member_snapshot(rows):
             row.departure_at,
             row.participation_status,
             row.source_revision_id,
+            row.work_shift,
+            row.shift_source_kind,
+            row.official_equipment_assignment_id,
+            row.shift_selected_by_access_id,
+            row.shift_selected_at,
+            row.shift_selection_basis,
+            row.shift_source_fingerprint,
         )
         for row in rows
     )
@@ -85,6 +92,7 @@ def _placement_snapshot(rows):
             row.physical_bed_id,
             row.action,
             row.source_kind,
+            row.work_shift,
             row.cohort_member_id_snapshot,
             row.physical_room_id_snapshot,
             row.binding_id_snapshot,
@@ -104,6 +112,7 @@ def _unresolved_snapshot(rows):
             row.resident_id,
             row.reason_code,
             row.reason_codes,
+            row.work_shift,
             row.cohort_member_id_snapshot,
             row.structured_details,
         )
@@ -119,6 +128,13 @@ def _occupancy_snapshot(rows):
             row.physical_bed_id,
             row.assignment_type,
             row.source_kind,
+            row.work_shift,
+            row.shift_source_kind,
+            row.shift_source_fingerprint,
+            row.shift_official_assignment_id,
+            row.shift_selected_by_access_id,
+            row.shift_selected_at,
+            row.shift_selection_basis,
             row.starts_at,
             row.ends_at,
             row.terminated_at,
@@ -138,6 +154,7 @@ def _occupancy_snapshot(rows):
 class _ApplyLockPlan:
     using: str
     run_id: int
+    work_shift: str
     run_snapshot: tuple
     cohort_id: int
     cohort_snapshot: tuple
@@ -151,10 +168,10 @@ class _ApplyLockPlan:
     bed_snapshot: tuple
     room_snapshot: tuple
     occupancy_snapshot: tuple
-    application_id: int | None
+    application_snapshot: tuple
 
 
-def _build_apply_lock_plan(*, run_id: int) -> _ApplyLockPlan:
+def _build_apply_lock_plan(*, run_id: int, work_shift: str) -> _ApplyLockPlan:
     using = router.db_for_write(SettlementPreviewApplication)
     run_row = (
         SettlementPreviewRun._base_manager.using(using)
@@ -192,17 +209,18 @@ def _build_apply_lock_plan(*, run_id: int) -> _ApplyLockPlan:
         .filter(
             cohort_id=cohort_row['pk'],
             participation_status__in=SettlementCohortMember.ACTIVE_PARTICIPATION_STATUSES,
+            work_shift=work_shift,
         )
         .order_by('resident_id', 'pk')
     )
     placements = list(
         SettlementPreviewPlacement._base_manager.using(using)
-        .filter(run_id=run_id)
+        .filter(run_id=run_id, work_shift=work_shift)
         .order_by('pk')
     )
     unresolved = list(
         SettlementPreviewUnresolved._base_manager.using(using)
-        .filter(run_id=run_id)
+        .filter(run_id=run_id, work_shift=work_shift)
         .order_by('pk')
     )
 
@@ -230,6 +248,7 @@ def _build_apply_lock_plan(*, run_id: int) -> _ApplyLockPlan:
         .select_related(
             'source_application__preview_run',
             'source_preview_placement',
+            'cohort_member',
         )
         .order_by('pk')
     )
@@ -269,15 +288,17 @@ def _build_apply_lock_plan(*, run_id: int) -> _ApplyLockPlan:
             'dormitory_id', 'floor', 'number',
         )
     )
-    application_id = (
+    application_snapshot = tuple(
         SettlementPreviewApplication._base_manager.using(using)
         .filter(preview_run_id=run_id)
-        .values_list('pk', flat=True)
-        .first()
+        .filter(Q(work_shift=work_shift) | Q(legacy_whole_run=True))
+        .order_by('pk')
+        .values_list('pk', 'work_shift', 'legacy_whole_run')
     )
     return _ApplyLockPlan(
         using=using,
         run_id=run_id,
+        work_shift=work_shift,
         run_snapshot=tuple(run_row.values()),
         cohort_id=cohort_row['pk'],
         cohort_snapshot=tuple(cohort_row.values()),
@@ -291,7 +312,7 @@ def _build_apply_lock_plan(*, run_id: int) -> _ApplyLockPlan:
         bed_snapshot=tuple(beds),
         room_snapshot=rooms,
         occupancy_snapshot=_occupancy_snapshot(occupancies),
-        application_id=application_id,
+        application_snapshot=application_snapshot,
     )
 
 
@@ -334,13 +355,14 @@ def _lock_and_revalidate_plan(
     placements = list(
         SettlementPreviewPlacement._base_manager.using(using)
         .select_for_update(of=('self',))
-        .filter(run_id=run.pk)
+        .select_related('calendar_slot__watch_period')
+        .filter(run_id=run.pk, work_shift=plan.work_shift)
         .order_by('pk')
     )
     unresolved = list(
         SettlementPreviewUnresolved._base_manager.using(using)
         .select_for_update(of=('self',))
-        .filter(run_id=run.pk)
+        .filter(run_id=run.pk, work_shift=plan.work_shift)
         .order_by('pk')
     )
     bed_ids = tuple(row[0] for row in plan.bed_snapshot)
@@ -366,24 +388,33 @@ def _lock_and_revalidate_plan(
             'physical_bed',
             'source_application__preview_run',
             'source_preview_placement',
+            'cohort_member',
         )
         .filter(pk__in=occupancy_ids)
         .order_by('pk')
     )
-    application = None
-    if plan.application_id is not None:
-        application = (
-            SettlementPreviewApplication._base_manager.using(using)
-            .select_for_update(of=('self',))
-            .get(pk=plan.application_id)
-        )
-    else:
-        application = (
-            SettlementPreviewApplication._base_manager.using(using)
-            .select_for_update(of=('self',))
-            .filter(preview_run_id=run.pk)
-            .first()
-        )
+    application_ids = tuple(row[0] for row in plan.application_snapshot)
+    applications = list(
+        SettlementPreviewApplication._base_manager.using(using)
+        .select_for_update(of=('self',))
+        .filter(pk__in=application_ids)
+        .order_by('pk')
+    )
+    actual_application_snapshot = tuple(
+        (row.pk, row.work_shift, row.legacy_whole_run)
+        for row in applications
+    )
+    application = next(
+        (
+            row for row in applications
+            if not row.legacy_whole_run and row.work_shift == plan.work_shift
+        ),
+        None,
+    )
+    legacy_application = next(
+        (row for row in applications if row.legacy_whole_run),
+        None,
+    )
 
     actual_run_snapshot = (
         run.pk, run.cohort_id, run.watch_period_id, run.watch_composition_id,
@@ -404,6 +435,7 @@ def _lock_and_revalidate_plan(
         .filter(
             cohort_id=cohort.pk,
             participation_status__in=SettlementCohortMember.ACTIVE_PARTICIPATION_STATUSES,
+            work_shift=plan.work_shift,
         )
         .order_by('resident_id', 'pk')
     )
@@ -428,6 +460,7 @@ def _lock_and_revalidate_plan(
         or actual_bed_snapshot != plan.bed_snapshot
         or actual_room_snapshot != plan.room_snapshot
         or _occupancy_snapshot(occupancies) != plan.occupancy_snapshot
+        or actual_application_snapshot != plan.application_snapshot
     ):
         raise _apply_error('stale_preview', 'Apply lock plan устарел до записи.')
 
@@ -438,6 +471,7 @@ def _lock_and_revalidate_plan(
         'period': period,
         'cohort': cohort,
         'run': run,
+        'work_shift': plan.work_shift,
         'members': members,
         'placements': placements,
         'unresolved': unresolved,
@@ -445,6 +479,7 @@ def _lock_and_revalidate_plan(
         'rooms': rooms,
         'occupancies': occupancies,
         'application': application,
+        'legacy_application': legacy_application,
     }
 
 
@@ -473,7 +508,10 @@ def _validate_locked_preview(locked):
         raise _apply_error('stale_preview', 'Preview имеет stale календарное основание.')
     try:
         _validate_approved_cohort(cohort, stale=True)
-        result = resolve_settlement_cohort(cohort_id=cohort.pk)
+        result = resolve_settlement_cohort(
+            cohort_id=cohort.pk,
+            materialized_preview_run_id=run.pk,
+        )
         validated = _validate_resolver_result(cohort=cohort, result=result)
         _assert_stored_result_matches(run=run, result=result, validated=validated)
     except ValidationError as error:
@@ -481,14 +519,71 @@ def _validate_locked_preview(locked):
             'stale_preview',
             'Текущие источники не воспроизводят подтверждённый preview.',
         ) from error
-    if settlement_preview_is_stale(run_id=run.pk):
-        raise _apply_error('stale_preview', 'Подтверждённый preview устарел.')
     return result
+
+
+def _allowed_apply_date(*, period, work_shift):
+    if work_shift == SettlementCohortMember.WorkShift.DAY:
+        return period.starts_on
+    return period.starts_on - timedelta(days=1)
+
+
+def _validate_apply_date(*, period, work_shift, now):
+    effective_now = timezone.now() if now is None else now
+    try:
+        local_date = timezone.localdate(effective_now)
+    except (AttributeError, TypeError, ValueError) as error:
+        raise _apply_error('invalid_state', 'Серверное время Apply указано некорректно.') from error
+    allowed_date = _allowed_apply_date(period=period, work_shift=work_shift)
+    if local_date < allowed_date:
+        raise _apply_error(
+            'too_early',
+            f'Применение этой смены разрешено не раньше {allowed_date:%d.%m.%Y}.',
+            params={'allowed_date': allowed_date.isoformat()},
+        )
+
+
+def _validate_shift_scope(locked):
+    run = locked['run']
+    period = locked['period']
+    work_shift = locked['work_shift']
+    members_by_id = {row.pk: row for row in locked['members']}
+    for member in locked['members']:
+        if member.work_shift != work_shift:
+            raise _apply_error('incomplete_preview', 'Membership относится к другой смене.')
+    for row in (*locked['placements'], *locked['unresolved']):
+        member = members_by_id.get(row.cohort_member_id_snapshot)
+        if (
+            row.work_shift != work_shift
+            or member is None
+            or member.resident_id != row.resident_id
+        ):
+            raise _apply_error('incomplete_preview', 'Строка результата содержит stale смену.')
+    for placement in locked['placements']:
+        member = members_by_id[placement.cohort_member_id_snapshot]
+        slot = placement.calendar_slot
+        arrival_date = timezone.localdate(member.arrival_at)
+        early_night = (
+            work_shift == SettlementCohortMember.WorkShift.NIGHT
+            and arrival_date == period.starts_on - timedelta(days=1)
+        )
+        if (
+            placement.run_id != run.pk
+            or slot.watch_period_id != period.pk
+            or slot.calendar_relation_is_stale
+        ):
+            raise _apply_error('stale_preview', 'CalendarSlot смены устарел.')
+        if arrival_date < slot.valid_from and not early_night:
+            raise _apply_error(
+                'stale_preview',
+                'Начало размещения находится раньше допустимой границы CalendarSlot.',
+            )
 
 
 def _classify_changes(*, locked, confirm_replace_manual):
     run = locked['run']
     period = locked['period']
+    work_shift = locked['work_shift']
     members_by_id = {row.pk: row for row in locked['members']}
     members_by_resident = {row.resident_id: row for row in locked['members']}
     placements_by_resident = {row.resident_id: row for row in locked['placements']}
@@ -511,8 +606,20 @@ def _classify_changes(*, locked, confirm_replace_manual):
     for occupancy in locked['occupancies']:
         is_previous_auto = (
             occupancy.source_kind == EmployeeBedOccupancy.SourceKind.AUTO
+            and occupancy.shift_source_kind
+            == EmployeeBedOccupancy.ShiftSourceKind.AUTO_PREVIEW
+            and occupancy.work_shift == work_shift
             and occupancy.source_application_id is not None
+            and not occupancy.source_application.legacy_whole_run
+            and occupancy.source_application.work_shift == work_shift
             and occupancy.source_application.watch_period_id == period.pk
+            and occupancy.source_preview_placement_id is not None
+            and occupancy.source_preview_placement.work_shift == work_shift
+            and occupancy.cohort_member_id is not None
+            and occupancy.shift_source_fingerprint
+            == occupancy.source_preview_placement.normalized_provenance.get(
+                'shift_source_fingerprint'
+            )
             and occupancy.replaced_by_application_id is None
             and occupancy.replaced_by_occupancy_id is None
             and occupancy.terminated_at is None
@@ -520,6 +627,11 @@ def _classify_changes(*, locked, confirm_replace_manual):
         )
         is_target_manual = (
             occupancy.source_kind == EmployeeBedOccupancy.SourceKind.MANUAL
+            and occupancy.shift_source_kind in {
+                EmployeeBedOccupancy.ShiftSourceKind.OFFICIAL_ASSIGNMENT,
+                EmployeeBedOccupancy.ShiftSourceKind.CLERK_SELECTED,
+            }
+            and occupancy.work_shift == work_shift
             and occupancy.watch_period_id == period.pk
             and occupancy.resident_id in members_by_resident
             and occupancy.cohort_member_id == members_by_resident[occupancy.resident_id].pk
@@ -540,6 +652,9 @@ def _classify_changes(*, locked, confirm_replace_manual):
             and placement is not None
             and member is not None
             and occupancy.source_application.cohort_id == run.cohort_id
+            and occupancy.source_application.work_shift == work_shift
+            and occupancy.work_shift == work_shift
+            and occupancy.source_preview_placement.work_shift == work_shift
             and occupancy.source_preview_placement_id is not None
             and occupancy.source_preview_placement.run_id
             == occupancy.source_application.preview_run_id
@@ -574,6 +689,21 @@ def _classify_changes(*, locked, confirm_replace_manual):
     for occupancy in locked['occupancies']:
         if occupancy.pk in replace_ids or occupancy in reusable_by_resident.values():
             continue
+        member = members_by_resident.get(occupancy.resident_id)
+        if member is not None:
+            overlaps_member = (
+                occupancy.starts_at < member.departure_at
+                and (occupancy.ends_at is None or occupancy.ends_at > member.arrival_at)
+                and (
+                    occupancy.terminated_at is None
+                    or occupancy.terminated_at > member.arrival_at
+                )
+            )
+            if overlaps_member:
+                raise _apply_error(
+                    'hard_conflict',
+                    'Resident выбранной смены имеет unrelated occupancy.',
+                )
         for placement in locked['placements']:
             member = members_by_resident[placement.resident_id]
             overlaps = (
@@ -615,14 +745,21 @@ def _classify_changes(*, locked, confirm_replace_manual):
 def apply_confirmed_settlement_preview(
     *,
     run_id: int,
+    work_shift: str,
     control_context: SettlementControlWriteContext,
     confirm_replace_manual: bool = False,
+    now=None,
 ) -> SettlementPreviewApplication:
     if isinstance(run_id, bool) or not isinstance(run_id, int) or run_id <= 0:
         raise _apply_error('invalid_state', 'Требуется корректный PK preview run.')
     if not isinstance(confirm_replace_manual, bool):
         raise _apply_error('invalid_state', 'Флаг подтверждения должен быть boolean.')
-    plan = _build_apply_lock_plan(run_id=run_id)
+    if work_shift not in {
+        SettlementCohortMember.WorkShift.DAY,
+        SettlementCohortMember.WorkShift.NIGHT,
+    }:
+        raise _apply_error('invalid_state', 'Требуется дневная или ночная смена.')
+    plan = _build_apply_lock_plan(run_id=run_id, work_shift=work_shift)
 
     with transaction.atomic(using=plan.using):
         locked = _lock_and_revalidate_plan(
@@ -631,12 +768,20 @@ def apply_confirmed_settlement_preview(
         )
         if locked['application'] is not None:
             return locked['application']
+        if locked['legacy_application'] is not None:
+            return locked['legacy_application']
+        _validate_apply_date(
+            period=locked['period'],
+            work_shift=work_shift,
+            now=now,
+        )
         _validate_locked_preview(locked)
-        if locked['run'].requires_shift_split:
+        if not locked['run'].requires_shift_split:
             raise _apply_error(
                 'shift_split_required',
                 'План необходимо применить отдельно для ночной и дневной смены.',
             )
+        _validate_shift_scope(locked)
 
         changes = _classify_changes(
             locked=locked,
@@ -656,6 +801,7 @@ def apply_confirmed_settlement_preview(
         ))
         snapshot = {
             'preview_run_id': run.pk,
+            'work_shift': work_shift,
             'placement_ids': [row.pk for row in locked['placements']],
             'unresolved_ids': [row.pk for row in locked['unresolved']],
             'create_placement_ids': [row.pk for row in changes['create_placements']],
@@ -665,6 +811,8 @@ def apply_confirmed_settlement_preview(
         }
         application = SettlementPreviewApplication(
             preview_run=run,
+            work_shift=work_shift,
+            legacy_whole_run=False,
             watch_period=locked['period'],
             cohort=locked['cohort'],
             applied_by_access=actor_access,
@@ -682,7 +830,11 @@ def apply_confirmed_settlement_preview(
         except IntegrityError as error:
             winner = (
                 SettlementPreviewApplication._base_manager.using(plan.using)
-                .filter(preview_run_id=run.pk)
+                .filter(
+                    preview_run_id=run.pk,
+                    work_shift=work_shift,
+                    legacy_whole_run=False,
+                )
                 .first()
             )
             if winner is not None:
@@ -752,20 +904,26 @@ def apply_confirmed_settlement_preview(
                     'Целевой resident или PhysicalBed имеет пересекающуюся occupancy.',
                 ) from error
             try:
-                occupancy = _create_occupancy(
+                occupancy = EmployeeBedOccupancy(
                     resident=resident,
-                    bed=bed,
+                    physical_bed=bed,
                     assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
-                    starts_at=member.arrival_at,
-                    ends_at=member.departure_at,
-                    settled_by=actor_employee,
-                    using=plan.using,
                     source_kind=EmployeeBedOccupancy.SourceKind.AUTO,
+                    work_shift=work_shift,
+                    shift_source_kind=EmployeeBedOccupancy.ShiftSourceKind.AUTO_PREVIEW,
+                    shift_source_fingerprint=member.shift_source_fingerprint,
                     source_application=application,
                     source_preview_placement=placement,
                     watch_period=locked['period'],
                     cohort_member=member,
+                    settled_at=member.arrival_at,
+                    starts_at=member.arrival_at,
+                    ends_at=member.departure_at,
+                    terminated_at=None,
+                    settled_by=actor_employee,
+                    ended_at=None,
                 )
+                occupancy.save(using=plan.using)
             except IntegrityError as error:
                 raise _apply_error(
                     'hard_conflict',

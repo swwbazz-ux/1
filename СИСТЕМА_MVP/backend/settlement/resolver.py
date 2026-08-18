@@ -179,6 +179,7 @@ def _replaceable_occupancy_kind(*, occupancy, cohort, member) -> str | None:
         or occupancy.watch_period_id != cohort.watch_period_id
         or occupancy.cohort_member_id != member.pk
         or member.cohort_id != cohort.pk
+        or occupancy.work_shift != member.work_shift
     ):
         return None
 
@@ -186,6 +187,11 @@ def _replaceable_occupancy_kind(*, occupancy, cohort, member) -> str | None:
         if (
             occupancy.source_application_id is None
             and occupancy.source_preview_placement_id is None
+            and occupancy.shift_source_fingerprint == member.shift_source_fingerprint
+            and occupancy.shift_source_kind in {
+                EmployeeBedOccupancy.ShiftSourceKind.OFFICIAL_ASSIGNMENT,
+                EmployeeBedOccupancy.ShiftSourceKind.CLERK_SELECTED,
+            }
         ):
             return 'manual_current_cohort'
         return None
@@ -198,7 +204,14 @@ def _replaceable_occupancy_kind(*, occupancy, cohort, member) -> str | None:
         return None
     run = application.preview_run
     if (
-        application.watch_period_id != cohort.watch_period_id
+        application.legacy_whole_run
+        or application.work_shift != member.work_shift
+        or occupancy.shift_source_kind
+        != EmployeeBedOccupancy.ShiftSourceKind.AUTO_PREVIEW
+        or placement.work_shift != member.work_shift
+        or occupancy.shift_source_fingerprint
+        != placement.normalized_provenance.get('shift_source_fingerprint')
+        or application.watch_period_id != cohort.watch_period_id
         or application.cohort_id != cohort.pk
         or run.pk != placement.run_id
         or run.watch_period_id != cohort.watch_period_id
@@ -383,7 +396,11 @@ def _connected_scarcity_groups(
     return groups
 
 
-def resolve_settlement_cohort(*, cohort_id: int) -> SettlementResolverResult:
+def resolve_settlement_cohort(
+    *,
+    cohort_id: int,
+    materialized_preview_run_id: int | None = None,
+) -> SettlementResolverResult:
     """Return a deterministic proposal without writing any database row."""
 
     cohort = (
@@ -509,8 +526,20 @@ def resolve_settlement_cohort(*, cohort_id: int) -> SettlementResolverResult:
         )
         for item in occupancy_rows
     }
+    materialized_current_run_ids = {
+        item.pk
+        for item in occupancy_rows
+        if (
+            materialized_preview_run_id is not None
+            and occupancy_kinds[item.pk] == 'auto_current_cohort'
+            and item.source_application.preview_run_id == materialized_preview_run_id
+        )
+    }
     blocking_occupancy_rows = [
-        item for item in occupancy_rows if occupancy_kinds[item.pk] is None
+        item
+        for item in occupancy_rows
+        if item.pk not in materialized_current_run_ids
+        and occupancy_kinds[item.pk] is None
     ]
     blocking_resident_ids = {
         item.resident_id for item in blocking_occupancy_rows
@@ -689,6 +718,15 @@ def resolve_settlement_cohort(*, cohort_id: int) -> SettlementResolverResult:
                 'bed_id': item.physical_bed_id,
                 'assignment_type': item.assignment_type,
                 'source_kind': item.source_kind,
+                'work_shift': item.work_shift,
+                'shift_source_kind': item.shift_source_kind,
+                'shift_source_fingerprint': item.shift_source_fingerprint,
+                'shift_official_assignment_id': item.shift_official_assignment_id,
+                'shift_selected_by_access_id': item.shift_selected_by_access_id,
+                'shift_selected_at': (
+                    item.shift_selected_at.isoformat() if item.shift_selected_at else None
+                ),
+                'shift_selection_basis': item.shift_selection_basis,
                 'watch_period_id': item.watch_period_id,
                 'cohort_member_id': item.cohort_member_id,
                 'target_cohort_id': cohort.pk,
@@ -696,6 +734,14 @@ def resolve_settlement_cohort(*, cohort_id: int) -> SettlementResolverResult:
                 'source_application_id': item.source_application_id,
                 'source_application_cohort_id': (
                     item.source_application.cohort_id
+                    if item.source_application_id else None
+                ),
+                'source_application_work_shift': (
+                    item.source_application.work_shift
+                    if item.source_application_id else None
+                ),
+                'source_application_legacy_whole_run': (
+                    item.source_application.legacy_whole_run
                     if item.source_application_id else None
                 ),
                 'source_application_watch_period_id': (
@@ -711,6 +757,10 @@ def resolve_settlement_cohort(*, cohort_id: int) -> SettlementResolverResult:
                     item.source_preview_placement.run_id
                     if item.source_preview_placement_id else None
                 ),
+                'source_placement_work_shift': (
+                    item.source_preview_placement.work_shift
+                    if item.source_preview_placement_id else None
+                ),
                 'starts_at': item.starts_at.isoformat(),
                 'ends_at': item.ends_at.isoformat() if item.ends_at else None,
                 'terminated_at': (
@@ -721,6 +771,7 @@ def resolve_settlement_cohort(*, cohort_id: int) -> SettlementResolverResult:
                 'replaced_by_occupancy_id': item.replaced_by_occupancy_id,
             }
             for item in sorted(occupancy_rows, key=lambda row: row.pk)
+            if item.pk not in materialized_current_run_ids
         ],
     }
     fingerprint = _canonical_hash(snapshot)

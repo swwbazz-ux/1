@@ -32,14 +32,12 @@ from .control import (
     release_control_lease,
     store_control_session_credentials,
 )
-from .apply import apply_confirmed_settlement_preview
 from .models import (
     EmployeeBedOccupancy,
     PhysicalBed,
     PhysicalRoom,
     SettlementCohort,
     SettlementCohortMember,
-    SettlementPreviewApplication,
     SettlementPreviewRun,
 )
 from .saved_previews import (
@@ -1000,10 +998,7 @@ def _auto_settlement_run_payload(run):
             'reason_code': row.reason_code,
             'reason_codes': row.reason_codes,
         })
-    try:
-        application = run.application
-    except SettlementPreviewApplication.DoesNotExist:
-        application = None
+    application = next(iter(run.applications.all()), None)
     stale = (
         settlement_preview_is_stale(run_id=run.pk)
         if run.status == SettlementPreviewRun.Status.CONFIRMED and application is None
@@ -1035,10 +1030,10 @@ def _auto_settlement_run_queryset():
         .select_related(
             'cohort', 'watch_period',
             'created_by_access__employee',
-            'application__applied_by_access__employee',
         )
         .prefetch_related(
-            'application__occupancy_items',
+            'applications__applied_by_access__employee',
+            'applications__occupancy_items',
             'placements__resident__employee',
             'placements__physical_bed__room__dormitory',
             'unresolved_rows__resident__employee',
@@ -1121,18 +1116,10 @@ def settlement_auto_preview_confirm_view(request):
 @require_POST
 def settlement_auto_preview_apply_view(request):
     def apply(payload, context):
-        confirm_replace_manual = payload.get('confirm_replace_manual', False)
-        if not isinstance(confirm_replace_manual, bool):
-            raise ValidationError(
-                'Подтверждение замены ручных изменений указано некорректно.',
-                code='settlement.auto.invalid_confirmation',
-            )
-        application = apply_confirmed_settlement_preview(
-            run_id=_auto_settlement_positive_id(payload, 'run_id'),
-            control_context=context,
-            confirm_replace_manual=confirm_replace_manual,
+        raise ValidationError(
+            'План необходимо применить отдельно для ночной и дневной смены.',
+            code='settlement.apply.shift_split_required',
         )
-        return _auto_settlement_run_queryset().get(pk=application.preview_run_id)
 
     return _auto_settlement_mutation(request, apply)
 

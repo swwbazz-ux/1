@@ -39,6 +39,8 @@ from .models import (
     PhysicalRoom,
     SettlementControlEvent,
     SettlementControlLease,
+    SettlementPreviewApplication,
+    SettlementPreviewApplicationItem,
     SettlementResident,
 )
 from .services import (
@@ -1301,11 +1303,10 @@ class SettlementControlHttpLifecycleTests(
         self.assertNotIn(str(context.lease_token), response_text)
         self.assertNotIn(context.raw_session_key, response_text)
 
-    def test_auto_confirm_and_apply_forward_only_run_and_explicit_manual_flag(self):
+    def test_auto_confirm_forwards_run_and_legacy_apply_is_controlled_409(self):
         self.authenticate(self.client, self.clerk_access)
         self.assertEqual(self.client.post(self.acquire_url).status_code, 200)
         fake_run = mock.sentinel.auto_run
-        fake_application = mock.MagicMock(preview_run_id=51)
         response_payload = {'id': 51, 'status': 'confirmed', 'application': None}
 
         with (
@@ -1324,25 +1325,33 @@ class SettlementControlHttpLifecycleTests(
             self.clerk_access.pk,
         )
 
-        fake_queryset = mock.MagicMock()
-        fake_queryset.get.return_value = fake_run
-        with (
-            mock.patch('settlement.views.apply_confirmed_settlement_preview', return_value=fake_application) as apply,
-            mock.patch('settlement.views._auto_settlement_run_queryset', return_value=fake_queryset),
-            mock.patch('settlement.views._auto_settlement_run_payload', return_value=response_payload),
-        ):
-            applied = self.client.post(
-                reverse('settlement_auto_preview_apply'),
-                data=json.dumps({'run_id': 51, 'confirm_replace_manual': True}),
-                content_type='application/json',
-            )
-        self.assertEqual(applied.status_code, 200)
-        self.assertEqual(apply.call_args.kwargs['run_id'], 51)
-        self.assertIs(apply.call_args.kwargs['confirm_replace_manual'], True)
-        self.assertEqual(
-            apply.call_args.kwargs['control_context'].owner_access_id,
-            self.clerk_access.pk,
+        secret = str(uuid.uuid4())
+        applied = self.client.post(
+            reverse('settlement_auto_preview_apply') + '?work_shift=night&revision=777',
+            data=json.dumps({
+                'run_id': 51,
+                'work_shift': 'day',
+                'apply_date': '2099-01-01',
+                'owner_access_id': self.second_clerk_access.pk,
+                'employee_access_id': self.second_clerk_access.pk,
+                'lease_token': secret,
+                'fencing_revision': 999,
+                'raw_session_key': 'spoofed-session',
+                'session_binding': 'spoofed-binding',
+            }),
+            content_type='application/json',
         )
+        self.assertEqual(applied.status_code, 409)
+        self.assertEqual(applied.json(), {
+            'ok': False,
+            'error': 'План необходимо применить отдельно для ночной и дневной смены.',
+            'code': 'settlement.apply.shift_split_required',
+            'details': {},
+        })
+        self.assertNotIn(secret, applied.content.decode())
+        self.assertFalse(SettlementPreviewApplication.objects.exists())
+        self.assertFalse(SettlementPreviewApplicationItem.objects.exists())
+        self.assertFalse(EmployeeBedOccupancy._base_manager.exists())
 
     def test_auto_confirmation_conflicts_are_controlled(self):
         self.authenticate(self.client, self.clerk_access)
@@ -1375,29 +1384,28 @@ class SettlementControlHttpLifecycleTests(
         self.assertEqual(response.status_code, 409)
         self.assertEqual(response.json()['code'], 'settlement.control.not_held')
 
-    def test_auto_apply_returns_manual_replacement_count_without_ids(self):
+    def test_legacy_auto_apply_requires_held_control_before_shift_split_response(self):
         self.authenticate(self.client, self.clerk_access)
-        self.assertEqual(self.client.post(self.acquire_url).status_code, 200)
-        error = ValidationError(
-            'Повторный Apply затронет ручные корректировки.',
-            code='settlement.apply.manual_replacement_confirmation_required',
-            params={'manual_occupancy_count': 3, 'manual_occupancy_ids': (10, 11, 12)},
+        response = self.client.post(
+            reverse('settlement_auto_preview_apply'),
+            data=json.dumps({'run_id': 8, 'work_shift': 'night'}),
+            content_type='application/json',
         )
-
-        with mock.patch('settlement.views.apply_confirmed_settlement_preview', side_effect=error):
-            response = self.client.post(
-                reverse('settlement_auto_preview_apply'),
-                data=json.dumps({'run_id': 8, 'confirm_replace_manual': False}),
-                content_type='application/json',
-            )
-
         self.assertEqual(response.status_code, 409)
-        self.assertEqual(
-            response.json()['code'],
-            'settlement.apply.manual_replacement_confirmation_required',
+        self.assertEqual(response.json()['code'], 'settlement.control.not_held')
+
+        self.assertEqual(self.client.post(self.acquire_url).status_code, 200)
+        self.assertEqual(self.client.post(self.release_url).status_code, 200)
+        lost = self.client.post(
+            reverse('settlement_auto_preview_apply'),
+            data=json.dumps({'run_id': 8, 'work_shift': 'day'}),
+            content_type='application/json',
         )
-        self.assertEqual(response.json()['details'], {'manual_occupancy_count': 3})
-        self.assertNotIn('manual_occupancy_ids', response.content.decode())
+        self.assertEqual(lost.status_code, 409)
+        self.assertEqual(lost.json()['code'], 'settlement.control.not_held')
+        self.assertFalse(SettlementPreviewApplication.objects.exists())
+        self.assertFalse(SettlementPreviewApplicationItem.objects.exists())
+        self.assertFalse(EmployeeBedOccupancy._base_manager.exists())
 
     def test_acquire_uses_exact_session_access_and_stores_only_server_credentials(self):
         self.authenticate(self.client, self.clerk_access)

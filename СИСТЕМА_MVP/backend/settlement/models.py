@@ -27,7 +27,7 @@ class StableIdentifierModel(models.Model):
             return
 
         fields = ('stable_id', *field_names)
-        original = type(self).objects.filter(pk=self.pk).values(*fields).first()
+        original = type(self)._base_manager.filter(pk=self.pk).values(*fields).first()
         if not original:
             return
 
@@ -3345,11 +3345,22 @@ def _raise_apply_write_forbidden():
 class SettlementPreviewApplication(StableIdentifierModel):
     objects = M8ApplyQuerySet.as_manager()
 
-    preview_run = models.OneToOneField(
+    preview_run = models.ForeignKey(
         SettlementPreviewRun,
         verbose_name='Применённый preview',
         on_delete=models.PROTECT,
-        related_name='application',
+        related_name='applications',
+    )
+    work_shift = models.CharField(
+        'Применённая смена',
+        max_length=16,
+        choices=SettlementCohortMember.WorkShift.choices,
+        null=True,
+        blank=True,
+    )
+    legacy_whole_run = models.BooleanField(
+        'Историческое применение всего плана',
+        default=False,
     )
     watch_period = models.ForeignKey(
         'shifts.WatchPeriod',
@@ -3396,10 +3407,41 @@ class SettlementPreviewApplication(StableIdentifierModel):
                 name='preview_apply_period_at_idx',
             ),
         ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['preview_run', 'work_shift'],
+                name='unique_preview_apply_run_shift',
+            ),
+            models.UniqueConstraint(
+                fields=['preview_run'],
+                condition=models.Q(legacy_whole_run=True),
+                name='unique_legacy_apply_per_run',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(legacy_whole_run=True, work_shift__isnull=True)
+                    | models.Q(
+                        legacy_whole_run=False,
+                        work_shift__in=[
+                            SettlementCohortMember.WorkShift.DAY,
+                            SettlementCohortMember.WorkShift.NIGHT,
+                        ],
+                    )
+                ),
+                name='preview_apply_shift_scope_valid',
+            ),
+        ]
 
     def clean(self):
         super().clean()
         errors = {}
+        if self._state.adding and self.legacy_whole_run:
+            errors['legacy_whole_run'] = 'Новые применения всего плана запрещены.'
+        if not self.legacy_whole_run and self.work_shift not in {
+            SettlementCohortMember.WorkShift.DAY,
+            SettlementCohortMember.WorkShift.NIGHT,
+        }:
+            errors['work_shift'] = 'Для нового Apply требуется дневная или ночная смена.'
         if self.preview_run_id and self.watch_period_id and self.cohort_id:
             if self.preview_run.watch_period_id != self.watch_period_id:
                 errors['watch_period'] = 'Application относится к другому WatchPeriod.'
@@ -3415,7 +3457,8 @@ class SettlementPreviewApplication(StableIdentifierModel):
             if self.pk:
                 type(self)._base_manager.select_for_update().get(pk=self.pk)
                 self._validate_immutable_fields(
-                    'preview_run', 'watch_period', 'cohort', 'applied_by_access',
+                    'preview_run', 'work_shift', 'legacy_whole_run',
+                    'watch_period', 'cohort', 'applied_by_access',
                     'applied_at', 'resolver_fingerprint', 'normalized_fingerprint',
                     'confirm_replace_manual', 'created_occupancy_count',
                     'closed_occupancy_count', 'replaced_occupancy_count',
@@ -3483,6 +3526,12 @@ class EmployeeBedOccupancy(models.Model):
         MANUAL = 'manual', 'Ручное'
         AUTO = 'auto', 'Авторосселение'
 
+    class ShiftSourceKind(models.TextChoices):
+        UNVERIFIED_LEGACY = 'unverified_legacy', 'Непроверенное историческое'
+        AUTO_PREVIEW = 'auto_preview', 'Подтверждённый preview'
+        OFFICIAL_ASSIGNMENT = 'official_assignment', 'Официальное назначение'
+        CLERK_SELECTED = 'clerk_selected', 'Выбор делопроизводителя'
+
     objects = EmployeeBedOccupancyManager()
 
     resident = models.ForeignKey(
@@ -3508,6 +3557,53 @@ class EmployeeBedOccupancy(models.Model):
         choices=SourceKind.choices,
         default=SourceKind.MANUAL,
         db_index=True,
+    )
+    work_shift = models.CharField(
+        'Смена фактического проживания',
+        max_length=16,
+        choices=SettlementCohortMember.WorkShift.choices,
+        null=True,
+        blank=True,
+    )
+    shift_source_kind = models.CharField(
+        'Источник смены',
+        max_length=32,
+        choices=ShiftSourceKind.choices,
+        default=ShiftSourceKind.UNVERIFIED_LEGACY,
+        db_index=True,
+    )
+    shift_source_fingerprint = models.CharField(
+        'SHA-256 источника смены',
+        max_length=64,
+        blank=True,
+        default='',
+        validators=[RegexValidator(regex=r'^$|^[0-9a-f]{64}$')],
+    )
+    shift_official_assignment = models.ForeignKey(
+        'assignments.EquipmentAssignment',
+        verbose_name='Официальное назначение смены',
+        on_delete=models.PROTECT,
+        related_name='settlement_shift_occupancies',
+        null=True,
+        blank=True,
+    )
+    shift_selected_by_access = models.ForeignKey(
+        'users.EmployeeAccess',
+        verbose_name='Точный доступ выбравшего смену',
+        on_delete=models.PROTECT,
+        related_name='selected_settlement_shift_occupancies',
+        null=True,
+        blank=True,
+    )
+    shift_selected_at = models.DateTimeField(
+        'Когда выбрана смена',
+        null=True,
+        blank=True,
+    )
+    shift_selection_basis = models.TextField(
+        'Основание выбора смены',
+        blank=True,
+        default='',
     )
     source_application = models.ForeignKey(
         SettlementPreviewApplication,
@@ -3628,7 +3724,113 @@ class EmployeeBedOccupancy(models.Model):
                 ),
                 name='occupancy_auto_provenance_complete',
             ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        shift_source_kind='unverified_legacy',
+                        work_shift__isnull=True,
+                        shift_source_fingerprint='',
+                        shift_official_assignment__isnull=True,
+                        shift_selected_by_access__isnull=True,
+                        shift_selected_at__isnull=True,
+                        shift_selection_basis='',
+                    )
+                    | models.Q(
+                        shift_source_kind='auto_preview',
+                        source_kind='auto',
+                        work_shift__in=['day', 'night'],
+                        shift_source_fingerprint__gt='',
+                        shift_official_assignment__isnull=True,
+                        shift_selected_by_access__isnull=True,
+                        shift_selected_at__isnull=True,
+                        shift_selection_basis='',
+                    )
+                    | models.Q(
+                        shift_source_kind='official_assignment',
+                        source_kind='manual',
+                        work_shift__in=['day', 'night'],
+                        shift_source_fingerprint__gt='',
+                        shift_official_assignment__isnull=False,
+                        shift_selected_by_access__isnull=True,
+                        shift_selected_at__isnull=True,
+                        shift_selection_basis='',
+                    )
+                    | models.Q(
+                        shift_source_kind='clerk_selected',
+                        source_kind='manual',
+                        work_shift__in=['day', 'night'],
+                        shift_source_fingerprint__gt='',
+                        shift_official_assignment__isnull=True,
+                        shift_selected_by_access__isnull=False,
+                        shift_selected_at__isnull=False,
+                        shift_selection_basis__gt='',
+                    )
+                ),
+                name='occupancy_shift_provenance_valid',
+            ),
         ]
+
+    def clean(self):
+        super().clean()
+        errors = {}
+        if self.shift_source_kind == self.ShiftSourceKind.AUTO_PREVIEW:
+            application = self.source_application
+            placement = self.source_preview_placement
+            member = self.cohort_member
+            if not application or application.legacy_whole_run:
+                errors['source_application'] = 'AUTO shift требует сменную Application.'
+            if not placement or not member:
+                errors['source_preview_placement'] = 'AUTO shift требует Placement и membership.'
+            elif (
+                application
+                and (
+                    self.work_shift != application.work_shift
+                    or self.work_shift != placement.work_shift
+                    or application.preview_run_id != placement.run_id
+                    or application.watch_period_id != self.watch_period_id
+                    or application.cohort_id != member.cohort_id
+                    or placement.resident_id != self.resident_id
+                    or placement.physical_bed_id != self.physical_bed_id
+                    or placement.cohort_member_id_snapshot != member.pk
+                )
+            ):
+                errors['work_shift'] = 'AUTO shift provenance не соответствует Application и Placement.'
+            if (
+                placement
+                and self.shift_source_fingerprint
+                != placement.normalized_provenance.get('shift_source_fingerprint')
+            ):
+                errors['shift_source_fingerprint'] = 'Fingerprint смены не соответствует membership.'
+        if errors:
+            raise ValidationError(errors)
+
+    def _validate_immutable_fields(self, *field_names):
+        if not self.pk:
+            return
+        original = type(self)._base_manager.filter(pk=self.pk).values(*field_names).first()
+        if not original:
+            return
+        errors = {}
+        for field_name in field_names:
+            field = self._meta.get_field(field_name)
+            if original[field_name] != getattr(self, field.attname):
+                errors[field_name] = 'После создания это поле изменять нельзя.'
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        with transaction.atomic():
+            if self.pk:
+                type(self)._base_manager.select_for_update(of=('self',)).get(pk=self.pk)
+                self._validate_immutable_fields(
+                    'source_kind', 'source_application', 'source_preview_placement',
+                    'watch_period', 'cohort_member', 'work_shift', 'shift_source_kind',
+                    'shift_source_fingerprint', 'shift_official_assignment',
+                    'shift_selected_by_access', 'shift_selected_at',
+                    'shift_selection_basis',
+                )
+            self.clean()
+            return super().save(*args, **kwargs)
 
     def is_active_at(self, moment):
         if (

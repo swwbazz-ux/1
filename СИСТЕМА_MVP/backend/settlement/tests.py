@@ -9791,7 +9791,7 @@ class M6SettlementResolverTests(TestCase):
             created_by_access=cls.access,
         )
 
-    def _cohort(self, *residents, approve=True, supersedes=None):
+    def _cohort(self, *residents, approve=True, supersedes=None, arrivals=None):
         fingerprint_char = str((SettlementCohort.objects.count() % 9) + 1)
         cohort = create_settlement_cohort(
             watch_period_id=self.period.pk,
@@ -9804,6 +9804,7 @@ class M6SettlementResolverTests(TestCase):
             supersedes_id=supersedes.pk if supersedes is not None else None,
         )
         arrival = timezone.make_aware(datetime(2031, 1, 1))
+        arrivals = arrivals or {}
         departure = timezone.make_aware(datetime(2031, 2, 1))
         for resident in residents:
             if resident.is_external:
@@ -9835,7 +9836,7 @@ class M6SettlementResolverTests(TestCase):
             add_settlement_cohort_member(
                 cohort_id=cohort.pk,
                 resident_id=resident.pk,
-                arrival_at=arrival,
+                arrival_at=arrivals.get(resident.pk, arrival),
                 departure_at=departure,
                 participation_status=(
                     SettlementCohortMember.ParticipationStatus.PARTICIPATING
@@ -10654,12 +10655,13 @@ class M7SavedPreviewTests(TestCase):
             fencing_revision=grant.fencing_revision,
         )
 
-    def _cohort(self, *residents, approve=True, supersedes=None):
+    def _cohort(self, *residents, approve=True, supersedes=None, arrivals=None):
         return M6SettlementResolverTests._cohort(
             self,
             *residents,
             approve=approve,
             supersedes=supersedes,
+            arrivals=arrivals,
         )
 
     def _slot(self, room_index, bed_index):
@@ -11153,6 +11155,7 @@ class M7SavedPreviewTests(TestCase):
 
 
 class M8SettlementApplyTests(TestCase):
+    _DEFAULT_CONTROL = object()
     @classmethod
     def _external(cls, name, organization):
         return M6SettlementResolverTests._external.__func__(cls, name, organization)
@@ -11175,12 +11178,13 @@ class M8SettlementApplyTests(TestCase):
             fencing_revision=grant.fencing_revision,
         )
 
-    def _cohort(self, *residents, approve=True, supersedes=None):
+    def _cohort(self, *residents, approve=True, supersedes=None, arrivals=None):
         return M6SettlementResolverTests._cohort(
             self,
             *residents,
             approve=approve,
             supersedes=supersedes,
+            arrivals=arrivals,
         )
 
     def _slot(self, room_index, bed_index):
@@ -11203,11 +11207,12 @@ class M8SettlementApplyTests(TestCase):
     def _equipment_bed(self, suffix):
         return M6SettlementResolverTests._equipment_bed(self, suffix)
 
-    def _equipment_assignment(self, employee, equipment):
+    def _equipment_assignment(self, employee, equipment, **kwargs):
         return M6SettlementResolverTests._equipment_assignment(
             self,
             employee,
             equipment,
+            **kwargs,
         )
 
     def _equipment_route(self, equipment, *, physical_bed, suffix):
@@ -11218,7 +11223,7 @@ class M8SettlementApplyTests(TestCase):
             suffix=suffix,
         )
 
-    def _equipment_resident(self, suffix):
+    def _equipment_resident(self, suffix, *, shift_type=WorkShiftType.SHIFT_1):
         employee = Employee.objects.create(
             full_name=f'ДЕМО M8 equipment resident {suffix}',
             sex=Employee.Sex.MALE,
@@ -11230,7 +11235,11 @@ class M8SettlementApplyTests(TestCase):
         equipment = self._equipment(suffix)
         bed = self._equipment_bed(suffix)
         self._equipment_route(equipment, physical_bed=bed, suffix=suffix)
-        assignment = self._equipment_assignment(employee, equipment)
+        assignment = self._equipment_assignment(
+            employee,
+            equipment,
+            shift_type=shift_type,
+        )
         return resident, employee, equipment, bed, assignment
 
     def _confirmed_run_for_cohort(self, cohort):
@@ -11242,14 +11251,35 @@ class M8SettlementApplyTests(TestCase):
             run_id=run.pk,
             control_context=self.control_context,
         )
-        return self._as_historical_run(run)
+        return run
 
     def _as_historical_run(self, run):
-        SettlementPreviewRun._base_manager.filter(pk=run.pk).update(
-            requires_shift_split=False,
-        )
-        run.refresh_from_db()
         return run
+
+    def _apply(
+        self,
+        *,
+        run_id,
+        work_shift=SettlementCohortMember.WorkShift.DAY,
+        control_context=_DEFAULT_CONTROL,
+        confirm_replace_manual=False,
+        now=None,
+    ):
+        if now is None:
+            now = timezone.make_aware(
+                datetime.combine(self.period.starts_on, datetime.min.time())
+            )
+        return apply_confirmed_settlement_preview(
+            run_id=run_id,
+            work_shift=work_shift,
+            control_context=(
+                self.control_context
+                if control_context is self._DEFAULT_CONTROL
+                else control_context
+            ),
+            confirm_replace_manual=confirm_replace_manual,
+            now=now,
+        )
 
     def _replace_test_member_shift_source(self, cohort, resident, assignment):
         source = _internal_shift_source(
@@ -11284,7 +11314,7 @@ class M8SettlementApplyTests(TestCase):
             run_id=run.pk,
             control_context=self.control_context,
         )
-        return cohort, self._as_historical_run(run)
+        return cohort, run
 
     def assert_apply_code(self, code, callback):
         with self.assertRaises(ValidationError) as raised:
@@ -11296,7 +11326,7 @@ class M8SettlementApplyTests(TestCase):
         placement = run.placements.get()
         member = cohort.members.get(pk=placement.cohort_member_id_snapshot)
 
-        application = apply_confirmed_settlement_preview(
+        application = self._apply(
             run_id=run.pk,
             control_context=self.control_context,
         )
@@ -11323,7 +11353,7 @@ class M8SettlementApplyTests(TestCase):
             ).exists()
         )
 
-    def test_structured_run_requires_shift_split_without_partial_writes(self):
+    def test_structured_run_is_applied_only_for_requested_shift(self):
         cohort = self._prepared_cohort(include_unresolved=False)
         run = create_settlement_preview_run(
             cohort_id=cohort.pk,
@@ -11335,16 +11365,248 @@ class M8SettlementApplyTests(TestCase):
         )
         self.assertTrue(run.requires_shift_split)
 
-        for _attempt in range(2):
-            self.assert_apply_code(
-                'settlement.apply.shift_split_required',
-                lambda: apply_confirmed_settlement_preview(
-                    run_id=run.pk,
-                    control_context=self.control_context,
-                ),
+        application = self._apply(
+            run_id=run.pk,
+            work_shift=SettlementCohortMember.WorkShift.DAY,
+            control_context=self.control_context,
+        )
+        self.assertEqual(application.work_shift, SettlementCohortMember.WorkShift.DAY)
+        self.assertFalse(application.legacy_whole_run)
+        self.assertEqual(
+            set(application.occupancy_items.values_list('occupancy__work_shift', flat=True)),
+            {SettlementCohortMember.WorkShift.DAY},
+        )
+
+    def test_night_and_day_apply_dates_are_independent_and_idempotent(self):
+        day = self._equipment_resident('SPLIT-DAY')
+        night = self._equipment_resident(
+            'SPLIT-NIGHT',
+            shift_type=WorkShiftType.SHIFT_2,
+        )
+        night_arrival = timezone.make_aware(
+            datetime.combine(
+                self.period.starts_on - timedelta(days=1),
+                datetime.min.time(),
             )
+        )
+        cohort = self._cohort(
+            day[0],
+            night[0],
+            arrivals={night[0].pk: night_arrival},
+        )
+        run = self._confirmed_run_for_cohort(cohort)
+        before_night = timezone.make_aware(
+            datetime.combine(
+                self.period.starts_on - timedelta(days=2),
+                datetime.min.time(),
+            )
+        )
+        on_night = timezone.make_aware(
+            datetime.combine(
+                self.period.starts_on - timedelta(days=1),
+                datetime.min.time(),
+            )
+        )
+        on_day = timezone.make_aware(
+            datetime.combine(self.period.starts_on, datetime.min.time())
+        )
+
+        self.assert_apply_code(
+            'settlement.apply.too_early',
+            lambda: self._apply(
+                run_id=run.pk,
+                work_shift=SettlementCohortMember.WorkShift.NIGHT,
+                now=before_night,
+            ),
+        )
+        self.assertFalse(SettlementPreviewApplication.objects.exists())
+
+        night_application = self._apply(
+            run_id=run.pk,
+            work_shift=SettlementCohortMember.WorkShift.NIGHT,
+            now=on_night,
+        )
+        night_occupancy = EmployeeBedOccupancy.objects.get(
+            source_application=night_application,
+        )
+        self.assertEqual(night_occupancy.starts_at, night_arrival)
+        self.assertEqual(night_occupancy.work_shift, SettlementCohortMember.WorkShift.NIGHT)
+        self.assertEqual(
+            night_application.result_snapshot['placement_ids'],
+            list(
+                run.placements.filter(work_shift=SettlementCohortMember.WorkShift.NIGHT)
+                .order_by('pk').values_list('pk', flat=True)
+            ),
+        )
+        self.assertFalse(
+            night_application.occupancy_items.exclude(
+                preview_placement__work_shift=SettlementCohortMember.WorkShift.NIGHT,
+            ).exists()
+        )
+
+        self.assert_apply_code(
+            'settlement.apply.too_early',
+            lambda: self._apply(
+                run_id=run.pk,
+                work_shift=SettlementCohortMember.WorkShift.DAY,
+                now=on_night,
+            ),
+        )
+        night_state = (
+            night_occupancy.pk,
+            night_occupancy.starts_at,
+            night_occupancy.replaced_by_application_id,
+        )
+
+        day_application = self._apply(
+            run_id=run.pk,
+            work_shift=SettlementCohortMember.WorkShift.DAY,
+            now=on_day,
+        )
+        self.assertNotEqual(day_application.pk, night_application.pk)
+        self.assertEqual(
+            day_application.result_snapshot['placement_ids'],
+            list(
+                run.placements.filter(work_shift=SettlementCohortMember.WorkShift.DAY)
+                .order_by('pk').values_list('pk', flat=True)
+            ),
+        )
+        self.assertEqual(
+            set(
+                SettlementPreviewApplication.objects.filter(preview_run=run)
+                .values_list('work_shift', flat=True)
+            ),
+            {
+                SettlementCohortMember.WorkShift.DAY,
+                SettlementCohortMember.WorkShift.NIGHT,
+            },
+        )
+        night_occupancy.refresh_from_db()
+        self.assertEqual(
+            (
+                night_occupancy.pk,
+                night_occupancy.starts_at,
+                night_occupancy.replaced_by_application_id,
+            ),
+            night_state,
+        )
+        self.assertEqual(
+            self._apply(
+                run_id=run.pk,
+                work_shift=SettlementCohortMember.WorkShift.NIGHT,
+                now=on_day,
+            ).pk,
+            night_application.pk,
+        )
+
+    def test_arrival_before_the_single_night_exception_is_rejected(self):
+        day = self._equipment_resident('EARLY-DAY')
+        night = self._equipment_resident(
+            'EARLY-NIGHT',
+            shift_type=WorkShiftType.SHIFT_2,
+        )
+        too_early_night = timezone.make_aware(
+            datetime.combine(
+                self.period.starts_on - timedelta(days=2),
+                datetime.min.time(),
+            )
+        )
+        early_day = timezone.make_aware(
+            datetime.combine(
+                self.period.starts_on - timedelta(days=1),
+                datetime.min.time(),
+            )
+        )
+        cohort = self._cohort(
+            day[0],
+            night[0],
+            arrivals={day[0].pk: early_day, night[0].pk: too_early_night},
+        )
+        run = self._confirmed_run_for_cohort(cohort)
+
+        for work_shift in (
+            SettlementCohortMember.WorkShift.NIGHT,
+            SettlementCohortMember.WorkShift.DAY,
+        ):
+            with self.subTest(work_shift=work_shift):
+                self.assert_apply_code(
+                    'settlement.apply.stale_preview',
+                    lambda work_shift=work_shift: self._apply(
+                        run_id=run.pk,
+                        work_shift=work_shift,
+                    ),
+                )
         self.assertFalse(SettlementPreviewApplication.objects.exists())
         self.assertFalse(EmployeeBedOccupancy._base_manager.exists())
+
+    def test_opposite_shift_occupancy_is_hard_conflict_and_unchanged(self):
+        day = self._equipment_resident('OPPOSITE-DAY')
+        night = self._equipment_resident(
+            'OPPOSITE-NIGHT',
+            shift_type=WorkShiftType.SHIFT_2,
+        )
+        cohort = self._cohort(day[0], night[0])
+        run = self._confirmed_run_for_cohort(cohort)
+        day_placement = run.placements.get(work_shift=SettlementCohortMember.WorkShift.DAY)
+        night_member = cohort.members.get(resident=night[0])
+        blocking = EmployeeBedOccupancy(
+            resident=night[0],
+            physical_bed_id=day_placement.physical_bed_id,
+            assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
+            source_kind=EmployeeBedOccupancy.SourceKind.MANUAL,
+            work_shift=SettlementCohortMember.WorkShift.NIGHT,
+            shift_source_kind=EmployeeBedOccupancy.ShiftSourceKind.OFFICIAL_ASSIGNMENT,
+            shift_source_fingerprint=night_member.shift_source_fingerprint,
+            shift_official_assignment=night[4],
+            watch_period=self.period,
+            cohort_member=night_member,
+            starts_at=night_member.arrival_at,
+            settled_at=night_member.arrival_at,
+            ends_at=night_member.departure_at,
+            settled_by=self.control_actor,
+        )
+        blocking.save()
+        before = (
+            blocking.pk,
+            blocking.work_shift,
+            blocking.replaced_by_application_id,
+        )
+
+        self.assert_apply_code(
+            'settlement.apply.stale_preview',
+            lambda: self._apply(
+                run_id=run.pk,
+                work_shift=SettlementCohortMember.WorkShift.DAY,
+            ),
+        )
+        blocking.refresh_from_db()
+        self.assertEqual(
+            (blocking.pk, blocking.work_shift, blocking.replaced_by_application_id),
+            before,
+        )
+        self.assertFalse(SettlementPreviewApplication.objects.exists())
+
+    def test_historical_whole_run_application_is_returned_without_rewrite(self):
+        _cohort, run = self._confirmed_run(include_unresolved=False)
+        application = self._apply(run_id=run.pk)
+        original = (application.pk, application.applied_at, application.result_snapshot)
+        with connection.cursor() as cursor:
+            cursor.execute(
+                'UPDATE settlement_settlementpreviewapplication '
+                'SET work_shift = NULL, legacy_whole_run = 1 WHERE id = %s',
+                [application.pk],
+            )
+
+        historical = self._apply(
+            run_id=run.pk,
+            work_shift=SettlementCohortMember.WorkShift.DAY,
+        )
+        self.assertEqual(
+            (historical.pk, historical.applied_at, historical.result_snapshot),
+            original,
+        )
+        self.assertTrue(historical.legacy_whole_run)
+        self.assertIsNone(historical.work_shift)
 
     def test_external_resident_is_applied_without_employee_or_access(self):
         self._seed_room(self.external_a, 0)
@@ -11358,7 +11620,7 @@ class M8SettlementApplyTests(TestCase):
             control_context=self.control_context,
         )
         run = self._as_historical_run(run)
-        application = apply_confirmed_settlement_preview(
+        application = self._apply(
             run_id=run.pk,
             control_context=self.control_context,
         )
@@ -11370,7 +11632,7 @@ class M8SettlementApplyTests(TestCase):
 
     def test_same_run_apply_is_idempotent(self):
         _cohort, run = self._confirmed_run(include_unresolved=False)
-        first = apply_confirmed_settlement_preview(
+        first = self._apply(
             run_id=run.pk,
             control_context=self.control_context,
         )
@@ -11381,7 +11643,7 @@ class M8SettlementApplyTests(TestCase):
             EmployeeBedOccupancy._base_manager.count(),
             SettlementPreviewApplicationItem.objects.count(),
         )
-        second = apply_confirmed_settlement_preview(
+        second = self._apply(
             run_id=run.pk,
             control_context=self.control_context,
         )
@@ -11405,13 +11667,13 @@ class M8SettlementApplyTests(TestCase):
         )
         self.assert_apply_code(
             'settlement.apply.invalid_state',
-            lambda: apply_confirmed_settlement_preview(
+            lambda: self._apply(
                 run_id=run.pk,
                 control_context=self.control_context,
             ),
         )
         with self.assertRaises(ValidationError) as raised:
-            apply_confirmed_settlement_preview(run_id=run.pk, control_context=None)
+            self._apply(run_id=run.pk, control_context=None)
         self.assertEqual(raised.exception.code, 'settlement.control.not_held')
         self.assertFalse(SettlementPreviewApplication.objects.exists())
         self.assertFalse(EmployeeBedOccupancy._base_manager.exists())
@@ -11422,7 +11684,7 @@ class M8SettlementApplyTests(TestCase):
         self.position_employee.save(update_fields=['personnel_position'])
         self.assert_apply_code(
             'settlement.apply.stale_preview',
-            lambda: apply_confirmed_settlement_preview(
+            lambda: self._apply(
                 run_id=run.pk,
                 control_context=self.control_context,
             ),
@@ -11447,7 +11709,7 @@ class M8SettlementApplyTests(TestCase):
         )
         self.assert_apply_code(
             'settlement.apply.stale_preview',
-            lambda: apply_confirmed_settlement_preview(
+            lambda: self._apply(
                 run_id=run.pk,
                 control_context=self.control_context,
             ),
@@ -11457,7 +11719,7 @@ class M8SettlementApplyTests(TestCase):
 
     def test_repeat_apply_reuses_unchanged_auto_occupancy(self):
         cohort, first_run = self._confirmed_run(include_unresolved=False)
-        first_application = apply_confirmed_settlement_preview(
+        first_application = self._apply(
             run_id=first_run.pk,
             control_context=self.control_context,
         )
@@ -11473,7 +11735,7 @@ class M8SettlementApplyTests(TestCase):
             control_context=self.control_context,
         )
         second_run = self._as_historical_run(second_run)
-        second_application = apply_confirmed_settlement_preview(
+        second_application = self._apply(
             run_id=second_run.pk,
             control_context=self.control_context,
         )
@@ -11493,7 +11755,7 @@ class M8SettlementApplyTests(TestCase):
         )
         cohort = self._cohort(resident)
         first_run = self._confirmed_run_for_cohort(cohort)
-        first_application = apply_confirmed_settlement_preview(
+        first_application = self._apply(
             run_id=first_run.pk,
             control_context=self.control_context,
         )
@@ -11517,7 +11779,7 @@ class M8SettlementApplyTests(TestCase):
         self._replace_test_member_shift_source(cohort, resident, second_assignment)
 
         second_run = self._confirmed_run_for_cohort(cohort)
-        second_application = apply_confirmed_settlement_preview(
+        second_application = self._apply(
             run_id=second_run.pk,
             control_context=self.control_context,
         )
@@ -11533,7 +11795,7 @@ class M8SettlementApplyTests(TestCase):
         second = self._equipment_resident('SWAP-2')
         cohort = self._cohort(first[0], second[0])
         first_run = self._confirmed_run_for_cohort(cohort)
-        first_application = apply_confirmed_settlement_preview(
+        first_application = self._apply(
             run_id=first_run.pk,
             control_context=self.control_context,
         )
@@ -11555,7 +11817,7 @@ class M8SettlementApplyTests(TestCase):
         self._replace_test_member_shift_source(cohort, second[0], second_assignment)
 
         second_run = self._confirmed_run_for_cohort(cohort)
-        second_application = apply_confirmed_settlement_preview(
+        second_application = self._apply(
             run_id=second_run.pk,
             control_context=self.control_context,
         )
@@ -11574,7 +11836,7 @@ class M8SettlementApplyTests(TestCase):
         )
         cohort = self._cohort(resident)
         first_run = self._confirmed_run_for_cohort(cohort)
-        first_application = apply_confirmed_settlement_preview(
+        first_application = self._apply(
             run_id=first_run.pk,
             control_context=self.control_context,
         )
@@ -11586,7 +11848,7 @@ class M8SettlementApplyTests(TestCase):
 
         second_run = self._confirmed_run_for_cohort(cohort)
         self.assertTrue(second_run.unresolved_rows.filter(resident=resident).exists())
-        second_application = apply_confirmed_settlement_preview(
+        second_application = self._apply(
             run_id=second_run.pk,
             control_context=self.control_context,
         )
@@ -11596,7 +11858,7 @@ class M8SettlementApplyTests(TestCase):
 
     def test_other_period_auto_and_corrupt_auto_provenance_are_not_replaceable(self):
         cohort, first_run = self._confirmed_run(include_unresolved=False)
-        first_application = apply_confirmed_settlement_preview(
+        first_application = self._apply(
             run_id=first_run.pk,
             control_context=self.control_context,
         )
@@ -11610,19 +11872,30 @@ class M8SettlementApplyTests(TestCase):
             ends_on=self.period.ends_on,
         )
         occupancy.watch_period = other_period
-        occupancy.save(update_fields=['watch_period'])
+        with self.assertRaises(ValidationError):
+            occupancy.save(update_fields=['watch_period'])
+        with connection.cursor() as cursor:
+            cursor.execute(
+                'UPDATE settlement_employeebedoccupancy '
+                'SET watch_period_id = %s WHERE id = %s',
+                [other_period.pk, occupancy.pk],
+            )
         result = resolve_settlement_cohort(cohort_id=cohort.pk)
         self.assertEqual(result.unresolved[0].reason_codes, ('hard_rule_conflict',))
 
-        occupancy.watch_period = self.period
-        occupancy.source_preview_placement = None
         with self.assertRaises(IntegrityError):
             with transaction.atomic():
-                occupancy.save(update_fields=['watch_period', 'source_preview_placement'])
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        'UPDATE settlement_employeebedoccupancy '
+                        'SET watch_period_id = %s, source_preview_placement_id = NULL '
+                        'WHERE id = %s',
+                        [self.period.pk, occupancy.pk],
+                    )
 
     def test_auto_from_other_cohort_is_non_replaceable_and_fails_closed(self):
         cohort, first_run = self._confirmed_run(include_unresolved=False)
-        first_application = apply_confirmed_settlement_preview(
+        first_application = self._apply(
             run_id=first_run.pk,
             control_context=self.control_context,
         )
@@ -11650,7 +11923,7 @@ class M8SettlementApplyTests(TestCase):
 
     def test_replaceable_occupancy_changes_fingerprint_and_makes_draft_stale(self):
         cohort, first_run = self._confirmed_run(include_unresolved=False)
-        first_application = apply_confirmed_settlement_preview(
+        first_application = self._apply(
             run_id=first_run.pk,
             control_context=self.control_context,
         )
@@ -11676,7 +11949,7 @@ class M8SettlementApplyTests(TestCase):
 
     def test_resolver_with_replaceable_baseline_is_order_stable_and_read_only(self):
         cohort, first_run = self._confirmed_run(include_unresolved=False)
-        apply_confirmed_settlement_preview(
+        self._apply(
             run_id=first_run.pk,
             control_context=self.control_context,
         )
@@ -11692,9 +11965,9 @@ class M8SettlementApplyTests(TestCase):
         self.assertEqual(writes, [])
         self.assertEqual(EmployeeBedOccupancy._base_manager.count(), before)
 
-    def test_manual_correction_requires_confirmation_and_is_preserved_as_history(self):
+    def test_legacy_manual_correction_is_not_replaceable(self):
         cohort, first_run = self._confirmed_run(include_unresolved=False)
-        first_application = apply_confirmed_settlement_preview(
+        first_application = self._apply(
             run_id=first_run.pk,
             control_context=self.control_context,
         )
@@ -11723,8 +11996,8 @@ class M8SettlementApplyTests(TestCase):
             EmployeeBedOccupancy._base_manager.count(),
         )
         self.assert_apply_code(
-            'settlement.apply.manual_replacement_confirmation_required',
-            lambda: apply_confirmed_settlement_preview(
+            'settlement.apply.hard_conflict',
+            lambda: self._apply(
                 run_id=second_run.pk,
                 control_context=self.control_context,
             ),
@@ -11736,18 +12009,80 @@ class M8SettlementApplyTests(TestCase):
             ),
             before,
         )
-        application = apply_confirmed_settlement_preview(
-            run_id=second_run.pk,
-            control_context=self.control_context,
-            confirm_replace_manual=True,
+        self.assert_apply_code(
+            'settlement.apply.hard_conflict',
+            lambda: self._apply(
+                run_id=second_run.pk,
+                control_context=self.control_context,
+                confirm_replace_manual=True,
+            ),
         )
         manual = EmployeeBedOccupancy._base_manager.get(pk=manual.pk)
+        self.assertIsNone(manual.replaced_by_application_id)
+        self.assertFalse(
+            SettlementPreviewApplication.objects.filter(preview_run=second_run).exists()
+        )
+
+    def test_classified_manual_correction_requires_explicit_confirmation(self):
+        resident, _employee, _equipment, _bed, assignment = (
+            self._equipment_resident('MANUAL-SHIFT')
+        )
+        cohort = self._cohort(resident)
+        first_run = self._confirmed_run_for_cohort(cohort)
+        first_application = self._apply(run_id=first_run.pk)
+        auto = EmployeeBedOccupancy.objects.get(source_application=first_application)
+        member = cohort.members.get(resident=resident)
+        replacement_bed = next(
+            bed
+            for room_beds in self.beds
+            for bed in room_beds
+            if bed.pk != auto.physical_bed_id
+        )
+        manual = EmployeeBedOccupancy(
+            resident=resident,
+            physical_bed=replacement_bed,
+            assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
+            source_kind=EmployeeBedOccupancy.SourceKind.MANUAL,
+            work_shift=member.work_shift,
+            shift_source_kind=EmployeeBedOccupancy.ShiftSourceKind.OFFICIAL_ASSIGNMENT,
+            shift_source_fingerprint=member.shift_source_fingerprint,
+            shift_official_assignment=assignment,
+            watch_period=self.period,
+            cohort_member=member,
+            starts_at=member.arrival_at,
+            settled_at=member.arrival_at,
+            ends_at=member.departure_at,
+            settled_by=self.control_actor,
+        )
+        manual.save()
+        auto.replaced_by_occupancy = manual
+        auto.save(update_fields=['replaced_by_occupancy'])
+
+        second_run = self._confirmed_run_for_cohort(cohort)
+        self.assert_apply_code(
+            'settlement.apply.manual_replacement_confirmation_required',
+            lambda: self._apply(run_id=second_run.pk),
+        )
+        manual.refresh_from_db()
+        self.assertIsNone(manual.replaced_by_application_id)
+
+        application = self._apply(
+            run_id=second_run.pk,
+            confirm_replace_manual=True,
+        )
+        manual.refresh_from_db()
         self.assertEqual(manual.replaced_by_application_id, application.pk)
         self.assertTrue(application.confirm_replace_manual)
+        self.assertTrue(
+            application.occupancy_items.filter(
+                occupancy=manual,
+                action=SettlementPreviewApplicationItem.Action.REPLACED_MANUAL,
+            ).exists()
+        )
 
     def test_public_apply_and_occupancy_delete_guards(self):
         _cohort, run = self._confirmed_run(include_unresolved=False)
-        application = apply_confirmed_settlement_preview(
+        application = self._apply(
             run_id=run.pk,
             control_context=self.control_context,
         )
@@ -11763,6 +12098,30 @@ class M8SettlementApplyTests(TestCase):
         ):
             self.assert_apply_code('settlement.apply.public_write_forbidden', callback)
 
+        application.work_shift = SettlementCohortMember.WorkShift.NIGHT
+        with self.assertRaises(ValidationError):
+            application.save(update_fields=['work_shift'])
+        occupancy.work_shift = SettlementCohortMember.WorkShift.NIGHT
+        with self.assertRaises(ValidationError):
+            occupancy.save(update_fields=['work_shift'])
+        occupancy.refresh_from_db()
+        for callback in (
+            lambda: EmployeeBedOccupancy.objects.filter(pk=occupancy.pk).update(
+                work_shift=SettlementCohortMember.WorkShift.NIGHT,
+            ),
+            lambda: EmployeeBedOccupancy.objects.bulk_update(
+                [occupancy],
+                ['work_shift'],
+            ),
+            lambda: EmployeeBedOccupancy.objects.bulk_create([occupancy]),
+        ):
+            with self.assertRaises(ValidationError) as raised:
+                callback()
+            self.assertEqual(
+                raised.exception.code,
+                'employee_bed_occupancy_mass_write_forbidden',
+            )
+
     def test_application_item_failure_rolls_back_application_and_occupancy(self):
         _cohort, run = self._confirmed_run(include_unresolved=False)
         with mock.patch.object(
@@ -11771,7 +12130,7 @@ class M8SettlementApplyTests(TestCase):
             side_effect=ValidationError('ДЕМО M8 application item failure'),
         ):
             with self.assertRaises(ValidationError):
-                apply_confirmed_settlement_preview(
+                self._apply(
                     run_id=run.pk,
                     control_context=self.control_context,
                 )
@@ -12453,3 +12812,234 @@ class ResidentOccupancySubjectMigrationTests(TransactionTestCase):
             apps.get_model('settlement', 'EmployeeBedOccupancy').objects.count(),
             1,
         )
+
+
+class ShiftScopedApplyMigrationTests(TransactionTestCase):
+    migrate_from = ('settlement', '0015_cohort_member_work_shift')
+    migrate_to = ('settlement', '0016_shift_scoped_apply_and_occupancy')
+
+    def setUp(self):
+        self.addCleanup(self._restore_latest_migrations)
+        executor = MigrationExecutor(connection)
+        executor.migrate([self.migrate_from])
+        self.old_apps = executor.loader.project_state([self.migrate_from]).apps
+
+    def _restore_latest_migrations(self):
+        executor = MigrationExecutor(connection)
+        executor.migrate(executor.loader.graph.leaf_nodes())
+
+    def _migrate_to_target(self):
+        executor = MigrationExecutor(connection)
+        executor.migrate([self.migrate_to])
+        return executor.loader.project_state([self.migrate_to]).apps
+
+    @staticmethod
+    def _context(apps, suffix):
+        EmployeeModel = apps.get_model('users', 'Employee')
+        RoleModel = apps.get_model('users', 'Role')
+        AccessModel = apps.get_model('users', 'EmployeeAccess')
+        CompositionModel = apps.get_model('users', 'WatchComposition')
+        PeriodModel = apps.get_model('shifts', 'WatchPeriod')
+        SourceModel = apps.get_model('settlement', 'SettlementSource')
+        RevisionModel = apps.get_model('settlement', 'SettlementRevision')
+        CohortModel = apps.get_model('settlement', 'SettlementCohort')
+        RunModel = apps.get_model('settlement', 'SettlementPreviewRun')
+
+        composition = CompositionModel.objects.create(
+            code=f'm16-{suffix}',
+            name=f'M16 {suffix}',
+        )
+        period = PeriodModel.objects.create(
+            name=f'M16 period {suffix}',
+            watch_composition=composition,
+            starts_on=datetime(2035, 8, 14).date(),
+            ends_on=datetime(2035, 9, 14).date(),
+        )
+        actor = EmployeeModel.objects.create(
+            full_name=f'ДЕМО M16 actor {suffix}',
+            status='active',
+            is_active=True,
+        )
+        role = RoleModel.objects.create(
+            code=f'm16-role-{suffix}',
+            name=f'M16 role {suffix}',
+        )
+        access = AccessModel.objects.create(
+            employee=actor,
+            role=role,
+            access_code=f'M16-ACCESS-{suffix}',
+            status='activated',
+            is_active=True,
+        )
+        source = SourceModel.objects.create(
+            source_type='document',
+            title=f'M16 source {suffix}',
+            version='1',
+            file_sha256='6' * 64,
+            status='confirmed',
+            confirmed_at=timezone.now(),
+            confirmed_by_label='ДЕМО M16',
+        )
+        revision = RevisionModel.objects.create(
+            code=f'M16-REVISION-{suffix}',
+            source=source,
+            status='confirmed',
+            effective_at=timezone.now(),
+            confirmed_at=timezone.now(),
+            confirmed_by_label='ДЕМО M16',
+            reason='M16 migration test.',
+        )
+        cohort = CohortModel.objects.create(
+            watch_composition=composition,
+            watch_period=period,
+            version=1,
+            status='draft',
+            source_revision=revision,
+            source_type='migration_test',
+            source_id=f'M16-COHORT-{suffix}',
+            source_snapshot={'kind': 'migration_test'},
+            input_fingerprint='6' * 64,
+            created_by=actor,
+        )
+        run = RunModel.objects.create(
+            cohort=cohort,
+            watch_composition=composition,
+            watch_period=period,
+            version=1,
+            status='draft',
+            source_snapshot={'kind': 'migration_test'},
+            resolver_fingerprint='6' * 64,
+            result_fingerprint='7' * 64,
+            created_by_access=access,
+            requires_shift_split=True,
+        )
+        return actor, access, period, cohort, run
+
+    def test_existing_rows_become_legacy_and_reverse_without_data_loss(self):
+        ApplicationModel = self.old_apps.get_model(
+            'settlement', 'SettlementPreviewApplication'
+        )
+        OccupancyModel = self.old_apps.get_model('settlement', 'EmployeeBedOccupancy')
+        ResidentModel = self.old_apps.get_model('settlement', 'SettlementResident')
+        EmployeeModel = self.old_apps.get_model('users', 'Employee')
+        actor, access, period, cohort, run = self._context(self.old_apps, 'legacy')
+        application = ApplicationModel.objects.create(
+            preview_run=run,
+            watch_period=period,
+            cohort=cohort,
+            applied_by_access=access,
+            resolver_fingerprint='6' * 64,
+            normalized_fingerprint='7' * 64,
+            result_snapshot={'legacy': True},
+        )
+        employee = EmployeeModel.objects.create(
+            full_name='ДЕМО M16 legacy resident',
+            status='active',
+            is_active=True,
+        )
+        resident = ResidentModel.objects.create(
+            resident_type='EMPLOYEE',
+            employee=employee,
+        )
+        bed = ResidentOccupancySubjectMigrationTests._bed(self.old_apps, 'M16-LEGACY')
+        occupancy = OccupancyModel.objects.create(
+            resident=resident,
+            physical_bed=bed,
+            assignment_type='permanent',
+            source_kind='manual',
+            settled_by=actor,
+        )
+
+        apps = self._migrate_to_target()
+        migrated_application = apps.get_model(
+            'settlement', 'SettlementPreviewApplication'
+        ).objects.get(pk=application.pk)
+        migrated_occupancy = apps.get_model(
+            'settlement', 'EmployeeBedOccupancy'
+        ).objects.get(pk=occupancy.pk)
+        self.assertTrue(migrated_application.legacy_whole_run)
+        self.assertIsNone(migrated_application.work_shift)
+        self.assertEqual(migrated_occupancy.shift_source_kind, 'unverified_legacy')
+        self.assertIsNone(migrated_occupancy.work_shift)
+        self.assertEqual(migrated_occupancy.shift_source_fingerprint, '')
+
+        executor = MigrationExecutor(connection)
+        executor.migrate([self.migrate_from])
+        apps = executor.loader.project_state([self.migrate_from]).apps
+        self.assertTrue(
+            apps.get_model('settlement', 'SettlementPreviewApplication')
+            .objects.filter(pk=application.pk).exists()
+        )
+        self.assertTrue(
+            apps.get_model('settlement', 'EmployeeBedOccupancy')
+            .objects.filter(pk=occupancy.pk).exists()
+        )
+        apps = self._migrate_to_target()
+        self.assertTrue(
+            apps.get_model('settlement', 'SettlementPreviewApplication')
+            .objects.filter(
+                pk=application.pk,
+                legacy_whole_run=True,
+                work_shift__isnull=True,
+            ).exists()
+        )
+        self.assertTrue(
+            apps.get_model('settlement', 'EmployeeBedOccupancy')
+            .objects.filter(
+                pk=occupancy.pk,
+                shift_source_kind='unverified_legacy',
+                work_shift__isnull=True,
+            ).exists()
+        )
+
+    def test_reverse_fails_closed_for_shift_application_and_classified_occupancy(self):
+        self._context(self.old_apps, 'guard')
+        apps = self._migrate_to_target()
+        actor, access, period, cohort, run = self._context(apps, 'new')
+        ApplicationModel = apps.get_model('settlement', 'SettlementPreviewApplication')
+        OccupancyModel = apps.get_model('settlement', 'EmployeeBedOccupancy')
+        ResidentModel = apps.get_model('settlement', 'SettlementResident')
+        EmployeeModel = apps.get_model('users', 'Employee')
+        application = ApplicationModel.objects.create(
+            preview_run=run,
+            work_shift='day',
+            legacy_whole_run=False,
+            watch_period=period,
+            cohort=cohort,
+            applied_by_access=access,
+            resolver_fingerprint='6' * 64,
+            normalized_fingerprint='7' * 64,
+            result_snapshot={'work_shift': 'day'},
+        )
+        employee = EmployeeModel.objects.create(
+            full_name='ДЕМО M16 classified resident',
+            status='active',
+            is_active=True,
+        )
+        resident = ResidentModel.objects.create(
+            resident_type='EMPLOYEE',
+            employee=employee,
+        )
+        bed = ResidentOccupancySubjectMigrationTests._bed(apps, 'M16-GUARD')
+        occupancy = OccupancyModel.objects.create(
+            resident=resident,
+            physical_bed=bed,
+            assignment_type='permanent',
+            source_kind='manual',
+            work_shift='day',
+            shift_source_kind='clerk_selected',
+            shift_source_fingerprint='8' * 64,
+            shift_selected_by_access=access,
+            shift_selected_at=timezone.now(),
+            shift_selection_basis='Проверка reverse fail-closed.',
+            settled_by=actor,
+        )
+
+        executor = MigrationExecutor(connection)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            rf'applications=1.*{application.pk}.*occupancies=1.*{occupancy.pk}',
+        ):
+            executor.migrate([self.migrate_from])
+        self.assertTrue(ApplicationModel.objects.filter(pk=application.pk).exists())
+        self.assertTrue(OccupancyModel.objects.filter(pk=occupancy.pk).exists())
