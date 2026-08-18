@@ -20,14 +20,31 @@ from shifts.models import WatchPeriod
 from users.models import Employee, EmployeeAccess, Role
 
 from .arrival_roster_parser import UnsafeArrivalWorkbook, parse_arrival_workbook
-from .arrival_rosters import upload_arrival_roster
+from .arrival_rosters import (
+    _VerifiedTimekeeperContext,
+    _access_snapshot,
+    _lock_timekeeper_access,
+    _trusted_create_arrival_roster_event,
+    arrival_roster_match_readiness,
+    clear_arrival_roster_resident,
+    reopen_arrival_roster_issue,
+    resolve_arrival_roster_issue,
+    search_arrival_roster_residents,
+    select_arrival_roster_resident,
+    set_arrival_roster_dates,
+    set_arrival_roster_notes,
+    set_arrival_roster_participation,
+    upload_arrival_roster,
+)
 from .models import (
     ArrivalRosterEvent,
     ArrivalRosterIssue,
+    ArrivalRosterIssueResolution,
     ArrivalRosterMatch,
     ArrivalRosterMatchCandidate,
     ArrivalRosterNormalizedRow,
     ArrivalRosterParserProfile,
+    ArrivalRosterRowReview,
     ArrivalRosterSourceFile,
     ArrivalRosterSourceRow,
     ArrivalRosterVersion,
@@ -183,6 +200,10 @@ class ArrivalRosterT11Tests(TestCase):
             watch_period_id=self.period.pk,
             actor_access_id=(access or self.access).pk,
         )
+
+    def _verified_context(self, access=None):
+        access = access or self.access
+        return _lock_timekeeper_access(_access_snapshot(access.pk))
 
     def _login(self, client, access=None):
         session = client.session
@@ -668,3 +689,624 @@ class ArrivalRosterT11Tests(TestCase):
         self.assertEqual(version.source_row_count, len(parsed.source_rows))
         self.assertEqual(version.normalized_row_count, len(parsed.normalized_rows))
         self.assertEqual(ArrivalRosterMatchCandidate.objects.filter(match__version=version).count(), 0)
+
+    def test_t12_selects_and_clears_resident_with_linear_revision_history(self):
+        version, _created = self._upload()
+        match = version.matches.get()
+        review = select_arrival_roster_resident(
+            match_id=match.pk,
+            resident_id=self.resident.pk,
+            expected_revision=0,
+            actor_access_id=self.access.pk,
+        )
+        self.assertEqual(review.revision, 1)
+        self.assertEqual(review.selected_resident, self.resident)
+        review = clear_arrival_roster_resident(
+            match_id=match.pk,
+            expected_revision=1,
+            actor_access_id=self.access.pk,
+        )
+        self.assertEqual(review.revision, 2)
+        self.assertEqual(review.resident_resolution, ArrivalRosterRowReview.ResidentResolution.CLEARED)
+        self.assertIsNone(review.selected_resident_id)
+        self.assertEqual(
+            list(match.review_events.values_list('action', 'review_revision')),
+            [('resident_selected', 1), ('resident_cleared', 2)],
+        )
+
+    def test_t12_rejects_duplicate_resident_and_rolls_back_second_review(self):
+        version, _created = self._upload()
+        first = version.matches.get()
+        second = ArrivalRosterMatch(
+            version=version,
+            status=ArrivalRosterMatch.Status.UNMATCHED,
+            method='manual_test',
+            quality='unmatched',
+            evidence={'test': True},
+        )
+        second.save()
+        select_arrival_roster_resident(
+            match_id=first.pk,
+            resident_id=self.resident.pk,
+            expected_revision=0,
+            actor_access_id=self.access.pk,
+        )
+        with self.assertRaises(ValidationError) as caught:
+            select_arrival_roster_resident(
+                match_id=second.pk,
+                resident_id=self.resident.pk,
+                expected_revision=0,
+                actor_access_id=self.access.pk,
+            )
+        self.assertEqual(caught.exception.code, 'arrival_roster.duplicate_resident')
+        self.assertFalse(ArrivalRosterRowReview._base_manager.filter(match=second).exists())
+        self.assertFalse(second.review_events.exists())
+
+    def test_t12_participation_mode_dates_and_notes_are_validated(self):
+        version, _created = self._upload()
+        match = version.matches.get()
+        review = set_arrival_roster_participation(
+            match_id=match.pk,
+            participation_status='arriving',
+            arrival_mode='transfer',
+            expected_revision=0,
+            actor_access_id=self.access.pk,
+        )
+        review = set_arrival_roster_dates(
+            match_id=match.pk,
+            arrival_on=date(2026, 8, 14),
+            departure_on=date(2026, 9, 13),
+            expected_revision=review.revision,
+            actor_access_id=self.access.pk,
+        )
+        review = set_arrival_roster_notes(
+            match_id=match.pk,
+            basis='Заявка табельщика',
+            comment='Дата сверена.',
+            expected_revision=review.revision,
+            actor_access_id=self.access.pk,
+        )
+        self.assertEqual(review.revision, 3)
+        self.assertEqual(review.arrival_mode, 'transfer')
+        self.assertEqual(review.arrival_on, date(2026, 8, 14))
+        with self.assertRaises(ValidationError):
+            set_arrival_roster_participation(
+                match_id=match.pk,
+                participation_status='extended',
+                arrival_mode='self',
+                expected_revision=3,
+                actor_access_id=self.access.pk,
+            )
+        with self.assertRaises(ValidationError):
+            set_arrival_roster_dates(
+                match_id=match.pk,
+                arrival_on=date(2026, 9, 13),
+                departure_on=date(2026, 8, 14),
+                expected_revision=3,
+                actor_access_id=self.access.pk,
+            )
+        self.assertEqual(match.row_review.revision, 3)
+
+    def test_t12_stale_revision_and_wrong_access_are_fail_closed(self):
+        version, _created = self._upload()
+        match = version.matches.get()
+        select_arrival_roster_resident(
+            match_id=match.pk,
+            resident_id=self.resident.pk,
+            expected_revision=0,
+            actor_access_id=self.access.pk,
+        )
+        with self.assertRaises(ValidationError) as stale:
+            clear_arrival_roster_resident(
+                match_id=match.pk,
+                expected_revision=0,
+                actor_access_id=self.access.pk,
+            )
+        self.assertEqual(stale.exception.code, 'arrival_roster.stale_review_revision')
+        with self.assertRaises(ValidationError) as denied:
+            clear_arrival_roster_resident(
+                match_id=match.pk,
+                expected_revision=1,
+                actor_access_id=self.other_access.pk,
+            )
+        self.assertEqual(denied.exception.code, 'arrival_roster.access_denied')
+        match.row_review.refresh_from_db()
+        self.assertEqual(match.row_review.revision, 1)
+
+    def test_t12_search_is_exact_access_bounded_and_contains_no_phone(self):
+        version, _created = self._upload()
+        results = search_arrival_roster_residents(
+            version_id=version.pk,
+            query='Иванов',
+            actor_access_id=self.access.pk,
+        )
+        self.assertEqual(len(results), 1)
+        self.assertNotIn('phone', results[0])
+        self.assertNotIn('+7 999 123-45-67', json.dumps(results, ensure_ascii=False))
+        with self.assertRaises(ValidationError):
+            search_arrival_roster_residents(
+                version_id=version.pk,
+                query='Ив',
+                actor_access_id=self.access.pk,
+            )
+        with self.assertRaises(ValidationError):
+            search_arrival_roster_residents(
+                version_id=version.pk,
+                query='Иванов',
+                actor_access_id=self.other_access.pk,
+            )
+
+    def test_t12_resolves_and_reopens_nonblocking_warning(self):
+        version, _created = self._upload()
+        issue = version.issues.get(code='summary_requires_review')
+        before_readiness = arrival_roster_match_readiness(match_id=version.matches.get().pk)
+        resolution = resolve_arrival_roster_issue(
+            issue_id=issue.pk,
+            expected_revision=0,
+            resolution_note='Сверочный лист проверен вручную.',
+            actor_access_id=self.access.pk,
+        )
+        self.assertTrue(resolution.is_resolved)
+        self.assertEqual(resolution.revision, 1)
+        client = Client()
+        self._login(client)
+        response = client.get(reverse('arrival_roster_review', args=[version.pk]))
+        self.assertEqual(response.context['open_blocking_count'], 1)
+        self.assertEqual(
+            arrival_roster_match_readiness(match_id=version.matches.get().pk),
+            before_readiness,
+        )
+        resolution = reopen_arrival_roster_issue(
+            issue_id=issue.pk,
+            expected_revision=1,
+            resolution_note='Нужна повторная проверка сверочного листа.',
+            actor_access_id=self.access.pk,
+        )
+        self.assertFalse(resolution.is_resolved)
+        self.assertEqual(resolution.revision, 2)
+        self.assertEqual(
+            list(issue.review_events.values_list('action', 'review_revision')),
+            [('issue_resolved', 1), ('issue_reopened', 2)],
+        )
+
+    def test_t12_public_projection_writes_and_deletes_are_forbidden(self):
+        version, _created = self._upload(_workbook_bytes(omit_sheet='Числ'))
+        match = version.matches.first()
+        issue = version.issues.get(code='missing_sheet')
+        review = ArrivalRosterRowReview(
+            version=version,
+            match=match,
+            updated_by_access=self.access,
+        )
+        resolution = ArrivalRosterIssueResolution(
+            issue=issue,
+            is_resolved=True,
+            resolution_note='Проверено вручную.',
+            updated_by_access=self.access,
+        )
+        self._assert_public_write_forbidden(review.save)
+        self._assert_public_write_forbidden(lambda: ArrivalRosterRowReview.objects.create(
+            version=version, match=match, updated_by_access=self.access,
+        ))
+        self._assert_public_write_forbidden(
+            lambda: ArrivalRosterRowReview.objects.bulk_create([review]),
+        )
+        self._assert_public_write_forbidden(resolution.save)
+        self._assert_public_write_forbidden(
+            lambda: ArrivalRosterIssueResolution.objects.bulk_create([resolution]),
+        )
+        created = select_arrival_roster_resident(
+            match_id=match.pk,
+            resident_id=self.resident.pk,
+            expected_revision=0,
+            actor_access_id=self.access.pk,
+        )
+        self._assert_public_write_forbidden(
+            lambda: ArrivalRosterRowReview.objects.filter(pk=created.pk).update(comment='подмена'),
+        )
+        self._assert_public_write_forbidden(lambda: ArrivalRosterRowReview.objects.bulk_update(
+            [created], ['comment'],
+        ))
+        self._assert_public_write_forbidden(created.delete)
+        self._assert_public_write_forbidden(
+            lambda: ArrivalRosterRowReview.objects.filter(pk=created.pk).delete(),
+        )
+
+    def test_t12_http_commands_are_post_only_and_ignore_client_actor(self):
+        version, _created = self._upload()
+        match = version.matches.get()
+        client = Client(enforce_csrf_checks=True)
+        self._login(client)
+        url = reverse('arrival_roster_resident_select', args=[version.pk, match.pk])
+        self.assertEqual(client.get(url).status_code, 405)
+        self.assertEqual(client.post(url, {
+            'expected_revision': 0,
+            'resident_id': self.resident.pk,
+        }).status_code, 403)
+        page = client.get(reverse('arrival_roster_review', args=[version.pk]))
+        token = page.cookies['csrftoken'].value
+        response = client.post(url, {
+            'csrfmiddlewaretoken': token,
+            'expected_revision': 0,
+            'resident_id': self.resident.pk,
+            'actor_access_id': self.other_access.pk,
+            'employee_access_id': self.other_access.pk,
+        })
+        self.assertEqual(response.status_code, 302)
+        review = match.row_review
+        self.assertEqual(review.updated_by_access, self.access)
+
+    def test_t12_does_not_modify_t11_or_create_business_entities(self):
+        version, _created = self._upload()
+        match = version.matches.first()
+        issue = version.issues.get(code='summary_requires_review')
+        before = {
+            'employees': Employee.objects.count(),
+            'accesses': EmployeeAccess.objects.count(),
+            'residents': SettlementResident.objects.count(),
+            'cohorts': SettlementCohort.objects.count(),
+            'occupancies': EmployeeBedOccupancy.objects.count(),
+            'snapshot': version.snapshot_sha256,
+            'source_rows': list(version.source_rows.values_list('row_sha256', flat=True)),
+        }
+        select_arrival_roster_resident(
+            match_id=match.pk,
+            resident_id=self.resident.pk,
+            expected_revision=0,
+            actor_access_id=self.access.pk,
+        )
+        resolve_arrival_roster_issue(
+            issue_id=issue.pk,
+            expected_revision=0,
+            resolution_note='Проверено табельщиком.',
+            actor_access_id=self.access.pk,
+        )
+        version.refresh_from_db()
+        self.assertEqual(Employee.objects.count(), before['employees'])
+        self.assertEqual(EmployeeAccess.objects.count(), before['accesses'])
+        self.assertEqual(SettlementResident.objects.count(), before['residents'])
+        self.assertEqual(SettlementCohort.objects.count(), before['cohorts'])
+        self.assertEqual(EmployeeBedOccupancy.objects.count(), before['occupancies'])
+        self.assertEqual(version.snapshot_sha256, before['snapshot'])
+        self.assertEqual(
+            list(version.source_rows.values_list('row_sha256', flat=True)),
+            before['source_rows'],
+        )
+
+    def test_t12_public_event_creation_paths_are_forbidden(self):
+        version, _created = self._upload()
+        event = ArrivalRosterEvent(
+            version=version,
+            actor_access=self.access,
+            action=ArrivalRosterEvent.Action.REUSED,
+            details={'sha256': version.source_file.sha256},
+        )
+        self._assert_public_write_forbidden(event.save)
+        self._assert_public_write_forbidden(lambda: ArrivalRosterEvent.objects.create(
+            version=version,
+            actor_access=self.access,
+            action=ArrivalRosterEvent.Action.REUSED,
+            details={'sha256': version.source_file.sha256},
+        ))
+        self._assert_public_write_forbidden(lambda: ArrivalRosterEvent.objects.get_or_create(
+            version=version,
+            actor_access=self.access,
+            action=ArrivalRosterEvent.Action.REUSED,
+            details={'sha256': '0' * 64},
+        ))
+        self._assert_public_write_forbidden(lambda: ArrivalRosterEvent.objects.update_or_create(
+            version=version,
+            actor_access=self.access,
+            action=ArrivalRosterEvent.Action.REUSED,
+            defaults={'details': {'sha256': '1' * 64}},
+        ))
+        self._assert_public_write_forbidden(
+            lambda: ArrivalRosterEvent.objects.bulk_create([event]),
+        )
+
+    def test_t12_upload_and_commands_use_only_trusted_event_path(self):
+        version, _created = self._upload()
+        self.assertEqual(
+            list(version.events.values_list('action', flat=True)),
+            ['uploaded', 'parsed'],
+        )
+        match = version.matches.get()
+        warning = version.issues.get(code='summary_requires_review')
+        with patch(
+            'rotations.arrival_rosters._trusted_create_arrival_roster_event',
+            wraps=_trusted_create_arrival_roster_event,
+        ) as trusted:
+            review = select_arrival_roster_resident(
+                match_id=match.pk,
+                resident_id=self.resident.pk,
+                expected_revision=0,
+                actor_access_id=self.access.pk,
+            )
+            review = set_arrival_roster_participation(
+                match_id=match.pk,
+                participation_status='arriving',
+                arrival_mode='transfer',
+                expected_revision=review.revision,
+                actor_access_id=self.access.pk,
+            )
+            review = set_arrival_roster_dates(
+                match_id=match.pk,
+                arrival_on=date(2026, 8, 14),
+                departure_on=date(2026, 9, 13),
+                expected_revision=review.revision,
+                actor_access_id=self.access.pk,
+            )
+            review = set_arrival_roster_notes(
+                match_id=match.pk,
+                basis='Реестр заезда',
+                comment='Проверено.',
+                expected_revision=review.revision,
+                actor_access_id=self.access.pk,
+            )
+            clear_arrival_roster_resident(
+                match_id=match.pk,
+                expected_revision=review.revision,
+                actor_access_id=self.access.pk,
+            )
+            resolution = resolve_arrival_roster_issue(
+                issue_id=warning.pk,
+                expected_revision=0,
+                resolution_note='Предупреждение проверено вручную.',
+                actor_access_id=self.access.pk,
+            )
+            reopen_arrival_roster_issue(
+                issue_id=warning.pk,
+                expected_revision=resolution.revision,
+                resolution_note='Предупреждение возвращено на проверку.',
+                actor_access_id=self.access.pk,
+            )
+        self.assertEqual(trusted.call_count, 8)
+        self.assertTrue(all(
+            type(call.kwargs['actor_context']) is _VerifiedTimekeeperContext
+            for call in trusted.call_args_list
+        ))
+
+    def test_t12_trusted_event_rejects_cross_version_and_personal_details(self):
+        first, _created = self._upload()
+        second_payload = _with_cell_value(_workbook_bytes(), 'билеты', 'F2', 'Другой маршрут')
+        second, _created = self._upload(second_payload, name='другой.xlsx')
+        second_match = second.matches.get()
+        actor_context = self._verified_context()
+        with self.assertRaises(ValidationError) as mismatch:
+            _trusted_create_arrival_roster_event(
+                version=first,
+                actor_context=actor_context,
+                match=second_match,
+                review_revision=1,
+                action=ArrivalRosterEvent.Action.NOTES_CHANGED,
+                details={},
+            )
+        self.assertEqual(mismatch.exception.code, 'arrival_roster.event_version_mismatch')
+        with self.assertRaises(ValidationError) as unsafe:
+            _trusted_create_arrival_roster_event(
+                version=first,
+                actor_context=actor_context,
+                match=first.matches.get(),
+                review_revision=1,
+                action=ArrivalRosterEvent.Action.NOTES_CHANGED,
+                details={'phone': '+79990000000'},
+            )
+        self.assertEqual(unsafe.exception.code, 'arrival_roster.unsafe_event_details')
+
+    def test_t12_trusted_event_rejects_plain_access_and_forged_context(self):
+        version, _created = self._upload()
+        event_count = version.events.count()
+        kwargs = {
+            'version': version,
+            'action': ArrivalRosterEvent.Action.REUSED,
+            'details': {'sha256': version.source_file.sha256},
+        }
+        with self.assertRaises(ValidationError) as plain_access:
+            _trusted_create_arrival_roster_event(
+                actor_context=self.access,
+                **kwargs,
+            )
+        self.assertEqual(
+            plain_access.exception.code,
+            'arrival_roster.verified_context_required',
+        )
+        forged = replace(self._verified_context(), _marker=object())
+        with self.assertRaises(ValidationError) as forged_context:
+            _trusted_create_arrival_roster_event(
+                actor_context=forged,
+                **kwargs,
+            )
+        self.assertEqual(
+            forged_context.exception.code,
+            'arrival_roster.verified_context_required',
+        )
+        mismatched = replace(self._verified_context(), access_id=self.other_access.pk)
+        with self.assertRaises(ValidationError) as mismatched_context:
+            _trusted_create_arrival_roster_event(
+                actor_context=mismatched,
+                **kwargs,
+            )
+        self.assertEqual(
+            mismatched_context.exception.code,
+            'arrival_roster.verified_context_invalid',
+        )
+        self.assertEqual(version.events.count(), event_count)
+
+    def test_t12_verified_context_rejects_inactive_access_employee_role_and_no_fallback(self):
+        event_count = ArrivalRosterEvent.objects.count()
+
+        EmployeeAccess.objects.filter(pk=self.access.pk).update(is_active=False)
+        with self.assertRaises(ValidationError) as inactive_access:
+            _lock_timekeeper_access(_access_snapshot(self.access.pk))
+        self.assertEqual(inactive_access.exception.code, 'arrival_roster.access_denied')
+        EmployeeAccess.objects.filter(pk=self.access.pk).update(is_active=True)
+
+        Employee.objects.filter(pk=self.actor.pk).update(is_active=False)
+        with self.assertRaises(ValidationError) as inactive_employee:
+            _lock_timekeeper_access(_access_snapshot(self.access.pk))
+        self.assertEqual(inactive_employee.exception.code, 'arrival_roster.access_denied')
+        Employee.objects.filter(pk=self.actor.pk).update(is_active=True)
+
+        Role.objects.filter(pk=self.timekeeper_role.pk).update(is_active=False)
+        with self.assertRaises(ValidationError) as inactive_role:
+            _lock_timekeeper_access(_access_snapshot(self.access.pk))
+        self.assertEqual(inactive_role.exception.code, 'arrival_roster.access_denied')
+        Role.objects.filter(pk=self.timekeeper_role.pk).update(is_active=True)
+
+        with self.assertRaises(ValidationError) as wrong_access:
+            _lock_timekeeper_access(_access_snapshot(self.other_access.pk))
+        self.assertEqual(wrong_access.exception.code, 'arrival_roster.access_denied')
+        self.assertEqual(ArrivalRosterEvent.objects.count(), event_count)
+
+    def test_t12_trusted_event_uses_context_without_late_employee_or_access_lock(self):
+        version, _created = self._upload()
+        actor_context = self._verified_context()
+        with (
+            patch.object(
+                Employee.objects,
+                'select_for_update',
+                side_effect=AssertionError('late Employee lock'),
+            ),
+            patch.object(
+                EmployeeAccess.objects,
+                'select_for_update',
+                side_effect=AssertionError('late Access lock'),
+            ),
+        ):
+            event = _trusted_create_arrival_roster_event(
+                version=version,
+                actor_context=actor_context,
+                action=ArrivalRosterEvent.Action.REUSED,
+                details={'sha256': version.source_file.sha256},
+            )
+        self.assertEqual(event.actor_access_id, self.access.pk)
+
+    def test_t12_generic_resolution_rejects_protected_and_unknown_blockers(self):
+        version, _created = self._upload()
+        protected = {
+            'match_unmatched': ArrivalRosterIssue.Severity.ERROR,
+            'conflicting_shift_hints': ArrivalRosterIssue.Severity.ERROR,
+            'unknown_shift_hint': ArrivalRosterIssue.Severity.WARNING,
+            'formula_in_content': ArrivalRosterIssue.Severity.ERROR,
+            'missing_sheet': ArrivalRosterIssue.Severity.ERROR,
+            'content_outside_profile': ArrivalRosterIssue.Severity.ERROR,
+            'future_blocking_code': ArrivalRosterIssue.Severity.ERROR,
+        }
+        for code, severity in protected.items():
+            issue = ArrivalRosterIssue(
+                version=version,
+                severity=severity,
+                code=code,
+                message='Тестовый блокирующий вопрос.',
+                details={},
+            )
+            issue.save()
+            with self.assertRaises(ValidationError) as caught:
+                resolve_arrival_roster_issue(
+                    issue_id=issue.pk,
+                    expected_revision=0,
+                    resolution_note='Попытка ручного закрытия.',
+                    actor_access_id=self.access.pk,
+                )
+            self.assertEqual(
+                caught.exception.code,
+                'arrival_roster.blocking_issue_requires_action',
+            )
+            self.assertFalse(ArrivalRosterIssueResolution._base_manager.filter(issue=issue).exists())
+            self.assertFalse(issue.review_events.exists())
+
+    def test_t12_factual_actions_drive_readiness(self):
+        version, _created = self._upload(_workbook_bytes(arrival_value='неверная дата'))
+        match = version.matches.get()
+        self.assertEqual(
+            arrival_roster_match_readiness(match_id=match.pk)['code'],
+            'timekeeper',
+        )
+        review = select_arrival_roster_resident(
+            match_id=match.pk,
+            resident_id=self.resident.pk,
+            expected_revision=0,
+            actor_access_id=self.access.pk,
+        )
+        review = set_arrival_roster_participation(
+            match_id=match.pk,
+            participation_status='arriving',
+            arrival_mode='self',
+            expected_revision=review.revision,
+            actor_access_id=self.access.pk,
+        )
+        self.assertEqual(
+            arrival_roster_match_readiness(match_id=match.pk)['code'],
+            'timekeeper',
+        )
+        review = set_arrival_roster_dates(
+            match_id=match.pk,
+            arrival_on=date(2026, 8, 14),
+            departure_on=date(2026, 9, 13),
+            expected_revision=review.revision,
+            actor_access_id=self.access.pk,
+        )
+        readiness = arrival_roster_match_readiness(match_id=match.pk)
+        self.assertTrue(readiness['ready'])
+        self.assertEqual(readiness['blocking_codes'], [])
+        clear_arrival_roster_resident(
+            match_id=match.pk,
+            expected_revision=review.revision,
+            actor_access_id=self.access.pk,
+        )
+        self.assertFalse(arrival_roster_match_readiness(match_id=match.pk)['ready'])
+
+    def test_t12_structural_error_cannot_be_hidden_by_resolution(self):
+        version, _created = self._upload(_workbook_bytes(omit_sheet='Числ'))
+        match = version.matches.get()
+        issue = version.issues.get(code='missing_sheet')
+        ArrivalRosterIssueResolution._base_manager.bulk_create([
+            ArrivalRosterIssueResolution(
+                issue=issue,
+                is_resolved=True,
+                resolution_note='Техническая подмена решения.',
+                revision=1,
+                updated_by_access=self.access,
+            ),
+        ])
+        review = select_arrival_roster_resident(
+            match_id=match.pk,
+            resident_id=self.resident.pk,
+            expected_revision=0,
+            actor_access_id=self.access.pk,
+        )
+        review = set_arrival_roster_participation(
+            match_id=match.pk,
+            participation_status='arriving',
+            arrival_mode='transfer',
+            expected_revision=review.revision,
+            actor_access_id=self.access.pk,
+        )
+        set_arrival_roster_dates(
+            match_id=match.pk,
+            arrival_on=date(2026, 8, 14),
+            departure_on=date(2026, 9, 13),
+            expected_revision=review.revision,
+            actor_access_id=self.access.pk,
+        )
+        readiness = arrival_roster_match_readiness(match_id=match.pk)
+        self.assertEqual(readiness['code'], 'corrected_file')
+        self.assertIn('missing_sheet', readiness['blocking_codes'])
+
+    def test_t12_event_failure_rolls_back_domain_change(self):
+        version, _created = self._upload()
+        match = version.matches.get()
+        event_count = version.events.count()
+        with patch(
+            'rotations.arrival_rosters._trusted_create_arrival_roster_event',
+            side_effect=ValidationError('Событие не записано.'),
+        ):
+            with self.assertRaises(ValidationError):
+                select_arrival_roster_resident(
+                    match_id=match.pk,
+                    resident_id=self.resident.pk,
+                    expected_revision=0,
+                    actor_access_id=self.access.pk,
+                )
+        self.assertFalse(ArrivalRosterRowReview._base_manager.filter(match=match).exists())
+        self.assertEqual(version.events.count(), event_count)

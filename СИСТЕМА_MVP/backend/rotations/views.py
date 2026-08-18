@@ -17,10 +17,36 @@ from users.views import get_current_access
 
 from .documents import build_extension_data_packet, document_bytes
 from .exports import build_cycle_workbook, workbook_bytes
-from .arrival_rosters import UnsafeArrivalWorkbook, upload_arrival_roster
-from .forms import ArrivalRosterUploadForm, RotationCycleCreateForm, RotationResponseForm
+from .arrival_rosters import (
+    UnsafeArrivalWorkbook,
+    arrival_roster_match_readiness,
+    clear_arrival_roster_resident,
+    reopen_arrival_roster_issue,
+    resolve_arrival_roster_issue,
+    search_arrival_roster_residents,
+    select_arrival_roster_resident,
+    set_arrival_roster_dates,
+    set_arrival_roster_notes,
+    set_arrival_roster_participation,
+    upload_arrival_roster,
+)
+from .forms import (
+    ArrivalRosterDatesForm,
+    ArrivalRosterExpectedRevisionForm,
+    ArrivalRosterIssueResolutionForm,
+    ArrivalRosterNotesForm,
+    ArrivalRosterParticipationForm,
+    ArrivalRosterResidentSearchForm,
+    ArrivalRosterResidentSelectionForm,
+    ArrivalRosterUploadForm,
+    RotationCycleCreateForm,
+    RotationResponseForm,
+)
 from .models import (
+    ArrivalRosterIssue,
+    ArrivalRosterMatch,
     ArrivalRosterNormalizedRow,
+    ArrivalRosterRowReview,
     ArrivalRosterVersion,
     RotationCollectionCycle,
     RotationResponse,
@@ -122,25 +148,97 @@ def arrival_roster_review_view(request, version_id):
         .filter(source_row__version=version)
         .select_related(
             'source_row', 'match_link__match__matched_resident__employee',
+            'match_link__match__row_review__selected_resident__employee',
         )
-        .prefetch_related('issues', 'match_link__match__candidates__resident__employee')
+        .prefetch_related(
+            'issues__resolution',
+            'match_link__match__candidates__resident__employee',
+            'match_link__match__issues__resolution',
+        )
         .order_by('source_row__sheet_name', 'source_row__row_number')
     )
+    search_state = request.session.pop(f'arrival_roster_search_{version.pk}', None)
     review_rows = []
+    reviewed_match_ids = set()
+    readiness_by_match = {}
+    summary = {'ready': 0, 'oup': 0, 'clerk': 0, 'timekeeper': 0}
     for row in normalized_rows:
         match = row.match_link.match
+        is_review_lead = match.pk not in reviewed_match_ids
+        reviewed_match_ids.add(match.pk)
+        try:
+            row_review = match.row_review
+        except ArrivalRosterRowReview.DoesNotExist:
+            row_review = None
+        revision = row_review.revision if row_review else 0
         resident_name = ''
-        if match.matched_resident_id:
-            resident_name = match.matched_resident.display_name
+        effective_resident = None
+        if row_review and row_review.resident_resolution == ArrivalRosterRowReview.ResidentResolution.SELECTED:
+            effective_resident = row_review.selected_resident
+        elif not row_review or row_review.resident_resolution != ArrivalRosterRowReview.ResidentResolution.CLEARED:
+            effective_resident = match.matched_resident
+        if effective_resident:
+            resident_name = effective_resident.display_name
+        row_issues = list(row.issues.all())
+        for issue in row_issues:
+            resolution = getattr(issue, 'resolution', None)
+            issue.current_revision = resolution.revision if resolution else 0
+            issue.is_currently_resolved = bool(resolution and resolution.is_resolved)
+        readiness = readiness_by_match.get(match.pk)
+        if readiness is None:
+            readiness = arrival_roster_match_readiness(match_id=match.pk)
+            readiness_by_match[match.pk] = readiness
+        candidates = list(match.candidates.all())
+        if not is_review_lead:
+            responsibility = 'Объединено с решением по этому человеку'
+        else:
+            responsibility = readiness['label']
+            summary_key = readiness['code'] if readiness['code'] in summary else 'timekeeper'
+            summary[summary_key] += 1
+        row_search_results = []
+        if search_state and search_state.get('match_id') == match.pk:
+            row_search_results = search_state.get('results', [])
         review_rows.append({
             'row': row,
             'match': match,
+            'row_review': row_review,
+            'is_review_lead': is_review_lead,
+            'revision': revision,
             'resident_name': resident_name,
-            'issues': list(row.issues.all()),
-            'candidate_count': match.candidates.count(),
+            'issues': row_issues,
+            'open_blocking': readiness['blocking_codes'],
+            'candidates': candidates,
+            'candidate_count': len(candidates),
+            'responsibility': responsibility,
+            'search_results': row_search_results,
+            'search_form': ArrivalRosterResidentSearchForm(),
+            'participation_form': ArrivalRosterParticipationForm(initial={
+                'expected_revision': revision,
+                'participation_status': row_review.participation_status if row_review else '',
+                'arrival_mode': row_review.arrival_mode if row_review else '',
+            }),
+            'dates_form': ArrivalRosterDatesForm(initial={
+                'expected_revision': revision,
+                'arrival_on': row_review.arrival_on if row_review else None,
+                'departure_on': row_review.departure_on if row_review else None,
+            }),
+            'notes_form': ArrivalRosterNotesForm(initial={
+                'expected_revision': revision,
+                'basis': row_review.basis if row_review else '',
+                'comment': row_review.comment if row_review else '',
+            }),
         })
     version_issues = list(
-        version.issues.filter(normalized_row__isnull=True).order_by('severity', 'pk')
+        version.issues.filter(normalized_row__isnull=True)
+        .select_related('resolution')
+        .order_by('severity', 'pk')
+    )
+    for issue in version_issues:
+        resolution = getattr(issue, 'resolution', None)
+        issue.current_revision = resolution.revision if resolution else 0
+        issue.is_currently_resolved = bool(resolution and resolution.is_resolved)
+    open_blocking_count = sum(
+        1 for readiness in readiness_by_match.values() if not readiness['ready']
     )
     return render(
         request,
@@ -150,7 +248,199 @@ def arrival_roster_review_view(request, version_id):
             'version': version,
             'review_rows': review_rows,
             'version_issues': version_issues,
+            'open_blocking_count': open_blocking_count,
+            'review_summary': summary,
         },
+    )
+
+
+def _arrival_roster_redirect(version_id):
+    return redirect('arrival_roster_review', version_id=version_id)
+
+
+def _arrival_roster_error(request, error):
+    messages.error(request, _validation_message(error))
+
+
+def _match_for_version(version_id, match_id):
+    return get_object_or_404(ArrivalRosterMatch, pk=match_id, version_id=version_id)
+
+
+def _issue_for_version(version_id, issue_id):
+    return get_object_or_404(ArrivalRosterIssue, pk=issue_id, version_id=version_id)
+
+
+@require_POST
+def arrival_roster_resident_search_view(request, version_id, match_id):
+    access, response = _role_access(request, 'timekeeper')
+    if response:
+        return response
+    _match_for_version(version_id, match_id)
+    form = ArrivalRosterResidentSearchForm(request.POST)
+    if form.is_valid():
+        try:
+            results = search_arrival_roster_residents(
+                version_id=version_id,
+                query=form.cleaned_data['query'],
+                actor_access_id=access.pk,
+            )
+            request.session[f'arrival_roster_search_{version_id}'] = {
+                'match_id': match_id,
+                'results': results,
+            }
+        except ValidationError as error:
+            _arrival_roster_error(request, error)
+    else:
+        messages.error(request, 'Введите не менее трёх символов для поиска.')
+    return _arrival_roster_redirect(version_id)
+
+
+@require_POST
+def arrival_roster_resident_select_view(request, version_id, match_id):
+    access, response = _role_access(request, 'timekeeper')
+    if response:
+        return response
+    _match_for_version(version_id, match_id)
+    form = ArrivalRosterResidentSelectionForm(request.POST)
+    if form.is_valid():
+        try:
+            select_arrival_roster_resident(
+                match_id=match_id,
+                resident_id=form.cleaned_data['resident_id'],
+                expected_revision=form.cleaned_data['expected_revision'],
+                actor_access_id=access.pk,
+            )
+            messages.success(request, 'Жилец выбран.')
+        except ValidationError as error:
+            _arrival_roster_error(request, error)
+    else:
+        messages.error(request, 'Не удалось выбрать жильца. Обновите страницу.')
+    return _arrival_roster_redirect(version_id)
+
+
+@require_POST
+def arrival_roster_resident_clear_view(request, version_id, match_id):
+    access, response = _role_access(request, 'timekeeper')
+    if response:
+        return response
+    _match_for_version(version_id, match_id)
+    form = ArrivalRosterExpectedRevisionForm(request.POST)
+    if form.is_valid():
+        try:
+            clear_arrival_roster_resident(
+                match_id=match_id,
+                expected_revision=form.cleaned_data['expected_revision'],
+                actor_access_id=access.pk,
+            )
+            messages.success(request, 'Сопоставление отменено.')
+        except ValidationError as error:
+            _arrival_roster_error(request, error)
+    return _arrival_roster_redirect(version_id)
+
+
+@require_POST
+def arrival_roster_participation_view(request, version_id, match_id):
+    access, response = _role_access(request, 'timekeeper')
+    if response:
+        return response
+    _match_for_version(version_id, match_id)
+    form = ArrivalRosterParticipationForm(request.POST)
+    if form.is_valid():
+        try:
+            set_arrival_roster_participation(
+                match_id=match_id,
+                participation_status=form.cleaned_data['participation_status'],
+                arrival_mode=form.cleaned_data['arrival_mode'],
+                expected_revision=form.cleaned_data['expected_revision'],
+                actor_access_id=access.pk,
+            )
+            messages.success(request, 'Участие в заезде сохранено.')
+        except ValidationError as error:
+            _arrival_roster_error(request, error)
+    else:
+        messages.error(request, 'Проверьте участие и способ прибытия.')
+    return _arrival_roster_redirect(version_id)
+
+
+@require_POST
+def arrival_roster_dates_view(request, version_id, match_id):
+    access, response = _role_access(request, 'timekeeper')
+    if response:
+        return response
+    _match_for_version(version_id, match_id)
+    form = ArrivalRosterDatesForm(request.POST)
+    if form.is_valid():
+        try:
+            set_arrival_roster_dates(
+                match_id=match_id,
+                arrival_on=form.cleaned_data['arrival_on'],
+                departure_on=form.cleaned_data['departure_on'],
+                expected_revision=form.cleaned_data['expected_revision'],
+                actor_access_id=access.pk,
+            )
+            messages.success(request, 'Даты сохранены.')
+        except ValidationError as error:
+            _arrival_roster_error(request, error)
+    else:
+        messages.error(request, 'Проверьте даты заселения и выбытия.')
+    return _arrival_roster_redirect(version_id)
+
+
+@require_POST
+def arrival_roster_notes_view(request, version_id, match_id):
+    access, response = _role_access(request, 'timekeeper')
+    if response:
+        return response
+    _match_for_version(version_id, match_id)
+    form = ArrivalRosterNotesForm(request.POST)
+    if form.is_valid():
+        try:
+            set_arrival_roster_notes(
+                match_id=match_id,
+                basis=form.cleaned_data['basis'],
+                comment=form.cleaned_data['comment'],
+                expected_revision=form.cleaned_data['expected_revision'],
+                actor_access_id=access.pk,
+            )
+            messages.success(request, 'Основание и комментарий сохранены.')
+        except ValidationError as error:
+            _arrival_roster_error(request, error)
+    return _arrival_roster_redirect(version_id)
+
+
+def _arrival_roster_issue_command(request, version_id, issue_id, command):
+    access, response = _role_access(request, 'timekeeper')
+    if response:
+        return response
+    _issue_for_version(version_id, issue_id)
+    form = ArrivalRosterIssueResolutionForm(request.POST)
+    if form.is_valid():
+        try:
+            command(
+                issue_id=issue_id,
+                expected_revision=form.cleaned_data['expected_revision'],
+                resolution_note=form.cleaned_data['resolution_note'],
+                actor_access_id=access.pk,
+            )
+            messages.success(request, 'Состояние вопроса сохранено.')
+        except ValidationError as error:
+            _arrival_roster_error(request, error)
+    else:
+        messages.error(request, 'Укажите пояснение на русском языке.')
+    return _arrival_roster_redirect(version_id)
+
+
+@require_POST
+def arrival_roster_issue_resolve_view(request, version_id, issue_id):
+    return _arrival_roster_issue_command(
+        request, version_id, issue_id, resolve_arrival_roster_issue,
+    )
+
+
+@require_POST
+def arrival_roster_issue_reopen_view(request, version_id, issue_id):
+    return _arrival_roster_issue_command(
+        request, version_id, issue_id, reopen_arrival_roster_issue,
     )
 
 

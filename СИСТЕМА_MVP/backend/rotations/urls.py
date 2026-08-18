@@ -1,7 +1,15 @@
 from django.urls import path
 
 from .views import (
+    arrival_roster_dates_view,
+    arrival_roster_issue_reopen_view,
+    arrival_roster_issue_resolve_view,
+    arrival_roster_notes_view,
+    arrival_roster_participation_view,
     arrival_roster_review_view,
+    arrival_roster_resident_clear_view,
+    arrival_roster_resident_search_view,
+    arrival_roster_resident_select_view,
     arrival_roster_upload_form_view,
     arrival_roster_upload_view,
     cycle_action_view,
@@ -39,6 +47,46 @@ urlpatterns = [
         'timekeeper/arrival-rosters/<int:version_id>/',
         arrival_roster_review_view,
         name='arrival_roster_review',
+    ),
+    path(
+        'timekeeper/arrival-rosters/<int:version_id>/rows/<int:match_id>/residents/search/',
+        arrival_roster_resident_search_view,
+        name='arrival_roster_resident_search',
+    ),
+    path(
+        'timekeeper/arrival-rosters/<int:version_id>/rows/<int:match_id>/resident/select/',
+        arrival_roster_resident_select_view,
+        name='arrival_roster_resident_select',
+    ),
+    path(
+        'timekeeper/arrival-rosters/<int:version_id>/rows/<int:match_id>/resident/clear/',
+        arrival_roster_resident_clear_view,
+        name='arrival_roster_resident_clear',
+    ),
+    path(
+        'timekeeper/arrival-rosters/<int:version_id>/rows/<int:match_id>/participation/',
+        arrival_roster_participation_view,
+        name='arrival_roster_participation',
+    ),
+    path(
+        'timekeeper/arrival-rosters/<int:version_id>/rows/<int:match_id>/dates/',
+        arrival_roster_dates_view,
+        name='arrival_roster_dates',
+    ),
+    path(
+        'timekeeper/arrival-rosters/<int:version_id>/rows/<int:match_id>/notes/',
+        arrival_roster_notes_view,
+        name='arrival_roster_notes',
+    ),
+    path(
+        'timekeeper/arrival-rosters/<int:version_id>/issues/<int:issue_id>/resolve/',
+        arrival_roster_issue_resolve_view,
+        name='arrival_roster_issue_resolve',
+    ),
+    path(
+        'timekeeper/arrival-rosters/<int:version_id>/issues/<int:issue_id>/reopen/',
+        arrival_roster_issue_reopen_view,
+        name='arrival_roster_issue_reopen',
     ),
     path('timekeeper/campaigns/new/', cycle_create_view, name='rotation_cycle_create'),
     path('timekeeper/campaigns/<int:cycle_id>/', timekeeper_cycle_view, name='rotation_timekeeper_cycle'),

@@ -971,13 +971,189 @@ class ArrivalRosterIssue(ArrivalRosterImmutableModel):
         ]
 
 
+class ArrivalRosterProtectedProjection(ArrivalRosterImmutableModel):
+    PUBLIC_CREATE_FORBIDDEN = True
+
+    class Meta:
+        abstract = True
+
+    def save(self, *args, **kwargs):
+        raise self._write_forbidden_error()
+
+
+class ArrivalRosterRowReview(ArrivalRosterProtectedProjection):
+    class ResidentResolution(models.TextChoices):
+        UNREVIEWED = 'unreviewed', 'Не проверено'
+        SELECTED = 'selected', 'Жилец выбран'
+        CLEARED = 'cleared', 'Сопоставление отменено'
+
+    class ParticipationStatus(models.TextChoices):
+        ARRIVING = 'arriving', 'Заезжает'
+        NOT_ARRIVING = 'not_arriving', 'Не заезжает'
+        EXTENDED = 'extended', 'Продлевается'
+        ADDITIONAL = 'additional', 'Дополнительный человек'
+
+    class ArrivalMode(models.TextChoices):
+        TRANSFER = 'transfer', 'Трансфер'
+        SELF = 'self', 'Самостоятельно'
+
+    version = models.ForeignKey(
+        ArrivalRosterVersion,
+        verbose_name='Версия реестра',
+        on_delete=models.PROTECT,
+        related_name='row_reviews',
+    )
+    match = models.OneToOneField(
+        ArrivalRosterMatch,
+        verbose_name='Исходное сопоставление',
+        on_delete=models.PROTECT,
+        related_name='row_review',
+    )
+    resident_resolution = models.CharField(
+        'Решение по жильцу',
+        max_length=16,
+        choices=ResidentResolution.choices,
+        default=ResidentResolution.UNREVIEWED,
+    )
+    selected_resident = models.ForeignKey(
+        'settlement.SettlementResident',
+        verbose_name='Выбранный жилец',
+        on_delete=models.PROTECT,
+        related_name='arrival_roster_row_reviews',
+        null=True,
+        blank=True,
+    )
+    participation_status = models.CharField(
+        'Участие в заезде',
+        max_length=16,
+        choices=ParticipationStatus.choices,
+        null=True,
+        blank=True,
+    )
+    arrival_mode = models.CharField(
+        'Способ прибытия',
+        max_length=16,
+        choices=ArrivalMode.choices,
+        null=True,
+        blank=True,
+    )
+    arrival_on = models.DateField('Дата заселения', null=True, blank=True)
+    departure_on = models.DateField('Дата выбытия', null=True, blank=True)
+    basis = models.TextField('Основание', blank=True)
+    comment = models.TextField('Комментарий', blank=True)
+    revision = models.PositiveIntegerField('Ревизия', default=1)
+    updated_by_access = models.ForeignKey(
+        'users.EmployeeAccess',
+        verbose_name='Точный доступ табельщика',
+        on_delete=models.PROTECT,
+        related_name='updated_arrival_roster_rows',
+    )
+    created_at = models.DateTimeField('Создано', auto_now_add=True)
+    updated_at = models.DateTimeField('Обновлено', auto_now=True)
+
+    class Meta:
+        verbose_name = 'Ручная проверка строки реестра'
+        verbose_name_plural = 'Ручная проверка строк реестра'
+        ordering = ['version_id', 'match_id']
+        indexes = [
+            models.Index(fields=['version', 'resident_resolution'], name='arrival_review_state_idx'),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['version', 'selected_resident'],
+                condition=models.Q(selected_resident__isnull=False),
+                name='uniq_arrival_selected_resident',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(resident_resolution='selected', selected_resident__isnull=False)
+                    | models.Q(
+                        resident_resolution__in=['unreviewed', 'cleared'],
+                        selected_resident__isnull=True,
+                    )
+                ),
+                name='arrival_review_resident_shape',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(arrival_on__isnull=True)
+                    | models.Q(departure_on__isnull=True)
+                    | models.Q(departure_on__gte=models.F('arrival_on'))
+                ),
+                name='arrival_review_dates_order',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(arrival_mode__isnull=True)
+                    | models.Q(participation_status='arriving')
+                ),
+                name='arrival_review_mode_shape',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(revision__gte=1),
+                name='arrival_review_revision_gte_1',
+            ),
+        ]
+
+    def clean(self):
+        super().clean()
+        if self.match_id and self.version_id and self.match.version_id != self.version_id:
+            raise ValidationError({'match': 'Сопоставление относится к другой версии реестра.'})
+
+
+class ArrivalRosterIssueResolution(ArrivalRosterProtectedProjection):
+    issue = models.OneToOneField(
+        ArrivalRosterIssue,
+        verbose_name='Вопрос',
+        on_delete=models.PROTECT,
+        related_name='resolution',
+    )
+    is_resolved = models.BooleanField('Вопрос решён', default=False)
+    resolution_note = models.TextField('Пояснение')
+    revision = models.PositiveIntegerField('Ревизия', default=1)
+    updated_by_access = models.ForeignKey(
+        'users.EmployeeAccess',
+        verbose_name='Точный доступ табельщика',
+        on_delete=models.PROTECT,
+        related_name='resolved_arrival_roster_issues',
+    )
+    updated_at = models.DateTimeField('Обновлено', auto_now=True)
+
+    class Meta:
+        verbose_name = 'Решение вопроса реестра'
+        verbose_name_plural = 'Решения вопросов реестра'
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(revision__gte=1),
+                name='arrival_resolution_revision_gte_1',
+            ),
+            models.CheckConstraint(
+                condition=~models.Q(resolution_note=''),
+                name='arrival_resolution_note_required',
+            ),
+        ]
+
+
 class ArrivalRosterEvent(ArrivalRosterImmutableModel):
+    PUBLIC_CREATE_FORBIDDEN = True
+
     class Action(models.TextChoices):
         UPLOADED = 'uploaded', 'Файл загружен'
         REUSED = 'reused', 'Повторная загрузка распознана'
         PARSED = 'parsed', 'Предварительная проверка завершена'
+        RESIDENT_SELECTED = 'resident_selected', 'Жилец выбран'
+        RESIDENT_CLEARED = 'resident_cleared', 'Сопоставление отменено'
+        PARTICIPATION_CHANGED = 'participation_changed', 'Участие изменено'
+        ARRIVAL_MODE_CHANGED = 'arrival_mode_changed', 'Способ прибытия изменён'
+        DATES_CHANGED = 'dates_changed', 'Даты изменены'
+        NOTES_CHANGED = 'notes_changed', 'Основание или комментарий изменены'
+        ISSUE_RESOLVED = 'issue_resolved', 'Вопрос решён'
+        ISSUE_REOPENED = 'issue_reopened', 'Вопрос возвращён на проверку'
 
-    IMMUTABLE_FIELDS = ('version_id', 'actor_access_id', 'action', 'details')
+    IMMUTABLE_FIELDS = (
+        'version_id', 'actor_access_id', 'match_id', 'issue_id',
+        'review_revision', 'action', 'details',
+    )
 
     version = models.ForeignKey(
         ArrivalRosterVersion,
@@ -990,6 +1166,27 @@ class ArrivalRosterEvent(ArrivalRosterImmutableModel):
         verbose_name='Точный доступ исполнителя',
         on_delete=models.PROTECT,
         related_name='arrival_roster_events',
+    )
+    match = models.ForeignKey(
+        ArrivalRosterMatch,
+        verbose_name='Сопоставление',
+        on_delete=models.PROTECT,
+        related_name='review_events',
+        null=True,
+        blank=True,
+    )
+    issue = models.ForeignKey(
+        ArrivalRosterIssue,
+        verbose_name='Вопрос',
+        on_delete=models.PROTECT,
+        related_name='review_events',
+        null=True,
+        blank=True,
+    )
+    review_revision = models.PositiveIntegerField(
+        'Ревизия ручной проверки',
+        null=True,
+        blank=True,
     )
     action = models.CharField('Действие', max_length=24, choices=Action.choices)
     details = models.JSONField('Безопасные детали', default=dict, blank=True)

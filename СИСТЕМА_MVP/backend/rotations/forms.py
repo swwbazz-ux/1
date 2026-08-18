@@ -5,7 +5,7 @@ from django.utils import timezone
 from shifts.models import WatchPeriod
 
 from .arrival_roster_parser import MAX_FILE_SIZE
-from .models import RotationCollectionCycle, RotationResponse
+from .models import ArrivalRosterRowReview, RotationCollectionCycle, RotationResponse
 
 
 class ArrivalRosterUploadForm(forms.Form):
@@ -32,6 +32,61 @@ class ArrivalRosterUploadForm(forms.Form):
         if workbook.size > MAX_FILE_SIZE:
             raise forms.ValidationError('Размер файла превышает 10 МиБ.')
         return workbook
+
+
+class ArrivalRosterExpectedRevisionForm(forms.Form):
+    expected_revision = forms.IntegerField(min_value=0, widget=forms.HiddenInput)
+
+
+class ArrivalRosterResidentSearchForm(forms.Form):
+    query = forms.CharField(
+        label='Поиск жильца по ФИО',
+        min_length=3,
+        max_length=255,
+    )
+
+
+class ArrivalRosterResidentSelectionForm(ArrivalRosterExpectedRevisionForm):
+    resident_id = forms.IntegerField(min_value=1, widget=forms.HiddenInput)
+
+
+class ArrivalRosterParticipationForm(ArrivalRosterExpectedRevisionForm):
+    participation_status = forms.ChoiceField(
+        label='Участие в заезде',
+        choices=ArrivalRosterRowReview.ParticipationStatus.choices,
+    )
+    arrival_mode = forms.ChoiceField(
+        label='Способ прибытия',
+        choices=[('', 'Не указан'), *ArrivalRosterRowReview.ArrivalMode.choices],
+        required=False,
+    )
+
+
+class ArrivalRosterDatesForm(ArrivalRosterExpectedRevisionForm):
+    arrival_on = forms.DateField(
+        label='Дата заселения',
+        required=False,
+        widget=forms.DateInput(attrs={'type': 'date'}),
+    )
+    departure_on = forms.DateField(
+        label='Дата выбытия',
+        required=False,
+        widget=forms.DateInput(attrs={'type': 'date'}),
+    )
+
+
+class ArrivalRosterNotesForm(ArrivalRosterExpectedRevisionForm):
+    basis = forms.CharField(label='Основание', required=False, widget=forms.Textarea)
+    comment = forms.CharField(label='Комментарий', required=False, widget=forms.Textarea)
+
+
+class ArrivalRosterIssueResolutionForm(ArrivalRosterExpectedRevisionForm):
+    resolution_note = forms.CharField(
+        label='Пояснение',
+        min_length=1,
+        max_length=1000,
+        widget=forms.Textarea,
+    )
 
 
 class RotationCycleCreateForm(forms.ModelForm):
