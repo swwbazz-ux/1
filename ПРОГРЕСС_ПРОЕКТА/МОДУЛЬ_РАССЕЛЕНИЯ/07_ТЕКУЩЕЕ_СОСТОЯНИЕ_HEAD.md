@@ -2,8 +2,8 @@
 
 Версия документа: 0.5
 Дата последней сверки отчётов: 18.08.2026
-Статус: актуализирован по base HEAD `5ad6a1bd4203371d6a8ef9b032f5645ab081cf0a` и принятой локальной реализации backend M8 Apply; migration leaf рабочего дерева — `settlement.0014_m8_apply_provenance`
-Источники доказательств: модели и domain-код M4–M8, migrations `0008`–`0014`, целевые M6/M7/M8/occupancy tests и SQLite migration cycle; production не проверялась и migration `0014` к ней не применялась
+Статус: актуализирован по clean HEAD `7c21f3ec4248ad216e9cdb323ac207b0f3e0ffab`; migration leaf — `settlement.0014_m8_apply_provenance`
+Источники доказательств: принятые M4–M8, control-контур, whole-run HTTP/UI workflow и нормативное решение ADR-031; production в этой актуализации не проверялась
 
 ## 1. Репозиторий и baseline
 
@@ -87,13 +87,13 @@
 | `relocate_employee_to_bed()` | Атомарный ручной перенос | PARTIAL |
 | release | Досрочное прекращение через `terminated_at` | PARTIAL |
 | Карта/панели/drawer/DnD | Рабочий ручной интерфейс | READY/PARTIAL |
-| Apply | Endpoint/service/model отсутствуют | ABSENT |
+| Применение предварительного плана | Сохранённый run, backend service, HTTP/UI whole-run workflow и immutable Application history реализованы | READY/PARTIAL: нет раздельного применения смен |
 | `SettlementControlLease/SettlementControlEvent` | Schema, migration `0007` и bootstrap FREE singleton присутствуют в репозитории | PRESENT |
 | Control lifecycle | Внутренние ensure/acquire/heartbeat/release/expire, HMAC session binding, token/fencing и audit events реализованы | PRESENT |
 | Административный takeover | Внутренняя атомарная команда с обязательной причиной и fencing реализована | PRESENT |
-| Settlement write gate | Manual writers не проверяют lease token/revision и не используют общий кадровый lock plan | ABSENT |
-| Control HTTP/session integration | Endpoints/URLs и хранение lease credentials в пользовательской session отсутствуют | ABSENT |
-| Control UI integration | Browser heartbeat, owner indicator, read-only banner и takeover UI отсутствуют | ABSENT |
+| Settlement write gate | Manual occupancy writers и whole-run применение требуют server-side control context и общий кадровый lock plan | READY |
+| Control HTTP/session integration | Lifecycle и credentials привязаны к server-side session; browser payload не получает secrets | READY |
+| Control UI integration | Панель управления, heartbeat, read-only режим и потеря lease реализованы; административный takeover остаётся отдельным контуром | READY/PARTIAL |
 
 ## 4. Фактическая модель данных
 
@@ -151,7 +151,7 @@ Legacy `ended_at` в runtime activity больше не участвует.
 - `EmployeeShift`;
 - `RotationResponse` с arrival/departure/намерением.
 
-M5 использует эти upstream-факты через отдельные `SettlementCohort/SettlementCohortMember`: cohort имеет версию, lifecycle и immutable provenance, а member хранит конкретный resident и конечный интервал участия. Подключение cohort к новому preview ещё не реализовано.
+M5 использует эти upstream-факты через отдельные `SettlementCohort/SettlementCohortMember`: cohort имеет версию, lifecycle и immutable provenance, а member хранит конкретный resident и конечный интервал участия. APPROVED cohort подключён к M6 resolver, M7 saved preview и M8 применению; обязательная authoritative смена по ADR-031 ещё не материализована.
 
 ### 4.7. SettlementResident и subject transition M4/M5
 
@@ -343,7 +343,7 @@ Preview группирует конкуренцию по `(physical_bed_id, shif
 7. явные category assignments и маршрут стажёра по настоящей должности через authoritative structured state/adapter;
 8. room profiles, resolver rules и групповые конфликты дефицита.
 
-Saved preview M7 подтверждается без occupancy writes, а backend M8 атомарно применяет только актуальный `CONFIRMED` run. Специальные M6-конфигурации продолжают возвращать controlled unresolved и не маскируются Apply. Следующий активный этап — HTTP/UI orchestration и карточки внешних жильцов; затем нужны сквозная PostgreSQL/Browser приёмка и отдельное решение о deploy.
+Saved preview M7 подтверждается без occupancy writes, а M8/HTTP/UI-контур атомарно применяет актуальный `CONFIRMED` run целиком. Специальные M6-конфигурации продолжают возвращать controlled unresolved. Следующий активный этап — ADR-031: плановая карта следующего заезда, authoritative смена, точечные исправления и раздельное календарно защищённое применение.
 
 ### 11.1. Фактический M7
 
@@ -355,4 +355,12 @@ Migration leaf — `settlement.0012_m7_saved_previews`. Migration schema-only, �
 
 Migration leaf — `settlement.0014_m8_apply_provenance`; migration schema-only, зависит от `settlement.0013_resident_occupancy_subject`, не выполняет backfill и добавляет Application/ApplicationItem и nullable occupancy provenance. Canonical API `apply_confirmed_settlement_preview(*, run_id, control_context, confirm_replace_manual=False)` использует exact Access, повторно сверяет run/fingerprints/rows и выполняет один атомарный resident-based batch.
 
-Unchanged AUTO переиспользуется как `REUSED`; relocation, swap и unresolved заменяют только доказанный baseline текущего cohort/WatchPeriod. MANUAL требует явного `confirm_replace_manual=True`; история не удаляется. Resolver включает replaceable baseline в fingerprint, поэтому изменение после DRAFT делает preview stale. HTTP endpoint Apply, UI preview/confirm/apply, UI внешнего resident и production deployment отсутствуют.
+Unchanged AUTO переиспользуется как `REUSED`; relocation, swap и unresolved заменяют только доказанный baseline текущего cohort/WatchPeriod. MANUAL требует явного `confirm_replace_manual=True`; история не удаляется. Resolver включает replaceable baseline в fingerprint, поэтому изменение после DRAFT делает preview stale. Whole-run HTTP/UI workflow реализован; UI внешнего resident и логика ADR-031 не реализованы.
+
+### 11.3. Следующий этап по ADR-031
+
+Реализованы: текущая карта фактического проживания, сохранённый DRAFT/CONFIRMED план, повторная stale-проверка, whole-run применение и неизменяемая история Application.
+
+Не реализованы и не помечаются `COMPLETE`: отдельная плановая карта «Следующий заезд», обязательная authoritative DAY/NIGHT для каждого участника, состояние «Требуется проверка», точечные исправления поверх `CONFIRMED` run, независимые применения ночной смены 13-го и дневной 14-го, server-side календарный запрет досрочного применения и безопасный переход планового права без изменения фактической occupancy до своей команды.
+
+Отдельное состояние «Активирован» не планируется. Доказательством применения должны служить сменные Application-записи; после применения дальнейшие действия выполняются как фактические settle/relocate/release в режиме «Текущая вахта».
