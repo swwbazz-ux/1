@@ -2,7 +2,7 @@
 {% load static %}
 
 {% block clerk_extra_head %}
-<link rel="stylesheet" href="{% static 'css/settlement-clerk.css' %}?v={{ static_asset_release }}-settlement-map-v31">
+<link rel="stylesheet" href="{% static 'css/settlement-clerk.css' %}?v={{ static_asset_release }}-settlement-map-v32">
 {% endblock %}
 
 {% block clerk_shell_class %}settlement-shell{% endblock %}
@@ -16,7 +16,8 @@
      data-auto-state-url="{% url 'settlement_auto_state' %}"
      data-auto-create-url="{% url 'settlement_auto_preview_create' %}"
      data-auto-confirm-url="{% url 'settlement_auto_preview_confirm' %}"
-     data-auto-apply-url="{% url 'settlement_auto_preview_apply' %}"{% endblock %}
+     data-auto-apply-night-url="{% url 'settlement_auto_preview_apply_night' %}"
+     data-auto-apply-day-url="{% url 'settlement_auto_preview_apply_day' %}"{% endblock %}
 
 {% block clerk_content %}
     <main class="admin-console-page settlement-page">
@@ -182,7 +183,7 @@
         </header>
         <div class="settlement-auto-preview-modal-body" data-auto-preview-body aria-live="polite">
             <section class="settlement-auto-workflow" data-auto-workflow>
-                <p class="settlement-auto-preview-context">Предварительное авторасселение рассчитывается по утверждённому составу заезда и не меняет карту до Apply.</p>
+                <p class="settlement-auto-preview-context">Предварительное авторасселение рассчитывается по утверждённому составу заезда и не меняет карту до применения.</p>
                 <div class="settlement-auto-loading" data-auto-loading>Загружаем утверждённые составы…</div>
                 <div class="settlement-auto-feedback" data-auto-feedback role="status" hidden></div>
                 <section class="settlement-auto-empty" data-auto-empty hidden>
@@ -198,8 +199,25 @@
                     <div class="settlement-auto-actions">
                         <button type="button" data-auto-calculate>Рассчитать размещение</button>
                         <button type="button" data-auto-confirm hidden>Подтвердить результат</button>
-                        <button type="button" class="is-danger" data-auto-apply hidden>Применить расселение</button>
                     </div>
+                    <section class="settlement-auto-shift-actions" data-auto-shift-actions hidden aria-label="Применение по сменам">
+                        <article data-auto-shift-card="night">
+                            <div>
+                                <strong>Ночная смена</strong>
+                                <span data-auto-shift-message="night">Ожидаем подтверждения результата.</span>
+                            </div>
+                            <button type="button" class="is-danger" data-auto-apply-shift="night" disabled>Применить ночную смену</button>
+                            <div class="settlement-auto-shift-counts" data-auto-shift-counts="night" hidden></div>
+                        </article>
+                        <article data-auto-shift-card="day">
+                            <div>
+                                <strong>Дневная смена</strong>
+                                <span data-auto-shift-message="day">Ожидаем подтверждения результата.</span>
+                            </div>
+                            <button type="button" class="is-danger" data-auto-apply-shift="day" disabled>Применить дневную смену</button>
+                            <div class="settlement-auto-shift-counts" data-auto-shift-counts="day" hidden></div>
+                        </article>
+                    </section>
                     <div data-auto-result></div>
                 </div>
             </section>
@@ -464,5 +482,5 @@
 {% endblock %}
 
 {% block clerk_scripts %}
-<script src="{% static 'js/settlement-clerk.js' %}?v={{ static_asset_release }}-settlement-map-v31"></script>
+<script src="{% static 'js/settlement-clerk.js' %}?v={{ static_asset_release }}-settlement-map-v32"></script>
 {% endblock %}

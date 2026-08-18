@@ -1234,6 +1234,8 @@ class SettlementControlHttpLifecycleTests(
             reverse('settlement_auto_preview_create'),
             reverse('settlement_auto_preview_confirm'),
             reverse('settlement_auto_preview_apply'),
+            reverse('settlement_auto_preview_apply_night'),
+            reverse('settlement_auto_preview_apply_day'),
         )
         for url in urls:
             with self.subTest(url=url):
@@ -1353,6 +1355,68 @@ class SettlementControlHttpLifecycleTests(
         self.assertFalse(SettlementPreviewApplicationItem.objects.exists())
         self.assertFalse(EmployeeBedOccupancy._base_manager.exists())
 
+    def test_shift_apply_endpoints_use_fixed_shift_and_server_control_context(self):
+        self.authenticate(self.client, self.clerk_access)
+        self.assertEqual(self.client.post(self.acquire_url).status_code, 200)
+        secret = str(uuid.uuid4())
+        fake_application = mock.Mock(preview_run_id=51)
+        fake_run = mock.sentinel.shift_run
+        response_payload = {
+            'id': 51,
+            'status': 'confirmed',
+            'shift_apply': {},
+        }
+
+        for route_name, expected_shift, spoofed_shift in (
+            ('settlement_auto_preview_apply_night', 'night', 'day'),
+            ('settlement_auto_preview_apply_day', 'day', 'night'),
+        ):
+            queryset = mock.Mock()
+            queryset.get.return_value = fake_run
+            with (
+                mock.patch(
+                    'settlement.views.apply_confirmed_settlement_preview',
+                    return_value=fake_application,
+                ) as apply,
+                mock.patch(
+                    'settlement.views._auto_settlement_run_queryset',
+                    return_value=queryset,
+                ),
+                mock.patch(
+                    'settlement.views._auto_settlement_run_payload',
+                    return_value=response_payload,
+                ),
+            ):
+                response = self.client.post(
+                    reverse(route_name) + '?work_shift=' + spoofed_shift + '&now=2099-01-01',
+                    data=json.dumps({
+                        'run_id': 51,
+                        'work_shift': spoofed_shift,
+                        'apply_date': '2099-01-01',
+                        'now': '2099-01-01T00:00:00Z',
+                        'owner_access_id': self.second_clerk_access.pk,
+                        'employee_access_id': self.second_clerk_access.pk,
+                        'lease_token': secret,
+                        'fencing_revision': 999,
+                        'raw_session_key': 'spoofed-session',
+                        'session_binding': 'spoofed-binding',
+                    }),
+                    content_type='application/json',
+                )
+
+            self.assertEqual(response.status_code, 200, response.content)
+            kwargs = apply.call_args.kwargs
+            self.assertEqual(kwargs['run_id'], 51)
+            self.assertEqual(kwargs['work_shift'], expected_shift)
+            self.assertNotIn('now', kwargs)
+            context = kwargs['control_context']
+            self.assertEqual(context.owner_access_id, self.clerk_access.pk)
+            self.assertEqual(context.raw_session_key, self.client.session.session_key)
+            self.assertNotEqual(str(context.lease_token), secret)
+            rendered = response.content.decode()
+            self.assertNotIn(secret, rendered)
+            self.assertNotIn(context.raw_session_key, rendered)
+
     def test_auto_confirmation_conflicts_are_controlled(self):
         self.authenticate(self.client, self.clerk_access)
         self.assertEqual(self.client.post(self.acquire_url).status_code, 200)
@@ -1386,23 +1450,32 @@ class SettlementControlHttpLifecycleTests(
 
     def test_legacy_auto_apply_requires_held_control_before_shift_split_response(self):
         self.authenticate(self.client, self.clerk_access)
-        response = self.client.post(
-            reverse('settlement_auto_preview_apply'),
-            data=json.dumps({'run_id': 8, 'work_shift': 'night'}),
-            content_type='application/json',
+        apply_routes = (
+            'settlement_auto_preview_apply',
+            'settlement_auto_preview_apply_night',
+            'settlement_auto_preview_apply_day',
         )
-        self.assertEqual(response.status_code, 409)
-        self.assertEqual(response.json()['code'], 'settlement.control.not_held')
+        for route_name in apply_routes:
+            with self.subTest(route_name=route_name, control='not_held'):
+                response = self.client.post(
+                    reverse(route_name),
+                    data=json.dumps({'run_id': 8, 'work_shift': 'night'}),
+                    content_type='application/json',
+                )
+                self.assertEqual(response.status_code, 409)
+                self.assertEqual(response.json()['code'], 'settlement.control.not_held')
 
         self.assertEqual(self.client.post(self.acquire_url).status_code, 200)
         self.assertEqual(self.client.post(self.release_url).status_code, 200)
-        lost = self.client.post(
-            reverse('settlement_auto_preview_apply'),
-            data=json.dumps({'run_id': 8, 'work_shift': 'day'}),
-            content_type='application/json',
-        )
-        self.assertEqual(lost.status_code, 409)
-        self.assertEqual(lost.json()['code'], 'settlement.control.not_held')
+        for route_name in apply_routes:
+            with self.subTest(route_name=route_name, control='lost'):
+                lost = self.client.post(
+                    reverse(route_name),
+                    data=json.dumps({'run_id': 8, 'work_shift': 'day'}),
+                    content_type='application/json',
+                )
+                self.assertEqual(lost.status_code, 409)
+                self.assertEqual(lost.json()['code'], 'settlement.control.not_held')
         self.assertFalse(SettlementPreviewApplication.objects.exists())
         self.assertFalse(SettlementPreviewApplicationItem.objects.exists())
         self.assertFalse(EmployeeBedOccupancy._base_manager.exists())
@@ -1656,8 +1729,13 @@ class SettlementControlHttpLifecycleTests(
         self.assertContains(response, self.acquire_url)
         self.assertContains(response, self.heartbeat_url)
         self.assertContains(response, self.release_url)
-        self.assertEqual(response.content.count(b'-settlement-map-v31'), 2)
-        self.assertNotContains(response, '-settlement-map-v30')
+        self.assertEqual(response.content.count(b'-settlement-map-v32'), 2)
+        self.assertNotContains(response, '-settlement-map-v31')
+        self.assertContains(response, 'data-auto-apply-night-url')
+        self.assertContains(response, 'data-auto-apply-day-url')
+        self.assertContains(response, 'Применить ночную смену')
+        self.assertContains(response, 'Применить дневную смену')
+        self.assertNotContains(response, 'data-auto-apply-url')
         response_text = response.content.decode()
         self.assertNotIn(secret_token, response_text)
         self.assertNotIn(str(secret_revision), response_text)
@@ -1690,6 +1768,9 @@ class SettlementControlHttpLifecycleTests(
             'Связь с управлением потеряна',
             'function loadAutoState(cohortId, retryCount)',
             'function runAutoMutation(url, payload)',
+            'function applyAutoPreviewShift(workShift, confirmReplaceManual)',
+            'root.dataset.autoApplyNightUrl',
+            'root.dataset.autoApplyDayUrl',
             'manual_replacement_confirmation_required',
             'if (autoMutationInFlight || !controlHeld) return Promise.resolve(null);',
         ):
@@ -1701,6 +1782,7 @@ class SettlementControlHttpLifecycleTests(
             'settlement_control_owner_access_id',
             'owner_session_hash',
             'data-auto-preview-form',
+            'root.dataset.autoApplyUrl',
         ):
             self.assertNotIn(forbidden_fragment, script)
         initialization = script.split(

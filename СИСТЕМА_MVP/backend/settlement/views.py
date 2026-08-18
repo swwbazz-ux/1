@@ -1,5 +1,6 @@
 import json
 from collections import Counter, defaultdict
+from datetime import timedelta
 from urllib.parse import urlencode
 
 from django import forms
@@ -32,6 +33,7 @@ from .control import (
     release_control_lease,
     store_control_session_credentials,
 )
+from .apply import apply_confirmed_settlement_preview
 from .models import (
     EmployeeBedOccupancy,
     PhysicalBed,
@@ -961,6 +963,50 @@ def _auto_settlement_application_payload(application, unresolved_count):
     }
 
 
+def _auto_settlement_shift_apply_payload(run, work_shift, *, stale):
+    allowed_date = (
+        run.watch_period.starts_on
+        if work_shift == SettlementCohortMember.WorkShift.DAY
+        else run.watch_period.starts_on - timedelta(days=1)
+    )
+    applications = list(run.applications.all())
+    application = next(
+        (
+            row for row in applications
+            if row.legacy_whole_run or row.work_shift == work_shift
+        ),
+        None,
+    )
+    if application is not None:
+        action_counts = Counter(
+            application.occupancy_items.values_list('action', flat=True)
+        )
+        return {
+            'status': 'applied',
+            'allowed_date': allowed_date.isoformat(),
+            'applied_at': application.applied_at.isoformat(),
+            'counts': {
+                'created': action_counts.get('created', 0),
+                'reused': action_counts.get('reused', 0),
+                'replaced_auto': action_counts.get('replaced_auto', 0),
+                'replaced_manual': action_counts.get('replaced_manual', 0),
+                'unresolved': run.unresolved_rows.filter(work_shift=work_shift).count(),
+            },
+        }
+    if run.status != SettlementPreviewRun.Status.CONFIRMED or stale:
+        status = 'not_ready'
+    elif timezone.localdate() < allowed_date:
+        status = 'too_early'
+    else:
+        status = 'ready'
+    return {
+        'status': status,
+        'allowed_date': allowed_date.isoformat(),
+        'applied_at': None,
+        'counts': None,
+    }
+
+
 def _auto_settlement_run_payload(run):
     source_labels = {
         'confirmed_binding': 'binding',
@@ -998,10 +1044,22 @@ def _auto_settlement_run_payload(run):
             'reason_code': row.reason_code,
             'reason_codes': row.reason_codes,
         })
-    application = next(iter(run.applications.all()), None)
+    applications = list(run.applications.all())
+    application = next(iter(applications), None)
+    applied_shifts = {
+        row.work_shift for row in applications if not row.legacy_whole_run
+    }
+    has_legacy_application = any(row.legacy_whole_run for row in applications)
     stale = (
         settlement_preview_is_stale(run_id=run.pk)
-        if run.status == SettlementPreviewRun.Status.CONFIRMED and application is None
+        if (
+            run.status == SettlementPreviewRun.Status.CONFIRMED
+            and not has_legacy_application
+            and applied_shifts != {
+                SettlementCohortMember.WorkShift.DAY,
+                SettlementCohortMember.WorkShift.NIGHT,
+            }
+        )
         else False
     )
     return {
@@ -1021,6 +1079,18 @@ def _auto_settlement_run_payload(run):
             _auto_settlement_application_payload(application, len(unresolved))
             if application else None
         ),
+        'shift_apply': {
+            'night': _auto_settlement_shift_apply_payload(
+                run,
+                SettlementCohortMember.WorkShift.NIGHT,
+                stale=stale,
+            ),
+            'day': _auto_settlement_shift_apply_payload(
+                run,
+                SettlementCohortMember.WorkShift.DAY,
+                stale=stale,
+            ),
+        },
     }
 
 
@@ -1122,6 +1192,35 @@ def settlement_auto_preview_apply_view(request):
         )
 
     return _auto_settlement_mutation(request, apply)
+
+
+def _auto_settlement_shift_apply_view(request, work_shift):
+    def apply(payload, context):
+        application = apply_confirmed_settlement_preview(
+            run_id=_auto_settlement_positive_id(payload, 'run_id'),
+            work_shift=work_shift,
+            control_context=context,
+            confirm_replace_manual=payload.get('confirm_replace_manual') is True,
+        )
+        return _auto_settlement_run_queryset().get(pk=application.preview_run_id)
+
+    return _auto_settlement_mutation(request, apply)
+
+
+@require_POST
+def settlement_auto_preview_apply_night_view(request):
+    return _auto_settlement_shift_apply_view(
+        request,
+        SettlementCohortMember.WorkShift.NIGHT,
+    )
+
+
+@require_POST
+def settlement_auto_preview_apply_day_view(request):
+    return _auto_settlement_shift_apply_view(
+        request,
+        SettlementCohortMember.WorkShift.DAY,
+    )
 
 
 @require_POST

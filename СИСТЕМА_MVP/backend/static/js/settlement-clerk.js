@@ -70,7 +70,8 @@
     var autoResult = root.querySelector("[data-auto-result]");
     var autoCalculateButton = root.querySelector("[data-auto-calculate]");
     var autoConfirmButton = root.querySelector("[data-auto-confirm]");
-    var autoApplyButton = root.querySelector("[data-auto-apply]");
+    var autoShiftActions = root.querySelector("[data-auto-shift-actions]");
+    var autoShiftButtons = Array.from(root.querySelectorAll("[data-auto-apply-shift]"));
     var unsettledPanelToggles = Array.from(root.querySelectorAll("[data-unsettled-panel-toggle]"));
     var unsettledPanel = root.querySelector("[data-unsettled-panel]");
     var unsettledPanelClose = root.querySelector("[data-unsettled-panel-close]");
@@ -871,10 +872,10 @@
             autoConfirmButton.hidden = !preview || preview.status !== "draft";
             autoConfirmButton.disabled = !canMutate;
         }
-        if (autoApplyButton) {
-            autoApplyButton.hidden = !preview || preview.status !== "confirmed" || Boolean(preview.application);
-            autoApplyButton.disabled = !canMutate || Boolean(preview && preview.stale);
-        }
+        autoShiftButtons.forEach(function (button) {
+            var shiftState = preview && preview.shift_apply && preview.shift_apply[button.dataset.autoApplyShift];
+            button.disabled = !canMutate || !shiftState || shiftState.status !== "ready";
+        });
     }
 
     function autoSummaryCard(label, value, className) {
@@ -890,19 +891,54 @@
         return label;
     }
 
+    function autoDateLabel(value) {
+        if (!value) return "—";
+        var parts = String(value).split("-");
+        return parts.length === 3 ? parts[2] + "." + parts[1] + "." + parts[0] : value;
+    }
+
+    function renderAutoShiftState(preview) {
+        if (!autoShiftActions) return;
+        autoShiftActions.hidden = !preview;
+        ["night", "day"].forEach(function (workShift) {
+            var state = preview && preview.shift_apply && preview.shift_apply[workShift];
+            var card = root.querySelector('[data-auto-shift-card="' + workShift + '"]');
+            var message = root.querySelector('[data-auto-shift-message="' + workShift + '"]');
+            var counts = root.querySelector('[data-auto-shift-counts="' + workShift + '"]');
+            if (!card || !message || !counts) return;
+            card.className = state ? "is-" + state.status : "is-not-ready";
+            counts.hidden = true;
+            counts.textContent = "";
+            if (!state || state.status === "not_ready") {
+                message.textContent = "Сначала подтвердите актуальный результат.";
+            } else if (state.status === "too_early") {
+                message.textContent = "Можно применить не раньше " + autoDateLabel(state.allowed_date) + ".";
+            } else if (state.status === "ready") {
+                message.textContent = "Готово к применению с " + autoDateLabel(state.allowed_date) + ".";
+            } else if (state.status === "applied") {
+                message.textContent = "Применено " + new Date(state.applied_at).toLocaleString("ru-RU") + ".";
+                counts.hidden = false;
+                [["Создано", state.counts.created], ["Сохранено", state.counts.reused], ["Заменено автоматически", state.counts.replaced_auto], ["Заменено вручную", state.counts.replaced_manual], ["Без места", state.counts.unresolved]].forEach(function (row) {
+                    counts.appendChild(autoSummaryCard(row[0], row[1]));
+                });
+            }
+        });
+    }
+
     function renderAutoPreview(preview) {
         if (!autoStage || !autoResult) return;
         autoStage.textContent = "";
         autoResult.textContent = "";
         if (!preview) {
             autoStage.appendChild(element("p", "settlement-auto-preview-empty", "Расчёт ещё не выполнен. Выберите состав и запустите расчёт."));
+            renderAutoShiftState(null);
             autoSyncButtons();
             return;
         }
-        var statusLabels = {draft: "DRAFT", confirmed: "CONFIRMED", superseded: "SUPERSEDED"};
+        var statusLabels = {draft: "Черновик", confirmed: "Подтверждён", superseded: "Заменён"};
         var heading = element("div", "settlement-auto-run-heading");
         var title = element("div", "");
-        title.appendChild(element("strong", "", "Preview v" + preview.version));
+        title.appendChild(element("strong", "", "Расчёт № " + preview.version));
         title.appendChild(element("span", "", "Создан " + new Date(preview.created_at).toLocaleString("ru-RU") + " · " + preview.created_by));
         heading.appendChild(title);
         heading.appendChild(element("span", "settlement-auto-status is-" + preview.status, statusLabels[preview.status] || preview.status));
@@ -949,18 +985,7 @@
             });
             autoResult.appendChild(unresolved);
         }
-        if (preview.application) {
-            var applied = preview.application;
-            var result = element("section", "settlement-auto-application");
-            result.appendChild(element("h3", "", "Расселение применено"));
-            result.appendChild(element("p", "", new Date(applied.applied_at).toLocaleString("ru-RU") + " · " + applied.actor));
-            var counts = element("div", "settlement-auto-application-counts");
-            [["Создано", applied.created], ["Переиспользовано", applied.reused], ["Заменено AUTO", applied.replaced_auto], ["Заменено MANUAL", applied.replaced_manual], ["Без места", applied.unresolved]].forEach(function (row) {
-                counts.appendChild(autoSummaryCard(row[0], row[1]));
-            });
-            result.appendChild(counts);
-            autoResult.insertBefore(result, autoResult.firstChild);
-        }
+        renderAutoShiftState(preview);
         autoSyncButtons();
     }
 
@@ -1077,12 +1102,15 @@
         runAutoMutation(root.dataset.autoConfirmUrl, {run_id: preview.id}).catch(function () {});
     }
 
-    function applyAutoPreview(confirmReplaceManual) {
+    function applyAutoPreviewShift(workShift, confirmReplaceManual) {
         var preview = autoStatePayload && autoStatePayload.preview;
-        if (!preview) return;
-        if (!confirmReplaceManual && !window.confirm("После применения сотрудники будут записаны на карту расселения. Продолжить?")) return;
-        autoSetFeedback("Применяем подтверждённое расселение…", "progress", "");
-        runAutoMutation(root.dataset.autoApplyUrl, {run_id: preview.id, confirm_replace_manual: Boolean(confirmReplaceManual)})
+        var shiftState = preview && preview.shift_apply && preview.shift_apply[workShift];
+        if (!preview || !shiftState || shiftState.status !== "ready") return;
+        var label = workShift === "night" ? "ночную" : "дневную";
+        if (!confirmReplaceManual && !window.confirm("Применить " + label + " смену к карте фактического расселения?")) return;
+        autoSetFeedback("Применяем " + label + " смену…", "progress", "");
+        var url = workShift === "night" ? root.dataset.autoApplyNightUrl : root.dataset.autoApplyDayUrl;
+        runAutoMutation(url, {run_id: preview.id, confirm_replace_manual: Boolean(confirmReplaceManual)})
             .then(function (body) {
                 if (!body) return;
                 markAutoPreviewOpenOnce();
@@ -1091,9 +1119,9 @@
             .catch(function (error) {
                 if (autoShortCode(error.code) !== "manual_replacement_confirmation_required") return;
                 var count = Number(error.details.manual_occupancy_count || 0);
-                var message = "Будет заменено ручных размещений: " + count + ".\n\nРучные изменения сохранятся в истории. Изменения затронут только выбранный WatchPeriod и cohort.";
+                var message = "Будет заменено ручных размещений: " + count + ".\n\nРучные изменения сохранятся в истории. Изменения затронут только выбранный период и смену.";
                 if (window.confirm(message + "\n\nЗаменить ручные изменения и применить?")) {
-                    applyAutoPreview(true);
+                    applyAutoPreviewShift(workShift, true);
                 }
             });
     }
@@ -1847,8 +1875,10 @@
     });
     if (autoCalculateButton) autoCalculateButton.addEventListener("click", calculateAutoPreview);
     if (autoConfirmButton) autoConfirmButton.addEventListener("click", confirmAutoPreview);
-    if (autoApplyButton) autoApplyButton.addEventListener("click", function () {
-        applyAutoPreview(false);
+    autoShiftButtons.forEach(function (button) {
+        button.addEventListener("click", function () {
+            applyAutoPreviewShift(button.dataset.autoApplyShift, false);
+        });
     });
     if (autoPreviewModalBackdrop) autoPreviewModalBackdrop.addEventListener("click", function () {
         setAutoPreviewModal(false);

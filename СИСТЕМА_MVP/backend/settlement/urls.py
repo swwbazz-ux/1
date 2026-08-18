@@ -10,6 +10,8 @@ from .views import (
     settlement_control_heartbeat_view,
     settlement_control_release_view,
     settlement_auto_preview_apply_view,
+    settlement_auto_preview_apply_day_view,
+    settlement_auto_preview_apply_night_view,
     settlement_auto_preview_confirm_view,
     settlement_auto_preview_create_view,
     settlement_auto_state_view,
@@ -69,6 +71,16 @@ urlpatterns = [
         'clerk/settlement/auto/preview/apply/',
         settlement_auto_preview_apply_view,
         name='settlement_auto_preview_apply',
+    ),
+    path(
+        'clerk/settlement/auto/preview/apply/night/',
+        settlement_auto_preview_apply_night_view,
+        name='settlement_auto_preview_apply_night',
+    ),
+    path(
+        'clerk/settlement/auto/preview/apply/day/',
+        settlement_auto_preview_apply_day_view,
+        name='settlement_auto_preview_apply_day',
     ),
     path(
         'clerk/settlement/employees/search/',

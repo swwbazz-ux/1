@@ -2185,6 +2185,84 @@
     cursor: not-allowed;
 }
 
+.settlement-auto-shift-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.settlement-auto-shift-actions[hidden] {
+    display: none;
+}
+
+.settlement-auto-shift-actions > article {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px 14px;
+    align-items: center;
+    padding: 12px;
+    border: 1px solid var(--admin-line-soft);
+    border-radius: 8px;
+    background: var(--admin-panel-soft);
+}
+
+.settlement-auto-shift-actions > article > div:first-child {
+    display: grid;
+    gap: 3px;
+}
+
+.settlement-auto-shift-actions > article span {
+    color: var(--admin-muted);
+    font-size: 11px;
+}
+
+.settlement-auto-shift-actions > article.is-ready {
+    border-color: color-mix(in srgb, var(--admin-green) 48%, var(--admin-line));
+}
+
+.settlement-auto-shift-actions > article.is-applied {
+    border-color: color-mix(in srgb, var(--admin-green) 42%, var(--admin-line));
+    background: var(--admin-green-soft);
+}
+
+.settlement-auto-shift-actions button {
+    min-height: 40px;
+    padding: 0 14px;
+    border: 1px solid var(--admin-red);
+    border-radius: 7px;
+    background: var(--admin-red);
+    color: #fff;
+    font: inherit;
+    font-weight: 900;
+    cursor: pointer;
+}
+
+.settlement-auto-shift-actions button:disabled {
+    border-color: var(--admin-line);
+    background: var(--admin-gray-soft);
+    color: var(--admin-gray);
+    cursor: not-allowed;
+}
+
+.settlement-auto-shift-counts {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 6px;
+}
+
+.settlement-auto-shift-counts[hidden] {
+    display: none;
+}
+
+.settlement-auto-shift-counts article {
+    display: grid;
+    gap: 3px;
+    padding: 7px;
+    border-radius: 6px;
+    background: var(--admin-panel);
+}
+
 .settlement-auto-list {
     margin-top: 4px;
 }
@@ -2974,6 +3052,18 @@ body.settlement-auto-preview-modal-open {
 
     .settlement-auto-preview-modal .settlement-auto-preview-summary {
         grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .settlement-auto-shift-actions {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .settlement-auto-shift-actions > article {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .settlement-auto-shift-actions button {
+        width: 100%;
     }
 
     .settlement-toolbar {

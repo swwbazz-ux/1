@@ -4554,7 +4554,8 @@ class SettlementMapAccessTests(TestCase):
         self.assertIn('data-room-panel', content)
         self.assertIn('data-settlement-form', content)
         self.assertIn('data-employee-search', content)
-        self.assertEqual(content.count('-settlement-map-v31'), 2)
+        self.assertEqual(content.count('-settlement-map-v32'), 2)
+        self.assertNotIn('-settlement-map-v31', content)
         self.assertNotIn('-settlement-map-v28', content)
         self.assertNotIn('-settlement-map-v24', content)
         self.assertIn('data-relocate-button', content)
@@ -12260,6 +12261,71 @@ class AutoSettlementM7M8HttpTests(TestCase):
         )
         self.assertFalse(SettlementPreviewApplication.objects.exists())
         self.assertFalse(EmployeeBedOccupancy._base_manager.exists())
+
+    def test_http_day_apply_uses_server_date_and_is_idempotent(self):
+        cohort = self._prepared_cohort(include_unresolved=False)
+        created = self.client.post(
+            reverse('settlement_auto_preview_create'),
+            data={'cohort_id': cohort.pk},
+            content_type='application/json',
+        )
+        run_id = created.json()['preview']['id']
+        confirmed = self.client.post(
+            reverse('settlement_auto_preview_confirm'),
+            data={'run_id': run_id},
+            content_type='application/json',
+        )
+        shift_state = confirmed.json()['preview']['shift_apply']
+        self.assertEqual(shift_state['day']['status'], 'too_early')
+        self.assertEqual(shift_state['day']['allowed_date'], self.period.starts_on.isoformat())
+        self.assertEqual(
+            shift_state['night']['allowed_date'],
+            (self.period.starts_on - timedelta(days=1)).isoformat(),
+        )
+
+        spoofed = {
+            'run_id': run_id,
+            'work_shift': 'night',
+            'apply_date': '2099-01-01',
+            'now': '2099-01-01T00:00:00Z',
+            'owner_access_id': 999999,
+            'lease_token': str(uuid.uuid4()),
+            'fencing_revision': 999,
+            'session_binding': 'spoofed',
+        }
+        with (
+            mock.patch('settlement.apply._validate_apply_date'),
+            mock.patch('settlement.views.timezone.localdate', return_value=self.period.starts_on),
+        ):
+            first = self.client.post(
+                reverse('settlement_auto_preview_apply_day'),
+                data=spoofed,
+                content_type='application/json',
+            )
+            repeated = self.client.post(
+                reverse('settlement_auto_preview_apply_day'),
+                data=spoofed,
+                content_type='application/json',
+            )
+
+        self.assertEqual(first.status_code, 200, first.content)
+        self.assertEqual(repeated.status_code, 200, repeated.content)
+        self.assertEqual(first.json()['preview']['shift_apply']['day']['status'], 'applied')
+        self.assertEqual(repeated.json()['preview']['shift_apply']['day']['status'], 'applied')
+        self.assertEqual(
+            SettlementPreviewApplication.objects.filter(
+                preview_run_id=run_id,
+                work_shift=SettlementCohortMember.WorkShift.DAY,
+            ).count(),
+            1,
+        )
+        self.assertEqual(EmployeeBedOccupancy._base_manager.count(), 1)
+        serialized = first.content.decode()
+        for forbidden in (
+            spoofed['lease_token'], 'session_binding', 'fencing_revision',
+            'employee_access_id', 'owner_access_id',
+        ):
+            self.assertNotIn(str(forbidden), serialized)
 
 
 class M8SettlementApplyMigrationTests(TransactionTestCase):
