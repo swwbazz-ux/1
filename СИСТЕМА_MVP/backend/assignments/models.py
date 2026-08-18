@@ -1,4 +1,5 @@
-from django.db import models
+from django.core.exceptions import ValidationError
+from django.db import models, transaction
 
 
 class AssignmentStatus(models.TextChoices):
@@ -23,7 +24,50 @@ class HaulAssignmentAction(models.TextChoices):
     RELEASE = 'release', 'Снять назначение'
 
 
+class EquipmentAssignmentQuerySet(models.QuerySet):
+    PROVENANCE_FIELDS = {
+        'source_kind',
+        'source_crew_plan_slot',
+        'source_crew_plan_slot_id',
+    }
+
+    def update(self, **kwargs):
+        if self.PROVENANCE_FIELDS.intersection(kwargs):
+            raise ValidationError(
+                'Происхождение назначения после создания изменять нельзя.',
+                code='immutable_assignment_provenance',
+            )
+        return super().update(**kwargs)
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        if self.PROVENANCE_FIELDS.intersection(fields):
+            raise ValidationError(
+                'Происхождение назначения после создания изменять нельзя.',
+                code='immutable_assignment_provenance',
+            )
+        return super().bulk_update(objs, fields, batch_size=batch_size)
+
+    def bulk_create(self, objs, *args, **kwargs):
+        assignments = list(objs)
+        for assignment in assignments:
+            if (
+                assignment.source_kind == EquipmentAssignment.SourceKind.DEPUTY_PUBLISHED_PLAN
+                or assignment.source_crew_plan_slot_id is not None
+            ):
+                raise ValidationError(
+                    'Официальное назначение может создать только публикация плана.',
+                    code='official_assignment_requires_published_plan_service',
+                )
+        return super().bulk_create(assignments, *args, **kwargs)
+
+
 class EquipmentAssignment(models.Model):
+    class SourceKind(models.TextChoices):
+        UNVERIFIED = 'unverified', 'Непроверенный или неофициальный источник'
+        DEPUTY_PUBLISHED_PLAN = 'deputy_published_plan', 'Опубликованный план заместителя'
+
+    objects = EquipmentAssignmentQuerySet.as_manager()
+
     employee = models.ForeignKey('users.Employee', verbose_name='Сотрудник', on_delete=models.PROTECT)
     role = models.ForeignKey(
         'users.Role',
@@ -55,6 +99,20 @@ class EquipmentAssignment(models.Model):
         null=True,
         blank=True,
     )
+    source_kind = models.CharField(
+        'Источник назначения',
+        max_length=32,
+        choices=SourceKind.choices,
+        default=SourceKind.UNVERIFIED,
+    )
+    source_crew_plan_slot = models.ForeignKey(
+        'CrewPlanSlot',
+        verbose_name='Слот опубликованного плана-источника',
+        on_delete=models.PROTECT,
+        related_name='equipment_assignments',
+        null=True,
+        blank=True,
+    )
 
     class Meta:
         verbose_name = 'Назначение сотрудника на технику'
@@ -83,7 +141,79 @@ class EquipmentAssignment(models.Model):
                 ),
                 name='unique_active_equipment_work_shift',
             ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        source_kind='deputy_published_plan',
+                        source_crew_plan_slot__isnull=False,
+                    )
+                    | models.Q(
+                        source_kind='unverified',
+                        source_crew_plan_slot__isnull=True,
+                    )
+                ),
+                name='assignment_source_shape_valid',
+            ),
         ]
+
+    def clean(self):
+        super().clean()
+        errors = {}
+        if self.source_kind == self.SourceKind.DEPUTY_PUBLISHED_PLAN:
+            if self.source_crew_plan_slot_id is None:
+                errors['source_crew_plan_slot'] = (
+                    'Официальное назначение требует точный слот опубликованного плана.'
+                )
+            else:
+                slot = self.source_crew_plan_slot
+                if slot.plan.status not in {
+                    CrewPlanStatus.PUBLISHED,
+                    CrewPlanStatus.SUPERSEDED,
+                }:
+                    errors['source_crew_plan_slot'] = (
+                        'Официальный источник должен относиться к опубликованному плану или его истории.'
+                    )
+                if slot.employee_id != self.employee_id:
+                    errors['employee'] = 'Сотрудник назначения не соответствует слоту плана.'
+                if slot.equipment_id != self.equipment_id:
+                    errors['equipment'] = 'Техника назначения не соответствует слоту плана.'
+                if slot.plan.role_id != self.role_id:
+                    errors['role'] = 'Роль назначения не соответствует плану слота.'
+                if slot.shift_type != self.shift_type:
+                    errors['shift_type'] = 'Рабочая смена назначения не соответствует слоту плана.'
+        elif self.source_crew_plan_slot_id is not None:
+            errors['source_crew_plan_slot'] = (
+                'Неофициальное назначение не может ссылаться на опубликованный слот.'
+            )
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        with transaction.atomic():
+            if self._state.adding and (
+                self.source_kind == self.SourceKind.DEPUTY_PUBLISHED_PLAN
+                or self.source_crew_plan_slot_id is not None
+            ):
+                raise ValidationError(
+                    'Официальное назначение может создать только публикация плана.',
+                    code='official_assignment_requires_published_plan_service',
+                )
+            if self.pk:
+                persisted = (
+                    type(self)._base_manager.select_for_update()
+                    .only('source_kind', 'source_crew_plan_slot_id')
+                    .get(pk=self.pk)
+                )
+                if (
+                    persisted.source_kind != self.source_kind
+                    or persisted.source_crew_plan_slot_id != self.source_crew_plan_slot_id
+                ):
+                    raise ValidationError(
+                        'Происхождение назначения после создания изменять нельзя.',
+                        code='immutable_assignment_provenance',
+                    )
+            self.full_clean()
+            return super().save(*args, **kwargs)
 
     @property
     def work_shift_label(self):

@@ -40,6 +40,23 @@ WORK_ASSIGNMENT_ROLE_EQUIPMENT_TYPES = {
 CREW_PLAN_ROLE_CODES = frozenset(WORK_ASSIGNMENT_ROLE_EQUIPMENT_TYPES)
 
 
+def _bulk_create_published_plan_assignments(assignments):
+    assignments = list(assignments)
+    for assignment in assignments:
+        if (
+            assignment.source_kind
+            != EquipmentAssignment.SourceKind.DEPUTY_PUBLISHED_PLAN
+            or assignment.source_crew_plan_slot_id is None
+        ):
+            raise ValidationError(
+                'Публикация может создавать только назначения с точным официальным источником.',
+                code='invalid_published_assignment_provenance',
+            )
+        assignment.full_clean()
+    with transaction.atomic():
+        return EquipmentAssignment._base_manager.bulk_create(assignments)
+
+
 def production_work_date(now=None):
     """Return the date of the 07:00–07:00 production day."""
     return contract_production_work_date(now)
@@ -369,11 +386,6 @@ def publish_crew_plan(*, plan, expected_version, actor=None):
         for slot in slots
         if slot.employee_id
     }
-    desired_triples = {
-        (slot.equipment_id, slot.shift_type, slot.employee_id)
-        for slot in slots
-        if slot.employee_id
-    }
     other_role_employee_conflict = (
         EquipmentAssignment.objects.select_for_update()
         .filter(
@@ -429,17 +441,32 @@ def publish_crew_plan(*, plan, expected_version, actor=None):
             shift_type__in=WorkShiftType.values,
         )
     )
-    unchanged_triples = {
-        (assignment.equipment_id, assignment.shift_type, assignment.employee_id)
-        for assignment in current_scope_assignments
-        if assignment.status == AssignmentStatus.ACCEPTED
-        and (assignment.equipment_id, assignment.shift_type, assignment.employee_id) in desired_triples
+    desired_slots = {
+        (slot.equipment_id, slot.shift_type, slot.employee_id): slot
+        for slot in slots
+        if slot.employee_id
     }
+    unchanged_triples = set()
+    for assignment in current_scope_assignments:
+        assignment_key = (
+            assignment.equipment_id,
+            assignment.shift_type,
+            assignment.employee_id,
+        )
+        source_slot = desired_slots.get(assignment_key)
+        if (
+            assignment.status == AssignmentStatus.ACCEPTED
+            and source_slot is not None
+            and assignment.source_kind
+            == EquipmentAssignment.SourceKind.DEPUTY_PUBLISHED_PLAN
+            and assignment.source_crew_plan_slot_id == source_slot.pk
+        ):
+            unchanged_triples.add(assignment_key)
     assignments_to_close = [
         assignment
         for assignment in current_scope_assignments
         if assignment.status == AssignmentStatus.PENDING
-        or (assignment.equipment_id, assignment.shift_type, assignment.employee_id) not in desired_triples
+        or (assignment.equipment_id, assignment.shift_type, assignment.employee_id) not in unchanged_triples
     ]
 
     now = timezone.now()
@@ -463,6 +490,8 @@ def publish_crew_plan(*, plan, expected_version, actor=None):
             assigned_by=actor,
             status=AssignmentStatus.ACCEPTED,
             accepted_at=now,
+            source_kind=EquipmentAssignment.SourceKind.DEPUTY_PUBLISHED_PLAN,
+            source_crew_plan_slot=slot,
         )
         for slot in slots
         if slot.employee_id
@@ -478,15 +507,6 @@ def publish_crew_plan(*, plan, expected_version, actor=None):
         for assignment in [*assignments_to_close, *new_assignments]
         if assignment.equipment_id
     }
-    try:
-        with transaction.atomic():
-            EquipmentAssignment.objects.bulk_create(new_assignments)
-    except IntegrityError as error:
-        raise ValidationError(
-            'Публикация конфликтует с другим активным назначением. Обновите данные.',
-            code='assignment_conflict',
-        ) from error
-
     (
         CrewPlan.objects.select_for_update()
         .filter(
@@ -510,6 +530,13 @@ def publish_crew_plan(*, plan, expected_version, actor=None):
         'published_at',
         'updated_at',
     ])
+    try:
+        _bulk_create_published_plan_assignments(new_assignments)
+    except IntegrityError as error:
+        raise ValidationError(
+            'Публикация конфликтует с другим активным назначением. Обновите данные.',
+            code='assignment_conflict',
+        ) from error
     bump_operational_state(
         'CrewPlan:published',
         event_type='personnel_assignment_changed',
