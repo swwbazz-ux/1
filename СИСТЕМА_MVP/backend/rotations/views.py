@@ -17,8 +17,15 @@ from users.views import get_current_access
 
 from .documents import build_extension_data_packet, document_bytes
 from .exports import build_cycle_workbook, workbook_bytes
-from .forms import RotationCycleCreateForm, RotationResponseForm
-from .models import RotationCollectionCycle, RotationResponse, WatchExtensionCase
+from .arrival_rosters import UnsafeArrivalWorkbook, upload_arrival_roster
+from .forms import ArrivalRosterUploadForm, RotationCycleCreateForm, RotationResponseForm
+from .models import (
+    ArrivalRosterNormalizedRow,
+    ArrivalRosterVersion,
+    RotationCollectionCycle,
+    RotationResponse,
+    WatchExtensionCase,
+)
 from .services import (
     close_cycle,
     decide_extension,
@@ -52,6 +59,99 @@ def _any_employee_access(request):
 
 def _validation_message(error):
     return ' '.join(error.messages) if getattr(error, 'messages', None) else str(error)
+
+
+def arrival_roster_upload_form_view(request):
+    access, response = _role_access(request, 'timekeeper')
+    if response:
+        return response
+    return render(
+        request,
+        'rotations/arrival_roster_upload.html',
+        {'access': access, 'form': ArrivalRosterUploadForm()},
+    )
+
+
+@require_POST
+def arrival_roster_upload_view(request):
+    access, response = _role_access(request, 'timekeeper')
+    if response:
+        return response
+    form = ArrivalRosterUploadForm(request.POST, request.FILES)
+    if not form.is_valid():
+        return render(
+            request,
+            'rotations/arrival_roster_upload.html',
+            {'access': access, 'form': form},
+            status=400,
+        )
+    try:
+        version, created = upload_arrival_roster(
+            uploaded_file=form.cleaned_data['workbook'],
+            watch_period_id=form.cleaned_data['watch_period'].pk,
+            actor_access_id=access.pk,
+        )
+    except (ValidationError, UnsafeArrivalWorkbook) as error:
+        form.add_error('workbook', _validation_message(error))
+        return render(
+            request,
+            'rotations/arrival_roster_upload.html',
+            {'access': access, 'form': form},
+            status=400,
+        )
+    if created:
+        messages.success(request, 'Файл сохранён и предварительная проверка завершена.')
+    else:
+        messages.info(request, 'Такой файл для выбранного периода уже был проверен.')
+    return redirect('arrival_roster_review', version_id=version.pk)
+
+
+def arrival_roster_review_view(request, version_id):
+    access, response = _role_access(request, 'timekeeper')
+    if response:
+        return response
+    version = get_object_or_404(
+        ArrivalRosterVersion.objects.select_related(
+            'watch_period', 'source_file', 'parser_profile',
+            'uploaded_by_access__employee',
+        ),
+        pk=version_id,
+    )
+    normalized_rows = list(
+        ArrivalRosterNormalizedRow.objects
+        .filter(source_row__version=version)
+        .select_related(
+            'source_row', 'match_link__match__matched_resident__employee',
+        )
+        .prefetch_related('issues', 'match_link__match__candidates__resident__employee')
+        .order_by('source_row__sheet_name', 'source_row__row_number')
+    )
+    review_rows = []
+    for row in normalized_rows:
+        match = row.match_link.match
+        resident_name = ''
+        if match.matched_resident_id:
+            resident_name = match.matched_resident.display_name
+        review_rows.append({
+            'row': row,
+            'match': match,
+            'resident_name': resident_name,
+            'issues': list(row.issues.all()),
+            'candidate_count': match.candidates.count(),
+        })
+    version_issues = list(
+        version.issues.filter(normalized_row__isnull=True).order_by('severity', 'pk')
+    )
+    return render(
+        request,
+        'rotations/arrival_roster_review.html',
+        {
+            'access': access,
+            'version': version,
+            'review_rows': review_rows,
+            'version_issues': version_issues,
+        },
+    )
 
 
 def _shared_employee_response_url(request):

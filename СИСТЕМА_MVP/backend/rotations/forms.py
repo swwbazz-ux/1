@@ -4,7 +4,34 @@ from django.utils import timezone
 
 from shifts.models import WatchPeriod
 
+from .arrival_roster_parser import MAX_FILE_SIZE
 from .models import RotationCollectionCycle, RotationResponse
+
+
+class ArrivalRosterUploadForm(forms.Form):
+    watch_period = forms.ModelChoiceField(
+        label='Период вахты',
+        queryset=WatchPeriod.objects.none(),
+    )
+    workbook = forms.FileField(
+        label='Файл реестра',
+        help_text='Только книга .xlsx размером не более 10 МиБ.',
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['watch_period'].queryset = WatchPeriod.objects.filter(
+            is_active=True,
+        ).order_by('-starts_on', '-pk')
+        self.fields['workbook'].widget.attrs.update({'accept': '.xlsx'})
+
+    def clean_workbook(self):
+        workbook = self.cleaned_data['workbook']
+        if not str(workbook.name or '').casefold().endswith('.xlsx'):
+            raise forms.ValidationError('Разрешены только файлы .xlsx.')
+        if workbook.size > MAX_FILE_SIZE:
+            raise forms.ValidationError('Размер файла превышает 10 МиБ.')
+        return workbook
 
 
 class RotationCycleCreateForm(forms.ModelForm):

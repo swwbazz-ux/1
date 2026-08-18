@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Загрузка реестра заезда — табельщик{% endblock %}
+{% block body_class %}rotation-workplace-screen{% endblock %}
+{% block extra_head %}
+{% include "includes/role_app_pwa_head.html" with role_code="timekeeper" manifest_url="/timekeeper.webmanifest" service_worker_url="/timekeeper-sw.js" legacy_scope="/timekeeper/" theme_color="#176B73" apple_title="Табельщик" icon_180="img/pwa/timekeeper-180.png" %}
+<link rel="stylesheet" href="{% static 'css/rotation-workplace-v2.css' %}?v=3">
+{% endblock %}
+
+{% block body %}
+<div class="admin-shell admin-exports-shell admin-day rotation-shell" data-admin-theme>
+    <header class="admin-console-header rotation-console-header">
+        <section class="admin-console-identity">
+            <span class="admin-console-avatar" aria-hidden="true">{{ access.employee.full_name|default:"Т"|first }}</span>
+            <span><strong>{{ access.employee.full_name }}</strong><em>Табельщик</em></span>
+        </section>
+        <section class="admin-console-main">
+            <div class="admin-console-title">
+                <span>Единый реестр заезда</span>
+                <h1>Загрузка книги</h1>
+                <p>Исходный файл сохраняется без изменений, затем выполняется предварительная проверка.</p>
+            </div>
+            <nav class="admin-console-nav" aria-label="Разделы перевахты">
+                <a href="{% url 'rotation_timekeeper_dashboard' %}">Сбор данных</a>
+                <a class="is-active" href="{% url 'arrival_roster_upload_form' %}" aria-current="page">Реестр заезда</a>
+            </nav>
+        </section>
+        <section class="admin-console-actions rotation-console-actions">
+            <a class="admin-utility-link" href="{% url 'logout' %}">Выйти</a>
+        </section>
+    </header>
+
+    <main class="admin-console-page rotation-page">
+        <section class="rotation-page-heading">
+            <div>
+                <span class="rotation-eyebrow">Предварительная проверка</span>
+                <h2>Загрузить список заезда</h2>
+                <p>Загрузка не создаёт сотрудников, жильцов, назначения или фактическое проживание.</p>
+            </div>
+        </section>
+
+        <section class="rotation-form-card">
+            <form method="post" enctype="multipart/form-data" action="{% url 'arrival_roster_upload' %}">
+                {% csrf_token %}
+                {{ form.non_field_errors }}
+                {% for field in form %}
+                    <div class="rotation-form-field">
+                        <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                        {{ field }}
+                        {% if field.help_text %}<small>{{ field.help_text }}</small>{% endif %}
+                        {% for error in field.errors %}<div class="message error" role="alert">{{ error }}</div>{% endfor %}
+                    </div>
+                {% endfor %}
+                <button class="admin-button admin-button-primary" type="submit">Сохранить и проверить</button>
+            </form>
+        </section>
+    </main>
+</div>
+{% endblock %}

@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Проверка реестра заезда — табельщик{% endblock %}
+{% block body_class %}rotation-workplace-screen{% endblock %}
+{% block extra_head %}
+{% include "includes/role_app_pwa_head.html" with role_code="timekeeper" manifest_url="/timekeeper.webmanifest" service_worker_url="/timekeeper-sw.js" legacy_scope="/timekeeper/" theme_color="#176B73" apple_title="Табельщик" icon_180="img/pwa/timekeeper-180.png" %}
+<link rel="stylesheet" href="{% static 'css/rotation-workplace-v2.css' %}?v=3">
+{% endblock %}
+
+{% block body %}
+<div class="admin-shell admin-exports-shell admin-day rotation-shell" data-admin-theme>
+    <header class="admin-console-header rotation-console-header">
+        <section class="admin-console-identity">
+            <span class="admin-console-avatar" aria-hidden="true">{{ access.employee.full_name|default:"Т"|first }}</span>
+            <span><strong>{{ access.employee.full_name }}</strong><em>Табельщик</em></span>
+        </section>
+        <section class="admin-console-main">
+            <div class="admin-console-title">
+                <span>Единый реестр заезда</span>
+                <h1>Результат проверки</h1>
+                <p>На этом этапе версия ещё не утверждается и не передаётся в расселение.</p>
+            </div>
+            <nav class="admin-console-nav" aria-label="Разделы перевахты">
+                <a href="{% url 'rotation_timekeeper_dashboard' %}">Сбор данных</a>
+                <a class="is-active" href="{% url 'arrival_roster_upload_form' %}" aria-current="page">Реестр заезда</a>
+            </nav>
+        </section>
+        <section class="admin-console-actions rotation-console-actions">
+            <a class="admin-utility-link" href="{% url 'logout' %}">Выйти</a>
+        </section>
+    </header>
+
+    <main class="admin-console-page rotation-page">
+        {% for message in messages %}<div class="message {{ message.tags }}" role="status">{{ message }}</div>{% endfor %}
+        <section class="rotation-page-heading">
+            <div>
+                <a class="rotation-back-link" href="{% url 'arrival_roster_upload_form' %}">← Загрузить другой файл</a>
+                <h2>{{ version.watch_period }} · версия {{ version.version_number }}</h2>
+                <p>{{ version.get_status_display }} · {{ version.source_file.original_name }}</p>
+            </div>
+        </section>
+
+        <section class="rotation-summary-strip" aria-label="Итоги проверки">
+            <article class="rotation-summary-item"><span>Исходных строк</span><strong>{{ version.source_row_count }}</strong></article>
+            <article class="rotation-summary-item"><span>Распознано строк</span><strong>{{ version.normalized_row_count }}</strong></article>
+            <article class="rotation-summary-item is-warning"><span>Требуют решения</span><strong>{{ version.blocking_issue_count }}</strong></article>
+            <article class="rotation-summary-item"><span>Предупреждения</span><strong>{{ version.warning_count }}</strong></article>
+        </section>
+
+        {% if version_issues %}
+            <section class="rotation-form-card" aria-label="Общие замечания">
+                <h3>Общие замечания</h3>
+                {% for item in version_issues %}<div class="message {% if item.severity == 'error' %}error{% else %}warning{% endif %}">{{ item.message }}</div>{% endfor %}
+            </section>
+        {% endif %}
+
+        <section class="rotation-table-card">
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Источник</th>
+                            <th>ФИО</th>
+                            <th>Должность</th>
+                            <th>Дата</th>
+                            <th>Смена-подсказка</th>
+                            <th>Телефон</th>
+                            <th>Сопоставление</th>
+                            <th>Замечания</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in review_rows %}
+                            <tr>
+                                <td>{{ item.row.source_row.sheet_name }} · строка {{ item.row.source_row.row_number }}</td>
+                                <td>{{ item.row.normalized_full_name }}</td>
+                                <td>{{ item.row.source_position|default:"—" }}</td>
+                                <td>{% if item.row.arrival_date_candidate %}{{ item.row.arrival_date_candidate|date:"d.m.Y" }}{% else %}Требуется проверка{% endif %}</td>
+                                <td>{{ item.row.raw_shift_hint|default:"—" }}</td>
+                                <td>{{ item.row.masked_phone|default:"—" }}</td>
+                                <td>
+                                    {{ item.match.get_status_display }}
+                                    {% if item.resident_name %}<br><small>{{ item.resident_name }}</small>{% endif %}
+                                    {% if item.candidate_count %}<br><small>Возможных карточек: {{ item.candidate_count }}</small>{% endif %}
+                                </td>
+                                <td>
+                                    {% for issue in item.issues %}
+                                        <div class="message {% if issue.severity == 'error' %}error{% else %}warning{% endif %}">{{ issue.message }}</div>
+                                    {% empty %}Нет замечаний{% endfor %}
+                                </td>
+                            </tr>
+                        {% empty %}
+                            <tr><td colspan="8">Строки для проверки не найдены.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </main>
+</div>
+{% endblock %}

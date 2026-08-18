@@ -1,6 +1,9 @@
 from django.urls import path
 
 from .views import (
+    arrival_roster_review_view,
+    arrival_roster_upload_form_view,
+    arrival_roster_upload_view,
     cycle_action_view,
     cycle_create_view,
     cycle_document_packet_view,
@@ -22,6 +25,21 @@ from .views import (
 
 urlpatterns = [
     path('timekeeper/', timekeeper_dashboard_view, name='rotation_timekeeper_dashboard'),
+    path(
+        'timekeeper/arrival-rosters/new/',
+        arrival_roster_upload_form_view,
+        name='arrival_roster_upload_form',
+    ),
+    path(
+        'timekeeper/arrival-rosters/upload/',
+        arrival_roster_upload_view,
+        name='arrival_roster_upload',
+    ),
+    path(
+        'timekeeper/arrival-rosters/<int:version_id>/',
+        arrival_roster_review_view,
+        name='arrival_roster_review',
+    ),
     path('timekeeper/campaigns/new/', cycle_create_view, name='rotation_cycle_create'),
     path('timekeeper/campaigns/<int:cycle_id>/', timekeeper_cycle_view, name='rotation_timekeeper_cycle'),
     path('timekeeper/campaigns/<int:cycle_id>/<str:action>/', cycle_action_view, name='rotation_cycle_action'),

@@ -1,6 +1,10 @@
-from django.db import models
+from django.core.exceptions import ValidationError
+from django.core.validators import RegexValidator
+from django.db import models, transaction
 
 from shifts.models import ShiftType
+
+from .storage import arrival_roster_private_storage
 
 
 class RotationCollectionCycle(models.Model):
@@ -437,3 +441,564 @@ class RotationActionLog(models.Model):
 
     def __str__(self):
         return f'{self.created_at:%d.%m.%Y %H:%M} / {self.action_code}'
+
+
+class ArrivalRosterImmutableQuerySet(models.QuerySet):
+    WRITE_FORBIDDEN_MESSAGE = (
+        'Исходные данные реестра заезда изменяются только доменными командами.'
+    )
+
+    def _raise_write_forbidden(self):
+        raise ValidationError(
+            self.WRITE_FORBIDDEN_MESSAGE,
+            code='rotations.arrival_roster.public_write_forbidden',
+        )
+
+    def update(self, **kwargs):
+        self._raise_write_forbidden()
+
+    def bulk_create(self, objs, *args, **kwargs):
+        self._raise_write_forbidden()
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        self._raise_write_forbidden()
+
+    def delete(self):
+        self._raise_write_forbidden()
+
+
+class ArrivalRosterImmutableModel(models.Model):
+    objects = ArrivalRosterImmutableQuerySet.as_manager()
+    IMMUTABLE_FIELDS = ()
+    PUBLIC_CREATE_FORBIDDEN = False
+
+    class Meta:
+        abstract = True
+
+    @classmethod
+    def _write_forbidden_error(cls):
+        return ValidationError(
+            ArrivalRosterImmutableQuerySet.WRITE_FORBIDDEN_MESSAGE,
+            code='rotations.arrival_roster.public_write_forbidden',
+        )
+
+    def _validate_immutable_fields(self):
+        if not self.pk or not self.IMMUTABLE_FIELDS:
+            return
+        original = (
+            type(self)._base_manager
+            .filter(pk=self.pk)
+            .values(*self.IMMUTABLE_FIELDS)
+            .first()
+        )
+        if original is None:
+            return
+        changed = {
+            field_name.removesuffix('_id'): 'После создания это поле изменять нельзя.'
+            for field_name in self.IMMUTABLE_FIELDS
+            if original[field_name] != getattr(self, field_name)
+        }
+        if changed:
+            raise ValidationError(changed)
+
+    def save(self, *args, **kwargs):
+        if self._state.adding and self.PUBLIC_CREATE_FORBIDDEN:
+            raise self._write_forbidden_error()
+        with transaction.atomic(using=kwargs.get('using')):
+            if self.pk:
+                type(self)._base_manager.select_for_update().get(pk=self.pk)
+            self._validate_immutable_fields()
+            self.full_clean()
+            return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise self._write_forbidden_error()
+
+
+class ArrivalRosterSourceFile(ArrivalRosterImmutableModel):
+    PUBLIC_CREATE_FORBIDDEN = True
+    IMMUTABLE_FIELDS = (
+        'sha256', 'original_name', 'byte_size', 'content_type',
+        'file', 'uploaded_by_access_id',
+    )
+
+    sha256 = models.CharField(
+        'SHA-256 файла',
+        max_length=64,
+        unique=True,
+        validators=[RegexValidator(regex=r'^[0-9a-f]{64}$')],
+    )
+    original_name = models.CharField('Исходное имя файла', max_length=255)
+    byte_size = models.PositiveBigIntegerField('Размер файла')
+    content_type = models.CharField('Тип содержимого', max_length=128)
+    file = models.FileField(
+        'Закрытый исходный файл',
+        storage=arrival_roster_private_storage,
+        upload_to='arrival-rosters/',
+    )
+    uploaded_by_access = models.ForeignKey(
+        'users.EmployeeAccess',
+        verbose_name='Точный доступ загрузившего',
+        on_delete=models.PROTECT,
+        related_name='uploaded_arrival_roster_files',
+    )
+    created_at = models.DateTimeField('Загружен', auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Исходный файл реестра заезда'
+        verbose_name_plural = 'Исходные файлы реестров заезда'
+        ordering = ['-created_at', '-pk']
+
+    def __str__(self):
+        return f'{self.original_name} / {self.sha256[:12]}'
+
+
+class ArrivalRosterParserProfile(ArrivalRosterImmutableModel):
+    IMMUTABLE_FIELDS = ('code', 'version', 'configuration', 'configuration_sha256')
+
+    code = models.SlugField('Код профиля', max_length=64)
+    version = models.PositiveIntegerField('Версия профиля')
+    configuration = models.JSONField('Снимок правил разбора')
+    configuration_sha256 = models.CharField(
+        'SHA-256 правил разбора',
+        max_length=64,
+        validators=[RegexValidator(regex=r'^[0-9a-f]{64}$')],
+    )
+    created_at = models.DateTimeField('Создан', auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Профиль разбора реестра заезда'
+        verbose_name_plural = 'Профили разбора реестра заезда'
+        ordering = ['code', 'version']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['code', 'version'],
+                name='uniq_arrival_profile_version',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(version__gte=1),
+                name='arrival_profile_version_gte_1',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.code} / v{self.version}'
+
+
+class ArrivalRosterVersion(ArrivalRosterImmutableModel):
+    class Status(models.TextChoices):
+        DRAFT = 'draft', 'Черновик'
+        REVIEW_REQUIRED = 'review_required', 'Требуется проверка'
+
+    IMMUTABLE_FIELDS = (
+        'watch_period_id', 'version_number', 'source_file_id', 'parser_profile_id',
+        'uploaded_by_access_id',
+    )
+
+    watch_period = models.ForeignKey(
+        'shifts.WatchPeriod',
+        verbose_name='Период вахты',
+        on_delete=models.PROTECT,
+        related_name='arrival_roster_versions',
+    )
+    version_number = models.PositiveIntegerField('Номер версии')
+    status = models.CharField(
+        'Состояние',
+        max_length=24,
+        choices=Status.choices,
+        default=Status.REVIEW_REQUIRED,
+        db_index=True,
+    )
+    source_file = models.ForeignKey(
+        ArrivalRosterSourceFile,
+        verbose_name='Исходный файл',
+        on_delete=models.PROTECT,
+        related_name='roster_versions',
+    )
+    parser_profile = models.ForeignKey(
+        ArrivalRosterParserProfile,
+        verbose_name='Профиль разбора',
+        on_delete=models.PROTECT,
+        related_name='roster_versions',
+    )
+    uploaded_by_access = models.ForeignKey(
+        'users.EmployeeAccess',
+        verbose_name='Точный доступ загрузившего версию',
+        on_delete=models.PROTECT,
+        related_name='uploaded_arrival_roster_versions',
+    )
+    source_row_count = models.PositiveIntegerField('Исходных строк', default=0)
+    normalized_row_count = models.PositiveIntegerField('Распознано строк', default=0)
+    blocking_issue_count = models.PositiveIntegerField('Блокирующих замечаний', default=0)
+    warning_count = models.PositiveIntegerField('Предупреждений', default=0)
+    snapshot = models.JSONField('Неизменяемый снимок результата', default=dict, blank=True)
+    snapshot_sha256 = models.CharField(
+        'SHA-256 снимка',
+        max_length=64,
+        blank=True,
+        validators=[RegexValidator(regex=r'^$|^[0-9a-f]{64}$')],
+    )
+    created_at = models.DateTimeField('Создана', auto_now_add=True)
+    updated_at = models.DateTimeField('Обновлена', auto_now=True)
+
+    class Meta:
+        verbose_name = 'Версия реестра заезда'
+        verbose_name_plural = 'Версии реестра заезда'
+        ordering = ['watch_period_id', '-version_number', '-pk']
+        indexes = [
+            models.Index(
+                fields=['watch_period', 'status', 'version_number'],
+                name='arrival_ver_period_status_idx',
+            ),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['watch_period', 'version_number'],
+                name='uniq_arrival_period_version',
+            ),
+            models.UniqueConstraint(
+                fields=['watch_period', 'source_file', 'parser_profile'],
+                name='uniq_arrival_period_file_profile',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(version_number__gte=1),
+                name='arrival_version_number_gte_1',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(status__in=['draft', 'review_required']),
+                name='arrival_version_status_t11',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.watch_period} / версия {self.version_number}'
+
+    def _validate_immutable_fields(self):
+        super()._validate_immutable_fields()
+        if not self.pk:
+            return
+        original = (
+            type(self)._base_manager
+            .filter(pk=self.pk)
+            .values(
+                'status', 'source_row_count', 'normalized_row_count',
+                'blocking_issue_count', 'warning_count', 'snapshot',
+                'snapshot_sha256',
+            )
+            .first()
+        )
+        if original is None or not original['snapshot_sha256']:
+            return
+        changed = {
+            field_name: 'Завершённый результат предварительной проверки неизменяем.'
+            for field_name, original_value in original.items()
+            if original_value != getattr(self, field_name)
+        }
+        if changed:
+            raise ValidationError(changed)
+
+
+class ArrivalRosterSourceRow(ArrivalRosterImmutableModel):
+    PUBLIC_CREATE_FORBIDDEN = True
+
+    class RowKind(models.TextChoices):
+        HEADER = 'header', 'Заголовок'
+        PERSON = 'person', 'Строка человека'
+        SUMMARY = 'summary', 'Сверочная строка'
+
+    IMMUTABLE_FIELDS = (
+        'version_id', 'sheet_name', 'row_number', 'row_kind',
+        'raw_values', 'raw_styles', 'row_sha256',
+    )
+
+    version = models.ForeignKey(
+        ArrivalRosterVersion,
+        verbose_name='Версия реестра',
+        on_delete=models.CASCADE,
+        related_name='source_rows',
+    )
+    sheet_name = models.CharField('Исходный лист', max_length=128)
+    row_number = models.PositiveIntegerField('Номер строки')
+    row_kind = models.CharField('Тип строки', max_length=16, choices=RowKind.choices)
+    raw_values = models.JSONField('Исходные значения')
+    raw_styles = models.JSONField('Исходные стили')
+    row_sha256 = models.CharField(
+        'SHA-256 строки',
+        max_length=64,
+        validators=[RegexValidator(regex=r'^[0-9a-f]{64}$')],
+    )
+    created_at = models.DateTimeField('Сохранена', auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Исходная строка реестра заезда'
+        verbose_name_plural = 'Исходные строки реестра заезда'
+        ordering = ['version_id', 'sheet_name', 'row_number']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['version', 'sheet_name', 'row_number'],
+                name='uniq_arrival_source_sheet_row',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(row_number__gte=1),
+                name='arrival_source_row_gte_1',
+            ),
+        ]
+
+
+class ArrivalRosterNormalizedRow(ArrivalRosterImmutableModel):
+    class ParticipationHint(models.TextChoices):
+        ARRIVING = 'arriving', 'Предположительно участвует'
+        ADDITIONAL = 'additional', 'Предположительно добавлен'
+        SELF_TRANSFER = 'self_transfer', 'Предположительно прибывает самостоятельно'
+        EXTENDED = 'extended', 'Предположительно продлевает вахту'
+        NOT_ARRIVING = 'not_arriving', 'Предположительно не заезжает'
+        REVIEW_REQUIRED = 'review_required', 'Требуется проверка'
+
+    IMMUTABLE_FIELDS = (
+        'source_row_id', 'raw_full_name', 'normalized_full_name', 'normalized_name_key',
+        'name_comment', 'source_position', 'normalized_position_key', 'raw_shift_hint',
+        'raw_date', 'arrival_date_candidate', 'date_comment', 'route_text',
+        'raw_phone', 'normalized_phones', 'comments', 'participation_hint',
+        'color_hint',
+    )
+
+    source_row = models.OneToOneField(
+        ArrivalRosterSourceRow,
+        verbose_name='Исходная строка',
+        on_delete=models.PROTECT,
+        related_name='normalized',
+    )
+    raw_full_name = models.TextField('Исходное ФИО')
+    normalized_full_name = models.CharField('Нормализованное ФИО', max_length=255)
+    normalized_name_key = models.CharField('Ключ ФИО', max_length=255, db_index=True)
+    name_comment = models.TextField('Комментарий из ФИО', blank=True)
+    source_position = models.CharField('Исходная должность', max_length=255, blank=True)
+    normalized_position_key = models.CharField('Ключ должности', max_length=255, blank=True)
+    raw_shift_hint = models.CharField('Исходная смена-подсказка', max_length=64, blank=True)
+    raw_date = models.TextField('Исходная дата', blank=True)
+    arrival_date_candidate = models.DateField('Предполагаемая дата прибытия', null=True, blank=True)
+    date_comment = models.TextField('Комментарий к дате', blank=True)
+    route_text = models.TextField('Маршрут или способ прибытия', blank=True)
+    raw_phone = models.TextField('Исходный телефон', blank=True)
+    normalized_phones = models.JSONField('Нормализованные телефоны', default=list, blank=True)
+    comments = models.TextField('Исходные пояснения', blank=True)
+    participation_hint = models.CharField(
+        'Предполагаемое участие',
+        max_length=24,
+        choices=ParticipationHint.choices,
+        default=ParticipationHint.REVIEW_REQUIRED,
+    )
+    color_hint = models.JSONField('Цветовая подсказка', default=dict, blank=True)
+    created_at = models.DateTimeField('Сохранена', auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Нормализованная строка реестра заезда'
+        verbose_name_plural = 'Нормализованные строки реестра заезда'
+        ordering = ['source_row__version_id', 'source_row__sheet_name', 'source_row__row_number']
+        indexes = [
+            models.Index(fields=['normalized_name_key'], name='arrival_norm_name_idx'),
+        ]
+
+    @property
+    def masked_phone(self):
+        if not self.normalized_phones:
+            return ''
+        phone = str(self.normalized_phones[0])
+        if len(phone) < 4:
+            return '••••'
+        return f'•••••••{phone[-4:]}'
+
+
+class ArrivalRosterMatch(ArrivalRosterImmutableModel):
+    class Status(models.TextChoices):
+        EXACT = 'exact', 'Точное сопоставление'
+        PROBABLE = 'probable', 'Вероятное сопоставление'
+        AMBIGUOUS = 'ambiguous', 'Требуется сопоставление'
+        UNMATCHED = 'unmatched', 'Жилец не найден'
+        CONFLICT = 'conflict', 'Обнаружен конфликт'
+
+    IMMUTABLE_FIELDS = (
+        'version_id', 'status', 'method', 'quality', 'matched_resident_id',
+        'evidence',
+    )
+
+    version = models.ForeignKey(
+        ArrivalRosterVersion,
+        verbose_name='Версия реестра',
+        on_delete=models.CASCADE,
+        related_name='matches',
+    )
+    status = models.CharField('Результат сопоставления', max_length=16, choices=Status.choices)
+    method = models.CharField('Способ сопоставления', max_length=64)
+    quality = models.CharField('Качество сопоставления', max_length=32)
+    matched_resident = models.ForeignKey(
+        'settlement.SettlementResident',
+        verbose_name='Точный жилец',
+        on_delete=models.PROTECT,
+        related_name='arrival_roster_matches',
+        null=True,
+        blank=True,
+    )
+    evidence = models.JSONField('Доказательства сопоставления', default=dict)
+    created_at = models.DateTimeField('Сохранено', auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Результат сопоставления реестра заезда'
+        verbose_name_plural = 'Результаты сопоставления реестра заезда'
+        ordering = ['version_id', 'pk']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['version', 'matched_resident'],
+                condition=models.Q(matched_resident__isnull=False),
+                name='uniq_arrival_exact_resident',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(status='exact', matched_resident__isnull=False)
+                    | models.Q(
+                        status__in=['probable', 'ambiguous', 'unmatched', 'conflict'],
+                        matched_resident__isnull=True,
+                    )
+                ),
+                name='arrival_match_result_shape',
+            ),
+        ]
+
+
+class ArrivalRosterMatchRow(ArrivalRosterImmutableModel):
+    IMMUTABLE_FIELDS = ('match_id', 'normalized_row_id')
+
+    match = models.ForeignKey(
+        ArrivalRosterMatch,
+        verbose_name='Результат сопоставления',
+        on_delete=models.CASCADE,
+        related_name='row_links',
+    )
+    normalized_row = models.OneToOneField(
+        ArrivalRosterNormalizedRow,
+        verbose_name='Нормализованная строка',
+        on_delete=models.PROTECT,
+        related_name='match_link',
+    )
+    created_at = models.DateTimeField('Связана', auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Связь результата с исходной строкой'
+        verbose_name_plural = 'Связи результатов с исходными строками'
+
+
+class ArrivalRosterMatchCandidate(ArrivalRosterImmutableModel):
+    IMMUTABLE_FIELDS = ('match_id', 'resident_id', 'evidence')
+
+    match = models.ForeignKey(
+        ArrivalRosterMatch,
+        verbose_name='Результат сопоставления',
+        on_delete=models.CASCADE,
+        related_name='candidates',
+    )
+    resident = models.ForeignKey(
+        'settlement.SettlementResident',
+        verbose_name='Возможный жилец',
+        on_delete=models.PROTECT,
+        related_name='arrival_roster_match_candidates',
+    )
+    evidence = models.JSONField('Доказательства кандидата', default=dict)
+    created_at = models.DateTimeField('Сохранён', auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Кандидат сопоставления реестра заезда'
+        verbose_name_plural = 'Кандидаты сопоставления реестра заезда'
+        constraints = [
+            models.UniqueConstraint(
+                fields=['match', 'resident'],
+                name='uniq_arrival_match_candidate',
+            ),
+        ]
+
+
+class ArrivalRosterIssue(ArrivalRosterImmutableModel):
+    class Severity(models.TextChoices):
+        ERROR = 'error', 'Ошибка'
+        WARNING = 'warning', 'Предупреждение'
+
+    IMMUTABLE_FIELDS = (
+        'version_id', 'source_row_id', 'normalized_row_id', 'match_id',
+        'severity', 'code', 'message', 'details',
+    )
+
+    version = models.ForeignKey(
+        ArrivalRosterVersion,
+        verbose_name='Версия реестра',
+        on_delete=models.CASCADE,
+        related_name='issues',
+    )
+    source_row = models.ForeignKey(
+        ArrivalRosterSourceRow,
+        verbose_name='Исходная строка',
+        on_delete=models.PROTECT,
+        related_name='issues',
+        null=True,
+        blank=True,
+    )
+    normalized_row = models.ForeignKey(
+        ArrivalRosterNormalizedRow,
+        verbose_name='Нормализованная строка',
+        on_delete=models.PROTECT,
+        related_name='issues',
+        null=True,
+        blank=True,
+    )
+    match = models.ForeignKey(
+        ArrivalRosterMatch,
+        verbose_name='Результат сопоставления',
+        on_delete=models.PROTECT,
+        related_name='issues',
+        null=True,
+        blank=True,
+    )
+    severity = models.CharField('Важность', max_length=16, choices=Severity.choices)
+    code = models.CharField('Код', max_length=64, db_index=True)
+    message = models.CharField('Описание', max_length=255)
+    details = models.JSONField('Безопасные детали', default=dict, blank=True)
+    created_at = models.DateTimeField('Обнаружено', auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Замечание реестра заезда'
+        verbose_name_plural = 'Замечания реестра заезда'
+        ordering = ['version_id', 'severity', 'pk']
+        indexes = [
+            models.Index(fields=['version', 'severity'], name='arrival_issue_severity_idx'),
+        ]
+
+
+class ArrivalRosterEvent(ArrivalRosterImmutableModel):
+    class Action(models.TextChoices):
+        UPLOADED = 'uploaded', 'Файл загружен'
+        REUSED = 'reused', 'Повторная загрузка распознана'
+        PARSED = 'parsed', 'Предварительная проверка завершена'
+
+    IMMUTABLE_FIELDS = ('version_id', 'actor_access_id', 'action', 'details')
+
+    version = models.ForeignKey(
+        ArrivalRosterVersion,
+        verbose_name='Версия реестра',
+        on_delete=models.CASCADE,
+        related_name='events',
+    )
+    actor_access = models.ForeignKey(
+        'users.EmployeeAccess',
+        verbose_name='Точный доступ исполнителя',
+        on_delete=models.PROTECT,
+        related_name='arrival_roster_events',
+    )
+    action = models.CharField('Действие', max_length=24, choices=Action.choices)
+    details = models.JSONField('Безопасные детали', default=dict, blank=True)
+    created_at = models.DateTimeField('Время', auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Событие реестра заезда'
+        verbose_name_plural = 'События реестра заезда'
+        ordering = ['version_id', 'created_at', 'pk']
+        indexes = [
+            models.Index(fields=['version', 'created_at'], name='arrival_event_version_idx'),
+        ]
