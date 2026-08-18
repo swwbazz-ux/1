@@ -19,6 +19,8 @@ from django.utils import timezone
 
 from assignments.models import AssignmentStatus, EquipmentAssignment, WorkShiftType
 
+from .cohorts import _revalidated_member_shift_source
+
 from .models import (
     AccommodationAnchor,
     AccommodationAnchorBedAssignment,
@@ -54,6 +56,9 @@ class ResolverPlacement:
     physical_room_id: int
     action: str
     source_kind: str
+    work_shift: str
+    shift_source_kind: str
+    shift_source_fingerprint: str
     binding_id: int | None
     equipment_assignment_id: int | None
     calendar_slot_id: int
@@ -69,6 +74,9 @@ class ResolverUnresolved:
     resident_stable_id: str
     member_id: int
     reason_codes: tuple[str, ...]
+    work_shift: str
+    shift_source_kind: str
+    shift_source_fingerprint: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -215,10 +223,16 @@ def _effective_equipment_assignments(*, employee_ids, effective_date):
             role__isnull=False,
             shift__isnull=True,
             assigned_at__lte=effective_date,
+            source_kind=EquipmentAssignment.SourceKind.DEPUTY_PUBLISHED_PLAN,
+            source_crew_plan_slot__isnull=False,
+            source_crew_plan_slot__plan__work_date=effective_date.date(),
         )
         .filter(Q(accepted_at__isnull=True) | Q(accepted_at__lte=effective_date))
         .filter(Q(ended_at__isnull=True) | Q(ended_at__gt=effective_date))
-        .select_related('equipment__equipment_type', 'role')
+        .select_related(
+            'equipment__equipment_type', 'role',
+            'source_crew_plan_slot__plan',
+        )
         .order_by('employee_id', 'equipment_id', 'shift_type', 'pk')
     )
 
@@ -380,7 +394,11 @@ def resolve_settlement_cohort(*, cohort_id: int) -> SettlementResolverResult:
     )
     members = list(
         SettlementCohortMember.objects.filter(cohort_id=cohort.pk)
-        .select_related('resident__employee', 'source_revision')
+        .select_related(
+            'resident__employee', 'source_revision',
+            'official_equipment_assignment__source_crew_plan_slot__plan',
+            'shift_selected_by_access__employee', 'shift_selected_by_access__role',
+        )
         .order_by('resident__stable_id', 'pk')
     )
     active_members = [item for item in members if item.participates_in_accommodation]
@@ -587,6 +605,16 @@ def resolve_settlement_cohort(*, cohort_id: int) -> SettlementResolverResult:
                 'basis_id': item.basis_id,
                 'basis_snapshot': item.basis_snapshot,
                 'production_context_snapshot': item.production_context_snapshot,
+                'work_shift': item.work_shift,
+                'shift_source_kind': item.shift_source_kind,
+                'official_equipment_assignment_id': item.official_equipment_assignment_id,
+                'shift_selected_by_access_id': item.shift_selected_by_access_id,
+                'shift_selected_at': (
+                    item.shift_selected_at.isoformat() if item.shift_selected_at else None
+                ),
+                'shift_selection_basis': item.shift_selection_basis,
+                'shift_source_snapshot': item.shift_source_snapshot,
+                'shift_source_fingerprint': item.shift_source_fingerprint,
             }
             for item in members
         ],
@@ -606,6 +634,11 @@ def resolve_settlement_cohort(*, cohort_id: int) -> SettlementResolverResult:
                 'equipment_active': item.equipment.is_active,
                 'equipment_type_id': item.equipment.equipment_type_id,
                 'equipment_type_active': item.equipment.equipment_type.is_active,
+                'source_kind': item.source_kind,
+                'source_crew_plan_slot_id': item.source_crew_plan_slot_id,
+                'source_plan_id': item.source_crew_plan_slot.plan_id,
+                'source_plan_status': item.source_crew_plan_slot.plan.status,
+                'source_plan_work_date': item.source_crew_plan_slot.plan.work_date.isoformat(),
             }
             for item in sorted(effective_equipment_assignments, key=lambda row: row.pk)
         ],
@@ -700,6 +733,11 @@ def resolve_settlement_cohort(*, cohort_id: int) -> SettlementResolverResult:
             for item in members
         ),
         *(
+            f'member-shift-source:{item.shift_source_fingerprint}'
+            for item in members
+            if item.shift_source_fingerprint
+        ),
+        *(
             f'binding:{item.stable_id}'
             for item in all_period_bindings
         ),
@@ -719,6 +757,9 @@ def resolve_settlement_cohort(*, cohort_id: int) -> SettlementResolverResult:
             resident_stable_id=str(member.resident.stable_id),
             member_id=member.pk,
             reason_codes=tuple(sorted(set(reasons))),
+            work_shift=member.work_shift,
+            shift_source_kind=member.shift_source_kind,
+            shift_source_fingerprint=member.shift_source_fingerprint,
         )
 
     cohort_failure_reason = None
@@ -745,6 +786,15 @@ def resolve_settlement_cohort(*, cohort_id: int) -> SettlementResolverResult:
     unbound_members = []
     for member in active_members:
         resident = member.resident
+        try:
+            _revalidated_member_shift_source(
+                member=member,
+                period=cohort.watch_period,
+                for_update=False,
+            )
+        except ValidationError:
+            reject(member, REASON_INCOMPLETE_CONTEXT)
+            continue
         if resident.status != SettlementResident.Status.ACTIVE:
             reject(member, REASON_RESIDENT_INACTIVE)
             continue
@@ -824,6 +874,9 @@ def resolve_settlement_cohort(*, cohort_id: int) -> SettlementResolverResult:
             physical_room_id=candidate.room_id,
             action='SETTLE',
             source_kind='confirmed_binding',
+            work_shift=member.work_shift,
+            shift_source_kind=member.shift_source_kind,
+            shift_source_fingerprint=member.shift_source_fingerprint,
             binding_id=binding.pk,
             equipment_assignment_id=None,
             calendar_slot_id=candidate.slot_id,
@@ -850,6 +903,9 @@ def resolve_settlement_cohort(*, cohort_id: int) -> SettlementResolverResult:
             continue
 
         equipment_assignment = active_assignments[0]
+        if equipment_assignment.pk != member.official_equipment_assignment_id:
+            reject(member, REASON_INCOMPLETE_CONTEXT)
+            continue
         equipment = equipment_assignment.equipment
         if (
             equipment_assignment.shift_type not in WorkShiftType.values
@@ -863,7 +919,10 @@ def resolve_settlement_cohort(*, cohort_id: int) -> SettlementResolverResult:
 
         matching_anchors = equipment_anchors_by_equipment.get(equipment.pk, [])
         if not matching_anchors:
-            reject(member, REASON_RESOLVER_NOT_CONFIGURED)
+            if employee.personnel_position_id:
+                remaining_unbound_members.append(member)
+            else:
+                reject(member, REASON_RESOLVER_NOT_CONFIGURED)
             continue
         if len(matching_anchors) != 1:
             reject(member, REASON_INCOMPLETE_CONTEXT)
@@ -935,6 +994,9 @@ def resolve_settlement_cohort(*, cohort_id: int) -> SettlementResolverResult:
             physical_room_id=candidate.room_id,
             action='SETTLE_NEW_BINDING',
             source_kind='official_equipment_assignment',
+            work_shift=member.work_shift,
+            shift_source_kind=member.shift_source_kind,
+            shift_source_fingerprint=member.shift_source_fingerprint,
             binding_id=None,
             equipment_assignment_id=equipment_assignment.pk,
             calendar_slot_id=candidate.slot_id,
@@ -1058,6 +1120,9 @@ def resolve_settlement_cohort(*, cohort_id: int) -> SettlementResolverResult:
             physical_room_id=chosen.room_id,
             action='SETTLE_NEW_BINDING',
             source_kind=source_kind,
+            work_shift=member.work_shift,
+            shift_source_kind=member.shift_source_kind,
+            shift_source_fingerprint=member.shift_source_fingerprint,
             binding_id=None,
             equipment_assignment_id=None,
             calendar_slot_id=chosen.slot_id,

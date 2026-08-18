@@ -35,7 +35,14 @@ from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone
 
-from assignments.models import AssignmentStatus, EquipmentAssignment, WorkShiftType
+from assignments.models import (
+    AssignmentStatus,
+    CrewPlan,
+    CrewPlanSlot,
+    CrewPlanStatus,
+    EquipmentAssignment,
+    WorkShiftType,
+)
 from core.production_time import production_work_date
 from references.models import Dormitory, Equipment, EquipmentType
 from shifts.models import EmployeeShift, ShiftType, WatchPeriod
@@ -57,6 +64,7 @@ from .calendar_bindings import (
 )
 from .apply import apply_confirmed_settlement_preview
 from .cohorts import (
+    _internal_shift_source,
     add_settlement_cohort_member,
     approve_settlement_cohort,
     create_settlement_cohort,
@@ -8787,7 +8795,7 @@ class M5CohortTests(TestCase):
         cls.foreign_resident, _ = get_or_create_employee_resident(
             employee_id=cls.foreign_employee.pk,
         )
-        cls.resident_role = Role.objects.create(code='m5-resident-clerk', name='M5 actor')
+        cls.resident_role = Role.objects.create(code='clerk', name='M5 actor')
         cls.resident_access = EmployeeAccess.objects.create(
             employee=cls.actor,
             role=cls.resident_role,
@@ -8822,6 +8830,8 @@ class M5CohortTests(TestCase):
             confirmed_by_label='Архитектор M5',
             reason='Авторитетный состав заезда M5.',
         )
+        cls.work_role = Role.objects.create(code='m5-driver', name='M5 водитель')
+        cls.work_equipment_type = EquipmentType.objects.create(name='M5 техника')
 
     def period_bounds(self, period=None):
         period = period or self.period
@@ -8853,10 +8863,29 @@ class M5CohortTests(TestCase):
         participation_status=SettlementCohortMember.ParticipationStatus.PARTICIPATING,
         reason='',
         revision=None,
+        official_assignment=None,
+        work_shift=SettlementCohortMember.WorkShift.DAY,
+        shift_access=None,
+        shift_basis='Подтверждено делопроизводителем для теста M5.',
     ):
         period = period or cohort.watch_period
         arrival, departure = self.period_bounds(period)
         resident = resident or self.resident
+        if resident.is_external:
+            shift_kwargs = {
+                'work_shift': work_shift,
+                'shift_selected_by_access_id': (shift_access or self.resident_access).pk,
+                'shift_selection_basis': shift_basis,
+            }
+        else:
+            official_assignment = official_assignment or self.official_assignment(
+                resident=resident,
+                period=period,
+                work_shift=work_shift,
+            )
+            shift_kwargs = {
+                'official_equipment_assignment_id': official_assignment.pk,
+            }
         return add_settlement_cohort_member(
             cohort_id=cohort.pk,
             resident_id=resident.pk,
@@ -8870,7 +8899,71 @@ class M5CohortTests(TestCase):
             basis_id=f'M5-MEMBER-{cohort.pk}-{resident.pk}',
             basis_snapshot={'resident_id': resident.pk, 'period_id': period.pk},
             production_context_snapshot={'equipment_assignment': None},
+            **shift_kwargs,
         )
+
+    def official_assignment(self, *, resident, period, work_shift):
+        existing = EquipmentAssignment.objects.filter(
+            employee_id=resident.employee_id,
+            status=AssignmentStatus.ACCEPTED,
+            ended_at__isnull=True,
+            source_kind=EquipmentAssignment.SourceKind.DEPUTY_PUBLISHED_PLAN,
+            source_crew_plan_slot__plan__work_date=period.starts_on,
+        ).first()
+        if existing is not None:
+            return existing
+        effective_at = timezone.make_aware(
+            datetime.combine(period.starts_on, datetime.min.time()),
+        )
+        current = list(
+            EquipmentAssignment.objects.filter(
+                employee_id=resident.employee_id,
+                status=AssignmentStatus.ACCEPTED,
+                ended_at__isnull=True,
+                shift__isnull=True,
+            )
+        )
+        for assignment in current:
+            assignment.ended_at = effective_at
+            assignment.save(update_fields=['ended_at'])
+        plan, _created = CrewPlan.objects.get_or_create(
+            work_date=period.starts_on,
+            role=self.work_role,
+            status=CrewPlanStatus.PUBLISHED,
+            defaults={
+                'revision': 1,
+                'version': 1,
+                'created_by': self.actor,
+                'updated_by': self.actor,
+                'published_by': self.actor,
+                'published_at': self.now,
+            },
+        )
+        equipment, _created = Equipment.objects.get_or_create(
+            equipment_type=self.work_equipment_type,
+            garage_number=f'M5-{resident.employee_id}-{period.pk}',
+        )
+        slot = CrewPlanSlot.objects.create(
+            plan=plan,
+            equipment=equipment,
+            shift_type=work_shift,
+            employee_id=resident.employee_id,
+            baseline_employee_id=resident.employee_id,
+        )
+        assignment = EquipmentAssignment(
+            employee_id=resident.employee_id,
+            role=self.work_role,
+            equipment=equipment,
+            shift_type=work_shift,
+            assigned_by=self.actor,
+            status=AssignmentStatus.ACCEPTED,
+            accepted_at=self.now,
+            source_kind=EquipmentAssignment.SourceKind.DEPUTY_PUBLISHED_PLAN,
+            source_crew_plan_slot=slot,
+        )
+        assignment.full_clean()
+        EquipmentAssignment._base_manager.bulk_create([assignment])
+        return assignment
 
     def approve(self, cohort):
         return approve_settlement_cohort(
@@ -8894,6 +8987,96 @@ class M5CohortTests(TestCase):
             SettlementCohort._meta.get_field('shift_type')
         with self.assertRaises(FieldDoesNotExist):
             SettlementCohortMember._meta.get_field('physical_bed')
+
+    def test_internal_shift_is_derived_from_exact_official_assignment(self):
+        cohort = self.create_cohort()
+        assignment = self.official_assignment(
+            resident=self.resident,
+            period=self.period,
+            work_shift=SettlementCohortMember.WorkShift.NIGHT,
+        )
+        member = self.add_member(cohort, official_assignment=assignment)
+
+        self.assertEqual(member.work_shift, SettlementCohortMember.WorkShift.NIGHT)
+        self.assertEqual(
+            member.shift_source_kind,
+            SettlementCohortMember.ShiftSourceKind.INTERNAL_ASSIGNMENT,
+        )
+        self.assertEqual(member.official_equipment_assignment_id, assignment.pk)
+        self.assertEqual(member.shift_source_snapshot['crew_plan_slot_id'], assignment.source_crew_plan_slot_id)
+        self.assertRegex(member.shift_source_fingerprint, r'^[0-9a-f]{64}$')
+
+    def test_unverified_assignment_and_stale_official_source_are_controlled(self):
+        cohort = self.create_cohort()
+        equipment = Equipment.objects.create(
+            equipment_type=self.work_equipment_type,
+            garage_number='M5-UNVERIFIED',
+        )
+        unverified = EquipmentAssignment.objects.create(
+            employee=self.employee,
+            role=self.work_role,
+            equipment=equipment,
+            shift_type=WorkShiftType.SHIFT_1,
+            status=AssignmentStatus.ACCEPTED,
+            accepted_at=self.now,
+        )
+        with self.assertRaises(ValidationError) as raised:
+            self.add_member(cohort, official_assignment=unverified)
+        self.assertEqual(raised.exception.code, 'settlement.cohort.shift_review_required')
+        self.assertFalse(cohort.members.exists())
+
+        official = self.official_assignment(
+            resident=self.resident,
+            period=self.period,
+            work_shift=SettlementCohortMember.WorkShift.DAY,
+        )
+        member = self.add_member(cohort, official_assignment=official)
+        official.ended_at = timezone.make_aware(
+            datetime.combine(self.period.starts_on, datetime.min.time()),
+        )
+        official.save(update_fields=['ended_at'])
+        with self.assertRaises(ValidationError) as raised:
+            self.approve(cohort)
+        self.assertEqual(raised.exception.code, 'settlement.cohort.shift_review_required')
+        member.refresh_from_db()
+        cohort.refresh_from_db()
+        self.assertEqual(cohort.status, SettlementCohort.Status.DRAFT)
+
+    def test_external_shift_requires_exact_active_clerk_access_and_basis(self):
+        cohort = self.create_cohort()
+        member = self.add_member(
+            cohort,
+            resident=self.external_resident,
+            work_shift=SettlementCohortMember.WorkShift.NIGHT,
+        )
+        self.assertEqual(member.work_shift, SettlementCohortMember.WorkShift.NIGHT)
+        self.assertEqual(member.shift_selected_by_access_id, self.resident_access.pk)
+        self.assertIsNone(member.official_equipment_assignment_id)
+        self.assertIsNone(member.resident.employee_id)
+
+        second = self.create_cohort(period=self.next_period, fingerprint_char='2')
+        self.resident_access.is_active = False
+        self.resident_access.save(update_fields=['is_active'])
+        with self.assertRaises(ValidationError) as raised:
+            self.add_member(second, resident=self.external_resident, period=self.next_period)
+        self.assertEqual(raised.exception.code, 'settlement.cohort.shift_review_required')
+        self.assertFalse(second.members.exists())
+
+    def test_unverified_legacy_member_cannot_be_approved(self):
+        cohort = self.create_cohort()
+        member = self.add_member(cohort)
+        SettlementCohortMember._base_manager.filter(pk=member.pk).update(
+            work_shift='',
+            shift_source_kind=SettlementCohortMember.ShiftSourceKind.UNVERIFIED_LEGACY,
+            official_equipment_assignment=None,
+            shift_source_snapshot={},
+            shift_source_fingerprint='',
+        )
+        with self.assertRaises(ValidationError) as raised:
+            self.approve(cohort)
+        self.assertEqual(raised.exception.code, 'settlement.cohort.shift_review_required')
+        cohort.refresh_from_db()
+        self.assertEqual(cohort.status, SettlementCohort.Status.DRAFT)
 
     def test_external_resident_membership_has_no_employee_or_access_side_effect(self):
         cohort = self.create_cohort()
@@ -9158,13 +9341,17 @@ class M5CohortTests(TestCase):
         self.assertIn('unique_approved_cohort_per_watch', cohort_constraints)
         self.assertIn('unique_resident_per_cohort', member_constraints)
         self.assertIn('cohort_member_period_non_empty', member_constraints)
+        self.assertIn('cohort_member_shift_source_ck', member_constraints)
         self.assertEqual(
             cohort_indexes,
             {'cohort_period_status_ver_idx', 'cohort_composition_status_idx'},
         )
         self.assertEqual(
             member_indexes,
-            {'cohort_member_resident_idx', 'cohort_member_scope_idx'},
+            {
+                'cohort_member_resident_idx', 'cohort_member_scope_idx',
+                'cohort_member_shift_idx',
+            },
         )
 
     def test_m5_does_not_write_m4_or_occupancy_models(self):
@@ -9485,7 +9672,8 @@ class M6SettlementResolverTests(TestCase):
             is_active=True,
             watch_composition=cls.composition,
         )
-        cls.role = Role.objects.create(code='m6-clerk', name='M6 actor')
+        cls.role = Role.objects.create(code='clerk', name='M6 actor')
+        cls.work_role = Role.objects.create(code='m6-work-role', name='M6 work role')
         cls.access = EmployeeAccess.objects.create(
             employee=cls.actor,
             role=cls.role,
@@ -9603,7 +9791,7 @@ class M6SettlementResolverTests(TestCase):
             created_by_access=cls.access,
         )
 
-    def _cohort(self, *residents, approve=True):
+    def _cohort(self, *residents, approve=True, supersedes=None):
         fingerprint_char = str((SettlementCohort.objects.count() % 9) + 1)
         cohort = create_settlement_cohort(
             watch_period_id=self.period.pk,
@@ -9613,10 +9801,37 @@ class M6SettlementResolverTests(TestCase):
             source_snapshot={'period_id': self.period.pk},
             input_fingerprint=fingerprint_char * 64,
             created_by_id=self.actor.pk,
+            supersedes_id=supersedes.pk if supersedes is not None else None,
         )
         arrival = timezone.make_aware(datetime(2031, 1, 1))
         departure = timezone.make_aware(datetime(2031, 2, 1))
         for resident in residents:
+            if resident.is_external:
+                shift_kwargs = {
+                    'work_shift': SettlementCohortMember.WorkShift.DAY,
+                    'shift_selected_by_access_id': self.access.pk,
+                    'shift_selection_basis': 'Подтверждено делопроизводителем для M6.',
+                }
+            else:
+                assignments = list(
+                    EquipmentAssignment.objects.filter(
+                        employee_id=resident.employee_id,
+                        status=AssignmentStatus.ACCEPTED,
+                        ended_at__isnull=True,
+                        source_kind=EquipmentAssignment.SourceKind.DEPUTY_PUBLISHED_PLAN,
+                        source_crew_plan_slot__plan__work_date=self.period.starts_on,
+                    ).order_by('pk')
+                )
+                if not assignments:
+                    assignment = self._equipment_assignment(
+                        resident.employee,
+                        self._equipment(f'SHIFT-{resident.pk}'),
+                    )
+                else:
+                    assignment = assignments[0]
+                shift_kwargs = {
+                    'official_equipment_assignment_id': assignment.pk,
+                }
             add_settlement_cohort_member(
                 cohort_id=cohort.pk,
                 resident_id=resident.pk,
@@ -9632,6 +9847,7 @@ class M6SettlementResolverTests(TestCase):
                 basis_id=f'M6-MEMBER-{cohort.pk}-{resident.pk}',
                 basis_snapshot={'resident_id': resident.pk},
                 production_context_snapshot={'must_not_be_authority': True},
+                **shift_kwargs,
             )
         if approve:
             cohort = approve_settlement_cohort(
@@ -9695,14 +9911,61 @@ class M6SettlementResolverTests(TestCase):
         status=AssignmentStatus.ACCEPTED,
         accepted_at=None,
     ):
-        return EquipmentAssignment.objects.create(
+        existing_plan = CrewPlan.objects.filter(
+            work_date=self.period.starts_on,
+            role=self.work_role,
+            status=CrewPlanStatus.PUBLISHED,
+        ).first()
+        if existing_plan is None:
+            plan = CrewPlan.objects.create(
+                work_date=self.period.starts_on,
+                role=self.work_role,
+                revision=1,
+                status=CrewPlanStatus.PUBLISHED,
+                version=1,
+                created_by=self.actor,
+                updated_by=self.actor,
+                published_by=self.actor,
+                published_at=self.now,
+            )
+        elif existing_plan.slots.filter(employee=employee).exists():
+            revision = CrewPlan.objects.filter(
+                work_date=self.period.starts_on,
+                role=self.work_role,
+            ).count() + 1
+            plan = CrewPlan.objects.create(
+                work_date=self.period.starts_on,
+                role=self.work_role,
+                revision=revision,
+                status=CrewPlanStatus.SUPERSEDED,
+                version=1,
+                created_by=self.actor,
+                updated_by=self.actor,
+                published_by=self.actor,
+                published_at=self.now,
+            )
+        else:
+            plan = existing_plan
+        slot = CrewPlanSlot.objects.create(
+            plan=plan,
+            equipment=equipment,
+            shift_type=shift_type,
             employee=employee,
-            role=self.role,
+            baseline_employee=employee,
+        )
+        assignment = EquipmentAssignment(
+            employee=employee,
+            role=self.work_role,
             equipment=equipment,
             shift_type=shift_type,
             status=status,
             accepted_at=accepted_at if accepted_at is not None else self.now,
+            source_kind=EquipmentAssignment.SourceKind.DEPUTY_PUBLISHED_PLAN,
+            source_crew_plan_slot=slot,
         )
+        assignment.full_clean()
+        EquipmentAssignment._base_manager.bulk_create([assignment])
+        return assignment
 
     def _equipment_route(
         self,
@@ -9781,6 +10044,37 @@ class M6SettlementResolverTests(TestCase):
         self.assertEqual(len(result.placements), 1)
         self.assertEqual(result.placements[0].binding_id, binding.pk)
         self.assertEqual(result.placements[0].source_kind, 'confirmed_binding')
+        self.assertEqual(
+            result.placements[0].work_shift,
+            SettlementCohortMember.WorkShift.DAY,
+        )
+        self.assertEqual(
+            result.placements[0].shift_source_kind,
+            SettlementCohortMember.ShiftSourceKind.INTERNAL_ASSIGNMENT,
+        )
+
+    def test_stale_shift_source_is_unresolved_and_changes_fingerprint(self):
+        slot = self._slot(0, 0)
+        self._binding(self.internal_resident, slot)
+        cohort = self._cohort(self.internal_resident)
+        member = cohort.members.get(resident=self.internal_resident)
+        before = resolve_settlement_cohort(cohort_id=cohort.pk)
+        assignment = member.official_equipment_assignment
+        assignment.ended_at = timezone.make_aware(
+            datetime.combine(self.period.starts_on, datetime.min.time()),
+        )
+        assignment.save(update_fields=['ended_at'])
+
+        after = resolve_settlement_cohort(cohort_id=cohort.pk)
+
+        self.assertFalse(after.placements)
+        self.assertEqual(len(after.unresolved), 1)
+        self.assertEqual(
+            after.unresolved[0].reason_codes,
+            ('incomplete_authoritative_context',),
+        )
+        self.assertEqual(after.unresolved[0].work_shift, member.work_shift)
+        self.assertNotEqual(before.input_fingerprint, after.input_fingerprint)
 
     def test_internal_official_position_uses_matching_anchor(self):
         self._slot(2, 0)
@@ -10155,7 +10449,7 @@ class M6SettlementResolverTests(TestCase):
         cohort = self._cohort(self.external_a, self.internal_resident)
         result = resolve_settlement_cohort(cohort_id=cohort.pk)
         internal = next(item for item in result.unresolved if item.resident_id == self.internal_resident.pk)
-        self.assertIn('incomplete_authoritative_context', internal.reason_codes)
+        self.assertIn('resolver_not_configured', internal.reason_codes)
         self.assertFalse(any(
             item.resident_id == self.internal_resident.pk for item in result.placements
         ))
@@ -10214,7 +10508,7 @@ class M6SettlementResolverTests(TestCase):
         by_resident = {item.resident_id: item.reason_codes for item in result.unresolved}
         self.assertEqual(
             by_resident[self.internal_resident.pk],
-            ('incomplete_authoritative_context',),
+            ('resolver_not_configured',),
         )
         self.assertEqual(
             by_resident[self.external_a.pk],
@@ -10360,15 +10654,31 @@ class M7SavedPreviewTests(TestCase):
             fencing_revision=grant.fencing_revision,
         )
 
-    def _cohort(self, *residents, approve=True):
+    def _cohort(self, *residents, approve=True, supersedes=None):
         return M6SettlementResolverTests._cohort(
             self,
             *residents,
             approve=approve,
+            supersedes=supersedes,
         )
 
     def _slot(self, room_index, bed_index):
         return M6SettlementResolverTests._slot(self, room_index, bed_index)
+
+    def _equipment(self, suffix, *, active=True):
+        return M6SettlementResolverTests._equipment(
+            self,
+            suffix,
+            active=active,
+        )
+
+    def _equipment_assignment(self, employee, equipment, **kwargs):
+        return M6SettlementResolverTests._equipment_assignment(
+            self,
+            employee,
+            equipment,
+            **kwargs,
+        )
 
     def _prepared_cohort(self, *, include_unresolved=True):
         self._slot(2, 0)
@@ -10397,8 +10707,14 @@ class M7SavedPreviewTests(TestCase):
         self.assertEqual(run.created_by_access_id, self.control_access.pk)
         self.assertEqual(run.version, 1)
         self.assertEqual(run.revision, 1)
+        self.assertTrue(run.requires_shift_split)
         self.assertEqual(run.placements.count(), 1)
         self.assertEqual(run.unresolved_rows.count(), 1)
+        self.assertEqual(
+            set(run.placements.values_list('work_shift', flat=True))
+            | set(run.unresolved_rows.values_list('work_shift', flat=True)),
+            {SettlementCohortMember.WorkShift.DAY},
+        )
         represented = {
             *run.placements.values_list('resident_id', flat=True),
             *run.unresolved_rows.values_list('resident_id', flat=True),
@@ -10409,6 +10725,25 @@ class M7SavedPreviewTests(TestCase):
                 participation_status__in=SettlementCohortMember.ACTIVE_PARTICIPATION_STATUSES,
             ).values_list('resident_id', flat=True)),
         )
+
+    def test_shift_source_change_makes_draft_stale(self):
+        cohort, run = self._create_run(include_unresolved=False)
+        member = cohort.members.get()
+        assignment = member.official_equipment_assignment
+        assignment.ended_at = timezone.make_aware(
+            datetime.combine(self.period.starts_on, datetime.min.time()),
+        )
+        assignment.save(update_fields=['ended_at'])
+
+        self.assert_validation_code(
+            'settlement.preview.stale_source',
+            lambda: confirm_settlement_preview_run(
+                run_id=run.pk,
+                control_context=self.control_context,
+            ),
+        )
+        run.refresh_from_db()
+        self.assertEqual(run.status, SettlementPreviewRun.Status.DRAFT)
 
     def test_domain_api_requires_exact_server_control_context(self):
         cohort = self._prepared_cohort()
@@ -10840,11 +11175,12 @@ class M8SettlementApplyTests(TestCase):
             fencing_revision=grant.fencing_revision,
         )
 
-    def _cohort(self, *residents, approve=True):
+    def _cohort(self, *residents, approve=True, supersedes=None):
         return M6SettlementResolverTests._cohort(
             self,
             *residents,
             approve=approve,
+            supersedes=supersedes,
         )
 
     def _slot(self, room_index, bed_index):
@@ -10902,9 +11238,34 @@ class M8SettlementApplyTests(TestCase):
             cohort_id=cohort.pk,
             control_context=self.control_context,
         )
-        return confirm_settlement_preview_run(
+        run = confirm_settlement_preview_run(
             run_id=run.pk,
             control_context=self.control_context,
+        )
+        return self._as_historical_run(run)
+
+    def _as_historical_run(self, run):
+        SettlementPreviewRun._base_manager.filter(pk=run.pk).update(
+            requires_shift_split=False,
+        )
+        run.refresh_from_db()
+        return run
+
+    def _replace_test_member_shift_source(self, cohort, resident, assignment):
+        source = _internal_shift_source(
+            resident=resident,
+            period=cohort.watch_period,
+            assignment_id=assignment.pk,
+        )
+        SettlementCohortMember._base_manager.filter(
+            cohort=cohort,
+            resident=resident,
+        ).update(
+            work_shift=source['work_shift'],
+            shift_source_kind=source['shift_source_kind'],
+            official_equipment_assignment=source['official_equipment_assignment'],
+            shift_source_snapshot=source['shift_source_snapshot'],
+            shift_source_fingerprint=source['shift_source_fingerprint'],
         )
 
     def _prepared_cohort(self, *, include_unresolved=True):
@@ -10923,7 +11284,7 @@ class M8SettlementApplyTests(TestCase):
             run_id=run.pk,
             control_context=self.control_context,
         )
-        return cohort, run
+        return cohort, self._as_historical_run(run)
 
     def assert_apply_code(self, code, callback):
         with self.assertRaises(ValidationError) as raised:
@@ -10962,6 +11323,29 @@ class M8SettlementApplyTests(TestCase):
             ).exists()
         )
 
+    def test_structured_run_requires_shift_split_without_partial_writes(self):
+        cohort = self._prepared_cohort(include_unresolved=False)
+        run = create_settlement_preview_run(
+            cohort_id=cohort.pk,
+            control_context=self.control_context,
+        )
+        run = confirm_settlement_preview_run(
+            run_id=run.pk,
+            control_context=self.control_context,
+        )
+        self.assertTrue(run.requires_shift_split)
+
+        for _attempt in range(2):
+            self.assert_apply_code(
+                'settlement.apply.shift_split_required',
+                lambda: apply_confirmed_settlement_preview(
+                    run_id=run.pk,
+                    control_context=self.control_context,
+                ),
+            )
+        self.assertFalse(SettlementPreviewApplication.objects.exists())
+        self.assertFalse(EmployeeBedOccupancy._base_manager.exists())
+
     def test_external_resident_is_applied_without_employee_or_access(self):
         self._seed_room(self.external_a, 0)
         cohort = self._cohort(self.external_a)
@@ -10973,6 +11357,7 @@ class M8SettlementApplyTests(TestCase):
             run_id=run.pk,
             control_context=self.control_context,
         )
+        run = self._as_historical_run(run)
         application = apply_confirmed_settlement_preview(
             run_id=run.pk,
             control_context=self.control_context,
@@ -11061,7 +11446,7 @@ class M8SettlementApplyTests(TestCase):
             settled_by=self.control_actor,
         )
         self.assert_apply_code(
-            'settlement.apply.hard_conflict',
+            'settlement.apply.stale_preview',
             lambda: apply_confirmed_settlement_preview(
                 run_id=run.pk,
                 control_context=self.control_context,
@@ -11087,6 +11472,7 @@ class M8SettlementApplyTests(TestCase):
             run_id=second_run.pk,
             control_context=self.control_context,
         )
+        second_run = self._as_historical_run(second_run)
         second_application = apply_confirmed_settlement_preview(
             run_id=second_run.pk,
             control_context=self.control_context,
@@ -11127,7 +11513,8 @@ class M8SettlementApplyTests(TestCase):
             physical_bed=second_bed,
             suffix='MOVE-2',
         )
-        self._equipment_assignment(employee, second_equipment)
+        second_assignment = self._equipment_assignment(employee, second_equipment)
+        self._replace_test_member_shift_source(cohort, resident, second_assignment)
 
         second_run = self._confirmed_run_for_cohort(cohort)
         second_application = apply_confirmed_settlement_preview(
@@ -11137,9 +11524,7 @@ class M8SettlementApplyTests(TestCase):
         first_occupancy = EmployeeBedOccupancy._base_manager.get(
             pk=first_occupancy.pk,
         )
-        current = EmployeeBedOccupancy.objects.get(
-            source_application=second_application,
-        )
+        current = EmployeeBedOccupancy.objects.get(source_application=second_application)
         self.assertEqual(first_occupancy.replaced_by_application_id, second_application.pk)
         self.assertEqual(current.physical_bed_id, second_bed.pk)
 
@@ -11164,8 +11549,10 @@ class M8SettlementApplyTests(TestCase):
                 datetime.combine(self.period.starts_on, datetime.min.time())
             )
             assignment.save(update_fields=['ended_at'])
-        self._equipment_assignment(first[1], second[2])
-        self._equipment_assignment(second[1], first[2])
+        first_assignment = self._equipment_assignment(first[1], second[2])
+        second_assignment = self._equipment_assignment(second[1], first[2])
+        self._replace_test_member_shift_source(cohort, first[0], first_assignment)
+        self._replace_test_member_shift_source(cohort, second[0], second_assignment)
 
         second_run = self._confirmed_run_for_cohort(cohort)
         second_application = apply_confirmed_settlement_preview(
@@ -11174,9 +11561,7 @@ class M8SettlementApplyTests(TestCase):
         )
         current = {
             row.resident_id: row.physical_bed_id
-            for row in EmployeeBedOccupancy.objects.filter(
-                source_application=second_application,
-            )
+            for row in EmployeeBedOccupancy.objects.filter(source_application=second_application)
         }
         self.assertEqual(current[first[0].pk], baseline[second[0].pk])
         self.assertEqual(current[second[0].pk], baseline[first[0].pk])
@@ -11332,6 +11717,7 @@ class M8SettlementApplyTests(TestCase):
             run_id=second_run.pk,
             control_context=self.control_context,
         )
+        second_run = self._as_historical_run(second_run)
         before = (
             SettlementPreviewApplication.objects.count(),
             EmployeeBedOccupancy._base_manager.count(),
@@ -11434,6 +11820,16 @@ class AutoSettlementM7M8HttpTests(TestCase):
     def _slot(self, room_index, bed_index):
         return M6SettlementResolverTests._slot(self, room_index, bed_index)
 
+    def _equipment(self, suffix):
+        return M6SettlementResolverTests._equipment(self, suffix)
+
+    def _equipment_assignment(self, employee, equipment):
+        return M6SettlementResolverTests._equipment_assignment(
+            self,
+            employee,
+            equipment,
+        )
+
     def _prepared_cohort(self, *, include_unresolved=True):
         return M7SavedPreviewTests._prepared_cohort(
             self,
@@ -11457,7 +11853,7 @@ class AutoSettlementM7M8HttpTests(TestCase):
         ):
             self.assertNotIn(forbidden, serialized)
 
-    def test_http_workflow_creates_confirms_applies_and_reuses_idempotently(self):
+    def test_http_workflow_blocks_whole_run_apply_for_structured_preview(self):
         cohort = self._prepared_cohort()
         created = self.client.post(
             reverse('settlement_auto_preview_create'),
@@ -11490,24 +11886,21 @@ class AutoSettlementM7M8HttpTests(TestCase):
             data={'run_id': draft['id'], 'confirm_replace_manual': False},
             content_type='application/json',
         )
-        self.assertEqual(first.status_code, 200, first.content)
-        first_application = first.json()['preview']['application']
-        self.assertEqual(first_application['created'], 1)
-        self.assertEqual(first_application['reused'], 0)
-        self.assertEqual(first_application['unresolved'], 1)
-        self.assertEqual(first_application['actor'], self.control_actor.full_name)
+        self.assertEqual(first.status_code, 409, first.content)
+        self.assertEqual(first.json()['code'], 'settlement.apply.shift_split_required')
 
         repeated = self.client.post(
             reverse('settlement_auto_preview_apply'),
             data={'run_id': draft['id'], 'confirm_replace_manual': False},
             content_type='application/json',
         )
-        self.assertEqual(repeated.status_code, 200, repeated.content)
+        self.assertEqual(repeated.status_code, 409, repeated.content)
         self.assertEqual(
-            repeated.json()['preview']['application']['id'],
-            first_application['id'],
+            repeated.json()['code'],
+            'settlement.apply.shift_split_required',
         )
-        self.assertEqual(SettlementPreviewApplication.objects.count(), 1)
+        self.assertFalse(SettlementPreviewApplication.objects.exists())
+        self.assertFalse(EmployeeBedOccupancy._base_manager.exists())
 
 
 class M8SettlementApplyMigrationTests(TransactionTestCase):
@@ -11690,6 +12083,140 @@ class M8SettlementApplyMigrationTests(TransactionTestCase):
             .objects.filter(pk=application.pk)
             .exists()
         )
+
+
+class M5ShiftSourceMigrationTests(TransactionTestCase):
+    migrate_from = ('settlement', '0014_m8_apply_provenance')
+    migrate_to = ('settlement', '0015_cohort_member_work_shift')
+
+    def setUp(self):
+        self.addCleanup(self._restore_latest_migrations)
+        executor = MigrationExecutor(connection)
+        executor.migrate([
+            self.migrate_from,
+            ('assignments', '0007_equipment_assignment_provenance'),
+        ])
+        self.old_apps = executor.loader.project_state([
+            self.migrate_from,
+            ('assignments', '0007_equipment_assignment_provenance'),
+        ]).apps
+
+    def _restore_latest_migrations(self):
+        executor = MigrationExecutor(connection)
+        executor.migrate(executor.loader.graph.leaf_nodes())
+
+    def test_historical_member_is_not_guessed_and_reverse_preserves_data(self):
+        EmployeeModel = self.old_apps.get_model('users', 'Employee')
+        RoleModel = self.old_apps.get_model('users', 'Role')
+        AccessModel = self.old_apps.get_model('users', 'EmployeeAccess')
+        CompositionModel = self.old_apps.get_model('users', 'WatchComposition')
+        PeriodModel = self.old_apps.get_model('shifts', 'WatchPeriod')
+        SourceModel = self.old_apps.get_model('settlement', 'SettlementSource')
+        RevisionModel = self.old_apps.get_model('settlement', 'SettlementRevision')
+        ResidentModel = self.old_apps.get_model('settlement', 'SettlementResident')
+        CohortModel = self.old_apps.get_model('settlement', 'SettlementCohort')
+        MemberModel = self.old_apps.get_model('settlement', 'SettlementCohortMember')
+        RunModel = self.old_apps.get_model('settlement', 'SettlementPreviewRun')
+
+        composition = CompositionModel.objects.create(code='m5-shift-mig', name='M5 shift migration')
+        period = PeriodModel.objects.create(
+            name='M5 shift migration period',
+            watch_composition=composition,
+            starts_on=datetime(2033, 1, 1).date(),
+            ends_on=datetime(2033, 1, 31).date(),
+        )
+        actor = EmployeeModel.objects.create(full_name='M5 migration actor', status='active', is_active=True)
+        employee = EmployeeModel.objects.create(
+            full_name='M5 migration resident',
+            status='active',
+            is_active=True,
+            watch_composition=composition,
+        )
+        role = RoleModel.objects.create(code='m5-shift-mig-role', name='M5 migration role')
+        access = AccessModel.objects.create(
+            employee=actor,
+            role=role,
+            access_code='M5-SHIFT-MIGRATION',
+            status='activated',
+            is_active=True,
+        )
+        source = SourceModel.objects.create(
+            source_type='document',
+            title='M5 migration source',
+            version='1',
+            file_sha256='5' * 64,
+            status='confirmed',
+            confirmed_at=timezone.now(),
+            confirmed_by_label='M5 migration',
+        )
+        revision = RevisionModel.objects.create(
+            code='M5-SHIFT-MIGRATION-REV',
+            source=source,
+            status='confirmed',
+            effective_at=timezone.now(),
+            confirmed_at=timezone.now(),
+            confirmed_by_label='M5 migration',
+            reason='M5 shift migration test.',
+        )
+        resident = ResidentModel.objects.create(resident_type='EMPLOYEE', employee=employee)
+        cohort = CohortModel.objects.create(
+            watch_composition=composition,
+            watch_period=period,
+            version=1,
+            status='draft',
+            source_revision=revision,
+            source_type='migration_test',
+            source_id='M5-SHIFT-MIGRATION-COHORT',
+            source_snapshot={'kind': 'migration_test'},
+            input_fingerprint='5' * 64,
+            created_by=actor,
+        )
+        arrival = timezone.make_aware(datetime(2033, 1, 1))
+        departure = timezone.make_aware(datetime(2033, 2, 1))
+        member = MemberModel.objects.create(
+            cohort=cohort,
+            resident=resident,
+            arrival_at=arrival,
+            departure_at=departure,
+            participation_status='participating',
+            expected_schedule_regime='night',
+            source_revision=revision,
+            basis_type='migration_test',
+            basis_id='M5-SHIFT-MIGRATION-MEMBER',
+            basis_snapshot={'legacy': True},
+            production_context_snapshot={},
+        )
+        run = RunModel.objects.create(
+            cohort=cohort,
+            watch_composition=composition,
+            watch_period=period,
+            version=1,
+            status='draft',
+            source_snapshot={'kind': 'migration_test'},
+            resolver_fingerprint='5' * 64,
+            result_fingerprint='6' * 64,
+            created_by_access=access,
+        )
+
+        executor = MigrationExecutor(connection)
+        executor.migrate([self.migrate_to])
+        apps = executor.loader.project_state([self.migrate_to]).apps
+        migrated = apps.get_model('settlement', 'SettlementCohortMember').objects.get(pk=member.pk)
+        migrated_run = apps.get_model('settlement', 'SettlementPreviewRun').objects.get(pk=run.pk)
+        self.assertEqual(migrated.expected_schedule_regime, 'night')
+        self.assertEqual(migrated.work_shift, '')
+        self.assertEqual(migrated.shift_source_kind, 'unverified_legacy')
+        self.assertEqual(migrated.shift_source_snapshot, {})
+        self.assertEqual(migrated.shift_source_fingerprint, '')
+        self.assertIsNone(migrated.official_equipment_assignment_id)
+        self.assertIsNone(migrated.shift_selected_by_access_id)
+        self.assertFalse(migrated_run.requires_shift_split)
+
+        executor = MigrationExecutor(connection)
+        executor.migrate([self.migrate_from])
+        apps = executor.loader.project_state([self.migrate_from]).apps
+        restored = apps.get_model('settlement', 'SettlementCohortMember').objects.get(pk=member.pk)
+        self.assertEqual(restored.expected_schedule_regime, 'night')
 
 
 class M7SavedPreviewMigrationTests(TransactionTestCase):

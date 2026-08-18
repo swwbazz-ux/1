@@ -162,6 +162,7 @@ def _build_apply_lock_plan(*, run_id: int) -> _ApplyLockPlan:
         .values(
             'pk', 'cohort_id', 'watch_period_id', 'watch_composition_id',
             'status', 'resolver_fingerprint', 'result_fingerprint', 'revision',
+            'requires_shift_split',
         )
         .first()
     )
@@ -387,6 +388,7 @@ def _lock_and_revalidate_plan(
     actual_run_snapshot = (
         run.pk, run.cohort_id, run.watch_period_id, run.watch_composition_id,
         run.status, run.resolver_fingerprint, run.result_fingerprint, run.revision,
+        run.requires_shift_split,
     )
     actual_cohort_snapshot = (
         cohort.pk, cohort.watch_period_id, cohort.watch_composition_id,
@@ -629,12 +631,17 @@ def apply_confirmed_settlement_preview(
         )
         if locked['application'] is not None:
             return locked['application']
+        _validate_locked_preview(locked)
+        if locked['run'].requires_shift_split:
+            raise _apply_error(
+                'shift_split_required',
+                'План необходимо применить отдельно для ночной и дневной смены.',
+            )
 
         changes = _classify_changes(
             locked=locked,
             confirm_replace_manual=confirm_replace_manual,
         )
-        _validate_locked_preview(locked)
         run = locked['run']
         actor_access = locked['actor_access']
         actor_employee = locked['actor_employee']

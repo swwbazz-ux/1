@@ -1996,6 +1996,15 @@ class SettlementCohort(StableIdentifierModel):
 
 
 class SettlementCohortMember(StableIdentifierModel):
+    class WorkShift(models.TextChoices):
+        DAY = 'day', 'Дневная смена'
+        NIGHT = 'night', 'Ночная смена'
+
+    class ShiftSourceKind(models.TextChoices):
+        INTERNAL_ASSIGNMENT = 'internal_assignment', 'Официальное назначение сотрудника'
+        EXTERNAL_CLERK = 'external_clerk', 'Выбор делопроизводителя для внешнего жильца'
+        UNVERIFIED_LEGACY = 'unverified_legacy', 'Непроверенная историческая строка'
+
     class ParticipationStatus(models.TextChoices):
         PARTICIPATING = 'participating', 'Участвует в заезде'
         NOT_ARRIVING = 'not_arriving', 'Не заезжает'
@@ -2037,6 +2046,58 @@ class SettlementCohortMember(StableIdentifierModel):
         max_length=64,
         blank=True,
     )
+    work_shift = models.CharField(
+        'Официальная рабочая смена',
+        max_length=16,
+        choices=WorkShift.choices,
+        blank=True,
+        default='',
+    )
+    shift_source_kind = models.CharField(
+        'Источник официальной смены',
+        max_length=32,
+        choices=ShiftSourceKind.choices,
+        default=ShiftSourceKind.UNVERIFIED_LEGACY,
+        db_index=True,
+    )
+    official_equipment_assignment = models.ForeignKey(
+        'assignments.EquipmentAssignment',
+        verbose_name='Официальное назначение-источник',
+        on_delete=models.PROTECT,
+        related_name='settlement_cohort_members',
+        null=True,
+        blank=True,
+    )
+    shift_source_snapshot = models.JSONField(
+        'Неизменяемый снимок источника смены',
+        default=dict,
+        blank=True,
+    )
+    shift_source_fingerprint = models.CharField(
+        'SHA-256 источника смены',
+        max_length=64,
+        blank=True,
+        default='',
+        validators=[RegexValidator(regex=r'^$|^[0-9a-f]{64}$')],
+    )
+    shift_selected_by_access = models.ForeignKey(
+        'users.EmployeeAccess',
+        verbose_name='Точный доступ, выбравший смену',
+        on_delete=models.PROTECT,
+        related_name='selected_external_settlement_shifts',
+        null=True,
+        blank=True,
+    )
+    shift_selected_at = models.DateTimeField(
+        'Когда выбрана смена внешнего жильца',
+        null=True,
+        blank=True,
+    )
+    shift_selection_basis = models.CharField(
+        'Основание выбора смены внешнего жильца',
+        max_length=255,
+        blank=True,
+    )
     source_revision = models.ForeignKey(
         SettlementRevision,
         verbose_name='Ревизия-основание строки',
@@ -2066,6 +2127,10 @@ class SettlementCohortMember(StableIdentifierModel):
                 fields=['cohort', 'participation_status'],
                 name='cohort_member_scope_idx',
             ),
+            models.Index(
+                fields=['cohort', 'work_shift', 'shift_source_kind'],
+                name='cohort_member_shift_idx',
+            ),
         ]
         constraints = [
             models.UniqueConstraint(
@@ -2083,6 +2148,34 @@ class SettlementCohortMember(StableIdentifierModel):
                     ],
                 ),
                 name='cohort_member_status_valid',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        shift_source_kind='internal_assignment',
+                        work_shift__in=['day', 'night'],
+                        official_equipment_assignment__isnull=False,
+                        shift_selected_by_access__isnull=True,
+                        shift_selected_at__isnull=True,
+                        shift_selection_basis='',
+                    )
+                    | models.Q(
+                        shift_source_kind='external_clerk',
+                        work_shift__in=['day', 'night'],
+                        official_equipment_assignment__isnull=True,
+                        shift_selected_by_access__isnull=False,
+                        shift_selected_at__isnull=False,
+                    )
+                    | models.Q(
+                        shift_source_kind='unverified_legacy',
+                        work_shift='',
+                        official_equipment_assignment__isnull=True,
+                        shift_selected_by_access__isnull=True,
+                        shift_selected_at__isnull=True,
+                        shift_selection_basis='',
+                    )
+                ),
+                name='cohort_member_shift_source_ck',
             ),
         ]
 
@@ -2103,6 +2196,28 @@ class SettlementCohortMember(StableIdentifierModel):
             errors['basis_snapshot'] = 'Снимок основания membership должен быть непустым объектом.'
         if self.participation_status != self.ParticipationStatus.PARTICIPATING and not self.reason:
             errors['reason'] = 'Незаезд, продление или дополнительное участие требуют причины.'
+        if self.shift_source_kind == self.ShiftSourceKind.UNVERIFIED_LEGACY:
+            if self._state.adding:
+                errors['shift_source_kind'] = 'Новые membership требуют официальный источник смены.'
+        else:
+            if self.work_shift not in self.WorkShift.values:
+                errors['work_shift'] = 'Для membership требуется дневная или ночная смена.'
+            if not isinstance(self.shift_source_snapshot, dict) or not self.shift_source_snapshot:
+                errors['shift_source_snapshot'] = 'Снимок источника смены обязателен.'
+            if not self.shift_source_fingerprint or len(self.shift_source_fingerprint) != 64:
+                errors['shift_source_fingerprint'] = 'Требуется SHA-256 источника смены.'
+        if self.shift_source_kind == self.ShiftSourceKind.INTERNAL_ASSIGNMENT:
+            if not self.official_equipment_assignment_id:
+                errors['official_equipment_assignment'] = 'Внутренний жилец требует точное назначение.'
+            if self.shift_selected_by_access_id or self.shift_selected_at or self.shift_selection_basis:
+                errors['shift_selected_by_access'] = 'Внутренняя смена не выбирается делопроизводителем.'
+        elif self.shift_source_kind == self.ShiftSourceKind.EXTERNAL_CLERK:
+            if self.official_equipment_assignment_id:
+                errors['official_equipment_assignment'] = 'Внешний жилец не имеет кадрового назначения.'
+            if not self.shift_selected_by_access_id or not self.shift_selected_at:
+                errors['shift_selected_by_access'] = 'Внешняя смена требует точный доступ и время выбора.'
+            if not self.shift_selection_basis.strip():
+                errors['shift_selection_basis'] = 'Основание выбора внешней смены обязательно.'
         if self.cohort_id:
             cohort = self.cohort
             period_start = timezone.make_aware(
@@ -2151,6 +2266,9 @@ class SettlementCohortMember(StableIdentifierModel):
         original = type(self)._base_manager.filter(pk=self.pk).values(
             'stable_id', 'cohort_id', 'resident_id', 'arrival_at', 'departure_at',
             'participation_status', 'reason', 'expected_schedule_regime',
+            'work_shift', 'shift_source_kind', 'official_equipment_assignment_id',
+            'shift_source_snapshot', 'shift_source_fingerprint',
+            'shift_selected_by_access_id', 'shift_selected_at', 'shift_selection_basis',
             'source_revision_id', 'basis_type', 'basis_id', 'basis_snapshot',
             'production_context_snapshot',
         ).first()
@@ -2788,6 +2906,10 @@ class SettlementPreviewRun(StableIdentifierModel):
         max_length=64,
         validators=[RegexValidator(regex=r'^[0-9a-f]{64}$')],
     )
+    requires_shift_split = models.BooleanField(
+        'Требует раздельного применения смен',
+        default=False,
+    )
     source_snapshot = models.JSONField('Неизменяемый снимок результата и источников')
     base_confirmed_run = models.ForeignKey(
         'self',
@@ -2940,7 +3062,8 @@ class SettlementPreviewRun(StableIdentifierModel):
         original = type(self)._base_manager.filter(pk=self.pk).values(
             'stable_id', 'cohort_id', 'watch_period_id', 'watch_composition_id',
             'version', 'resolver_fingerprint', 'result_fingerprint',
-            'source_snapshot', 'base_confirmed_run_id', 'created_by_access_id',
+            'requires_shift_split', 'source_snapshot', 'base_confirmed_run_id',
+            'created_by_access_id',
             'status', 'supersedes_id', 'confirmed_by_access_id',
             'confirmed_at', 'superseded_at', 'revision',
         ).first()
@@ -2950,7 +3073,8 @@ class SettlementPreviewRun(StableIdentifierModel):
         for field_name in (
             'stable_id', 'cohort_id', 'watch_period_id', 'watch_composition_id',
             'version', 'resolver_fingerprint', 'result_fingerprint',
-            'source_snapshot', 'base_confirmed_run_id', 'created_by_access_id',
+            'requires_shift_split', 'source_snapshot', 'base_confirmed_run_id',
+            'created_by_access_id',
         ):
             if original[field_name] != getattr(self, field_name):
                 errors[field_name.removesuffix('_id')] = 'Смысловые поля preview после создания неизменяемы.'
@@ -3017,6 +3141,13 @@ class SettlementPreviewPlacement(StableIdentifierModel):
     )
     action = models.CharField('Действие resolver', max_length=32)
     source_kind = models.CharField('Волна resolver', max_length=64)
+    work_shift = models.CharField(
+        'Официальная смена',
+        max_length=16,
+        choices=SettlementCohortMember.WorkShift.choices,
+        blank=True,
+        default='',
+    )
     cohort_member_id_snapshot = models.PositiveBigIntegerField('PK membership snapshot')
     physical_room_id_snapshot = models.PositiveBigIntegerField('PK комнаты snapshot')
     binding_id_snapshot = models.PositiveBigIntegerField(null=True, blank=True)
@@ -3077,7 +3208,7 @@ class SettlementPreviewPlacement(StableIdentifierModel):
                 type(self)._base_manager.select_for_update().get(pk=self.pk)
                 self._validate_immutable_fields(
                     'run', 'resident', 'calendar_slot', 'physical_bed', 'action',
-                    'source_kind', 'cohort_member_id_snapshot',
+                    'source_kind', 'work_shift', 'cohort_member_id_snapshot',
                     'physical_room_id_snapshot', 'binding_id_snapshot',
                     'equipment_assignment_id_snapshot', 'anchor_id_snapshot',
                     'anchor_bed_assignment_id_snapshot', 'normalized_provenance',
@@ -3106,6 +3237,13 @@ class SettlementPreviewUnresolved(StableIdentifierModel):
     )
     reason_code = models.CharField('Основной код причины', max_length=64)
     reason_codes = models.JSONField('Все коды причин')
+    work_shift = models.CharField(
+        'Официальная смена',
+        max_length=16,
+        choices=SettlementCohortMember.WorkShift.choices,
+        blank=True,
+        default='',
+    )
     cohort_member_id_snapshot = models.PositiveBigIntegerField('PK membership snapshot')
     structured_details = models.JSONField('Неизменяемые структурированные детали')
     created_at = models.DateTimeField('Создана', auto_now_add=True)
@@ -3154,7 +3292,7 @@ class SettlementPreviewUnresolved(StableIdentifierModel):
                 type(self)._base_manager.select_for_update().get(pk=self.pk)
                 self._validate_immutable_fields(
                     'run', 'resident', 'reason_code', 'reason_codes',
-                    'cohort_member_id_snapshot', 'structured_details',
+                    'work_shift', 'cohort_member_id_snapshot', 'structured_details',
                 )
             self.full_clean()
             return super().save(*args, **kwargs)

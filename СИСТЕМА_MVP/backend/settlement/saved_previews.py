@@ -80,10 +80,13 @@ def _validate_resolver_result(
             participation_status__in=SettlementCohortMember.ACTIVE_PARTICIPATION_STATUSES,
         )
         .order_by('resident_id', 'pk')
-        .values('pk', 'resident_id')
+        .values(
+            'pk', 'resident_id', 'work_shift',
+            'shift_source_kind', 'shift_source_fingerprint',
+        )
     )
     expected_by_resident = {
-        item['resident_id']: item['pk']
+        item['resident_id']: item
         for item in active_members
     }
     placement_resident_ids = [item.resident_id for item in result.placements]
@@ -100,10 +103,18 @@ def _validate_resolver_result(
             'Каждый действующий resident должен присутствовать ровно в одной строке preview.',
         )
     for item in (*result.placements, *result.unresolved):
-        if expected_by_resident.get(item.resident_id) != item.member_id:
+        expected = expected_by_resident.get(item.resident_id)
+        if (
+            expected is None
+            or expected['pk'] != item.member_id
+            or expected['work_shift'] != item.work_shift
+            or expected['shift_source_kind'] != item.shift_source_kind
+            or expected['shift_source_fingerprint'] != item.shift_source_fingerprint
+            or item.work_shift not in SettlementCohortMember.WorkShift.values
+        ):
             raise _preview_error(
                 'incomplete_result',
-                'Resolver вернул stale либо чужую membership.',
+                'Resolver вернул stale membership или непроверенную смену.',
             )
     bed_ids = [item.physical_bed_id for item in result.placements]
     slot_ids = [item.calendar_slot_id for item in result.placements]
@@ -220,6 +231,7 @@ def _save_result_rows(*, run, result):
             physical_bed_id=item.physical_bed_id,
             action=item.action,
             source_kind=item.source_kind,
+            work_shift=item.work_shift,
             cohort_member_id_snapshot=item.member_id,
             physical_room_id_snapshot=item.physical_room_id,
             binding_id_snapshot=item.binding_id,
@@ -235,6 +247,7 @@ def _save_result_rows(*, run, result):
             resident_id=item.resident_id,
             reason_code=item.reason_codes[0],
             reason_codes=list(item.reason_codes),
+            work_shift=item.work_shift,
             cohort_member_id_snapshot=item.member_id,
             structured_details=details,
         ).save()
@@ -295,6 +308,7 @@ def create_settlement_preview_run(
         version=version,
         resolver_fingerprint=result.input_fingerprint,
         result_fingerprint=validated['result_fingerprint'],
+        requires_shift_split=True,
         source_snapshot=validated['source_snapshot'],
         base_confirmed_run=base_confirmed,
         created_by_access=actor_access,
