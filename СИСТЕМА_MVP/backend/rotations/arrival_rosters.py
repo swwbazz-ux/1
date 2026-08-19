@@ -6,7 +6,7 @@ from pathlib import Path
 
 from django.core.exceptions import ValidationError
 from django.core.files.base import ContentFile
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, models, transaction
 from django.db.models import Q
 from django.utils import timezone
 
@@ -51,6 +51,155 @@ def _validation_error(code, message):
     return ValidationError(message, code=code)
 
 
+def _trusted_insert_arrival_roster_version(version):
+    version.full_clean()
+    models.QuerySet.bulk_create(ArrivalRosterVersion._base_manager.all(), [version])
+    return version
+
+
+def _trusted_create_excel_arrival_roster_version(*, period, version_number,
+                                                  source_file, parser_profile,
+                                                  actor_access):
+    version = ArrivalRosterVersion(
+        watch_period=period,
+        version_number=version_number,
+        status=ArrivalRosterVersion.Status.REVIEW_REQUIRED,
+        source_kind=ArrivalRosterVersion.SourceKind.EXCEL,
+        source_file=source_file,
+        parser_profile=parser_profile,
+        created_by_access=actor_access,
+        source_fingerprint=source_file.sha256,
+    )
+    return _trusted_insert_arrival_roster_version(version)
+
+
+def _trusted_finalize_excel_arrival_roster_version(*, version, period, source_file,
+                                                    parser_profile, parsed):
+    locked = ArrivalRosterVersion._base_manager.select_for_update(of=('self',)).get(pk=version.pk)
+    if (
+        locked.status not in {ArrivalRosterVersion.Status.DRAFT, ArrivalRosterVersion.Status.REVIEW_REQUIRED}
+        or locked.snapshot_sha256
+        or locked.source_kind != ArrivalRosterVersion.SourceKind.EXCEL
+        or locked.source_file_id != source_file.pk
+        or locked.parser_profile_id != parser_profile.pk
+        or locked.watch_period_id != period.pk
+    ):
+        raise _validation_error('arrival_roster.version_changed', 'Версия реестра изменилась.')
+    source_rows = list(
+        locked.source_rows.order_by('sheet_name', 'row_number').values(
+            'sheet_name', 'row_number', 'row_kind', 'row_sha256',
+        )
+    )
+    matches = list(
+        locked.matches.order_by('pk').values(
+            'status', 'method', 'quality', 'matched_resident_id',
+        )
+    )
+    blocking_count = locked.issues.filter(severity=ArrivalRosterIssue.Severity.ERROR).count()
+    warning_count = locked.issues.filter(severity=ArrivalRosterIssue.Severity.WARNING).count()
+    snapshot = {
+        'watch_period_id': period.pk,
+        'version_number': locked.version_number,
+        'source_sha256': source_file.sha256,
+        'parser_profile': {
+            'code': parser_profile.code,
+            'version': parser_profile.version,
+            'sha256': parser_profile.configuration_sha256,
+        },
+        'workbook': parsed.workbook_summary,
+        'source_rows': source_rows,
+        'matches': matches,
+        'blocking_issue_count': blocking_count,
+        'warning_count': warning_count,
+    }
+    locked.status = (
+        ArrivalRosterVersion.Status.REVIEW_REQUIRED
+        if blocking_count else ArrivalRosterVersion.Status.DRAFT
+    )
+    locked.source_row_count = len(source_rows)
+    locked.normalized_row_count = len(parsed.normalized_rows)
+    locked.blocking_issue_count = blocking_count
+    locked.warning_count = warning_count
+    locked.snapshot = snapshot
+    locked.snapshot_sha256 = _canonical_sha256(snapshot)
+    locked.updated_at = timezone.now()
+    locked.full_clean()
+    updated = models.QuerySet.update(
+        ArrivalRosterVersion._base_manager.filter(pk=locked.pk),
+        status=locked.status,
+        source_row_count=locked.source_row_count,
+        normalized_row_count=locked.normalized_row_count,
+        blocking_issue_count=locked.blocking_issue_count,
+        warning_count=locked.warning_count,
+        snapshot=locked.snapshot,
+        snapshot_sha256=locked.snapshot_sha256,
+        updated_at=locked.updated_at,
+    )
+    if updated != 1:
+        raise _validation_error('arrival_roster.version_changed', 'Версия реестра изменилась.')
+    return locked
+
+
+def _approval_metadata(version):
+    return (
+        version.confirmed_by_access_id,
+        version.confirmed_at,
+        version.confirmation_snapshot,
+        version.confirmation_sha256,
+        version.based_on_version_id,
+    )
+
+
+def _trusted_confirm_arrival_roster_version(*, version_id, actor_access_id,
+                                            confirmation_snapshot,
+                                            confirmation_sha256, confirmed_at):
+    version = ArrivalRosterVersion._base_manager.select_for_update(of=('self',)).get(pk=version_id)
+    if version.status not in {ArrivalRosterVersion.Status.DRAFT, ArrivalRosterVersion.Status.REVIEW_REQUIRED}:
+        raise _validation_error('arrival_roster.invalid_confirmation_transition', 'Версию нельзя утвердить из текущего состояния.')
+    if any(_approval_metadata(version)[:4]):
+        raise _validation_error('arrival_roster.approval_metadata_present', 'Подготовительная версия содержит данные утверждения.')
+    version.status = ArrivalRosterVersion.Status.CONFIRMED
+    version.confirmed_by_access_id = actor_access_id
+    version.confirmed_at = confirmed_at
+    version.confirmation_snapshot = confirmation_snapshot
+    version.confirmation_sha256 = confirmation_sha256
+    version.updated_at = confirmed_at
+    version.full_clean()
+    updated = models.QuerySet.update(
+        ArrivalRosterVersion._base_manager.filter(pk=version.pk),
+        status=version.status,
+        confirmed_by_access_id=version.confirmed_by_access_id,
+        confirmed_at=version.confirmed_at,
+        confirmation_snapshot=version.confirmation_snapshot,
+        confirmation_sha256=version.confirmation_sha256,
+        updated_at=version.updated_at,
+    )
+    if updated != 1:
+        raise _validation_error('arrival_roster.version_changed', 'Версия реестра изменилась.')
+    return version
+
+
+def _trusted_supersede_arrival_roster_version(*, version_id, superseded_at):
+    version = ArrivalRosterVersion._base_manager.select_for_update(of=('self',)).get(pk=version_id)
+    if version.status != ArrivalRosterVersion.Status.CONFIRMED:
+        raise _validation_error('arrival_roster.invalid_supersede_transition', 'Заменить можно только действующую утверждённую версию.')
+    before = _approval_metadata(version)
+    version.status = ArrivalRosterVersion.Status.SUPERSEDED
+    version.superseded_at = superseded_at
+    version.updated_at = superseded_at
+    version.full_clean()
+    if _approval_metadata(version) != before:
+        raise _validation_error('arrival_roster.confirmed_history_changed', 'История утверждения была изменена.')
+    updated = models.QuerySet.update(
+        ArrivalRosterVersion._base_manager.filter(pk=version.pk),
+        status=version.status, superseded_at=version.superseded_at,
+        updated_at=version.updated_at,
+    )
+    if updated != 1:
+        raise _validation_error('arrival_roster.version_changed', 'Версия реестра изменилась.')
+    return version
+
+
 _EVENT_DETAIL_KEYS = {
     ArrivalRosterEvent.Action.UPLOADED: {'sha256', 'byte_size'},
     ArrivalRosterEvent.Action.REUSED: {'sha256'},
@@ -70,6 +219,7 @@ _EVENT_DETAIL_KEYS = {
     },
     ArrivalRosterEvent.Action.POOL_EMPLOYEE_ADDED: {'employee_id', 'resident_id'},
     ArrivalRosterEvent.Action.POOL_EXTERNAL_ADDED: {'resident_id'},
+    ArrivalRosterEvent.Action.CONFIRMED: {'confirmation_sha256'},
 }
 
 _GENERIC_ISSUE_RESOLUTION_FORBIDDEN_CODES = {
@@ -101,6 +251,35 @@ _MATCH_ISSUE_CODES = {
 _DATE_ISSUE_CODES = {'conflicting_arrival_dates', 'date_requires_review'}
 _PARTICIPATION_ISSUE_CODES = {'participation_requires_review'}
 _SHIFT_ISSUE_CODES = {'conflicting_shift_hints', 'unknown_shift_hint'}
+
+# Closed T1.4 ownership policy shared by the review readiness and approval paths.
+ARRIVAL_ROSTER_ISSUE_POLICY = {
+    **{code: ('corrected_file', True) for code in _STRUCTURAL_SOURCE_ISSUE_CODES},
+    **{code: ('timekeeper', False) for code in _MATCH_ISSUE_CODES | _DATE_ISSUE_CODES | _PARTICIPATION_ISSUE_CODES},
+    **{code: ('deputy', False) for code in _SHIFT_ISSUE_CODES},
+    'employee_watch_composition_mismatch': ('oup', False),
+    'employee_watch_composition_missing': ('oup', True),
+    'employee_inactive': ('oup', True),
+    'employee_hire_date_missing': ('oup', True),
+    'employee_hired_after_period_start': ('oup', True),
+    'employee_dismissed_before_period': ('oup', True),
+    'employee_resident_missing': ('clerk', True),
+    'employee_resident_ambiguous': ('clerk', True),
+    'employee_resident_unavailable': ('clerk', True),
+    'external_card_incomplete': ('clerk', False),
+    'equipment_missing': ('deputy', False),
+    'official_shift_missing': ('deputy', False),
+}
+
+
+def arrival_roster_issue_policy(code, severity):
+    policy = ARRIVAL_ROSTER_ISSUE_POLICY.get(code)
+    if policy is not None:
+        return {'role': policy[0], 'blocks_confirmation': policy[1]}
+    return {
+        'role': 'timekeeper',
+        'blocks_confirmation': severity == ArrivalRosterIssue.Severity.ERROR,
+    }
 
 
 _VERIFIED_TIMEKEEPER_CONTEXT_MARKER = object()
@@ -975,7 +1154,12 @@ def arrival_roster_match_readiness(*, match_id):
             'blocking_codes': sorted(set(blockers)),
         }
 
-    structural_codes = issue_codes.intersection(_STRUCTURAL_SOURCE_ISSUE_CODES)
+    structural_codes = {
+        issue.code for issue in issues
+        if arrival_roster_issue_policy(issue.code, issue.severity) == {
+            'role': 'corrected_file', 'blocks_confirmation': True,
+        }
+    }
     if structural_codes:
         return result(
             'corrected_file',
@@ -983,7 +1167,11 @@ def arrival_roster_match_readiness(*, match_id):
             structural_codes,
         )
 
-    shift_codes = issue_codes.intersection(_SHIFT_ISSUE_CODES)
+    shift_codes = {
+        issue.code for issue in issues
+        if arrival_roster_issue_policy(issue.code, issue.severity)['role'] == 'deputy'
+        and issue.code in _SHIFT_ISSUE_CODES
+    }
     if shift_codes:
         return result(
             'deputy',
@@ -1068,7 +1256,9 @@ def arrival_roster_match_readiness(*, match_id):
     unknown_blocking_codes = {
         issue.code
         for issue in issues
-        if issue.severity == ArrivalRosterIssue.Severity.ERROR
+        if arrival_roster_issue_policy(
+            issue.code, issue.severity,
+        )['blocks_confirmation']
         and issue.code not in known_factually_resolved
     }
     if unknown_blocking_codes:
@@ -1499,67 +1689,16 @@ def upload_arrival_roster(*, uploaded_file, watch_period_id, actor_access_id):
             .order_by('-version_number', '-pk')
             .first()
         )
-        version = ArrivalRosterVersion(
-            watch_period=period,
+        version = _trusted_create_excel_arrival_roster_version(
+            period=period,
             version_number=(last_version.version_number + 1) if last_version else 1,
-            status=ArrivalRosterVersion.Status.REVIEW_REQUIRED,
-            source_kind=ArrivalRosterVersion.SourceKind.EXCEL,
             source_file=source_file,
-            parser_profile=profile,
-            created_by_access=actor_access,
-            source_fingerprint=source_file.sha256,
+            parser_profile=profile, actor_access=actor_access,
         )
-        version.save()
         _persist_parse_result(version=version, parsed=parsed)
-
-        blocking_count = version.issues.filter(
-            severity=ArrivalRosterIssue.Severity.ERROR,
-        ).count()
-        warning_count = version.issues.filter(
-            severity=ArrivalRosterIssue.Severity.WARNING,
-        ).count()
-        source_rows = list(
-            version.source_rows.order_by('sheet_name', 'row_number').values(
-                'sheet_name', 'row_number', 'row_kind', 'row_sha256',
-            )
-        )
-        matches = list(
-            version.matches.order_by('pk').values(
-                'status', 'method', 'quality', 'matched_resident_id',
-            )
-        )
-        immutable_snapshot = {
-            'watch_period_id': period.pk,
-            'version_number': version.version_number,
-            'source_sha256': source_file.sha256,
-            'parser_profile': {
-                'code': profile.code,
-                'version': profile.version,
-                'sha256': profile.configuration_sha256,
-            },
-            'workbook': parsed.workbook_summary,
-            'source_rows': source_rows,
-            'matches': matches,
-            'blocking_issue_count': blocking_count,
-            'warning_count': warning_count,
-        }
-        version.status = (
-            ArrivalRosterVersion.Status.REVIEW_REQUIRED
-            if blocking_count
-            else ArrivalRosterVersion.Status.DRAFT
-        )
-        version.source_row_count = len(source_rows)
-        version.normalized_row_count = len(parsed.normalized_rows)
-        version.blocking_issue_count = blocking_count
-        version.warning_count = warning_count
-        version.snapshot = immutable_snapshot
-        version.snapshot_sha256 = _canonical_sha256(immutable_snapshot)
-        version.save(
-            update_fields=[
-                'status', 'source_row_count', 'normalized_row_count',
-                'blocking_issue_count', 'warning_count', 'snapshot',
-                'snapshot_sha256', 'updated_at',
-            ]
+        version = _trusted_finalize_excel_arrival_roster_version(
+            version=version, period=period, source_file=source_file,
+            parser_profile=profile, parsed=parsed,
         )
         _trusted_create_arrival_roster_event(
             version=version,

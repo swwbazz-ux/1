@@ -5,15 +5,18 @@ import json
 import tempfile
 import zipfile
 from dataclasses import replace
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
+from django.apps import apps
 from django.core.exceptions import ValidationError
 from django.core.files.base import ContentFile
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db import IntegrityError, connection, models, transaction
+from django.db.migrations.executor import MigrationExecutor
 from django.db.models import QuerySet
-from django.test import Client, TestCase, override_settings
+from django.test import Client, TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 from openpyxl import Workbook, load_workbook
@@ -23,6 +26,11 @@ from shifts.models import WatchPeriod
 from users.models import Employee, EmployeeAccess, Role, WatchComposition
 
 from .arrival_roster_parser import UnsafeArrivalWorkbook, parse_arrival_workbook
+from .arrival_roster_approvals import (
+    _is_confirmed_period_collision,
+    build_arrival_roster_confirmation_proposal,
+    confirm_arrival_roster_version,
+)
 from .arrival_rosters import (
     _VerifiedTimekeeperContext,
     _access_snapshot,
@@ -30,6 +38,9 @@ from .arrival_rosters import (
     _trusted_create_arrival_roster_issue,
     _trusted_create_arrival_roster_match,
     _trusted_create_arrival_roster_event,
+    _trusted_confirm_arrival_roster_version,
+    _trusted_supersede_arrival_roster_version,
+    arrival_roster_issue_policy,
     arrival_roster_match_readiness,
     clear_arrival_roster_resident,
     reopen_arrival_roster_issue,
@@ -44,6 +55,8 @@ from .arrival_rosters import (
 from .arrival_roster_pool import (
     _employee_snapshot,
     _resident_snapshot,
+    _trusted_create_pool_arrival_roster_version,
+    _trusted_finalize_pool_arrival_roster_version,
     _trusted_create_pool_row,
     add_employee_to_arrival_roster,
     add_external_resident_to_arrival_roster,
@@ -1806,11 +1819,770 @@ class ArrivalRosterT13aTests(TestCase):
         self.assertEqual(row.basis, '')
 
         original_created_at = row.created_at
-        row.created_at = timezone.now()
-        with self.assertRaises(ValidationError):
+        row.created_at = original_created_at + timedelta(seconds=1)
+        with self.assertRaises(ValidationError) as caught:
             row.save()
+        self.assertIn('created_at', caught.exception.message_dict)
         row.refresh_from_db()
         self.assertEqual(row.created_at, original_created_at)
+
+
+class ArrivalRosterT14aApprovalTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        role = Role.objects.get(code='timekeeper')
+        composition = WatchComposition.objects.create(code='watch-t14a', name='Вахта T1.4a')
+        cls.actor = Employee.objects.create(
+            full_name='Табельщик T1.4a', status=Employee.Status.ACTIVE,
+            is_active=True, hired_at=date(2025, 1, 1),
+        )
+        cls.access = EmployeeAccess.objects.create(
+            employee=cls.actor, role=role, access_code='t14a',
+            status=EmployeeAccess.Status.ACTIVATED, is_active=True,
+        )
+        cls.employee = Employee.objects.create(
+            full_name='Участник T1.4a', status=Employee.Status.ACTIVE,
+            is_active=True, hired_at=date(2025, 1, 1), watch_composition=composition,
+        )
+        cls.resident = SettlementResident.objects.create(
+            employee=cls.employee, resident_type=SettlementResident.ResidentType.EMPLOYEE,
+            status=SettlementResident.Status.ACTIVE,
+        )
+        cls.period = WatchPeriod.objects.create(
+            name='Период T1.4a', watch_composition=composition,
+            starts_on=date(2026, 8, 14), ends_on=date(2026, 9, 13), is_active=True,
+        )
+        cls.other_role = Role.objects.create(code='t14a-other', name='Другая роль T1.4a')
+        cls.other_access = EmployeeAccess.objects.create(
+            employee=cls.actor, role=cls.other_role, access_code='t14a-other',
+            status=EmployeeAccess.Status.ACTIVATED, is_active=True,
+        )
+
+    def _ready_version(self):
+        version = create_arrival_roster_from_employee_pool(
+            watch_period_id=self.period.pk, actor_access_id=self.access.pk,
+        )
+        for match in version.matches.order_by('pk'):
+            review = match.row_review
+            if review.selected_resident_id is None:
+                continue
+            set_arrival_roster_participation(
+                match_id=match.pk, participation_status='arriving', arrival_mode='transfer',
+                expected_revision=review.revision, actor_access_id=self.access.pk,
+            )
+            review.refresh_from_db()
+            set_arrival_roster_dates(
+                match_id=match.pk, arrival_on=self.period.starts_on,
+                departure_on=self.period.ends_on, expected_revision=review.revision,
+                actor_access_id=self.access.pk,
+            )
+        return version
+
+    def _ready_excel(self, *, shift_hint=1):
+        uploaded = SimpleUploadedFile(
+            't14a.xlsx',
+            _workbook_bytes(
+                full_name=self.employee.full_name,
+                primary_name=self.employee.full_name,
+                phone='', shift_hint=shift_hint,
+            ),
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+        version, created = upload_arrival_roster(
+            uploaded_file=uploaded, watch_period_id=self.period.pk,
+            actor_access_id=self.access.pk,
+        )
+        self.assertTrue(created)
+        for index, match in enumerate(version.matches.order_by('pk')):
+            try:
+                review = match.row_review
+            except ArrivalRosterRowReview.DoesNotExist:
+                review = None
+            if review is None:
+                resident = match.matched_resident
+                if resident is None:
+                    resident = SettlementResident.objects.create(
+                        resident_type=SettlementResident.ResidentType.CONTRACTOR,
+                        full_name=f'Внешний T1.4a {version.pk}-{match.pk}',
+                        position_title='Специалист', organization='Подрядчик',
+                        phone='+79990000000', external_sex='male',
+                        created_by_access=self.access,
+                        status=SettlementResident.Status.ACTIVE,
+                    )
+                review = select_arrival_roster_resident(
+                    match_id=match.pk, resident_id=resident.pk,
+                    expected_revision=0, actor_access_id=self.access.pk,
+                )
+            if review.resident_resolution != ArrivalRosterRowReview.ResidentResolution.SELECTED:
+                resident = SettlementResident.objects.create(
+                    resident_type=SettlementResident.ResidentType.CONTRACTOR,
+                    full_name=f'Внешний T1.4a {version.pk}-{match.pk}',
+                    position_title='Специалист', organization='Подрядчик',
+                    phone='+79990000000', external_sex='male',
+                    created_by_access=self.access,
+                    status=SettlementResident.Status.ACTIVE,
+                )
+                select_arrival_roster_resident(
+                    match_id=match.pk, resident_id=resident.pk,
+                    expected_revision=review.revision,
+                    actor_access_id=self.access.pk,
+                )
+                review.refresh_from_db()
+            participation = 'arriving' if index == 0 else 'not_arriving'
+            set_arrival_roster_participation(
+                match_id=match.pk, participation_status=participation,
+                arrival_mode='transfer' if index == 0 else '',
+                expected_revision=review.revision, actor_access_id=self.access.pk,
+            )
+            review.refresh_from_db()
+            if index == 0:
+                set_arrival_roster_dates(
+                    match_id=match.pk, arrival_on=self.period.starts_on,
+                    departure_on=self.period.ends_on, expected_revision=review.revision,
+                    actor_access_id=self.access.pk,
+                )
+        return version
+
+    def _proposal(self, version):
+        return build_arrival_roster_confirmation_proposal(
+            version_id=version.pk, actor_access_id=self.access.pk,
+        )
+
+    def _confirm(self, version):
+        proposal = self._proposal(version)
+        return confirm_arrival_roster_version(
+            version_id=version.pk, expected_sha256=proposal['confirmation_sha256'],
+            actor_access_id=self.access.pk,
+        )
+
+    def test_t14a_confirmation_is_sha_guarded_idempotent_and_contains_no_pii(self):
+        version = self._ready_version()
+        proposal = build_arrival_roster_confirmation_proposal(
+            version_id=version.pk, actor_access_id=self.access.pk,
+        )
+        with self.assertRaises(ValidationError) as caught:
+            confirm_arrival_roster_version(
+                version_id=version.pk, expected_sha256='0' * 64,
+                actor_access_id=self.access.pk,
+            )
+        self.assertEqual(caught.exception.code, 'arrival_roster.stale_confirmation_sha256')
+        confirmed = confirm_arrival_roster_version(
+            version_id=version.pk, expected_sha256=proposal['confirmation_sha256'],
+            actor_access_id=self.access.pk,
+        )
+        first_time = confirmed.confirmed_at
+        first_events = confirmed.events.filter(action=ArrivalRosterEvent.Action.CONFIRMED).count()
+        repeated = confirm_arrival_roster_version(
+            version_id=version.pk, expected_sha256=proposal['confirmation_sha256'],
+            actor_access_id=self.access.pk,
+        )
+        self.assertEqual(repeated.confirmed_at, first_time)
+        self.assertEqual(repeated.events.filter(action=ArrivalRosterEvent.Action.CONFIRMED).count(), first_events)
+        serialized = json.dumps(repeated.confirmation_snapshot, ensure_ascii=False)
+        self.assertNotIn(self.employee.full_name, serialized)
+        self.assertEqual(repeated.status, ArrivalRosterVersion.Status.CONFIRMED)
+
+    def test_t14a_version_public_orm_writes_are_closed(self):
+        version = self._ready_version()
+        operations = [
+            lambda: version.save(),
+            lambda: ArrivalRosterVersion.objects.filter(pk=version.pk).update(status='confirmed'),
+            lambda: ArrivalRosterVersion.objects.bulk_create([version]),
+            lambda: ArrivalRosterVersion.objects.bulk_update([version], ['status']),
+            version.delete,
+        ]
+        for operation in operations:
+            with self.assertRaises(ValidationError) as caught:
+                operation()
+            self.assertEqual(caught.exception.code, 'rotations.arrival_roster.public_write_forbidden')
+
+    def test_t14a_excel_and_pool_happy_paths_and_shift_hints(self):
+        pool = self._ready_version()
+        self.assertEqual(self._confirm(pool).source_kind, ArrivalRosterVersion.SourceKind.EMPLOYEE_POOL)
+
+        second_period = WatchPeriod.objects.create(
+            name='Период Excel T1.4a', watch_composition=self.period.watch_composition,
+            starts_on=self.period.starts_on, ends_on=self.period.ends_on,
+        )
+        original_period = self.period
+        self.period = second_period
+        try:
+            excel = self._ready_excel(shift_hint=2)
+            confirmed = self._confirm(excel)
+        finally:
+            self.period = original_period
+        self.assertEqual(confirmed.source_kind, ArrivalRosterVersion.SourceKind.EXCEL)
+        serialized = json.dumps(confirmed.confirmation_snapshot, ensure_ascii=False)
+        self.assertNotIn('official_shift', serialized)
+        self.assertFalse(hasattr(confirmed, 'official_shift'))
+
+    def test_t14a_readiness_rejects_empty_resident_participation_and_dates(self):
+        empty_composition = WatchComposition.objects.create(
+            code='empty-t14a', name='Пустая вахта T1.4a',
+        )
+        empty_period = WatchPeriod.objects.create(
+            name='Пустой период T1.4a', watch_composition=empty_composition,
+            starts_on=self.period.starts_on, ends_on=self.period.ends_on,
+        )
+        empty = create_arrival_roster_from_employee_pool(
+            watch_period_id=empty_period.pk, actor_access_id=self.access.pk,
+        )
+        with self.assertRaises(ValidationError) as empty_error:
+            self._proposal(empty)
+        self.assertEqual(empty_error.exception.code, 'arrival_roster.empty_or_incomplete')
+        cases = [
+            ({'resident_resolution': 'unreviewed', 'selected_resident_id': None}, 'arrival_roster.resident_required'),
+            ({'participation_status': None}, 'arrival_roster.participation_required'),
+            ({'arrival_on': None, 'departure_on': None}, 'arrival_roster.dates_required'),
+        ]
+        for changes, code in cases:
+            version = self._ready_version()
+            target = version.row_reviews.get()
+            ArrivalRosterRowReview._base_manager.filter(pk=target.pk).update(**changes)
+            with self.assertRaises(ValidationError) as caught:
+                self._proposal(version)
+            self.assertEqual(caught.exception.code, code)
+
+    def test_t14a_stale_employee_fields_resident_and_source_snapshot(self):
+        mutations = [
+            {'status': Employee.Status.DISMISSED},
+            {'is_active': False},
+            {'hired_at': date(2026, 8, 15)},
+            {'dismissed_at': date(2026, 8, 1)},
+            {'watch_composition_id': None},
+        ]
+        for mutation in mutations:
+            version = self._ready_version()
+            proposal = self._proposal(version)
+            before = Employee.objects.filter(pk=self.employee.pk).values().get()
+            Employee.objects.filter(pk=self.employee.pk).update(**mutation)
+            with self.assertRaises(ValidationError) as caught:
+                confirm_arrival_roster_version(
+                    version_id=version.pk, expected_sha256=proposal['confirmation_sha256'],
+                    actor_access_id=self.access.pk,
+                )
+            self.assertEqual(caught.exception.code, 'arrival_roster.stale_confirmation_sha256')
+            Employee.objects.filter(pk=self.employee.pk).update(
+                status=before['status'], is_active=before['is_active'],
+                hired_at=before['hired_at'], dismissed_at=before['dismissed_at'],
+                watch_composition_id=before['watch_composition_id'],
+                updated_at=before['updated_at'],
+            )
+
+        version = self._ready_version()
+        proposal = self._proposal(version)
+        SettlementResident._base_manager.filter(pk=self.resident.pk).update(revision=models.F('revision') + 1)
+        with self.assertRaises(ValidationError) as resident_stale:
+            confirm_arrival_roster_version(
+                version_id=version.pk, expected_sha256=proposal['confirmation_sha256'],
+                actor_access_id=self.access.pk,
+            )
+        self.assertEqual(resident_stale.exception.code, 'arrival_roster.stale_confirmation_sha256')
+
+        version = self._ready_version()
+        proposal = self._proposal(version)
+        models.QuerySet.update(
+            ArrivalRosterVersion._base_manager.filter(pk=version.pk), snapshot={'tampered': True},
+        )
+        with self.assertRaises(ValidationError) as source_stale:
+            confirm_arrival_roster_version(
+                version_id=version.pk, expected_sha256=proposal['confirmation_sha256'],
+                actor_access_id=self.access.pk,
+            )
+        self.assertEqual(source_stale.exception.code, 'arrival_roster.stale_confirmation_sha256')
+
+    def test_t14a_inactive_and_wrong_resident_duplicates_and_invalid_interval(self):
+        version = self._ready_version()
+        proposal = self._proposal(version)
+        SettlementResident._base_manager.filter(pk=self.resident.pk).update(
+            status=SettlementResident.Status.ARCHIVED, archived_at=timezone.now(),
+        )
+        with self.assertRaises(ValidationError) as inactive:
+            confirm_arrival_roster_version(
+                version_id=version.pk, expected_sha256=proposal['confirmation_sha256'],
+                actor_access_id=self.access.pk,
+            )
+        self.assertEqual(inactive.exception.code, 'arrival_roster.stale_confirmation_sha256')
+        SettlementResident._base_manager.filter(pk=self.resident.pk).update(
+            status=SettlementResident.Status.ACTIVE, archived_at=None,
+        )
+
+        version = self._ready_version()
+        proposal = self._proposal(version)
+        other_employee = Employee.objects.create(
+            full_name='Другой Employee T1.4a', status=Employee.Status.ACTIVE,
+            is_active=True, hired_at=date(2025, 1, 1),
+            watch_composition=self.period.watch_composition,
+        )
+        SettlementResident._base_manager.filter(pk=self.resident.pk).update(
+            employee_id=other_employee.pk, revision=models.F('revision') + 1,
+        )
+        with self.assertRaises(ValidationError) as wrong:
+            confirm_arrival_roster_version(
+                version_id=version.pk, expected_sha256=proposal['confirmation_sha256'],
+                actor_access_id=self.access.pk,
+            )
+        self.assertEqual(wrong.exception.code, 'arrival_roster.stale_confirmation_sha256')
+        SettlementResident._base_manager.filter(pk=self.resident.pk).update(
+            employee_id=self.employee.pk, revision=models.F('revision') + 1,
+        )
+
+        version = self._ready_version()
+        match = version.matches.filter(pool_row__employee=self.employee).get()
+        with self.assertRaises(ValidationError) as dates:
+            set_arrival_roster_dates(
+                match_id=match.pk, arrival_on=self.period.ends_on,
+                departure_on=self.period.starts_on,
+                expected_revision=match.row_review.revision,
+                actor_access_id=self.access.pk,
+            )
+        self.assertEqual(dates.exception.code, 'arrival_roster.invalid_dates')
+
+        second_employee = Employee.objects.create(
+            full_name='Дубль T1.4a', status=Employee.Status.ACTIVE,
+            is_active=True, hired_at=date(2025, 1, 1),
+            watch_composition=self.period.watch_composition,
+        )
+        second_resident = SettlementResident.objects.create(
+            employee=second_employee,
+            resident_type=SettlementResident.ResidentType.EMPLOYEE,
+            status=SettlementResident.Status.ACTIVE,
+        )
+        second_version = self._ready_version()
+        first_match = second_version.matches.filter(pool_row__employee=self.employee).get()
+        second_match = second_version.matches.filter(pool_row__employee=second_employee).get()
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                ArrivalRosterRowReview._base_manager.filter(pk=second_match.row_review.pk).update(
+                    selected_resident_id=first_match.row_review.selected_resident_id,
+                )
+
+    def test_t14a_question_policy_is_closed_and_unknown_error_cannot_be_resolved(self):
+        expected = {
+            'conflicting_shift_hints': ('deputy', False),
+            'employee_watch_composition_mismatch': ('oup', False),
+            'employee_resident_missing': ('clerk', True),
+            'participation_requires_review': ('timekeeper', False),
+            'equipment_missing': ('deputy', False),
+            'official_shift_missing': ('deputy', False),
+            'external_card_incomplete': ('clerk', False),
+        }
+        for code, (role, blocks) in expected.items():
+            self.assertEqual(arrival_roster_issue_policy(code, 'error'), {
+                'role': role, 'blocks_confirmation': blocks,
+            })
+        self.assertTrue(arrival_roster_issue_policy('future_unknown', 'error')['blocks_confirmation'])
+
+        version = self._ready_version()
+        match = version.matches.get()
+        context = _lock_timekeeper_access(_access_snapshot(self.access.pk))
+        issue = _trusted_create_arrival_roster_issue(
+            version=version, match=match, severity='error', code='future_unknown',
+            message='Будущая неизвестная ошибка.', details={},
+        )
+        ArrivalRosterIssueResolution._base_manager.bulk_create([
+            ArrivalRosterIssueResolution(
+                issue=issue, is_resolved=True, resolution_note='Ручная отметка.',
+                revision=1, updated_by_access=self.access,
+            )
+        ])
+        with self.assertRaises(ValidationError) as caught:
+            self._proposal(version)
+        self.assertEqual(caught.exception.code, 'arrival_roster.blocking_issue')
+
+    def test_t14a_allowed_next_role_questions_and_missing_operational_fields_do_not_block(self):
+        version = self._ready_version()
+        match = version.matches.get()
+        for code in [
+            'employee_watch_composition_mismatch', 'external_card_incomplete',
+            'conflicting_shift_hints', 'equipment_missing', 'official_shift_missing',
+        ]:
+            _trusted_create_arrival_roster_issue(
+                version=version, match=match, severity='error', code=code,
+                message=f'Проверка политики {code}.', details={},
+            )
+        proposal = self._proposal(version)
+        roles = {
+            row['code']: row['responsible_role']
+            for row in proposal['confirmation_snapshot']['issues']
+        }
+        self.assertEqual(roles['employee_watch_composition_mismatch'], 'oup')
+        self.assertEqual(roles['external_card_incomplete'], 'clerk')
+        self.assertEqual(roles['conflicting_shift_hints'], 'deputy')
+        self.assertEqual(self._confirm(version).status, ArrivalRosterVersion.Status.CONFIRMED)
+
+    def test_t14a_exact_access_no_fallback_and_lock_order(self):
+        version = self._ready_version()
+        with self.assertRaises(ValidationError) as wrong_role:
+            build_arrival_roster_confirmation_proposal(
+                version_id=version.pk, actor_access_id=self.other_access.pk,
+            )
+        self.assertEqual(wrong_role.exception.code, 'arrival_roster.access_denied')
+
+        fallback = EmployeeAccess.objects.create(
+            employee=self.actor, role=self.access.role, access_code='fallback-t14a',
+            status=EmployeeAccess.Status.ACTIVATED, is_active=True,
+        )
+        EmployeeAccess.objects.filter(pk=self.access.pk).update(is_active=False)
+        with self.assertRaises(ValidationError) as inactive:
+            build_arrival_roster_confirmation_proposal(
+                version_id=version.pk, actor_access_id=self.access.pk,
+            )
+        self.assertEqual(inactive.exception.code, 'arrival_roster.access_denied')
+        self.assertTrue(fallback.is_active)
+        EmployeeAccess.objects.filter(pk=self.access.pk).update(is_active=True)
+
+        Employee.objects.filter(pk=self.actor.pk).update(is_active=False)
+        with self.assertRaises(ValidationError) as inactive_employee:
+            build_arrival_roster_confirmation_proposal(
+                version_id=version.pk, actor_access_id=self.access.pk,
+            )
+        self.assertEqual(inactive_employee.exception.code, 'arrival_roster.access_denied')
+        Employee.objects.filter(pk=self.actor.pk).update(is_active=True)
+
+        trace = []
+        original = QuerySet.select_for_update
+        def traced(queryset, *args, **kwargs):
+            trace.append(queryset.model.__name__)
+            return original(queryset, *args, **kwargs)
+        with patch.object(QuerySet, 'select_for_update', new=traced):
+            self._proposal(version)
+        expected = ['Employee', 'EmployeeAccess', 'WatchPeriod', 'ArrivalRosterVersion',
+                    'SettlementResident', 'ArrivalRosterMatch', 'ArrivalRosterRowReview',
+                    'ArrivalRosterIssue', 'ArrivalRosterIssueResolution']
+        positions = [trace.index(name) for name in expected]
+        self.assertEqual(positions, sorted(positions))
+        access_position = trace.index('EmployeeAccess')
+        self.assertNotIn('Employee', trace[access_position + 1:])
+        self.assertNotIn('Role', trace)
+
+    def test_t14a_confirmed_and_superseded_metadata_are_immutable(self):
+        confirmed = self._confirm(self._ready_version())
+        before = (confirmed.confirmed_by_access_id, confirmed.confirmed_at,
+                  confirmed.confirmation_snapshot, confirmed.confirmation_sha256)
+        with self.assertRaises(ValidationError):
+            _trusted_confirm_arrival_roster_version(
+                version_id=confirmed.pk, actor_access_id=self.access.pk,
+                confirmation_snapshot={'rewrite': True}, confirmation_sha256='1' * 64,
+                confirmed_at=timezone.now(),
+            )
+        superseded = _trusted_supersede_arrival_roster_version(
+            version_id=confirmed.pk, superseded_at=timezone.now(),
+        )
+        self.assertEqual(
+            (superseded.confirmed_by_access_id, superseded.confirmed_at,
+             superseded.confirmation_snapshot, superseded.confirmation_sha256), before,
+        )
+        with self.assertRaises(ValidationError):
+            _trusted_supersede_arrival_roster_version(
+                version_id=superseded.pk, superseded_at=timezone.now(),
+            )
+
+    def test_t14a_replacement_lineage_and_atomic_rollback(self):
+        first = self._confirm(self._ready_version())
+        replacement = self._ready_version()
+        proposal = self._proposal(replacement)
+        with self.assertRaises(ValidationError) as missing_lineage:
+            confirm_arrival_roster_version(
+                version_id=replacement.pk, expected_sha256=proposal['confirmation_sha256'],
+                actor_access_id=self.access.pk,
+            )
+        self.assertEqual(missing_lineage.exception.code, 'arrival_roster.replacement_lineage_required')
+        models.QuerySet.update(
+            ArrivalRosterVersion._base_manager.filter(pk=replacement.pk),
+            based_on_version_id=first.pk,
+        )
+        proposal = self._proposal(replacement)
+        with patch(
+            'rotations.arrival_roster_approvals._trusted_create_arrival_roster_event',
+            side_effect=RuntimeError('event failure'),
+        ):
+            with self.assertRaises(RuntimeError):
+                confirm_arrival_roster_version(
+                    version_id=replacement.pk, expected_sha256=proposal['confirmation_sha256'],
+                    actor_access_id=self.access.pk,
+                )
+        first.refresh_from_db(); replacement.refresh_from_db()
+        self.assertEqual(first.status, ArrivalRosterVersion.Status.CONFIRMED)
+        self.assertNotEqual(replacement.status, ArrivalRosterVersion.Status.CONFIRMED)
+        self.assertFalse(replacement.events.filter(action=ArrivalRosterEvent.Action.CONFIRMED).exists())
+
+        confirmed_replacement = confirm_arrival_roster_version(
+            version_id=replacement.pk, expected_sha256=proposal['confirmation_sha256'],
+            actor_access_id=self.access.pk,
+        )
+        first.refresh_from_db()
+        self.assertEqual(first.status, ArrivalRosterVersion.Status.SUPERSEDED)
+        self.assertEqual(confirmed_replacement.status, ArrivalRosterVersion.Status.CONFIRMED)
+
+    def test_t14a_wrong_period_lineage_and_second_confirmed_are_rejected(self):
+        first = self._confirm(self._ready_version())
+        other_composition = WatchComposition.objects.create(code='other-base-t14a', name='Другая база T1.4a')
+        other_period = WatchPeriod.objects.create(
+            name='Другой период T1.4a', watch_composition=other_composition,
+            starts_on=self.period.starts_on, ends_on=self.period.ends_on,
+        )
+        other_version = create_arrival_roster_from_employee_pool(
+            watch_period_id=other_period.pk, actor_access_id=self.access.pk,
+        )
+        replacement = self._ready_version()
+        models.QuerySet.update(
+            ArrivalRosterVersion._base_manager.filter(pk=replacement.pk),
+            based_on_version_id=other_version.pk,
+        )
+        with self.assertRaises(ValidationError) as wrong_period:
+            self._proposal(replacement)
+        self.assertEqual(wrong_period.exception.code, 'arrival_roster.replacement_base_invalid')
+
+        clean_second = self._ready_version()
+        proposal = self._proposal(clean_second)
+        with self.assertRaises(ValidationError) as one_confirmed:
+            confirm_arrival_roster_version(
+                version_id=clean_second.pk,
+                expected_sha256=proposal['confirmation_sha256'],
+                actor_access_id=self.access.pk,
+            )
+        self.assertEqual(one_confirmed.exception.code, 'arrival_roster.replacement_lineage_required')
+        first.refresh_from_db()
+        self.assertEqual(first.status, ArrivalRosterVersion.Status.CONFIRMED)
+
+    def test_t14a_pool_trusted_snapshot_ignores_caller_snapshots(self):
+        plans = [{
+            'employee': self.employee,
+            'resident': self.resident,
+            'employee_snapshot': {'forged_employee': 'must-not-be-stored'},
+            'resident_snapshot': {'forged_resident': 'must-not-be-stored'},
+            'issues': [],
+        }]
+        version = _trusted_create_pool_arrival_roster_version(
+            period=self.period,
+            version_number=997,
+            actor_access=self.access,
+            plans=plans,
+        )
+        version = _trusted_finalize_pool_arrival_roster_version(
+            version=version,
+            period=self.period,
+            plans=plans,
+            pool_rows=[],
+        )
+        actual_source = {
+            'watch_period_id': self.period.pk,
+            'watch_composition_id': self.period.watch_composition_id,
+            'employees': [{
+                'employee': _employee_snapshot(
+                    Employee._base_manager.get(pk=self.employee.pk)
+                ),
+                'resident': _resident_snapshot(
+                    SettlementResident._base_manager.get(pk=self.resident.pk)
+                ),
+                'issue_codes': [],
+            }],
+        }
+        expected_fingerprint = hashlib.sha256(
+            json.dumps(
+                actual_source,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(',', ':'),
+            ).encode('utf-8')
+        ).hexdigest()
+        version.refresh_from_db()
+        self.assertEqual(version.snapshot['source'], actual_source)
+        self.assertEqual(version.source_fingerprint, expected_fingerprint)
+        self.assertEqual(version.snapshot['source_fingerprint'], expected_fingerprint)
+        serialized = json.dumps(version.snapshot, ensure_ascii=False)
+        self.assertNotIn('forged_employee', serialized)
+        self.assertNotIn('forged_resident', serialized)
+        self.assertNotIn('must-not-be-stored', serialized)
+
+    def test_t14a_database_enforces_one_confirmed_version_per_period(self):
+        first = self._confirm(self._ready_version())
+        second = self._ready_version()
+        collision = None
+        try:
+            with transaction.atomic():
+                models.QuerySet.update(
+                    ArrivalRosterVersion._base_manager.filter(pk=second.pk),
+                    status=ArrivalRosterVersion.Status.CONFIRMED,
+                    confirmed_by_access_id=self.access.pk,
+                    confirmed_at=timezone.now(),
+                    confirmation_snapshot={'test': 'second-confirmed'},
+                    confirmation_sha256='2' * 64,
+                )
+        except IntegrityError as error:
+            collision = error
+        self.assertIsNotNone(collision)
+        self.assertTrue(_is_confirmed_period_collision(collision))
+        self.assertEqual(
+            ArrivalRosterVersion._base_manager.filter(
+                watch_period=self.period,
+                status=ArrivalRosterVersion.Status.CONFIRMED,
+            ).count(),
+            1,
+        )
+        first.refresh_from_db()
+        second.refresh_from_db()
+        self.assertEqual(first.status, ArrivalRosterVersion.Status.CONFIRMED)
+        self.assertNotEqual(second.status, ArrivalRosterVersion.Status.CONFIRMED)
+
+    def test_t14a_controlled_unique_collision_and_unknown_integrity_error(self):
+        version = self._ready_version()
+        proposal = self._proposal(version)
+        collision = IntegrityError(
+            'UNIQUE constraint failed: rotations_arrivalrosterversion.watch_period_id'
+        )
+        with patch(
+            'rotations.arrival_roster_approvals._confirm_arrival_roster_version_once',
+            side_effect=collision,
+        ):
+            with self.assertRaises(ValidationError) as caught:
+                confirm_arrival_roster_version(
+                    version_id=version.pk, expected_sha256=proposal['confirmation_sha256'],
+                    actor_access_id=self.access.pk,
+                )
+        self.assertEqual(caught.exception.code, 'arrival_roster.confirmed_period_conflict')
+        with patch(
+            'rotations.arrival_roster_approvals._confirm_arrival_roster_version_once',
+            side_effect=IntegrityError('unknown constraint'),
+        ):
+            with self.assertRaises(IntegrityError):
+                confirm_arrival_roster_version(
+                    version_id=version.pk, expected_sha256=proposal['confirmation_sha256'],
+                    actor_access_id=self.access.pk,
+                )
+
+    def test_t14a_public_create_shortcuts_queryset_delete_and_db_shape_are_closed(self):
+        version = self._ready_version()
+        kwargs = {
+            'watch_period': self.period, 'version_number': 999,
+            'status': 'draft', 'source_kind': 'employee_pool',
+            'created_by_access': self.access, 'source_fingerprint': '1' * 64,
+        }
+        operations = [
+            lambda: ArrivalRosterVersion.objects.create(**kwargs),
+            lambda: ArrivalRosterVersion.objects.get_or_create(version_number=998, defaults=kwargs),
+            lambda: ArrivalRosterVersion.objects.update_or_create(version_number=997, defaults=kwargs),
+            lambda: ArrivalRosterVersion.objects.filter(pk=version.pk).delete(),
+        ]
+        for operation in operations:
+            with self.assertRaises(ValidationError) as caught:
+                operation()
+            self.assertEqual(caught.exception.code, 'rotations.arrival_roster.public_write_forbidden')
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                models.QuerySet.update(
+                    ArrivalRosterVersion._base_manager.filter(pk=version.pk),
+                    status='confirmed', confirmed_by_access_id=self.access.pk,
+                    confirmed_at=timezone.now(), confirmation_snapshot={},
+                    confirmation_sha256='1' * 64,
+                )
+
+    def test_t14a_snapshot_is_deterministic_complete_safe_and_has_no_side_effects(self):
+        version = self._ready_version()
+        counts = {
+            'employee': Employee.objects.count(),
+            'access': EmployeeAccess.objects.count(),
+            'resident': SettlementResident.objects.count(),
+            'cohort': SettlementCohort.objects.count(),
+            'occupancy': EmployeeBedOccupancy.objects.count(),
+            'assignment': apps.get_model('assignments', 'EquipmentAssignment').objects.count(),
+        }
+        first = self._proposal(version)
+        second = self._proposal(version)
+        self.assertEqual(first, second)
+        row = first['confirmation_snapshot']['rows'][0]
+        self.assertEqual(set(row['employee']), {
+            'employee_id', 'status', 'is_active', 'hired_at', 'dismissed_at',
+            'watch_composition_id', 'updated_at',
+        })
+        serialized = json.dumps(first['confirmation_snapshot'], ensure_ascii=False).lower()
+        for secret in [self.employee.full_name, 'phone', 'pin', 'password', 'passport']:
+            self.assertNotIn(secret.lower(), serialized)
+        self.assertEqual(counts, {
+            'employee': Employee.objects.count(),
+            'access': EmployeeAccess.objects.count(),
+            'resident': SettlementResident.objects.count(),
+            'cohort': SettlementCohort.objects.count(),
+            'occupancy': EmployeeBedOccupancy.objects.count(),
+            'assignment': apps.get_model('assignments', 'EquipmentAssignment').objects.count(),
+        })
+
+
+class ArrivalRosterT14aMigrationTests(TransactionTestCase):
+    reset_sequences = True
+
+    def _migrate(self, target):
+        executor = MigrationExecutor(connection)
+        executor.migrate([('rotations', target)])
+        return executor.loader.project_state([('rotations', target)]).apps
+
+    def tearDown(self):
+        self._migrate('0005_arrival_roster_confirmation')
+        super().tearDown()
+
+    def _historical_version(self, apps, *, confirmed=False):
+        RoleModel = apps.get_model('users', 'Role')
+        EmployeeModel = apps.get_model('users', 'Employee')
+        AccessModel = apps.get_model('users', 'EmployeeAccess')
+        CompositionModel = apps.get_model('users', 'WatchComposition')
+        PeriodModel = apps.get_model('shifts', 'WatchPeriod')
+        VersionModel = apps.get_model('rotations', 'ArrivalRosterVersion')
+        role, _created = RoleModel.objects.get_or_create(
+            code='timekeeper', defaults={'name': 'Табельщик', 'is_active': True},
+        )
+        employee = EmployeeModel.objects.create(
+            full_name='Migration T1.4a', status='active', is_active=True,
+        )
+        access = AccessModel.objects.create(
+            employee_id=employee.pk, role_id=role.pk, access_code='migration-t14a',
+            status='activated', is_active=True,
+        )
+        composition = CompositionModel.objects.create(
+            code='migration-t14a', name='Migration T1.4a',
+        )
+        period = PeriodModel.objects.create(
+            name='Migration T1.4a', watch_composition_id=composition.pk,
+            starts_on=date(2026, 8, 1), ends_on=date(2026, 9, 1), is_active=True,
+        )
+        kwargs = {
+            'watch_period_id': period.pk, 'version_number': 1,
+            'status': 'confirmed' if confirmed else 'draft',
+            'source_kind': 'employee_pool', 'created_by_access_id': access.pk,
+            'source_fingerprint': '1' * 64,
+            'snapshot': {'source': 'migration'}, 'snapshot_sha256': '2' * 64,
+        }
+        if confirmed:
+            kwargs.update(
+                confirmed_by_access_id=access.pk, confirmed_at=timezone.now(),
+                confirmation_snapshot={'schema': 1}, confirmation_sha256='3' * 64,
+            )
+        return VersionModel.objects.create(**kwargs)
+
+    def test_t14a_migration_cycle_and_safe_reverse_preserve_draft_version(self):
+        apps_0004 = self._migrate('0004_arrival_roster_employee_pool')
+        version = self._historical_version(apps_0004)
+        apps_0005 = self._migrate('0005_arrival_roster_confirmation')
+        Version0005 = apps_0005.get_model('rotations', 'ArrivalRosterVersion')
+        migrated = Version0005.objects.get(pk=version.pk)
+        self.assertEqual(migrated.status, 'draft')
+        self.assertEqual(migrated.confirmation_snapshot, {})
+        apps_reversed = self._migrate('0004_arrival_roster_employee_pool')
+        self.assertTrue(
+            apps_reversed.get_model('rotations', 'ArrivalRosterVersion').objects.filter(pk=version.pk).exists()
+        )
+        apps_forward = self._migrate('0005_arrival_roster_confirmation')
+        self.assertTrue(
+            apps_forward.get_model('rotations', 'ArrivalRosterVersion').objects.filter(pk=version.pk).exists()
+        )
+
+    def test_t14a_migration_reverse_fails_closed_with_count_and_pk(self):
+        apps_0005 = self._migrate('0005_arrival_roster_confirmation')
+        version = self._historical_version(apps_0005, confirmed=True)
+        with self.assertRaisesRegex(
+            RuntimeError, rf'count=1; PK=\[{version.pk}\]',
+        ):
+            self._migrate('0004_arrival_roster_employee_pool')
 
 
 class ArrivalRosterT13bTests(TestCase):

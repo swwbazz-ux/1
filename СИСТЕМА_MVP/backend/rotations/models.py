@@ -598,6 +598,7 @@ class ArrivalRosterParserProfile(ArrivalRosterImmutableModel):
 
 
 class ArrivalRosterVersion(ArrivalRosterImmutableModel):
+    PUBLIC_CREATE_FORBIDDEN = True
     class SourceKind(models.TextChoices):
         EXCEL = 'excel', 'Excel'
         EMPLOYEE_POOL = 'employee_pool', 'Из базы сотрудников'
@@ -605,10 +606,13 @@ class ArrivalRosterVersion(ArrivalRosterImmutableModel):
     class Status(models.TextChoices):
         DRAFT = 'draft', 'Черновик'
         REVIEW_REQUIRED = 'review_required', 'Требуется проверка'
+        CONFIRMED = 'confirmed', 'Утверждена'
+        SUPERSEDED = 'superseded', 'Заменена'
 
     IMMUTABLE_FIELDS = (
         'watch_period_id', 'version_number', 'source_kind', 'source_file_id',
         'parser_profile_id', 'created_by_access_id', 'source_fingerprint',
+        'based_on_version_id',
     )
 
     watch_period = models.ForeignKey(
@@ -658,6 +662,24 @@ class ArrivalRosterVersion(ArrivalRosterImmutableModel):
         max_length=64,
         validators=[RegexValidator(regex=r'^[0-9a-f]{64}$')],
     )
+    based_on_version = models.ForeignKey(
+        'self', verbose_name='Основана на версии', on_delete=models.PROTECT,
+        related_name='replacement_versions', null=True, blank=True,
+    )
+    confirmed_by_access = models.ForeignKey(
+        'users.EmployeeAccess', verbose_name='Точный доступ утвердившего',
+        on_delete=models.PROTECT, related_name='confirmed_arrival_roster_versions',
+        null=True, blank=True,
+    )
+    confirmed_at = models.DateTimeField('Утверждена', null=True, blank=True)
+    confirmation_snapshot = models.JSONField(
+        'Канонический снимок утверждения', default=dict, blank=True,
+    )
+    confirmation_sha256 = models.CharField(
+        'SHA-256 утверждения', max_length=64, blank=True,
+        validators=[RegexValidator(regex=r'^$|^[0-9a-f]{64}$')],
+    )
+    superseded_at = models.DateTimeField('Заменена', null=True, blank=True)
     source_row_count = models.PositiveIntegerField('Исходных строк', default=0)
     normalized_row_count = models.PositiveIntegerField('Распознано строк', default=0)
     blocking_issue_count = models.PositiveIntegerField('Блокирующих замечаний', default=0)
@@ -697,8 +719,36 @@ class ArrivalRosterVersion(ArrivalRosterImmutableModel):
                 name='arrival_version_number_gte_1',
             ),
             models.CheckConstraint(
-                condition=models.Q(status__in=['draft', 'review_required']),
-                name='arrival_version_status_t11',
+                condition=models.Q(status__in=['draft', 'review_required', 'confirmed', 'superseded']),
+                name='arrival_version_status_t14a',
+            ),
+            models.UniqueConstraint(
+                fields=['watch_period'], condition=models.Q(status='confirmed'),
+                name='uniq_arrival_confirmed_period',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        status__in=['draft', 'review_required'], confirmed_by_access__isnull=True,
+                        confirmed_at__isnull=True, confirmation_snapshot={},
+                        confirmation_sha256='', superseded_at__isnull=True,
+                    )
+                    | models.Q(
+                        status='confirmed', confirmed_by_access__isnull=False,
+                        confirmed_at__isnull=False, confirmation_sha256__regex=r'^[0-9a-f]{64}$',
+                        superseded_at__isnull=True,
+                    ) & ~models.Q(
+                        confirmation_snapshot={},
+                    )
+                    | models.Q(
+                        status='superseded', confirmed_by_access__isnull=False,
+                        confirmed_at__isnull=False, confirmation_sha256__regex=r'^[0-9a-f]{64}$',
+                        superseded_at__isnull=False,
+                    ) & ~models.Q(
+                        confirmation_snapshot={},
+                    )
+                ),
+                name='arrival_version_approval_shape',
             ),
             models.CheckConstraint(
                 condition=(
@@ -719,6 +769,9 @@ class ArrivalRosterVersion(ArrivalRosterImmutableModel):
 
     def __str__(self):
         return f'{self.watch_period} / версия {self.version_number}'
+
+    def save(self, *args, **kwargs):
+        raise self._write_forbidden_error()
 
     @property
     def uploaded_by_access(self):
@@ -742,6 +795,24 @@ class ArrivalRosterVersion(ArrivalRosterImmutableModel):
                 errors['source_file'] = 'Версия из базы сотрудников не использует Excel-файл.'
             if self.parser_profile_id:
                 errors['parser_profile'] = 'Версия из базы сотрудников не использует профиль Excel.'
+        approval_complete = bool(
+            self.confirmed_by_access_id and self.confirmed_at
+            and self.confirmation_snapshot and self.confirmation_sha256
+        )
+        if self.status in {self.Status.CONFIRMED, self.Status.SUPERSEDED}:
+            if not approval_complete:
+                errors['confirmation_snapshot'] = 'Утверждённая история требует полный снимок.'
+            if self.status == self.Status.CONFIRMED and self.superseded_at:
+                errors['superseded_at'] = 'Действующая утверждённая версия не заменена.'
+            if self.status == self.Status.SUPERSEDED and not self.superseded_at:
+                errors['superseded_at'] = 'Заменённая версия требует время замены.'
+        elif approval_complete or self.confirmed_by_access_id or self.confirmed_at or self.confirmation_snapshot or self.confirmation_sha256 or self.superseded_at:
+            errors['status'] = 'Подготовительная версия не содержит данных утверждения.'
+        if self.based_on_version_id:
+            if self.based_on_version_id == self.pk:
+                errors['based_on_version'] = 'Версия не может основываться сама на себе.'
+            elif self.based_on_version.watch_period_id != self.watch_period_id:
+                errors['based_on_version'] = 'Базовая версия относится к другому периоду.'
         if errors:
             raise ValidationError(errors)
 
@@ -756,6 +827,8 @@ class ArrivalRosterVersion(ArrivalRosterImmutableModel):
                 'status', 'source_row_count', 'normalized_row_count',
                 'blocking_issue_count', 'warning_count', 'snapshot',
                 'snapshot_sha256',
+                'based_on_version_id', 'confirmed_by_access_id', 'confirmed_at',
+                'confirmation_snapshot', 'confirmation_sha256', 'superseded_at',
             )
             .first()
         )
@@ -1411,6 +1484,7 @@ class ArrivalRosterEvent(ArrivalRosterImmutableModel):
         POOL_CREATED = 'pool_created', 'Список сформирован из карточек сотрудников'
         POOL_EMPLOYEE_ADDED = 'pool_employee_added', 'Сотрудник добавлен в список'
         POOL_EXTERNAL_ADDED = 'pool_external_added', 'Внешний жилец добавлен в список'
+        CONFIRMED = 'confirmed', 'Версия окончательно утверждена'
 
     IMMUTABLE_FIELDS = (
         'version_id', 'actor_access_id', 'match_id', 'issue_id',

@@ -1,7 +1,8 @@
 from dataclasses import dataclass
 
 from django.core.exceptions import ValidationError
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, models, transaction
+from django.utils import timezone
 
 from settlement.models import SettlementResident
 from shifts.models import WatchPeriod
@@ -17,6 +18,7 @@ from .arrival_rosters import (
     _trusted_create_arrival_roster_issue,
     _trusted_create_arrival_roster_match,
     _trusted_create_arrival_roster_event,
+    _trusted_insert_arrival_roster_version,
     _trusted_write_review,
     _verified_timekeeper_access,
 )
@@ -32,6 +34,119 @@ from .models import (
 
 def _validation_error(code, message):
     return ValidationError(message, code=code)
+
+
+def _trusted_pool_source_snapshot(*, period, plans):
+    employee_ids = [plan['employee'].pk for plan in plans]
+    resident_ids = [
+        plan['resident'].pk
+        for plan in plans
+        if plan['resident'] is not None
+    ]
+    employees_by_id = {
+        employee.pk: employee
+        for employee in Employee._base_manager.filter(pk__in=employee_ids).order_by('pk')
+    }
+    residents_by_id = {
+        resident.pk: resident
+        for resident in SettlementResident._base_manager.filter(pk__in=resident_ids).order_by('pk')
+    }
+    if set(employees_by_id) != set(employee_ids) or set(residents_by_id) != set(resident_ids):
+        raise _validation_error(
+            'arrival_roster.pool_snapshot_mismatch',
+            'Сотрудник или карточка жильца изменились во время формирования версии.',
+        )
+
+    employees = []
+    for plan in plans:
+        employee = employees_by_id[plan['employee'].pk]
+        resident = (
+            residents_by_id[plan['resident'].pk]
+            if plan['resident'] is not None
+            else None
+        )
+        if resident is not None and resident.employee_id != employee.pk:
+            raise _validation_error(
+                'arrival_roster.pool_snapshot_mismatch',
+                'Карточка жильца не соответствует сотруднику.',
+            )
+        employees.append({
+            'employee': _employee_snapshot(employee),
+            'resident': _resident_snapshot(resident) if resident is not None else {},
+            'issue_codes': sorted(code for code, _message in plan['issues']),
+        })
+    return {
+        'watch_period_id': period.pk,
+        'watch_composition_id': period.watch_composition_id,
+        'employees': employees,
+    }
+
+
+def _trusted_create_pool_arrival_roster_version(*, period, version_number,
+                                                 actor_access, plans):
+    source_snapshot = _trusted_pool_source_snapshot(period=period, plans=plans)
+    version = ArrivalRosterVersion(
+        watch_period=period,
+        version_number=version_number,
+        status=ArrivalRosterVersion.Status.REVIEW_REQUIRED,
+        source_kind=ArrivalRosterVersion.SourceKind.EMPLOYEE_POOL,
+        source_file=None,
+        parser_profile=None,
+        created_by_access=actor_access,
+        source_fingerprint=_canonical_sha256(source_snapshot),
+    )
+    return _trusted_insert_arrival_roster_version(version)
+
+
+def _trusted_finalize_pool_arrival_roster_version(*, version, period, plans,
+                                                   pool_rows):
+    locked = ArrivalRosterVersion._base_manager.select_for_update(of=('self',)).get(pk=version.pk)
+    if (
+        locked.status not in {ArrivalRosterVersion.Status.DRAFT, ArrivalRosterVersion.Status.REVIEW_REQUIRED}
+        or locked.snapshot_sha256
+        or locked.source_kind != ArrivalRosterVersion.SourceKind.EMPLOYEE_POOL
+        or locked.watch_period_id != period.pk
+    ):
+        raise _validation_error('arrival_roster.version_changed', 'Версия реестра изменилась.')
+    source_snapshot = _trusted_pool_source_snapshot(period=period, plans=plans)
+    source_fingerprint = _canonical_sha256(source_snapshot)
+    if source_fingerprint != locked.source_fingerprint:
+        raise _validation_error('arrival_roster.source_changed', 'Исходный состав версии изменился.')
+    blocking_count = locked.issues.filter(severity=ArrivalRosterIssue.Severity.ERROR).count()
+    snapshot = {
+        'source_kind': ArrivalRosterVersion.SourceKind.EMPLOYEE_POOL,
+        'source_fingerprint': source_fingerprint,
+        'source': source_snapshot,
+        'version_number': locked.version_number,
+        'pool_row_hashes': [row.snapshot_sha256 for row in pool_rows],
+        'blocking_issue_count': blocking_count,
+    }
+    locked.status = (
+        ArrivalRosterVersion.Status.REVIEW_REQUIRED
+        if blocking_count else ArrivalRosterVersion.Status.DRAFT
+    )
+    locked.source_row_count = len(plans)
+    locked.normalized_row_count = len(pool_rows)
+    locked.blocking_issue_count = blocking_count
+    locked.warning_count = 0
+    locked.snapshot = snapshot
+    locked.snapshot_sha256 = _canonical_sha256(snapshot)
+    locked.updated_at = timezone.now()
+    locked.full_clean()
+    updated = models.QuerySet.update(
+        ArrivalRosterVersion._base_manager.filter(pk=locked.pk),
+        status=locked.status,
+        source_row_count=locked.source_row_count,
+        normalized_row_count=locked.normalized_row_count,
+        blocking_issue_count=locked.blocking_issue_count,
+        warning_count=locked.warning_count,
+        snapshot=locked.snapshot,
+        snapshot_sha256=locked.snapshot_sha256,
+        updated_at=locked.updated_at,
+    )
+    if updated != 1:
+        raise _validation_error('arrival_roster.version_changed', 'Версия реестра изменилась.')
+    return locked
 
 
 @dataclass(frozen=True, slots=True)
@@ -433,42 +548,22 @@ def create_arrival_roster_from_employee_pool(*, watch_period_id, actor_access_id
             employee,
             residents_by_employee.get(employee.pk, []),
         )
-        employee_snapshot = _employee_snapshot(employee)
         issue_specs = _issue_specs_for_employee(employee, period)
         if resident_issue:
             issue_specs.append(resident_issue)
         plans.append({
             'employee': employee,
             'resident': resident,
-            'employee_snapshot': employee_snapshot,
-            'resident_snapshot': _resident_snapshot(resident) if resident else {},
             'issues': issue_specs,
         })
 
-    source_snapshot = {
-        'watch_period_id': period.pk,
-        'watch_composition_id': period.watch_composition_id,
-        'employees': [
-            {
-                'employee': plan['employee_snapshot'],
-                'resident': plan['resident_snapshot'],
-                'issue_codes': sorted(code for code, _message in plan['issues']),
-            }
-            for plan in plans
-        ],
-    }
-    source_fingerprint = _canonical_sha256(source_snapshot)
-    version = ArrivalRosterVersion(
-        watch_period=period,
+    version = _trusted_create_pool_arrival_roster_version(
+        period=period,
         version_number=version_number,
-        status=ArrivalRosterVersion.Status.REVIEW_REQUIRED,
-        source_kind=ArrivalRosterVersion.SourceKind.EMPLOYEE_POOL,
-        source_file=None,
-        parser_profile=None,
-        created_by_access=actor_access,
-        source_fingerprint=source_fingerprint,
+        actor_access=actor_access,
+        plans=plans,
     )
-    version.save()
+    source_fingerprint = version.source_fingerprint
 
     pool_rows = []
     for plan in plans:
@@ -507,31 +602,10 @@ def create_arrival_roster_from_employee_pool(*, watch_period_id, actor_access_id
                 employee_id=employee.pk,
             )
 
-    blocking_count = version.issues.filter(severity=ArrivalRosterIssue.Severity.ERROR).count()
-    immutable_snapshot = {
-        'source_kind': ArrivalRosterVersion.SourceKind.EMPLOYEE_POOL,
-        'source_fingerprint': source_fingerprint,
-        'source': source_snapshot,
-        'version_number': version_number,
-        'pool_row_hashes': [row.snapshot_sha256 for row in pool_rows],
-        'blocking_issue_count': blocking_count,
-    }
-    version.status = (
-        ArrivalRosterVersion.Status.REVIEW_REQUIRED
-        if blocking_count
-        else ArrivalRosterVersion.Status.DRAFT
+    version = _trusted_finalize_pool_arrival_roster_version(
+        version=version, period=period, plans=plans, pool_rows=pool_rows,
     )
-    version.source_row_count = len(plans)
-    version.normalized_row_count = len(pool_rows)
-    version.blocking_issue_count = blocking_count
-    version.warning_count = 0
-    version.snapshot = immutable_snapshot
-    version.snapshot_sha256 = _canonical_sha256(immutable_snapshot)
-    version.save(update_fields=[
-        'status', 'source_row_count', 'normalized_row_count',
-        'blocking_issue_count', 'warning_count', 'snapshot',
-        'snapshot_sha256', 'updated_at',
-    ])
+    blocking_count = version.blocking_issue_count
     _trusted_create_arrival_roster_event(
         version=version,
         actor_context=actor_context,
