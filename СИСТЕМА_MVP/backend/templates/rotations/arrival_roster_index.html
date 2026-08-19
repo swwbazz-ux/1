@@ -79,8 +79,8 @@
                                     <td>{{ period.starts_on|date:"d.m.Y" }}–{{ period.ends_on|date:"d.m.Y" }}{% if period.is_current %}<br><small>Текущий период</small>{% else %}<br><small>Будущий период</small>{% endif %}</td>
                                     <td>{{ period.watch_composition.name|default:"Не указана" }}</td>
                                     <td>№ {{ version.version_number }}</td>
-                                    <td>{% if version.source_kind == 'employee_pool' %}Из базы сотрудников{% else %}Из Excel{% endif %}</td>
-                                    <td>{{ version.get_status_display }}</td>
+                                    <td>{{ version.source_label }}</td>
+                                    <td>{% if version.is_current_confirmed %}<strong>{{ version.status_label }} · действующая версия</strong>{% else %}{{ version.status_label }}{% endif %}</td>
                                     <td>{{ version.people_count }}</td>
                                     <td>
                                         Табельщик: {{ version.responsibility_counts.timekeeper }}<br>

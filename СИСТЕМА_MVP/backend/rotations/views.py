@@ -41,7 +41,12 @@ from .arrival_roster_pool import (
     confirm_unambiguous_arrival_roster_rows,
     create_arrival_roster_from_employee_pool,
 )
+from .arrival_roster_approvals import (
+    build_arrival_roster_confirmation_proposal,
+    confirm_arrival_roster_version,
+)
 from .forms import (
+    ArrivalRosterConfirmationForm,
     ArrivalRosterDatesForm,
     ArrivalRosterEmployeeAddForm,
     ArrivalRosterEmployeeSearchForm,
@@ -118,6 +123,23 @@ def _version_responsibility_counts(version):
     return counts
 
 
+def _arrival_roster_status_label(status):
+    return {
+        ArrivalRosterVersion.Status.DRAFT: 'Подготовка',
+        ArrivalRosterVersion.Status.REVIEW_REQUIRED: 'Требуется проверка',
+        ArrivalRosterVersion.Status.CONFIRMED: 'Утверждена',
+        ArrivalRosterVersion.Status.SUPERSEDED: 'Заменена новой версией',
+    }.get(status, 'Требуется проверка')
+
+
+def _arrival_roster_source_label(source_kind):
+    return (
+        'Из базы сотрудников'
+        if source_kind == ArrivalRosterVersion.SourceKind.EMPLOYEE_POOL
+        else 'Excel для сверки'
+    )
+
+
 def _arrival_roster_index_context(*, pool_form=None):
     today = timezone.localdate()
     periods = list(
@@ -132,6 +154,9 @@ def _arrival_roster_index_context(*, pool_form=None):
         for version in versions:
             version.people_count = version.matches.count()
             version.responsibility_counts = _version_responsibility_counts(version)
+            version.status_label = _arrival_roster_status_label(version.status)
+            version.source_label = _arrival_roster_source_label(version.source_kind)
+            version.is_current_confirmed = version.status == ArrivalRosterVersion.Status.CONFIRMED
         period.roster_versions = versions
         period.is_current = period.starts_on <= today <= period.ends_on
     return {
@@ -240,6 +265,7 @@ def arrival_roster_review_view(request, version_id):
         ArrivalRosterVersion.objects.select_related(
             'watch_period', 'source_file', 'parser_profile',
             'uploaded_by_access__employee',
+            'confirmed_by_access__employee',
         ),
         pk=version_id,
     )
@@ -439,6 +465,24 @@ def arrival_roster_review_view(request, version_id):
     open_blocking_count = sum(
         1 for readiness in readiness_by_match.values() if not readiness['ready']
     )
+    is_read_only = version.status in {
+        ArrivalRosterVersion.Status.CONFIRMED,
+        ArrivalRosterVersion.Status.SUPERSEDED,
+    }
+    approval_error = ''
+    approval_form = None
+    if not is_read_only:
+        try:
+            proposal = build_arrival_roster_confirmation_proposal(
+                version_id=version.pk,
+                actor_access_id=access.pk,
+            )
+        except ValidationError as error:
+            approval_error = _validation_message(error)
+        else:
+            approval_form = ArrivalRosterConfirmationForm(initial={
+                'expected_sha256': proposal['confirmation_sha256'],
+            })
 
     group_specs = (
         ('expected', 'Ожидаются к заезду'),
@@ -542,6 +586,12 @@ def arrival_roster_review_view(request, version_id):
             'employee_results': employee_results,
             'external_search_form': external_search_form,
             'external_results': external_results,
+            'is_read_only': is_read_only,
+            'status_label': _arrival_roster_status_label(version.status),
+            'source_label': _arrival_roster_source_label(version.source_kind),
+            'approval_ready': approval_form is not None,
+            'approval_form': approval_form,
+            'approval_error': approval_error,
         },
     )
     return _private_no_store(response)
@@ -553,6 +603,35 @@ def _arrival_roster_redirect(version_id):
 
 def _arrival_roster_error(request, error):
     messages.error(request, _validation_message(error))
+
+
+@require_POST
+def arrival_roster_approval_confirm_view(request, version_id):
+    access, response = _role_access(request, 'timekeeper')
+    if response:
+        return response
+    form = ArrivalRosterConfirmationForm(request.POST)
+    if not form.is_valid():
+        messages.error(request, 'Предложение утверждения повреждено. Обновите страницу.')
+        return _arrival_roster_redirect(version_id)
+    already_confirmed = ArrivalRosterVersion.objects.filter(
+        pk=version_id,
+        status=ArrivalRosterVersion.Status.CONFIRMED,
+    ).exists()
+    try:
+        confirm_arrival_roster_version(
+            version_id=version_id,
+            expected_sha256=form.cleaned_data['expected_sha256'],
+            actor_access_id=access.pk,
+        )
+    except ValidationError as error:
+        _arrival_roster_error(request, error)
+    else:
+        if already_confirmed:
+            messages.info(request, 'Список уже утверждён.')
+        else:
+            messages.success(request, 'Список заезда утверждён.')
+    return _arrival_roster_redirect(version_id)
 
 
 @require_POST

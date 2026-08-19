@@ -1878,6 +1878,18 @@ class ArrivalRosterT14aApprovalTests(TestCase):
             )
         return version
 
+    def _login(self, client=None, access=None):
+        client = client or self.client
+        session = client.session
+        session['employee_access_id'] = (access or self.access).pk
+        session.save()
+        return client
+
+    def _approval_token(self, client, version):
+        response = client.get(reverse('arrival_roster_review', args=[version.pk]))
+        self.assertEqual(response.status_code, 200)
+        return response, response.context['approval_form']['expected_sha256'].value()
+
     def _ready_excel(self, *, shift_hint=1):
         uploaded = SimpleUploadedFile(
             't14a.xlsx',
@@ -2425,6 +2437,127 @@ class ArrivalRosterT14aApprovalTests(TestCase):
         second.refresh_from_db()
         self.assertEqual(first.status, ArrivalRosterVersion.Status.CONFIRMED)
         self.assertNotEqual(second.status, ArrivalRosterVersion.Status.CONFIRMED)
+
+    def test_t14b_ready_button_and_unready_blockers_are_server_rendered(self):
+        client = self._login()
+        ready_response, _token = self._approval_token(client, self._ready_version())
+        self.assertContains(ready_response, 'Утвердить список заезда')
+        self.assertContains(ready_response, 'Версия готова к утверждению')
+
+        unready = create_arrival_roster_from_employee_pool(
+            watch_period_id=self.period.pk,
+            actor_access_id=self.access.pk,
+        )
+        blocked = client.get(reverse('arrival_roster_review', args=[unready.pk]))
+        self.assertNotContains(blocked, 'Утвердить список заезда')
+        self.assertContains(blocked, 'Утверждение пока недоступно')
+        self.assertTrue(blocked.context['approval_error'])
+        self.assertContains(blocked, blocked.context['approval_error'])
+        self.assertContains(blocked, 'Требуют решения табельщика')
+
+    def test_t14b_approval_is_post_csrf_session_access_and_payload_safe(self):
+        version = self._ready_version()
+        csrf_client = self._login(Client(enforce_csrf_checks=True))
+        url = reverse('arrival_roster_approval_confirm', args=[version.pk])
+        self.assertEqual(csrf_client.get(url).status_code, 405)
+        self.assertEqual(csrf_client.post(url, {}).status_code, 403)
+
+        client = self._login()
+        _response, token = self._approval_token(client, version)
+        confirmed = client.post(url, {
+            'expected_sha256': token,
+            'actor_access_id': self.other_access.pk,
+            'employee_access_id': self.other_access.pk,
+            'employee_id': 999999,
+            'role_id': 999999,
+            'confirmed_at': '2000-01-01T00:00:00Z',
+            'session_id': 'forged',
+        })
+        self.assertEqual(confirmed.status_code, 302)
+        version.refresh_from_db()
+        self.assertEqual(version.status, ArrivalRosterVersion.Status.CONFIRMED)
+        self.assertEqual(version.confirmed_by_access_id, self.access.pk)
+
+    def test_t14b_wrong_or_inactive_session_access_is_rejected(self):
+        version = self._ready_version()
+        url = reverse('arrival_roster_approval_confirm', args=[version.pk])
+        other_client = self._login(Client(), self.other_access)
+        self.assertEqual(other_client.post(url, {'expected_sha256': '0' * 64}).status_code, 302)
+        version.refresh_from_db()
+        self.assertNotEqual(version.status, ArrivalRosterVersion.Status.CONFIRMED)
+
+        EmployeeAccess.objects.filter(pk=self.access.pk).update(is_active=False)
+        inactive_client = self._login(Client(), self.access)
+        self.assertIn(
+            inactive_client.post(url, {'expected_sha256': '0' * 64}).status_code,
+            {302, 409},
+        )
+        version.refresh_from_db()
+        self.assertNotEqual(version.status, ArrivalRosterVersion.Status.CONFIRMED)
+
+    def test_t14b_stale_success_repeat_and_read_only_html(self):
+        Employee.objects.filter(pk=self.employee.pk).update(phone='+79990001122')
+        version = self._ready_version()
+        client = self._login()
+        url = reverse('arrival_roster_approval_confirm', args=[version.pk])
+        stale = client.post(url, {'expected_sha256': '0' * 64}, follow=True)
+        self.assertContains(stale, 'Предложение утверждения устарело.')
+        version.refresh_from_db()
+        self.assertNotEqual(version.status, ArrivalRosterVersion.Status.CONFIRMED)
+
+        _response, token = self._approval_token(client, version)
+        successful = client.post(url, {'expected_sha256': token}, follow=True)
+        self.assertContains(successful, 'Список заезда утверждён.')
+        version.refresh_from_db()
+        confirmed_at = version.confirmed_at
+        event_count = version.events.filter(action=ArrivalRosterEvent.Action.CONFIRMED).count()
+
+        repeated = client.post(url, {'expected_sha256': token}, follow=True)
+        self.assertContains(repeated, 'Список уже утверждён.')
+        version.refresh_from_db()
+        self.assertEqual(version.confirmed_at, confirmed_at)
+        self.assertEqual(version.events.filter(action=ArrivalRosterEvent.Action.CONFIRMED).count(), event_count)
+
+        page = client.get(reverse('arrival_roster_review', args=[version.pk]))
+        html = page.content.decode('utf-8')
+        self.assertContains(page, 'Список заезда утверждён')
+        self.assertContains(page, 'Табельщик:')
+        self.assertNotContains(page, 'Утвердить список заезда')
+        self.assertNotIn('Сохранить участие', html)
+        self.assertNotIn('+79990001122', html)
+        self.assertNotIn(version.confirmation_sha256, html)
+        self.assertNotIn('confirmation_snapshot', html)
+        self.assertNotIn('employee_access_id', html)
+        self.assertNotIn('PIN', html)
+
+    def test_t14b_index_uses_russian_states_and_current_confirmed_marker(self):
+        first = self._confirm(self._ready_version())
+        replacement = self._ready_version()
+        models.QuerySet.update(
+            ArrivalRosterVersion._base_manager.filter(pk=replacement.pk),
+            based_on_version_id=first.pk,
+        )
+        confirmed = self._confirm(replacement)
+        draft = create_arrival_roster_from_employee_pool(
+            watch_period_id=self.period.pk,
+            actor_access_id=self.access.pk,
+        )
+        review_required = create_arrival_roster_from_employee_pool(
+            watch_period_id=self.period.pk,
+            actor_access_id=self.access.pk,
+        )
+        models.QuerySet.update(
+            ArrivalRosterVersion._base_manager.filter(pk=review_required.pk),
+            status=ArrivalRosterVersion.Status.REVIEW_REQUIRED,
+        )
+        response = self._login().get(reverse('arrival_roster_index'))
+        self.assertContains(response, 'Утверждена · действующая версия')
+        self.assertContains(response, 'Заменена новой версией')
+        self.assertContains(response, 'Подготовка')
+        self.assertContains(response, 'Требуется проверка')
+        self.assertContains(response, 'Из базы сотрудников')
+        self.assertEqual(confirmed.status, ArrivalRosterVersion.Status.CONFIRMED)
+        self.assertEqual(draft.status, ArrivalRosterVersion.Status.DRAFT)
 
     def test_t14a_controlled_unique_collision_and_unknown_integrity_error(self):
         version = self._ready_version()

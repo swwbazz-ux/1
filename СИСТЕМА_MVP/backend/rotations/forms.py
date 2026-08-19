@@ -50,6 +50,13 @@ class ArrivalRosterPoolCreateForm(forms.Form):
         )
 
 
+class ArrivalRosterConfirmationForm(forms.Form):
+    expected_sha256 = forms.RegexField(
+        regex=r'^[0-9a-f]{64}$',
+        widget=forms.HiddenInput,
+    )
+
+
 class ArrivalRosterEmployeeSearchForm(forms.Form):
     query = forms.CharField(
         label='ФИО или должность',
