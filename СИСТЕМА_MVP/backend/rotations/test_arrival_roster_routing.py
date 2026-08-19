@@ -5,7 +5,8 @@ from django.apps import apps
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, connection, models, transaction
 from django.db.migrations.executor import MigrationExecutor
-from django.test import TestCase, TransactionTestCase
+from django.test import Client, TestCase, TransactionTestCase
+from django.urls import reverse
 from django.utils import timezone
 
 from assignments.models import (
@@ -808,6 +809,216 @@ class ArrivalRosterRoutingCommandTests(TestCase):
             self.assertNotIn('access_id', payload)
             self.assertNotIn('confirmation_snapshot', payload)
             self.assertNotIn('fingerprint', payload)
+
+
+class ArrivalRosterRoutingHttpTests(TestCase):
+    _insert = ArrivalRosterRoutingCommandTests._insert
+    setUp = ArrivalRosterRoutingCommandTests.setUp
+    _confirmed_version = ArrivalRosterRoutingCommandTests._confirmed_version
+    _employee = ArrivalRosterRoutingCommandTests._employee
+    _subject = ArrivalRosterRoutingCommandTests._subject
+    _route = ArrivalRosterRoutingCommandTests._route
+
+    def _login(self, client=None, access=None):
+        client = client or self.client
+        session = client.session
+        session['employee_access_id'] = (access or self.access).pk
+        session.save()
+        return client
+
+    def _url(self, version=None):
+        return reverse('arrival_roster_routing', args=[(version or self.version).pk])
+
+    def _ready_subject(self, suffix='HTTP'):
+        employee = self._employee(suffix, specialization=self.driver_specialization)
+        return self._subject(suffix, employee=employee)
+
+    def test_button_is_visible_only_to_timekeeper_for_current_confirmed_version(self):
+        self._ready_subject()
+        page = self._login().get(reverse('arrival_roster_review', args=[self.version.pk]))
+        self.assertContains(page, 'Передать утверждённый реестр')
+        self.assertContains(page, self._url())
+        wrong_access = EmployeeAccess.objects.create(
+            employee=self.timekeeper,
+            role=self.clerk_role,
+            access_code='routing-http-button-clerk',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+        self.assertEqual(
+            self._login(Client(), wrong_access).get(
+                reverse('arrival_roster_review', args=[self.version.pk]),
+            ).status_code,
+            302,
+        )
+
+        review = self._insert(ArrivalRosterVersion(
+            watch_period=self.period,
+            version_number=2,
+            status=ArrivalRosterVersion.Status.REVIEW_REQUIRED,
+            source_kind=ArrivalRosterVersion.SourceKind.EMPLOYEE_POOL,
+            created_by_access=self.access,
+            source_fingerprint='d' * 64,
+        ))
+        review_page = self._login().get(reverse('arrival_roster_review', args=[review.pk]))
+        self.assertNotContains(review_page, 'Передать утверждённый реестр')
+
+        self._route()
+        ArrivalRosterVersion._base_manager.filter(pk=self.version.pk).update(
+            status=ArrivalRosterVersion.Status.SUPERSEDED,
+            superseded_at=timezone.now(),
+        )
+        superseded = self._login().get(reverse('arrival_roster_review', args=[self.version.pk]))
+        self.assertNotContains(superseded, 'Передать утверждённый реестр')
+        self.assertContains(superseded, 'Передача устарела: создана исправленная версия')
+
+    def test_endpoint_is_post_csrf_session_bound_and_ignores_forged_fields(self):
+        self._ready_subject()
+        csrf_client = self._login(Client(enforce_csrf_checks=True))
+        self.assertEqual(csrf_client.get(self._url()).status_code, 405)
+        self.assertEqual(csrf_client.post(self._url(), {}).status_code, 403)
+
+        client = self._login()
+        response = client.post(self._url(), {
+            'actor_access_id': 999999,
+            'employee_access_id': 999999,
+            'employee_id': 999999,
+            'resident_id': 999999,
+            'role_id': 999999,
+            'route_state': 'to_clerk',
+            'participation_status': 'not_arriving',
+            'arrival_on': '2000-01-01',
+            'confirmation_sha256': '0' * 64,
+            'created_at': '2000-01-01T00:00:00Z',
+        })
+        self.assertEqual(response.status_code, 302)
+        batch = ArrivalRosterRoutingBatch._base_manager.get(
+            arrival_roster_version=self.version,
+        )
+        self.assertEqual(batch.created_by_access_id, self.access.pk)
+        row = ArrivalRosterRoutingRow._base_manager.get(batch=batch)
+        self.assertEqual(row.route_state, ArrivalRosterRoutingRow.RouteState.TO_DEPUTY)
+
+    def test_wrong_inactive_blocked_or_missing_session_access_cannot_route(self):
+        self._ready_subject()
+        wrong_access = EmployeeAccess.objects.create(
+            employee=self.timekeeper,
+            role=self.clerk_role,
+            access_code='routing-http-clerk-access',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+        self.assertEqual(self._login(Client(), wrong_access).post(self._url()).status_code, 302)
+        self.assertEqual(ArrivalRosterRoutingBatch._base_manager.count(), 0)
+
+        EmployeeAccess.objects.filter(pk=self.access.pk).update(is_active=False)
+        self.assertIn(
+            self._login(Client(), self.access).post(self._url()).status_code,
+            {302, 409},
+        )
+        EmployeeAccess.objects.filter(pk=self.access.pk).update(
+            is_active=True,
+            status=EmployeeAccess.Status.BLOCKED,
+        )
+        self.assertIn(
+            self._login(Client(), self.access).post(self._url()).status_code,
+            {302, 409},
+        )
+        self.assertEqual(Client().post(self._url()).status_code, 302)
+        self.assertEqual(ArrivalRosterRoutingBatch._base_manager.count(), 0)
+
+    def test_success_repeat_and_four_routing_counts_are_rendered(self):
+        absent_employee = self._employee('HTTP не участвует', specialization=self.driver_specialization)
+        self._subject(
+            'HTTP не участвует',
+            employee=absent_employee,
+            participation=ArrivalRosterRowReview.ParticipationStatus.NOT_ARRIVING,
+        )
+        self._subject('HTTP внешний')
+        clerk_employee = self._employee('HTTP делопроизводитель')
+        self._subject('HTTP делопроизводитель', employee=clerk_employee)
+        driver_employee = self._employee('HTTP водитель', specialization=self.driver_specialization)
+        self._subject('HTTP водитель', employee=driver_employee)
+        ambiguous_employee = self._employee('HTTP неоднозначный')
+        for specialization in (self.driver_specialization, self.excavator_specialization):
+            TemporaryWorkTransfer.objects.create(
+                employee=ambiguous_employee,
+                target_specialization=specialization,
+                watch_period=self.period,
+                effective_from=self.period.starts_on,
+                effective_to=self.period.ends_on,
+                status=TemporaryWorkTransfer.Status.APPROVED,
+            )
+        self._subject('HTTP неоднозначный', employee=ambiguous_employee)
+
+        client = self._login()
+        first = client.post(self._url(), follow=True)
+        self.assertContains(first, 'Утверждённый реестр передан для дальнейшей работы.')
+        self.assertContains(first, 'Реестр передан')
+        presentation = first.context['routing_presentation']
+        self.assertEqual(presentation['counts'], {
+            'to_deputy': 1,
+            'to_clerk': 2,
+            'review_required': 1,
+            'not_participating': 1,
+        })
+        for label in (
+            'На расстановку техники',
+            'Сразу к расселению',
+            'Требуется проверка',
+            'Не участвуют',
+        ):
+            self.assertContains(first, label)
+        row_count = ArrivalRosterRoutingRow._base_manager.count()
+        event_count = ArrivalRosterRoutingEvent._base_manager.count()
+
+        repeated = client.post(self._url(), follow=True)
+        self.assertContains(repeated, 'Реестр уже передан.')
+        self.assertEqual(ArrivalRosterRoutingRow._base_manager.count(), row_count)
+        self.assertEqual(ArrivalRosterRoutingEvent._base_manager.count(), event_count)
+
+    def test_superseded_history_and_controlled_stale_do_not_change_old_batch(self):
+        self._ready_subject()
+        self._route()
+        row_count = ArrivalRosterRoutingRow._base_manager.count()
+        event_count = ArrivalRosterRoutingEvent._base_manager.count()
+        ArrivalRosterVersion._base_manager.filter(pk=self.version.pk).update(
+            status=ArrivalRosterVersion.Status.SUPERSEDED,
+            superseded_at=timezone.now(),
+        )
+
+        response = self._login().post(self._url(), follow=True)
+
+        self.assertContains(response, 'Переданная версия уже заменена новой утверждённой версией.')
+        self.assertNotContains(response, 'arrival_roster.routing_stale')
+        self.assertNotContains(response, 'Traceback')
+        self.assertContains(response, 'Передача устарела: создана исправленная версия')
+        self.assertEqual(ArrivalRosterRoutingRow._base_manager.count(), row_count)
+        self.assertEqual(ArrivalRosterRoutingEvent._base_manager.count(), event_count)
+
+    def test_routing_html_keeps_sensitive_and_unimplemented_controls_absent(self):
+        employee = self._employee('HTTP конфиденциальность', specialization=self.driver_specialization)
+        employee.phone = '+79995550124'
+        employee.save(update_fields=['phone'])
+        self._subject('HTTP конфиденциальность', employee=employee)
+        self._login().post(self._url())
+
+        page = self._login().get(reverse('arrival_roster_review', args=[self.version.pk]))
+        html = page.content.decode('utf-8')
+        self.assertNotIn(employee.phone, html)
+        self.assertNotIn(self.version.confirmation_sha256, html)
+        for forbidden in (
+            'confirmation_snapshot',
+            'source_fingerprint',
+            'snapshot_sha256',
+            'employee_access_id',
+            'route_state',
+            'Назначить технику',
+            'Выбрать официальную смену',
+            'Выбрать комнату',
+            'Выбрать роль',
+        ):
+            self.assertNotIn(forbidden, html)
 
 
 class ArrivalRosterRoutingMigrationTests(TransactionTestCase):

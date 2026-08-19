@@ -75,6 +75,30 @@
             {% endif %}
         </section>
 
+        {% if routing_presentation %}
+            <section class="rotation-form-card" aria-label="Передача утверждённого реестра">
+                {% if version.status == 'superseded' %}
+                    <h3>Передача устарела: создана исправленная версия</h3>
+                    <p>Историческая передача сохранена и больше не меняется.</p>
+                {% else %}
+                    <h3>Реестр передан</h3>
+                    <p>Передан: {{ routing_presentation.created_at|date:"d.m.Y H:i" }}</p>
+                {% endif %}
+                <dl>
+                    <dt>На расстановку техники</dt><dd>{{ routing_presentation.counts.to_deputy }}</dd>
+                    <dt>Сразу к расселению</dt><dd>{{ routing_presentation.counts.to_clerk }}</dd>
+                    <dt>Требуется проверка</dt><dd>{{ routing_presentation.counts.review_required }}</dd>
+                    <dt>Не участвуют</dt><dd>{{ routing_presentation.counts.not_participating }}</dd>
+                </dl>
+            </section>
+        {% elif routing_can_start %}
+            <section class="rotation-form-card" aria-label="Передача утверждённого реестра">
+                <h3>Передача утверждённого реестра</h3>
+                <p>Производственные сотрудники поступят заместителю для назначения техники и официальной смены, остальные — делопроизводителю для расселения.</p>
+                <form method="post" action="{% url 'arrival_roster_routing' version.pk %}">{% csrf_token %}<button class="admin-button admin-button-primary" type="submit">Передать утверждённый реестр</button></form>
+            </section>
+        {% endif %}
+
         <section class="rotation-summary-strip" aria-label="Итоги проверки">
             <article class="rotation-summary-item"><span>Исходных строк</span><strong>{{ version.source_row_count }}</strong></article>
             <article class="rotation-summary-item"><span>Людей</span><strong>{{ version.matches.count }}</strong></article>

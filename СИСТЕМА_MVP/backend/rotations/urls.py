@@ -13,6 +13,7 @@ from .views import (
     arrival_roster_notes_view,
     arrival_roster_participation_view,
     arrival_roster_pool_create_view,
+    arrival_roster_routing_view,
     arrival_roster_review_view,
     arrival_roster_resident_clear_view,
     arrival_roster_resident_search_view,
@@ -84,6 +85,11 @@ urlpatterns = [
         'timekeeper/arrival-rosters/<int:version_id>/approve/',
         arrival_roster_approval_confirm_view,
         name='arrival_roster_approval_confirm',
+    ),
+    path(
+        'timekeeper/arrival-rosters/<int:version_id>/routing/',
+        arrival_roster_routing_view,
+        name='arrival_roster_routing',
     ),
     path(
         'timekeeper/arrival-rosters/<int:version_id>/create-revision/',

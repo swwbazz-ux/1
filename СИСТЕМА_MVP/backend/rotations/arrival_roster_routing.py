@@ -420,6 +420,30 @@ def _is_routing_batch_collision(error):
     )
 
 
+def arrival_roster_routing_presentation(*, version):
+    """Return the safe, human-facing routing status for one roster version."""
+    batch = (
+        ArrivalRosterRoutingBatch._base_manager
+        .filter(arrival_roster_version_id=version.pk)
+        .first()
+    )
+    if batch is None:
+        return None
+    counts = {
+        'to_deputy': 0,
+        'to_clerk': 0,
+        'review_required': 0,
+        'not_participating': 0,
+    }
+    for row in ArrivalRosterRoutingRow._base_manager.filter(batch=batch).values('route_state'):
+        if row['route_state'] in counts:
+            counts[row['route_state']] += 1
+    return {
+        'created_at': batch.created_at,
+        'counts': counts,
+    }
+
+
 def route_confirmed_arrival_roster_version(*, version_id, actor_access_id):
     """Create the one immutable routing batch for the current confirmed version."""
     try:

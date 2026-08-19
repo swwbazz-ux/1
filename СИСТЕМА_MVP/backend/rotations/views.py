@@ -46,6 +46,10 @@ from .arrival_roster_approvals import (
     confirm_arrival_roster_version,
     create_arrival_roster_correction_revision,
 )
+from .arrival_roster_routing import (
+    arrival_roster_routing_presentation,
+    route_confirmed_arrival_roster_version,
+)
 from .forms import (
     ArrivalRosterConfirmationForm,
     ArrivalRosterDatesForm,
@@ -488,6 +492,7 @@ def arrival_roster_review_view(request, version_id):
             .order_by('pk').first()
         )
     revision_base = version.based_on_version if version.based_on_version_id else None
+    routing_presentation = arrival_roster_routing_presentation(version=version)
     approval_error = ''
     approval_form = None
     if not is_read_only:
@@ -614,6 +619,12 @@ def arrival_roster_review_view(request, version_id):
             'revision_child': revision_child,
             'replacement_version': replacement_version,
             'revision_base': revision_base,
+            'routing_presentation': routing_presentation,
+            'routing_can_start': bool(
+                version.status == ArrivalRosterVersion.Status.CONFIRMED
+                and version.superseded_at is None
+                and routing_presentation is None
+            ),
         },
     )
     return _private_no_store(response)
@@ -653,6 +664,30 @@ def arrival_roster_approval_confirm_view(request, version_id):
             messages.info(request, 'Список уже утверждён.')
         else:
             messages.success(request, 'Список заезда утверждён.')
+    return _arrival_roster_redirect(version_id)
+
+
+@require_POST
+def arrival_roster_routing_view(request, version_id):
+    access, response = _role_access(request, 'timekeeper')
+    if response:
+        return response
+    already_routed = ArrivalRosterVersion.objects.filter(
+        pk=version_id,
+        routing_batch__isnull=False,
+    ).exists()
+    try:
+        route_confirmed_arrival_roster_version(
+            version_id=version_id,
+            actor_access_id=access.pk,
+        )
+    except ValidationError as error:
+        _arrival_roster_error(request, error)
+    else:
+        if already_routed:
+            messages.info(request, 'Реестр уже передан.')
+        else:
+            messages.success(request, 'Утверждённый реестр передан для дальнейшей работы.')
     return _arrival_roster_redirect(version_id)
 
 
