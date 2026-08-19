@@ -17,7 +17,7 @@ from core.models import bump_operational_state
 from core.production_time import production_work_date as contract_production_work_date
 from references.models import Equipment
 from shifts.models import EmployeeShift
-from users.models import Employee, Role
+from users.models import Employee, EmployeeAccess, Role
 from users.work_profiles import employee_has_effective_access_role
 
 from .models import (
@@ -86,6 +86,47 @@ def _crew_plan_instance(plan, *, for_update=False):
         return queryset.get(pk=plan_id)
     except CrewPlan.DoesNotExist as error:
         raise ValidationError('План расстановки не найден.', code='plan_not_found') from error
+
+
+def _locked_deputy_publish_access(*, actor_access, actor):
+    """Lock and verify the exact server-side deputy access before publication."""
+    access_id = getattr(actor_access, 'pk', actor_access)
+    try:
+        access_snapshot = EmployeeAccess.objects.filter(pk=access_id).values(
+            'pk', 'employee_id',
+        ).get()
+    except (EmployeeAccess.DoesNotExist, TypeError, ValueError) as error:
+        raise ValidationError(
+            'Активный доступ заместителя не найден.',
+            code='deputy_access_required',
+        ) from error
+    locked_employee = Employee.objects.select_for_update().get(
+        pk=access_snapshot['employee_id'],
+    )
+    access = (
+        EmployeeAccess.objects.select_related('role')
+        .select_for_update(of=('self',))
+        .get(pk=access_snapshot['pk'])
+    )
+    actor_id = getattr(actor, 'pk', actor)
+    if (
+        access.employee_id != locked_employee.pk
+        or actor_id not in (None, locked_employee.pk)
+        or not access.is_active
+        or access.status in {
+            EmployeeAccess.Status.BLOCKED,
+            EmployeeAccess.Status.DEACTIVATED,
+        }
+        or not locked_employee.is_active
+        or locked_employee.status != Employee.Status.ACTIVE
+        or not access.role.is_active
+        or access.role.code != 'deputy_mining_manager'
+    ):
+        raise ValidationError(
+            'Активный доступ заместителя не найден.',
+            code='deputy_access_required',
+        )
+    return locked_employee, access
 
 
 def _validate_current_crew_plan(plan):
@@ -297,7 +338,12 @@ def update_crew_draft_slot(
 
 
 @transaction.atomic
-def publish_crew_plan(*, plan, expected_version, actor=None):
+def _publish_crew_plan_once(*, plan, expected_version, actor=None, actor_access=None):
+    if actor_access is not None:
+        actor, actor_access = _locked_deputy_publish_access(
+            actor_access=actor_access,
+            actor=actor,
+        )
     locked_plan = _crew_plan_instance(plan, for_update=True)
     role = _crew_plan_role(locked_plan.role)
     if locked_plan.status != CrewPlanStatus.DRAFT:
@@ -537,6 +583,14 @@ def publish_crew_plan(*, plan, expected_version, actor=None):
             'Публикация конфликтует с другим активным назначением. Обновите данные.',
             code='assignment_conflict',
         ) from error
+    if actor_access is not None:
+        from rotations.arrival_roster_routing import _record_published_crew_plan_routing
+
+        _record_published_crew_plan_routing(
+            plan=locked_plan,
+            slots=slots,
+            actor_access=actor_access,
+        )
     bump_operational_state(
         'CrewPlan:published',
         event_type='personnel_assignment_changed',
@@ -552,6 +606,26 @@ def publish_crew_plan(*, plan, expected_version, actor=None):
         },
     )
     return locked_plan
+
+
+def publish_crew_plan(*, plan, expected_version, actor=None, actor_access=None):
+    """Publish once; retain a controlled OUP-role review outside a rolled-back draft."""
+    try:
+        return _publish_crew_plan_once(
+            plan=plan,
+            expected_version=expected_version,
+            actor=actor,
+            actor_access=actor_access,
+        )
+    except ValidationError as error:
+        if actor_access is not None and getattr(error, 'code', '') == 'invalid_work_category':
+            from rotations.arrival_roster_routing import _record_crew_plan_role_review
+
+            _record_crew_plan_role_review(
+                plan=plan,
+                actor_access=actor_access,
+            )
+        raise
 
 
 def equipment_queryset_for_work_role(role_code):

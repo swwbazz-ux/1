@@ -795,13 +795,17 @@ class EquipmentAssignmentProvenanceMigrationTests(TransactionTestCase):
     def setUp(self):
         super().setUp()
         executor = MigrationExecutor(connection)
+        # rotations.0007 depends on assignments.0007.  Exclude only leaves
+        # with that dependency: unrelated app leaves are still needed so the
+        # historical models match their already-migrated database tables.
         other_leaf_targets = [
             target
             for target in executor.loader.graph.leaf_nodes()
             if target[0] != 'assignments'
+            and self.migrate_to not in executor.loader.graph.forwards_plan(target)
         ]
         self.before_targets = [*other_leaf_targets, self.migrate_from]
-        self.after_targets = [*other_leaf_targets, self.migrate_to]
+        self.after_targets = executor.loader.graph.leaf_nodes()
         executor.migrate(self.before_targets)
         old_apps = executor.loader.project_state(self.before_targets).apps
         Employee = old_apps.get_model('users', 'Employee')

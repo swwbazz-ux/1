@@ -498,6 +498,15 @@ def deputy_arrival_roster_routing_queue():
         'driver': 'Водитель',
         'excavator_operator': 'Машинист экскаватора',
     }
+    latest_event_by_row = {}
+    for event in (
+        ArrivalRosterRoutingEvent._base_manager.filter(
+            routing_row_id__in=[row.pk for row in rows],
+        )
+        .order_by('routing_row_id', 'created_at', 'pk')
+        .values('routing_row_id', 'event_type')
+    ):
+        latest_event_by_row[event['routing_row_id']] = event['event_type']
     transfer_cache = {}
     groups = {}
     for row in rows:
@@ -529,6 +538,11 @@ def deputy_arrival_roster_routing_queue():
             current_role.get('qualification_state') != 'exact'
             or current_role.get('role_code') != saved_role
         )
+        requires_review = (
+            role_changed
+            or latest_event_by_row.get(row.pk)
+            == ArrivalRosterRoutingEvent.EventType.REQUIRES_REVIEW
+        )
         group_key = (period.starts_on, period.name, saved_role)
         groups.setdefault(group_key, {
             'watch_period': period.name,
@@ -542,9 +556,13 @@ def deputy_arrival_roster_routing_queue():
             'status': (
                 'Роль изменена ОУП — требуется проверка'
                 if role_changed
-                else 'Ожидает назначения техники и смены'
+                else (
+                    'Требуется проверка'
+                    if requires_review
+                    else 'Ожидает назначения техники и смены'
+                )
             ),
-            'is_blocked': role_changed,
+            'is_blocked': requires_review,
         })
 
     ordered_groups = []
@@ -562,6 +580,238 @@ def deputy_arrival_roster_routing_queue():
     return {
         'groups': ordered_groups,
     }
+
+
+def _routing_snapshot_date(snapshot, field_name):
+    try:
+        return date.fromisoformat((snapshot or {}).get(field_name))
+    except (TypeError, ValueError):
+        return None
+
+
+def _routing_event_exists(*, row, event_type, crew_plan_slot=None, equipment_assignment=None):
+    return ArrivalRosterRoutingEvent._base_manager.select_for_update(of=('self',)).filter(
+        routing_row=row,
+        event_type=event_type,
+        crew_plan_slot=crew_plan_slot,
+        equipment_assignment=equipment_assignment,
+    ).exists()
+
+
+def _trusted_insert_routing_events(events):
+    if not events:
+        return
+    for event in events:
+        event.full_clean()
+    models.QuerySet.bulk_create(ArrivalRosterRoutingEvent._base_manager.all(), events)
+
+
+@transaction.atomic
+def _record_crew_plan_role_review(*, plan, actor_access):
+    """Persist the controlled OUP-role conflict after a draft publication rolls back."""
+    from assignments.models import CrewPlanSlot
+
+    plan_id = getattr(plan, 'pk', plan)
+    slots = list(
+        CrewPlanSlot.objects.select_for_update(of=('self',))
+        .filter(plan_id=plan_id, employee__isnull=False)
+        .select_related('employee', 'plan__role')
+        .order_by('employee_id', 'equipment_id', 'shift_type')
+    )
+    if not slots:
+        return
+    employee_ids = sorted({slot.employee_id for slot in slots})
+    rows_by_employee = defaultdict(list)
+    for row in (
+        ArrivalRosterRoutingRow._base_manager.select_for_update(
+            of=(
+                'self',
+                'batch',
+                'batch__arrival_roster_version',
+                'batch__arrival_roster_version__watch_period',
+            ),
+        )
+        .select_related('batch__arrival_roster_version__watch_period', 'employee')
+        .filter(
+            employee_id__in=employee_ids,
+            route_state=ArrivalRosterRoutingRow.RouteState.TO_DEPUTY,
+            batch__arrival_roster_version__status=ArrivalRosterVersion.Status.CONFIRMED,
+            batch__arrival_roster_version__superseded_at__isnull=True,
+        )
+        .order_by('employee_id', 'batch__arrival_roster_version__watch_period_id', 'pk')
+    ):
+        rows_by_employee[row.employee_id].append(row)
+
+    transfers_by_period = {}
+    events = []
+    for slot in slots:
+        for row in rows_by_employee.get(slot.employee_id, []):
+            period = row.batch.arrival_roster_version.watch_period
+            if period.pk not in transfers_by_period:
+                transfers_by_period[period.pk] = _locked_active_transfers(
+                    employee_ids=employee_ids,
+                    as_of=period.starts_on,
+                )
+            current_role, _basis = _qualification_snapshots(
+                employee=row.employee,
+                transfers=transfers_by_period[period.pk],
+                as_of=period.starts_on,
+            )
+            saved_role = (row.role_snapshot or {}).get('role_code')
+            if (
+                saved_role != slot.plan.role.code
+                or (row.role_snapshot or {}).get('qualification_state') != 'exact'
+                or current_role.get('qualification_state') != 'exact'
+                or current_role.get('role_code') != saved_role
+            ):
+                if not _routing_event_exists(
+                    row=row,
+                    event_type=ArrivalRosterRoutingEvent.EventType.REQUIRES_REVIEW,
+                ):
+                    events.append(ArrivalRosterRoutingEvent(
+                        routing_row=row,
+                        event_type=ArrivalRosterRoutingEvent.EventType.REQUIRES_REVIEW,
+                        actor_access=actor_access,
+                    ))
+    _trusted_insert_routing_events(events)
+
+
+def _record_published_crew_plan_routing(*, plan, slots, actor_access):
+    """Append exact routing evidence after one deputy CrewPlan publication.
+
+    This is a trusted in-transaction hook.  Its caller has already locked and
+    verified the precise deputy EmployeeAccess before it locked the CrewPlan.
+    """
+    from assignments.models import AssignmentStatus, EquipmentAssignment
+
+    if not actor_access or actor_access.employee_id != getattr(plan, 'published_by_id', None):
+        raise _error(
+            'arrival_roster.routing_deputy_access_required',
+            'Для фиксации назначения требуется точный доступ заместителя.',
+        )
+
+    assigned_slots = [slot for slot in slots if slot.employee_id]
+    if not assigned_slots:
+        return
+    assignments_by_slot = defaultdict(list)
+    for assignment in (
+        EquipmentAssignment._base_manager.select_for_update(of=('self',))
+        .filter(source_crew_plan_slot_id__in=[slot.pk for slot in assigned_slots])
+        .select_related('source_crew_plan_slot')
+        .order_by('source_crew_plan_slot_id', 'pk')
+    ):
+        assignments_by_slot[assignment.source_crew_plan_slot_id].append(assignment)
+
+    employee_ids = sorted({slot.employee_id for slot in assigned_slots})
+    rows_by_employee = defaultdict(list)
+    for row in (
+        ArrivalRosterRoutingRow._base_manager.select_for_update(
+            of=(
+                'self',
+                'batch',
+                'batch__arrival_roster_version',
+                'batch__arrival_roster_version__watch_period',
+            ),
+        )
+        .select_related(
+            'batch__arrival_roster_version__watch_period', 'employee',
+        )
+        .filter(
+            employee_id__in=employee_ids,
+            route_state=ArrivalRosterRoutingRow.RouteState.TO_DEPUTY,
+            batch__arrival_roster_version__status=ArrivalRosterVersion.Status.CONFIRMED,
+            batch__arrival_roster_version__superseded_at__isnull=True,
+        )
+        .order_by('employee_id', 'batch__arrival_roster_version__watch_period_id', 'pk')
+    ):
+        rows_by_employee[row.employee_id].append(row)
+
+    transfers_by_period = {}
+    events = []
+    for slot in assigned_slots:
+        rows = rows_by_employee.get(slot.employee_id, [])
+        if not rows:
+            continue
+        exact_rows = []
+        mismatch_rows = []
+        assignments = assignments_by_slot.get(slot.pk, [])
+        assignment = assignments[0] if len(assignments) == 1 else None
+        assignment_is_exact = bool(
+            assignment
+            and assignment.status == AssignmentStatus.ACCEPTED
+            and assignment.ended_at is None
+            and assignment.shift_id is None
+            and assignment.source_kind == EquipmentAssignment.SourceKind.DEPUTY_PUBLISHED_PLAN
+            and assignment.employee_id == slot.employee_id
+            and assignment.role_id == plan.role_id
+            and assignment.equipment_id == slot.equipment_id
+            and assignment.shift_type == slot.shift_type
+        )
+        for row in rows:
+            period = row.batch.arrival_roster_version.watch_period
+            if period.pk not in transfers_by_period:
+                transfers_by_period[period.pk] = _locked_active_transfers(
+                    employee_ids=[
+                        routed_row.employee_id
+                        for row_group in rows_by_employee.values()
+                        for routed_row in row_group
+                    ],
+                    as_of=period.starts_on,
+                )
+            current_role, _basis = _qualification_snapshots(
+                employee=row.employee,
+                transfers=transfers_by_period[period.pk],
+                as_of=period.starts_on,
+            )
+            participation = (row.participation_snapshot or {}).get('participation_status')
+            arrival_on = _routing_snapshot_date(row.dates_snapshot, 'arrival_on')
+            departure_on = _routing_snapshot_date(row.dates_snapshot, 'departure_on')
+            role_is_exact = (
+                (row.role_snapshot or {}).get('qualification_state') == 'exact'
+                and (row.role_snapshot or {}).get('role_code') == plan.role.code
+                and current_role.get('qualification_state') == 'exact'
+                and current_role.get('role_code') == plan.role.code
+            )
+            dates_are_exact = bool(
+                participation != ArrivalRosterRowReview.ParticipationStatus.NOT_ARRIVING
+                and arrival_on
+                and departure_on
+                and arrival_on <= plan.work_date <= departure_on
+                and period.starts_on <= plan.work_date <= period.ends_on
+            )
+            if role_is_exact and dates_are_exact:
+                exact_rows.append(row)
+            else:
+                mismatch_rows.append(row)
+
+        if len(exact_rows) == 1 and not mismatch_rows and assignment_is_exact:
+            row = exact_rows[0]
+            if not _routing_event_exists(
+                row=row,
+                event_type=ArrivalRosterRoutingEvent.EventType.OFFICIAL_ASSIGNMENT_PUBLISHED,
+                crew_plan_slot=slot,
+                equipment_assignment=assignment,
+            ):
+                events.append(ArrivalRosterRoutingEvent(
+                    routing_row=row,
+                    event_type=ArrivalRosterRoutingEvent.EventType.OFFICIAL_ASSIGNMENT_PUBLISHED,
+                    actor_access=actor_access,
+                    crew_plan_slot=slot,
+                    equipment_assignment=assignment,
+                ))
+            continue
+
+        for row in [*exact_rows, *mismatch_rows]:
+            if not _routing_event_exists(
+                row=row,
+                event_type=ArrivalRosterRoutingEvent.EventType.REQUIRES_REVIEW,
+            ):
+                events.append(ArrivalRosterRoutingEvent(
+                    routing_row=row,
+                    event_type=ArrivalRosterRoutingEvent.EventType.REQUIRES_REVIEW,
+                    actor_access=actor_access,
+                ))
+    _trusted_insert_routing_events(events)
 
 
 def route_confirmed_arrival_roster_version(*, version_id, actor_access_id):

@@ -1092,6 +1092,7 @@ def deputy_mining_manager_publish_view(request):
             plan=plan,
             expected_version=int(payload.get('expected_version')),
             actor=access.employee,
+            actor_access=access,
         )
         next_draft, _ = get_or_create_crew_draft(
             work_date=published_plan.work_date,
