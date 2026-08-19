@@ -1,6 +1,7 @@
 """Atomic, server-owned hand-off of a confirmed arrival roster."""
 
 from collections import defaultdict
+from datetime import date
 
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, models, transaction
@@ -441,6 +442,125 @@ def arrival_roster_routing_presentation(*, version):
     return {
         'created_at': batch.created_at,
         'counts': counts,
+    }
+
+
+def _queue_active_transfers(*, employee_ids, as_of):
+    """Read the current approved OUP qualification source without taking locks."""
+    transfers = defaultdict(list)
+    if not employee_ids:
+        return transfers
+    for transfer in (
+        TemporaryWorkTransfer.objects.select_related(
+            'target_specialization', 'target_specialization__access_role',
+        )
+        .filter(
+            employee_id__in=employee_ids,
+            status=TemporaryWorkTransfer.Status.APPROVED,
+            effective_from__lte=as_of,
+            effective_to__gte=as_of,
+        )
+        .order_by('employee_id', '-reviewed_at', '-pk')
+    ):
+        transfers[transfer.employee_id].append(transfer)
+    return transfers
+
+
+def _queue_date_label(value):
+    if not value:
+        return '—'
+    try:
+        return date.fromisoformat(value).strftime('%d.%m.%Y')
+    except (TypeError, ValueError):
+        return '—'
+
+
+def deputy_arrival_roster_routing_queue():
+    """Return the deputy's safe, read-only pending official-assignment queue."""
+    rows = list(
+        ArrivalRosterRoutingRow._base_manager.select_related(
+            'batch__arrival_roster_version__watch_period', 'employee',
+        )
+        .filter(
+            batch__arrival_roster_version__status=ArrivalRosterVersion.Status.CONFIRMED,
+            batch__arrival_roster_version__superseded_at__isnull=True,
+            route_state=ArrivalRosterRoutingRow.RouteState.TO_DEPUTY,
+            employee__isnull=False,
+        )
+        .exclude(
+            events__event_type=ArrivalRosterRoutingEvent.EventType.OFFICIAL_ASSIGNMENT_PUBLISHED,
+        )
+        .order_by('batch__arrival_roster_version__watch_period__starts_on', 'employee__full_name')
+        .distinct()
+    )
+
+    role_labels = {
+        'driver': 'Водитель',
+        'excavator_operator': 'Машинист экскаватора',
+    }
+    transfer_cache = {}
+    groups = {}
+    for row in rows:
+        participation = row.participation_snapshot or {}
+        if participation.get('participation_status') == ArrivalRosterRowReview.ParticipationStatus.NOT_ARRIVING:
+            continue
+        saved_role = (row.role_snapshot or {}).get('role_code')
+        if saved_role not in role_labels:
+            continue
+        period = row.batch.arrival_roster_version.watch_period
+        cache_key = period.pk
+        if cache_key not in transfer_cache:
+            employee_ids = [
+                candidate.employee_id
+                for candidate in rows
+                if candidate.batch.arrival_roster_version.watch_period_id == period.pk
+                and candidate.employee_id
+            ]
+            transfer_cache[cache_key] = _queue_active_transfers(
+                employee_ids=employee_ids,
+                as_of=period.starts_on,
+            )
+        current_role, _current_basis = _qualification_snapshots(
+            employee=row.employee,
+            transfers=transfer_cache[cache_key],
+            as_of=period.starts_on,
+        )
+        role_changed = (
+            current_role.get('qualification_state') != 'exact'
+            or current_role.get('role_code') != saved_role
+        )
+        group_key = (period.starts_on, period.name, saved_role)
+        groups.setdefault(group_key, {
+            'watch_period': period.name,
+            'role': role_labels[saved_role],
+            'items': [],
+        })['items'].append({
+            'full_name': row.employee.full_name,
+            'personnel_number': row.employee.personnel_number or '',
+            'arrival_on': _queue_date_label((row.dates_snapshot or {}).get('arrival_on')),
+            'departure_on': _queue_date_label((row.dates_snapshot or {}).get('departure_on')),
+            'status': (
+                'Роль изменена ОУП — требуется проверка'
+                if role_changed
+                else 'Ожидает назначения техники и смены'
+            ),
+            'is_blocked': role_changed,
+        })
+
+    ordered_groups = []
+    for key in sorted(groups, key=lambda item: (item[0], item[1].casefold(), item[2])):
+        group = groups[key]
+        group['items'].sort(
+            key=lambda item: (
+                item['full_name'].casefold(),
+                item['personnel_number'].casefold(),
+                item['arrival_on'],
+                item['departure_on'],
+            ),
+        )
+        ordered_groups.append(group)
+    return {
+        'groups': ordered_groups,
     }
 
 

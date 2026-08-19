@@ -24,6 +24,7 @@ from users.work_profiles import (
     expire_due_temporary_work_transfers,
     request_temporary_work_transfer,
 )
+from rotations.arrival_roster_routing import deputy_arrival_roster_routing_queue
 
 from .models import (
     AssignmentStatus,
@@ -1218,4 +1219,19 @@ def deputy_mining_manager_reports_view(request):
         request,
         'reports/deputy_mining_manager_reports.html',
         {'access': access, 'publications': publications},
+    )
+
+
+@require_GET
+def deputy_mining_manager_arrival_roster_routing_view(request):
+    access = deputy_access_from_request(request)
+    if not access:
+        return redirect('role_home')
+    return render(
+        request,
+        'assignments/deputy_mining_manager_arrival_roster_routing.html',
+        {
+            'access': access,
+            'routing_queue': deputy_arrival_roster_routing_queue(),
+        },
     )

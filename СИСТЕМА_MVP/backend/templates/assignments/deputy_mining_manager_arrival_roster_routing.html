@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Реестр заезда{% endblock %}
+{% block body_class %}deputy-mining-manager-screen deputy-reports-screen{% endblock %}
+{% block extra_head %}
+{% include "includes/deputy_mining_manager_pwa_head.html" %}
+<link rel="stylesheet" href="{% static 'css/deputy-mining-manager-v3.css' %}?v=20260718-2">
+{% endblock %}
+
+{% block body %}
+<div class="admin-shell admin-exports-shell deputy-shell admin-day" data-admin-theme>
+    {% include "includes/deputy_mining_manager_header.html" with active_section="arrival_roster_routing" screen_title="Реестр заезда" screen_subtitle="Производственные сотрудники, ожидающие назначения техники и смены." %}
+
+    <main class="admin-console-page deputy-reports-page">
+        <section class="deputy-publications-card" aria-labelledby="arrival-routing-title">
+            <header>
+                <div>
+                    <span>Очередь на расстановку</span>
+                    <h2 id="arrival-routing-title">Утверждённые реестры заезда</h2>
+                </div>
+            </header>
+
+            {% if routing_queue.groups %}
+                <div class="deputy-publications-list" role="list">
+                    {% for group in routing_queue.groups %}
+                        <section role="group" aria-label="{{ group.watch_period }}: {{ group.role }}">
+                            <h3>{{ group.watch_period }} · {{ group.role }}</h3>
+                            {% for item in group.items %}
+                                <article class="deputy-publication-row" role="listitem">
+                                    <div>
+                                        <span>Сотрудник</span>
+                                        <strong>{{ item.full_name }}</strong>
+                                        {% if item.personnel_number %}<small>Таб. № {{ item.personnel_number }}</small>{% endif %}
+                                    </div>
+                                    <div>
+                                        <span>Даты заезда</span>
+                                        <strong>{{ item.arrival_on }} — {{ item.departure_on }}</strong>
+                                    </div>
+                                    <div class="deputy-publication-status">
+                                        <span class="admin-chip {% if item.is_blocked %}admin-chip-warning{% else %}admin-chip-ok{% endif %}">{{ item.status }}</span>
+                                    </div>
+                                </article>
+                            {% endfor %}
+                        </section>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <div class="deputy-report-empty">
+                    <strong>Нет сотрудников, ожидающих расстановки</strong>
+                    <p>После передачи утверждённого реестра производственные сотрудники появятся здесь.</p>
+                </div>
+            {% endif %}
+        </section>
+    </main>
+</div>
+
+<script src="{% static 'js/deputy-mining-manager-pwa-v1.js' %}" defer></script>
+{% endblock %}

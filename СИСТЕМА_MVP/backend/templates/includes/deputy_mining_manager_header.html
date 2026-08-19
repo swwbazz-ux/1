@@ -17,6 +17,9 @@
             <a class="{% if active_section == 'placement' %}is-active{% endif %}"
                href="{% url 'deputy_mining_manager_placement' %}"
                {% if active_section == 'placement' %}aria-current="page"{% endif %}>Расстановка</a>
+            <a class="{% if active_section == 'arrival_roster_routing' %}is-active{% endif %}"
+               href="{% url 'deputy_mining_manager_arrival_roster_routing' %}"
+               {% if active_section == 'arrival_roster_routing' %}aria-current="page"{% endif %}>Реестр заезда</a>
             <a class="{% if active_section == 'reports' %}is-active{% endif %}"
                href="{% url 'deputy_mining_manager_reports' %}"
                {% if active_section == 'reports' %}aria-current="page"{% endif %}>Отчёты</a>
