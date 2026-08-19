@@ -149,6 +149,91 @@ def _trusted_finalize_pool_arrival_roster_version(*, version, period, plans,
     return locked
 
 
+def _trusted_create_pool_revision_version(*, period, version_number, actor_access,
+                                          based_on_version, parent_pool_rows,
+                                          employees_by_id, residents_by_id):
+    """Create a correction version from locked factual pool subjects only."""
+    source_rows = []
+    for row in parent_pool_rows:
+        employee = employees_by_id.get(row.employee_id)
+        resident = residents_by_id.get(row.resident_id)
+        if row.employee_id and employee is None:
+            raise _validation_error('arrival_roster.pool_snapshot_mismatch', 'Сотрудник отсутствует в заблокированном плане.')
+        if row.resident_id and resident is None:
+            raise _validation_error('arrival_roster.pool_snapshot_mismatch', 'Карточка жильца отсутствует в заблокированном плане.')
+        if employee is not None and resident is not None and resident.employee_id != employee.pk:
+            raise _validation_error('arrival_roster.pool_snapshot_mismatch', 'Карточка жильца не соответствует сотруднику.')
+        source_rows.append({
+            'origin_kind': row.origin_kind,
+            'suggested_participation': row.suggested_participation,
+            'watch_composition_id': row.watch_composition_id,
+            'basis': row.basis,
+            'employee': _employee_snapshot(employee) if employee is not None else {},
+            'resident': _resident_snapshot(resident) if resident is not None else {},
+        })
+    source_snapshot = {
+        'watch_period_id': period.pk,
+        'watch_composition_id': period.watch_composition_id,
+        'pool_rows': source_rows,
+    }
+    fingerprint = _canonical_sha256(source_snapshot)
+    version = ArrivalRosterVersion(
+        watch_period=period,
+        version_number=version_number,
+        status=ArrivalRosterVersion.Status.REVIEW_REQUIRED,
+        source_kind=ArrivalRosterVersion.SourceKind.EMPLOYEE_POOL,
+        created_by_access=actor_access,
+        source_fingerprint=fingerprint,
+        based_on_version=based_on_version,
+    )
+    return _trusted_insert_arrival_roster_version(version), source_snapshot
+
+
+def _trusted_finalize_pool_revision_version(*, version, source_snapshot, pool_rows):
+    locked = ArrivalRosterVersion._base_manager.select_for_update(of=('self',)).get(pk=version.pk)
+    if (
+        locked.status != ArrivalRosterVersion.Status.REVIEW_REQUIRED
+        or locked.source_kind != ArrivalRosterVersion.SourceKind.EMPLOYEE_POOL
+        or locked.snapshot_sha256
+    ):
+        raise _validation_error('arrival_roster.version_changed', 'Версия реестра изменилась.')
+    fingerprint = _canonical_sha256(source_snapshot)
+    if fingerprint != locked.source_fingerprint:
+        raise _validation_error('arrival_roster.source_changed', 'Исходный состав версии изменился.')
+    blocking_count = locked.issues.filter(severity=ArrivalRosterIssue.Severity.ERROR).count()
+    warning_count = locked.issues.filter(severity=ArrivalRosterIssue.Severity.WARNING).count()
+    snapshot = {
+        'source_kind': ArrivalRosterVersion.SourceKind.EMPLOYEE_POOL,
+        'source_fingerprint': fingerprint,
+        'source': source_snapshot,
+        'version_number': locked.version_number,
+        'pool_row_hashes': [row.snapshot_sha256 for row in pool_rows],
+        'blocking_issue_count': blocking_count,
+        'warning_count': warning_count,
+    }
+    locked.source_row_count = len(pool_rows)
+    locked.normalized_row_count = len(pool_rows)
+    locked.blocking_issue_count = blocking_count
+    locked.warning_count = warning_count
+    locked.snapshot = snapshot
+    locked.snapshot_sha256 = _canonical_sha256(snapshot)
+    locked.updated_at = timezone.now()
+    locked.full_clean()
+    updated = models.QuerySet.update(
+        ArrivalRosterVersion._base_manager.filter(pk=locked.pk),
+        source_row_count=locked.source_row_count,
+        normalized_row_count=locked.normalized_row_count,
+        blocking_issue_count=locked.blocking_issue_count,
+        warning_count=locked.warning_count,
+        snapshot=locked.snapshot,
+        snapshot_sha256=locked.snapshot_sha256,
+        updated_at=locked.updated_at,
+    )
+    if updated != 1:
+        raise _validation_error('arrival_roster.version_changed', 'Версия реестра изменилась.')
+    return locked
+
+
 @dataclass(frozen=True, slots=True)
 class ArrivalRosterBulkConfirmationResult:
     changed: int

@@ -711,7 +711,10 @@ class ArrivalRosterVersion(ArrivalRosterImmutableModel):
             ),
             models.UniqueConstraint(
                 fields=['watch_period', 'source_file', 'parser_profile'],
-                condition=models.Q(source_kind='excel'),
+                condition=models.Q(
+                    source_kind='excel',
+                    based_on_version__isnull=True,
+                ),
                 name='uniq_arrival_period_file_profile',
             ),
             models.CheckConstraint(

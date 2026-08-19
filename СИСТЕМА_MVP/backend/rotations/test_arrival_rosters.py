@@ -30,6 +30,7 @@ from .arrival_roster_approvals import (
     _is_confirmed_period_collision,
     build_arrival_roster_confirmation_proposal,
     confirm_arrival_roster_version,
+    create_arrival_roster_correction_revision,
 )
 from .arrival_rosters import (
     _VerifiedTimekeeperContext,
@@ -2559,6 +2560,146 @@ class ArrivalRosterT14aApprovalTests(TestCase):
         self.assertEqual(confirmed.status, ArrivalRosterVersion.Status.CONFIRMED)
         self.assertEqual(draft.status, ArrivalRosterVersion.Status.DRAFT)
 
+    def test_t14c_pool_revision_is_independent_and_reuses_effective_decisions(self):
+        parent = self._confirm(self._ready_version())
+        parent_pool = list(parent.pool_rows.order_by('pk'))
+        parent_matches = list(parent.matches.order_by('pk'))
+        parent_reviews = list(parent.row_reviews.order_by('match_id'))
+        child = create_arrival_roster_correction_revision(
+            version_id=parent.pk, actor_access_id=self.access.pk,
+        )
+        child.refresh_from_db()
+        self.assertEqual(child.watch_period_id, parent.watch_period_id)
+        self.assertEqual(child.based_on_version_id, parent.pk)
+        self.assertEqual(child.status, ArrivalRosterVersion.Status.REVIEW_REQUIRED)
+        self.assertFalse(child.confirmed_by_access_id)
+        self.assertFalse(child.confirmed_at)
+        self.assertEqual(child.confirmation_snapshot, {})
+        self.assertEqual(child.confirmation_sha256, '')
+        self.assertEqual(child.version_number, parent.version_number + 1)
+        self.assertEqual(child.pool_rows.count(), len(parent_pool))
+        self.assertEqual(child.matches.count(), len(parent_matches))
+        self.assertEqual(child.row_reviews.count(), len(parent_reviews))
+        self.assertFalse(set(parent.pool_rows.values_list('pk', flat=True)) & set(child.pool_rows.values_list('pk', flat=True)))
+        self.assertFalse(set(parent.matches.values_list('pk', flat=True)) & set(child.matches.values_list('pk', flat=True)))
+        self.assertTrue(all(review.revision == 1 for review in child.row_reviews.all()))
+        self.assertTrue(all(review.updated_by_access_id == self.access.pk for review in child.row_reviews.all()))
+        self.assertEqual(parent.events.filter(action='revision_created').count(), 0)
+        self.assertEqual(child.events.filter(action='revision_created').count(), 1)
+        parent.refresh_from_db()
+        self.assertEqual(parent.status, ArrivalRosterVersion.Status.CONFIRMED)
+
+    def test_t14c_excel_revision_copies_rows_links_issues_and_resolutions(self):
+        editable = self._ready_excel()
+        issue = _trusted_create_arrival_roster_issue(
+            version=editable,
+            match=editable.matches.order_by('pk').first(),
+            severity=ArrivalRosterIssue.Severity.WARNING,
+            code='external_card_incomplete',
+            message='Требуется уточнение карточки.',
+        )
+        resolve_arrival_roster_issue(
+            issue_id=issue.pk, expected_revision=0,
+            resolution_note='Карточка проверена табельщиком.', actor_access_id=self.access.pk,
+        )
+        parent = self._confirm(editable)
+        parent_source_ids = set(parent.source_rows.values_list('pk', flat=True))
+        parent_normalized_ids = set(
+            ArrivalRosterNormalizedRow.objects.filter(source_row__version=parent).values_list('pk', flat=True)
+        )
+        child = create_arrival_roster_correction_revision(
+            version_id=parent.pk, actor_access_id=self.access.pk,
+        )
+        child.refresh_from_db()
+        self.assertEqual(child.source_kind, ArrivalRosterVersion.SourceKind.EXCEL)
+        self.assertEqual(child.source_file_id, parent.source_file_id)
+        self.assertEqual(child.parser_profile_id, parent.parser_profile_id)
+        self.assertEqual(child.source_rows.count(), parent.source_rows.count())
+        child_normalized = ArrivalRosterNormalizedRow.objects.filter(source_row__version=child)
+        self.assertEqual(child_normalized.count(), len(parent_normalized_ids))
+        self.assertFalse(parent_source_ids & set(child.source_rows.values_list('pk', flat=True)))
+        self.assertFalse(parent_normalized_ids & set(child_normalized.values_list('pk', flat=True)))
+        self.assertTrue(all(link.normalized_row.source_row.version_id == child.pk for link in ArrivalRosterMatchRow.objects.filter(match__version=child).select_related('normalized_row__source_row')))
+        self.assertEqual(child.issues.count(), parent.issues.count())
+        copied_resolution = child.issues.get(code='external_card_incomplete').resolution
+        self.assertTrue(copied_resolution.is_resolved)
+        self.assertEqual(copied_resolution.resolution_note, 'Карточка проверена табельщиком.')
+        self.assertEqual(copied_resolution.revision, 1)
+        self.assertEqual(copied_resolution.updated_by_access_id, self.access.pk)
+        self.assertEqual(child.events.count(), 1)
+        self.assertEqual(child.events.get().action, 'revision_created')
+
+    def test_t14c_http_is_post_csrf_session_bound_and_idempotent(self):
+        parent = self._confirm(self._ready_version())
+        self.employee.phone = '+79995550123'
+        self.employee.save(update_fields=['phone'])
+        self.employee.refresh_from_db()
+        self.assertTrue(self.employee.phone)
+        url = reverse('arrival_roster_create_revision', args=[parent.pk])
+        csrf_client = self._login(Client(enforce_csrf_checks=True))
+        self.assertEqual(csrf_client.get(url).status_code, 405)
+        self.assertEqual(csrf_client.post(url, {}).status_code, 403)
+        other_client = self._login(Client(), self.other_access)
+        self.assertEqual(other_client.post(url).status_code, 302)
+        self.assertFalse(ArrivalRosterVersion.objects.filter(based_on_version=parent).exists())
+        client = self._login()
+        response = client.post(url, {
+            'actor_access_id': self.other_access.pk,
+            'employee_id': 999999,
+            'role_id': 999999,
+            'watch_period_id': 999999,
+            'based_on_version': 999999,
+            'created_at': '2000-01-01T00:00:00Z',
+        })
+        self.assertEqual(response.status_code, 302)
+        child = ArrivalRosterVersion.objects.get(based_on_version=parent)
+        self.assertEqual(child.created_by_access_id, self.access.pk)
+        repeated = client.post(url)
+        self.assertEqual(repeated.status_code, 302)
+        self.assertEqual(ArrivalRosterVersion.objects.filter(based_on_version=parent).count(), 1)
+        page = client.get(reverse('arrival_roster_review', args=[parent.pk]))
+        self.assertContains(page, 'Перейти к версии для исправления')
+        child_page = client.get(reverse('arrival_roster_review', args=[child.pk]))
+        self.assertContains(child_page, f'Создана на основании утверждённой версии № {parent.version_number}')
+        self.assertNotContains(child_page, parent.confirmation_sha256)
+        self.assertNotContains(child_page, 'employee_access_id')
+        self.assertNotContains(child_page, self.employee.phone)
+        self.assertNotContains(child_page, 'snapshot_sha256')
+
+    def test_t14c_rejects_invalid_parent_conflicts_and_rolls_back(self):
+        draft = self._ready_version()
+        with self.assertRaises(ValidationError) as invalid:
+            create_arrival_roster_correction_revision(version_id=draft.pk, actor_access_id=self.access.pk)
+        self.assertEqual(invalid.exception.code, 'arrival_roster.revision_parent_not_confirmed')
+        parent = self._confirm(self._ready_version())
+        before = ArrivalRosterVersion.objects.count()
+        with patch(
+            'rotations.arrival_roster_approvals._trusted_create_arrival_roster_event',
+            side_effect=RuntimeError('event failure'),
+        ):
+            with self.assertRaises(RuntimeError):
+                create_arrival_roster_correction_revision(version_id=parent.pk, actor_access_id=self.access.pk)
+        self.assertEqual(ArrivalRosterVersion.objects.count(), before)
+        first = create_arrival_roster_correction_revision(version_id=parent.pk, actor_access_id=self.access.pk)
+        duplicate = ArrivalRosterVersion._base_manager.get(pk=first.pk)
+        models.QuerySet.update(
+            ArrivalRosterVersion._base_manager.filter(pk=duplicate.pk),
+            version_number=duplicate.version_number + 100,
+        )
+        # Test-only base manager bypass proves the controlled ambiguity branch.
+        clone = ArrivalRosterVersion._base_manager.get(pk=first.pk)
+        clone.pk = None
+        clone.id = None
+        clone.version_number = first.version_number + 101
+        clone.snapshot = {}
+        clone.snapshot_sha256 = ''
+        clone.created_at = None
+        clone.updated_at = None
+        ArrivalRosterVersion._base_manager.bulk_create([clone])
+        with self.assertRaises(ValidationError) as conflict:
+            create_arrival_roster_correction_revision(version_id=parent.pk, actor_access_id=self.access.pk)
+        self.assertEqual(conflict.exception.code, 'arrival_roster.revision_child_conflict')
+
     def test_t14a_controlled_unique_collision_and_unknown_integrity_error(self):
         version = self._ready_version()
         proposal = self._proposal(version)
@@ -2651,7 +2792,7 @@ class ArrivalRosterT14aMigrationTests(TransactionTestCase):
         return executor.loader.project_state([('rotations', target)]).apps
 
     def tearDown(self):
-        self._migrate('0005_arrival_roster_confirmation')
+        self._migrate('0006_arrival_roster_excel_revision')
         super().tearDown()
 
     def _historical_version(self, apps, *, confirmed=False):
@@ -2716,6 +2857,96 @@ class ArrivalRosterT14aMigrationTests(TransactionTestCase):
             RuntimeError, rf'count=1; PK=\[{version.pk}\]',
         ):
             self._migrate('0004_arrival_roster_employee_pool')
+
+
+class ArrivalRosterT14cMigrationTests(TransactionTestCase):
+    reset_sequences = True
+
+    def _migrate(self, target):
+        executor = MigrationExecutor(connection)
+        executor.migrate([('rotations', target)])
+        return executor.loader.project_state([('rotations', target)]).apps
+
+    def tearDown(self):
+        self._migrate('0006_arrival_roster_excel_revision')
+        super().tearDown()
+
+    def _excel_version(self, apps, *, version_number=1, based_on_version_id=None):
+        RoleModel = apps.get_model('users', 'Role')
+        EmployeeModel = apps.get_model('users', 'Employee')
+        AccessModel = apps.get_model('users', 'EmployeeAccess')
+        CompositionModel = apps.get_model('users', 'WatchComposition')
+        PeriodModel = apps.get_model('shifts', 'WatchPeriod')
+        SourceModel = apps.get_model('rotations', 'ArrivalRosterSourceFile')
+        ProfileModel = apps.get_model('rotations', 'ArrivalRosterParserProfile')
+        VersionModel = apps.get_model('rotations', 'ArrivalRosterVersion')
+        role, _ = RoleModel.objects.get_or_create(code='timekeeper', defaults={'name': 'Табельщик'})
+        employee, _ = EmployeeModel.objects.get_or_create(
+            full_name='Migration T1.4c', defaults={'status': 'active', 'is_active': True},
+        )
+        access, _ = AccessModel.objects.get_or_create(
+            employee_id=employee.pk, role_id=role.pk, access_code='migration-t14c',
+            defaults={'status': 'activated', 'is_active': True},
+        )
+        composition, _ = CompositionModel.objects.get_or_create(code='migration-t14c', defaults={'name': 'Migration T1.4c'})
+        period, _ = PeriodModel.objects.get_or_create(
+            name='Migration T1.4c',
+            defaults={
+                'watch_composition_id': composition.pk,
+                'starts_on': date(2026, 8, 1), 'ends_on': date(2026, 9, 1), 'is_active': True,
+            },
+        )
+        source, _ = SourceModel.objects.get_or_create(
+            sha256='a' * 64,
+            defaults={
+                'original_name': 'migration.xlsx', 'byte_size': 1,
+                'content_type': 'application/octet-stream', 'file': 'migration.xlsx',
+                'uploaded_by_access_id': access.pk,
+            },
+        )
+        profile, _ = ProfileModel.objects.get_or_create(
+            code='migration-t14c', version=1,
+            defaults={'configuration': {}, 'configuration_sha256': 'b' * 64},
+        )
+        return VersionModel.objects.create(
+            watch_period_id=period.pk, version_number=version_number,
+            status='draft', source_kind='excel', source_file_id=source.pk,
+            parser_profile_id=profile.pk, created_by_access_id=access.pk,
+            source_fingerprint='c' * 64, snapshot={}, snapshot_sha256='',
+            based_on_version_id=based_on_version_id,
+        )
+
+    def test_t14c_migration_primary_unique_revision_lineage_and_safe_cycle(self):
+        apps_0005 = self._migrate('0005_arrival_roster_confirmation')
+        primary = self._excel_version(apps_0005)
+        apps_0006 = self._migrate('0006_arrival_roster_excel_revision')
+        Version = apps_0006.get_model('rotations', 'ArrivalRosterVersion')
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                self._excel_version(apps_0006, version_number=2)
+        revision = self._excel_version(apps_0006, version_number=2, based_on_version_id=primary.pk)
+        grandchild = self._excel_version(apps_0006, version_number=3, based_on_version_id=revision.pk)
+        self.assertEqual(Version.objects.filter(source_kind='excel').count(), 3)
+        self.assertEqual(grandchild.based_on_version_id, revision.pk)
+        with self.assertRaisesRegex(RuntimeError, rf'count=3; PK=\[{primary.pk}, {revision.pk}, {grandchild.pk}\]'):
+            self._migrate('0005_arrival_roster_confirmation')
+
+    def test_t14c_migration_reverse_without_revisions_and_employee_pool_is_unchanged(self):
+        apps_0005 = self._migrate('0005_arrival_roster_confirmation')
+        version = self._excel_version(apps_0005)
+        apps_0006 = self._migrate('0006_arrival_roster_excel_revision')
+        Version = apps_0006.get_model('rotations', 'ArrivalRosterVersion')
+        pool = Version.objects.create(
+            watch_period_id=version.watch_period_id, version_number=2,
+            status='draft', source_kind='employee_pool', source_file_id=None,
+            parser_profile_id=None, created_by_access_id=version.created_by_access_id,
+            source_fingerprint='d' * 64, snapshot={}, snapshot_sha256='',
+        )
+        self.assertTrue(Version.objects.filter(pk=version.pk).exists())
+        apps_reversed = self._migrate('0005_arrival_roster_confirmation')
+        self.assertTrue(apps_reversed.get_model('rotations', 'ArrivalRosterVersion').objects.filter(pk=version.pk).exists())
+        apps_forward = self._migrate('0006_arrival_roster_excel_revision')
+        self.assertTrue(apps_forward.get_model('rotations', 'ArrivalRosterVersion').objects.filter(pk=pool.pk).exists())
 
 
 class ArrivalRosterT13bTests(TestCase):

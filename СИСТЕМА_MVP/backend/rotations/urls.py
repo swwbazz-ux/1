@@ -3,6 +3,7 @@ from django.urls import path
 from .views import (
     arrival_roster_confirm_unambiguous_view,
     arrival_roster_approval_confirm_view,
+    arrival_roster_create_revision_view,
     arrival_roster_dates_view,
     arrival_roster_employee_add_view,
     arrival_roster_external_add_view,
@@ -83,6 +84,11 @@ urlpatterns = [
         'timekeeper/arrival-rosters/<int:version_id>/approve/',
         arrival_roster_approval_confirm_view,
         name='arrival_roster_approval_confirm',
+    ),
+    path(
+        'timekeeper/arrival-rosters/<int:version_id>/create-revision/',
+        arrival_roster_create_revision_view,
+        name='arrival_roster_create_revision',
     ),
     path(
         'timekeeper/arrival-rosters/<int:version_id>/rows/<int:match_id>/residents/search/',

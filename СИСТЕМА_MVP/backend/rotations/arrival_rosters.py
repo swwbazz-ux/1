@@ -220,6 +220,7 @@ _EVENT_DETAIL_KEYS = {
     ArrivalRosterEvent.Action.POOL_EMPLOYEE_ADDED: {'employee_id', 'resident_id'},
     ArrivalRosterEvent.Action.POOL_EXTERNAL_ADDED: {'resident_id'},
     ArrivalRosterEvent.Action.CONFIRMED: {'confirmation_sha256'},
+    'revision_created': set(),
 }
 
 _GENERIC_ISSUE_RESOLUTION_FORBIDDEN_CODES = {
@@ -404,7 +405,13 @@ def _trusted_create_arrival_roster_event(*, version, actor_context, action,
         action=action,
         details=details,
     )
-    event.full_clean()
+    # T1.4c stores a dedicated immutable revision event.  The database column
+    # deliberately has no choice constraint; keeping this narrow exception here
+    # preserves the closed writer boundary for every other event value.
+    if action == 'revision_created':
+        event.full_clean(exclude=['action'])
+    else:
+        event.full_clean()
     ArrivalRosterEvent._base_manager.bulk_create([event])
     return event
 
@@ -1384,6 +1391,117 @@ def _trusted_bulk_create_source_rows(*, version, parsed_rows):
 
     with transaction.atomic():
         return ArrivalRosterSourceRow._base_manager.bulk_create(source_rows)
+
+
+def _trusted_clone_excel_source_graph(*, version, source_rows, normalized_rows):
+    """Clone immutable Excel input rows without retaining parent-row links."""
+    copied_sources = []
+    source_map = {}
+    for source in source_rows:
+        copied = ArrivalRosterSourceRow(
+            version=version,
+            sheet_name=source.sheet_name,
+            row_number=source.row_number,
+            row_kind=source.row_kind,
+            raw_values=source.raw_values,
+            raw_styles=source.raw_styles,
+            row_sha256=source.row_sha256,
+        )
+        copied.full_clean()
+        copied_sources.append(copied)
+        source_map[source.pk] = copied
+    ArrivalRosterSourceRow._base_manager.bulk_create(copied_sources)
+
+    copied_normalized = []
+    normalized_map = {}
+    for normalized in normalized_rows:
+        copied = ArrivalRosterNormalizedRow(
+            source_row=source_map[normalized.source_row_id],
+            raw_full_name=normalized.raw_full_name,
+            normalized_full_name=normalized.normalized_full_name,
+            normalized_name_key=normalized.normalized_name_key,
+            name_comment=normalized.name_comment,
+            source_position=normalized.source_position,
+            normalized_position_key=normalized.normalized_position_key,
+            raw_shift_hint=normalized.raw_shift_hint,
+            raw_date=normalized.raw_date,
+            arrival_date_candidate=normalized.arrival_date_candidate,
+            date_comment=normalized.date_comment,
+            route_text=normalized.route_text,
+            raw_phone=normalized.raw_phone,
+            normalized_phones=normalized.normalized_phones,
+            comments=normalized.comments,
+            participation_hint=normalized.participation_hint,
+            color_hint=normalized.color_hint,
+        )
+        copied.full_clean()
+        copied_normalized.append(copied)
+        normalized_map[normalized.pk] = copied
+    ArrivalRosterNormalizedRow._base_manager.bulk_create(copied_normalized)
+    return source_map, normalized_map
+
+
+def _trusted_finalize_excel_revision_version(*, version, period, source_file,
+                                             parser_profile):
+    locked = ArrivalRosterVersion._base_manager.select_for_update(of=('self',)).get(pk=version.pk)
+    if (
+        locked.status != ArrivalRosterVersion.Status.REVIEW_REQUIRED
+        or locked.source_kind != ArrivalRosterVersion.SourceKind.EXCEL
+        or locked.source_file_id != source_file.pk
+        or locked.parser_profile_id != parser_profile.pk
+        or locked.watch_period_id != period.pk
+        or locked.snapshot_sha256
+    ):
+        raise _validation_error('arrival_roster.version_changed', 'Версия реестра изменилась.')
+    source_rows = list(
+        locked.source_rows.order_by('sheet_name', 'row_number').values(
+            'sheet_name', 'row_number', 'row_kind', 'row_sha256',
+        )
+    )
+    matches = list(
+        locked.matches.order_by('pk').values(
+            'status', 'method', 'quality', 'matched_resident_id',
+        )
+    )
+    blocking_count = locked.issues.filter(severity=ArrivalRosterIssue.Severity.ERROR).count()
+    warning_count = locked.issues.filter(severity=ArrivalRosterIssue.Severity.WARNING).count()
+    snapshot = {
+        'watch_period_id': period.pk,
+        'version_number': locked.version_number,
+        'source_sha256': source_file.sha256,
+        'parser_profile': {
+            'code': parser_profile.code,
+            'version': parser_profile.version,
+            'sha256': parser_profile.configuration_sha256,
+        },
+        'source_rows': source_rows,
+        'matches': matches,
+        'blocking_issue_count': blocking_count,
+        'warning_count': warning_count,
+    }
+    locked.source_row_count = len(source_rows)
+    locked.normalized_row_count = ArrivalRosterNormalizedRow._base_manager.filter(
+        source_row__version=locked,
+    ).count()
+    locked.blocking_issue_count = blocking_count
+    locked.warning_count = warning_count
+    locked.snapshot = snapshot
+    locked.snapshot_sha256 = _canonical_sha256(snapshot)
+    locked.updated_at = timezone.now()
+    locked.full_clean()
+    updated = models.QuerySet.update(
+        ArrivalRosterVersion._base_manager.filter(pk=locked.pk),
+        source_row_count=locked.source_row_count,
+        normalized_row_count=locked.normalized_row_count,
+        blocking_issue_count=locked.blocking_issue_count,
+        warning_count=locked.warning_count,
+        snapshot=locked.snapshot,
+        snapshot_sha256=locked.snapshot_sha256,
+        updated_at=locked.updated_at,
+    )
+    if updated != 1:
+        raise _validation_error('arrival_roster.version_changed', 'Версия реестра изменилась.')
+    return locked
 
 
 def _resident_record(resident):

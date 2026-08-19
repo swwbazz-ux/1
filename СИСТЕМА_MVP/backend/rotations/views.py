@@ -44,6 +44,7 @@ from .arrival_roster_pool import (
 from .arrival_roster_approvals import (
     build_arrival_roster_confirmation_proposal,
     confirm_arrival_roster_version,
+    create_arrival_roster_correction_revision,
 )
 from .forms import (
     ArrivalRosterConfirmationForm,
@@ -469,6 +470,24 @@ def arrival_roster_review_view(request, version_id):
         ArrivalRosterVersion.Status.CONFIRMED,
         ArrivalRosterVersion.Status.SUPERSEDED,
     }
+    revision_child = None
+    replacement_version = None
+    if version.status == ArrivalRosterVersion.Status.CONFIRMED:
+        revision_child = (
+            version.replacement_versions
+            .filter(status__in=[
+                ArrivalRosterVersion.Status.DRAFT,
+                ArrivalRosterVersion.Status.REVIEW_REQUIRED,
+            ])
+            .order_by('pk').first()
+        )
+    elif version.status == ArrivalRosterVersion.Status.SUPERSEDED:
+        replacement_version = (
+            version.replacement_versions
+            .filter(status=ArrivalRosterVersion.Status.CONFIRMED)
+            .order_by('pk').first()
+        )
+    revision_base = version.based_on_version if version.based_on_version_id else None
     approval_error = ''
     approval_form = None
     if not is_read_only:
@@ -592,6 +611,9 @@ def arrival_roster_review_view(request, version_id):
             'approval_ready': approval_form is not None,
             'approval_form': approval_form,
             'approval_error': approval_error,
+            'revision_child': revision_child,
+            'replacement_version': replacement_version,
+            'revision_base': revision_base,
         },
     )
     return _private_no_store(response)
@@ -632,6 +654,23 @@ def arrival_roster_approval_confirm_view(request, version_id):
         else:
             messages.success(request, 'Список заезда утверждён.')
     return _arrival_roster_redirect(version_id)
+
+
+@require_POST
+def arrival_roster_create_revision_view(request, version_id):
+    access, response = _role_access(request, 'timekeeper')
+    if response:
+        return response
+    try:
+        version = create_arrival_roster_correction_revision(
+            version_id=version_id,
+            actor_access_id=access.pk,
+        )
+    except ValidationError as error:
+        _arrival_roster_error(request, error)
+        return _arrival_roster_redirect(version_id)
+    messages.success(request, 'Создана версия для исправления.')
+    return _arrival_roster_redirect(version.pk)
 
 
 @require_POST

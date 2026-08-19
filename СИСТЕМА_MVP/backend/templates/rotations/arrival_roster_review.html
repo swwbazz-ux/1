@@ -40,6 +40,7 @@
                 <h2>{{ version.watch_period }} · версия {{ version.version_number }}</h2>
                 <p>{{ status_label }} · {{ source_label }}</p>
                 {% if is_read_only and version.status == 'confirmed' %}<p>Утверждена: {{ version.confirmed_at|date:"d.m.Y H:i" }} · Табельщик: {{ version.confirmed_by_access.employee.full_name }}</p>{% endif %}
+                {% if revision_base %}<p>Создана на основании утверждённой версии № {{ revision_base.version_number }}.</p>{% endif %}
             </div>
             {% if version.source_kind == 'employee_pool' and not is_read_only %}
                 <form method="post" action="{% url 'arrival_roster_confirm_unambiguous' version.pk %}">
@@ -53,6 +54,16 @@
             {% if is_read_only %}
                 {% if version.status == 'confirmed' %}<h3>Список заезда утверждён</h3>{% else %}<h3>Версия заменена новой</h3>{% endif %}
                 <p>Версия доступна только для чтения. Исходные строки, решения и история сохранены ниже.</p>
+                {% if version.status == 'confirmed' %}
+                    {% if revision_child %}
+                        <p><a class="admin-button" href="{% url 'arrival_roster_review' revision_child.pk %}">Перейти к версии для исправления</a></p>
+                    {% else %}
+                        <p>Утверждённый список и его история не изменятся. Исправления будут внесены в новую версию.</p>
+                        <form method="post" action="{% url 'arrival_roster_create_revision' version.pk %}">{% csrf_token %}<button class="admin-button admin-button-primary" type="submit">Создать версию для исправления</button></form>
+                    {% endif %}
+                {% elif replacement_version %}
+                    <p><a class="admin-button" href="{% url 'arrival_roster_review' replacement_version.pk %}">Перейти к заменившей версии</a></p>
+                {% endif %}
             {% elif approval_ready %}
                 <h3>Версия готова к утверждению</h3>
                 <p>Все обязательные проверки завершены.</p>
@@ -152,13 +163,13 @@
                 {% if group.items %}
                     <div class="table-wrap">
                         <table>
-                            <thead><tr><th>Источник</th><th>Человек</th><th>Дата</th>{% if not is_read_only %}<th>Телефон</th>{% endif %}<th>Состояние</th><th>Замечания</th>{% if not is_read_only %}<th>Ручная проверка</th>{% endif %}</tr></thead>
+                            <thead><tr><th>Источник</th><th>Человек</th><th>Дата</th><th>Состояние</th><th>Замечания</th>{% if not is_read_only %}<th>Ручная проверка</th>{% endif %}</tr></thead>
                             <tbody>
                             {% for item in group.items %}
                                 <tr>
                                     <td>{{ item.source_label }}</td>
                                     <td>{% if item.photo %}<img src="{{ item.photo.url }}" alt="Фото" width="40" height="40"><br>{% endif %}<strong>{{ item.display_name }}</strong><br><small>{{ item.display_position }}</small></td>
-                                    <td>{% if item.display_date %}{{ item.display_date|date:"d.m.Y" }}{% else %}Требуется проверка{% endif %}</td>{% if not is_read_only %}<td>{{ item.display_phone }}</td>{% endif %}
+                                    <td>{% if item.display_date %}{{ item.display_date|date:"d.m.Y" }}{% else %}Требуется проверка{% endif %}</td>
                                     <td>{{ item.match.get_status_display }}<br><small>{{ item.responsibility }}</small>{% if item.resident_name %}<br><small>{{ item.resident_name }}</small>{% endif %}</td>
                                     <td>
                                         {% for issue in item.issues %}
