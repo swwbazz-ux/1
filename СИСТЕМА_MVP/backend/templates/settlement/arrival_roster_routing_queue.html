@@ -1,0 +1,81 @@
+{% extends "clerk/base.html" %}
+
+{% block clerk_content %}
+<main class="admin-console-page settlement-page">
+    <section class="admin-console-section" aria-labelledby="settlement-routing-title">
+        <header class="admin-console-section-header">
+            <div>
+                <span>Утверждённый состав заезда</span>
+                <h2 id="settlement-routing-title">Готово к расселению</h2>
+                <p>Здесь показаны только строки, чья передача и назначение проверены сервером.</p>
+            </div>
+        </header>
+
+        <section aria-labelledby="settlement-ready-title">
+            <h3 id="settlement-ready-title">Готово к расселению</h3>
+            <div class="admin-console-table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Человек</th>
+                            <th>Тип</th>
+                            <th>Роль ОУП</th>
+                            <th>Период вахты</th>
+                            <th>Участие и даты</th>
+                            <th>Основание готовности</th>
+                            <th>Техника и смена</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in routing_queue.ready %}
+                        <tr>
+                            <td>{{ item.name }}</td>
+                            <td>{{ item.subject_type }}</td>
+                            <td>{{ item.role }}</td>
+                            <td>{{ item.watch_period }}</td>
+                            <td>Участвует: {{ item.arrival_on }} — {{ item.departure_on }}</td>
+                            <td>{{ item.readiness_source }}</td>
+                            <td>{% if item.equipment %}{{ item.equipment }} · {{ item.shift }}{% else %}Не назначается заместителем{% endif %}</td>
+                        </tr>
+                        {% empty %}
+                        <tr><td colspan="7">Нет строк, готовых к расселению.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section aria-labelledby="settlement-review-title">
+            <h3 id="settlement-review-title">Требуется проверка</h3>
+            <div class="admin-console-table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Человек</th>
+                            <th>Тип</th>
+                            <th>Роль ОУП</th>
+                            <th>Период вахты</th>
+                            <th>Участие и даты</th>
+                            <th>Причина</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in routing_queue.review %}
+                        <tr>
+                            <td>{{ item.name }}</td>
+                            <td>{{ item.subject_type }}</td>
+                            <td>{{ item.role }}</td>
+                            <td>{{ item.watch_period }}</td>
+                            <td>Участвует: {{ item.arrival_on }} — {{ item.departure_on }}</td>
+                            <td>{{ item.reason }}</td>
+                        </tr>
+                        {% empty %}
+                        <tr><td colspan="6">Строк, требующих проверки, нет.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </section>
+</main>
+{% endblock %}

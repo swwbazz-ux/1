@@ -582,6 +582,236 @@ def deputy_arrival_roster_routing_queue():
     }
 
 
+def _clerk_role_label(role_snapshot):
+    """Return a user-facing OUP role label without exposing stored JSON."""
+    role_code = (role_snapshot or {}).get('role_code')
+    return {
+        'driver': 'Водитель',
+        'excavator_operator': 'Машинист экскаватора',
+        None: 'Непроизводственная роль',
+    }.get(role_code, 'Роль требует проверки')
+
+
+def _clerk_queue_item(*, row, readiness_source, equipment=None, shift_label=None, reason=None):
+    """Project one immutable routing row into safe clerk-facing fields only."""
+    resident = row.resident
+    employee = row.employee
+    name = employee.full_name if employee is not None else resident.display_name
+    return {
+        'name': name,
+        'subject_type': 'Сотрудник' if employee is not None else 'Внешний жилец',
+        'role': _clerk_role_label(row.role_snapshot),
+        'watch_period': row.batch.arrival_roster_version.watch_period.name,
+        'arrival_on': _queue_date_label((row.dates_snapshot or {}).get('arrival_on')),
+        'departure_on': _queue_date_label((row.dates_snapshot or {}).get('departure_on')),
+        'readiness_source': readiness_source,
+        'equipment': str(equipment) if equipment is not None else None,
+        'shift': shift_label,
+        'reason': reason,
+        '_sort_key': (
+            row.batch.arrival_roster_version.watch_period.starts_on,
+            row.batch.arrival_roster_version.watch_period.name.casefold(),
+            name.casefold(),
+            '0' if employee is not None else '1',
+        ),
+    }
+
+
+def _clerk_queue_production_reason(*, row, event, transfers):
+    """Fail closed unless an official event proves every production relation."""
+    from assignments.models import (
+        AssignmentStatus,
+        CrewPlanStatus,
+        EquipmentAssignment,
+        WorkShiftType,
+    )
+
+    saved_role = (row.role_snapshot or {}).get('role_code')
+    period = row.batch.arrival_roster_version.watch_period
+    current_role, _basis = _qualification_snapshots(
+        employee=row.employee,
+        transfers=transfers,
+        as_of=period.starts_on,
+    )
+    if (
+        saved_role not in _PRODUCTION_ROLE_CODES
+        or (row.role_snapshot or {}).get('qualification_state') != 'exact'
+        or current_role.get('qualification_state') != 'exact'
+        or current_role.get('role_code') != saved_role
+    ):
+        return 'Роль изменена ОУП — требуется проверка', None, None
+
+    slot = event.crew_plan_slot
+    assignment = event.equipment_assignment
+    if slot is None or assignment is None:
+        return 'Связь назначения техники и смены нарушена.', None, None
+    plan = slot.plan
+    assignment_is_exact = (
+        event.actor_access.role.code == 'deputy_mining_manager'
+        and plan.status in {CrewPlanStatus.PUBLISHED, CrewPlanStatus.SUPERSEDED}
+        and slot.employee_id == row.employee_id
+        and assignment.source_crew_plan_slot_id == slot.pk
+        and assignment.source_kind == EquipmentAssignment.SourceKind.DEPUTY_PUBLISHED_PLAN
+        and assignment.status == AssignmentStatus.ACCEPTED
+        and assignment.ended_at is None
+        and assignment.shift_id is None
+        and assignment.employee_id == row.employee_id
+        and assignment.role_id == plan.role_id
+        and assignment.equipment_id == slot.equipment_id
+        and assignment.shift_type == slot.shift_type
+        and plan.role.code == saved_role
+        and slot.shift_type in {WorkShiftType.SHIFT_1, WorkShiftType.SHIFT_2}
+    )
+    arrival_on = _routing_snapshot_date(row.dates_snapshot, 'arrival_on')
+    departure_on = _routing_snapshot_date(row.dates_snapshot, 'departure_on')
+    dates_are_exact = bool(
+        arrival_on
+        and departure_on
+        and arrival_on <= plan.work_date <= departure_on
+        and period.starts_on <= plan.work_date <= period.ends_on
+    )
+    if not assignment_is_exact or not dates_are_exact:
+        return 'Связь назначения техники и смены нарушена.', None, None
+    return None, assignment.equipment, {
+        WorkShiftType.SHIFT_1: 'День',
+        WorkShiftType.SHIFT_2: 'Ночь',
+    }[slot.shift_type]
+
+
+def settlement_clerk_arrival_roster_routing_queue():
+    """Return the clerk's consolidated, read-only settlement-ready queue.
+
+    The projection never creates events or repairs damaged provenance.  Every
+    route is accepted only when its immutable history still proves readiness.
+    """
+    rows = list(
+        ArrivalRosterRoutingRow._base_manager.select_related(
+            'batch__arrival_roster_version__watch_period',
+            'employee',
+            'resident',
+        )
+        .prefetch_related(
+            models.Prefetch(
+                'events',
+                queryset=(
+                    ArrivalRosterRoutingEvent._base_manager.select_related(
+                        'actor_access__role',
+                        'crew_plan_slot__plan__role',
+                        'crew_plan_slot__equipment',
+                        'equipment_assignment__equipment',
+                    ).order_by('created_at', 'pk')
+                ),
+                to_attr='routing_events',
+            ),
+        )
+        .filter(
+            batch__arrival_roster_version__status=ArrivalRosterVersion.Status.CONFIRMED,
+            batch__arrival_roster_version__superseded_at__isnull=True,
+        )
+        .order_by(
+            'batch__arrival_roster_version__watch_period__starts_on',
+            'batch__arrival_roster_version__watch_period__name',
+            'employee__full_name',
+            'resident__full_name',
+        )
+    )
+    employee_ids = sorted({row.employee_id for row in rows if row.employee_id})
+    transfers_by_period = {}
+    ready = []
+    review = []
+
+    for row in rows:
+        participation = (row.participation_snapshot or {}).get('participation_status')
+        if participation == ArrivalRosterRowReview.ParticipationStatus.NOT_ARRIVING:
+            continue
+        events = row.routing_events
+        latest_event = events[-1] if events else None
+        if latest_event is None:
+            review.append(_clerk_queue_item(
+                row=row,
+                readiness_source='',
+                reason='История передачи неполная — требуется проверка.',
+            ))
+            continue
+
+        if latest_event.event_type in {
+            ArrivalRosterRoutingEvent.EventType.REQUIRES_REVIEW,
+            ArrivalRosterRoutingEvent.EventType.STALE,
+        } or row.route_state == ArrivalRosterRoutingRow.RouteState.REVIEW_REQUIRED:
+            review.append(_clerk_queue_item(
+                row=row,
+                readiness_source='',
+                reason=(
+                    'Передача устарела: создана исправленная версия.'
+                    if latest_event.event_type == ArrivalRosterRoutingEvent.EventType.STALE
+                    else 'Требуется проверка исходных данных.'
+                ),
+            ))
+            continue
+
+        if row.route_state == ArrivalRosterRoutingRow.RouteState.TO_CLERK:
+            is_nonproduction = (
+                (row.role_snapshot or {}).get('qualification_state') == 'not_production'
+                and (row.role_snapshot or {}).get('role_code') not in _PRODUCTION_ROLE_CODES
+            )
+            if (
+                latest_event.event_type == ArrivalRosterRoutingEvent.EventType.SENT_TO_CLERK
+                and is_nonproduction
+            ):
+                ready.append(_clerk_queue_item(
+                    row=row,
+                    readiness_source='Направлен непосредственно',
+                ))
+            else:
+                review.append(_clerk_queue_item(
+                    row=row,
+                    readiness_source='',
+                    reason=(
+                        'Роль ОУП требует проверки.'
+                        if not is_nonproduction
+                        else 'История прямого направления нарушена.'
+                    ),
+                ))
+            continue
+
+        if row.route_state != ArrivalRosterRoutingRow.RouteState.TO_DEPUTY or row.employee_id is None:
+            continue
+        if latest_event.event_type != ArrivalRosterRoutingEvent.EventType.OFFICIAL_ASSIGNMENT_PUBLISHED:
+            # The deputy owns rows that have not yet received an official event.
+            continue
+
+        period = row.batch.arrival_roster_version.watch_period
+        if period.pk not in transfers_by_period:
+            transfers_by_period[period.pk] = _queue_active_transfers(
+                employee_ids=employee_ids,
+                as_of=period.starts_on,
+            )
+        reason, equipment, shift_label = _clerk_queue_production_reason(
+            row=row,
+            event=latest_event,
+            transfers=transfers_by_period[period.pk],
+        )
+        if reason:
+            review.append(_clerk_queue_item(
+                row=row,
+                readiness_source='',
+                reason=reason,
+            ))
+        else:
+            ready.append(_clerk_queue_item(
+                row=row,
+                readiness_source='Техника и смена назначены',
+                equipment=equipment,
+                shift_label=shift_label,
+            ))
+
+    ready.sort(key=lambda item: item['_sort_key'])
+    review.sort(key=lambda item: item['_sort_key'])
+    for item in [*ready, *review]:
+        item.pop('_sort_key')
+    return {'ready': ready, 'review': review}
+
+
 def _routing_snapshot_date(snapshot, field_name):
     try:
         return date.fromisoformat((snapshot or {}).get(field_name))

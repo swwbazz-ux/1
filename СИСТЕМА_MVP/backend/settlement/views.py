@@ -23,6 +23,7 @@ from users.role_apps import (
     role_app_manifest_response,
     role_app_service_worker_response,
 )
+from rotations.arrival_roster_routing import settlement_clerk_arrival_roster_routing_queue
 
 from .control import (
     SettlementControlWriteContext,
@@ -241,10 +242,11 @@ def _person_short_label(full_name):
     return f"{parts[0]} {''.join(f'{part[0]}.' for part in parts[1:])}"
 
 
-def settlement_clerk_access_from_request(request):
+def settlement_clerk_access_from_request(request, *, allow_admin=True):
     access_id = request.session.get('employee_access_id')
     if not access_id:
         return None
+    role_codes = ('settlement_clerk', 'admin') if allow_admin else ('settlement_clerk',)
     access = (
         EmployeeAccess.objects
         .select_related('employee', 'role')
@@ -255,7 +257,7 @@ def settlement_clerk_access_from_request(request):
             employee__is_active=True,
             employee__status=Employee.Status.ACTIVE,
             role__is_active=True,
-            role__code__in=('settlement_clerk', 'admin'),
+            role__code__in=role_codes,
         )
         .first()
     )
@@ -265,6 +267,24 @@ def settlement_clerk_access_from_request(request):
     if not session_state['authenticated'] or not session_state['is_active']:
         return None
     return access
+
+
+@require_GET
+def settlement_arrival_roster_routing_view(request):
+    """Read-only ready-for-settlement hand-off queue for the exact clerk access."""
+    access = settlement_clerk_access_from_request(request, allow_admin=False)
+    if not access:
+        next_url = urlencode({'next': reverse('settlement_arrival_roster_routing')})
+        return redirect(f'{reverse("clerk_login")}?{next_url}')
+    return render(
+        request,
+        'settlement/arrival_roster_routing_queue.html',
+        {
+            'access': access,
+            'routing_queue': settlement_clerk_arrival_roster_routing_queue(),
+            'clerk_active_section': 'routing',
+        },
+    )
 
 
 def _employee_profiles(employees):

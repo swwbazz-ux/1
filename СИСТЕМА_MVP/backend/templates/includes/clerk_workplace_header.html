@@ -20,6 +20,8 @@
                     data-unsettled-panel-toggle
                     aria-controls="settlement-unsettled-panel"
                     aria-expanded="false">Расселение</button>
+            <a href="{% url 'settlement_arrival_roster_routing' %}"
+               class="{% if clerk_active_section == 'routing' %}is-active{% endif %}">Готово к расселению</a>
         </nav>
     </section>
 
