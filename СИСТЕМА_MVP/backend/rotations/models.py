@@ -1538,3 +1538,252 @@ class ArrivalRosterEvent(ArrivalRosterImmutableModel):
         indexes = [
             models.Index(fields=['version', 'created_at'], name='arrival_event_version_idx'),
         ]
+
+
+class ArrivalRosterRoutingBatch(ArrivalRosterImmutableModel):
+    """Immutable hand-off root for one confirmed arrival-roster version."""
+
+    PUBLIC_CREATE_FORBIDDEN = True
+    IMMUTABLE_FIELDS = (
+        'arrival_roster_version_id', 'watch_period_id', 'confirmation_sha256',
+        'created_by_access_id', 'created_at',
+    )
+
+    arrival_roster_version = models.OneToOneField(
+        ArrivalRosterVersion,
+        verbose_name='Точная утверждённая версия реестра',
+        on_delete=models.PROTECT,
+        related_name='routing_batch',
+    )
+    watch_period = models.ForeignKey(
+        'shifts.WatchPeriod',
+        verbose_name='Период вахты',
+        on_delete=models.PROTECT,
+        related_name='arrival_roster_routing_batches',
+    )
+    confirmation_sha256 = models.CharField(
+        'SHA-256 утверждённого реестра',
+        max_length=64,
+        validators=[RegexValidator(regex=r'^[0-9a-f]{64}$')],
+    )
+    created_by_access = models.ForeignKey(
+        'users.EmployeeAccess',
+        verbose_name='Точный доступ табельщика, создавшего передачу',
+        on_delete=models.PROTECT,
+        related_name='created_arrival_roster_routing_batches',
+    )
+    created_at = models.DateTimeField('Передача создана', auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Передача утверждённого реестра заезда'
+        verbose_name_plural = 'Передачи утверждённых реестров заезда'
+        ordering = ['watch_period_id', 'pk']
+        indexes = [
+            models.Index(
+                fields=['watch_period', 'created_at'],
+                name='arrival_route_batch_period_idx',
+            ),
+        ]
+
+    def clean(self):
+        super().clean()
+        errors = {}
+        version = self.arrival_roster_version
+        if version.status != ArrivalRosterVersion.Status.CONFIRMED:
+            errors['arrival_roster_version'] = 'Передача создаётся только для действующей утверждённой версии.'
+        if version.watch_period_id != self.watch_period_id:
+            errors['watch_period'] = 'Период передачи не соответствует версии реестра.'
+        if version.confirmation_sha256 != self.confirmation_sha256:
+            errors['confirmation_sha256'] = 'Контрольная сумма передачи не соответствует утверждённой версии.'
+        if self.created_by_access.role.code != 'timekeeper':
+            errors['created_by_access'] = 'Передачу утверждённого реестра создаёт только точный доступ табельщика.'
+        if errors:
+            raise ValidationError(errors)
+
+
+class ArrivalRosterRoutingRow(ArrivalRosterImmutableModel):
+    """Immutable routed projection of one confirmed roster review row."""
+
+    PUBLIC_CREATE_FORBIDDEN = True
+
+    class RouteState(models.TextChoices):
+        TO_DEPUTY = 'to_deputy', 'Заместителю начальника участка'
+        TO_CLERK = 'to_clerk', 'Напрямую делопроизводителю'
+        NOT_PARTICIPATING = 'not_participating', 'Не участвует в заезде'
+        REVIEW_REQUIRED = 'review_required', 'Требуется проверка'
+
+    IMMUTABLE_FIELDS = (
+        'batch_id', 'row_review_id', 'match_id', 'resident_id', 'employee_id',
+        'participation_snapshot', 'dates_snapshot', 'role_snapshot',
+        'role_basis_snapshot', 'route_state', 'created_at',
+    )
+
+    batch = models.ForeignKey(
+        ArrivalRosterRoutingBatch,
+        verbose_name='Передача реестра',
+        on_delete=models.CASCADE,
+        related_name='rows',
+    )
+    row_review = models.ForeignKey(
+        ArrivalRosterRowReview,
+        verbose_name='Точная ручная проверка строки',
+        on_delete=models.PROTECT,
+        related_name='routing_rows',
+    )
+    match = models.ForeignKey(
+        ArrivalRosterMatch,
+        verbose_name='Точное сопоставление строки',
+        on_delete=models.PROTECT,
+        related_name='routing_rows',
+    )
+    resident = models.ForeignKey(
+        'settlement.SettlementResident',
+        verbose_name='Точный жилец',
+        on_delete=models.PROTECT,
+        related_name='arrival_roster_routing_rows',
+    )
+    employee = models.ForeignKey(
+        'users.Employee',
+        verbose_name='Внутренний сотрудник',
+        on_delete=models.PROTECT,
+        related_name='arrival_roster_routing_rows',
+        null=True,
+        blank=True,
+    )
+    participation_snapshot = models.JSONField('Снимок участия в заезде')
+    dates_snapshot = models.JSONField('Снимок дат заезда')
+    role_snapshot = models.JSONField('Снимок роли, установленной ОУП')
+    role_basis_snapshot = models.JSONField('Снимок основания определения роли')
+    route_state = models.CharField(
+        'Маршрутное состояние',
+        max_length=24,
+        choices=RouteState.choices,
+        db_index=True,
+    )
+    created_at = models.DateTimeField('Строка передачи создана', auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Маршрутизированная строка реестра заезда'
+        verbose_name_plural = 'Маршрутизированные строки реестра заезда'
+        ordering = ['batch_id', 'row_review_id', 'pk']
+        indexes = [
+            models.Index(
+                fields=['batch', 'route_state'],
+                name='arrival_route_row_state_idx',
+            ),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['batch', 'row_review'],
+                name='uniq_arrival_route_batch_review',
+            ),
+        ]
+
+    def clean(self):
+        super().clean()
+        errors = {}
+        if self.row_review.version_id != self.batch.arrival_roster_version_id:
+            errors['row_review'] = 'Проверка относится к другой версии реестра.'
+        if self.match.version_id != self.batch.arrival_roster_version_id:
+            errors['match'] = 'Сопоставление относится к другой версии реестра.'
+        if self.row_review.match_id != self.match_id:
+            errors['match'] = 'Сопоставление не соответствует ручной проверке строки.'
+        if self.row_review.selected_resident_id != self.resident_id:
+            errors['resident'] = 'Жилец не соответствует выбранному жильцу в ручной проверке.'
+        if self.resident.employee_id != self.employee_id:
+            errors['employee'] = 'Внутренний сотрудник не соответствует карточке жильца.'
+        for field_name in (
+            'participation_snapshot', 'dates_snapshot', 'role_snapshot',
+            'role_basis_snapshot',
+        ):
+            if not isinstance(getattr(self, field_name), dict):
+                errors[field_name] = 'Снимок должен быть JSON-объектом.'
+        if errors:
+            raise ValidationError(errors)
+
+
+class ArrivalRosterRoutingEvent(ArrivalRosterImmutableModel):
+    """Append-only routing history; current state is its last ordered event."""
+
+    PUBLIC_CREATE_FORBIDDEN = True
+
+    class EventType(models.TextChoices):
+        CREATED = 'created', 'Передача создана'
+        SENT_TO_DEPUTY = 'sent_to_deputy', 'Направлена заместителю'
+        SENT_TO_CLERK = 'sent_to_clerk', 'Направлена делопроизводителю'
+        OFFICIAL_ASSIGNMENT_PUBLISHED = (
+            'official_assignment_published', 'Официальное назначение опубликовано',
+        )
+        REQUIRES_REVIEW = 'requires_review', 'Требуется проверка'
+        STALE = 'stale', 'Передача устарела'
+
+    IMMUTABLE_FIELDS = (
+        'routing_row_id', 'event_type', 'actor_access_id', 'crew_plan_slot_id',
+        'equipment_assignment_id', 'created_at',
+    )
+
+    routing_row = models.ForeignKey(
+        ArrivalRosterRoutingRow,
+        verbose_name='Маршрутизированная строка',
+        on_delete=models.CASCADE,
+        related_name='events',
+    )
+    event_type = models.CharField(
+        'Тип события',
+        max_length=32,
+        choices=EventType.choices,
+    )
+    actor_access = models.ForeignKey(
+        'users.EmployeeAccess',
+        verbose_name='Точный доступ исполнителя',
+        on_delete=models.PROTECT,
+        related_name='arrival_roster_routing_events',
+    )
+    crew_plan_slot = models.ForeignKey(
+        'assignments.CrewPlanSlot',
+        verbose_name='Точный слот опубликованного плана',
+        on_delete=models.PROTECT,
+        related_name='arrival_roster_routing_events',
+        null=True,
+        blank=True,
+    )
+    equipment_assignment = models.ForeignKey(
+        'assignments.EquipmentAssignment',
+        verbose_name='Точное официальное назначение техники',
+        on_delete=models.PROTECT,
+        related_name='arrival_roster_routing_events',
+        null=True,
+        blank=True,
+    )
+    created_at = models.DateTimeField('Время события', auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Событие маршрутизации реестра заезда'
+        verbose_name_plural = 'События маршрутизации реестра заезда'
+        ordering = ['routing_row_id', 'created_at', 'pk']
+        indexes = [
+            models.Index(
+                fields=['routing_row', 'created_at'],
+                name='arrival_route_event_row_idx',
+            ),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        event_type='official_assignment_published',
+                        crew_plan_slot__isnull=False,
+                        equipment_assignment__isnull=False,
+                    )
+                    | models.Q(
+                        event_type__in=[
+                            'created', 'sent_to_deputy', 'sent_to_clerk',
+                            'requires_review', 'stale',
+                        ],
+                        crew_plan_slot__isnull=True,
+                        equipment_assignment__isnull=True,
+                    )
+                ),
+                name='arrival_route_event_assignment_shape',
+            ),
+        ]
