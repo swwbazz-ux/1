@@ -2,13 +2,14 @@ from datetime import date, timedelta
 from importlib import import_module
 
 from django.core.exceptions import ValidationError
-from django.db import IntegrityError, models, transaction
+from django.db import IntegrityError, connection, models, transaction
+from django.db.migrations.executor import MigrationExecutor
 from django.db.models.deletion import ProtectedError
 from django.db.migrations import RunPython, RunSQL
-from django.test import TestCase
+from django.test import TestCase, TransactionTestCase
 from django.utils import timezone
 
-from users.models import WorkSchedule
+from users.models import Employee, EmployeeAccess, Role, WorkSchedule
 
 from .models import (
     WatchPeriod,
@@ -22,6 +23,13 @@ class BrigadePhaseCalendarSchemaTests(TestCase):
     source_fingerprint = 'a' * 64
 
     def setUp(self):
+        self.actor_role = Role.objects.create(
+            code='brigade-phase-schema-actor',
+            name='Schema-only actor календаря фаз',
+        )
+        self.created_access = self._actor_access('создатель', 'BPC-ACTOR-001')
+        self.confirmed_access = self._actor_access('подтвердивший', 'BPC-ACTOR-002')
+        self.superseded_access = self._actor_access('заменивший', 'BPC-ACTOR-003')
         self.work_schedule = WorkSchedule.objects.create(
             code='schedule-12-schema-test',
             name='График № 12 — schema test',
@@ -33,12 +41,28 @@ class BrigadePhaseCalendarSchemaTests(TestCase):
             ends_on=date(2030, 2, 15),
         )
 
+    def _actor_access(self, label, access_code):
+        employee = Employee.objects.create(
+            full_name=f'Schema-only {label} календаря фаз',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        return EmployeeAccess.objects.create(
+            employee=employee,
+            role=self.actor_role,
+            access_code=access_code,
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+
     def _version(
         self,
         version_number,
         *,
         status=WatchPeriodBrigadePhaseVersion.Status.DRAFT,
         based_on_version=None,
+        confirmed_by_access=None,
+        superseded_by_access=None,
         confirmed_at=None,
         superseded_at=None,
         watch_period=None,
@@ -50,6 +74,9 @@ class BrigadePhaseCalendarSchemaTests(TestCase):
             version_number=version_number,
             status=status,
             based_on_version=based_on_version,
+            created_by_access=self.created_access,
+            confirmed_by_access=confirmed_by_access,
+            superseded_by_access=superseded_by_access,
             confirmed_at=confirmed_at,
             superseded_at=superseded_at,
             source_snapshot=self._source_snapshot(),
@@ -111,6 +138,27 @@ class BrigadePhaseCalendarSchemaTests(TestCase):
             version_fields.get_field('based_on_version').remote_field.on_delete,
             models.PROTECT,
         )
+        actor_fields = {
+            'created_by_access': (
+                False,
+                'created_brigade_phase_versions',
+            ),
+            'confirmed_by_access': (
+                True,
+                'confirmed_brigade_phase_versions',
+            ),
+            'superseded_by_access': (
+                True,
+                'superseded_brigade_phase_versions',
+            ),
+        }
+        for field_name, (is_nullable, related_name) in actor_fields.items():
+            with self.subTest(field_name=field_name):
+                field = version_fields.get_field(field_name)
+                self.assertIs(field.remote_field.model, EmployeeAccess)
+                self.assertIs(field.remote_field.on_delete, models.PROTECT)
+                self.assertEqual(field.null, is_nullable)
+                self.assertEqual(field.remote_field.related_name, related_name)
         self.assertIs(
             row_fields.get_field('version').remote_field.on_delete,
             models.CASCADE,
@@ -125,11 +173,18 @@ class BrigadePhaseCalendarSchemaTests(TestCase):
             ['day', 'night', 'off'],
         )
         forbidden_fields = {
-            'actor', 'access', 'role', 'created_by_access',
-            'confirmed_by_access', 'superseded_by_access',
+            'actor', 'access', 'role',
         }
         self.assertFalse(
             forbidden_fields.intersection(field.name for field in version_fields.fields)
+        )
+        self.assertTrue(
+            set(actor_fields).issubset(
+                field.name for field in version_fields.fields
+            )
+        )
+        self.assertTrue(
+            actor_fields.keys().isdisjoint(field.name for field in row_fields.fields)
         )
 
     def test_declared_database_constraint_names_are_complete(self):
@@ -148,7 +203,7 @@ class BrigadePhaseCalendarSchemaTests(TestCase):
                 'uniq_watch_phase_confirmed',
                 'watch_phase_version_gte_1',
                 'watch_phase_status_valid',
-                'watch_phase_status_dates',
+                'watch_phase_status_audit',
                 'watch_phase_supersede_order',
                 'watch_phase_not_self_based',
             },
@@ -181,6 +236,7 @@ class BrigadePhaseCalendarSchemaTests(TestCase):
                     watch_period=self.watch_period,
                     work_schedule=self.work_schedule,
                     version_number=1,
+                    created_by_access=self.created_access,
                     source_snapshot=None,
                     source_fingerprint=self.source_fingerprint,
                 )
@@ -192,10 +248,24 @@ class BrigadePhaseCalendarSchemaTests(TestCase):
                     watch_period=self.watch_period,
                     work_schedule=self.work_schedule,
                     version_number=2,
+                    created_by_access=self.created_access,
                     source_snapshot=self._source_snapshot(),
                     source_fingerprint=None,
                 )
             )
+        )
+
+    def test_created_by_access_is_required(self):
+        field = WatchPeriodBrigadePhaseVersion._meta.get_field(
+            'created_by_access'
+        )
+        self.assertFalse(field.null)
+        self.assertFalse(field.has_default())
+
+        missing_creator = self._version(1)
+        missing_creator.created_by_access = None
+        self._assert_integrity_error(
+            lambda: self._insert_version(missing_creator)
         )
 
     def test_same_source_fingerprint_is_allowed_for_different_versions(self):
@@ -247,6 +317,7 @@ class BrigadePhaseCalendarSchemaTests(TestCase):
             self._version(
                 2,
                 status=WatchPeriodBrigadePhaseVersion.Status.CONFIRMED,
+                confirmed_by_access=self.confirmed_access,
                 confirmed_at=now,
             )
         )
@@ -255,6 +326,7 @@ class BrigadePhaseCalendarSchemaTests(TestCase):
                 self._version(
                     3,
                     status=WatchPeriodBrigadePhaseVersion.Status.CONFIRMED,
+                    confirmed_by_access=self.confirmed_access,
                     confirmed_at=now,
                 )
             )
@@ -263,6 +335,8 @@ class BrigadePhaseCalendarSchemaTests(TestCase):
             self._version(
                 3,
                 status=WatchPeriodBrigadePhaseVersion.Status.SUPERSEDED,
+                confirmed_by_access=self.confirmed_access,
+                superseded_by_access=self.superseded_access,
                 confirmed_at=now,
                 superseded_at=now,
             )
@@ -283,7 +357,7 @@ class BrigadePhaseCalendarSchemaTests(TestCase):
             ).update(based_on_version_id=version.pk)
         )
 
-    def test_status_date_shapes_are_enforced_by_database(self):
+    def test_status_actor_and_date_shapes_are_enforced_by_database(self):
         now = timezone.now()
         later = now + timedelta(seconds=1)
 
@@ -292,16 +366,31 @@ class BrigadePhaseCalendarSchemaTests(TestCase):
             self._version(
                 2,
                 status=WatchPeriodBrigadePhaseVersion.Status.CONFIRMED,
+                confirmed_by_access=self.confirmed_access,
                 confirmed_at=now,
             ),
             self._version(
                 3,
                 status=WatchPeriodBrigadePhaseVersion.Status.SUPERSEDED,
+                confirmed_by_access=self.confirmed_access,
+                superseded_by_access=self.superseded_access,
                 confirmed_at=now,
                 superseded_at=later,
             ),
         ]
         self._insert(WatchPeriodBrigadePhaseVersion, valid_versions)
+        saved = list(
+            WatchPeriodBrigadePhaseVersion._base_manager.order_by(
+                'version_number'
+            )
+        )
+        self.assertEqual(saved[0].created_by_access_id, self.created_access.pk)
+        self.assertIsNone(saved[0].confirmed_by_access_id)
+        self.assertEqual(saved[1].confirmed_by_access_id, self.confirmed_access.pk)
+        self.assertEqual(
+            saved[2].superseded_by_access_id,
+            self.superseded_access.pk,
+        )
 
         invalid_versions = [
             self._version(4, confirmed_at=now),
@@ -309,28 +398,70 @@ class BrigadePhaseCalendarSchemaTests(TestCase):
             self._version(
                 6,
                 status=WatchPeriodBrigadePhaseVersion.Status.CONFIRMED,
+                confirmed_by_access=self.confirmed_access,
             ),
             self._version(
                 7,
                 status=WatchPeriodBrigadePhaseVersion.Status.CONFIRMED,
+                confirmed_by_access=self.confirmed_access,
                 confirmed_at=now,
                 superseded_at=later,
             ),
             self._version(
                 8,
                 status=WatchPeriodBrigadePhaseVersion.Status.SUPERSEDED,
+                confirmed_by_access=self.confirmed_access,
+                superseded_by_access=self.superseded_access,
                 superseded_at=later,
             ),
             self._version(
                 9,
                 status=WatchPeriodBrigadePhaseVersion.Status.SUPERSEDED,
+                confirmed_by_access=self.confirmed_access,
+                superseded_by_access=self.superseded_access,
                 confirmed_at=now,
             ),
             self._version(
                 10,
                 status=WatchPeriodBrigadePhaseVersion.Status.SUPERSEDED,
+                confirmed_by_access=self.confirmed_access,
+                superseded_by_access=self.superseded_access,
                 confirmed_at=later,
                 superseded_at=now,
+            ),
+            self._version(
+                11,
+                confirmed_by_access=self.confirmed_access,
+            ),
+            self._version(
+                12,
+                superseded_by_access=self.superseded_access,
+            ),
+            self._version(
+                13,
+                status=WatchPeriodBrigadePhaseVersion.Status.CONFIRMED,
+                confirmed_at=now,
+            ),
+            self._version(
+                14,
+                status=WatchPeriodBrigadePhaseVersion.Status.CONFIRMED,
+                confirmed_by_access=self.confirmed_access,
+                superseded_by_access=self.superseded_access,
+                confirmed_at=now,
+            ),
+            self._version(
+                15,
+                status=WatchPeriodBrigadePhaseVersion.Status.SUPERSEDED,
+                confirmed_by_access=self.confirmed_access,
+                confirmed_at=now,
+                superseded_at=later,
+            ),
+            self._version(
+                16,
+                status=WatchPeriodBrigadePhaseVersion.Status.SUPERSEDED,
+                superseded_by_access=self.superseded_access,
+                confirmed_at=now,
+                superseded_at=later,
             ),
         ]
         for invalid in invalid_versions:
@@ -496,6 +627,28 @@ class BrigadePhaseCalendarSchemaTests(TestCase):
             WatchPeriodBrigadePhaseRow._base_manager.filter(pk=row.pk).exists()
         )
 
+    def test_all_historical_actor_accesses_are_protected(self):
+        now = timezone.now()
+        self._insert_version(
+            self._version(
+                1,
+                status=WatchPeriodBrigadePhaseVersion.Status.SUPERSEDED,
+                confirmed_by_access=self.confirmed_access,
+                superseded_by_access=self.superseded_access,
+                confirmed_at=now,
+                superseded_at=now,
+            )
+        )
+
+        for access in (
+            self.created_access,
+            self.confirmed_access,
+            self.superseded_access,
+        ):
+            with self.subTest(access_id=access.pk):
+                with self.assertRaises(ProtectedError):
+                    EmployeeAccess.objects.filter(pk=access.pk).delete()
+
     def test_migration_dependencies_and_no_data_operations(self):
         migration_module = import_module(
             'shifts.migrations.0014_watch_period_brigade_phases'
@@ -527,3 +680,115 @@ class BrigadePhaseCalendarSchemaTests(TestCase):
         self.assertFalse(version_fields['source_fingerprint'].null)
         self.assertFalse(version_fields['source_fingerprint'].has_default())
         self.assertEqual(version_fields['source_fingerprint'].max_length, 64)
+
+    def test_actor_migration_is_schema_only_and_depends_on_0014(self):
+        migration_module = import_module(
+            'shifts.migrations.0015_brigade_phase_actor_accesses'
+        )
+        operations = migration_module.Migration.operations
+
+        self.assertEqual(
+            migration_module.Migration.dependencies,
+            [('shifts', '0014_watch_period_brigade_phases')],
+        )
+        self.assertEqual(
+            [type(operation).__name__ for operation in operations],
+            [
+                'AddField',
+                'AddField',
+                'AddField',
+                'RemoveConstraint',
+                'AddConstraint',
+            ],
+        )
+        self.assertFalse(
+            any(
+                isinstance(operation, (RunPython, RunSQL))
+                for operation in operations
+            )
+        )
+
+        actor_fields = {
+            operation.name: operation.field
+            for operation in operations
+            if type(operation).__name__ == 'AddField'
+        }
+        self.assertEqual(
+            set(actor_fields),
+            {
+                'created_by_access',
+                'confirmed_by_access',
+                'superseded_by_access',
+            },
+        )
+        self.assertFalse(actor_fields['created_by_access'].null)
+        self.assertFalse(actor_fields['created_by_access'].has_default())
+        self.assertTrue(actor_fields['confirmed_by_access'].null)
+        self.assertTrue(actor_fields['superseded_by_access'].null)
+        self.assertEqual(operations[3].name, 'watch_phase_status_dates')
+        self.assertEqual(
+            operations[4].constraint.name,
+            'watch_phase_status_audit',
+        )
+
+
+class BrigadePhaseActorMigrationCycleTests(TransactionTestCase):
+    migrate_from = '0014_watch_period_brigade_phases'
+    migrate_to = '0015_brigade_phase_actor_accesses'
+
+    def _migrate(self, target):
+        executor = MigrationExecutor(connection)
+        migration_target = ('shifts', target)
+        executor.migrate([migration_target])
+        return executor.loader.project_state([migration_target]).apps
+
+    def tearDown(self):
+        self._migrate(self.migrate_to)
+        super().tearDown()
+
+    def test_migration_cycle_0014_0015_0014_0015(self):
+        apps_0014 = self._migrate(self.migrate_from)
+        version_0014 = apps_0014.get_model(
+            'shifts',
+            'WatchPeriodBrigadePhaseVersion',
+        )
+        self.assertNotIn(
+            'created_by_access',
+            {field.name for field in version_0014._meta.fields},
+        )
+
+        apps_0015 = self._migrate(self.migrate_to)
+        version_0015 = apps_0015.get_model(
+            'shifts',
+            'WatchPeriodBrigadePhaseVersion',
+        )
+        self.assertTrue(
+            {
+                'created_by_access',
+                'confirmed_by_access',
+                'superseded_by_access',
+            }.issubset(field.name for field in version_0015._meta.fields)
+        )
+
+        apps_reversed = self._migrate(self.migrate_from)
+        version_reversed = apps_reversed.get_model(
+            'shifts',
+            'WatchPeriodBrigadePhaseVersion',
+        )
+        self.assertNotIn(
+            'created_by_access',
+            {field.name for field in version_reversed._meta.fields},
+        )
+
+        apps_restored = self._migrate(self.migrate_to)
+        version_restored = apps_restored.get_model(
+            'shifts',
+            'WatchPeriodBrigadePhaseVersion',
+        )
+        self.assertTrue(
+            {
+                'created_by_access',
+                'confirmed_by_access',
+                'superseded_by_access',
+            }.issubset(field.name for field in version_restored._meta.fields)
+        )

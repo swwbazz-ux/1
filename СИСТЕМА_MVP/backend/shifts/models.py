@@ -232,6 +232,28 @@ class WatchPeriodBrigadePhaseVersion(BrigadePhaseImmutableModel):
         null=True,
         blank=True,
     )
+    created_by_access = models.ForeignKey(
+        'users.EmployeeAccess',
+        verbose_name='Доступ создателя',
+        on_delete=models.PROTECT,
+        related_name='created_brigade_phase_versions',
+    )
+    confirmed_by_access = models.ForeignKey(
+        'users.EmployeeAccess',
+        verbose_name='Доступ подтвердившего',
+        on_delete=models.PROTECT,
+        related_name='confirmed_brigade_phase_versions',
+        null=True,
+        blank=True,
+    )
+    superseded_by_access = models.ForeignKey(
+        'users.EmployeeAccess',
+        verbose_name='Доступ заменившего',
+        on_delete=models.PROTECT,
+        related_name='superseded_brigade_phase_versions',
+        null=True,
+        blank=True,
+    )
     confirmed_at = models.DateTimeField('Утверждена', null=True, blank=True)
     superseded_at = models.DateTimeField('Заменена', null=True, blank=True)
     created_at = models.DateTimeField('Создана', auto_now_add=True)
@@ -273,21 +295,27 @@ class WatchPeriodBrigadePhaseVersion(BrigadePhaseImmutableModel):
                 condition=(
                     models.Q(
                         status='draft',
+                        confirmed_by_access__isnull=True,
+                        superseded_by_access__isnull=True,
                         confirmed_at__isnull=True,
                         superseded_at__isnull=True,
                     )
                     | models.Q(
                         status='confirmed',
+                        confirmed_by_access__isnull=False,
+                        superseded_by_access__isnull=True,
                         confirmed_at__isnull=False,
                         superseded_at__isnull=True,
                     )
                     | models.Q(
                         status='superseded',
+                        confirmed_by_access__isnull=False,
+                        superseded_by_access__isnull=False,
                         confirmed_at__isnull=False,
                         superseded_at__isnull=False,
                     )
                 ),
-                name='watch_phase_status_dates',
+                name='watch_phase_status_audit',
             ),
             models.CheckConstraint(
                 condition=(
