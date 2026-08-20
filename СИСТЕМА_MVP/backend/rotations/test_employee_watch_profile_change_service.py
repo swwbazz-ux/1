@@ -1,5 +1,6 @@
 import hashlib
 import json
+from dataclasses import FrozenInstanceError, asdict
 from datetime import timedelta
 from unittest.mock import patch
 
@@ -29,8 +30,10 @@ from users.models import (
 from . import employee_watch_profile_changes as service
 from .employee_watch_profile_changes import (
     EmployeeWatchProfileChangeError,
+    ResolvedEmployeeWatchProfile,
     apply_employee_watch_profile_change,
     create_employee_watch_profile_change_draft,
+    resolve_employee_watch_profile,
 )
 from .models import ArrivalRosterRoutingBatch, EmployeeWatchProfileChange
 
@@ -143,6 +146,14 @@ class EmployeeWatchProfileChangeServiceTests(TestCase):
             apply_employee_watch_profile_change(
                 change_id=change.pk,
                 actor_access_id=(actor_access or self.access).pk,
+            )
+        self.assertEqual(caught.exception.code, code)
+
+    def _assert_resolve_error(self, code, *, employee_id=None, period_id=None):
+        with self.assertRaises(EmployeeWatchProfileChangeError) as caught:
+            resolve_employee_watch_profile(
+                employee_id=employee_id or self.employee.pk,
+                watch_period_id=period_id or self.period.pk,
             )
         self.assertEqual(caught.exception.code, code)
 
@@ -1222,3 +1233,368 @@ class EmployeeWatchProfileChangeServiceTests(TestCase):
                 actor_access_id=self.access.pk,
             )
         self.assertEqual(caught.exception.code, service.ERROR_CHANGE_NOT_FOUND)
+
+    def test_resolver_returns_frozen_legacy_baseline_without_guesses(self):
+        resolved = resolve_employee_watch_profile(
+            employee_id=self.employee.pk,
+            watch_period_id=self.period.pk,
+        )
+
+        self.assertIsInstance(resolved, ResolvedEmployeeWatchProfile)
+        self.assertEqual(resolved.employee_id, self.employee.pk)
+        self.assertEqual(resolved.watch_period_id, self.period.pk)
+        self.assertEqual(resolved.effective_on, self.period.starts_on)
+        self.assertEqual(resolved.work_schedule_id, self.old_schedule.pk)
+        self.assertEqual(resolved.brigade_number, 1)
+        self.assertEqual(resolved.watch_composition_id, self.old_composition.pk)
+        self.assertEqual(
+            resolved.source_kind,
+            service.SOURCE_KIND_LEGACY_BASELINE,
+        )
+        self.assertIsNone(resolved.change_id)
+        self.assertIsNone(resolved.change_version_number)
+        self.assertIsNone(resolved.source_fingerprint)
+        self.assertRegex(resolved.profile_fingerprint, r'^[0-9a-f]{64}$')
+        self.assertFalse(hasattr(resolved, '__dict__'))
+        with self.assertRaises(FrozenInstanceError):
+            resolved.brigade_number = 2
+
+        employee = Employee.objects.create(
+            full_name='Сотрудник с неполным исходным профилем',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        nullable = resolve_employee_watch_profile(
+            employee_id=employee.pk,
+            watch_period_id=self.period.pk,
+        )
+        self.assertIsNone(nullable.work_schedule_id)
+        self.assertIsNone(nullable.brigade_number)
+        self.assertIsNone(nullable.watch_composition_id)
+
+    def test_resolver_replays_applied_history_at_period_boundaries(self):
+        first_period = self._period(days=10, composition=self.new_composition)
+        second_period = self._period(days=20, composition=self.old_composition)
+        before = self._period(days=5)
+        between = self._period(days=15)
+        after = self._period(days=25)
+        first = self._historical_change(period=first_period)
+        second = self._historical_change(
+            period=second_period,
+            old_schedule=self.new_schedule,
+            old_brigade=2,
+            old_composition=self.new_composition,
+            new_schedule=self.no_brigade_schedule,
+            new_brigade=None,
+            new_composition=self.old_composition,
+        )
+
+        before_result = resolve_employee_watch_profile(
+            employee_id=self.employee.pk,
+            watch_period_id=before.pk,
+        )
+        first_result = resolve_employee_watch_profile(
+            employee_id=self.employee.pk,
+            watch_period_id=first_period.pk,
+        )
+        between_result = resolve_employee_watch_profile(
+            employee_id=self.employee.pk,
+            watch_period_id=between.pk,
+        )
+        second_result = resolve_employee_watch_profile(
+            employee_id=self.employee.pk,
+            watch_period_id=second_period.pk,
+        )
+        after_result = resolve_employee_watch_profile(
+            employee_id=self.employee.pk,
+            watch_period_id=after.pk,
+        )
+
+        self.assertEqual(before_result.source_kind, 'legacy_baseline')
+        self.assertEqual(first_result.change_id, first.pk)
+        self.assertEqual(between_result.change_id, first.pk)
+        self.assertEqual(second_result.change_id, second.pk)
+        self.assertEqual(after_result.change_id, second.pk)
+        self.assertEqual(after_result.work_schedule_id, self.no_brigade_schedule.pk)
+        self.assertIsNone(after_result.brigade_number)
+        self.assertEqual(after_result.watch_composition_id, self.old_composition.pk)
+
+    def test_resolver_ignores_non_applied_rows_and_uses_current_correction(self):
+        period = self._period(days=10, composition=self.new_composition)
+        superseded = self._historical_change(
+            period=period,
+            version_number=1,
+            status=EmployeeWatchProfileChange.Status.SUPERSEDED,
+        )
+        correction = self._historical_change(
+            period=period,
+            version_number=2,
+            new_schedule=self.no_brigade_schedule,
+            new_brigade=None,
+        )
+        models.QuerySet.update(
+            EmployeeWatchProfileChange._base_manager.filter(pk=correction.pk),
+            supersedes_id=superseded.pk,
+        )
+        self._historical_change(
+            period=period,
+            version_number=3,
+            status=EmployeeWatchProfileChange.Status.DRAFT,
+        )
+        self._historical_change(
+            period=period,
+            version_number=4,
+            status=EmployeeWatchProfileChange.Status.CANCELLED,
+        )
+
+        resolved = resolve_employee_watch_profile(
+            employee_id=self.employee.pk,
+            watch_period_id=period.pk,
+        )
+
+        self.assertEqual(resolved.source_kind, 'applied_change')
+        self.assertEqual(resolved.change_id, correction.pk)
+        self.assertEqual(resolved.change_version_number, 2)
+        self.assertEqual(resolved.work_schedule_id, self.no_brigade_schedule.pk)
+
+    def test_resolver_fails_closed_on_history_gap_or_same_date_ambiguity(self):
+        first_period = self._period(days=10, composition=self.new_composition)
+        second_period = self._period(days=20, composition=self.old_composition)
+        self._historical_change(period=first_period)
+        self._historical_change(period=second_period)
+
+        self._assert_resolve_error(
+            service.ERROR_PROFILE_INCONSISTENT,
+            period_id=second_period.pk,
+        )
+
+    def test_resolver_fails_closed_on_two_applied_changes_for_same_date(self):
+        first_period = self._period(days=10, composition=self.new_composition)
+        second_period = WatchPeriod.objects.create(
+            name='Параллельный период той же даты',
+            watch_composition=self.old_composition,
+            starts_on=first_period.starts_on,
+            ends_on=first_period.ends_on,
+            is_active=True,
+        )
+        self._historical_change(period=first_period)
+        self._historical_change(
+            period=second_period,
+            old_schedule=self.new_schedule,
+            old_brigade=2,
+            old_composition=self.new_composition,
+            new_schedule=self.no_brigade_schedule,
+            new_brigade=None,
+            new_composition=self.old_composition,
+        )
+
+        self._assert_resolve_error(
+            service.ERROR_PROFILE_INCONSISTENT,
+            period_id=first_period.pk,
+        )
+
+    def test_resolver_rejects_damaged_snapshot_and_fingerprint_separately(self):
+        period = self._period(days=10, composition=self.new_composition)
+        change = self._historical_change(period=period)
+        models.QuerySet.update(
+            EmployeeWatchProfileChange._base_manager.filter(pk=change.pk),
+            source_snapshot={'schema': 'tampered'},
+        )
+        self._assert_resolve_error(
+            service.ERROR_SOURCE_INVALID,
+            period_id=period.pk,
+        )
+
+        models.QuerySet.update(
+            EmployeeWatchProfileChange._base_manager.filter(pk=change.pk),
+            source_snapshot=service._snapshot_for_change(change),
+            source_fingerprint='f' * 64,
+        )
+        self._assert_resolve_error(
+            service.ERROR_SOURCE_FINGERPRINT_INVALID,
+            period_id=period.pk,
+        )
+
+    def test_resolver_rejects_invalid_correction_lineage(self):
+        period = self._period(days=10, composition=self.new_composition)
+        invalid_parent = self._historical_change(
+            period=period,
+            version_number=1,
+            status=EmployeeWatchProfileChange.Status.DRAFT,
+        )
+        correction = self._historical_change(
+            period=period,
+            version_number=2,
+            new_schedule=self.no_brigade_schedule,
+            new_brigade=None,
+        )
+        models.QuerySet.update(
+            EmployeeWatchProfileChange._base_manager.filter(pk=correction.pk),
+            supersedes_id=invalid_parent.pk,
+        )
+
+        self._assert_resolve_error(
+            service.ERROR_PROFILE_INCONSISTENT,
+            period_id=period.pk,
+        )
+
+    def test_resolver_revalidates_employee_and_final_reference_activity(self):
+        Employee.objects.filter(pk=self.employee.pk).update(is_active=False)
+        self._assert_resolve_error(service.ERROR_EMPLOYEE_INACTIVE)
+        Employee.objects.filter(pk=self.employee.pk).update(is_active=True)
+
+        WorkSchedule.objects.filter(pk=self.old_schedule.pk).update(is_active=False)
+        self._assert_resolve_error(service.ERROR_WORK_SCHEDULE_INACTIVE)
+        WorkSchedule.objects.filter(pk=self.old_schedule.pk).update(is_active=True)
+
+        WatchComposition.objects.filter(pk=self.old_composition.pk).update(
+            is_active=False,
+        )
+        self._assert_resolve_error(service.ERROR_WATCH_COMPOSITION_INACTIVE)
+
+    def test_resolver_revalidates_brigade_policy_with_specific_codes(self):
+        Employee.objects.filter(pk=self.employee.pk).update(brigade_number=None)
+        self._assert_resolve_error(service.ERROR_BRIGADE_REQUIRED)
+
+        Employee.objects.filter(pk=self.employee.pk).update(brigade_number=3)
+        self._assert_resolve_error(service.ERROR_BRIGADE_OUT_OF_RANGE)
+
+        WorkSchedule.objects.filter(pk=self.old_schedule.pk).update(brigade_count=0)
+        Employee.objects.filter(pk=self.employee.pk).update(brigade_number=1)
+        self._assert_resolve_error(service.ERROR_BRIGADE_NOT_ALLOWED)
+
+    def test_resolver_allows_composition_different_from_target_period(self):
+        self.assertNotEqual(
+            self.employee.watch_composition_id,
+            self.period.watch_composition_id,
+        )
+
+        resolved = resolve_employee_watch_profile(
+            employee_id=self.employee.pk,
+            watch_period_id=self.period.pk,
+        )
+
+        self.assertEqual(
+            resolved.watch_composition_id,
+            self.employee.watch_composition_id,
+        )
+
+    def test_profile_fingerprint_is_stable_structural_and_provenance_sensitive(self):
+        first = resolve_employee_watch_profile(
+            employee_id=self.employee.pk,
+            watch_period_id=self.period.pk,
+        )
+        repeated = resolve_employee_watch_profile(
+            employee_id=self.employee.pk,
+            watch_period_id=self.period.pk,
+        )
+        self.assertEqual(first.profile_fingerprint, repeated.profile_fingerprint)
+
+        baseline_snapshot = service._build_profile_snapshot(
+            employee_id=self.employee.pk,
+            watch_period=self.period,
+            profile=(self.old_schedule.pk, 1, self.old_composition.pk),
+            source_kind=service.SOURCE_KIND_LEGACY_BASELINE,
+            change=None,
+        )
+        changed_profile = json.loads(json.dumps(baseline_snapshot))
+        changed_profile['resolved_profile']['brigade_number'] = 2
+        changed_source = json.loads(json.dumps(baseline_snapshot))
+        changed_source['source']['kind'] = service.SOURCE_KIND_APPLIED_CHANGE
+        changed_source['source']['change_id'] = 999
+        changed_source['source']['change_version_number'] = 1
+        changed_source['source']['source_fingerprint'] = 'a' * 64
+        self.assertNotEqual(
+            service._canonical_fingerprint(baseline_snapshot),
+            service._canonical_fingerprint(changed_profile),
+        )
+        self.assertNotEqual(
+            service._canonical_fingerprint(baseline_snapshot),
+            service._canonical_fingerprint(changed_source),
+        )
+
+    def test_resolver_result_and_fingerprint_source_exclude_personal_access_data(self):
+        source_period = self._period(days=10, composition=self.new_composition)
+        change = self._historical_change(period=source_period)
+        resolved = resolve_employee_watch_profile(
+            employee_id=self.employee.pk,
+            watch_period_id=self.period.pk,
+        )
+        payload = asdict(resolved)
+        serialized = json.dumps(payload, ensure_ascii=False, default=str)
+        self.assertNotIn(self.employee.full_name, serialized)
+        self.assertNotIn(self.employee.phone, serialized)
+        self.assertNotIn(change.basis, serialized)
+        self.assertEqual(resolved.source_fingerprint, change.source_fingerprint)
+        self.assertEqual(
+            set(payload),
+            {
+                'employee_id',
+                'watch_period_id',
+                'effective_on',
+                'work_schedule_id',
+                'brigade_number',
+                'watch_composition_id',
+                'source_kind',
+                'change_id',
+                'change_version_number',
+                'source_fingerprint',
+                'profile_fingerprint',
+            },
+        )
+
+    def test_resolver_is_read_only_and_never_requests_row_locks(self):
+        source_period = self._period(days=10, composition=self.new_composition)
+        self._historical_change(period=source_period)
+        before_employee = Employee.objects.values().get(pk=self.employee.pk)
+        before_changes = list(
+            EmployeeWatchProfileChange._base_manager.values().order_by('pk')
+        )
+        before_routing = ArrivalRosterRoutingBatch._base_manager.count()
+
+        with (
+            patch.object(
+                QuerySet,
+                'select_for_update',
+                side_effect=AssertionError('resolver must not lock rows'),
+            ),
+            patch.object(
+                service,
+                '_trusted_insert_change',
+                side_effect=AssertionError('resolver must not insert'),
+            ),
+            patch.object(
+                service,
+                '_trusted_transition_change',
+                side_effect=AssertionError('resolver must not update'),
+            ),
+        ):
+            first = resolve_employee_watch_profile(
+                employee_id=self.employee.pk,
+                watch_period_id=self.period.pk,
+            )
+            second = resolve_employee_watch_profile(
+                employee_id=self.employee.pk,
+                watch_period_id=self.period.pk,
+            )
+
+        self.assertEqual(first, second)
+        self.assertEqual(
+            Employee.objects.values().get(pk=self.employee.pk),
+            before_employee,
+        )
+        self.assertEqual(
+            list(EmployeeWatchProfileChange._base_manager.values().order_by('pk')),
+            before_changes,
+        )
+        self.assertEqual(ArrivalRosterRoutingBatch._base_manager.count(), before_routing)
+
+    def test_resolver_missing_exact_employee_and_period_are_controlled(self):
+        self._assert_resolve_error(
+            service.ERROR_EMPLOYEE_NOT_FOUND,
+            employee_id=999999,
+        )
+        self._assert_resolve_error(
+            service.ERROR_WATCH_PERIOD_NOT_FOUND,
+            period_id=999999,
+        )

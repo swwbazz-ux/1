@@ -1,5 +1,6 @@
 import hashlib
 import json
+from dataclasses import dataclass
 from datetime import date, datetime
 
 from django.core.exceptions import ValidationError
@@ -55,7 +56,27 @@ ERROR_PROFILE_INCONSISTENT = 'employee_watch_profile.profile_inconsistent'
 
 _SNAPSHOT_SCHEMA = 'rotations.employee_watch_profile_change'
 _SNAPSHOT_VERSION = 1
+_PROFILE_SNAPSHOT_SCHEMA = 'rotations.resolved_employee_watch_profile'
+_PROFILE_SNAPSHOT_VERSION = 1
 _TIMEKEEPER_ROLE_CODE = 'timekeeper'
+
+SOURCE_KIND_LEGACY_BASELINE = 'legacy_baseline'
+SOURCE_KIND_APPLIED_CHANGE = 'applied_change'
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedEmployeeWatchProfile:
+    employee_id: int
+    watch_period_id: int
+    effective_on: date
+    work_schedule_id: int | None
+    brigade_number: int | None
+    watch_composition_id: int | None
+    source_kind: str
+    change_id: int | None
+    change_version_number: int | None
+    source_fingerprint: str | None
+    profile_fingerprint: str
 
 
 def _error(code, message):
@@ -1106,3 +1127,280 @@ def apply_employee_watch_profile_change(*, change_id, actor_access_id):
             ERROR_PROFILE_INCONSISTENT,
             'Не удалось атомарно применить изменение профиля сотрудника.',
         ) from error
+
+
+def _read_employee_for_profile(employee_id):
+    if not _valid_identifier(employee_id):
+        raise _error(ERROR_EMPLOYEE_NOT_FOUND, 'Сотрудник не найден.')
+    employee = (
+        Employee._base_manager
+        .select_related('work_schedule', 'watch_composition')
+        .filter(pk=employee_id)
+        .first()
+    )
+    if employee is None:
+        raise _error(ERROR_EMPLOYEE_NOT_FOUND, 'Сотрудник не найден.')
+    if employee.status != Employee.Status.ACTIVE or not employee.is_active:
+        raise _error(ERROR_EMPLOYEE_INACTIVE, 'Сотрудник неактивен.')
+    return employee
+
+
+def _read_watch_period_for_profile(watch_period_id):
+    if not _valid_identifier(watch_period_id):
+        raise _error(ERROR_WATCH_PERIOD_NOT_FOUND, 'Период вахты не найден.')
+    watch_period = (
+        WatchPeriod._base_manager
+        .filter(pk=watch_period_id)
+        .first()
+    )
+    if watch_period is None:
+        raise _error(ERROR_WATCH_PERIOD_NOT_FOUND, 'Период вахты не найден.')
+    return watch_period
+
+
+def _resolved_profile_tuple(change):
+    return _profile_tuple(
+        work_schedule_id=change.new_work_schedule_id,
+        brigade_number=change.new_brigade_number,
+        watch_composition_id=change.new_watch_composition_id,
+    )
+
+
+def _old_profile_tuple(change):
+    return _profile_tuple(
+        work_schedule_id=change.old_work_schedule_id,
+        brigade_number=change.old_brigade_number,
+        watch_composition_id=change.old_watch_composition_id,
+    )
+
+
+def _validate_applied_audit_shape(change):
+    if (
+        change.status != EmployeeWatchProfileChange.Status.APPLIED
+        or change.applied_by_access_id is None
+        or change.applied_at is None
+        or change.superseded_by_access_id is not None
+        or change.superseded_at is not None
+        or change.cancelled_by_access_id is not None
+        or change.cancelled_at is not None
+    ):
+        raise _error(
+            ERROR_PROFILE_INCONSISTENT,
+            'История профиля сотрудника содержит неверное состояние применения.',
+        )
+
+
+def _validate_superseded_lineage(change):
+    if change.supersedes_id is None:
+        return
+    superseded = change.supersedes
+    if (
+        superseded.employee_id != change.employee_id
+        or superseded.effective_watch_period_id
+        != change.effective_watch_period_id
+        or superseded.effective_on != change.effective_on
+        or superseded.version_number >= change.version_number
+        or superseded.status != EmployeeWatchProfileChange.Status.SUPERSEDED
+        or superseded.applied_by_access_id is None
+        or superseded.applied_at is None
+        or superseded.superseded_by_access_id is None
+        or superseded.superseded_at is None
+        or superseded.cancelled_by_access_id is not None
+        or superseded.cancelled_at is not None
+        or _old_profile_tuple(superseded) != _old_profile_tuple(change)
+    ):
+        raise _error(
+            ERROR_PROFILE_INCONSISTENT,
+            'История исправлений профиля сотрудника противоречива.',
+        )
+    _validate_change_source(superseded)
+
+
+def _validate_replayed_change(change, *, employee_id, previous_profile):
+    _validate_applied_audit_shape(change)
+    if (
+        change.employee_id != employee_id
+        or change.version_number < 1
+        or change.effective_on != change.effective_watch_period.starts_on
+        or change.new_watch_composition_id
+        != change.effective_watch_period.watch_composition_id
+    ):
+        raise _error(
+            ERROR_PROFILE_INCONSISTENT,
+            'История профиля сотрудника противоречива.',
+        )
+    _validate_change_source(change)
+    _validate_superseded_lineage(change)
+    _validate_existing_profile(
+        work_schedule=change.old_work_schedule,
+        brigade_number=change.old_brigade_number,
+    )
+    _validate_existing_profile(
+        work_schedule=change.new_work_schedule,
+        brigade_number=change.new_brigade_number,
+    )
+    if _old_profile_tuple(change) != previous_profile:
+        raise _error(
+            ERROR_PROFILE_INCONSISTENT,
+            'История профиля сотрудника содержит разрыв прежних и новых значений.',
+        )
+    next_profile = _resolved_profile_tuple(change)
+    if next_profile == previous_profile:
+        raise _error(
+            ERROR_PROFILE_INCONSISTENT,
+            'Применённое изменение не изменяет структурированный профиль.',
+        )
+    return next_profile
+
+
+def _validate_resolved_profile(
+    *,
+    work_schedule,
+    brigade_number,
+    watch_composition,
+):
+    if work_schedule is None:
+        if brigade_number is not None:
+            raise _error(
+                ERROR_BRIGADE_NOT_ALLOWED,
+                'Без графика работы номер бригады не указывается.',
+            )
+    else:
+        if not work_schedule.is_active:
+            raise _error(ERROR_WORK_SCHEDULE_INACTIVE, 'График работы неактивен.')
+        _normalize_brigade_number(
+            brigade_number,
+            work_schedule=work_schedule,
+        )
+    if watch_composition is not None and not watch_composition.is_active:
+        raise _error(
+            ERROR_WATCH_COMPOSITION_INACTIVE,
+            'Состав вахты неактивен.',
+        )
+
+
+def _build_profile_snapshot(
+    *,
+    employee_id,
+    watch_period,
+    profile,
+    source_kind,
+    change,
+):
+    return {
+        'schema': _PROFILE_SNAPSHOT_SCHEMA,
+        'version': _PROFILE_SNAPSHOT_VERSION,
+        'employee_id': employee_id,
+        'watch_period': {
+            'id': watch_period.pk,
+            'starts_on': watch_period.starts_on.isoformat(),
+        },
+        'resolved_profile': {
+            'work_schedule_id': profile[0],
+            'brigade_number': profile[1],
+            'watch_composition_id': profile[2],
+        },
+        'source': {
+            'kind': source_kind,
+            'change_id': change.pk if change is not None else None,
+            'change_version_number': (
+                change.version_number if change is not None else None
+            ),
+            'source_fingerprint': (
+                change.source_fingerprint if change is not None else None
+            ),
+        },
+    }
+
+
+def resolve_employee_watch_profile(*, employee_id, watch_period_id):
+    """Resolve one employee's structured profile for one exact watch period."""
+    employee = _read_employee_for_profile(employee_id)
+    watch_period = _read_watch_period_for_profile(watch_period_id)
+    applied_history = list(
+        EmployeeWatchProfileChange._base_manager
+        .filter(
+            employee_id=employee.pk,
+            status=EmployeeWatchProfileChange.Status.APPLIED,
+            effective_on__lte=watch_period.starts_on,
+        )
+        .select_related(
+            'effective_watch_period',
+            'old_work_schedule',
+            'old_watch_composition',
+            'new_work_schedule',
+            'new_watch_composition',
+            'supersedes',
+            'supersedes__effective_watch_period',
+            'supersedes__old_work_schedule',
+            'supersedes__old_watch_composition',
+            'supersedes__new_work_schedule',
+            'supersedes__new_watch_composition',
+        )
+        .order_by(
+            'effective_on',
+            'effective_watch_period_id',
+            'version_number',
+            'pk',
+        )
+    )
+
+    effective_dates = [change.effective_on for change in applied_history]
+    if len(effective_dates) != len(set(effective_dates)):
+        raise _error(
+            ERROR_PROFILE_INCONSISTENT,
+            'Для одной даты найдено несколько действующих решений профиля.',
+        )
+
+    profile = _profile_tuple(
+        work_schedule_id=employee.work_schedule_id,
+        brigade_number=employee.brigade_number,
+        watch_composition_id=employee.watch_composition_id,
+    )
+    last_change = None
+    for change in applied_history:
+        profile = _validate_replayed_change(
+            change,
+            employee_id=employee.pk,
+            previous_profile=profile,
+        )
+        last_change = change
+
+    if last_change is None:
+        work_schedule = employee.work_schedule
+        watch_composition = employee.watch_composition
+        source_kind = SOURCE_KIND_LEGACY_BASELINE
+    else:
+        work_schedule = last_change.new_work_schedule
+        watch_composition = last_change.new_watch_composition
+        source_kind = SOURCE_KIND_APPLIED_CHANGE
+    _validate_resolved_profile(
+        work_schedule=work_schedule,
+        brigade_number=profile[1],
+        watch_composition=watch_composition,
+    )
+
+    profile_snapshot = _build_profile_snapshot(
+        employee_id=employee.pk,
+        watch_period=watch_period,
+        profile=profile,
+        source_kind=source_kind,
+        change=last_change,
+    )
+    return ResolvedEmployeeWatchProfile(
+        employee_id=employee.pk,
+        watch_period_id=watch_period.pk,
+        effective_on=watch_period.starts_on,
+        work_schedule_id=profile[0],
+        brigade_number=profile[1],
+        watch_composition_id=profile[2],
+        source_kind=source_kind,
+        change_id=last_change.pk if last_change is not None else None,
+        change_version_number=(
+            last_change.version_number if last_change is not None else None
+        ),
+        source_fingerprint=(
+            last_change.source_fingerprint if last_change is not None else None
+        ),
+        profile_fingerprint=_canonical_fingerprint(profile_snapshot),
+    )
