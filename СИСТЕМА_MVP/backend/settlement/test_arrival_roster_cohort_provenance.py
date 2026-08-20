@@ -634,7 +634,7 @@ class ArrivalRosterCohortProvenanceSchemaTests(TestCase):
             any(isinstance(operation, (RunPython, RunSQL)) for operation in migration.operations)
         )
         self.assertIn(
-            ('settlement', '0018_arrival_roster_cohort_provenance'),
+            ('settlement', '0019_cohort_member_watch_profile_provenance'),
             MigrationLoader(None).graph.leaf_nodes('settlement'),
         )
 

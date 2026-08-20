@@ -2026,6 +2026,11 @@ class SettlementCohortMember(StableIdentifierModel):
         EXTERNAL_CLERK = 'external_clerk', 'Выбор делопроизводителя для внешнего жильца'
         UNVERIFIED_LEGACY = 'unverified_legacy', 'Непроверенная историческая строка'
 
+    class WatchProfileSourceKind(models.TextChoices):
+        UNVERIFIED_LEGACY = 'unverified_legacy', 'Непроверенный исторический профиль'
+        LEGACY_BASELINE = 'legacy_baseline', 'Структурированный профиль Employee'
+        APPLIED_CHANGE = 'applied_change', 'Применённое изменение профиля'
+
     class ParticipationStatus(models.TextChoices):
         PARTICIPATING = 'participating', 'Участвует в заезде'
         NOT_ARRIVING = 'not_arriving', 'Не заезжает'
@@ -2066,6 +2071,47 @@ class SettlementCohortMember(StableIdentifierModel):
         'Ожидаемый режим графика snapshot',
         max_length=64,
         blank=True,
+    )
+    watch_profile_source_kind = models.CharField(
+        'Источник структурированного профиля сотрудника',
+        max_length=32,
+        choices=WatchProfileSourceKind.choices,
+        db_index=True,
+    )
+    employee_watch_profile_change = models.ForeignKey(
+        'rotations.EmployeeWatchProfileChange',
+        verbose_name='Точное применённое изменение профиля сотрудника',
+        on_delete=models.PROTECT,
+        related_name='settlement_cohort_members_by_watch_profile_change',
+        null=True,
+        blank=True,
+    )
+    watch_profile_work_schedule = models.ForeignKey(
+        'users.WorkSchedule',
+        verbose_name='Разрешённый график работы сотрудника',
+        on_delete=models.PROTECT,
+        related_name='settlement_cohort_members_by_watch_profile_schedule',
+        null=True,
+        blank=True,
+    )
+    watch_profile_brigade_number = models.PositiveSmallIntegerField(
+        'Разрешённый номер бригады сотрудника',
+        null=True,
+        blank=True,
+    )
+    watch_profile_watch_composition = models.ForeignKey(
+        'users.WatchComposition',
+        verbose_name='Разрешённый состав вахты сотрудника',
+        on_delete=models.PROTECT,
+        related_name='settlement_cohort_members_by_watch_profile_composition',
+        null=True,
+        blank=True,
+    )
+    watch_profile_fingerprint = models.CharField(
+        'SHA-256 разрешённого профиля сотрудника',
+        max_length=64,
+        blank=True,
+        validators=[RegexValidator(regex=r'^$|^[0-9a-f]{64}$')],
     )
     work_shift = models.CharField(
         'Официальная рабочая смена',
@@ -2256,7 +2302,68 @@ class SettlementCohortMember(StableIdentifierModel):
                 ),
                 name='cohort_member_source_family_ck',
             ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    watch_profile_source_kind__in=[
+                        'unverified_legacy', 'legacy_baseline', 'applied_change',
+                    ],
+                ),
+                name='cohort_member_watch_profile_kind_ck',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        watch_profile_source_kind='unverified_legacy',
+                        employee_watch_profile_change__isnull=True,
+                        watch_profile_work_schedule__isnull=True,
+                        watch_profile_brigade_number__isnull=True,
+                        watch_profile_watch_composition__isnull=True,
+                        watch_profile_fingerprint='',
+                    )
+                    | models.Q(
+                        watch_profile_source_kind='legacy_baseline',
+                        employee_watch_profile_change__isnull=True,
+                        watch_profile_fingerprint__regex=r'^[0-9a-f]{64}$',
+                    )
+                    | models.Q(
+                        watch_profile_source_kind='applied_change',
+                        employee_watch_profile_change__isnull=False,
+                        watch_profile_work_schedule__isnull=False,
+                        watch_profile_watch_composition__isnull=False,
+                        watch_profile_fingerprint__regex=r'^[0-9a-f]{64}$',
+                    )
+                ),
+                name='cohort_member_watch_profile_shape_ck',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(watch_profile_brigade_number__isnull=True)
+                    | models.Q(watch_profile_brigade_number__gte=1)
+                ),
+                name='cohort_member_watch_profile_brigade_ck',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(watch_profile_work_schedule__isnull=False)
+                    | models.Q(watch_profile_brigade_number__isnull=True)
+                ),
+                name='cohort_member_watch_profile_schedule_ck',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(source_revision__isnull=True)
+                    | models.Q(watch_profile_source_kind='unverified_legacy')
+                ),
+                name='cohort_member_watch_profile_family_ck',
+            ),
         ]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self._state.adding and not self.watch_profile_source_kind:
+            self.watch_profile_source_kind = (
+                self.WatchProfileSourceKind.UNVERIFIED_LEGACY
+            )
 
     @property
     def participates_in_accommodation(self):
@@ -2354,6 +2461,9 @@ class SettlementCohortMember(StableIdentifierModel):
         original = type(self)._base_manager.filter(pk=self.pk).values(
             'stable_id', 'cohort_id', 'resident_id', 'arrival_at', 'departure_at',
             'participation_status', 'reason', 'expected_schedule_regime',
+            'watch_profile_source_kind', 'employee_watch_profile_change_id',
+            'watch_profile_work_schedule_id', 'watch_profile_brigade_number',
+            'watch_profile_watch_composition_id', 'watch_profile_fingerprint',
             'work_shift', 'shift_source_kind', 'official_equipment_assignment_id',
             'shift_source_snapshot', 'shift_source_fingerprint',
             'shift_selected_by_access_id', 'shift_selected_at', 'shift_selection_basis',
