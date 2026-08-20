@@ -2,6 +2,7 @@ import hashlib
 import inspect
 import json
 from datetime import date
+from importlib import import_module
 from unittest import mock
 
 from django.db import IntegrityError, models
@@ -16,15 +17,27 @@ from .brigade_phase_calendar import (
     ERROR_ACCESS_NOT_FOUND,
     ERROR_ACCESS_WRONG_ROLE,
     ERROR_EMPLOYEE_INACTIVE,
+    ERROR_GRAPH_INCOMPLETE,
+    ERROR_GRAPH_INCONSISTENT,
     ERROR_INCONSISTENT_GRAPH,
     ERROR_INVALID_BRIGADE_SET,
     ERROR_INVALID_SOURCE,
+    ERROR_POLICY_MISMATCH,
+    ERROR_POLICY_NOT_DEFINED,
+    ERROR_SCHEDULE_DESIGNATION_MISMATCH,
+    ERROR_SOURCE_FINGERPRINT_INVALID,
+    ERROR_SOURCE_INVALID,
     ERROR_SOURCE_NOT_EFFECTIVE,
+    ERROR_VERSION_NOT_FOUND,
+    ERROR_VERSION_STALE,
     ERROR_WATCH_PERIOD_NOT_FOUND,
     ERROR_WORK_SCHEDULE_INACTIVE,
     ERROR_WORK_SCHEDULE_NOT_FOUND,
+    WORK_SCHEDULE_CODE_11,
+    WORK_SCHEDULE_CODE_12,
     BrigadePhaseCalendarError,
     _normalize_brigade_phases,
+    confirm_watch_period_brigade_phase_version,
     create_watch_period_brigade_phase_draft,
 )
 from .models import (
@@ -488,3 +501,371 @@ class BrigadePhaseCalendarDraftServiceTests(TestCase):
             },
             period_before,
         )
+
+
+class BrigadePhaseCalendarConfirmationServiceTests(TestCase):
+    order_sha = 'c' * 64
+    schedule_sha = 'd' * 64
+
+    def setUp(self):
+        self.timekeeper_role = Role.objects.get(code='timekeeper')
+        self.employee = Employee.objects.create(
+            full_name='Табельщик подтверждения календаря фаз',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        self.access = EmployeeAccess.objects.create(
+            employee=self.employee,
+            role=self.timekeeper_role,
+            access_code='BPC-CONFIRM-ACCESS',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+        self.schedule_11 = WorkSchedule.objects.get(code=WORK_SCHEDULE_CODE_11)
+        self.schedule_12 = WorkSchedule.objects.get(code=WORK_SCHEDULE_CODE_12)
+        self.period = WatchPeriod.objects.create(
+            name='Период подтверждения календаря фаз',
+            starts_on=date(2032, 1, 15),
+            ends_on=date(2032, 2, 28),
+        )
+
+    def _draft(
+        self,
+        *,
+        schedule=None,
+        designation='График № 12/1',
+        phases=None,
+        order_number='Приказ подтверждения № 1',
+        actor_access=None,
+        period=None,
+    ):
+        schedule = schedule or self.schedule_12
+        if phases is None:
+            phases = [
+                {'brigade_number': 1, 'phase': 'night'},
+                {'brigade_number': 2, 'phase': 'day'},
+                {'brigade_number': 3, 'phase': 'off'},
+                {'brigade_number': 4, 'phase': 'off'},
+            ]
+        return create_watch_period_brigade_phase_draft(
+            watch_period_id=(period or self.period).pk,
+            work_schedule_id=schedule.pk,
+            actor_access_id=(actor_access or self.access).pk,
+            order_number=order_number,
+            order_date='2032-01-01',
+            effective_from='2032-01-15',
+            order_document_sha256=self.order_sha,
+            schedule_designation=designation,
+            schedule_document_sha256=self.schedule_sha,
+            brigade_phases=phases,
+        )
+
+    def _confirm(self, version, *, actor_access=None):
+        return confirm_watch_period_brigade_phase_version(
+            version_id=version.pk,
+            actor_access_id=(actor_access or self.access).pk,
+        )
+
+    def _assert_confirm_error(self, code, version_id, *, actor_access=None):
+        with self.assertRaises(BrigadePhaseCalendarError) as caught:
+            confirm_watch_period_brigade_phase_version(
+                version_id=version_id,
+                actor_access_id=(actor_access or self.access).pk,
+            )
+        self.assertEqual(caught.exception.code, code)
+
+    def _another_timekeeper_access(self):
+        employee = Employee.objects.create(
+            full_name='Второй табельщик подтверждения календаря фаз',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        return EmployeeAccess.objects.create(
+            employee=employee,
+            role=self.timekeeper_role,
+            access_code='BPC-CONFIRM-ACCESS-2',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+
+    def test_policy_uses_exact_codes_seeded_by_users_0013(self):
+        migration = import_module('users.migrations.0013_normalize_department_work_schedule')
+        seeded = {
+            code: (name, brigade_count)
+            for code, name, brigade_count in migration.WORK_SCHEDULES
+        }
+        self.assertEqual(WORK_SCHEDULE_CODE_11, 'schedule_11')
+        self.assertEqual(WORK_SCHEDULE_CODE_12, 'schedule_12')
+        self.assertEqual(seeded[WORK_SCHEDULE_CODE_11][1], 2)
+        self.assertEqual(seeded[WORK_SCHEDULE_CODE_12][1], 4)
+        self.assertEqual(self.schedule_11.brigade_count, 2)
+        self.assertEqual(self.schedule_12.brigade_count, 4)
+
+    def test_first_confirmation_succeeds_for_official_schedule_12(self):
+        draft = self._draft(designation='  ГРАФИК  №  12 / 1  ')
+        confirmed = self._confirm(draft)
+        confirmed.refresh_from_db()
+
+        self.assertEqual(confirmed.status, WatchPeriodBrigadePhaseVersion.Status.CONFIRMED)
+        self.assertEqual(confirmed.confirmed_by_access_id, self.access.pk)
+        self.assertIsNotNone(confirmed.confirmed_at)
+        self.assertIsNone(confirmed.superseded_by_access_id)
+        self.assertIsNone(confirmed.superseded_at)
+        self.assertEqual(
+            WatchPeriodBrigadePhaseVersion._base_manager.filter(
+                watch_period=self.period,
+                work_schedule=self.schedule_12,
+                status=WatchPeriodBrigadePhaseVersion.Status.CONFIRMED,
+            ).count(),
+            1,
+        )
+
+    def test_first_confirmation_succeeds_for_official_schedule_11(self):
+        draft = self._draft(
+            schedule=self.schedule_11,
+            designation='График № 11/1',
+            phases=[
+                {'brigade_number': 1, 'phase': 'day'},
+                {'brigade_number': 2, 'phase': 'off'},
+            ],
+        )
+        confirmed = self._confirm(draft)
+        confirmed.refresh_from_db()
+        self.assertEqual(confirmed.status, WatchPeriodBrigadePhaseVersion.Status.CONFIRMED)
+        self.assertEqual(confirmed.confirmed_by_access_id, self.access.pk)
+
+    def test_official_phase_distribution_is_enforced(self):
+        invalid_12 = self._draft(
+            phases=[
+                {'brigade_number': 1, 'phase': 'day'},
+                {'brigade_number': 2, 'phase': 'day'},
+                {'brigade_number': 3, 'phase': 'off'},
+                {'brigade_number': 4, 'phase': 'off'},
+            ],
+        )
+        self._assert_confirm_error(ERROR_POLICY_MISMATCH, invalid_12.pk)
+        invalid_12.refresh_from_db()
+        self.assertEqual(invalid_12.status, WatchPeriodBrigadePhaseVersion.Status.DRAFT)
+
+        another_period = WatchPeriod.objects.create(
+            name='Период неверной policy № 11/1',
+            starts_on=self.period.starts_on,
+            ends_on=self.period.ends_on,
+        )
+        invalid_11 = self._draft(
+            period=another_period,
+            schedule=self.schedule_11,
+            designation='График № 11/1',
+            phases=[
+                {'brigade_number': 1, 'phase': 'night'},
+                {'brigade_number': 2, 'phase': 'off'},
+            ],
+        )
+        self._assert_confirm_error(ERROR_POLICY_MISMATCH, invalid_11.pk)
+
+    def test_designation_must_match_exact_work_schedule_code_policy(self):
+        draft = self._draft(designation='График № 11/1')
+        self._assert_confirm_error(
+            ERROR_SCHEDULE_DESIGNATION_MISMATCH,
+            draft.pk,
+        )
+
+    def test_unsupported_schedule_is_fail_closed(self):
+        unsupported = WorkSchedule.objects.create(
+            code='schedule-confirmation-policy-not-defined',
+            name='График без утверждённой policy',
+            brigade_count=2,
+            is_active=True,
+        )
+        draft = self._draft(
+            schedule=unsupported,
+            designation='График № 99/1',
+            phases=[
+                {'brigade_number': 1, 'phase': 'day'},
+                {'brigade_number': 2, 'phase': 'off'},
+            ],
+        )
+        self._assert_confirm_error(ERROR_POLICY_NOT_DEFINED, draft.pk)
+
+    def test_corrupted_source_snapshot_is_rejected(self):
+        draft = self._draft()
+        corrupted = dict(draft.source_snapshot)
+        corrupted['unexpected'] = 'forbidden'
+        WatchPeriodBrigadePhaseVersion._base_manager.filter(pk=draft.pk).update(
+            source_snapshot=corrupted,
+        )
+        self._assert_confirm_error(ERROR_SOURCE_INVALID, draft.pk)
+        draft.refresh_from_db()
+        self.assertEqual(draft.status, WatchPeriodBrigadePhaseVersion.Status.DRAFT)
+
+    def test_corrupted_source_fingerprint_is_rejected(self):
+        draft = self._draft()
+        WatchPeriodBrigadePhaseVersion._base_manager.filter(pk=draft.pk).update(
+            source_fingerprint='f' * 64,
+        )
+        self._assert_confirm_error(ERROR_SOURCE_FINGERPRINT_INVALID, draft.pk)
+
+    def test_graph_incomplete_and_inconsistent_are_distinct(self):
+        incomplete = self._draft()
+        WatchPeriodBrigadePhaseRow._base_manager.filter(
+            version=incomplete,
+            brigade_number=4,
+        ).delete()
+        self._assert_confirm_error(ERROR_GRAPH_INCOMPLETE, incomplete.pk)
+
+        another_period = WatchPeriod.objects.create(
+            name='Период повреждённого графа',
+            starts_on=self.period.starts_on,
+            ends_on=self.period.ends_on,
+        )
+        inconsistent = self._draft(
+            period=another_period,
+            order_number='Приказ повреждённого графа',
+        )
+        WatchPeriodBrigadePhaseRow._base_manager.filter(
+            version=inconsistent,
+            brigade_number=4,
+        ).update(brigade_number=5)
+        self._assert_confirm_error(ERROR_GRAPH_INCONSISTENT, inconsistent.pk)
+
+    def test_confirmation_requires_exact_active_timekeeper_access(self):
+        draft = self._draft()
+        wrong_role = Role.objects.create(
+            code='brigade-phase-confirm-wrong-role',
+            name='Неверная роль подтверждения календаря фаз',
+        )
+        wrong_employee = Employee.objects.create(
+            full_name='Не табельщик подтверждения календаря фаз',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        wrong_access = EmployeeAccess.objects.create(
+            employee=wrong_employee,
+            role=wrong_role,
+            access_code='BPC-CONFIRM-WRONG-ROLE',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+        self._assert_confirm_error(
+            ERROR_ACCESS_WRONG_ROLE,
+            draft.pk,
+            actor_access=wrong_access,
+        )
+        self._assert_confirm_error(
+            ERROR_ACCESS_NOT_FOUND,
+            draft.pk,
+            actor_access=type('MissingAccess', (), {'pk': wrong_access.pk + 10000})(),
+        )
+        draft.refresh_from_db()
+        self.assertEqual(draft.status, WatchPeriodBrigadePhaseVersion.Status.DRAFT)
+
+    def test_atomic_replacement_uses_one_server_time_and_exact_actor(self):
+        first = self._confirm(self._draft())
+        replacement = self._draft(order_number='Приказ подтверждения № 2')
+        replacement_creator_id = replacement.created_by_access_id
+        confirming_access = self._another_timekeeper_access()
+
+        confirmed = self._confirm(replacement, actor_access=confirming_access)
+        first.refresh_from_db()
+        confirmed.refresh_from_db()
+
+        self.assertEqual(first.status, WatchPeriodBrigadePhaseVersion.Status.SUPERSEDED)
+        self.assertEqual(first.superseded_by_access_id, confirming_access.pk)
+        self.assertEqual(confirmed.status, WatchPeriodBrigadePhaseVersion.Status.CONFIRMED)
+        self.assertEqual(confirmed.confirmed_by_access_id, confirming_access.pk)
+        self.assertEqual(first.superseded_at, confirmed.confirmed_at)
+        self.assertEqual(confirmed.created_by_access_id, replacement_creator_id)
+        self.assertEqual(
+            WatchPeriodBrigadePhaseVersion._base_manager.filter(
+                watch_period=self.period,
+                work_schedule=self.schedule_12,
+                status=WatchPeriodBrigadePhaseVersion.Status.CONFIRMED,
+            ).count(),
+            1,
+        )
+
+    def test_repeat_confirmation_is_idempotent_without_actor_or_time_change(self):
+        confirmed = self._confirm(self._draft())
+        confirmed.refresh_from_db()
+        original_at = confirmed.confirmed_at
+        original_actor_id = confirmed.confirmed_by_access_id
+        version_count = WatchPeriodBrigadePhaseVersion._base_manager.count()
+        row_count = WatchPeriodBrigadePhaseRow._base_manager.count()
+
+        repeated = self._confirm(
+            confirmed,
+            actor_access=self._another_timekeeper_access(),
+        )
+        repeated.refresh_from_db()
+        self.assertEqual(repeated.pk, confirmed.pk)
+        self.assertEqual(repeated.confirmed_at, original_at)
+        self.assertEqual(repeated.confirmed_by_access_id, original_actor_id)
+        self.assertEqual(WatchPeriodBrigadePhaseVersion._base_manager.count(), version_count)
+        self.assertEqual(WatchPeriodBrigadePhaseRow._base_manager.count(), row_count)
+
+    def test_second_competing_draft_on_old_lineage_is_stale(self):
+        original = self._confirm(self._draft())
+        first_competing = self._draft(order_number='Конкурирующий приказ № 1')
+        second_competing = self._draft(order_number='Конкурирующий приказ № 2')
+        self.assertEqual(first_competing.based_on_version_id, original.pk)
+        self.assertEqual(second_competing.based_on_version_id, original.pk)
+
+        self._confirm(first_competing)
+        self._assert_confirm_error(ERROR_VERSION_STALE, second_competing.pk)
+        second_competing.refresh_from_db()
+        self.assertEqual(
+            second_competing.status,
+            WatchPeriodBrigadePhaseVersion.Status.DRAFT,
+        )
+        original.refresh_from_db()
+        self._assert_confirm_error(ERROR_VERSION_STALE, original.pk)
+
+    def test_failure_after_supersede_rolls_back_both_versions(self):
+        current = self._confirm(self._draft())
+        current.refresh_from_db()
+        original_confirmed_at = current.confirmed_at
+        replacement = self._draft(order_number='Приказ rollback подтверждения')
+
+        with mock.patch(
+            'shifts.brigade_phase_calendar._trusted_confirm_version',
+            side_effect=IntegrityError('simulated confirmation failure'),
+        ):
+            self._assert_confirm_error(ERROR_GRAPH_INCONSISTENT, replacement.pk)
+
+        current.refresh_from_db()
+        replacement.refresh_from_db()
+        self.assertEqual(current.status, WatchPeriodBrigadePhaseVersion.Status.CONFIRMED)
+        self.assertEqual(current.confirmed_at, original_confirmed_at)
+        self.assertIsNone(current.superseded_at)
+        self.assertIsNone(current.superseded_by_access_id)
+        self.assertEqual(replacement.status, WatchPeriodBrigadePhaseVersion.Status.DRAFT)
+        self.assertIsNone(replacement.confirmed_at)
+        self.assertIsNone(replacement.confirmed_by_access_id)
+
+    def test_confirmation_preserves_provenance_creator_and_rows(self):
+        draft = self._draft()
+        snapshot = json.loads(json.dumps(draft.source_snapshot))
+        fingerprint = draft.source_fingerprint
+        creator_id = draft.created_by_access_id
+        rows = list(
+            WatchPeriodBrigadePhaseRow._base_manager.filter(version=draft)
+            .order_by('brigade_number')
+            .values_list('pk', 'brigade_number', 'phase')
+        )
+
+        self._confirm(draft)
+        draft.refresh_from_db()
+        self.assertEqual(draft.source_snapshot, snapshot)
+        self.assertEqual(draft.source_fingerprint, fingerprint)
+        self.assertEqual(draft.created_by_access_id, creator_id)
+        self.assertEqual(
+            list(
+                WatchPeriodBrigadePhaseRow._base_manager.filter(version=draft)
+                .order_by('brigade_number')
+                .values_list('pk', 'brigade_number', 'phase')
+            ),
+            rows,
+        )
+
+    def test_version_not_found_is_controlled(self):
+        self._assert_confirm_error(ERROR_VERSION_NOT_FOUND, 999999)

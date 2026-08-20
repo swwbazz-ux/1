@@ -1,11 +1,14 @@
 import hashlib
 import json
 import re
+import unicodedata
+from collections import Counter
 from collections.abc import Mapping, Sequence
 from datetime import date, datetime
 
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, models, transaction
+from django.utils import timezone
 
 from users.models import Employee, EmployeeAccess, WorkSchedule
 
@@ -32,10 +35,42 @@ ERROR_INVALID_SOURCE = 'shifts.brigade_phase.invalid_source'
 ERROR_SOURCE_NOT_EFFECTIVE = 'shifts.brigade_phase.source_not_effective_for_period'
 ERROR_INVALID_BRIGADE_SET = 'shifts.brigade_phase.invalid_brigade_set'
 ERROR_INCONSISTENT_GRAPH = 'shifts.brigade_phase.inconsistent_graph'
+ERROR_VERSION_NOT_FOUND = 'shifts.brigade_phase.version_not_found'
+ERROR_VERSION_NOT_DRAFT = 'shifts.brigade_phase.version_not_draft'
+ERROR_VERSION_STALE = 'shifts.brigade_phase.version_stale'
+ERROR_SOURCE_INVALID = 'shifts.brigade_phase.source_invalid'
+ERROR_SOURCE_FINGERPRINT_INVALID = 'shifts.brigade_phase.source_fingerprint_invalid'
+ERROR_GRAPH_INCOMPLETE = 'shifts.brigade_phase.graph_incomplete'
+ERROR_GRAPH_INCONSISTENT = 'shifts.brigade_phase.graph_inconsistent'
+ERROR_SCHEDULE_DESIGNATION_MISMATCH = (
+    'shifts.brigade_phase.schedule_designation_mismatch'
+)
+ERROR_POLICY_NOT_DEFINED = 'shifts.brigade_phase.policy_not_defined'
+ERROR_POLICY_MISMATCH = 'shifts.brigade_phase.policy_mismatch'
+
+WORK_SCHEDULE_CODE_11 = 'schedule_11'
+WORK_SCHEDULE_CODE_12 = 'schedule_12'
 
 _SHA256_PATTERN = re.compile(r'^[0-9a-f]{64}$')
 _SOURCE_KIND = 'official_schedule_order'
 _ROW_KEYS = frozenset({'brigade_number', 'phase'})
+_SOURCE_KEYS = frozenset({'source_kind', 'order', 'schedule'})
+_ORDER_KEYS = frozenset(
+    {'number', 'date', 'effective_from', 'document_sha256'}
+)
+_SCHEDULE_KEYS = frozenset({'designation', 'document_sha256'})
+_CONFIRMATION_POLICIES = {
+    WORK_SCHEDULE_CODE_11: {
+        'brigade_count': 2,
+        'designation': 'график№11/1',
+        'phase_counts': {'day': 1, 'night': 0, 'off': 1},
+    },
+    WORK_SCHEDULE_CODE_12: {
+        'brigade_count': 4,
+        'designation': 'график№12/1',
+        'phase_counts': {'day': 1, 'night': 1, 'off': 2},
+    },
+}
 
 
 def _error(code, message):
@@ -226,12 +261,12 @@ def _lock_watch_period(watch_period_id):
         raise _error(ERROR_WATCH_PERIOD_NOT_FOUND, 'Период вахты не найден.') from error
 
 
-def _lock_work_schedule(work_schedule_id):
+def _lock_work_schedule(work_schedule_id, *, require_active=True):
     try:
         schedule = WorkSchedule.objects.select_for_update(of=('self',)).get(pk=work_schedule_id)
     except WorkSchedule.DoesNotExist as error:
         raise _error(ERROR_WORK_SCHEDULE_NOT_FOUND, 'График работы не найден.') from error
-    if not schedule.is_active:
+    if require_active and not schedule.is_active:
         raise _error(ERROR_WORK_SCHEDULE_INACTIVE, 'График работы неактивен.')
     return schedule
 
@@ -428,4 +463,300 @@ def create_watch_period_brigade_phase_draft(
         raise _error(
             ERROR_INCONSISTENT_GRAPH,
             'Не удалось атомарно сохранить календарь фаз. Повторите операцию.',
+        ) from error
+
+
+def _version_plan(version_id):
+    return (
+        WatchPeriodBrigadePhaseVersion._base_manager.filter(pk=version_id)
+        .values('pk', 'watch_period_id', 'work_schedule_id')
+        .first()
+    )
+
+
+def _normalize_official_designation(value):
+    if not isinstance(value, str):
+        raise _error(
+            ERROR_SOURCE_INVALID,
+            'Обозначение официального графика заполнено неверно.',
+        )
+    normalized = unicodedata.normalize('NFC', value)
+    normalized = ' '.join(normalized.split()).casefold()
+    normalized = re.sub(r'\s*№\s*', '№', normalized)
+    normalized = re.sub(r'\s*/\s*', '/', normalized)
+    return normalized
+
+
+def _validate_confirmation_source(*, version, watch_period):
+    snapshot = version.source_snapshot
+    if not isinstance(snapshot, Mapping) or set(snapshot) != _SOURCE_KEYS:
+        raise _error(ERROR_SOURCE_INVALID, 'Снимок официального источника повреждён.')
+    order = snapshot.get('order')
+    schedule = snapshot.get('schedule')
+    if (
+        snapshot.get('source_kind') != _SOURCE_KIND
+        or not isinstance(order, Mapping)
+        or set(order) != _ORDER_KEYS
+        or not isinstance(schedule, Mapping)
+        or set(schedule) != _SCHEDULE_KEYS
+    ):
+        raise _error(ERROR_SOURCE_INVALID, 'Снимок официального источника повреждён.')
+    try:
+        normalized_snapshot, effective_from = _build_source_snapshot(
+            order_number=order['number'],
+            order_date=order['date'],
+            effective_from=order['effective_from'],
+            order_document_sha256=order['document_sha256'],
+            schedule_designation=schedule['designation'],
+            schedule_document_sha256=schedule['document_sha256'],
+        )
+    except BrigadePhaseCalendarError as error:
+        raise _error(
+            ERROR_SOURCE_INVALID,
+            'Снимок официального источника содержит некорректные реквизиты.',
+        ) from error
+    if normalized_snapshot != snapshot:
+        raise _error(
+            ERROR_SOURCE_INVALID,
+            'Снимок официального источника не является каноническим.',
+        )
+    if effective_from > watch_period.starts_on:
+        raise _error(
+            ERROR_SOURCE_NOT_EFFECTIVE,
+            'Официальный источник действует позже начала периода вахты.',
+        )
+    if (
+        not isinstance(version.source_fingerprint, str)
+        or not _SHA256_PATTERN.fullmatch(version.source_fingerprint)
+        or _canonical_fingerprint(snapshot) != version.source_fingerprint
+    ):
+        raise _error(
+            ERROR_SOURCE_FINGERPRINT_INVALID,
+            'Fingerprint официального источника не соответствует снимку.',
+        )
+    return snapshot
+
+
+def _target_rows(versions, locked_rows, *, target, brigade_count):
+    version_ids = {version.pk for version in versions}
+    if any(row.version_id not in version_ids for row in locked_rows):
+        raise _error(
+            ERROR_GRAPH_INCONSISTENT,
+            'Строка календаря не связана с заблокированным набором версий.',
+        )
+    rows = [row for row in locked_rows if row.version_id == target.pk]
+    expected_numbers = set(range(1, brigade_count + 1))
+    actual_numbers = [row.brigade_number for row in rows]
+    actual_number_set = set(actual_numbers)
+    allowed_phases = set(WatchPeriodBrigadePhaseRow.Phase.values)
+
+    if (
+        len(actual_numbers) < brigade_count
+        and len(actual_numbers) == len(actual_number_set)
+        and actual_number_set.issubset(expected_numbers)
+        and all(row.phase in allowed_phases for row in rows)
+    ):
+        raise _error(
+            ERROR_GRAPH_INCOMPLETE,
+            'В draft отсутствуют строки некоторых бригад.',
+        )
+    if (
+        len(actual_numbers) != brigade_count
+        or len(actual_numbers) != len(actual_number_set)
+        or actual_number_set != expected_numbers
+        or any(row.phase not in allowed_phases for row in rows)
+    ):
+        raise _error(
+            ERROR_GRAPH_INCONSISTENT,
+            'Строки draft не соответствуют точному составу бригад графика.',
+        )
+    return tuple(
+        sorted(
+            (row.brigade_number, row.phase)
+            for row in rows
+        )
+    )
+
+
+def _validate_confirmation_policy(*, work_schedule, snapshot, rows):
+    policy = _CONFIRMATION_POLICIES.get(work_schedule.code)
+    if policy is None:
+        raise _error(
+            ERROR_POLICY_NOT_DEFINED,
+            'Для этого графика ещё не утверждена серверная policy подтверждения.',
+        )
+    if work_schedule.brigade_count != policy['brigade_count']:
+        raise _error(
+            ERROR_GRAPH_INCONSISTENT,
+            'Количество бригад графика не соответствует официальной policy.',
+        )
+    designation = _normalize_official_designation(
+        snapshot['schedule']['designation']
+    )
+    if designation != policy['designation']:
+        raise _error(
+            ERROR_SCHEDULE_DESIGNATION_MISMATCH,
+            'Обозначение источника не соответствует выбранному официальному графику.',
+        )
+    phase_counts = Counter(phase for _brigade_number, phase in rows)
+    actual_counts = {
+        phase: phase_counts.get(phase, 0)
+        for phase in WatchPeriodBrigadePhaseRow.Phase.values
+    }
+    if actual_counts != policy['phase_counts']:
+        raise _error(
+            ERROR_POLICY_MISMATCH,
+            'Распределение DAY/NIGHT/OFF не соответствует официальной policy графика.',
+        )
+
+
+def _trusted_supersede_version(version, *, actor_access, transition_at):
+    if version.status != WatchPeriodBrigadePhaseVersion.Status.CONFIRMED:
+        raise _error(
+            ERROR_GRAPH_INCONSISTENT,
+            'Текущая версия перестала быть утверждённой.',
+        )
+    version.status = WatchPeriodBrigadePhaseVersion.Status.SUPERSEDED
+    version.superseded_at = transition_at
+    version.superseded_by_access = actor_access
+    version.full_clean()
+    updated = models.QuerySet.update(
+        WatchPeriodBrigadePhaseVersion._base_manager.filter(
+            pk=version.pk,
+            status=WatchPeriodBrigadePhaseVersion.Status.CONFIRMED,
+        ),
+        status=version.status,
+        superseded_at=version.superseded_at,
+        superseded_by_access=version.superseded_by_access,
+    )
+    if updated != 1:
+        raise _error(
+            ERROR_GRAPH_INCONSISTENT,
+            'Не удалось атомарно заменить предыдущую утверждённую версию.',
+        )
+    return version
+
+
+def _trusted_confirm_version(version, *, actor_access, transition_at):
+    if version.status != WatchPeriodBrigadePhaseVersion.Status.DRAFT:
+        raise _error(ERROR_VERSION_NOT_DRAFT, 'Версия перестала быть draft.')
+    version.status = WatchPeriodBrigadePhaseVersion.Status.CONFIRMED
+    version.confirmed_at = transition_at
+    version.confirmed_by_access = actor_access
+    version.full_clean()
+    updated = models.QuerySet.update(
+        WatchPeriodBrigadePhaseVersion._base_manager.filter(
+            pk=version.pk,
+            status=WatchPeriodBrigadePhaseVersion.Status.DRAFT,
+        ),
+        status=version.status,
+        confirmed_at=version.confirmed_at,
+        confirmed_by_access=version.confirmed_by_access,
+    )
+    if updated != 1:
+        raise _error(
+            ERROR_GRAPH_INCONSISTENT,
+            'Не удалось атомарно подтвердить draft календаря фаз.',
+        )
+    return version
+
+
+def _confirm_watch_period_brigade_phase_version_once(*, version_id, actor_access_id):
+    plan = _version_plan(version_id)
+    actor_access = _lock_timekeeper_access(_access_plan(actor_access_id))
+    if plan is None:
+        raise _error(ERROR_VERSION_NOT_FOUND, 'Версия календаря фаз не найдена.')
+
+    watch_period = _lock_watch_period(plan['watch_period_id'])
+    work_schedule = _lock_work_schedule(
+        plan['work_schedule_id'],
+        require_active=False,
+    )
+    versions, locked_rows = _lock_existing_graph(
+        watch_period=watch_period,
+        work_schedule=work_schedule,
+    )
+    target = next((version for version in versions if version.pk == plan['pk']), None)
+    if (
+        target is None
+        or target.watch_period_id != watch_period.pk
+        or target.work_schedule_id != work_schedule.pk
+    ):
+        raise _error(ERROR_VERSION_NOT_FOUND, 'Версия календаря фаз изменилась или удалена.')
+
+    current_confirmed = _validate_versions(versions)
+    if target.status == WatchPeriodBrigadePhaseVersion.Status.SUPERSEDED:
+        raise _error(
+            ERROR_VERSION_STALE,
+            'Эта версия уже заменена более новой утверждённой версией.',
+        )
+    if target.status == WatchPeriodBrigadePhaseVersion.Status.CONFIRMED:
+        if current_confirmed is target:
+            return target
+        raise _error(
+            ERROR_VERSION_STALE,
+            'Эта версия больше не является текущей утверждённой версией.',
+        )
+    if target.status != WatchPeriodBrigadePhaseVersion.Status.DRAFT:
+        raise _error(ERROR_VERSION_NOT_DRAFT, 'Подтвердить можно только draft-версию.')
+    if not work_schedule.is_active:
+        raise _error(ERROR_WORK_SCHEDULE_INACTIVE, 'График работы неактивен.')
+
+    snapshot = _validate_confirmation_source(
+        version=target,
+        watch_period=watch_period,
+    )
+    target_rows = _target_rows(
+        versions,
+        locked_rows,
+        target=target,
+        brigade_count=work_schedule.brigade_count,
+    )
+    _validate_confirmation_policy(
+        work_schedule=work_schedule,
+        snapshot=snapshot,
+        rows=target_rows,
+    )
+
+    if current_confirmed is None:
+        if target.based_on_version_id is not None:
+            raise _error(
+                ERROR_VERSION_STALE,
+                'Основание draft больше не соответствует текущему календарю.',
+            )
+    elif target.based_on_version_id != current_confirmed.pk:
+        raise _error(
+            ERROR_VERSION_STALE,
+            'После создания draft была подтверждена другая версия календаря.',
+        )
+
+    transition_at = timezone.now()
+    if current_confirmed is not None:
+        _trusted_supersede_version(
+            current_confirmed,
+            actor_access=actor_access,
+            transition_at=transition_at,
+        )
+    _trusted_confirm_version(
+        target,
+        actor_access=actor_access,
+        transition_at=transition_at,
+    )
+    return target
+
+
+def confirm_watch_period_brigade_phase_version(*, version_id, actor_access_id):
+    """Confirm an exact draft and atomically supersede its current lineage base."""
+    try:
+        with transaction.atomic():
+            return _confirm_watch_period_brigade_phase_version_once(
+                version_id=version_id,
+                actor_access_id=actor_access_id,
+            )
+    except BrigadePhaseCalendarError:
+        raise
+    except (IntegrityError, ValidationError) as error:
+        raise _error(
+            ERROR_GRAPH_INCONSISTENT,
+            'Не удалось атомарно подтвердить календарь фаз. Повторите операцию.',
         ) from error
