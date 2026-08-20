@@ -1,3 +1,4 @@
+from datetime import date
 from urllib.parse import quote, urlencode
 
 from django.contrib import messages
@@ -10,8 +11,17 @@ from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from settlement.models import SettlementResident
-from shifts.models import WatchPeriod
-from users.models import Employee, WatchComposition
+from shifts.brigade_phase_calendar import (
+    BrigadePhaseCalendarError,
+    confirm_watch_period_brigade_phase_version,
+    create_watch_period_brigade_phase_draft,
+)
+from shifts.models import (
+    WatchPeriod,
+    WatchPeriodBrigadePhaseRow,
+    WatchPeriodBrigadePhaseVersion,
+)
+from users.models import Employee, WatchComposition, WorkSchedule
 
 from users.role_apps import (
     get_role_app_for_request,
@@ -117,6 +127,263 @@ def _validation_message(error):
 def _private_no_store(response):
     response['Cache-Control'] = 'private, no-store'
     return response
+
+
+_BRIGADE_PHASE_UI_POLICIES = {
+    'schedule_11': {
+        'brigade_numbers': (1, 2),
+        'phase_counts': {'day': 1, 'night': 0, 'off': 1},
+        'phase_choices': (
+            (WatchPeriodBrigadePhaseRow.Phase.DAY, 'Дневная смена'),
+            (WatchPeriodBrigadePhaseRow.Phase.OFF, 'Межвахта'),
+        ),
+    },
+    'schedule_12': {
+        'brigade_numbers': (1, 2, 3, 4),
+        'phase_counts': {'day': 1, 'night': 1, 'off': 2},
+        'phase_choices': (
+            (WatchPeriodBrigadePhaseRow.Phase.DAY, 'Дневная смена'),
+            (WatchPeriodBrigadePhaseRow.Phase.NIGHT, 'Ночная смена'),
+            (WatchPeriodBrigadePhaseRow.Phase.OFF, 'Межвахта'),
+        ),
+    },
+}
+
+
+def _positive_int(value):
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _brigade_phase_calendar_url(*, watch_period_id=None, work_schedule_id=None):
+    query = {}
+    if watch_period_id:
+        query['watch_period'] = watch_period_id
+    if work_schedule_id:
+        query['work_schedule'] = work_schedule_id
+    url = reverse('timekeeper_brigade_phase_calendar')
+    return f'{url}?{urlencode(query)}' if query else url
+
+
+def _safe_brigade_phase_source(version):
+    snapshot = version.source_snapshot
+    if not isinstance(snapshot, dict):
+        return None
+    order = snapshot.get('order')
+    schedule = snapshot.get('schedule')
+    if not isinstance(order, dict) or not isinstance(schedule, dict):
+        return None
+    fields = {
+        'order_number': order.get('number'),
+        'order_date': order.get('date'),
+        'effective_from': order.get('effective_from'),
+        'schedule_designation': schedule.get('designation'),
+    }
+    if not all(isinstance(value, str) and value.strip() for value in fields.values()):
+        return None
+    try:
+        fields['order_date'] = date.fromisoformat(fields['order_date'].strip()).strftime('%d.%m.%Y')
+        fields['effective_from'] = date.fromisoformat(
+            fields['effective_from'].strip()
+        ).strftime('%d.%m.%Y')
+    except ValueError:
+        return None
+    return {key: value.strip() for key, value in fields.items()}
+
+
+def _brigade_phase_calendar_context(request):
+    periods = list(
+        WatchPeriod.objects.filter(is_active=True).order_by('starts_on', 'pk')
+    )
+    schedules = list(
+        WorkSchedule.objects.filter(
+            is_active=True,
+            code__in=tuple(_BRIGADE_PHASE_UI_POLICIES),
+        ).order_by('code', 'pk')
+    )
+    period_by_id = {period.pk: period for period in periods}
+    schedule_by_id = {schedule.pk: schedule for schedule in schedules}
+    selected_period = period_by_id.get(_positive_int(request.GET.get('watch_period')))
+    selected_schedule = schedule_by_id.get(_positive_int(request.GET.get('work_schedule')))
+    if selected_period is None and periods:
+        selected_period = periods[0]
+    if selected_schedule is None and schedules:
+        selected_schedule = schedules[0]
+
+    policy = (
+        _BRIGADE_PHASE_UI_POLICIES.get(selected_schedule.code)
+        if selected_schedule is not None
+        else None
+    )
+    configuration_ready = bool(
+        policy
+        and selected_schedule.brigade_count == len(policy['brigade_numbers'])
+    )
+    versions = []
+    if selected_period is not None and selected_schedule is not None:
+        versions = list(
+            WatchPeriodBrigadePhaseVersion._base_manager.filter(
+                watch_period=selected_period,
+                work_schedule=selected_schedule,
+                status__in=(
+                    WatchPeriodBrigadePhaseVersion.Status.DRAFT,
+                    WatchPeriodBrigadePhaseVersion.Status.CONFIRMED,
+                ),
+            )
+            .prefetch_related('rows')
+            .order_by('-version_number', '-pk')
+        )
+    phase_labels = dict(WatchPeriodBrigadePhaseRow.Phase.choices)
+    version_rows = []
+    for version in versions:
+        rows = [
+            {
+                'brigade_number': row.brigade_number,
+                'phase_label': phase_labels.get(row.phase, 'Требуется проверка'),
+            }
+            for row in version.rows.all()
+        ]
+        version_rows.append({
+            'version': version,
+            'status_label': version.get_status_display(),
+            'source': _safe_brigade_phase_source(version),
+            'rows': rows,
+            'can_confirm': version.status == WatchPeriodBrigadePhaseVersion.Status.DRAFT,
+        })
+
+    brigade_fields = []
+    if configuration_ready:
+        brigade_fields = [
+            {
+                'number': number,
+                'name': f'brigade_{number}_phase',
+                'choices': policy['phase_choices'],
+            }
+            for number in policy['brigade_numbers']
+        ]
+    return {
+        'periods': periods,
+        'schedules': schedules,
+        'selected_period': selected_period,
+        'selected_schedule': selected_schedule,
+        'configuration_ready': configuration_ready,
+        'brigade_fields': brigade_fields,
+        'version_rows': version_rows,
+    }
+
+
+def timekeeper_brigade_phase_calendar_view(request):
+    access, response = _role_access(request, 'timekeeper')
+    if response:
+        return response
+    context = _brigade_phase_calendar_context(request)
+    context['access'] = access
+    return _private_no_store(render(
+        request,
+        'rotations/timekeeper_brigade_phase_calendar.html',
+        context,
+    ))
+
+
+@require_POST
+def timekeeper_brigade_phase_calendar_create_view(request):
+    access, response = _role_access(request, 'timekeeper')
+    if response:
+        return response
+
+    watch_period_id = _positive_int(request.POST.get('watch_period'))
+    work_schedule_id = _positive_int(request.POST.get('work_schedule'))
+    schedule = (
+        WorkSchedule.objects.filter(
+            pk=work_schedule_id,
+            is_active=True,
+            code__in=tuple(_BRIGADE_PHASE_UI_POLICIES),
+        ).first()
+        if work_schedule_id
+        else None
+    )
+    policy = _BRIGADE_PHASE_UI_POLICIES.get(schedule.code) if schedule else None
+    redirect_url = _brigade_phase_calendar_url(
+        watch_period_id=watch_period_id,
+        work_schedule_id=work_schedule_id,
+    )
+    if (
+        watch_period_id is None
+        or schedule is None
+        or schedule.brigade_count != len(policy['brigade_numbers'])
+    ):
+        messages.error(request, 'Выберите доступный период вахты и поддерживаемый график.')
+        return redirect(redirect_url)
+
+    submitted_phases = {
+        number: request.POST.getlist(f'brigade_{number}_phase')
+        for number in policy['brigade_numbers']
+    }
+    if any(
+        len(values) != 1 or values[0] not in dict(policy['phase_choices'])
+        for values in submitted_phases.values()
+    ):
+        messages.error(request, 'Укажите допустимую фазу для каждой бригады.')
+        return redirect(redirect_url)
+    brigade_phases = [
+        {'brigade_number': number, 'phase': submitted_phases[number][0]}
+        for number in policy['brigade_numbers']
+    ]
+    actual_phase_counts = {
+        phase: sum(item['phase'] == phase for item in brigade_phases)
+        for phase in WatchPeriodBrigadePhaseRow.Phase.values
+    }
+    if actual_phase_counts != policy['phase_counts']:
+        messages.error(request, 'Распределение фаз не соответствует выбранному графику.')
+        return redirect(redirect_url)
+
+    try:
+        create_watch_period_brigade_phase_draft(
+            watch_period_id=watch_period_id,
+            work_schedule_id=schedule.pk,
+            actor_access_id=access.pk,
+            order_number=request.POST.get('order_number', ''),
+            order_date=request.POST.get('order_date', ''),
+            effective_from=request.POST.get('effective_from', ''),
+            order_document_sha256=request.POST.get('order_checksum', ''),
+            schedule_designation=request.POST.get('schedule_designation', ''),
+            schedule_document_sha256=request.POST.get('schedule_checksum', ''),
+            brigade_phases=brigade_phases,
+        )
+    except BrigadePhaseCalendarError:
+        messages.error(
+            request,
+            'Не удалось создать версию календаря. Проверьте реквизиты источника и фазы бригад.',
+        )
+    else:
+        messages.success(request, 'Черновик календаря фаз создан.')
+    return redirect(redirect_url)
+
+
+@require_POST
+def timekeeper_brigade_phase_calendar_confirm_view(request, version_id):
+    access, response = _role_access(request, 'timekeeper')
+    if response:
+        return response
+    try:
+        version = confirm_watch_period_brigade_phase_version(
+            version_id=version_id,
+            actor_access_id=access.pk,
+        )
+    except BrigadePhaseCalendarError:
+        messages.error(
+            request,
+            'Не удалось подтвердить версию календаря. Проверьте её состояние и данные.',
+        )
+        return redirect('timekeeper_brigade_phase_calendar')
+    messages.success(request, 'Календарь фаз утверждён.')
+    return redirect(_brigade_phase_calendar_url(
+        watch_period_id=version.watch_period_id,
+        work_schedule_id=version.work_schedule_id,
+    ))
 
 
 def _version_responsibility_counts(version):

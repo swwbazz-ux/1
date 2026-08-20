@@ -32,6 +32,9 @@ from .views import (
     site_manager_queue_view,
     site_manager_service_worker_view,
     timekeeper_cycle_view,
+    timekeeper_brigade_phase_calendar_confirm_view,
+    timekeeper_brigade_phase_calendar_create_view,
+    timekeeper_brigade_phase_calendar_view,
     timekeeper_dashboard_view,
     timekeeper_manifest_view,
     timekeeper_response_edit_view,
@@ -41,6 +44,21 @@ from .views import (
 
 urlpatterns = [
     path('timekeeper/', timekeeper_dashboard_view, name='rotation_timekeeper_dashboard'),
+    path(
+        'timekeeper/brigade-phase-calendar/',
+        timekeeper_brigade_phase_calendar_view,
+        name='timekeeper_brigade_phase_calendar',
+    ),
+    path(
+        'timekeeper/brigade-phase-calendar/create/',
+        timekeeper_brigade_phase_calendar_create_view,
+        name='timekeeper_brigade_phase_calendar_create',
+    ),
+    path(
+        'timekeeper/brigade-phase-calendar/<int:version_id>/confirm/',
+        timekeeper_brigade_phase_calendar_confirm_view,
+        name='timekeeper_brigade_phase_calendar_confirm',
+    ),
     path(
         'timekeeper/arrival-rosters/',
         arrival_roster_index_view,

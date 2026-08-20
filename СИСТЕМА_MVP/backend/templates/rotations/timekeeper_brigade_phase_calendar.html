@@ -1,0 +1,182 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Календарь фаз бригад — табельщик{% endblock %}
+{% block body_class %}rotation-workplace-screen{% endblock %}
+{% block extra_head %}
+{% include "includes/role_app_pwa_head.html" with role_code="timekeeper" manifest_url="/timekeeper.webmanifest" service_worker_url="/timekeeper-sw.js" legacy_scope="/timekeeper/" theme_color="#176B73" apple_title="Табельщик" icon_180="img/pwa/timekeeper-180.png" %}
+<link rel="stylesheet" href="{% static 'css/rotation-workplace-v2.css' %}?v=3">
+{% endblock %}
+
+{% block body %}
+<div class="admin-shell admin-exports-shell admin-day rotation-shell" data-admin-theme>
+    <header class="admin-console-header rotation-console-header">
+        <section class="admin-console-identity">
+            <span class="admin-console-avatar" aria-hidden="true">{{ access.employee.full_name|default:"Т"|first }}</span>
+            <span><strong>{{ access.employee.full_name }}</strong><em>Табельщик</em></span>
+        </section>
+        <section class="admin-console-main">
+            <div class="admin-console-title">
+                <span>Рабочее место табельщика</span>
+                <h1>Календарь фаз бригад</h1>
+                <p>Подготовьте и утвердите дневные, ночные и межвахтовые фазы официального графика.</p>
+            </div>
+            <nav class="admin-console-nav" aria-label="Разделы перевахты">
+                <a href="{% url 'rotation_timekeeper_dashboard' %}">Сбор данных</a>
+                <a href="{% url 'arrival_roster_index' %}">Перевахта и состав заезда</a>
+                <a class="is-active" href="{% url 'timekeeper_brigade_phase_calendar' %}" aria-current="page">Календарь фаз бригад</a>
+            </nav>
+        </section>
+        <section class="admin-console-actions rotation-console-actions">
+            <a class="admin-utility-link" href="{% url 'logout' %}">Выйти</a>
+        </section>
+    </header>
+
+    <main class="admin-console-page rotation-page">
+        {% for message in messages %}<div class="message {{ message.tags }}" role="status">{{ message }}</div>{% endfor %}
+
+        <section class="rotation-page-heading">
+            <div>
+                <span class="rotation-eyebrow">Официальный календарь</span>
+                <h2>Период и график работы</h2>
+                <p>Сначала выберите точную пару. Существующие версии и форма нового черновика показаны только для неё.</p>
+            </div>
+        </section>
+
+        <section class="rotation-form-card">
+            <form method="get" action="{% url 'timekeeper_brigade_phase_calendar' %}">
+                <div class="rotation-form-field">
+                    <label for="calendar-watch-period">Период вахты</label>
+                    <select id="calendar-watch-period" name="watch_period" required>
+                        {% for period in periods %}
+                            <option value="{{ period.pk }}"{% if selected_period.pk == period.pk %} selected{% endif %}>{{ period.name }} · {{ period.starts_on|date:"d.m.Y" }}–{{ period.ends_on|date:"d.m.Y" }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="rotation-form-field">
+                    <label for="calendar-work-schedule">График работы</label>
+                    <select id="calendar-work-schedule" name="work_schedule" required>
+                        {% for schedule in schedules %}
+                            <option value="{{ schedule.pk }}"{% if selected_schedule.pk == schedule.pk %} selected{% endif %}>{{ schedule.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <button class="admin-button admin-button-secondary" type="submit">Показать календарь</button>
+            </form>
+        </section>
+
+        {% if selected_period and selected_schedule %}
+            <section class="rotation-table-card" aria-label="Версии календаря фаз">
+                <div class="rotation-page-heading">
+                    <div>
+                        <span class="rotation-eyebrow">{{ selected_period.name }}</span>
+                        <h2>{{ selected_schedule.name }}</h2>
+                    </div>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Версия</th>
+                                <th>Состояние</th>
+                                <th>Официальный источник</th>
+                                <th>Фазы бригад</th>
+                                <th>Утверждена</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for item in version_rows %}
+                                <tr>
+                                    <td>№ {{ item.version.version_number }}</td>
+                                    <td><span class="rotation-status-chip status-{{ item.version.status }}">{{ item.status_label }}</span></td>
+                                    <td>
+                                        {% if item.source %}
+                                            Приказ {{ item.source.order_number }} от {{ item.source.order_date }}<br>
+                                            <small>действует с {{ item.source.effective_from }} · {{ item.source.schedule_designation }}</small>
+                                        {% else %}
+                                            <span class="is-warning">Требуется проверка реквизитов</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% for row in item.rows %}
+                                            Бригада {{ row.brigade_number }} — {{ row.phase_label }}{% if not forloop.last %}<br>{% endif %}
+                                        {% empty %}
+                                            Требуется проверка строк
+                                        {% endfor %}
+                                    </td>
+                                    <td>{% if item.version.confirmed_at %}{{ item.version.confirmed_at|date:"d.m.Y H:i" }}{% else %}—{% endif %}</td>
+                                    <td>
+                                        {% if item.can_confirm %}
+                                            <form method="post" action="{% url 'timekeeper_brigade_phase_calendar_confirm' item.version.pk %}">
+                                                {% csrf_token %}
+                                                <button class="admin-button admin-button-primary" type="submit">Утвердить версию</button>
+                                            </form>
+                                        {% else %}
+                                            <strong>Действующая версия</strong>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                            {% empty %}
+                                <tr><td colspan="6">Для выбранного периода и графика версий пока нет.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section class="rotation-form-card" aria-labelledby="calendar-create-title">
+                <h2 id="calendar-create-title">Новый черновик</h2>
+                {% if configuration_ready %}
+                    <form method="post" action="{% url 'timekeeper_brigade_phase_calendar_create' %}">
+                        {% csrf_token %}
+                        <input type="hidden" name="watch_period" value="{{ selected_period.pk }}">
+                        <input type="hidden" name="work_schedule" value="{{ selected_schedule.pk }}">
+                        <div class="rotation-form-field">
+                            <label for="order-number">Номер приказа</label>
+                            <input id="order-number" name="order_number" type="text" maxlength="255" required>
+                        </div>
+                        <div class="rotation-form-field">
+                            <label for="order-date">Дата приказа</label>
+                            <input id="order-date" name="order_date" type="date" required>
+                        </div>
+                        <div class="rotation-form-field">
+                            <label for="effective-from">Дата начала действия</label>
+                            <input id="effective-from" name="effective_from" type="date" required>
+                        </div>
+                        <div class="rotation-form-field">
+                            <label for="order-checksum">Контрольная сумма файла приказа</label>
+                            <input id="order-checksum" name="order_checksum" type="text" minlength="64" maxlength="64" autocomplete="off" required>
+                        </div>
+                        <div class="rotation-form-field">
+                            <label for="schedule-designation">Обозначение официального графика</label>
+                            <input id="schedule-designation" name="schedule_designation" type="text" maxlength="255" required>
+                        </div>
+                        <div class="rotation-form-field">
+                            <label for="schedule-checksum">Контрольная сумма файла графика</label>
+                            <input id="schedule-checksum" name="schedule_checksum" type="text" minlength="64" maxlength="64" autocomplete="off" required>
+                        </div>
+                        {% for field in brigade_fields %}
+                            <div class="rotation-form-field">
+                                <label for="{{ field.name }}">Бригада {{ field.number }}</label>
+                                <select id="{{ field.name }}" name="{{ field.name }}" required>
+                                    <option value="">Выберите фазу</option>
+                                    {% for value, label in field.choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+                                </select>
+                            </div>
+                        {% endfor %}
+                        <button class="admin-button admin-button-primary" type="submit">Создать черновик</button>
+                    </form>
+                {% else %}
+                    <div class="message error" role="alert">Настройка количества бригад не соответствует поддерживаемому официальному графику.</div>
+                {% endif %}
+            </section>
+        {% else %}
+            <div class="rotation-empty-state">
+                <strong>Нет доступных периодов или поддерживаемых графиков</strong>
+                <p>Проверьте справочники периодов вахты и активных графиков работы.</p>
+            </div>
+        {% endif %}
+    </main>
+</div>
+{% endblock %}
