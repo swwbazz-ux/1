@@ -4,6 +4,7 @@ import re
 import unicodedata
 from collections import Counter
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from datetime import date, datetime
 
 from django.core.exceptions import ValidationError
@@ -47,6 +48,13 @@ ERROR_SCHEDULE_DESIGNATION_MISMATCH = (
 )
 ERROR_POLICY_NOT_DEFINED = 'shifts.brigade_phase.policy_not_defined'
 ERROR_POLICY_MISMATCH = 'shifts.brigade_phase.policy_mismatch'
+ERROR_CONFIRMED_VERSION_NOT_FOUND = (
+    'shifts.brigade_phase.confirmed_version_not_found'
+)
+ERROR_CONFIRMED_VERSION_INCONSISTENT = (
+    'shifts.brigade_phase.confirmed_version_inconsistent'
+)
+ERROR_BRIGADE_NOT_FOUND = 'shifts.brigade_phase.brigade_not_found'
 
 WORK_SCHEDULE_CODE_11 = 'schedule_11'
 WORK_SCHEDULE_CODE_12 = 'schedule_12'
@@ -71,6 +79,17 @@ _CONFIRMATION_POLICIES = {
         'phase_counts': {'day': 1, 'night': 1, 'off': 2},
     },
 }
+
+
+@dataclass(frozen=True, slots=True)
+class ConfirmedBrigadePhase:
+    version_id: int
+    row_id: int
+    watch_period_id: int
+    work_schedule_id: int
+    brigade_number: int
+    phase: str
+    source_fingerprint: str
 
 
 def _error(code, message):
@@ -760,3 +779,132 @@ def confirm_watch_period_brigade_phase_version(*, version_id, actor_access_id):
             ERROR_GRAPH_INCONSISTENT,
             'Не удалось атомарно подтвердить календарь фаз. Повторите операцию.',
         ) from error
+
+
+def _read_watch_period(watch_period_id):
+    try:
+        return WatchPeriod.objects.get(pk=watch_period_id)
+    except WatchPeriod.DoesNotExist as error:
+        raise _error(ERROR_WATCH_PERIOD_NOT_FOUND, 'Период вахты не найден.') from error
+
+
+def _read_work_schedule(work_schedule_id):
+    try:
+        return WorkSchedule.objects.get(pk=work_schedule_id)
+    except WorkSchedule.DoesNotExist as error:
+        raise _error(ERROR_WORK_SCHEDULE_NOT_FOUND, 'График работы не найден.') from error
+
+
+def _read_confirmed_version(*, watch_period, work_schedule):
+    try:
+        version = WatchPeriodBrigadePhaseVersion._base_manager.get(
+            watch_period=watch_period,
+            work_schedule=work_schedule,
+            status=WatchPeriodBrigadePhaseVersion.Status.CONFIRMED,
+        )
+    except WatchPeriodBrigadePhaseVersion.DoesNotExist as error:
+        raise _error(
+            ERROR_CONFIRMED_VERSION_NOT_FOUND,
+            'Для периода и графика нет утверждённой версии календаря фаз.',
+        ) from error
+    except WatchPeriodBrigadePhaseVersion.MultipleObjectsReturned as error:
+        raise _error(
+            ERROR_CONFIRMED_VERSION_INCONSISTENT,
+            'Для периода и графика найдено несколько утверждённых версий.',
+        ) from error
+    if (
+        version.watch_period_id != watch_period.pk
+        or version.work_schedule_id != work_schedule.pk
+        or version.status != WatchPeriodBrigadePhaseVersion.Status.CONFIRMED
+        or version.created_by_access_id is None
+        or version.confirmed_by_access_id is None
+        or version.superseded_by_access_id is not None
+        or version.confirmed_at is None
+        or version.superseded_at is not None
+    ):
+        raise _error(
+            ERROR_CONFIRMED_VERSION_INCONSISTENT,
+            'Утверждённая версия имеет несогласованный статус или аудит.',
+        )
+    try:
+        version.full_clean()
+    except ValidationError as error:
+        raise _error(
+            ERROR_CONFIRMED_VERSION_INCONSISTENT,
+            'Утверждённая версия не проходит проверку модели.',
+        ) from error
+    return version
+
+
+def _normalize_requested_brigade_number(brigade_number, *, brigade_count):
+    if (
+        isinstance(brigade_number, bool)
+        or not isinstance(brigade_number, int)
+        or brigade_number < 1
+        or brigade_number > brigade_count
+    ):
+        raise _error(
+            ERROR_BRIGADE_NOT_FOUND,
+            'Номер бригады не входит в состав выбранного графика.',
+        )
+    return brigade_number
+
+
+def resolve_confirmed_brigade_phase(
+    *,
+    watch_period_id,
+    work_schedule_id,
+    brigade_number,
+):
+    """Resolve one phase from the exact, fully revalidated confirmed calendar."""
+    watch_period = _read_watch_period(watch_period_id)
+    work_schedule = _read_work_schedule(work_schedule_id)
+    requested_brigade_number = _normalize_requested_brigade_number(
+        brigade_number,
+        brigade_count=work_schedule.brigade_count,
+    )
+    version = _read_confirmed_version(
+        watch_period=watch_period,
+        work_schedule=work_schedule,
+    )
+    snapshot = _validate_confirmation_source(
+        version=version,
+        watch_period=watch_period,
+    )
+    rows = list(
+        WatchPeriodBrigadePhaseRow._base_manager.filter(version=version)
+        .order_by('brigade_number', 'pk')
+    )
+    normalized_rows = _target_rows(
+        [version],
+        rows,
+        target=version,
+        brigade_count=work_schedule.brigade_count,
+    )
+    _validate_confirmation_policy(
+        work_schedule=work_schedule,
+        snapshot=snapshot,
+        rows=normalized_rows,
+    )
+    resolved_row = next(
+        (
+            row
+            for row in rows
+            if row.brigade_number == requested_brigade_number
+        ),
+        None,
+    )
+    if resolved_row is None:
+        raise _error(
+            ERROR_BRIGADE_NOT_FOUND,
+            'Строка указанной бригады не найдена в утверждённой версии.',
+        )
+    return ConfirmedBrigadePhase(
+        version_id=version.pk,
+        row_id=resolved_row.pk,
+        watch_period_id=watch_period.pk,
+        work_schedule_id=work_schedule.pk,
+        brigade_number=resolved_row.brigade_number,
+        phase=resolved_row.phase,
+        source_fingerprint=version.source_fingerprint,
+    )

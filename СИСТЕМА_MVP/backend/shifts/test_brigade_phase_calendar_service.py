@@ -1,10 +1,12 @@
 import hashlib
 import inspect
 import json
+from dataclasses import FrozenInstanceError
 from datetime import date
 from importlib import import_module
 from unittest import mock
 
+from django.core.exceptions import ValidationError
 from django.db import IntegrityError, models
 from django.test import TestCase
 from django.utils import timezone
@@ -16,6 +18,9 @@ from .brigade_phase_calendar import (
     ERROR_ACCESS_INACTIVE,
     ERROR_ACCESS_NOT_FOUND,
     ERROR_ACCESS_WRONG_ROLE,
+    ERROR_BRIGADE_NOT_FOUND,
+    ERROR_CONFIRMED_VERSION_INCONSISTENT,
+    ERROR_CONFIRMED_VERSION_NOT_FOUND,
     ERROR_EMPLOYEE_INACTIVE,
     ERROR_GRAPH_INCOMPLETE,
     ERROR_GRAPH_INCONSISTENT,
@@ -36,9 +41,11 @@ from .brigade_phase_calendar import (
     WORK_SCHEDULE_CODE_11,
     WORK_SCHEDULE_CODE_12,
     BrigadePhaseCalendarError,
+    ConfirmedBrigadePhase,
     _normalize_brigade_phases,
     confirm_watch_period_brigade_phase_version,
     create_watch_period_brigade_phase_draft,
+    resolve_confirmed_brigade_phase,
 )
 from .models import (
     WatchPeriod,
@@ -869,3 +876,272 @@ class BrigadePhaseCalendarConfirmationServiceTests(TestCase):
 
     def test_version_not_found_is_controlled(self):
         self._assert_confirm_error(ERROR_VERSION_NOT_FOUND, 999999)
+
+    def _resolve(self, brigade_number, *, period=None, schedule=None):
+        return resolve_confirmed_brigade_phase(
+            watch_period_id=(period or self.period).pk,
+            work_schedule_id=(schedule or self.schedule_12).pk,
+            brigade_number=brigade_number,
+        )
+
+    def _assert_resolve_error(
+        self,
+        code,
+        brigade_number,
+        *,
+        period=None,
+        schedule=None,
+    ):
+        with self.assertRaises(BrigadePhaseCalendarError) as caught:
+            self._resolve(
+                brigade_number,
+                period=period,
+                schedule=schedule,
+            )
+        self.assertEqual(caught.exception.code, code)
+
+    def _force_confirm_for_resolver(self, draft):
+        WatchPeriodBrigadePhaseVersion._base_manager.filter(pk=draft.pk).update(
+            status=WatchPeriodBrigadePhaseVersion.Status.CONFIRMED,
+            confirmed_by_access=self.access,
+            confirmed_at=timezone.now(),
+        )
+        draft.refresh_from_db()
+        return draft
+
+    def test_resolver_returns_immutable_exact_day_night_and_off_results(self):
+        confirmed = self._confirm(self._draft())
+        rows_by_number = {
+            row.brigade_number: row
+            for row in WatchPeriodBrigadePhaseRow._base_manager.filter(
+                version=confirmed,
+            )
+        }
+
+        night = self._resolve(1)
+        day = self._resolve(2)
+        off = self._resolve(3)
+
+        self.assertIsInstance(day, ConfirmedBrigadePhase)
+        self.assertEqual(night.phase, WatchPeriodBrigadePhaseRow.Phase.NIGHT)
+        self.assertEqual(day.phase, WatchPeriodBrigadePhaseRow.Phase.DAY)
+        self.assertEqual(off.phase, WatchPeriodBrigadePhaseRow.Phase.OFF)
+        self.assertEqual(day.version_id, confirmed.pk)
+        self.assertEqual(day.row_id, rows_by_number[2].pk)
+        self.assertEqual(day.watch_period_id, self.period.pk)
+        self.assertEqual(day.work_schedule_id, self.schedule_12.pk)
+        self.assertEqual(day.brigade_number, 2)
+        self.assertEqual(day.source_fingerprint, confirmed.source_fingerprint)
+        self.assertFalse(hasattr(day, 'source_snapshot'))
+        self.assertFalse(hasattr(day, 'confirmed_by_access'))
+        with self.assertRaises(FrozenInstanceError):
+            day.phase = WatchPeriodBrigadePhaseRow.Phase.OFF
+
+    def test_resolver_ignores_draft_and_requires_confirmed_version(self):
+        self._draft()
+        self._assert_resolve_error(ERROR_CONFIRMED_VERSION_NOT_FOUND, 1)
+
+    def test_resolver_ignores_superseded_and_uses_replacement_only(self):
+        original = self._confirm(self._draft())
+        replacement = self._draft(
+            order_number='Приказ resolver replacement',
+            phases=[
+                {'brigade_number': 1, 'phase': 'day'},
+                {'brigade_number': 2, 'phase': 'night'},
+                {'brigade_number': 3, 'phase': 'off'},
+                {'brigade_number': 4, 'phase': 'off'},
+            ],
+        )
+        replacement = self._confirm(replacement)
+        original.refresh_from_db()
+        self.assertEqual(
+            original.status,
+            WatchPeriodBrigadePhaseVersion.Status.SUPERSEDED,
+        )
+
+        resolved = self._resolve(1)
+        self.assertEqual(resolved.version_id, replacement.pk)
+        self.assertEqual(resolved.phase, WatchPeriodBrigadePhaseRow.Phase.DAY)
+
+    def test_resolver_rejects_invalid_brigade_number(self):
+        self._confirm(self._draft())
+        for brigade_number in (True, 0, 5, '1', None):
+            with self.subTest(brigade_number=brigade_number):
+                self._assert_resolve_error(
+                    ERROR_BRIGADE_NOT_FOUND,
+                    brigade_number,
+                )
+
+    def test_resolver_rejects_corrupted_snapshot_and_fingerprint(self):
+        snapshot_version = self._confirm(self._draft())
+        corrupted = dict(snapshot_version.source_snapshot)
+        corrupted['unexpected'] = 'forbidden'
+        WatchPeriodBrigadePhaseVersion._base_manager.filter(
+            pk=snapshot_version.pk,
+        ).update(source_snapshot=corrupted)
+        self._assert_resolve_error(ERROR_SOURCE_INVALID, 1)
+
+        fingerprint_period = WatchPeriod.objects.create(
+            name='Период resolver fingerprint',
+            starts_on=self.period.starts_on,
+            ends_on=self.period.ends_on,
+        )
+        fingerprint_version = self._confirm(
+            self._draft(
+                period=fingerprint_period,
+                order_number='Приказ resolver fingerprint',
+            )
+        )
+        WatchPeriodBrigadePhaseVersion._base_manager.filter(
+            pk=fingerprint_version.pk,
+        ).update(source_fingerprint='e' * 64)
+        self._assert_resolve_error(
+            ERROR_SOURCE_FINGERPRINT_INVALID,
+            1,
+            period=fingerprint_period,
+        )
+
+    def test_resolver_rejects_incomplete_and_inconsistent_graph(self):
+        incomplete = self._confirm(self._draft())
+        WatchPeriodBrigadePhaseRow._base_manager.filter(
+            version=incomplete,
+            brigade_number=4,
+        ).delete()
+        self._assert_resolve_error(ERROR_GRAPH_INCOMPLETE, 1)
+
+        inconsistent_period = WatchPeriod.objects.create(
+            name='Период resolver inconsistent graph',
+            starts_on=self.period.starts_on,
+            ends_on=self.period.ends_on,
+        )
+        inconsistent = self._confirm(
+            self._draft(
+                period=inconsistent_period,
+                order_number='Приказ resolver inconsistent graph',
+            )
+        )
+        WatchPeriodBrigadePhaseRow._base_manager.filter(
+            version=inconsistent,
+            brigade_number=4,
+        ).update(brigade_number=5)
+        self._assert_resolve_error(
+            ERROR_GRAPH_INCONSISTENT,
+            1,
+            period=inconsistent_period,
+        )
+
+    def test_resolver_rejects_unsupported_code_and_designation_mismatch(self):
+        unsupported = WorkSchedule.objects.create(
+            code='resolver-policy-not-defined',
+            name='Resolver график без policy',
+            brigade_count=2,
+            is_active=True,
+        )
+        unsupported_draft = self._draft(
+            schedule=unsupported,
+            designation='График № 99/1',
+            phases=[
+                {'brigade_number': 1, 'phase': 'day'},
+                {'brigade_number': 2, 'phase': 'off'},
+            ],
+        )
+        self._force_confirm_for_resolver(unsupported_draft)
+        self._assert_resolve_error(
+            ERROR_POLICY_NOT_DEFINED,
+            1,
+            schedule=unsupported,
+        )
+
+        mismatch_period = WatchPeriod.objects.create(
+            name='Период resolver designation mismatch',
+            starts_on=self.period.starts_on,
+            ends_on=self.period.ends_on,
+        )
+        mismatch = self._draft(
+            period=mismatch_period,
+            designation='График № 11/1',
+            order_number='Приказ resolver designation mismatch',
+        )
+        self._force_confirm_for_resolver(mismatch)
+        self._assert_resolve_error(
+            ERROR_SCHEDULE_DESIGNATION_MISMATCH,
+            1,
+            period=mismatch_period,
+        )
+
+    def test_resolver_rejects_official_policy_mismatch(self):
+        invalid = self._draft(
+            phases=[
+                {'brigade_number': 1, 'phase': 'day'},
+                {'brigade_number': 2, 'phase': 'day'},
+                {'brigade_number': 3, 'phase': 'off'},
+                {'brigade_number': 4, 'phase': 'off'},
+            ],
+        )
+        self._force_confirm_for_resolver(invalid)
+        self._assert_resolve_error(ERROR_POLICY_MISMATCH, 1)
+
+    def test_resolver_maps_model_audit_shape_failure_to_controlled_error(self):
+        self._confirm(self._draft())
+        with mock.patch.object(
+            WatchPeriodBrigadePhaseVersion,
+            'full_clean',
+            side_effect=ValidationError('simulated audit-shape failure'),
+        ):
+            self._assert_resolve_error(
+                ERROR_CONFIRMED_VERSION_INCONSISTENT,
+                1,
+            )
+
+    def test_resolver_missing_exact_period_or_schedule_is_controlled(self):
+        with self.assertRaises(BrigadePhaseCalendarError) as period_error:
+            resolve_confirmed_brigade_phase(
+                watch_period_id=self.period.pk + 10000,
+                work_schedule_id=self.schedule_12.pk,
+                brigade_number=1,
+            )
+        self.assertEqual(period_error.exception.code, ERROR_WATCH_PERIOD_NOT_FOUND)
+
+        with self.assertRaises(BrigadePhaseCalendarError) as schedule_error:
+            resolve_confirmed_brigade_phase(
+                watch_period_id=self.period.pk,
+                work_schedule_id=self.schedule_12.pk + 10000,
+                brigade_number=1,
+            )
+        self.assertEqual(schedule_error.exception.code, ERROR_WORK_SCHEDULE_NOT_FOUND)
+
+    def test_repeated_resolver_call_is_fully_read_only(self):
+        self._confirm(self._draft())
+        version_before = list(
+            WatchPeriodBrigadePhaseVersion._base_manager.order_by('pk').values()
+        )
+        rows_before = list(
+            WatchPeriodBrigadePhaseRow._base_manager.order_by('pk').values()
+        )
+        employee_before = list(
+            Employee.objects.filter(pk=self.employee.pk).values()
+        )
+        access_before = list(
+            EmployeeAccess.objects.filter(pk=self.access.pk).values()
+        )
+
+        first = self._resolve(2)
+        second = self._resolve(2)
+
+        self.assertEqual(first, second)
+        self.assertEqual(
+            list(WatchPeriodBrigadePhaseVersion._base_manager.order_by('pk').values()),
+            version_before,
+        )
+        self.assertEqual(
+            list(WatchPeriodBrigadePhaseRow._base_manager.order_by('pk').values()),
+            rows_before,
+        )
+        self.assertEqual(
+            list(Employee.objects.filter(pk=self.employee.pk).values()),
+            employee_before,
+        )
+        self.assertEqual(
+            list(EmployeeAccess.objects.filter(pk=self.access.pk).values()),
+            access_before,
+        )
