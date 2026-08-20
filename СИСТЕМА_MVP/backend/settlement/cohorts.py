@@ -1,16 +1,42 @@
 import hashlib
 import json
-from datetime import datetime, time
+from dataclasses import dataclass
+from datetime import date, datetime, time, timedelta
 
-from assignments.models import AssignmentStatus, EquipmentAssignment, WorkShiftType
+from assignments.models import (
+    AssignmentStatus,
+    CrewPlan,
+    CrewPlanSlot,
+    EquipmentAssignment,
+    WorkShiftType,
+)
 from django.core.exceptions import ValidationError
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Q
 from django.utils import timezone
-from shifts.models import WatchPeriod
-from users.models import EmployeeAccess
+from rotations.models import (
+    ArrivalRosterRoutingBatch,
+    ArrivalRosterRoutingEvent,
+    ArrivalRosterRoutingRow,
+    ArrivalRosterVersion,
+)
+from shifts.models import (
+    WatchPeriod,
+    WatchPeriodBrigadePhaseRow,
+    WatchPeriodBrigadePhaseVersion,
+)
+from users.models import Employee, EmployeeAccess, WorkSchedule
 
-from .models import SettlementCohort, SettlementCohortMember, SettlementRevision
+from .cohort_readiness import (
+    SettlementCohortReadinessError,
+    build_arrival_roster_cohort_readiness,
+)
+from .models import (
+    SettlementCohort,
+    SettlementCohortMember,
+    SettlementResident,
+    SettlementRevision,
+)
 from .residents import build_settlement_resident_lock_plan, lock_settlement_resident_plan
 
 
@@ -464,3 +490,785 @@ def approve_settlement_cohort(*, cohort_id, approved_by_id, approved_at=None):
     cohort.approved_at = approval_time
     cohort.save(update_fields=['status', 'approved_by', 'approved_at', 'updated_at'])
     return cohort
+
+
+ERROR_ACCESS_NOT_FOUND = 'access_not_found'
+ERROR_ACCESS_INACTIVE = 'access_inactive'
+ERROR_ACCESS_BLOCKED = 'access_blocked'
+ERROR_ACCESS_WRONG_ROLE = 'access_wrong_role'
+ERROR_BATCH_NOT_FOUND = 'batch_not_found'
+ERROR_COHORT_NOT_READY = 'cohort_not_ready'
+ERROR_COHORT_ALREADY_INCONSISTENT = 'cohort_already_inconsistent'
+ERROR_ROUTING_STALE = 'routing_stale'
+ERROR_PROVENANCE_INCONSISTENT = 'provenance_inconsistent'
+ERROR_COHORT_GRAPH_INCOMPLETE = 'cohort_graph_incomplete'
+ERROR_COHORT_GRAPH_INCONSISTENT = 'cohort_graph_inconsistent'
+
+_ROUTING_SOURCE_TYPE = 'arrival_roster_routing'
+_ROUTING_BASIS_TYPE = 'arrival_roster_routing_row'
+
+
+class ArrivalRosterCohortCreationError(ValidationError):
+    """Controlled failure of the closed routing-to-cohort writer."""
+
+    def __init__(self, message, *, code, blocker_codes=()):
+        super().__init__(message, code=code)
+        self.blocker_codes = tuple(blocker_codes)
+
+
+def _creation_error(code, message, *, blocker_codes=()):
+    return ArrivalRosterCohortCreationError(
+        message,
+        code=code,
+        blocker_codes=blocker_codes,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class _RoutingCohortLockPlan:
+    access_id: int
+    actor_employee_id: int
+    actor_role_id: int
+    batch_id: int
+    version_id: int
+    watch_period_id: int
+    routing_row_ids: tuple[int, ...]
+    routing_event_ids: tuple[int, ...]
+    resident_ids: tuple[int, ...]
+    employee_ids: tuple[int, ...]
+    work_schedule_ids: tuple[int, ...]
+    crew_plan_ids: tuple[int, ...]
+    crew_plan_slot_ids: tuple[int, ...]
+    equipment_assignment_ids: tuple[int, ...]
+    phase_version_ids: tuple[int, ...]
+    phase_row_ids: tuple[int, ...]
+    cohort_ids: tuple[int, ...]
+    cohort_member_ids: tuple[int, ...]
+
+
+def _ordered_ids(queryset):
+    return tuple(queryset.order_by('pk').values_list('pk', flat=True))
+
+
+def _routing_cohort_lock_plan(*, batch_id, actor_access_id):
+    access_plan = EmployeeAccess.objects.filter(pk=actor_access_id).values(
+        'pk', 'employee_id', 'role_id',
+    ).first()
+    if access_plan is None:
+        raise _creation_error(
+            ERROR_ACCESS_NOT_FOUND,
+            'Точный доступ делопроизводителя не найден.',
+        )
+    batch_plan = ArrivalRosterRoutingBatch._base_manager.filter(pk=batch_id).values(
+        'pk', 'arrival_roster_version_id', 'watch_period_id',
+    ).first()
+    if batch_plan is None:
+        raise _creation_error(ERROR_BATCH_NOT_FOUND, 'Передача реестра не найдена.')
+
+    routing_rows = tuple(
+        ArrivalRosterRoutingRow._base_manager.filter(batch_id=batch_id)
+        .order_by('pk')
+        .values('pk', 'resident_id', 'employee_id')
+    )
+    routing_row_ids = tuple(row['pk'] for row in routing_rows)
+    routing_events = tuple(
+        ArrivalRosterRoutingEvent._base_manager.filter(
+            routing_row_id__in=routing_row_ids,
+        )
+        .order_by('pk')
+        .values('pk', 'crew_plan_slot_id', 'equipment_assignment_id')
+    )
+    crew_plan_slot_ids = tuple(sorted({
+        event['crew_plan_slot_id']
+        for event in routing_events
+        if event['crew_plan_slot_id'] is not None
+    }))
+    crew_plan_ids = tuple(sorted(set(
+        CrewPlanSlot.objects.filter(pk__in=crew_plan_slot_ids)
+        .values_list('plan_id', flat=True)
+    )))
+    employee_ids = tuple(sorted({
+        row['employee_id']
+        for row in routing_rows
+        if row['employee_id'] is not None
+    }))
+    work_schedule_ids = tuple(sorted(set(
+        Employee.objects.filter(pk__in=employee_ids)
+        .exclude(work_schedule_id__isnull=True)
+        .values_list('work_schedule_id', flat=True)
+    )))
+    phase_version_ids = _ordered_ids(
+        WatchPeriodBrigadePhaseVersion._base_manager.filter(
+            watch_period_id=batch_plan['watch_period_id'],
+            work_schedule_id__in=work_schedule_ids,
+        )
+    )
+    cohort_ids = _ordered_ids(
+        SettlementCohort._base_manager.filter(
+            watch_period_id=batch_plan['watch_period_id'],
+        )
+    )
+    return _RoutingCohortLockPlan(
+        access_id=access_plan['pk'],
+        actor_employee_id=access_plan['employee_id'],
+        actor_role_id=access_plan['role_id'],
+        batch_id=batch_plan['pk'],
+        version_id=batch_plan['arrival_roster_version_id'],
+        watch_period_id=batch_plan['watch_period_id'],
+        routing_row_ids=routing_row_ids,
+        routing_event_ids=tuple(event['pk'] for event in routing_events),
+        resident_ids=tuple(sorted({row['resident_id'] for row in routing_rows})),
+        employee_ids=employee_ids,
+        work_schedule_ids=work_schedule_ids,
+        crew_plan_ids=crew_plan_ids,
+        crew_plan_slot_ids=crew_plan_slot_ids,
+        equipment_assignment_ids=tuple(sorted({
+            event['equipment_assignment_id']
+            for event in routing_events
+            if event['equipment_assignment_id'] is not None
+        })),
+        phase_version_ids=phase_version_ids,
+        phase_row_ids=_ordered_ids(
+            WatchPeriodBrigadePhaseRow._base_manager.filter(
+                version_id__in=phase_version_ids,
+            )
+        ),
+        cohort_ids=cohort_ids,
+        cohort_member_ids=_ordered_ids(
+            SettlementCohortMember._base_manager.filter(cohort_id__in=cohort_ids)
+        ),
+    )
+
+
+def _lock_exact(queryset, expected_ids, *, code=ERROR_PROVENANCE_INCONSISTENT):
+    rows = list(queryset.select_for_update(of=('self',)).filter(pk__in=expected_ids).order_by('pk'))
+    if tuple(row.pk for row in rows) != tuple(expected_ids):
+        raise _creation_error(code, 'Состав серверного lock plan изменился.')
+    return rows
+
+
+def _lock_settlement_clerk_access(plan):
+    actor = _lock_exact(
+        Employee.objects.all(),
+        (plan.actor_employee_id,),
+        code=ERROR_ACCESS_NOT_FOUND,
+    )[0]
+    access = _lock_exact(
+        EmployeeAccess.objects.select_related('employee', 'role'),
+        (plan.access_id,),
+        code=ERROR_ACCESS_NOT_FOUND,
+    )[0]
+    if access.employee_id != actor.pk or access.role_id != plan.actor_role_id:
+        raise _creation_error(ERROR_ACCESS_NOT_FOUND, 'Точный доступ изменился.')
+    if access.status == EmployeeAccess.Status.BLOCKED:
+        raise _creation_error(ERROR_ACCESS_BLOCKED, 'Доступ делопроизводителя заблокирован.')
+    if access.status != EmployeeAccess.Status.ACTIVATED or not access.is_active:
+        raise _creation_error(ERROR_ACCESS_INACTIVE, 'Доступ делопроизводителя неактивен.')
+    if actor.status != Employee.Status.ACTIVE or not actor.is_active:
+        raise _creation_error(ERROR_ACCESS_INACTIVE, 'Сотрудник делопроизводителя неактивен.')
+    if not access.role.is_active:
+        raise _creation_error(ERROR_ACCESS_INACTIVE, 'Роль доступа неактивна.')
+    if access.role.code != 'settlement_clerk':
+        raise _creation_error(
+            ERROR_ACCESS_WRONG_ROLE,
+            'Точный доступ не принадлежит роли делопроизводителя.',
+        )
+    return actor, access
+
+
+def _lock_routing_cohort_graph(plan):
+    """Lock the preflight graph in writer-compatible deterministic order."""
+    actor, access = _lock_settlement_clerk_access(plan)
+    crew_plans = _lock_exact(CrewPlan.objects.all(), plan.crew_plan_ids)
+    crew_plan_slots = _lock_exact(CrewPlanSlot.objects.all(), plan.crew_plan_slot_ids)
+    employees = _lock_exact(Employee.objects.all(), plan.employee_ids)
+    assignments = _lock_exact(
+        EquipmentAssignment._base_manager.all(),
+        plan.equipment_assignment_ids,
+    )
+    period = _lock_exact(WatchPeriod.objects.all(), (plan.watch_period_id,))[0]
+    version = _lock_exact(
+        ArrivalRosterVersion._base_manager.all(),
+        (plan.version_id,),
+    )[0]
+    batch = _lock_exact(
+        ArrivalRosterRoutingBatch._base_manager.all(),
+        (plan.batch_id,),
+    )[0]
+    routing_rows = _lock_exact(
+        ArrivalRosterRoutingRow._base_manager.all(),
+        plan.routing_row_ids,
+    )
+    routing_events = _lock_exact(
+        ArrivalRosterRoutingEvent._base_manager.all(),
+        plan.routing_event_ids,
+    )
+    residents = _lock_exact(SettlementResident._base_manager.all(), plan.resident_ids)
+    schedules = _lock_exact(WorkSchedule.objects.all(), plan.work_schedule_ids)
+    phase_versions = _lock_exact(
+        WatchPeriodBrigadePhaseVersion._base_manager.all(),
+        plan.phase_version_ids,
+    )
+    phase_rows = _lock_exact(
+        WatchPeriodBrigadePhaseRow._base_manager.all(),
+        plan.phase_row_ids,
+    )
+    cohorts = _lock_exact(SettlementCohort._base_manager.all(), plan.cohort_ids)
+    cohort_members = _lock_exact(
+        SettlementCohortMember._base_manager.all(),
+        plan.cohort_member_ids,
+    )
+    current_row_ids = _ordered_ids(
+        ArrivalRosterRoutingRow._base_manager.filter(batch_id=plan.batch_id)
+    )
+    current_event_ids = _ordered_ids(
+        ArrivalRosterRoutingEvent._base_manager.filter(
+            routing_row_id__in=current_row_ids,
+        )
+    )
+    current_schedule_ids = tuple(sorted({
+        employee.work_schedule_id
+        for employee in employees
+        if employee.work_schedule_id is not None
+    }))
+    current_phase_version_ids = _ordered_ids(
+        WatchPeriodBrigadePhaseVersion._base_manager.filter(
+            watch_period_id=plan.watch_period_id,
+            work_schedule_id__in=current_schedule_ids,
+        )
+    )
+    current_phase_row_ids = _ordered_ids(
+        WatchPeriodBrigadePhaseRow._base_manager.filter(
+            version_id__in=current_phase_version_ids,
+        )
+    )
+    current_cohort_ids = _ordered_ids(
+        SettlementCohort._base_manager.filter(watch_period_id=plan.watch_period_id)
+    )
+    current_member_ids = _ordered_ids(
+        SettlementCohortMember._base_manager.filter(cohort_id__in=current_cohort_ids)
+    )
+    if (
+        current_row_ids != plan.routing_row_ids
+        or current_event_ids != plan.routing_event_ids
+        or tuple(sorted({row.resident_id for row in routing_rows})) != plan.resident_ids
+        or tuple(sorted({
+            row.employee_id for row in routing_rows if row.employee_id is not None
+        })) != plan.employee_ids
+        or current_schedule_ids != plan.work_schedule_ids
+        or current_phase_version_ids != plan.phase_version_ids
+        or current_phase_row_ids != plan.phase_row_ids
+        or current_cohort_ids != plan.cohort_ids
+        or current_member_ids != plan.cohort_member_ids
+    ):
+        raise _creation_error(
+            ERROR_PROVENANCE_INCONSISTENT,
+            'Состав exact графа изменился после построения lock plan.',
+        )
+    if (
+        batch.arrival_roster_version_id != version.pk
+        or batch.watch_period_id != period.pk
+        or version.watch_period_id != period.pk
+    ):
+        raise _creation_error(
+            ERROR_PROVENANCE_INCONSISTENT,
+            'Передача, версия реестра и период больше не согласованы.',
+        )
+    return {
+        'actor': actor,
+        'access': access,
+        'crew_plans': crew_plans,
+        'crew_plan_slots': crew_plan_slots,
+        'employees': employees,
+        'assignments': assignments,
+        'period': period,
+        'version': version,
+        'batch': batch,
+        'routing_rows': routing_rows,
+        'routing_events': routing_events,
+        'residents': residents,
+        'schedules': schedules,
+        'phase_versions': phase_versions,
+        'phase_rows': phase_rows,
+        'cohorts': cohorts,
+        'cohort_members': cohort_members,
+    }
+
+
+def _canonical_snapshot(snapshot):
+    payload = json.dumps(
+        snapshot,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(',', ':'),
+    )
+    return snapshot, hashlib.sha256(payload.encode('utf-8')).hexdigest()
+
+
+def _canonical_fingerprint_or_none(snapshot):
+    try:
+        return _canonical_snapshot(snapshot)[1]
+    except (TypeError, ValueError):
+        return None
+
+
+def _cohort_member_source_row(member):
+    return {
+        'routing_row_id': member.routing_row_id,
+        'routing_event_id': member.routing_event_id,
+        'brigade_phase_row_id': member.brigade_phase_row_id,
+        'resident_id': member.resident_id,
+        'employee_id': member.routing_row.employee_id,
+        'work_shift': member.work_shift,
+        'crew_plan_slot_id': member.routing_event.crew_plan_slot_id,
+        'equipment_assignment_id': member.official_equipment_assignment_id,
+    }
+
+
+def _validate_existing_routing_cohort(*, cohort, graph):
+    members = [member for member in graph['cohort_members'] if member.cohort_id == cohort.pk]
+    routing_rows = {row.pk: row for row in graph['routing_rows']}
+    snapshot = cohort.source_snapshot
+    try:
+        expected_members = tuple(sorted(
+            snapshot['members'],
+            key=lambda item: item['routing_row_id'],
+        ))
+        excluded = tuple(snapshot['excluded_not_arriving_row_ids'])
+        _snapshot, fingerprint = _canonical_snapshot(snapshot)
+    except (KeyError, TypeError, ValueError):
+        fingerprint = None
+        expected_members = ()
+        excluded = ()
+    actual_members = tuple(sorted(
+        (_cohort_member_source_row(member) for member in members),
+        key=lambda item: item['routing_row_id'],
+    ))
+    expected_member_row_ids = {
+        item.get('routing_row_id') for item in expected_members
+        if isinstance(item, dict)
+    }
+    excluded_row_ids = set(excluded)
+    consistent = (
+        cohort.status == SettlementCohort.Status.APPROVED
+        and cohort.source_revision_id is None
+        and cohort.routing_batch_id == graph['batch'].pk
+        and cohort.watch_period_id == graph['period'].pk
+        and cohort.source_type == _ROUTING_SOURCE_TYPE
+        and cohort.source_id == str(graph['batch'].pk)
+        and isinstance(snapshot, dict)
+        and snapshot.get('source_kind') == _ROUTING_SOURCE_TYPE
+        and snapshot.get('routing_batch_id') == graph['batch'].pk
+        and snapshot.get('arrival_roster_version_id') == graph['version'].pk
+        and snapshot.get('watch_period_id') == graph['period'].pk
+        and list(expected_members) == snapshot.get('members')
+        and list(excluded) == sorted(set(excluded))
+        and fingerprint == cohort.input_fingerprint
+        and actual_members == expected_members
+        and len(members) == len(expected_members)
+        and cohort.created_by_id == cohort.approved_by_id
+        and cohort.approved_at is not None
+        and expected_member_row_ids.isdisjoint(excluded_row_ids)
+        and expected_member_row_ids | excluded_row_ids == set(routing_rows)
+        and all(
+            routing_rows[row_id].route_state
+            == ArrivalRosterRoutingRow.RouteState.NOT_PARTICIPATING
+            and (routing_rows[row_id].participation_snapshot or {}).get(
+                'participation_status',
+            ) == 'not_arriving'
+            for row_id in excluded_row_ids
+            if row_id in routing_rows
+        )
+        and excluded_row_ids <= set(routing_rows)
+        and all(
+            member.source_revision_id is None
+            and member.routing_row_id is not None
+            and member.routing_event_id is not None
+            and member.brigade_phase_row_id is not None
+            and member.routing_row.batch_id == graph['batch'].pk
+            and member.routing_event.routing_row_id == member.routing_row_id
+            and member.basis_type == _ROUTING_BASIS_TYPE
+            and member.basis_id == str(member.routing_row_id)
+            and member.shift_source_fingerprint
+            == _canonical_fingerprint_or_none(member.shift_source_snapshot)
+            and (
+                (
+                    member.shift_source_kind
+                    == SettlementCohortMember.ShiftSourceKind.CONFIRMED_BRIGADE_PHASE
+                    and member.official_equipment_assignment_id is None
+                )
+                or (
+                    member.shift_source_kind
+                    == SettlementCohortMember.ShiftSourceKind.INTERNAL_ASSIGNMENT
+                    and member.official_equipment_assignment_id is not None
+                )
+            )
+            for member in members
+        )
+    )
+    if not consistent:
+        raise _creation_error(
+            ERROR_COHORT_ALREADY_INCONSISTENT,
+            'Существующий состав для этой передачи повреждён или неполон.',
+        )
+    return cohort
+
+
+def _snapshot_date(snapshot, field_name):
+    value = (snapshot or {}).get(field_name)
+    try:
+        return date.fromisoformat(value)
+    except (TypeError, ValueError) as error:
+        raise _creation_error(
+            ERROR_PROVENANCE_INCONSISTENT,
+            'Даты строки передачи повреждены.',
+        ) from error
+
+
+def _aware_day(value):
+    return timezone.make_aware(
+        datetime.combine(value, time.min),
+        timezone.get_current_timezone(),
+    )
+
+
+def _participation_status(routing_row):
+    status = (routing_row.participation_snapshot or {}).get('participation_status')
+    mapping = {
+        'arriving': SettlementCohortMember.ParticipationStatus.PARTICIPATING,
+        'extended': SettlementCohortMember.ParticipationStatus.EXTENDED,
+        'additional': SettlementCohortMember.ParticipationStatus.ADDITIONAL,
+    }
+    try:
+        return mapping[status]
+    except KeyError as error:
+        raise _creation_error(
+            ERROR_PROVENANCE_INCONSISTENT,
+            'Статус участия строки передачи не согласован с readiness.',
+        ) from error
+
+
+def _routing_member_snapshots(*, ready, row, event, phase_row, assignment):
+    basis_snapshot = {
+        'source_kind': _ROUTING_SOURCE_TYPE,
+        'routing_row_id': row.pk,
+        'routing_event_id': event.pk,
+        'brigade_phase_row_id': phase_row.pk,
+        'resident_id': row.resident_id,
+        'employee_id': row.employee_id,
+        'participation': row.participation_snapshot,
+        'dates': row.dates_snapshot,
+        'role': row.role_snapshot,
+        'role_basis': row.role_basis_snapshot,
+    }
+    if assignment is None:
+        shift_snapshot = {
+            'kind': SettlementCohortMember.ShiftSourceKind.CONFIRMED_BRIGADE_PHASE,
+            'work_shift': ready.work_shift,
+            'brigade_phase_row_id': phase_row.pk,
+            'brigade_phase_version_id': phase_row.version_id,
+            'crew_plan_slot_id': None,
+            'equipment_assignment_id': None,
+            'routing_event_id': event.pk,
+        }
+        shift_source_kind = SettlementCohortMember.ShiftSourceKind.CONFIRMED_BRIGADE_PHASE
+    else:
+        shift_snapshot = {
+            'kind': SettlementCohortMember.ShiftSourceKind.INTERNAL_ASSIGNMENT,
+            'work_shift': ready.work_shift,
+            'brigade_phase_row_id': phase_row.pk,
+            'brigade_phase_version_id': phase_row.version_id,
+            'crew_plan_slot_id': event.crew_plan_slot_id,
+            'equipment_assignment_id': assignment.pk,
+            'routing_event_id': event.pk,
+        }
+        shift_source_kind = SettlementCohortMember.ShiftSourceKind.INTERNAL_ASSIGNMENT
+    shift_snapshot, shift_fingerprint = _canonical_snapshot(shift_snapshot)
+    return basis_snapshot, shift_snapshot, shift_fingerprint, shift_source_kind
+
+
+def _trusted_save_routing_cohort(cohort):
+    cohort.full_clean()
+    cohort.save()
+    return cohort
+
+
+def _trusted_save_routing_member(member):
+    member.full_clean()
+    member.save()
+    return member
+
+
+def _new_routing_member(*, cohort, ready, graph):
+    rows = {row.pk: row for row in graph['routing_rows']}
+    events = {event.pk: event for event in graph['routing_events']}
+    residents = {resident.pk: resident for resident in graph['residents']}
+    employees = {employee.pk: employee for employee in graph['employees']}
+    phases = {row.pk: row for row in graph['phase_rows']}
+    assignments = {assignment.pk: assignment for assignment in graph['assignments']}
+    row = rows.get(ready.routing_row_id)
+    event = events.get(ready.routing_event_id)
+    resident = residents.get(ready.resident_id)
+    employee = employees.get(ready.employee_id)
+    phase_row = phases.get(ready.brigade_phase_row_id)
+    assignment = assignments.get(ready.equipment_assignment_id)
+    if (
+        row is None
+        or event is None
+        or resident is None
+        or employee is None
+        or phase_row is None
+        or row.batch_id != graph['batch'].pk
+        or row.resident_id != resident.pk
+        or row.employee_id != employee.pk
+        or event.routing_row_id != row.pk
+        or phase_row.version.watch_period_id != graph['period'].pk
+        or phase_row.version.work_schedule_id != employee.work_schedule_id
+        or phase_row.brigade_number != employee.brigade_number
+        or phase_row.phase != ready.work_shift
+        or ready.crew_plan_slot_id != event.crew_plan_slot_id
+        or ready.equipment_assignment_id != event.equipment_assignment_id
+        or (ready.equipment_assignment_id is not None and assignment is None)
+    ):
+        raise _creation_error(
+            ERROR_PROVENANCE_INCONSISTENT,
+            'Exact provenance готовой строки больше не согласована.',
+        )
+    arrival_on = _snapshot_date(row.dates_snapshot, 'arrival_on')
+    departure_on = _snapshot_date(row.dates_snapshot, 'departure_on')
+    if departure_on < arrival_on:
+        raise _creation_error(ERROR_PROVENANCE_INCONSISTENT, 'Даты участия идут в неверном порядке.')
+    participation = _participation_status(row)
+    basis_snapshot, shift_snapshot, shift_fingerprint, shift_source_kind = (
+        _routing_member_snapshots(
+            ready=ready,
+            row=row,
+            event=event,
+            phase_row=phase_row,
+            assignment=assignment,
+        )
+    )
+    return SettlementCohortMember(
+        cohort=cohort,
+        resident=resident,
+        arrival_at=_aware_day(arrival_on),
+        departure_at=_aware_day(departure_on + timedelta(days=1)),
+        participation_status=participation,
+        reason=(
+            ''
+            if participation == SettlementCohortMember.ParticipationStatus.PARTICIPATING
+            else 'Статус перенесён из утверждённой передачи реестра.'
+        ),
+        expected_schedule_regime=employee.work_schedule.code,
+        work_shift=ready.work_shift,
+        shift_source_kind=shift_source_kind,
+        official_equipment_assignment=assignment,
+        shift_source_snapshot=shift_snapshot,
+        shift_source_fingerprint=shift_fingerprint,
+        source_revision=None,
+        routing_row=row,
+        routing_event=event,
+        brigade_phase_row=phase_row,
+        basis_type=_ROUTING_BASIS_TYPE,
+        basis_id=str(row.pk),
+        basis_snapshot=basis_snapshot,
+        production_context_snapshot={
+            'role': row.role_snapshot,
+            'role_basis': row.role_basis_snapshot,
+            'crew_plan_slot_id': ready.crew_plan_slot_id,
+            'equipment_assignment_id': ready.equipment_assignment_id,
+        },
+    )
+
+
+def _source_snapshot(*, graph, readiness):
+    members = [
+        {
+            'routing_row_id': item.routing_row_id,
+            'routing_event_id': item.routing_event_id,
+            'brigade_phase_row_id': item.brigade_phase_row_id,
+            'resident_id': item.resident_id,
+            'employee_id': item.employee_id,
+            'work_shift': item.work_shift,
+            'crew_plan_slot_id': item.crew_plan_slot_id,
+            'equipment_assignment_id': item.equipment_assignment_id,
+        }
+        for item in sorted(readiness.ready_members, key=lambda member: member.routing_row_id)
+    ]
+    snapshot = {
+        'source_kind': _ROUTING_SOURCE_TYPE,
+        'routing_batch_id': graph['batch'].pk,
+        'arrival_roster_version_id': graph['version'].pk,
+        'watch_period_id': graph['period'].pk,
+        'members': members,
+        'excluded_not_arriving_row_ids': sorted(readiness.excluded_not_arriving_row_ids),
+    }
+    return _canonical_snapshot(snapshot)
+
+
+def _assert_complete_new_graph(*, cohort, readiness):
+    members = list(
+        SettlementCohortMember._base_manager.filter(cohort=cohort)
+        .select_related('routing_row', 'routing_event')
+        .order_by('routing_row_id')
+    )
+    expected = tuple(sorted(
+        (
+            item.routing_row_id,
+            item.routing_event_id,
+            item.brigade_phase_row_id,
+            item.equipment_assignment_id,
+        )
+        for item in readiness.ready_members
+    ))
+    actual = tuple(
+        (
+            member.routing_row_id,
+            member.routing_event_id,
+            member.brigade_phase_row_id,
+            member.official_equipment_assignment_id,
+        )
+        for member in members
+    )
+    if actual != expected or len(members) != len(readiness.ready_members):
+        raise _creation_error(
+            ERROR_COHORT_GRAPH_INCOMPLETE,
+            'Состав создан не полностью.',
+        )
+    if any(
+        member.source_revision_id is not None
+        or member.routing_row.batch_id != cohort.routing_batch_id
+        or member.routing_event.routing_row_id != member.routing_row_id
+        for member in members
+    ):
+        raise _creation_error(
+            ERROR_COHORT_GRAPH_INCONSISTENT,
+            'Созданный состав содержит несогласованную provenance.',
+        )
+
+
+def _create_approved_arrival_roster_cohort_once(*, plan):
+    graph = _lock_routing_cohort_graph(plan)
+    existing = next(
+        (cohort for cohort in graph['cohorts'] if cohort.routing_batch_id == graph['batch'].pk),
+        None,
+    )
+    if existing is not None:
+        return _validate_existing_routing_cohort(cohort=existing, graph=graph)
+
+    try:
+        readiness = build_arrival_roster_cohort_readiness(batch_id=graph['batch'].pk)
+    except SettlementCohortReadinessError as error:
+        if getattr(error, 'code', None) == ERROR_BATCH_NOT_FOUND:
+            code = ERROR_BATCH_NOT_FOUND
+        else:
+            code = ERROR_PROVENANCE_INCONSISTENT
+        raise _creation_error(code, str(error)) from error
+    if not readiness.is_ready:
+        blocker_codes = tuple(blocker.code for blocker in readiness.blockers)
+        code = ERROR_ROUTING_STALE if any(
+            blocker in {'batch_stale', 'routing_stale'} for blocker in blocker_codes
+        ) else ERROR_COHORT_NOT_READY
+        raise _creation_error(
+            code,
+            'Состав нельзя сформировать: не все строки передачи готовы.',
+            blocker_codes=blocker_codes,
+        )
+    if readiness.batch_id != graph['batch'].pk or readiness.watch_period_id != graph['period'].pk:
+        raise _creation_error(
+            ERROR_PROVENANCE_INCONSISTENT,
+            'Readiness относится к другой передаче или периоду.',
+        )
+    covered_row_ids = {
+        item.routing_row_id for item in readiness.ready_members
+    } | set(readiness.excluded_not_arriving_row_ids)
+    if covered_row_ids != set(plan.routing_row_ids):
+        raise _creation_error(
+            ERROR_COHORT_GRAPH_INCOMPLETE,
+            'Readiness не покрывает все строки exact batch.',
+        )
+
+    approved = [
+        cohort for cohort in graph['cohorts']
+        if cohort.status == SettlementCohort.Status.APPROVED
+    ]
+    if len(approved) > 1:
+        raise _creation_error(
+            ERROR_COHORT_GRAPH_INCONSISTENT,
+            'Для периода найдено несколько утверждённых составов.',
+        )
+    previous = approved[0] if approved else None
+    if graph['cohorts']:
+        latest = max(graph['cohorts'], key=lambda cohort: (cohort.version, cohort.pk))
+        if previous is None or latest.pk != previous.pk:
+            raise _creation_error(
+                ERROR_COHORT_GRAPH_INCONSISTENT,
+                'Последовательность версий составов повреждена.',
+            )
+        version_number = previous.version + 1
+    else:
+        version_number = 1
+
+    snapshot, fingerprint = _source_snapshot(graph=graph, readiness=readiness)
+    cohort = _trusted_save_routing_cohort(SettlementCohort(
+        watch_composition_id=graph['period'].watch_composition_id,
+        watch_period=graph['period'],
+        version=version_number,
+        source_revision=None,
+        routing_batch=graph['batch'],
+        source_type=_ROUTING_SOURCE_TYPE,
+        source_id=str(graph['batch'].pk),
+        source_snapshot=snapshot,
+        input_fingerprint=fingerprint,
+        created_by=graph['actor'],
+        supersedes=previous,
+    ))
+    for ready in sorted(readiness.ready_members, key=lambda item: item.routing_row_id):
+        _trusted_save_routing_member(_new_routing_member(
+            cohort=cohort,
+            ready=ready,
+            graph=graph,
+        ))
+    _assert_complete_new_graph(cohort=cohort, readiness=readiness)
+
+    transition_at = timezone.now()
+    if previous is not None:
+        previous.status = SettlementCohort.Status.SUPERSEDED
+        previous.superseded_at = transition_at
+        previous.save(update_fields=['status', 'superseded_at', 'updated_at'])
+    cohort.status = SettlementCohort.Status.APPROVED
+    cohort.approved_by = graph['actor']
+    cohort.approved_at = transition_at
+    cohort.save(update_fields=['status', 'approved_by', 'approved_at', 'updated_at'])
+    _assert_complete_new_graph(cohort=cohort, readiness=readiness)
+    if SettlementCohort._base_manager.filter(
+        watch_period=graph['period'], status=SettlementCohort.Status.APPROVED,
+    ).count() != 1:
+        raise _creation_error(
+            ERROR_COHORT_GRAPH_INCONSISTENT,
+            'После утверждения нарушена уникальность действующего состава.',
+        )
+    return cohort
+
+
+def create_approved_arrival_roster_cohort(*, batch_id, actor_access_id):
+    """Create and approve one complete cohort from one exact ready routing batch."""
+    plan = _routing_cohort_lock_plan(
+        batch_id=batch_id,
+        actor_access_id=actor_access_id,
+    )
+    try:
+        with transaction.atomic():
+            return _create_approved_arrival_roster_cohort_once(plan=plan)
+    except ArrivalRosterCohortCreationError:
+        raise
+    except IntegrityError as error:
+        raise _creation_error(
+            ERROR_COHORT_GRAPH_INCONSISTENT,
+            'Состав конфликтует с уже сохранённым графом.',
+        ) from error
+    except ValidationError as error:
+        raise _creation_error(
+            ERROR_PROVENANCE_INCONSISTENT,
+            'Серверные данные состава не прошли проверку целостности.',
+        ) from error
