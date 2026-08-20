@@ -11,6 +11,64 @@
             </div>
         </header>
 
+        <section aria-labelledby="settlement-cohort-title">
+            <h3 id="settlement-cohort-title">Формирование состава расселения</h3>
+            <div class="admin-console-table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Период вахты</th>
+                            <th>Готовность</th>
+                            <th>Участники</th>
+                            <th>Действие</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in cohort_overview.batches %}
+                        <tr>
+                            <td>{{ item.watch_period_name }}<br><small>{{ item.watch_period_dates }}</small></td>
+                            {% if item.is_created %}
+                            <td>Состав расселения сформирован</td>
+                            <td>
+                                {{ item.approved_member_count }} чел.<br>
+                                <small>Утверждён {{ item.approved_at|date:"d.m.Y H:i" }}</small>
+                            </td>
+                            <td>Повторное формирование не требуется</td>
+                            {% elif item.can_create %}
+                            <td>Готово к формированию</td>
+                            <td>
+                                Готово: {{ item.ready_member_count }} чел.<br>
+                                <small>Не заезжают: {{ item.excluded_not_arriving_count }}</small>
+                            </td>
+                            <td>
+                                <form method="post" action="{% url 'settlement_arrival_roster_create_cohort' item.batch_id %}">
+                                    {% csrf_token %}
+                                    <button type="submit">Сформировать состав расселения</button>
+                                </form>
+                            </td>
+                            {% else %}
+                            <td>Требуется проверка</td>
+                            <td>
+                                Готово: {{ item.ready_member_count }} чел.<br>
+                                <small>Не заезжают: {{ item.excluded_not_arriving_count }}</small>
+                            </td>
+                            <td>
+                                {% for message in item.blocker_messages %}
+                                <div>{{ message }}</div>
+                                {% empty %}
+                                <div>Данные состава требуют дополнительной проверки.</div>
+                                {% endfor %}
+                            </td>
+                            {% endif %}
+                        </tr>
+                        {% empty %}
+                        <tr><td colspan="4">Нет актуальных утверждённых реестров для формирования состава.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
         <section aria-labelledby="settlement-ready-title">
             <h3 id="settlement-ready-title">Готово к расселению</h3>
             <div class="admin-console-table-wrap">

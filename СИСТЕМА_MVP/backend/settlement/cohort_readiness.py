@@ -1,7 +1,9 @@
-"""Read-only readiness projection for one exact arrival-roster routing batch."""
+"""Read-only readiness projections for arrival-roster routing batches."""
 
 from collections import Counter
 from dataclasses import dataclass
+import hashlib
+import json
 
 from django.core.exceptions import ValidationError
 
@@ -14,6 +16,7 @@ from rotations.arrival_roster_routing import (
     EVIDENCE_SENT_TO_CLERK,
     resolve_arrival_roster_routing_evidence,
 )
+from rotations.models import ArrivalRosterRoutingBatch, ArrivalRosterVersion
 from shifts.brigade_phase_calendar import (
     ERROR_BRIGADE_NOT_FOUND,
     ERROR_CONFIRMED_VERSION_INCONSISTENT,
@@ -32,6 +35,8 @@ from shifts.brigade_phase_calendar import (
 )
 from users.models import Employee
 
+from .models import SettlementCohort, SettlementCohortMember
+
 
 ERROR_EMPLOYEE_NOT_FOUND = 'employee_not_found'
 ERROR_EMPLOYEE_INACTIVE = 'employee_inactive'
@@ -48,6 +53,12 @@ ERROR_DUPLICATE_RESIDENT = 'duplicate_resident'
 ERROR_DUPLICATE_ROUTING_ROW = 'duplicate_routing_row'
 ERROR_NO_ARRIVING_MEMBERS = 'no_arriving_members'
 ERROR_ROUTING_INCONSISTENT = 'routing_inconsistent'
+
+_ROUTING_SOURCE_TYPE = 'arrival_roster_routing'
+_ROUTING_BASIS_TYPE = 'arrival_roster_routing_row'
+_INCONSISTENT_COHORT_MESSAGE = (
+    'Связанный состав расселения повреждён или имеет неожиданное состояние.'
+)
 
 _PHASE_DAY = 'day'
 _PHASE_NIGHT = 'night'
@@ -128,6 +139,25 @@ class SettlementCohortReadiness:
     blockers: tuple[CohortReadinessBlocker, ...]
     excluded_not_arriving_row_ids: tuple[int, ...]
     is_ready: bool
+
+
+@dataclass(frozen=True, slots=True)
+class SettlementCohortBatchOverview:
+    batch_id: int
+    watch_period_name: str
+    watch_period_dates: str
+    ready_member_count: int
+    excluded_not_arriving_count: int
+    blocker_messages: tuple[str, ...]
+    can_create: bool
+    is_created: bool
+    approved_at: object | None
+    approved_member_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class SettlementCohortOverview:
+    batches: tuple[SettlementCohortBatchOverview, ...]
 
 
 def _blocker(*, routing_row_id, code):
@@ -341,3 +371,191 @@ def build_arrival_roster_cohort_readiness(*, batch_id):
         excluded_not_arriving_row_ids=tuple(excluded),
         is_ready=bool(ready_members) and not blockers,
     )
+
+
+def _canonical_sha256(value):
+    try:
+        payload = json.dumps(
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(',', ':'),
+        ).encode('utf-8')
+    except (TypeError, ValueError):
+        return None
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _cohort_member_snapshot(member):
+    if member.routing_row_id is None or member.routing_event_id is None:
+        return None
+    return {
+        'routing_row_id': member.routing_row_id,
+        'routing_event_id': member.routing_event_id,
+        'brigade_phase_row_id': member.brigade_phase_row_id,
+        'resident_id': member.resident_id,
+        'employee_id': member.routing_row.employee_id,
+        'work_shift': member.work_shift,
+        'crew_plan_slot_id': member.routing_event.crew_plan_slot_id,
+        'equipment_assignment_id': member.official_equipment_assignment_id,
+    }
+
+
+def _approved_cohort_is_consistent(*, cohort, batch, members, routing_rows):
+    snapshot = cohort.source_snapshot
+    try:
+        expected_members = tuple(sorted(
+            snapshot['members'],
+            key=lambda item: item['routing_row_id'],
+        ))
+        excluded = tuple(snapshot['excluded_not_arriving_row_ids'])
+    except (KeyError, TypeError, ValueError):
+        return False
+    member_snapshots = tuple(_cohort_member_snapshot(member) for member in members)
+    if any(snapshot is None for snapshot in member_snapshots):
+        return False
+    actual_members = tuple(sorted(
+        member_snapshots,
+        key=lambda item: item['routing_row_id'],
+    ))
+    routing_by_id = {row.pk: row for row in routing_rows}
+    expected_member_ids = {
+        item.get('routing_row_id')
+        for item in expected_members
+        if isinstance(item, dict)
+    }
+    excluded_ids = set(excluded)
+    return bool(
+        cohort.status == SettlementCohort.Status.APPROVED
+        and cohort.source_revision_id is None
+        and cohort.routing_batch_id == batch.pk
+        and cohort.watch_period_id == batch.watch_period_id
+        and cohort.source_type == _ROUTING_SOURCE_TYPE
+        and cohort.source_id == str(batch.pk)
+        and cohort.created_by_id == cohort.approved_by_id
+        and cohort.approved_at is not None
+        and isinstance(snapshot, dict)
+        and snapshot.get('source_kind') == _ROUTING_SOURCE_TYPE
+        and snapshot.get('routing_batch_id') == batch.pk
+        and snapshot.get('arrival_roster_version_id') == batch.arrival_roster_version_id
+        and snapshot.get('watch_period_id') == batch.watch_period_id
+        and list(expected_members) == snapshot.get('members')
+        and list(excluded) == sorted(excluded_ids)
+        and _canonical_sha256(snapshot) == cohort.input_fingerprint
+        and actual_members == expected_members
+        and len(members) == len(expected_members)
+        and expected_member_ids.isdisjoint(excluded_ids)
+        and expected_member_ids | excluded_ids == set(routing_by_id)
+        and excluded_ids <= set(routing_by_id)
+        and all(
+            routing_by_id[row_id].route_state == 'not_participating'
+            and (routing_by_id[row_id].participation_snapshot or {}).get(
+                'participation_status',
+            ) == 'not_arriving'
+            for row_id in excluded_ids
+        )
+        and all(
+            member.source_revision_id is None
+            and member.routing_row.batch_id == batch.pk
+            and member.routing_event.routing_row_id == member.routing_row_id
+            and member.basis_type == _ROUTING_BASIS_TYPE
+            and member.basis_id == str(member.routing_row_id)
+            and _canonical_sha256(member.shift_source_snapshot)
+            == member.shift_source_fingerprint
+            and (
+                (
+                    member.shift_source_kind
+                    == SettlementCohortMember.ShiftSourceKind.CONFIRMED_BRIGADE_PHASE
+                    and member.official_equipment_assignment_id is None
+                )
+                or (
+                    member.shift_source_kind
+                    == SettlementCohortMember.ShiftSourceKind.INTERNAL_ASSIGNMENT
+                    and member.official_equipment_assignment_id is not None
+                )
+            )
+            for member in members
+        )
+    )
+
+
+def build_arrival_roster_cohort_overview():
+    """Return immutable, safe UI state for current confirmed routing batches."""
+    batches = list(
+        ArrivalRosterRoutingBatch.objects
+        .select_related('arrival_roster_version', 'watch_period')
+        .filter(
+            arrival_roster_version__status=ArrivalRosterVersion.Status.CONFIRMED,
+            arrival_roster_version__superseded_at__isnull=True,
+        )
+        .order_by('watch_period__starts_on', 'watch_period_id', 'pk')
+    )
+    batch_ids = [batch.pk for batch in batches]
+    cohorts = {
+        cohort.routing_batch_id: cohort
+        for cohort in (
+            SettlementCohort._base_manager
+            .filter(routing_batch_id__in=batch_ids)
+            .order_by('routing_batch_id', 'pk')
+        )
+    }
+    members_by_cohort = {}
+    for member in (
+        SettlementCohortMember._base_manager
+        .filter(cohort_id__in=[cohort.pk for cohort in cohorts.values()])
+        .select_related('routing_row', 'routing_event')
+        .order_by('cohort_id', 'routing_row_id', 'pk')
+    ):
+        members_by_cohort.setdefault(member.cohort_id, []).append(member)
+    routing_rows_by_batch = {}
+    for batch in batches:
+        routing_rows_by_batch[batch.pk] = list(
+            batch.rows.order_by('pk')
+        )
+
+    overview = []
+    for batch in batches:
+        try:
+            readiness = build_arrival_roster_cohort_readiness(batch_id=batch.pk)
+            readiness_error = None
+        except SettlementCohortReadinessError as error:
+            readiness = None
+            readiness_error = error.messages[0]
+        cohort = cohorts.get(batch.pk)
+        is_created = bool(
+            cohort
+            and _approved_cohort_is_consistent(
+                cohort=cohort,
+                batch=batch,
+                members=members_by_cohort.get(cohort.pk, []),
+                routing_rows=routing_rows_by_batch[batch.pk],
+            )
+        )
+        if cohort is not None and not is_created:
+            blocker_messages = (_INCONSISTENT_COHORT_MESSAGE,)
+        elif readiness_error is not None:
+            blocker_messages = (readiness_error,)
+        else:
+            blocker_messages = tuple(dict.fromkeys(
+                blocker.message for blocker in readiness.blockers
+            ))
+        overview.append(SettlementCohortBatchOverview(
+            batch_id=batch.pk,
+            watch_period_name=batch.watch_period.name,
+            watch_period_dates=(
+                f'{batch.watch_period.starts_on:%d.%m.%Y} — '
+                f'{batch.watch_period.ends_on:%d.%m.%Y}'
+            ),
+            ready_member_count=(len(readiness.ready_members) if readiness else 0),
+            excluded_not_arriving_count=(
+                len(readiness.excluded_not_arriving_row_ids) if readiness else 0
+            ),
+            blocker_messages=blocker_messages,
+            can_create=bool(cohort is None and readiness and readiness.is_ready),
+            is_created=is_created,
+            approved_at=cohort.approved_at if is_created else None,
+            approved_member_count=(
+                len(members_by_cohort.get(cohort.pk, [])) if is_created else 0
+            ),
+        ))
+    return SettlementCohortOverview(batches=tuple(overview))

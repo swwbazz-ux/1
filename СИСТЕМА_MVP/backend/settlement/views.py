@@ -40,6 +40,7 @@ from .cohorts import (
     ArrivalRosterCohortCreationError,
     create_approved_arrival_roster_cohort,
 )
+from .cohort_readiness import build_arrival_roster_cohort_overview
 from .models import (
     EmployeeBedOccupancy,
     PhysicalBed,
@@ -287,6 +288,7 @@ def settlement_arrival_roster_routing_view(request):
         {
             'access': access,
             'routing_queue': settlement_clerk_arrival_roster_routing_queue(),
+            'cohort_overview': build_arrival_roster_cohort_overview(),
             'clerk_active_section': 'routing',
         },
     )
