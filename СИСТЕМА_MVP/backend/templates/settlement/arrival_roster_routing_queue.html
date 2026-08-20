@@ -2,6 +2,11 @@
 
 {% block clerk_content %}
 <main class="admin-console-page settlement-page">
+    {% if messages %}
+    <section aria-label="Сообщения системы">
+        {% for message in messages %}<div class="message {{ message.tags }}" role="status">{{ message }}</div>{% endfor %}
+    </section>
+    {% endif %}
     <section class="admin-console-section" aria-labelledby="settlement-routing-title">
         <header class="admin-console-section-header">
             <div>
@@ -24,7 +29,7 @@
                         </tr>
                     </thead>
                     <tbody>
-                        {% for item in cohort_overview.batches %}
+                        {% for item, preview_cohort_id in cohort_preview_rows %}
                         <tr>
                             <td>{{ item.watch_period_name }}<br><small>{{ item.watch_period_dates }}</small></td>
                             {% if item.is_created %}
@@ -33,7 +38,16 @@
                                 {{ item.approved_member_count }} чел.<br>
                                 <small>Утверждён {{ item.approved_at|date:"d.m.Y H:i" }}</small>
                             </td>
-                            <td>Повторное формирование не требуется</td>
+                            <td>
+                                {% if preview_cohort_id %}
+                                <form method="post" action="{% url 'settlement_arrival_roster_create_preview' preview_cohort_id %}">
+                                    {% csrf_token %}
+                                    <button type="submit">Подготовить предварительное расселение</button>
+                                </form>
+                                {% else %}
+                                Требуется проверка исходных данных
+                                {% endif %}
+                            </td>
                             {% elif item.can_create %}
                             <td>Готово к формированию</td>
                             <td>

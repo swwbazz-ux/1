@@ -39,6 +39,7 @@ from .apply import apply_confirmed_settlement_preview
 from .cohorts import (
     ArrivalRosterCohortCreationError,
     create_approved_arrival_roster_cohort,
+    revalidate_routing_cohort_members,
 )
 from .cohort_readiness import build_arrival_roster_cohort_overview
 from .models import (
@@ -282,13 +283,39 @@ def settlement_arrival_roster_routing_view(request):
     if not access:
         next_url = urlencode({'next': reverse('settlement_arrival_roster_routing')})
         return redirect(f'{reverse("clerk_login")}?{next_url}')
+    cohort_overview = build_arrival_roster_cohort_overview()
+    cohort_ids_by_batch = dict(
+        SettlementCohort._base_manager.filter(
+            routing_batch_id__in=[item.batch_id for item in cohort_overview.batches],
+            status=SettlementCohort.Status.APPROVED,
+        ).values_list('routing_batch_id', 'pk')
+    )
+    preview_rows = []
+    for item in cohort_overview.batches:
+        cohort_id = cohort_ids_by_batch.get(item.batch_id) if item.is_created else None
+        if cohort_id is not None:
+            try:
+                cohort = (
+                    SettlementCohort._base_manager
+                    .select_related(
+                        'watch_period',
+                        'watch_composition',
+                        'routing_batch__arrival_roster_version',
+                    )
+                    .get(pk=cohort_id)
+                )
+                revalidate_routing_cohort_members(cohort=cohort)
+            except (SettlementCohort.DoesNotExist, ValidationError):
+                cohort_id = None
+        preview_rows.append((item, cohort_id))
     return render(
         request,
         'settlement/arrival_roster_routing_queue.html',
         {
             'access': access,
             'routing_queue': settlement_clerk_arrival_roster_routing_queue(),
-            'cohort_overview': build_arrival_roster_cohort_overview(),
+            'cohort_overview': cohort_overview,
+            'cohort_preview_rows': tuple(preview_rows),
             'clerk_active_section': 'routing',
         },
     )
@@ -319,6 +346,40 @@ def settlement_arrival_roster_create_cohort_view(request, batch_id):
     else:
         messages.success(request, 'Утверждённый состав заезда создан.')
     return redirect('settlement_arrival_roster_routing')
+
+
+@require_POST
+def settlement_arrival_roster_create_preview_view(request, cohort_id):
+    """Create a saved preview for the exact routing cohort from server context."""
+    access = settlement_clerk_access_from_request(request, allow_admin=False)
+    if not access:
+        messages.error(
+            request,
+            'Для подготовки расселения требуется действующий '
+            'доступ делопроизводителя.',
+        )
+        next_url = urlencode({'next': reverse('settlement_arrival_roster_routing')})
+        return redirect(f'{reverse("clerk_login")}?{next_url}')
+
+    try:
+        control_context = _auto_settlement_control_context(request, access)
+        create_settlement_preview_run(
+            cohort_id=cohort_id,
+            control_context=control_context,
+        )
+    except ValidationError as error:
+        _message, code = _validation_error_details(error)
+        if code.startswith('settlement.control.'):
+            clear_control_session_credentials(request.session)
+        messages.error(
+            request,
+            'Предварительное расселение не подготовлено. '
+            'Проверьте исходные данные и повторите попытку.',
+        )
+        return redirect('settlement_arrival_roster_routing')
+
+    messages.success(request, 'Предварительное расселение подготовлено.')
+    return redirect('settlement_map')
 
 
 def _employee_profiles(employees):
