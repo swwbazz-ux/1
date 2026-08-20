@@ -10,7 +10,13 @@ from django.test import TestCase
 from django.utils import timezone
 
 from assignments.models import EquipmentAssignment
-from settlement.models import SettlementCohort
+from settlement.models import (
+    SettlementCohort,
+    SettlementPreviewApplication,
+    SettlementPreviewRun,
+    SettlementRevision,
+    SettlementSource,
+)
 from shifts.models import WatchPeriod, WatchPeriodBrigadePhaseVersion
 from users.models import (
     Employee,
@@ -23,6 +29,7 @@ from users.models import (
 from . import employee_watch_profile_changes as service
 from .employee_watch_profile_changes import (
     EmployeeWatchProfileChangeError,
+    apply_employee_watch_profile_change,
     create_employee_watch_profile_change_draft,
 )
 from .models import ArrivalRosterRoutingBatch, EmployeeWatchProfileChange
@@ -131,6 +138,14 @@ class EmployeeWatchProfileChangeServiceTests(TestCase):
             create_employee_watch_profile_change_draft(**self._kwargs(**overrides))
         self.assertEqual(caught.exception.code, code)
 
+    def _assert_apply_error(self, code, change, *, actor_access=None):
+        with self.assertRaises(EmployeeWatchProfileChangeError) as caught:
+            apply_employee_watch_profile_change(
+                change_id=change.pk,
+                actor_access_id=(actor_access or self.access).pk,
+            )
+        self.assertEqual(caught.exception.code, code)
+
     @staticmethod
     def _trusted_insert(row):
         models.QuerySet.bulk_create(
@@ -231,6 +246,89 @@ class EmployeeWatchProfileChangeServiceTests(TestCase):
             ends_on=timezone.localdate() + timedelta(days=days + 29),
             is_active=True,
         )
+
+    def _settlement_preview(
+        self,
+        *,
+        period,
+        version=1,
+        confirmed=False,
+        application_shift=None,
+    ):
+        suffix = f'{period.pk}-{version}'
+        now = timezone.now()
+        source = SettlementSource.objects.create(
+            source_type=SettlementSource.SourceType.SYSTEM,
+            title=f'Источник проверки применения {suffix}',
+            status=SettlementSource.Status.CANDIDATE,
+        )
+        source.status = SettlementSource.Status.CONFIRMED
+        source.confirmed_at = now
+        source.confirmed_by_label = 'Серверная проверка'
+        source.save()
+        revision = SettlementRevision.objects.create(
+            code=f'profile-apply-{suffix}',
+            source=source,
+            status=SettlementRevision.Status.DRAFT,
+            reason='Проверка authoritative применения расселения.',
+        )
+        revision.status = SettlementRevision.Status.CONFIRMED
+        revision.effective_at = now
+        revision.confirmed_at = now
+        revision.confirmed_by_label = 'Серверная проверка'
+        revision.save()
+        cohort = SettlementCohort.objects.create(
+            watch_composition=period.watch_composition,
+            watch_period=period,
+            version=1,
+            status=SettlementCohort.Status.DRAFT,
+            source_revision=revision,
+            source_type='service_test',
+            source_id=f'profile-apply-{suffix}',
+            source_snapshot={'schema': 1, 'period_id': period.pk},
+            input_fingerprint='a' * 64,
+            created_by=self.actor,
+        )
+        cohort.status = SettlementCohort.Status.APPROVED
+        cohort.approved_by = self.actor
+        cohort.approved_at = now
+        cohort.save()
+        run = SettlementPreviewRun.objects.create(
+            cohort=cohort,
+            watch_period=period,
+            watch_composition=period.watch_composition,
+            version=version,
+            status=SettlementPreviewRun.Status.DRAFT,
+            resolver_fingerprint='b' * 64,
+            result_fingerprint='c' * 64,
+            requires_shift_split=True,
+            source_snapshot={'schema': 1, 'period_id': period.pk},
+            created_by_access=self.access,
+        )
+        if confirmed or application_shift is not None:
+            run.status = SettlementPreviewRun.Status.CONFIRMED
+            run.confirmed_by_access = self.access
+            run.confirmed_at = now
+            run.revision += 1
+            run.save()
+        application = None
+        if application_shift is not None:
+            application = SettlementPreviewApplication.objects.create(
+                preview_run=run,
+                work_shift=application_shift,
+                legacy_whole_run=False,
+                watch_period=period,
+                cohort=cohort,
+                applied_by_access=self.access,
+                resolver_fingerprint=run.resolver_fingerprint,
+                normalized_fingerprint=run.result_fingerprint,
+                result_snapshot={
+                    'schema': 1,
+                    'preview_run_id': run.pk,
+                    'work_shift': application_shift,
+                },
+            )
+        return run, application
 
     def test_creates_exact_normalized_future_draft(self):
         change = create_employee_watch_profile_change_draft(**self._kwargs())
@@ -662,3 +760,465 @@ class EmployeeWatchProfileChangeServiceTests(TestCase):
 
         self._assert_error(service.ERROR_PROFILE_INCONSISTENT)
         self.assertEqual(EmployeeWatchProfileChange._base_manager.count(), 1)
+
+    def test_apply_first_draft_sets_exact_actor_and_server_timestamp(self):
+        change = create_employee_watch_profile_change_draft(**self._kwargs())
+        transition_at = timezone.now() + timedelta(seconds=1)
+
+        with patch.object(service.timezone, 'now', return_value=transition_at):
+            applied = apply_employee_watch_profile_change(
+                change_id=change.pk,
+                actor_access_id=self.second_access.pk,
+            )
+
+        self.assertEqual(applied.status, EmployeeWatchProfileChange.Status.APPLIED)
+        self.assertEqual(applied.applied_by_access_id, self.second_access.pk)
+        self.assertEqual(applied.applied_at, transition_at)
+        self.assertIsNone(applied.supersedes_id)
+        self.assertEqual(
+            EmployeeWatchProfileChange._base_manager.filter(
+                employee=self.employee,
+                effective_watch_period=self.period,
+                status=EmployeeWatchProfileChange.Status.APPLIED,
+            ).count(),
+            1,
+        )
+
+    def test_apply_current_applied_is_idempotent_without_audit_change(self):
+        change = create_employee_watch_profile_change_draft(**self._kwargs())
+        first = apply_employee_watch_profile_change(
+            change_id=change.pk,
+            actor_access_id=self.access.pk,
+        )
+        audit = (
+            first.applied_by_access_id,
+            first.applied_at,
+            first.supersedes_id,
+        )
+
+        second = apply_employee_watch_profile_change(
+            change_id=change.pk,
+            actor_access_id=self.second_access.pk,
+        )
+
+        self.assertEqual(second.pk, first.pk)
+        self.assertEqual(
+            (second.applied_by_access_id, second.applied_at, second.supersedes_id),
+            audit,
+        )
+
+    def test_superseded_and_cancelled_changes_are_not_reapplied(self):
+        cancelled = create_employee_watch_profile_change_draft(**self._kwargs())
+        now = timezone.now()
+        EmployeeWatchProfileChange._base_manager.filter(pk=cancelled.pk).update(
+            status=EmployeeWatchProfileChange.Status.CANCELLED,
+            cancelled_by_access_id=self.access.pk,
+            cancelled_at=now,
+        )
+        cancelled.refresh_from_db()
+        self._assert_apply_error(service.ERROR_CHANGE_NOT_DRAFT, cancelled)
+
+        other_period = self._period(days=70, composition=self.new_composition)
+        superseded = create_employee_watch_profile_change_draft(**self._kwargs(
+            effective_watch_period_id=other_period.pk,
+        ))
+        EmployeeWatchProfileChange._base_manager.filter(pk=superseded.pk).update(
+            status=EmployeeWatchProfileChange.Status.SUPERSEDED,
+            applied_by_access_id=self.access.pk,
+            applied_at=now - timedelta(seconds=1),
+            superseded_by_access_id=self.access.pk,
+            superseded_at=now,
+        )
+        superseded.refresh_from_db()
+        self._assert_apply_error(service.ERROR_CHANGE_NOT_DRAFT, superseded)
+
+    def test_fresh_correction_supersedes_current_with_one_timestamp(self):
+        first = create_employee_watch_profile_change_draft(**self._kwargs())
+        first = apply_employee_watch_profile_change(
+            change_id=first.pk,
+            actor_access_id=self.access.pk,
+        )
+        correction = create_employee_watch_profile_change_draft(**self._kwargs(
+            new_brigade_number=3,
+            basis_number='Исправление № 2',
+        ))
+        self.assertIsNone(correction.supersedes_id)
+        transition_at = timezone.now() + timedelta(seconds=1)
+
+        with patch.object(service.timezone, 'now', return_value=transition_at):
+            correction = apply_employee_watch_profile_change(
+                change_id=correction.pk,
+                actor_access_id=self.second_access.pk,
+            )
+
+        first.refresh_from_db()
+        self.assertEqual(first.status, EmployeeWatchProfileChange.Status.SUPERSEDED)
+        self.assertEqual(first.superseded_by_access_id, self.second_access.pk)
+        self.assertEqual(first.superseded_at, transition_at)
+        self.assertEqual(correction.status, EmployeeWatchProfileChange.Status.APPLIED)
+        self.assertEqual(correction.supersedes_id, first.pk)
+        self.assertEqual(correction.applied_by_access_id, self.second_access.pk)
+        self.assertEqual(correction.applied_at, transition_at)
+        self.assertEqual(
+            EmployeeWatchProfileChange._base_manager.filter(
+                employee=self.employee,
+                effective_watch_period=self.period,
+                status=EmployeeWatchProfileChange.Status.APPLIED,
+            ).count(),
+            1,
+        )
+
+    def test_competing_draft_becomes_stale_after_other_version_applies(self):
+        stale = create_employee_watch_profile_change_draft(**self._kwargs())
+        winner = create_employee_watch_profile_change_draft(**self._kwargs(
+            new_brigade_number=3,
+            basis_number='Конкурирующее заявление',
+        ))
+        apply_employee_watch_profile_change(
+            change_id=winner.pk,
+            actor_access_id=self.access.pk,
+        )
+
+        self._assert_apply_error(service.ERROR_CHANGE_STALE, stale)
+        stale.refresh_from_db()
+        self.assertEqual(stale.status, EmployeeWatchProfileChange.Status.DRAFT)
+        self.assertIsNone(stale.supersedes_id)
+
+    def test_correction_created_after_current_applied_is_fresh(self):
+        current = create_employee_watch_profile_change_draft(**self._kwargs())
+        apply_employee_watch_profile_change(
+            change_id=current.pk,
+            actor_access_id=self.access.pk,
+        )
+        correction = create_employee_watch_profile_change_draft(**self._kwargs(
+            new_brigade_number=4,
+            basis_number='Позднее исправление',
+        ))
+
+        applied = apply_employee_watch_profile_change(
+            change_id=correction.pk,
+            actor_access_id=self.access.pk,
+        )
+        self.assertEqual(applied.status, EmployeeWatchProfileChange.Status.APPLIED)
+        self.assertEqual(applied.supersedes_id, current.pk)
+
+    def test_failure_of_second_transition_rolls_back_supersede(self):
+        current = create_employee_watch_profile_change_draft(**self._kwargs())
+        current = apply_employee_watch_profile_change(
+            change_id=current.pk,
+            actor_access_id=self.access.pk,
+        )
+        correction = create_employee_watch_profile_change_draft(**self._kwargs(
+            new_brigade_number=3,
+            basis_number='Исправление с откатом',
+        ))
+        original = service._trusted_transition_change
+        calls = []
+
+        def fail_second(change, **kwargs):
+            calls.append(change.pk)
+            if len(calls) == 2:
+                raise ValidationError('Искусственная ошибка второго перехода.')
+            return original(change, **kwargs)
+
+        with patch.object(
+            service,
+            '_trusted_transition_change',
+            side_effect=fail_second,
+        ):
+            self._assert_apply_error(service.ERROR_PROFILE_INCONSISTENT, correction)
+
+        current.refresh_from_db()
+        correction.refresh_from_db()
+        self.assertEqual(current.status, EmployeeWatchProfileChange.Status.APPLIED)
+        self.assertIsNone(current.superseded_at)
+        self.assertEqual(correction.status, EmployeeWatchProfileChange.Status.DRAFT)
+        self.assertIsNone(correction.supersedes_id)
+
+    def test_apply_rejects_damaged_snapshot_and_fingerprint_separately(self):
+        damaged_snapshot = create_employee_watch_profile_change_draft(**self._kwargs())
+        EmployeeWatchProfileChange._base_manager.filter(
+            pk=damaged_snapshot.pk,
+        ).update(source_snapshot={'schema': 'tampered'})
+        damaged_snapshot.refresh_from_db()
+        self._assert_apply_error(service.ERROR_SOURCE_INVALID, damaged_snapshot)
+
+        other_period = self._period(days=70, composition=self.new_composition)
+        damaged_fingerprint = create_employee_watch_profile_change_draft(**self._kwargs(
+            effective_watch_period_id=other_period.pk,
+        ))
+        EmployeeWatchProfileChange._base_manager.filter(
+            pk=damaged_fingerprint.pk,
+        ).update(source_fingerprint='f' * 64)
+        damaged_fingerprint.refresh_from_db()
+        self._assert_apply_error(
+            service.ERROR_SOURCE_FINGERPRINT_INVALID,
+            damaged_fingerprint,
+        )
+
+    def test_changed_legacy_baseline_makes_draft_stale(self):
+        change = create_employee_watch_profile_change_draft(**self._kwargs())
+        Employee.objects.filter(pk=self.employee.pk).update(
+            work_schedule=self.no_brigade_schedule,
+            brigade_number=None,
+        )
+
+        self._assert_apply_error(service.ERROR_CHANGE_STALE, change)
+        change.refresh_from_db()
+        self.assertEqual(change.status, EmployeeWatchProfileChange.Status.DRAFT)
+
+    def test_changed_baseline_also_stales_explicit_correction(self):
+        current = create_employee_watch_profile_change_draft(**self._kwargs())
+        apply_employee_watch_profile_change(
+            change_id=current.pk,
+            actor_access_id=self.access.pk,
+        )
+        correction = create_employee_watch_profile_change_draft(**self._kwargs(
+            new_brigade_number=3,
+            basis_number='Исправление после исходного решения',
+        ))
+        Employee.objects.filter(pk=self.employee.pk).update(
+            work_schedule=self.no_brigade_schedule,
+            brigade_number=None,
+        )
+
+        self._assert_apply_error(service.ERROR_CHANGE_STALE, correction)
+        current.refresh_from_db()
+        correction.refresh_from_db()
+        self.assertEqual(current.status, EmployeeWatchProfileChange.Status.APPLIED)
+        self.assertEqual(correction.status, EmployeeWatchProfileChange.Status.DRAFT)
+
+    def test_apply_revalidates_period_employee_schedule_composition_and_brigade(self):
+        current_period = create_employee_watch_profile_change_draft(**self._kwargs())
+        with patch.object(
+            service.timezone,
+            'localdate',
+            return_value=self.period.starts_on,
+        ):
+            self._assert_apply_error(
+                service.ERROR_WATCH_PERIOD_NOT_FUTURE,
+                current_period,
+            )
+
+        inactive_employee_period = self._period(
+            days=70,
+            composition=self.new_composition,
+            name='Период неактивного сотрудника',
+        )
+        inactive_employee = create_employee_watch_profile_change_draft(**self._kwargs(
+            effective_watch_period_id=inactive_employee_period.pk,
+        ))
+        Employee.objects.filter(pk=self.employee.pk).update(is_active=False)
+        self._assert_apply_error(service.ERROR_EMPLOYEE_INACTIVE, inactive_employee)
+        Employee.objects.filter(pk=self.employee.pk).update(is_active=True)
+
+        schedule_period = self._period(
+            days=100,
+            composition=self.new_composition,
+            name='Период неактивного графика',
+        )
+        inactive_schedule = create_employee_watch_profile_change_draft(**self._kwargs(
+            effective_watch_period_id=schedule_period.pk,
+        ))
+        WorkSchedule.objects.filter(pk=self.new_schedule.pk).update(is_active=False)
+        self._assert_apply_error(
+            service.ERROR_WORK_SCHEDULE_INACTIVE,
+            inactive_schedule,
+        )
+        WorkSchedule.objects.filter(pk=self.new_schedule.pk).update(is_active=True)
+
+        composition_period = self._period(
+            days=130,
+            composition=self.new_composition,
+            name='Период неактивного состава',
+        )
+        inactive_composition = create_employee_watch_profile_change_draft(**self._kwargs(
+            effective_watch_period_id=composition_period.pk,
+        ))
+        WatchComposition.objects.filter(pk=self.new_composition.pk).update(
+            is_active=False,
+        )
+        self._assert_apply_error(
+            service.ERROR_WATCH_COMPOSITION_INACTIVE,
+            inactive_composition,
+        )
+        WatchComposition.objects.filter(pk=self.new_composition.pk).update(
+            is_active=True,
+        )
+
+        brigade_period = self._period(
+            days=160,
+            composition=self.new_composition,
+            name='Период изменённой бригадной политики',
+        )
+        changed_brigade_policy = create_employee_watch_profile_change_draft(
+            **self._kwargs(effective_watch_period_id=brigade_period.pk)
+        )
+        WorkSchedule.objects.filter(pk=self.new_schedule.pk).update(brigade_count=1)
+        self._assert_apply_error(
+            service.ERROR_BRIGADE_OUT_OF_RANGE,
+            changed_brigade_policy,
+        )
+
+    def test_draft_and_confirmed_preview_without_application_do_not_block(self):
+        draft_period = self._period(
+            days=70,
+            composition=self.new_composition,
+            name='Период с черновиком расселения',
+        )
+        draft_change = create_employee_watch_profile_change_draft(**self._kwargs(
+            effective_watch_period_id=draft_period.pk,
+        ))
+        self._settlement_preview(period=draft_period, confirmed=False)
+        applied = apply_employee_watch_profile_change(
+            change_id=draft_change.pk,
+            actor_access_id=self.access.pk,
+        )
+        self.assertEqual(applied.status, EmployeeWatchProfileChange.Status.APPLIED)
+
+        confirmed_period = self._period(
+            days=100,
+            composition=self.new_composition,
+            name='Период с подтверждённым планом расселения',
+        )
+        confirmed_change = create_employee_watch_profile_change_draft(**self._kwargs(
+            effective_watch_period_id=confirmed_period.pk,
+            new_brigade_number=3,
+        ))
+        self._settlement_preview(period=confirmed_period, confirmed=True)
+        applied = apply_employee_watch_profile_change(
+            change_id=confirmed_change.pk,
+            actor_access_id=self.access.pk,
+        )
+        self.assertEqual(applied.status, EmployeeWatchProfileChange.Status.APPLIED)
+
+    def test_authoritative_day_or_night_application_blocks_profile_apply(self):
+        for offset, shift in (
+            (70, 'day'),
+            (100, 'night'),
+        ):
+            with self.subTest(shift=shift):
+                period = self._period(
+                    days=offset,
+                    composition=self.new_composition,
+                    name=f'Период применённой смены {shift}',
+                )
+                change = create_employee_watch_profile_change_draft(**self._kwargs(
+                    effective_watch_period_id=period.pk,
+                ))
+                _run, application = self._settlement_preview(
+                    period=period,
+                    confirmed=True,
+                    application_shift=shift,
+                )
+                self.assertEqual(application.watch_period_id, period.pk)
+
+                self._assert_apply_error(
+                    service.ERROR_WATCH_PERIOD_ALREADY_SETTLED,
+                    change,
+                )
+                change.refresh_from_db()
+                self.assertEqual(
+                    change.status,
+                    EmployeeWatchProfileChange.Status.DRAFT,
+                )
+
+    def test_apply_does_not_mutate_employee_or_downstream_entities(self):
+        change = create_employee_watch_profile_change_draft(**self._kwargs())
+        self.employee.refresh_from_db()
+        employee_before = (
+            self.employee.work_schedule_id,
+            self.employee.brigade_number,
+            self.employee.watch_composition_id,
+            self.employee.rotation,
+            self.employee.updated_at,
+        )
+        counts_before = {
+            'periods': WatchPeriod.objects.count(),
+            'calendars': WatchPeriodBrigadePhaseVersion._base_manager.count(),
+            'routing': ArrivalRosterRoutingBatch._base_manager.count(),
+            'assignments': EquipmentAssignment._base_manager.count(),
+            'cohorts': SettlementCohort._base_manager.count(),
+            'previews': SettlementPreviewRun._base_manager.count(),
+            'applications': SettlementPreviewApplication._base_manager.count(),
+        }
+
+        apply_employee_watch_profile_change(
+            change_id=change.pk,
+            actor_access_id=self.access.pk,
+        )
+
+        self.employee.refresh_from_db()
+        self.assertEqual(
+            (
+                self.employee.work_schedule_id,
+                self.employee.brigade_number,
+                self.employee.watch_composition_id,
+                self.employee.rotation,
+                self.employee.updated_at,
+            ),
+            employee_before,
+        )
+        self.assertEqual(
+            {
+                'periods': WatchPeriod.objects.count(),
+                'calendars': WatchPeriodBrigadePhaseVersion._base_manager.count(),
+                'routing': ArrivalRosterRoutingBatch._base_manager.count(),
+                'assignments': EquipmentAssignment._base_manager.count(),
+                'cohorts': SettlementCohort._base_manager.count(),
+                'previews': SettlementPreviewRun._base_manager.count(),
+                'applications': SettlementPreviewApplication._base_manager.count(),
+            },
+            counts_before,
+        )
+
+    def test_apply_uses_exact_access_and_deterministic_lock_order(self):
+        change = create_employee_watch_profile_change_draft(**self._kwargs())
+        wrong_access = EmployeeAccess.objects.create(
+            employee=self.actor,
+            role=self.other_role,
+            access_code='profile-apply-wrong-role',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+        self._assert_apply_error(
+            service.ERROR_ACCESS_WRONG_ROLE,
+            change,
+            actor_access=wrong_access,
+        )
+
+        lock_order = []
+        original = QuerySet.select_for_update
+
+        def traced(queryset, *args, **kwargs):
+            lock_order.append(queryset.model.__name__)
+            return original(queryset, *args, **kwargs)
+
+        with patch.object(QuerySet, 'select_for_update', new=traced):
+            apply_employee_watch_profile_change(
+                change_id=change.pk,
+                actor_access_id=self.access.pk,
+            )
+
+        self.assertEqual(
+            lock_order,
+            [
+                'Employee',
+                'EmployeeAccess',
+                'Employee',
+                'WatchPeriod',
+                'WorkSchedule',
+                'WatchComposition',
+                'EmployeeWatchProfileChange',
+                'EmployeeWatchProfileChange',
+                'SettlementPreviewApplication',
+            ],
+        )
+
+    def test_apply_missing_change_is_controlled(self):
+        with self.assertRaises(EmployeeWatchProfileChangeError) as caught:
+            apply_employee_watch_profile_change(
+                change_id=999999,
+                actor_access_id=self.access.pk,
+            )
+        self.assertEqual(caught.exception.code, service.ERROR_CHANGE_NOT_FOUND)

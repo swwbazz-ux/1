@@ -41,6 +41,16 @@ ERROR_BRIGADE_OUT_OF_RANGE = 'employee_watch_profile.brigade_out_of_range'
 ERROR_INVALID_BASIS = 'employee_watch_profile.invalid_basis'
 ERROR_BASIS_DATE_IN_FUTURE = 'employee_watch_profile.basis_date_in_future'
 ERROR_NO_CHANGE = 'employee_watch_profile.no_change'
+ERROR_CHANGE_NOT_FOUND = 'employee_watch_profile.change_not_found'
+ERROR_CHANGE_NOT_DRAFT = 'employee_watch_profile.change_not_draft'
+ERROR_CHANGE_STALE = 'employee_watch_profile.change_stale'
+ERROR_SOURCE_INVALID = 'employee_watch_profile.source_invalid'
+ERROR_SOURCE_FINGERPRINT_INVALID = (
+    'employee_watch_profile.source_fingerprint_invalid'
+)
+ERROR_WATCH_PERIOD_ALREADY_SETTLED = (
+    'employee_watch_profile.watch_period_already_settled'
+)
 ERROR_PROFILE_INCONSISTENT = 'employee_watch_profile.profile_inconsistent'
 
 _SNAPSHOT_SCHEMA = 'rotations.employee_watch_profile_change'
@@ -170,7 +180,7 @@ def _lock_timekeeper_access(plan, *, actor_employee):
     return access
 
 
-def _lock_target_employee(employee_id, *, actor_employee):
+def _lock_target_employee(employee_id, *, actor_employee, require_active=True):
     if not _valid_identifier(employee_id):
         raise _error(ERROR_EMPLOYEE_NOT_FOUND, 'Сотрудник не найден.')
     if employee_id == actor_employee.pk:
@@ -183,12 +193,15 @@ def _lock_target_employee(employee_id, *, actor_employee):
             )
         except Employee.DoesNotExist as error:
             raise _error(ERROR_EMPLOYEE_NOT_FOUND, 'Сотрудник не найден.') from error
-    if employee.status != Employee.Status.ACTIVE or not employee.is_active:
+    if (
+        require_active
+        and (employee.status != Employee.Status.ACTIVE or not employee.is_active)
+    ):
         raise _error(ERROR_EMPLOYEE_INACTIVE, 'Сотрудник неактивен.')
     return employee
 
 
-def _lock_watch_period(watch_period_id):
+def _lock_watch_period(watch_period_id, *, require_future=True):
     if not _valid_identifier(watch_period_id):
         raise _error(ERROR_WATCH_PERIOD_NOT_FOUND, 'Период вахты не найден.')
     try:
@@ -198,7 +211,7 @@ def _lock_watch_period(watch_period_id):
         )
     except WatchPeriod.DoesNotExist as error:
         raise _error(ERROR_WATCH_PERIOD_NOT_FOUND, 'Период вахты не найден.') from error
-    if period.starts_on <= timezone.localdate():
+    if require_future and period.starts_on <= timezone.localdate():
         raise _error(
             ERROR_WATCH_PERIOD_NOT_FUTURE,
             'Изменение разрешено только для будущего периода вахты.',
@@ -206,7 +219,7 @@ def _lock_watch_period(watch_period_id):
     return period
 
 
-def _lock_work_schedule(work_schedule_id):
+def _lock_work_schedule(work_schedule_id, *, require_active=True):
     if not _valid_identifier(work_schedule_id):
         raise _error(ERROR_WORK_SCHEDULE_NOT_FOUND, 'График работы не найден.')
     try:
@@ -216,12 +229,18 @@ def _lock_work_schedule(work_schedule_id):
         )
     except WorkSchedule.DoesNotExist as error:
         raise _error(ERROR_WORK_SCHEDULE_NOT_FOUND, 'График работы не найден.') from error
-    if not schedule.is_active:
+    if require_active and not schedule.is_active:
         raise _error(ERROR_WORK_SCHEDULE_INACTIVE, 'График работы неактивен.')
     return schedule
 
 
-def _lock_watch_composition(watch_composition_id, *, watch_period):
+def _lock_watch_composition(
+    watch_composition_id,
+    *,
+    watch_period,
+    require_active=True,
+    require_period_match=True,
+):
     if not _valid_identifier(watch_composition_id):
         raise _error(
             ERROR_WATCH_COMPOSITION_NOT_FOUND,
@@ -237,12 +256,15 @@ def _lock_watch_composition(watch_composition_id, *, watch_period):
             ERROR_WATCH_COMPOSITION_NOT_FOUND,
             'Состав вахты не найден.',
         ) from error
-    if not composition.is_active:
+    if require_active and not composition.is_active:
         raise _error(
             ERROR_WATCH_COMPOSITION_INACTIVE,
             'Состав вахты неактивен.',
         )
-    if watch_period.watch_composition_id != composition.pk:
+    if (
+        require_period_match
+        and watch_period.watch_composition_id != composition.pk
+    ):
         raise _error(
             ERROR_WATCH_COMPOSITION_MISMATCH,
             'Состав вахты не соответствует выбранному периоду.',
@@ -686,4 +708,401 @@ def create_employee_watch_profile_change_draft(
         raise _error(
             ERROR_PROFILE_INCONSISTENT,
             'Не удалось атомарно сохранить изменение профиля сотрудника.',
+        ) from error
+
+
+def _change_plan(change_id):
+    if not _valid_identifier(change_id):
+        raise _error(ERROR_CHANGE_NOT_FOUND, 'Изменение профиля не найдено.')
+    plan = (
+        EmployeeWatchProfileChange._base_manager.filter(pk=change_id)
+        .values(
+            'pk',
+            'employee_id',
+            'effective_watch_period_id',
+            'new_work_schedule_id',
+            'new_watch_composition_id',
+        )
+        .first()
+    )
+    if plan is None:
+        raise _error(ERROR_CHANGE_NOT_FOUND, 'Изменение профиля не найдено.')
+    return plan
+
+
+def _locked_change_from_history(*, target_changes, change_plan):
+    change = next(
+        (row for row in target_changes if row.pk == change_plan['pk']),
+        None,
+    )
+    if change is None:
+        raise _error(ERROR_CHANGE_NOT_FOUND, 'Изменение профиля не найдено.')
+    if (
+        change.employee_id != change_plan['employee_id']
+        or change.effective_watch_period_id
+        != change_plan['effective_watch_period_id']
+        or change.new_work_schedule_id != change_plan['new_work_schedule_id']
+        or change.new_watch_composition_id
+        != change_plan['new_watch_composition_id']
+    ):
+        raise _error(
+            ERROR_PROFILE_INCONSISTENT,
+            'Смысловые ссылки изменения профиля изменились.',
+        )
+    return change
+
+
+def _validate_change_source(change):
+    normalized_basis = _normalize_basis(
+        basis_kind=change.basis_kind,
+        basis_number=change.basis_number,
+        basis_date=change.basis_date,
+        basis=change.basis,
+    )
+    if normalized_basis != (
+        change.basis_kind,
+        change.basis_number,
+        change.basis_date,
+        change.basis,
+    ):
+        raise _error(
+            ERROR_SOURCE_INVALID,
+            'Официальное основание изменения не является каноническим.',
+        )
+    expected_snapshot = _snapshot_for_change(change)
+    if change.source_snapshot != expected_snapshot:
+        raise _error(
+            ERROR_SOURCE_INVALID,
+            'Снимок источника изменения не соответствует сохранённым данным.',
+        )
+    expected_fingerprint = _canonical_fingerprint(expected_snapshot)
+    if change.source_fingerprint != expected_fingerprint:
+        raise _error(
+            ERROR_SOURCE_FINGERPRINT_INVALID,
+            'Отпечаток источника изменения не соответствует снимку.',
+        )
+
+
+def _lock_settlement_applications(watch_period):
+    from settlement.models import SettlementPreviewApplication
+
+    return list(
+        SettlementPreviewApplication._base_manager
+        .select_for_update(of=('self',))
+        .filter(watch_period=watch_period)
+        .order_by('applied_at', 'pk')
+    )
+
+
+def _trusted_transition_change(change, *, expected_status, update_fields):
+    change.full_clean()
+    values = {}
+    for field_name in update_fields:
+        field = EmployeeWatchProfileChange._meta.get_field(field_name)
+        values[field.attname] = getattr(change, field.attname)
+    updated = models.QuerySet.update(
+        EmployeeWatchProfileChange._base_manager.filter(
+            pk=change.pk,
+            status=expected_status,
+        ),
+        **values,
+    )
+    if updated != 1:
+        raise _error(
+            ERROR_PROFILE_INCONSISTENT,
+            'Состояние изменения профиля изменилось во время операции.',
+        )
+    return change
+
+
+def _applied_for_target(target_changes):
+    applied = [
+        change
+        for change in target_changes
+        if change.status == EmployeeWatchProfileChange.Status.APPLIED
+    ]
+    if len(applied) > 1:
+        raise _error(
+            ERROR_PROFILE_INCONSISTENT,
+            'Для периода найдено несколько действующих решений.',
+        )
+    return applied[0] if applied else None
+
+
+def _validate_draft_references(
+    *,
+    change,
+    employee,
+    watch_period,
+    work_schedule,
+    watch_composition,
+):
+    if employee.status != Employee.Status.ACTIVE or not employee.is_active:
+        raise _error(ERROR_EMPLOYEE_INACTIVE, 'Сотрудник неактивен.')
+    if watch_period.starts_on <= timezone.localdate():
+        raise _error(
+            ERROR_WATCH_PERIOD_NOT_FUTURE,
+            'Изменение разрешено только для будущего периода вахты.',
+        )
+    if change.effective_on != watch_period.starts_on:
+        raise _error(
+            ERROR_PROFILE_INCONSISTENT,
+            'Дата вступления изменения не совпадает с началом периода.',
+        )
+    if not work_schedule.is_active:
+        raise _error(ERROR_WORK_SCHEDULE_INACTIVE, 'График работы неактивен.')
+    if not watch_composition.is_active:
+        raise _error(
+            ERROR_WATCH_COMPOSITION_INACTIVE,
+            'Состав вахты неактивен.',
+        )
+    if watch_period.watch_composition_id != watch_composition.pk:
+        raise _error(
+            ERROR_WATCH_COMPOSITION_MISMATCH,
+            'Состав вахты не соответствует выбранному периоду.',
+        )
+    normalized_brigade = _normalize_brigade_number(
+        change.new_brigade_number,
+        work_schedule=work_schedule,
+    )
+    if normalized_brigade != change.new_brigade_number:
+        raise _error(
+            ERROR_PROFILE_INCONSISTENT,
+            'Номер бригады изменения профиля повреждён.',
+        )
+    if (
+        change.supersedes_id is not None
+        or change.applied_by_access_id is not None
+        or change.superseded_by_access_id is not None
+        or change.cancelled_by_access_id is not None
+        or change.applied_at is not None
+        or change.superseded_at is not None
+        or change.cancelled_at is not None
+    ):
+        raise _error(
+            ERROR_PROFILE_INCONSISTENT,
+            'Черновик содержит недопустимые реквизиты перехода.',
+        )
+
+
+def _draft_old_profile(change):
+    return _profile_tuple(
+        work_schedule_id=change.old_work_schedule_id,
+        brigade_number=change.old_brigade_number,
+        watch_composition_id=change.old_watch_composition_id,
+    )
+
+
+def _draft_new_profile(change):
+    return _profile_tuple(
+        work_schedule_id=change.new_work_schedule_id,
+        brigade_number=change.new_brigade_number,
+        watch_composition_id=change.new_watch_composition_id,
+    )
+
+
+def _profile_before_target(*, employee, earlier_applied):
+    if earlier_applied:
+        applied = earlier_applied[-1]
+        _validate_applied_change(applied)
+        return _profile_tuple(
+            work_schedule_id=applied.new_work_schedule_id,
+            brigade_number=applied.new_brigade_number,
+            watch_composition_id=applied.new_watch_composition_id,
+        )
+    _validate_existing_profile(
+        work_schedule=employee.work_schedule,
+        brigade_number=employee.brigade_number,
+    )
+    return _profile_tuple(
+        work_schedule_id=employee.work_schedule_id,
+        brigade_number=employee.brigade_number,
+        watch_composition_id=employee.watch_composition_id,
+    )
+
+
+def _validate_draft_freshness(
+    *,
+    change,
+    employee,
+    target_changes,
+    earlier_applied,
+):
+    current_applied = _applied_for_target(target_changes)
+    if current_applied is None and any(
+        row.status == EmployeeWatchProfileChange.Status.SUPERSEDED
+        for row in target_changes
+    ):
+        raise _error(
+            ERROR_PROFILE_INCONSISTENT,
+            'История исправлений периода не содержит действующей версии.',
+        )
+
+    profile_before_target = _profile_before_target(
+        employee=employee,
+        earlier_applied=earlier_applied,
+    )
+    if current_applied is not None:
+        _validate_applied_change(current_applied)
+        if (
+            current_applied.applied_at is None
+            or change.created_at <= current_applied.applied_at
+            or change.version_number <= current_applied.version_number
+        ):
+            raise _error(
+                ERROR_CHANGE_STALE,
+                'После создания черновика было применено другое решение.',
+            )
+        expected_old = _profile_tuple(
+            work_schedule_id=current_applied.old_work_schedule_id,
+            brigade_number=current_applied.old_brigade_number,
+            watch_composition_id=current_applied.old_watch_composition_id,
+        )
+        if expected_old != profile_before_target:
+            raise _error(
+                ERROR_CHANGE_STALE,
+                'Профиль перед периодом изменился после исходного решения.',
+            )
+        current_profile = _profile_tuple(
+            work_schedule_id=current_applied.new_work_schedule_id,
+            brigade_number=current_applied.new_brigade_number,
+            watch_composition_id=current_applied.new_watch_composition_id,
+        )
+    else:
+        expected_old = profile_before_target
+        current_profile = profile_before_target
+    if _draft_old_profile(change) != expected_old:
+        raise _error(
+            ERROR_CHANGE_STALE,
+            'Исходный профиль сотрудника изменился после создания черновика.',
+        )
+    if _draft_new_profile(change) == current_profile:
+        raise _error(ERROR_NO_CHANGE, 'Новый профиль совпадает с действующим.')
+    return current_applied
+
+
+def _apply_employee_watch_profile_change_once(
+    *,
+    access_plan,
+    change_plan,
+):
+    actor_employee = _lock_actor_employee(access_plan)
+    actor_access = _lock_timekeeper_access(
+        access_plan,
+        actor_employee=actor_employee,
+    )
+    employee = _lock_target_employee(
+        change_plan['employee_id'],
+        actor_employee=actor_employee,
+        require_active=False,
+    )
+    watch_period = _lock_watch_period(
+        change_plan['effective_watch_period_id'],
+        require_future=False,
+    )
+    work_schedule = _lock_work_schedule(
+        change_plan['new_work_schedule_id'],
+        require_active=False,
+    )
+    watch_composition = _lock_watch_composition(
+        change_plan['new_watch_composition_id'],
+        watch_period=watch_period,
+        require_active=False,
+        require_period_match=False,
+    )
+    target_changes, earlier_applied = _lock_change_history(
+        employee=employee,
+        watch_period=watch_period,
+    )
+    settlement_applications = _lock_settlement_applications(watch_period)
+    change = _locked_change_from_history(
+        target_changes=target_changes,
+        change_plan=change_plan,
+    )
+    current_applied = _applied_for_target(target_changes)
+
+    if change.status == EmployeeWatchProfileChange.Status.APPLIED:
+        if current_applied is None or current_applied.pk != change.pk:
+            raise _error(
+                ERROR_PROFILE_INCONSISTENT,
+                'Применённая версия не является действующей для периода.',
+            )
+        _validate_change_source(change)
+        _validate_applied_change(change)
+        return change
+    if change.status != EmployeeWatchProfileChange.Status.DRAFT:
+        raise _error(
+            ERROR_CHANGE_NOT_DRAFT,
+            'Применить можно только черновик изменения.',
+        )
+
+    _validate_draft_references(
+        change=change,
+        employee=employee,
+        watch_period=watch_period,
+        work_schedule=work_schedule,
+        watch_composition=watch_composition,
+    )
+    _validate_change_source(change)
+    _validate_target_history(target_changes)
+    current_applied = _validate_draft_freshness(
+        change=change,
+        employee=employee,
+        target_changes=target_changes,
+        earlier_applied=earlier_applied,
+    )
+    if settlement_applications:
+        raise _error(
+            ERROR_WATCH_PERIOD_ALREADY_SETTLED,
+            'Для периода уже применено фактическое расселение.',
+        )
+
+    transition_at = timezone.now()
+    if current_applied is not None:
+        current_applied.status = EmployeeWatchProfileChange.Status.SUPERSEDED
+        current_applied.superseded_by_access = actor_access
+        current_applied.superseded_at = transition_at
+        _trusted_transition_change(
+            current_applied,
+            expected_status=EmployeeWatchProfileChange.Status.APPLIED,
+            update_fields=(
+                'status',
+                'superseded_by_access',
+                'superseded_at',
+            ),
+        )
+        change.supersedes = current_applied
+
+    change.status = EmployeeWatchProfileChange.Status.APPLIED
+    change.applied_by_access = actor_access
+    change.applied_at = transition_at
+    _trusted_transition_change(
+        change,
+        expected_status=EmployeeWatchProfileChange.Status.DRAFT,
+        update_fields=(
+            'status',
+            'supersedes',
+            'applied_by_access',
+            'applied_at',
+        ),
+    )
+    return change
+
+
+def apply_employee_watch_profile_change(*, change_id, actor_access_id):
+    """Apply one exact immutable future watch-profile draft atomically."""
+    access_plan = _access_plan(actor_access_id)
+    change_plan = _change_plan(change_id)
+    try:
+        with transaction.atomic():
+            return _apply_employee_watch_profile_change_once(
+                access_plan=access_plan,
+                change_plan=change_plan,
+            )
+    except EmployeeWatchProfileChangeError:
+        raise
+    except (IntegrityError, ValidationError) as error:
+        raise _error(
+            ERROR_PROFILE_INCONSISTENT,
+            'Не удалось атомарно применить изменение профиля сотрудника.',
         ) from error
