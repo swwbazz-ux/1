@@ -1817,6 +1817,16 @@ class SettlementCohort(StableIdentifierModel):
         verbose_name='Ревизия-основание',
         on_delete=models.PROTECT,
         related_name='settlement_cohorts',
+        null=True,
+        blank=True,
+    )
+    routing_batch = models.OneToOneField(
+        'rotations.ArrivalRosterRoutingBatch',
+        verbose_name='Точная передача реестра заезда',
+        on_delete=models.PROTECT,
+        related_name='settlement_cohort',
+        null=True,
+        blank=True,
     )
     source_type = models.CharField('Тип источника', max_length=64)
     source_id = models.CharField('Идентификатор источника', max_length=128)
@@ -1913,6 +1923,13 @@ class SettlementCohort(StableIdentifierModel):
                 condition=models.Q(supersedes__isnull=True) | ~models.Q(pk=models.F('supersedes_id')),
                 name='cohort_not_self_supersede',
             ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(source_revision__isnull=False, routing_batch__isnull=True)
+                    | models.Q(source_revision__isnull=True, routing_batch__isnull=False)
+                ),
+                name='cohort_source_family_ck',
+            ),
         ]
 
     @property
@@ -1934,7 +1951,10 @@ class SettlementCohort(StableIdentifierModel):
         if not isinstance(self.source_snapshot, dict) or not self.source_snapshot:
             errors['source_snapshot'] = 'Снимок источника cohort должен быть непустым объектом.'
         if self.status in {self.Status.APPROVED, self.Status.SUPERSEDED}:
-            if self.source_revision.status != SettlementRevision.Status.CONFIRMED:
+            if (
+                self.source_revision_id
+                and self.source_revision.status != SettlementRevision.Status.CONFIRMED
+            ):
                 errors['source_revision'] = 'Утверждённый cohort требует подтверждённой ревизии.'
             if not self.approved_by_id or not self.approved_at:
                 errors['approved_by'] = 'Утверждённый cohort требует автора и времени утверждения.'
@@ -1956,7 +1976,7 @@ class SettlementCohort(StableIdentifierModel):
             return
         original = type(self)._base_manager.filter(pk=self.pk).values(
             'stable_id', 'watch_composition_id', 'watch_period_id', 'version',
-            'source_revision_id', 'source_type', 'source_id', 'source_snapshot',
+            'source_revision_id', 'routing_batch_id', 'source_type', 'source_id', 'source_snapshot',
             'input_fingerprint', 'created_by_id', 'supersedes_id', 'status',
             'approved_by_id', 'approved_at', 'superseded_at',
         ).first()
@@ -1965,7 +1985,7 @@ class SettlementCohort(StableIdentifierModel):
         errors = {}
         for field_name in (
             'stable_id', 'watch_composition_id', 'watch_period_id', 'version',
-            'source_revision_id', 'source_type', 'source_id', 'source_snapshot',
+            'source_revision_id', 'routing_batch_id', 'source_type', 'source_id', 'source_snapshot',
             'input_fingerprint', 'created_by_id', 'supersedes_id',
         ):
             if original[field_name] != getattr(self, field_name):
@@ -2002,6 +2022,7 @@ class SettlementCohortMember(StableIdentifierModel):
 
     class ShiftSourceKind(models.TextChoices):
         INTERNAL_ASSIGNMENT = 'internal_assignment', 'Официальное назначение сотрудника'
+        CONFIRMED_BRIGADE_PHASE = 'confirmed_brigade_phase', 'Подтверждённая фаза бригады'
         EXTERNAL_CLERK = 'external_clerk', 'Выбор делопроизводителя для внешнего жильца'
         UNVERIFIED_LEGACY = 'unverified_legacy', 'Непроверенная историческая строка'
 
@@ -2103,6 +2124,32 @@ class SettlementCohortMember(StableIdentifierModel):
         verbose_name='Ревизия-основание строки',
         on_delete=models.PROTECT,
         related_name='settlement_cohort_members',
+        null=True,
+        blank=True,
+    )
+    routing_row = models.OneToOneField(
+        'rotations.ArrivalRosterRoutingRow',
+        verbose_name='Точная строка передачи реестра',
+        on_delete=models.PROTECT,
+        related_name='settlement_cohort_member',
+        null=True,
+        blank=True,
+    )
+    routing_event = models.OneToOneField(
+        'rotations.ArrivalRosterRoutingEvent',
+        verbose_name='Точное событие готовности строки',
+        on_delete=models.PROTECT,
+        related_name='settlement_cohort_member',
+        null=True,
+        blank=True,
+    )
+    brigade_phase_row = models.ForeignKey(
+        'shifts.WatchPeriodBrigadePhaseRow',
+        verbose_name='Точная подтверждённая фаза бригады',
+        on_delete=models.PROTECT,
+        related_name='settlement_cohort_members',
+        null=True,
+        blank=True,
     )
     basis_type = models.CharField('Тип основания', max_length=64)
     basis_id = models.CharField('Идентификатор основания', max_length=128)
@@ -2160,6 +2207,14 @@ class SettlementCohortMember(StableIdentifierModel):
                         shift_selection_basis='',
                     )
                     | models.Q(
+                        shift_source_kind='confirmed_brigade_phase',
+                        work_shift__in=['day', 'night'],
+                        official_equipment_assignment__isnull=True,
+                        shift_selected_by_access__isnull=True,
+                        shift_selected_at__isnull=True,
+                        shift_selection_basis='',
+                    )
+                    | models.Q(
                         shift_source_kind='external_clerk',
                         work_shift__in=['day', 'night'],
                         official_equipment_assignment__isnull=True,
@@ -2176,6 +2231,30 @@ class SettlementCohortMember(StableIdentifierModel):
                     )
                 ),
                 name='cohort_member_shift_source_ck',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        source_revision__isnull=False,
+                        routing_row__isnull=True,
+                        routing_event__isnull=True,
+                        brigade_phase_row__isnull=True,
+                        shift_source_kind__in=[
+                            'internal_assignment', 'external_clerk',
+                            'unverified_legacy',
+                        ],
+                    )
+                    | models.Q(
+                        source_revision__isnull=True,
+                        routing_row__isnull=False,
+                        routing_event__isnull=False,
+                        brigade_phase_row__isnull=False,
+                        shift_source_kind__in=[
+                            'internal_assignment', 'confirmed_brigade_phase',
+                        ],
+                    )
+                ),
+                name='cohort_member_source_family_ck',
             ),
         ]
 
@@ -2218,6 +2297,15 @@ class SettlementCohortMember(StableIdentifierModel):
                 errors['shift_selected_by_access'] = 'Внешняя смена требует точный доступ и время выбора.'
             if not self.shift_selection_basis.strip():
                 errors['shift_selection_basis'] = 'Основание выбора внешней смены обязательно.'
+        elif self.shift_source_kind == self.ShiftSourceKind.CONFIRMED_BRIGADE_PHASE:
+            if self.official_equipment_assignment_id:
+                errors['official_equipment_assignment'] = (
+                    'Календарная фаза не использует назначение техники.'
+                )
+            if self.shift_selected_by_access_id or self.shift_selected_at or self.shift_selection_basis:
+                errors['shift_selected_by_access'] = (
+                    'Календарная фаза не выбирается делопроизводителем.'
+                )
         if self.cohort_id:
             cohort = self.cohort
             period_start = timezone.make_aware(
@@ -2269,7 +2357,8 @@ class SettlementCohortMember(StableIdentifierModel):
             'work_shift', 'shift_source_kind', 'official_equipment_assignment_id',
             'shift_source_snapshot', 'shift_source_fingerprint',
             'shift_selected_by_access_id', 'shift_selected_at', 'shift_selection_basis',
-            'source_revision_id', 'basis_type', 'basis_id', 'basis_snapshot',
+            'source_revision_id', 'routing_row_id', 'routing_event_id',
+            'brigade_phase_row_id', 'basis_type', 'basis_id', 'basis_snapshot',
             'production_context_snapshot',
         ).first()
         if original is None:
