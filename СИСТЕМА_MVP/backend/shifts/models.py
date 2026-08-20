@@ -145,6 +145,211 @@ class WatchPeriod(models.Model):
         return self.name
 
 
+class BrigadePhaseImmutableQuerySet(models.QuerySet):
+    WRITE_FORBIDDEN_MESSAGE = (
+        'Календарь фаз бригад изменяется только закрытыми доменными командами.'
+    )
+
+    def _raise_write_forbidden(self):
+        raise ValidationError(
+            self.WRITE_FORBIDDEN_MESSAGE,
+            code='shifts.brigade_phase.public_write_forbidden',
+        )
+
+    def create(self, **kwargs):
+        self._raise_write_forbidden()
+
+    def get_or_create(self, defaults=None, **kwargs):
+        self._raise_write_forbidden()
+
+    def update_or_create(self, defaults=None, create_defaults=None, **kwargs):
+        self._raise_write_forbidden()
+
+    def update(self, **kwargs):
+        self._raise_write_forbidden()
+
+    def bulk_create(self, objs, *args, **kwargs):
+        self._raise_write_forbidden()
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        self._raise_write_forbidden()
+
+    def delete(self):
+        self._raise_write_forbidden()
+
+
+class BrigadePhaseImmutableModel(models.Model):
+    objects = BrigadePhaseImmutableQuerySet.as_manager()
+
+    class Meta:
+        abstract = True
+
+    @classmethod
+    def _write_forbidden_error(cls):
+        return ValidationError(
+            BrigadePhaseImmutableQuerySet.WRITE_FORBIDDEN_MESSAGE,
+            code='shifts.brigade_phase.public_write_forbidden',
+        )
+
+    def save(self, *args, **kwargs):
+        raise self._write_forbidden_error()
+
+    def delete(self, *args, **kwargs):
+        raise self._write_forbidden_error()
+
+
+class WatchPeriodBrigadePhaseVersion(BrigadePhaseImmutableModel):
+    class Status(models.TextChoices):
+        DRAFT = 'draft', 'Черновик'
+        CONFIRMED = 'confirmed', 'Утверждена'
+        SUPERSEDED = 'superseded', 'Заменена'
+
+    watch_period = models.ForeignKey(
+        WatchPeriod,
+        verbose_name='Период вахты',
+        on_delete=models.PROTECT,
+        related_name='brigade_phase_versions',
+    )
+    work_schedule = models.ForeignKey(
+        'users.WorkSchedule',
+        verbose_name='График работы',
+        on_delete=models.PROTECT,
+        related_name='watch_period_phase_versions',
+    )
+    version_number = models.PositiveIntegerField('Номер версии')
+    status = models.CharField(
+        'Статус',
+        max_length=16,
+        choices=Status.choices,
+        default=Status.DRAFT,
+        db_index=True,
+    )
+    based_on_version = models.ForeignKey(
+        'self',
+        verbose_name='Основана на версии',
+        on_delete=models.PROTECT,
+        related_name='replacement_versions',
+        null=True,
+        blank=True,
+    )
+    confirmed_at = models.DateTimeField('Утверждена', null=True, blank=True)
+    superseded_at = models.DateTimeField('Заменена', null=True, blank=True)
+    created_at = models.DateTimeField('Создана', auto_now_add=True)
+    source_snapshot = models.JSONField('Снимок официального источника')
+    source_fingerprint = models.CharField(
+        'SHA-256 снимка официального источника',
+        max_length=64,
+    )
+
+    class Meta:
+        verbose_name = 'Версия календаря фаз бригад'
+        verbose_name_plural = 'Версии календаря фаз бригад'
+        ordering = ['watch_period_id', 'work_schedule_id', '-version_number', '-pk']
+        indexes = [
+            models.Index(
+                fields=['watch_period', 'work_schedule', 'status'],
+                name='watch_phase_period_status_idx',
+            ),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['watch_period', 'work_schedule', 'version_number'],
+                name='uniq_watch_phase_revision',
+            ),
+            models.UniqueConstraint(
+                fields=['watch_period', 'work_schedule'],
+                condition=models.Q(status='confirmed'),
+                name='uniq_watch_phase_confirmed',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(version_number__gte=1),
+                name='watch_phase_version_gte_1',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(status__in=['draft', 'confirmed', 'superseded']),
+                name='watch_phase_status_valid',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        status='draft',
+                        confirmed_at__isnull=True,
+                        superseded_at__isnull=True,
+                    )
+                    | models.Q(
+                        status='confirmed',
+                        confirmed_at__isnull=False,
+                        superseded_at__isnull=True,
+                    )
+                    | models.Q(
+                        status='superseded',
+                        confirmed_at__isnull=False,
+                        superseded_at__isnull=False,
+                    )
+                ),
+                name='watch_phase_status_dates',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    ~models.Q(status='superseded')
+                    | models.Q(superseded_at__gte=models.F('confirmed_at'))
+                ),
+                name='watch_phase_supersede_order',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(based_on_version__isnull=True)
+                    | ~models.Q(pk=models.F('based_on_version_id'))
+                ),
+                name='watch_phase_not_self_based',
+            ),
+        ]
+
+    def __str__(self):
+        return (
+            f'{self.watch_period} / {self.work_schedule} / '
+            f'версия {self.version_number}'
+        )
+
+
+class WatchPeriodBrigadePhaseRow(BrigadePhaseImmutableModel):
+    class Phase(models.TextChoices):
+        DAY = 'day', 'Дневная смена'
+        NIGHT = 'night', 'Ночная смена'
+        OFF = 'off', 'Межвахта'
+
+    version = models.ForeignKey(
+        WatchPeriodBrigadePhaseVersion,
+        verbose_name='Версия календаря фаз',
+        on_delete=models.CASCADE,
+        related_name='rows',
+    )
+    brigade_number = models.PositiveSmallIntegerField('Номер бригады')
+    phase = models.CharField('Фаза бригады', max_length=16, choices=Phase.choices)
+
+    class Meta:
+        verbose_name = 'Строка календаря фаз бригад'
+        verbose_name_plural = 'Строки календаря фаз бригад'
+        ordering = ['version_id', 'brigade_number', 'pk']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['version', 'brigade_number'],
+                name='uniq_watch_phase_brigade',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(brigade_number__gte=1),
+                name='watch_phase_brigade_gte_1',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(phase__in=['day', 'night', 'off']),
+                name='watch_phase_value_valid',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.version} / бригада {self.brigade_number}: {self.phase}'
+
+
 class EmployeeShift(models.Model):
     employee = models.ForeignKey('users.Employee', verbose_name='Сотрудник', on_delete=models.PROTECT)
     shift_type = models.CharField('Смена', max_length=16, choices=ShiftType.choices)
