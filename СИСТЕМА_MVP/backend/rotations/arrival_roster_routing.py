@@ -1,6 +1,7 @@
 """Atomic, server-owned hand-off of a confirmed arrival roster."""
 
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import date
 
 from django.core.exceptions import ValidationError
@@ -28,6 +29,63 @@ from .models import (
 
 
 _PRODUCTION_ROLE_CODES = frozenset({'driver', 'excavator_operator'})
+
+BATCH_STATE_CURRENT = 'current'
+BATCH_STATE_STALE = 'stale'
+BATCH_STATE_INCONSISTENT = 'inconsistent'
+
+EVIDENCE_NOT_ARRIVING = 'not_arriving'
+EVIDENCE_SENT_TO_CLERK = 'sent_to_clerk'
+EVIDENCE_OFFICIAL_ASSIGNMENT_PUBLISHED = 'official_assignment_published'
+EVIDENCE_PENDING = 'pending'
+EVIDENCE_REQUIRES_REVIEW = 'requires_review'
+EVIDENCE_STALE = 'stale'
+EVIDENCE_INCONSISTENT = 'inconsistent'
+
+ERROR_BATCH_NOT_FOUND = 'batch_not_found'
+ERROR_BATCH_STALE = 'batch_stale'
+ERROR_BATCH_INCONSISTENT = 'batch_inconsistent'
+ERROR_ROUTING_PENDING = 'routing_pending'
+ERROR_ROUTING_REQUIRES_REVIEW = 'routing_requires_review'
+ERROR_ROUTING_STALE = 'routing_stale'
+ERROR_ROUTING_INCONSISTENT = 'routing_inconsistent'
+ERROR_OFFICIAL_ASSIGNMENT_MISSING = 'official_assignment_missing'
+ERROR_OFFICIAL_ASSIGNMENT_INCONSISTENT = 'official_assignment_inconsistent'
+ERROR_UNKNOWN_ROUTE_STATE = 'unknown_route_state'
+
+
+@dataclass(frozen=True, slots=True)
+class ArrivalRosterRoutingRowEvidence:
+    routing_row_id: int
+    resident_id: int
+    employee_id: int | None
+    route_state: str
+    participating: bool
+    evidence_state: str
+    blocker_code: str | None
+    latest_event_id: int | None
+    latest_event_type: str | None
+    crew_plan_slot_id: int | None
+    equipment_assignment_id: int | None
+    assignment_shift_type: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class ArrivalRosterRoutingBatchEvidence:
+    batch_id: int
+    version_id: int
+    watch_period_id: int
+    batch_state: str
+    batch_blocker_code: str | None
+    rows: tuple[ArrivalRosterRoutingRowEvidence, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _ProductionAssignmentEvidence:
+    blocker_code: str | None
+    message: str | None
+    equipment: object | None
+    shift_type: str | None
 
 
 def _error(code, message):
@@ -617,8 +675,8 @@ def _clerk_queue_item(*, row, readiness_source, equipment=None, shift_label=None
     }
 
 
-def _clerk_queue_production_reason(*, row, event, transfers):
-    """Fail closed unless an official event proves every production relation."""
+def _clerk_queue_production_evidence(*, row, event, transfers):
+    """Return exact production provenance without changing the T2.6 policy."""
     from assignments.models import (
         AssignmentStatus,
         CrewPlanStatus,
@@ -639,12 +697,22 @@ def _clerk_queue_production_reason(*, row, event, transfers):
         or current_role.get('qualification_state') != 'exact'
         or current_role.get('role_code') != saved_role
     ):
-        return 'Роль изменена ОУП — требуется проверка', None, None
+        return _ProductionAssignmentEvidence(
+            blocker_code=ERROR_ROUTING_REQUIRES_REVIEW,
+            message='Роль изменена ОУП — требуется проверка',
+            equipment=None,
+            shift_type=None,
+        )
 
     slot = event.crew_plan_slot
     assignment = event.equipment_assignment
     if slot is None or assignment is None:
-        return 'Связь назначения техники и смены нарушена.', None, None
+        return _ProductionAssignmentEvidence(
+            blocker_code=ERROR_OFFICIAL_ASSIGNMENT_INCONSISTENT,
+            message='Связь назначения техники и смены нарушена.',
+            equipment=None,
+            shift_type=None,
+        )
     plan = slot.plan
     assignment_is_exact = (
         event.actor_access.role.code == 'deputy_mining_manager'
@@ -671,11 +739,350 @@ def _clerk_queue_production_reason(*, row, event, transfers):
         and period.starts_on <= plan.work_date <= period.ends_on
     )
     if not assignment_is_exact or not dates_are_exact:
-        return 'Связь назначения техники и смены нарушена.', None, None
-    return None, assignment.equipment, {
-        WorkShiftType.SHIFT_1: 'День',
-        WorkShiftType.SHIFT_2: 'Ночь',
-    }[slot.shift_type]
+        return _ProductionAssignmentEvidence(
+            blocker_code=ERROR_OFFICIAL_ASSIGNMENT_INCONSISTENT,
+            message='Связь назначения техники и смены нарушена.',
+            equipment=None,
+            shift_type=None,
+        )
+    return _ProductionAssignmentEvidence(
+        blocker_code=None,
+        message=None,
+        equipment=assignment.equipment,
+        shift_type=slot.shift_type,
+    )
+
+
+def _clerk_queue_production_reason(*, row, event, transfers):
+    """Compatibility projection for the existing T2.6 human queue."""
+    from assignments.models import WorkShiftType
+
+    evidence = _clerk_queue_production_evidence(
+        row=row,
+        event=event,
+        transfers=transfers,
+    )
+    shift_label = None
+    if evidence.shift_type is not None:
+        shift_label = {
+            WorkShiftType.SHIFT_1: 'День',
+            WorkShiftType.SHIFT_2: 'Ночь',
+        }[evidence.shift_type]
+    return evidence.message, evidence.equipment, shift_label
+
+
+def _routing_row_evidence(
+    *,
+    row,
+    latest_event,
+    evidence_state,
+    blocker_code=None,
+    participating=True,
+    assignment_shift_type=None,
+):
+    return ArrivalRosterRoutingRowEvidence(
+        routing_row_id=row.pk,
+        resident_id=row.resident_id,
+        employee_id=row.employee_id,
+        route_state=row.route_state,
+        participating=participating,
+        evidence_state=evidence_state,
+        blocker_code=blocker_code,
+        latest_event_id=(latest_event.pk if latest_event else None),
+        latest_event_type=(latest_event.event_type if latest_event else None),
+        crew_plan_slot_id=(latest_event.crew_plan_slot_id if latest_event else None),
+        equipment_assignment_id=(
+            latest_event.equipment_assignment_id if latest_event else None
+        ),
+        assignment_shift_type=assignment_shift_type,
+    )
+
+
+def _routing_row_core_is_consistent(*, row, version_id):
+    return bool(
+        row.row_review.version_id == version_id
+        and row.match.version_id == version_id
+        and row.row_review.match_id == row.match_id
+        and row.row_review.selected_resident_id == row.resident_id
+        and row.resident.employee_id == row.employee_id
+        and isinstance(row.participation_snapshot, dict)
+        and isinstance(row.dates_snapshot, dict)
+        and isinstance(row.role_snapshot, dict)
+        and isinstance(row.role_basis_snapshot, dict)
+    )
+
+
+def _resolve_routing_row_evidence(*, row, version_id, transfers):
+    events = row.routing_events
+    latest_event = events[-1] if events else None
+    participation = (row.participation_snapshot or {}).get('participation_status')
+    participating_statuses = {
+        ArrivalRosterRowReview.ParticipationStatus.ARRIVING,
+        ArrivalRosterRowReview.ParticipationStatus.EXTENDED,
+        ArrivalRosterRowReview.ParticipationStatus.ADDITIONAL,
+    }
+    participating = participation in participating_statuses
+
+    if not _routing_row_core_is_consistent(row=row, version_id=version_id):
+        return _routing_row_evidence(
+            row=row,
+            latest_event=latest_event,
+            participating=participating,
+            evidence_state=EVIDENCE_INCONSISTENT,
+            blocker_code=ERROR_ROUTING_INCONSISTENT,
+        )
+    if participation not in {
+        *participating_statuses,
+        ArrivalRosterRowReview.ParticipationStatus.NOT_ARRIVING,
+    }:
+        return _routing_row_evidence(
+            row=row,
+            latest_event=latest_event,
+            participating=False,
+            evidence_state=EVIDENCE_INCONSISTENT,
+            blocker_code=ERROR_ROUTING_INCONSISTENT,
+        )
+
+    route_states = {choice for choice, _label in ArrivalRosterRoutingRow.RouteState.choices}
+    if row.route_state not in route_states:
+        return _routing_row_evidence(
+            row=row,
+            latest_event=latest_event,
+            participating=participating,
+            evidence_state=EVIDENCE_INCONSISTENT,
+            blocker_code=ERROR_UNKNOWN_ROUTE_STATE,
+        )
+
+    if latest_event and latest_event.event_type == ArrivalRosterRoutingEvent.EventType.STALE:
+        return _routing_row_evidence(
+            row=row,
+            latest_event=latest_event,
+            participating=participating,
+            evidence_state=EVIDENCE_STALE,
+            blocker_code=ERROR_ROUTING_STALE,
+        )
+    if (
+        row.route_state == ArrivalRosterRoutingRow.RouteState.REVIEW_REQUIRED
+        or latest_event
+        and latest_event.event_type == ArrivalRosterRoutingEvent.EventType.REQUIRES_REVIEW
+    ):
+        return _routing_row_evidence(
+            row=row,
+            latest_event=latest_event,
+            participating=participating,
+            evidence_state=EVIDENCE_REQUIRES_REVIEW,
+            blocker_code=ERROR_ROUTING_REQUIRES_REVIEW,
+        )
+
+    if participation == ArrivalRosterRowReview.ParticipationStatus.NOT_ARRIVING:
+        if row.route_state != ArrivalRosterRoutingRow.RouteState.NOT_PARTICIPATING:
+            return _routing_row_evidence(
+                row=row,
+                latest_event=latest_event,
+                participating=False,
+                evidence_state=EVIDENCE_INCONSISTENT,
+                blocker_code=ERROR_ROUTING_INCONSISTENT,
+            )
+        return _routing_row_evidence(
+            row=row,
+            latest_event=latest_event,
+            participating=False,
+            evidence_state=EVIDENCE_NOT_ARRIVING,
+        )
+
+    if row.route_state == ArrivalRosterRoutingRow.RouteState.NOT_PARTICIPATING:
+        return _routing_row_evidence(
+            row=row,
+            latest_event=latest_event,
+            evidence_state=EVIDENCE_INCONSISTENT,
+            blocker_code=ERROR_ROUTING_INCONSISTENT,
+        )
+
+    if row.route_state == ArrivalRosterRoutingRow.RouteState.TO_CLERK:
+        is_nonproduction = (
+            (row.role_snapshot or {}).get('qualification_state') == 'not_production'
+            and (row.role_snapshot or {}).get('role_code') not in _PRODUCTION_ROLE_CODES
+        )
+        if (
+            latest_event
+            and latest_event.event_type == ArrivalRosterRoutingEvent.EventType.SENT_TO_CLERK
+            and is_nonproduction
+        ):
+            return _routing_row_evidence(
+                row=row,
+                latest_event=latest_event,
+                evidence_state=EVIDENCE_SENT_TO_CLERK,
+            )
+        if latest_event is None or latest_event.event_type == ArrivalRosterRoutingEvent.EventType.CREATED:
+            return _routing_row_evidence(
+                row=row,
+                latest_event=latest_event,
+                evidence_state=EVIDENCE_PENDING,
+                blocker_code=ERROR_ROUTING_PENDING,
+            )
+        if not is_nonproduction:
+            return _routing_row_evidence(
+                row=row,
+                latest_event=latest_event,
+                evidence_state=EVIDENCE_REQUIRES_REVIEW,
+                blocker_code=ERROR_ROUTING_REQUIRES_REVIEW,
+            )
+        return _routing_row_evidence(
+            row=row,
+            latest_event=latest_event,
+            evidence_state=EVIDENCE_INCONSISTENT,
+            blocker_code=ERROR_ROUTING_INCONSISTENT,
+        )
+
+    if row.route_state != ArrivalRosterRoutingRow.RouteState.TO_DEPUTY or row.employee_id is None:
+        return _routing_row_evidence(
+            row=row,
+            latest_event=latest_event,
+            evidence_state=EVIDENCE_INCONSISTENT,
+            blocker_code=ERROR_ROUTING_INCONSISTENT,
+        )
+    if (
+        latest_event is None
+        or latest_event.event_type in {
+            ArrivalRosterRoutingEvent.EventType.CREATED,
+            ArrivalRosterRoutingEvent.EventType.SENT_TO_DEPUTY,
+        }
+    ):
+        return _routing_row_evidence(
+            row=row,
+            latest_event=latest_event,
+            evidence_state=EVIDENCE_PENDING,
+            blocker_code=ERROR_OFFICIAL_ASSIGNMENT_MISSING,
+        )
+    if latest_event.event_type != ArrivalRosterRoutingEvent.EventType.OFFICIAL_ASSIGNMENT_PUBLISHED:
+        return _routing_row_evidence(
+            row=row,
+            latest_event=latest_event,
+            evidence_state=EVIDENCE_INCONSISTENT,
+            blocker_code=ERROR_ROUTING_INCONSISTENT,
+        )
+
+    production = _clerk_queue_production_evidence(
+        row=row,
+        event=latest_event,
+        transfers=transfers,
+    )
+    if production.blocker_code == ERROR_ROUTING_REQUIRES_REVIEW:
+        return _routing_row_evidence(
+            row=row,
+            latest_event=latest_event,
+            evidence_state=EVIDENCE_REQUIRES_REVIEW,
+            blocker_code=production.blocker_code,
+        )
+    if production.blocker_code:
+        return _routing_row_evidence(
+            row=row,
+            latest_event=latest_event,
+            evidence_state=EVIDENCE_INCONSISTENT,
+            blocker_code=production.blocker_code,
+        )
+    return _routing_row_evidence(
+        row=row,
+        latest_event=latest_event,
+        evidence_state=EVIDENCE_OFFICIAL_ASSIGNMENT_PUBLISHED,
+        assignment_shift_type=production.shift_type,
+    )
+
+
+def resolve_arrival_roster_routing_evidence(*, batch_id):
+    """Resolve exact immutable routing provenance for one batch, without writes."""
+    try:
+        batch = (
+            ArrivalRosterRoutingBatch._base_manager.select_related(
+                'arrival_roster_version__watch_period',
+            )
+            .filter(pk=batch_id)
+            .first()
+        )
+    except (TypeError, ValueError):
+        batch = None
+    if batch is None:
+        raise _error(ERROR_BATCH_NOT_FOUND, 'Передача реестра не найдена.')
+
+    version = batch.arrival_roster_version
+    batch_is_consistent = bool(
+        batch.watch_period_id == version.watch_period_id
+        and batch.confirmation_sha256 == version.confirmation_sha256
+        and version.confirmation_sha256
+    )
+    confirmed_version_ids = list(
+        ArrivalRosterVersion._base_manager.filter(
+            watch_period_id=batch.watch_period_id,
+            status=ArrivalRosterVersion.Status.CONFIRMED,
+        )
+        .order_by('pk')
+        .values_list('pk', flat=True)
+    )
+    if not batch_is_consistent:
+        batch_state = BATCH_STATE_INCONSISTENT
+        batch_blocker_code = ERROR_BATCH_INCONSISTENT
+    elif (
+        version.status == ArrivalRosterVersion.Status.SUPERSEDED
+        or version.superseded_at is not None
+        or confirmed_version_ids
+        and confirmed_version_ids != [version.pk]
+    ):
+        batch_state = BATCH_STATE_STALE
+        batch_blocker_code = ERROR_BATCH_STALE
+    elif (
+        version.status == ArrivalRosterVersion.Status.CONFIRMED
+        and confirmed_version_ids == [version.pk]
+    ):
+        batch_state = BATCH_STATE_CURRENT
+        batch_blocker_code = None
+    else:
+        batch_state = BATCH_STATE_INCONSISTENT
+        batch_blocker_code = ERROR_BATCH_INCONSISTENT
+
+    rows = list(
+        ArrivalRosterRoutingRow._base_manager.select_related(
+            'row_review',
+            'match',
+            'resident',
+            'employee',
+        )
+        .prefetch_related(
+            models.Prefetch(
+                'events',
+                queryset=(
+                    ArrivalRosterRoutingEvent._base_manager.select_related(
+                        'actor_access__role',
+                        'crew_plan_slot__plan__role',
+                        'crew_plan_slot__equipment',
+                        'equipment_assignment__equipment',
+                    ).order_by('created_at', 'pk')
+                ),
+                to_attr='routing_events',
+            ),
+        )
+        .filter(batch_id=batch.pk)
+        .order_by('row_review_id', 'pk')
+    )
+    transfers = _queue_active_transfers(
+        employee_ids=sorted({row.employee_id for row in rows if row.employee_id}),
+        as_of=version.watch_period.starts_on,
+    )
+    resolved_rows = tuple(
+        _resolve_routing_row_evidence(
+            row=row,
+            version_id=version.pk,
+            transfers=transfers,
+        )
+        for row in rows
+    )
+    return ArrivalRosterRoutingBatchEvidence(
+        batch_id=batch.pk,
+        version_id=version.pk,
+        watch_period_id=batch.watch_period_id,
+        batch_state=batch_state,
+        batch_blocker_code=batch_blocker_code,
+        rows=resolved_rows,
+    )
 
 
 def settlement_clerk_arrival_roster_routing_queue():
