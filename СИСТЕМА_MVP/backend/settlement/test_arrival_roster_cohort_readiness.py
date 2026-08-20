@@ -12,11 +12,19 @@ from rotations.arrival_roster_routing import (
     ArrivalRosterRoutingBatchEvidence,
     ArrivalRosterRoutingRowEvidence,
 )
+from rotations.employee_watch_profile_changes import (
+    SOURCE_KIND_APPLIED_CHANGE,
+    SOURCE_KIND_LEGACY_BASELINE,
+    apply_employee_watch_profile_change,
+    create_employee_watch_profile_change_draft,
+    resolve_employee_watch_profile,
+)
 from rotations.models import (
     ArrivalRosterRoutingBatch,
     ArrivalRosterRoutingEvent,
     ArrivalRosterRoutingRow,
     ArrivalRosterVersion,
+    EmployeeWatchProfileChange,
 )
 from shifts.brigade_phase_calendar import (
     WORK_SCHEDULE_CODE_12,
@@ -28,7 +36,7 @@ from shifts.models import (
     WatchPeriodBrigadePhaseRow,
     WatchPeriodBrigadePhaseVersion,
 )
-from users.models import Employee, WorkSchedule
+from users.models import Employee, WatchComposition, WorkSchedule
 
 from .cohort_readiness import (
     ERROR_ASSIGNMENT_PHASE_MISMATCH,
@@ -40,6 +48,9 @@ from .cohort_readiness import (
     ERROR_EMPLOYEE_BRIGADE_MISSING,
     ERROR_EMPLOYEE_INACTIVE,
     ERROR_EMPLOYEE_SCHEDULE_MISSING,
+    ERROR_EMPLOYEE_WATCH_COMPOSITION_MISSING,
+    ERROR_EMPLOYEE_WATCH_COMPOSITION_MISMATCH,
+    ERROR_EMPLOYEE_WATCH_PROFILE_INCONSISTENT,
     ERROR_EXTERNAL_SHIFT_UNRESOLVED,
     ERROR_NO_ARRIVING_MEMBERS,
     CohortReadyMember,
@@ -96,12 +107,15 @@ class ArrivalRosterCohortReadinessTests(TestCase):
         values = {
             'work_schedule': self.schedule if schedule else None,
             'brigade_number': brigade,
+            'watch_composition': self.period.watch_composition,
         }
         if production:
             employee = self._production_employee(name)
             Employee.objects.filter(pk=employee.pk).update(**{
-                f'{key}_id' if key == 'work_schedule' else key: (
-                    value.pk if key == 'work_schedule' and value else value
+                f'{key}_id' if key in {'work_schedule', 'watch_composition'} else key: (
+                    value.pk
+                    if key in {'work_schedule', 'watch_composition'} and value
+                    else value
                 )
                 for key, value in values.items()
             })
@@ -136,6 +150,41 @@ class ArrivalRosterCohortReadinessTests(TestCase):
     def _readiness(self):
         return build_arrival_roster_cohort_readiness(batch_id=self.batch.pk)
 
+    def _create_profile_draft(
+        self,
+        employee,
+        *,
+        brigade,
+        schedule=None,
+        composition=None,
+        basis_suffix='1',
+    ):
+        return create_employee_watch_profile_change_draft(
+            employee_id=employee.pk,
+            effective_watch_period_id=self.period.pk,
+            new_work_schedule_id=(schedule or self.schedule).pk,
+            new_brigade_number=brigade,
+            new_watch_composition_id=(
+                composition or self.period.watch_composition
+            ).pk,
+            basis_kind=EmployeeWatchProfileChange.BasisKind.EMPLOYEE_APPLICATION,
+            basis_number=f'ЗАЯВЛЕНИЕ-READINESS-{basis_suffix}',
+            basis_date=timezone.localdate(),
+            basis='Заявление сотрудника для проверки готовности состава.',
+            actor_access_id=self.timekeeper_access.pk,
+        )
+
+    def _apply_profile_change(self, employee, *, brigade, basis_suffix='1'):
+        draft = self._create_profile_draft(
+            employee,
+            brigade=brigade,
+            basis_suffix=basis_suffix,
+        )
+        return apply_employee_watch_profile_change(
+            change_id=draft.pk,
+            actor_access_id=self.timekeeper_access.pk,
+        )
+
     def test_ready_direct_internal_day_and_night_use_exact_phase_rows(self):
         self._confirm_calendar()
         night_row = self._direct_row(employee=self._internal_employee(
@@ -168,6 +217,160 @@ class ArrivalRosterCohortReadinessTests(TestCase):
             self.assertEqual(member.brigade_phase_row_id, phase.row_id)
             self.assertIsNone(member.equipment_assignment_id)
             self.assertIsNone(member.crew_plan_slot_id)
+
+    def test_legacy_baseline_ready_member_has_exact_profile_provenance(self):
+        self._confirm_calendar()
+        employee = self._internal_employee(
+            'Legacy baseline T3 readiness',
+            brigade=2,
+        )
+        row = self._direct_row(employee=employee)
+        expected = resolve_employee_watch_profile(
+            employee_id=employee.pk,
+            watch_period_id=self.period.pk,
+        )
+
+        result = self._readiness()
+
+        self.assertTrue(result.is_ready)
+        member = result.ready_members[0]
+        self.assertEqual(member.routing_row_id, row.pk)
+        self.assertEqual(
+            member.watch_profile_source_kind,
+            SOURCE_KIND_LEGACY_BASELINE,
+        )
+        self.assertIsNone(member.employee_watch_profile_change_id)
+        self.assertEqual(member.watch_profile_work_schedule_id, self.schedule.pk)
+        self.assertEqual(member.watch_profile_brigade_number, 2)
+        self.assertEqual(
+            member.watch_profile_watch_composition_id,
+            self.period.watch_composition_id,
+        )
+        self.assertEqual(
+            member.watch_profile_fingerprint,
+            expected.profile_fingerprint,
+        )
+
+    def test_applied_change_drives_phase_and_exact_member_provenance(self):
+        self._confirm_calendar()
+        employee = self._internal_employee(
+            'Applied profile T3 readiness',
+            brigade=1,
+        )
+        applied = self._apply_profile_change(employee, brigade=2)
+        row = self._direct_row(employee=employee)
+        expected_phase = resolve_confirmed_brigade_phase(
+            watch_period_id=self.period.pk,
+            work_schedule_id=self.schedule.pk,
+            brigade_number=2,
+        )
+
+        result = self._readiness()
+
+        self.assertTrue(result.is_ready)
+        member = result.ready_members[0]
+        self.assertEqual(member.routing_row_id, row.pk)
+        self.assertEqual(member.work_shift, 'day')
+        self.assertEqual(member.brigade_phase_row_id, expected_phase.row_id)
+        self.assertEqual(
+            member.watch_profile_source_kind,
+            SOURCE_KIND_APPLIED_CHANGE,
+        )
+        self.assertEqual(member.employee_watch_profile_change_id, applied.pk)
+        self.assertEqual(member.watch_profile_work_schedule_id, self.schedule.pk)
+        self.assertEqual(member.watch_profile_brigade_number, 2)
+        self.assertEqual(
+            member.watch_profile_watch_composition_id,
+            self.period.watch_composition_id,
+        )
+        self.assertRegex(member.watch_profile_fingerprint, r'^[0-9a-f]{64}$')
+
+    def test_draft_profile_change_does_not_affect_readiness(self):
+        self._confirm_calendar()
+        employee = self._internal_employee(
+            'Draft profile T3 readiness',
+            brigade=2,
+        )
+        draft = self._create_profile_draft(employee, brigade=1)
+        self._direct_row(employee=employee)
+
+        result = self._readiness()
+
+        self.assertTrue(result.is_ready)
+        member = result.ready_members[0]
+        self.assertEqual(
+            member.watch_profile_source_kind,
+            SOURCE_KIND_LEGACY_BASELINE,
+        )
+        self.assertIsNone(member.employee_watch_profile_change_id)
+        self.assertNotEqual(member.employee_watch_profile_change_id, draft.pk)
+        self.assertEqual(member.watch_profile_brigade_number, 2)
+
+    def test_corrupted_effective_profile_history_is_blocked(self):
+        self._confirm_calendar()
+        employee = self._internal_employee(
+            'Corrupted profile T3 readiness',
+            brigade=1,
+        )
+        applied = self._apply_profile_change(employee, brigade=2)
+        EmployeeWatchProfileChange._base_manager.filter(pk=applied.pk).update(
+            source_fingerprint='0' * 64,
+        )
+        row = self._direct_row(employee=employee)
+
+        result = self._readiness()
+
+        self.assertFalse(result.is_ready)
+        self.assertEqual(result.ready_members, ())
+        self.assertEqual(
+            [(blocker.routing_row_id, blocker.code) for blocker in result.blockers],
+            [(row.pk, ERROR_EMPLOYEE_WATCH_PROFILE_INCONSISTENT)],
+        )
+
+    def test_resolved_watch_composition_must_match_exact_period(self):
+        self._confirm_calendar()
+        other_composition = WatchComposition.objects.create(
+            code='readiness-other-watch-composition',
+            name='Другой состав вахты для readiness',
+            is_active=True,
+        )
+        employee = self._internal_employee(
+            'Composition mismatch T3 readiness',
+            brigade=2,
+        )
+        Employee.objects.filter(pk=employee.pk).update(
+            watch_composition=other_composition,
+        )
+        row = self._direct_row(employee=employee)
+
+        result = self._readiness()
+
+        self.assertFalse(result.is_ready)
+        self.assertEqual(result.ready_members, ())
+        self.assertEqual(
+            [(blocker.routing_row_id, blocker.code) for blocker in result.blockers],
+            [(row.pk, ERROR_EMPLOYEE_WATCH_COMPOSITION_MISMATCH)],
+        )
+
+    def test_production_assignment_uses_resolved_profile_phase(self):
+        self._confirm_calendar()
+        employee = self._internal_employee(
+            'Production applied profile T3 readiness',
+            brigade=1,
+            production=True,
+        )
+        applied = self._apply_profile_change(employee, brigade=2)
+        row = self._routing_row(employee=employee)
+        self._publish_event(row)
+
+        result = self._readiness()
+
+        self.assertTrue(result.is_ready)
+        member = result.ready_members[0]
+        self.assertEqual(member.work_shift, 'day')
+        self.assertEqual(member.employee_watch_profile_change_id, applied.pk)
+        self.assertEqual(member.watch_profile_brigade_number, 2)
+        self.assertIsNotNone(member.equipment_assignment_id)
 
     def test_ready_production_requires_matching_exact_assignment_and_phase(self):
         self._confirm_calendar()
@@ -226,10 +429,13 @@ class ArrivalRosterCohortReadinessTests(TestCase):
 
         with mock.patch(
             'settlement.cohort_readiness.resolve_confirmed_brigade_phase',
-        ) as calendar:
+        ) as calendar, mock.patch(
+            'settlement.cohort_readiness.resolve_employee_watch_profile',
+        ) as profile_resolver:
             result = self._readiness()
 
         calendar.assert_not_called()
+        profile_resolver.assert_not_called()
         self.assertEqual(result.ready_members, ())
         self.assertEqual(
             [(blocker.routing_row_id, blocker.code) for blocker in result.blockers],
@@ -251,6 +457,13 @@ class ArrivalRosterCohortReadinessTests(TestCase):
             'Без бригады T3 readiness', brigade=None,
         )
         no_brigade_row = self._direct_row(employee=no_brigade)
+        no_composition = self._internal_employee(
+            'Без состава вахты T3 readiness', brigade=2,
+        )
+        Employee.objects.filter(pk=no_composition.pk).update(
+            watch_composition=None,
+        )
+        no_composition_row = self._direct_row(employee=no_composition)
 
         result = self._readiness()
 
@@ -261,6 +474,10 @@ class ArrivalRosterCohortReadinessTests(TestCase):
                 (inactive_row.pk, ERROR_EMPLOYEE_INACTIVE),
                 (no_schedule_row.pk, ERROR_EMPLOYEE_SCHEDULE_MISSING),
                 (no_brigade_row.pk, ERROR_EMPLOYEE_BRIGADE_MISSING),
+                (
+                    no_composition_row.pk,
+                    ERROR_EMPLOYEE_WATCH_COMPOSITION_MISSING,
+                ),
             ],
         )
 
@@ -338,10 +555,13 @@ class ArrivalRosterCohortReadinessTests(TestCase):
 
         with mock.patch(
             'settlement.cohort_readiness.resolve_confirmed_brigade_phase',
-        ) as calendar:
+        ) as calendar, mock.patch(
+            'settlement.cohort_readiness.resolve_employee_watch_profile',
+        ) as profile_resolver:
             result = self._readiness()
 
         calendar.assert_not_called()
+        profile_resolver.assert_not_called()
         self.assertEqual(result.excluded_not_arriving_row_ids, (row.pk,))
         self.assertEqual(result.ready_members, ())
         self.assertEqual(result.blockers[0].code, ERROR_NO_ARRIVING_MEMBERS)
@@ -523,6 +743,7 @@ class ArrivalRosterCohortReadinessTests(TestCase):
             CrewPlan,
             CrewPlanSlot,
             EquipmentAssignment,
+            EmployeeWatchProfileChange,
         )
         before_counts = {
             model: model._base_manager.count()

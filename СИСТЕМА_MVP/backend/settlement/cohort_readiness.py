@@ -16,6 +16,25 @@ from rotations.arrival_roster_routing import (
     EVIDENCE_SENT_TO_CLERK,
     resolve_arrival_roster_routing_evidence,
 )
+from rotations.employee_watch_profile_changes import (
+    ERROR_BRIGADE_NOT_ALLOWED as PROFILE_ERROR_BRIGADE_NOT_ALLOWED,
+    ERROR_BRIGADE_OUT_OF_RANGE as PROFILE_ERROR_BRIGADE_OUT_OF_RANGE,
+    ERROR_BRIGADE_REQUIRED as PROFILE_ERROR_BRIGADE_REQUIRED,
+    ERROR_EMPLOYEE_INACTIVE as PROFILE_ERROR_EMPLOYEE_INACTIVE,
+    ERROR_EMPLOYEE_NOT_FOUND as PROFILE_ERROR_EMPLOYEE_NOT_FOUND,
+    ERROR_PROFILE_INCONSISTENT as PROFILE_ERROR_PROFILE_INCONSISTENT,
+    ERROR_SOURCE_FINGERPRINT_INVALID as PROFILE_ERROR_SOURCE_FINGERPRINT_INVALID,
+    ERROR_SOURCE_INVALID as PROFILE_ERROR_SOURCE_INVALID,
+    ERROR_WATCH_COMPOSITION_INACTIVE as PROFILE_ERROR_WATCH_COMPOSITION_INACTIVE,
+    ERROR_WATCH_COMPOSITION_NOT_FOUND as PROFILE_ERROR_WATCH_COMPOSITION_NOT_FOUND,
+    ERROR_WATCH_PERIOD_NOT_FOUND as PROFILE_ERROR_WATCH_PERIOD_NOT_FOUND,
+    ERROR_WORK_SCHEDULE_INACTIVE as PROFILE_ERROR_WORK_SCHEDULE_INACTIVE,
+    ERROR_WORK_SCHEDULE_NOT_FOUND as PROFILE_ERROR_WORK_SCHEDULE_NOT_FOUND,
+    SOURCE_KIND_APPLIED_CHANGE,
+    SOURCE_KIND_LEGACY_BASELINE,
+    EmployeeWatchProfileChangeError,
+    resolve_employee_watch_profile,
+)
 from rotations.models import ArrivalRosterRoutingBatch, ArrivalRosterVersion
 from shifts.brigade_phase_calendar import (
     ERROR_BRIGADE_NOT_FOUND,
@@ -33,7 +52,7 @@ from shifts.brigade_phase_calendar import (
     BrigadePhaseCalendarError,
     resolve_confirmed_brigade_phase,
 )
-from users.models import Employee
+from shifts.models import WatchPeriod
 
 from .models import SettlementCohort, SettlementCohortMember
 
@@ -42,6 +61,9 @@ ERROR_EMPLOYEE_NOT_FOUND = 'employee_not_found'
 ERROR_EMPLOYEE_INACTIVE = 'employee_inactive'
 ERROR_EMPLOYEE_SCHEDULE_MISSING = 'employee_schedule_missing'
 ERROR_EMPLOYEE_BRIGADE_MISSING = 'employee_brigade_missing'
+ERROR_EMPLOYEE_WATCH_COMPOSITION_MISSING = 'employee_watch_composition_missing'
+ERROR_EMPLOYEE_WATCH_COMPOSITION_MISMATCH = 'employee_watch_composition_mismatch'
+ERROR_EMPLOYEE_WATCH_PROFILE_INCONSISTENT = 'employee_watch_profile_inconsistent'
 ERROR_CALENDAR_NOT_CONFIRMED = 'calendar_not_confirmed'
 ERROR_CALENDAR_INCONSISTENT = 'calendar_inconsistent'
 ERROR_CALENDAR_POLICY_MISSING = 'calendar_policy_missing'
@@ -80,6 +102,13 @@ _SAFE_MESSAGES = {
     ERROR_EMPLOYEE_INACTIVE: 'Сотрудник не является действующим.',
     ERROR_EMPLOYEE_SCHEDULE_MISSING: 'В карточке сотрудника не указан график работы.',
     ERROR_EMPLOYEE_BRIGADE_MISSING: 'В карточке сотрудника не указана действующая бригада.',
+    ERROR_EMPLOYEE_WATCH_COMPOSITION_MISSING: 'Для сотрудника не определён состав вахты.',
+    ERROR_EMPLOYEE_WATCH_COMPOSITION_MISMATCH: (
+        'Сотрудник относится к другому составу вахты.'
+    ),
+    ERROR_EMPLOYEE_WATCH_PROFILE_INCONSISTENT: (
+        'История графика, бригады и состава вахты сотрудника несогласована.'
+    ),
     ERROR_CALENDAR_NOT_CONFIRMED: 'Для графика и периода нет утверждённого календаря фаз.',
     ERROR_CALENDAR_INCONSISTENT: 'Утверждённый календарь фаз повреждён или несогласован.',
     ERROR_CALENDAR_POLICY_MISSING: 'Для графика не определено правило календарных фаз.',
@@ -107,6 +136,28 @@ _CALENDAR_ERROR_CODES = {
     ERROR_WORK_SCHEDULE_NOT_FOUND: ERROR_CALENDAR_INCONSISTENT,
 }
 
+_PROFILE_ERROR_CODES = {
+    PROFILE_ERROR_EMPLOYEE_NOT_FOUND: ERROR_EMPLOYEE_NOT_FOUND,
+    PROFILE_ERROR_EMPLOYEE_INACTIVE: ERROR_EMPLOYEE_INACTIVE,
+    PROFILE_ERROR_WORK_SCHEDULE_NOT_FOUND: ERROR_EMPLOYEE_SCHEDULE_MISSING,
+    PROFILE_ERROR_WORK_SCHEDULE_INACTIVE: ERROR_EMPLOYEE_SCHEDULE_MISSING,
+    PROFILE_ERROR_BRIGADE_REQUIRED: ERROR_EMPLOYEE_BRIGADE_MISSING,
+    PROFILE_ERROR_BRIGADE_NOT_ALLOWED: ERROR_EMPLOYEE_SCHEDULE_MISSING,
+    PROFILE_ERROR_BRIGADE_OUT_OF_RANGE: ERROR_EMPLOYEE_BRIGADE_MISSING,
+    PROFILE_ERROR_WATCH_COMPOSITION_NOT_FOUND: (
+        ERROR_EMPLOYEE_WATCH_COMPOSITION_MISSING
+    ),
+    PROFILE_ERROR_WATCH_COMPOSITION_INACTIVE: (
+        ERROR_EMPLOYEE_WATCH_PROFILE_INCONSISTENT
+    ),
+    PROFILE_ERROR_WATCH_PERIOD_NOT_FOUND: ERROR_EMPLOYEE_WATCH_PROFILE_INCONSISTENT,
+    PROFILE_ERROR_SOURCE_INVALID: ERROR_EMPLOYEE_WATCH_PROFILE_INCONSISTENT,
+    PROFILE_ERROR_SOURCE_FINGERPRINT_INVALID: (
+        ERROR_EMPLOYEE_WATCH_PROFILE_INCONSISTENT
+    ),
+    PROFILE_ERROR_PROFILE_INCONSISTENT: ERROR_EMPLOYEE_WATCH_PROFILE_INCONSISTENT,
+}
+
 
 class SettlementCohortReadinessError(ValidationError):
     """Controlled failure before a structured readiness result can be built."""
@@ -122,6 +173,12 @@ class CohortReadyMember:
     work_shift: str
     equipment_assignment_id: int | None
     crew_plan_slot_id: int | None
+    watch_profile_source_kind: str
+    employee_watch_profile_change_id: int | None
+    watch_profile_work_schedule_id: int | None
+    watch_profile_brigade_number: int | None
+    watch_profile_watch_composition_id: int | None
+    watch_profile_fingerprint: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -175,39 +232,115 @@ def _calendar_blocker_code(error):
     )
 
 
-def _employee_for_evidence(evidence):
+def _profile_blocker_code(error):
+    return _PROFILE_ERROR_CODES.get(
+        getattr(error, 'code', None),
+        ERROR_EMPLOYEE_WATCH_PROFILE_INCONSISTENT,
+    )
+
+
+def _positive_identifier(value):
+    return isinstance(value, int) and not isinstance(value, bool) and value > 0
+
+
+def _valid_profile_fingerprint(value):
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in '0123456789abcdef' for character in value)
+    )
+
+
+def _profile_for_evidence(
+    evidence,
+    *,
+    watch_period_id,
+    watch_period_starts_on,
+    watch_composition_id,
+):
     if evidence.employee_id is None:
         return None, ERROR_EXTERNAL_SHIFT_UNRESOLVED
-    employee = Employee.objects.select_related('work_schedule').filter(
-        pk=evidence.employee_id,
-    ).first()
-    if employee is None:
-        return None, ERROR_EMPLOYEE_NOT_FOUND
-    if not employee.is_active or employee.status != Employee.Status.ACTIVE:
-        return None, ERROR_EMPLOYEE_INACTIVE
-    if employee.work_schedule_id is None:
-        return None, ERROR_EMPLOYEE_SCHEDULE_MISSING
+    try:
+        profile = resolve_employee_watch_profile(
+            employee_id=evidence.employee_id,
+            watch_period_id=watch_period_id,
+        )
+    except EmployeeWatchProfileChangeError as error:
+        return None, _profile_blocker_code(error)
     if (
-        isinstance(employee.brigade_number, bool)
-        or not isinstance(employee.brigade_number, int)
-        or employee.brigade_number < 1
+        profile.employee_id != evidence.employee_id
+        or profile.watch_period_id != watch_period_id
+        or profile.effective_on != watch_period_starts_on
+        or profile.source_kind not in {
+            SOURCE_KIND_LEGACY_BASELINE,
+            SOURCE_KIND_APPLIED_CHANGE,
+        }
+        or not _valid_profile_fingerprint(profile.profile_fingerprint)
+        or (
+            profile.source_kind == SOURCE_KIND_LEGACY_BASELINE
+            and profile.change_id is not None
+        )
+        or (
+            profile.source_kind == SOURCE_KIND_APPLIED_CHANGE
+            and not _positive_identifier(profile.change_id)
+        )
+    ):
+        return None, ERROR_EMPLOYEE_WATCH_PROFILE_INCONSISTENT
+    if profile.work_schedule_id is None:
+        return None, ERROR_EMPLOYEE_SCHEDULE_MISSING
+    if not _positive_identifier(profile.work_schedule_id):
+        return None, ERROR_EMPLOYEE_WATCH_PROFILE_INCONSISTENT
+    if (
+        isinstance(profile.brigade_number, bool)
+        or not isinstance(profile.brigade_number, int)
+        or profile.brigade_number < 1
     ):
         return None, ERROR_EMPLOYEE_BRIGADE_MISSING
-    return employee, None
+    if profile.watch_composition_id is None:
+        return None, ERROR_EMPLOYEE_WATCH_COMPOSITION_MISSING
+    if not _positive_identifier(profile.watch_composition_id):
+        return None, ERROR_EMPLOYEE_WATCH_PROFILE_INCONSISTENT
+    if profile.watch_composition_id != watch_composition_id:
+        return None, ERROR_EMPLOYEE_WATCH_COMPOSITION_MISMATCH
+    return profile, None
 
 
-def _phase_for_employee(*, employee, watch_period_id):
+def _phase_for_profile(*, profile, watch_period_id):
     try:
         return resolve_confirmed_brigade_phase(
             watch_period_id=watch_period_id,
-            work_schedule_id=employee.work_schedule_id,
-            brigade_number=employee.brigade_number,
+            work_schedule_id=profile.work_schedule_id,
+            brigade_number=profile.brigade_number,
         ), None
     except BrigadePhaseCalendarError as error:
         return None, _calendar_blocker_code(error)
 
 
-def _ready_member(*, evidence, phase):
+def _ready_evidence_shape_error(evidence):
+    if evidence.evidence_state == EVIDENCE_SENT_TO_CLERK:
+        if (
+            evidence.route_state != 'to_clerk'
+            or evidence.latest_event_type != EVIDENCE_SENT_TO_CLERK
+            or evidence.crew_plan_slot_id is not None
+            or evidence.equipment_assignment_id is not None
+            or evidence.assignment_shift_type is not None
+        ):
+            return ERROR_ROUTING_INCONSISTENT
+        return None
+    if evidence.evidence_state == EVIDENCE_OFFICIAL_ASSIGNMENT_PUBLISHED:
+        if (
+            evidence.route_state != 'to_deputy'
+            or evidence.latest_event_type != EVIDENCE_OFFICIAL_ASSIGNMENT_PUBLISHED
+            or evidence.crew_plan_slot_id is None
+            or evidence.equipment_assignment_id is None
+            or evidence.assignment_shift_type not in _WORK_SHIFTS
+        ):
+            return ERROR_ROUTING_INCONSISTENT
+        return None
+    return evidence.blocker_code or ERROR_ROUTING_INCONSISTENT
+
+
+def _ready_member(*, evidence, phase, profile):
     if evidence.latest_event_id is None or not evidence.participating:
         return None, ERROR_ROUTING_INCONSISTENT
     if phase.phase == _PHASE_OFF:
@@ -233,6 +366,12 @@ def _ready_member(*, evidence, phase):
             work_shift=phase.phase,
             equipment_assignment_id=None,
             crew_plan_slot_id=None,
+            watch_profile_source_kind=profile.source_kind,
+            employee_watch_profile_change_id=profile.change_id,
+            watch_profile_work_schedule_id=profile.work_schedule_id,
+            watch_profile_brigade_number=profile.brigade_number,
+            watch_profile_watch_composition_id=profile.watch_composition_id,
+            watch_profile_fingerprint=profile.profile_fingerprint,
         ), None
 
     if evidence.evidence_state == EVIDENCE_OFFICIAL_ASSIGNMENT_PUBLISHED:
@@ -255,6 +394,12 @@ def _ready_member(*, evidence, phase):
             work_shift=phase.phase,
             equipment_assignment_id=evidence.equipment_assignment_id,
             crew_plan_slot_id=evidence.crew_plan_slot_id,
+            watch_profile_source_kind=profile.source_kind,
+            employee_watch_profile_change_id=profile.change_id,
+            watch_profile_work_schedule_id=profile.work_schedule_id,
+            watch_profile_brigade_number=profile.brigade_number,
+            watch_profile_watch_composition_id=profile.watch_composition_id,
+            watch_profile_fingerprint=profile.profile_fingerprint,
         ), None
 
     return None, evidence.blocker_code or ERROR_ROUTING_INCONSISTENT
@@ -280,6 +425,16 @@ def build_arrival_roster_cohort_readiness(*, batch_id):
     blockers = []
     excluded = []
     rows = routing.rows
+    watch_period = WatchPeriod.objects.only(
+        'pk',
+        'starts_on',
+        'watch_composition_id',
+    ).filter(pk=routing.watch_period_id).first()
+    if watch_period is None:
+        raise SettlementCohortReadinessError(
+            _SAFE_MESSAGES[ERROR_BATCH_INCONSISTENT],
+            code=ERROR_BATCH_INCONSISTENT,
+        )
 
     if routing.batch_state != BATCH_STATE_CURRENT:
         batch_code = routing.batch_blocker_code or ERROR_BATCH_INCONSISTENT
@@ -339,19 +494,35 @@ def build_arrival_roster_cohort_readiness(*, batch_id):
                 code=evidence.blocker_code or ERROR_ROUTING_INCONSISTENT,
             ))
             continue
-
-        employee, employee_error = _employee_for_evidence(evidence)
-        if employee_error:
-            blockers.append(_blocker(routing_row_id=row_id, code=employee_error))
+        evidence_shape_error = _ready_evidence_shape_error(evidence)
+        if evidence_shape_error:
+            blockers.append(_blocker(
+                routing_row_id=row_id,
+                code=evidence_shape_error,
+            ))
             continue
-        phase, calendar_error = _phase_for_employee(
-            employee=employee,
+
+        profile, profile_error = _profile_for_evidence(
+            evidence,
+            watch_period_id=routing.watch_period_id,
+            watch_period_starts_on=watch_period.starts_on,
+            watch_composition_id=watch_period.watch_composition_id,
+        )
+        if profile_error:
+            blockers.append(_blocker(routing_row_id=row_id, code=profile_error))
+            continue
+        phase, calendar_error = _phase_for_profile(
+            profile=profile,
             watch_period_id=routing.watch_period_id,
         )
         if calendar_error:
             blockers.append(_blocker(routing_row_id=row_id, code=calendar_error))
             continue
-        member, member_error = _ready_member(evidence=evidence, phase=phase)
+        member, member_error = _ready_member(
+            evidence=evidence,
+            phase=phase,
+            profile=profile,
+        )
         if member_error:
             blockers.append(_blocker(routing_row_id=row_id, code=member_error))
             continue
