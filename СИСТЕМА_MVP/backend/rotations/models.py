@@ -527,6 +527,296 @@ class ArrivalRosterImmutableModel(models.Model):
         raise self._write_forbidden_error()
 
 
+class EmployeeWatchProfileChangeQuerySet(models.QuerySet):
+    WRITE_FORBIDDEN_MESSAGE = (
+        'История изменений графика, бригады и состава вахты '
+        'изменяется только закрытыми доменными командами.'
+    )
+    WRITE_FORBIDDEN_CODE = (
+        'rotations.employee_watch_profile_change.public_write_forbidden'
+    )
+
+    def _raise_write_forbidden(self):
+        raise ValidationError(
+            self.WRITE_FORBIDDEN_MESSAGE,
+            code=self.WRITE_FORBIDDEN_CODE,
+        )
+
+    def update(self, **kwargs):
+        self._raise_write_forbidden()
+
+    def bulk_create(self, objs, *args, **kwargs):
+        self._raise_write_forbidden()
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        self._raise_write_forbidden()
+
+    def delete(self):
+        self._raise_write_forbidden()
+
+
+class EmployeeWatchProfileChange(models.Model):
+    class BasisKind(models.TextChoices):
+        EMPLOYEE_APPLICATION = (
+            'employee_application',
+            'Заявление сотрудника',
+        )
+        OFFICIAL_ORDER = 'official_order', 'Официальный приказ'
+        OTHER_OFFICIAL_DOCUMENT = (
+            'other_official_document',
+            'Другой официальный документ',
+        )
+
+    class Status(models.TextChoices):
+        DRAFT = 'draft', 'Черновик'
+        APPLIED = 'applied', 'Применена'
+        SUPERSEDED = 'superseded', 'Заменена'
+        CANCELLED = 'cancelled', 'Отменена'
+
+    objects = EmployeeWatchProfileChangeQuerySet.as_manager()
+
+    employee = models.ForeignKey(
+        'users.Employee',
+        verbose_name='Сотрудник',
+        on_delete=models.PROTECT,
+        related_name='watch_profile_changes',
+    )
+    effective_watch_period = models.ForeignKey(
+        'shifts.WatchPeriod',
+        verbose_name='Период вступления изменения в силу',
+        on_delete=models.PROTECT,
+        related_name='employee_watch_profile_changes',
+    )
+    effective_on = models.DateField('Дата вступления в силу')
+    version_number = models.PositiveIntegerField('Номер версии')
+    supersedes = models.OneToOneField(
+        'self',
+        verbose_name='Заменяет версию',
+        on_delete=models.PROTECT,
+        related_name='replacement',
+        null=True,
+        blank=True,
+    )
+
+    old_work_schedule = models.ForeignKey(
+        'users.WorkSchedule',
+        verbose_name='Прежний график работы',
+        on_delete=models.PROTECT,
+        related_name='employee_watch_profile_changes_from_schedule',
+        null=True,
+        blank=True,
+    )
+    old_brigade_number = models.PositiveSmallIntegerField(
+        'Прежний номер бригады',
+        null=True,
+        blank=True,
+    )
+    old_watch_composition = models.ForeignKey(
+        'users.WatchComposition',
+        verbose_name='Прежний состав вахты',
+        on_delete=models.PROTECT,
+        related_name='employee_watch_profile_changes_from_composition',
+        null=True,
+        blank=True,
+    )
+    new_work_schedule = models.ForeignKey(
+        'users.WorkSchedule',
+        verbose_name='Новый график работы',
+        on_delete=models.PROTECT,
+        related_name='employee_watch_profile_changes_to_schedule',
+    )
+    new_brigade_number = models.PositiveSmallIntegerField(
+        'Новый номер бригады',
+        null=True,
+        blank=True,
+    )
+    new_watch_composition = models.ForeignKey(
+        'users.WatchComposition',
+        verbose_name='Новый состав вахты',
+        on_delete=models.PROTECT,
+        related_name='employee_watch_profile_changes_to_composition',
+    )
+
+    basis_kind = models.CharField(
+        'Вид официального основания',
+        max_length=32,
+        choices=BasisKind.choices,
+    )
+    basis_number = models.CharField('Номер официального основания', max_length=128)
+    basis_date = models.DateField('Дата официального основания')
+    basis = models.TextField('Официальное основание')
+    source_snapshot = models.JSONField('Неизменяемый снимок источника')
+    source_fingerprint = models.CharField(
+        'SHA-256 снимка источника',
+        max_length=64,
+        validators=[
+            RegexValidator(
+                regex=r'^[0-9a-f]{64}$',
+                message='SHA-256 должен содержать ровно 64 шестнадцатеричных символа.',
+            ),
+        ],
+    )
+
+    created_by_access = models.ForeignKey(
+        'users.EmployeeAccess',
+        verbose_name='Точный доступ создателя',
+        on_delete=models.PROTECT,
+        related_name='created_employee_watch_profile_changes',
+    )
+    applied_by_access = models.ForeignKey(
+        'users.EmployeeAccess',
+        verbose_name='Точный доступ применившего',
+        on_delete=models.PROTECT,
+        related_name='applied_employee_watch_profile_changes',
+        null=True,
+        blank=True,
+    )
+    superseded_by_access = models.ForeignKey(
+        'users.EmployeeAccess',
+        verbose_name='Точный доступ заменившего',
+        on_delete=models.PROTECT,
+        related_name='superseded_employee_watch_profile_changes',
+        null=True,
+        blank=True,
+    )
+    cancelled_by_access = models.ForeignKey(
+        'users.EmployeeAccess',
+        verbose_name='Точный доступ отменившего',
+        on_delete=models.PROTECT,
+        related_name='cancelled_employee_watch_profile_changes',
+        null=True,
+        blank=True,
+    )
+    created_at = models.DateTimeField('Создана', auto_now_add=True)
+    applied_at = models.DateTimeField('Применена', null=True, blank=True)
+    superseded_at = models.DateTimeField('Заменена', null=True, blank=True)
+    cancelled_at = models.DateTimeField('Отменена', null=True, blank=True)
+    status = models.CharField(
+        'Статус',
+        max_length=16,
+        choices=Status.choices,
+        default=Status.DRAFT,
+        db_index=True,
+    )
+
+    class Meta:
+        verbose_name = 'Изменение графика, бригады и состава вахты сотрудника'
+        verbose_name_plural = 'Изменения графика, бригады и состава вахты сотрудников'
+        ordering = ['employee_id', 'effective_on', 'version_number', 'pk']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['employee', 'effective_watch_period', 'version_number'],
+                name='uniq_employee_watch_profile_version',
+            ),
+            models.UniqueConstraint(
+                fields=['employee', 'effective_watch_period'],
+                condition=models.Q(status='applied'),
+                name='uniq_applied_employee_watch_profile',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(version_number__gte=1),
+                name='employee_watch_profile_version_gte_1',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(old_brigade_number__isnull=True)
+                    | models.Q(old_brigade_number__gte=1)
+                ),
+                name='employee_watch_profile_old_brigade_gte_1',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(new_brigade_number__isnull=True)
+                    | models.Q(new_brigade_number__gte=1)
+                ),
+                name='employee_watch_profile_new_brigade_gte_1',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    basis_kind__in=[
+                        'employee_application',
+                        'official_order',
+                        'other_official_document',
+                    ],
+                ),
+                name='employee_watch_profile_basis_kind_valid',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    ~models.Q(basis_number='')
+                    & ~models.Q(basis='')
+                ),
+                name='employee_watch_profile_basis_required',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    status__in=['draft', 'applied', 'superseded', 'cancelled'],
+                ),
+                name='employee_watch_profile_status_valid',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        status='draft',
+                        applied_by_access__isnull=True,
+                        applied_at__isnull=True,
+                        superseded_by_access__isnull=True,
+                        superseded_at__isnull=True,
+                        cancelled_by_access__isnull=True,
+                        cancelled_at__isnull=True,
+                    )
+                    | models.Q(
+                        status='applied',
+                        applied_by_access__isnull=False,
+                        applied_at__isnull=False,
+                        superseded_by_access__isnull=True,
+                        superseded_at__isnull=True,
+                        cancelled_by_access__isnull=True,
+                        cancelled_at__isnull=True,
+                    )
+                    | models.Q(
+                        status='superseded',
+                        applied_by_access__isnull=False,
+                        applied_at__isnull=False,
+                        superseded_by_access__isnull=False,
+                        superseded_at__isnull=False,
+                        cancelled_by_access__isnull=True,
+                        cancelled_at__isnull=True,
+                    )
+                    | models.Q(
+                        status='cancelled',
+                        applied_by_access__isnull=True,
+                        applied_at__isnull=True,
+                        superseded_by_access__isnull=True,
+                        superseded_at__isnull=True,
+                        cancelled_by_access__isnull=False,
+                        cancelled_at__isnull=False,
+                    )
+                ),
+                name='employee_watch_profile_status_audit',
+            ),
+        ]
+
+    @classmethod
+    def _write_forbidden_error(cls):
+        return ValidationError(
+            EmployeeWatchProfileChangeQuerySet.WRITE_FORBIDDEN_MESSAGE,
+            code=EmployeeWatchProfileChangeQuerySet.WRITE_FORBIDDEN_CODE,
+        )
+
+    def save(self, *args, **kwargs):
+        raise self._write_forbidden_error()
+
+    def delete(self, *args, **kwargs):
+        raise self._write_forbidden_error()
+
+    def __str__(self):
+        return (
+            f'{self.employee} / {self.effective_watch_period} / '
+            f'версия {self.version_number}'
+        )
+
+
 class ArrivalRosterSourceFile(ArrivalRosterImmutableModel):
     PUBLIC_CREATE_FORBIDDEN = True
     IMMUTABLE_FIELDS = (
