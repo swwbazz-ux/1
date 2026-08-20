@@ -4,6 +4,7 @@ from datetime import timedelta
 from urllib.parse import urlencode
 
 from django import forms
+from django.contrib import messages
 from django.core.exceptions import ValidationError
 from django.db.models import Prefetch, Q
 from django.http import HttpResponse, JsonResponse
@@ -35,6 +36,10 @@ from .control import (
     store_control_session_credentials,
 )
 from .apply import apply_confirmed_settlement_preview
+from .cohorts import (
+    ArrivalRosterCohortCreationError,
+    create_approved_arrival_roster_cohort,
+)
 from .models import (
     EmployeeBedOccupancy,
     PhysicalBed,
@@ -285,6 +290,33 @@ def settlement_arrival_roster_routing_view(request):
             'clerk_active_section': 'routing',
         },
     )
+
+
+@require_POST
+def settlement_arrival_roster_create_cohort_view(request, batch_id):
+    """Create one approved cohort from an exact routing batch."""
+    access = settlement_clerk_access_from_request(request, allow_admin=False)
+    if not access:
+        messages.error(
+            request,
+            'Для создания состава требуется действующий доступ делопроизводителя.',
+        )
+        next_url = urlencode({'next': reverse('settlement_arrival_roster_routing')})
+        return redirect(f'{reverse("clerk_login")}?{next_url}')
+
+    try:
+        create_approved_arrival_roster_cohort(
+            batch_id=batch_id,
+            actor_access_id=access.pk,
+        )
+    except ArrivalRosterCohortCreationError:
+        messages.error(
+            request,
+            'Состав заезда не создан. Проверьте готовность данных и повторите попытку.',
+        )
+    else:
+        messages.success(request, 'Утверждённый состав заезда создан.')
+    return redirect('settlement_arrival_roster_routing')
 
 
 def _employee_profiles(employees):
