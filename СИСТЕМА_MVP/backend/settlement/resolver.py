@@ -19,7 +19,10 @@ from django.utils import timezone
 
 from assignments.models import AssignmentStatus, EquipmentAssignment, WorkShiftType
 
-from .cohorts import _revalidated_member_shift_source
+from .cohorts import (
+    _revalidated_member_shift_source,
+    revalidate_routing_cohort_members,
+)
 
 from .models import (
     AccommodationAnchor,
@@ -447,19 +450,31 @@ def resolve_settlement_cohort(
     cohort = (
         SettlementCohort.objects.select_related(
             'watch_period', 'watch_composition', 'source_revision',
+            'routing_batch__arrival_roster_version',
         )
         .get(pk=cohort_id)
     )
     members = list(
         SettlementCohortMember.objects.filter(cohort_id=cohort.pk)
         .select_related(
-            'resident__employee', 'source_revision',
-            'official_equipment_assignment__source_crew_plan_slot__plan',
+            'cohort__routing_batch__arrival_roster_version',
+            'resident__employee__work_schedule', 'source_revision',
+            'routing_row',
+            'routing_event__crew_plan_slot__plan__role',
+            'brigade_phase_row__version',
+            'official_equipment_assignment__equipment__equipment_type',
+            'official_equipment_assignment__source_crew_plan_slot__plan__role',
             'shift_selected_by_access__employee', 'shift_selected_by_access__role',
         )
         .order_by('resident__stable_id', 'pk')
     )
     active_members = [item for item in members if item.participates_in_accommodation]
+    routing_context = None
+    if cohort.routing_batch_id is not None:
+        routing_context = revalidate_routing_cohort_members(
+            cohort=cohort,
+            members=members,
+        )
     candidates, slot_snapshot = _slot_candidates(cohort)
     starts_at, ends_at = _period_datetimes(cohort)
     internal_employee_ids = {
@@ -467,10 +482,21 @@ def resolve_settlement_cohort(
         for item in active_members
         if item.resident.employee_id
     }
-    effective_equipment_assignments = _effective_equipment_assignments(
-        employee_ids=internal_employee_ids,
-        effective_date=starts_at,
-    )
+    if routing_context is None:
+        effective_equipment_assignments = _effective_equipment_assignments(
+            employee_ids=internal_employee_ids,
+            effective_date=starts_at,
+        )
+    else:
+        effective_equipment_assignments = sorted(
+            {
+                context['official_equipment_assignment'].pk:
+                    context['official_equipment_assignment']
+                for context in routing_context.values()
+                if context['official_equipment_assignment'] is not None
+            }.values(),
+            key=lambda item: item.pk,
+        )
     equipment_assignments_by_employee: dict[int, list[EquipmentAssignment]] = defaultdict(list)
     for equipment_assignment in effective_equipment_assignments:
         equipment_assignments_by_employee[equipment_assignment.employee_id].append(
@@ -622,6 +648,25 @@ def resolve_settlement_cohort(
         else:
             internal_room_ids.add(candidate.room_id)
 
+    routing_member_provenance = {}
+    if routing_context is not None:
+        routing_member_provenance = {
+            item.pk: {
+                'routing_row_id': item.routing_row_id,
+                'routing_event_id': item.routing_event_id,
+                'brigade_phase_row_id': item.brigade_phase_row_id,
+                'brigade_phase_version_id': item.brigade_phase_row.version_id,
+                'official_equipment_assignment_id': (
+                    item.official_equipment_assignment_id
+                ),
+                'source_crew_plan_slot_id': (
+                    item.official_equipment_assignment.source_crew_plan_slot_id
+                    if item.official_equipment_assignment_id else None
+                ),
+            }
+            for item in members
+        }
+
     snapshot = {
         'resolver_version': 'm6-equipment-routing-v1',
         'cohort': {
@@ -635,6 +680,15 @@ def resolve_settlement_cohort(
             'ends_on': cohort.watch_period.ends_on.isoformat(),
             'source_revision_id': cohort.source_revision_id,
             'input_fingerprint': cohort.input_fingerprint,
+            **(
+                {
+                    'routing_batch_id': cohort.routing_batch_id,
+                    'arrival_roster_version_id': (
+                        cohort.routing_batch.arrival_roster_version_id
+                    ),
+                }
+                if routing_context is not None else {}
+            ),
         },
         'members': [
             {
@@ -687,6 +741,10 @@ def resolve_settlement_cohort(
                 'shift_selection_basis': item.shift_selection_basis,
                 'shift_source_snapshot': item.shift_source_snapshot,
                 'shift_source_fingerprint': item.shift_source_fingerprint,
+                **(
+                    {'routing_provenance': routing_member_provenance[item.pk]}
+                    if routing_context is not None else {}
+                ),
             }
             for item in members
         ],
@@ -823,6 +881,23 @@ def resolve_settlement_cohort(
         ],
     }
     fingerprint = _canonical_hash(snapshot)
+    routing_source_identifiers = ()
+    if routing_context is not None:
+        routing_source_identifiers = (
+            f'routing-batch:{cohort.routing_batch_id}',
+            'arrival-roster-version:'
+            f'{cohort.routing_batch.arrival_roster_version_id}',
+            *(
+                identifier
+                for item in members
+                for identifier in (
+                    f'routing-row:{item.routing_row_id}',
+                    f'routing-event:{item.routing_event_id}',
+                    f'brigade-phase-row:{item.brigade_phase_row_id}',
+                    f'brigade-phase-version:{item.brigade_phase_row.version_id}',
+                )
+            ),
+        )
     source_identifiers = tuple(sorted({
         'resolver:m6-equipment-routing-v1',
         f'cohort:{cohort.stable_id}',
@@ -844,6 +919,7 @@ def resolve_settlement_cohort(
             f'equipment-assignment:{item.pk}'
             for item in effective_equipment_assignments
         ),
+        *routing_source_identifiers,
     }))
 
     unresolved: dict[int, ResolverUnresolved] = {}
@@ -890,6 +966,7 @@ def resolve_settlement_cohort(
                 member=member,
                 period=cohort.watch_period,
                 for_update=False,
+                routing_context=routing_context,
             )
         except ValidationError:
             reject(member, REASON_INCOMPLETE_CONTEXT)

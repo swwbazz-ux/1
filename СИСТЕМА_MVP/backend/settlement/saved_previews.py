@@ -16,6 +16,7 @@ from .control import (
     lock_settlement_write_access,
     lock_settlement_write_lease,
 )
+from .cohorts import revalidate_routing_cohort_members
 from .models import (
     SettlementCohort,
     SettlementCohortMember,
@@ -171,7 +172,11 @@ def _lock_preview_scope(
     cohort = (
         SettlementCohort._base_manager.using(using)
         .select_for_update(of=('self',))
-        .select_related('watch_period', 'watch_composition')
+        .select_related(
+            'watch_period',
+            'watch_composition',
+            'routing_batch__arrival_roster_version',
+        )
         .get(pk=cohort_id)
     )
     if (
@@ -205,6 +210,14 @@ def _validate_approved_cohort(cohort: SettlementCohort, *, stale: bool = False):
             'stale_source' if stale else 'not_approved',
             'Календарное основание cohort неактуально.',
         )
+    if cohort.routing_batch_id is not None:
+        try:
+            revalidate_routing_cohort_members(cohort=cohort)
+        except ValidationError as error:
+            raise _preview_error(
+                'stale_source' if stale else 'not_approved',
+                'Источник состава из реестра больше не воспроизводится.',
+            ) from error
 
 
 def _current_confirmed_run(runs, *, exclude_id=None):

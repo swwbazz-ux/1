@@ -20,6 +20,10 @@ from rotations.models import (
     ArrivalRosterRoutingRow,
     ArrivalRosterVersion,
 )
+from rotations.arrival_roster_routing import (
+    ERROR_OFFICIAL_ASSIGNMENT_INCONSISTENT,
+    ERROR_OFFICIAL_ASSIGNMENT_MISSING,
+)
 from shifts.models import (
     WatchPeriod,
     WatchPeriodBrigadePhaseRow,
@@ -28,7 +32,9 @@ from shifts.models import (
 from users.models import Employee, EmployeeAccess, WorkSchedule
 
 from .cohort_readiness import (
+    ERROR_ASSIGNMENT_PHASE_MISMATCH,
     SettlementCohortReadinessError,
+    _approved_cohort_is_consistent,
     build_arrival_roster_cohort_readiness,
 )
 from .models import (
@@ -215,7 +221,250 @@ def _external_shift_source(*, work_shift, access_id, basis, selected_at=None, fo
     }
 
 
-def _revalidated_member_shift_source(*, member, period, for_update=True):
+def _routing_source_error(message):
+    return _shift_review_required(f'источник передачи реестра изменился: {message}')
+
+
+def _routing_member_context(*, cohort, member, ready, period):
+    row = member.routing_row
+    event = member.routing_event
+    phase_row = member.brigade_phase_row
+    assignment = member.official_equipment_assignment
+    if (
+        row is None
+        or event is None
+        or phase_row is None
+        or member.cohort_id != cohort.pk
+        or row.batch_id != cohort.routing_batch_id
+        or row.pk != ready.routing_row_id
+        or row.resident_id != member.resident_id
+        or row.employee_id != member.resident.employee_id
+        or ready.resident_id != member.resident_id
+        or ready.employee_id != member.resident.employee_id
+        or event.pk != ready.routing_event_id
+        or event.routing_row_id != row.pk
+        or phase_row.pk != ready.brigade_phase_row_id
+        or phase_row.version.watch_period_id != period.pk
+        or phase_row.version.work_schedule_id != member.resident.employee.work_schedule_id
+        or phase_row.brigade_number != member.resident.employee.brigade_number
+        or phase_row.phase != ready.work_shift
+        or member.work_shift != ready.work_shift
+        or member.participation_status != _participation_status(row)
+        or member.arrival_at != _aware_day(_snapshot_date(row.dates_snapshot, 'arrival_on'))
+        or member.departure_at != _aware_day(
+            _snapshot_date(row.dates_snapshot, 'departure_on') + timedelta(days=1)
+        )
+    ):
+        raise _routing_source_error('exact FK участника больше не согласованы.')
+
+    if ready.equipment_assignment_id is None:
+        if (
+            member.shift_source_kind
+            != SettlementCohortMember.ShiftSourceKind.CONFIRMED_BRIGADE_PHASE
+            or assignment is not None
+            or ready.crew_plan_slot_id is not None
+            or event.event_type != ArrivalRosterRoutingEvent.EventType.SENT_TO_CLERK
+            or event.crew_plan_slot_id is not None
+            or event.equipment_assignment_id is not None
+        ):
+            raise _routing_source_error('прямой маршрут участника повреждён.')
+    else:
+        effective_at = _watch_period_start(period)
+        if (
+            member.shift_source_kind
+            != SettlementCohortMember.ShiftSourceKind.INTERNAL_ASSIGNMENT
+            or assignment is None
+            or assignment.pk != ready.equipment_assignment_id
+            or assignment.pk != event.equipment_assignment_id
+            or assignment.source_crew_plan_slot_id != ready.crew_plan_slot_id
+            or assignment.source_crew_plan_slot_id != event.crew_plan_slot_id
+            or event.event_type
+            != ArrivalRosterRoutingEvent.EventType.OFFICIAL_ASSIGNMENT_PUBLISHED
+            or assignment.status != AssignmentStatus.ACCEPTED
+            or assignment.ended_at is not None
+            or assignment.shift_id is not None
+            or assignment.role_id is None
+            or assignment.assigned_at > effective_at
+            or assignment.accepted_at is not None
+            and assignment.accepted_at > effective_at
+            or assignment.source_kind
+            != EquipmentAssignment.SourceKind.DEPUTY_PUBLISHED_PLAN
+            or assignment.source_crew_plan_slot_id is None
+            or assignment.employee_id != member.resident.employee_id
+            or assignment.shift_type != ready.work_shift
+            or assignment.shift_type != phase_row.phase
+        ):
+            raise _routing_source_error('официальное назначение участника изменилось.')
+        slot = assignment.source_crew_plan_slot
+        if (
+            slot.employee_id != assignment.employee_id
+            or slot.equipment_id != assignment.equipment_id
+            or slot.plan.role_id != assignment.role_id
+            or slot.shift_type != assignment.shift_type
+            or slot.plan.work_date
+            != _snapshot_date(row.dates_snapshot, 'arrival_on')
+        ):
+            raise _routing_source_error('опубликованный слот назначения изменился.')
+        try:
+            assignment.full_clean()
+        except ValidationError as error:
+            raise _routing_source_error('официальное назначение больше невалидно.') from error
+
+    basis_snapshot, shift_snapshot, shift_fingerprint, shift_source_kind = (
+        _routing_member_snapshots(
+            ready=ready,
+            row=row,
+            event=event,
+            phase_row=phase_row,
+            assignment=assignment,
+        )
+    )
+    production_context_snapshot = {
+        'role': row.role_snapshot,
+        'role_basis': row.role_basis_snapshot,
+        'crew_plan_slot_id': ready.crew_plan_slot_id,
+        'equipment_assignment_id': ready.equipment_assignment_id,
+    }
+    if (
+        member.basis_snapshot != basis_snapshot
+        or member.shift_source_kind != shift_source_kind
+        or member.shift_source_snapshot != shift_snapshot
+        or member.shift_source_fingerprint != shift_fingerprint
+        or member.production_context_snapshot != production_context_snapshot
+        or member.shift_selected_by_access_id is not None
+        or member.shift_selected_at is not None
+        or member.shift_selection_basis
+    ):
+        raise _routing_source_error('неизменяемый snapshot участника не совпадает.')
+    return {
+        'work_shift': ready.work_shift,
+        'shift_source_kind': shift_source_kind,
+        'official_equipment_assignment': assignment,
+        'shift_source_snapshot': shift_snapshot,
+        'shift_source_fingerprint': shift_fingerprint,
+        'shift_selected_by_access': None,
+        'shift_selected_at': None,
+        'shift_selection_basis': '',
+    }
+
+
+def revalidate_routing_cohort_members(*, cohort, members=None):
+    """Revalidate one structurally linked routing cohort without selecting fallbacks."""
+
+    if cohort.routing_batch_id is None:
+        raise _routing_source_error('cohort не связан с exact routing batch.')
+    batch = cohort.routing_batch
+    version = batch.arrival_roster_version
+    period = cohort.watch_period
+    if (
+        cohort.status != SettlementCohort.Status.APPROVED
+        or batch.watch_period_id != period.pk
+        or version.watch_period_id != period.pk
+        or version.status != ArrivalRosterVersion.Status.CONFIRMED
+        or version.superseded_at is not None
+    ):
+        raise _routing_source_error('версия реестра больше не является текущей.')
+    if members is None:
+        members = list(
+            SettlementCohortMember._base_manager.filter(cohort_id=cohort.pk)
+            .select_related(
+                'cohort__routing_batch__arrival_roster_version',
+                'cohort__watch_period',
+                'resident__employee__work_schedule',
+                'routing_row',
+                'routing_event__crew_plan_slot__plan__role',
+                'official_equipment_assignment__source_crew_plan_slot__plan__role',
+                'brigade_phase_row__version',
+            )
+            .order_by('routing_row_id', 'pk')
+        )
+    else:
+        members = list(members)
+    routing_rows = list(
+        ArrivalRosterRoutingRow._base_manager.filter(batch_id=batch.pk)
+        .order_by('pk')
+    )
+    if not _approved_cohort_is_consistent(
+        cohort=cohort,
+        batch=batch,
+        members=members,
+        routing_rows=routing_rows,
+    ):
+        raise _routing_source_error('snapshot состава больше не воспроизводится.')
+    try:
+        readiness = build_arrival_roster_cohort_readiness(batch_id=batch.pk)
+    except SettlementCohortReadinessError as error:
+        raise _routing_source_error('готовность передачи не подтверждена.') from error
+    if (
+        readiness.batch_id != batch.pk
+        or readiness.watch_period_id != period.pk
+    ):
+        raise _routing_source_error('готовность передачи изменилась.')
+
+    assignment_blocker_codes = {
+        ERROR_ASSIGNMENT_PHASE_MISMATCH,
+        ERROR_OFFICIAL_ASSIGNMENT_INCONSISTENT,
+        ERROR_OFFICIAL_ASSIGNMENT_MISSING,
+    }
+    assignment_blockers = {
+        blocker.routing_row_id: blocker.code
+        for blocker in readiness.blockers
+        if (
+            blocker.routing_row_id is not None
+            and blocker.code in assignment_blocker_codes
+        )
+    }
+    if any(
+        blocker.routing_row_id is None
+        or blocker.code not in assignment_blocker_codes
+        for blocker in readiness.blockers
+    ):
+        raise _routing_source_error('готовность передачи изменилась.')
+    ready_by_row = {
+        item.routing_row_id: item for item in readiness.ready_members
+    }
+    members_by_row = {item.routing_row_id: item for item in members}
+    if (
+        None in members_by_row
+        or len(members_by_row) != len(members)
+        or set(members_by_row) != set(ready_by_row) | set(assignment_blockers)
+        or set(members_by_row).intersection(readiness.excluded_not_arriving_row_ids)
+    ):
+        raise _routing_source_error('состав participants больше не совпадает с передачей.')
+    contexts = {}
+    for member in members:
+        blocker_code = assignment_blockers.get(member.routing_row_id)
+        if blocker_code is not None:
+            contexts[member.pk] = {
+                'validation_error': _routing_source_error(
+                    'официальное назначение участника изменилось.',
+                ),
+                'official_equipment_assignment': None,
+            }
+            continue
+        contexts[member.pk] = _routing_member_context(
+            cohort=cohort,
+            member=member,
+            ready=ready_by_row[member.routing_row_id],
+            period=period,
+        )
+    return contexts
+
+
+def _revalidated_member_shift_source(
+    *, member, period, for_update=True, routing_context=None,
+):
+    if member.cohort.routing_batch_id is not None:
+        contexts = routing_context
+        if contexts is None:
+            contexts = revalidate_routing_cohort_members(cohort=member.cohort)
+        try:
+            context = contexts[member.pk]
+        except KeyError as error:
+            raise _routing_source_error('участник отсутствует в exact составе.') from error
+        if 'validation_error' in context:
+            raise context['validation_error']
+        return context
     if member.shift_source_kind == SettlementCohortMember.ShiftSourceKind.UNVERIFIED_LEGACY:
         raise _shift_review_required('историческая membership не содержит проверенной смены.')
     if member.shift_source_kind == SettlementCohortMember.ShiftSourceKind.INTERNAL_ASSIGNMENT:
