@@ -1,4 +1,6 @@
+from django import forms
 from django.contrib import admin
+from django.core.exceptions import ValidationError
 
 from .models import (
     AdminActionLog,
@@ -16,8 +18,58 @@ from .models import (
 )
 
 
+class EmployeeAdminForm(forms.ModelForm):
+    PROTECTED_WATCH_PROFILE_FIELDS = (
+        'work_schedule',
+        'brigade_number',
+        'watch_composition',
+        'rotation',
+    )
+    WATCH_PROFILE_EDIT_ERROR = (
+        'Изменение графика, бригады и состава вахты действующего сотрудника '
+        'выполняет Табельщик.'
+    )
+
+    class Meta:
+        model = Employee
+        fields = '__all__'
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if not self.instance or not self.instance.pk:
+            return
+        for field_name in self.PROTECTED_WATCH_PROFILE_FIELDS:
+            field = self.fields[field_name]
+            field.disabled = True
+            field.help_text = self.WATCH_PROFILE_EDIT_ERROR
+
+    def clean(self):
+        cleaned_data = super().clean()
+        if not self.instance or not self.instance.pk:
+            return cleaned_data
+
+        expected_values = {
+            'work_schedule': str(self.instance.work_schedule_id or ''),
+            'brigade_number': str(self.instance.brigade_number or ''),
+            'watch_composition': str(self.instance.watch_composition_id or ''),
+            'rotation': str(self.instance.rotation or ''),
+        }
+        for field_name, expected_value in expected_values.items():
+            posted_name = self.add_prefix(field_name)
+            if posted_name not in self.data:
+                continue
+            submitted_value = str(self.data.get(posted_name) or '')
+            if submitted_value != expected_value:
+                raise ValidationError(
+                    self.WATCH_PROFILE_EDIT_ERROR,
+                    code='django_admin_watch_profile_forbidden',
+                )
+        return cleaned_data
+
+
 @admin.register(Employee)
 class EmployeeAdmin(admin.ModelAdmin):
+    form = EmployeeAdminForm
     list_display = (
         'full_name',
         'sex',
