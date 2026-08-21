@@ -2044,11 +2044,14 @@ def system_admin_employee_detail_view(request, employee_id):
                             'Статус сотрудника уже изменился. Обновите страницу.',
                             code='stale_employee_status',
                         )
+                    form.validate_protected_profile(locked_employee)
+                    excluded_fields = set(form._meta.exclude or ())
+                    excluded_fields.update(AdminEmployeeEditForm.PROTECTED_EXISTING_PROFILE_FIELDS)
                     form.instance = construct_instance(
                         form,
                         locked_employee,
                         form._meta.fields,
-                        form._meta.exclude,
+                        tuple(excluded_fields),
                     )
                     previous_specialization_id = locked_employee.base_specialization_id
                     saved_employee = form.save()
@@ -2056,8 +2059,11 @@ def system_admin_employee_detail_view(request, employee_id):
                         sync_employee_production_access(employee=saved_employee)
                     work_assignment = form.save_work_assignment(assigned_by=access.employee)
             except ValidationError as error:
+                error_code = getattr(error, 'code', '')
                 form.add_error(
-                    None if getattr(error, 'code', '') == 'stale_employee_status' else 'assignment_equipment',
+                    None
+                    if error_code in {'stale_employee_status', 'admin_watch_profile_forbidden'}
+                    else 'assignment_equipment',
                     error,
                 )
             else:

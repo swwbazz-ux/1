@@ -179,11 +179,13 @@
                     <div class="employee-card-section-heading">
                         <h3 id="employee-work-title">Работа и учет</h3>
                     </div>
-                    {% if employee_card_context == "oup" and page_mode == "detail" %}
-                        <div class="employee-card-readonly-note">
-                            <strong>Профиль вахты доступен только для просмотра.</strong>
-                            <span>Изменение графика, бригады и состава вахты действующего сотрудника выполняет Табельщик.</span>
-                        </div>
+                    {% if page_mode == "detail" %}
+                        {% if employee_card_context == "oup" or employee_card_context == "admin" %}
+                            <div class="employee-card-readonly-note">
+                                <strong>Профиль вахты доступен только для просмотра.</strong>
+                                <span>Изменение графика, бригады и состава вахты действующего сотрудника выполняет Табельщик.</span>
+                            </div>
+                        {% endif %}
                     {% endif %}
                     <div class="employee-card-field-grid">
                         <div class="employee-card-field" data-card-field data-copy-label="Производственная специализация">

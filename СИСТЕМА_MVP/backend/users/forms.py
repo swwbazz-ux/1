@@ -594,6 +594,16 @@ class AdminEmployeeForm(EmployeeCardForm):
 
 
 class AdminEmployeeEditForm(EmployeeCardForm):
+    PROTECTED_EXISTING_PROFILE_FIELDS = (
+        'work_schedule',
+        'brigade_number',
+        'watch_composition',
+    )
+    WATCH_PROFILE_EDIT_ERROR = (
+        'Изменение графика, бригады и состава вахты действующего сотрудника '
+        'выполняет Табельщик.'
+    )
+
     assignment_role = forms.ModelChoiceField(
         label='Рабочая роль',
         queryset=Role.objects.none(),
@@ -618,6 +628,8 @@ class AdminEmployeeEditForm(EmployeeCardForm):
         employee = self.instance if self.instance and self.instance.pk else None
         if not employee:
             return
+        for field_name in self.PROTECTED_EXISTING_PROFILE_FIELDS:
+            self.fields[field_name].disabled = True
 
         active_assignment = get_active_equipment_assignment(employee)
         available_accesses = (
@@ -691,6 +703,32 @@ class AdminEmployeeEditForm(EmployeeCardForm):
                 'assignment_equipment': active_assignment.equipment_id if active_assignment else None,
             })
 
+    def validate_protected_profile(self, employee):
+        expected_values = {
+            'work_schedule': str(employee.work_schedule_id or ''),
+            'brigade_number': str(employee.brigade_number or ''),
+            'watch_composition': str(employee.watch_composition_id or ''),
+        }
+        for field_name, expected_value in expected_values.items():
+            prefixed_name = self.add_prefix(field_name)
+            if prefixed_name not in self.data:
+                continue
+            submitted_value = str(self.data.get(prefixed_name) or '').strip()
+            if submitted_value != expected_value:
+                raise ValidationError(
+                    self.WATCH_PROFILE_EDIT_ERROR,
+                    code='admin_watch_profile_forbidden',
+                )
+
+        rotation_name = self.add_prefix('rotation')
+        if rotation_name in self.data:
+            submitted_rotation = str(self.data.get(rotation_name) or '').strip()
+            if submitted_rotation != str(employee.rotation or '').strip():
+                raise ValidationError(
+                    self.WATCH_PROFILE_EDIT_ERROR,
+                    code='admin_watch_profile_forbidden',
+                )
+
     def clean(self):
         cleaned_data = super().clean()
         role = cleaned_data.get('assignment_role')
@@ -726,6 +764,21 @@ class AdminEmployeeEditForm(EmployeeCardForm):
             except ValidationError as error:
                 self.add_error('assignment_equipment', error)
         return cleaned_data
+
+    def save(self, commit=True):
+        protected_profile = {
+            'work_schedule_id': self.instance.work_schedule_id,
+            'brigade_number': self.instance.brigade_number,
+            'watch_composition_id': self.instance.watch_composition_id,
+            'rotation': self.instance.rotation,
+        }
+        employee = super().save(commit=False)
+        for field_name, value in protected_profile.items():
+            setattr(employee, field_name, value)
+        if commit:
+            employee.save()
+            self.save_m2m()
+        return employee
 
     def save_work_assignment(self, *, assigned_by):
         equipment = self.cleaned_data.get('assignment_equipment')
