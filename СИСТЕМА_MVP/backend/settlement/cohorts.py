@@ -19,6 +19,7 @@ from rotations.models import (
     ArrivalRosterRoutingEvent,
     ArrivalRosterRoutingRow,
     ArrivalRosterVersion,
+    EmployeeWatchProfileChange,
 )
 from rotations.arrival_roster_routing import (
     ERROR_OFFICIAL_ASSIGNMENT_INCONSISTENT,
@@ -245,10 +246,21 @@ def _routing_member_context(*, cohort, member, ready, period):
         or event.routing_row_id != row.pk
         or phase_row.pk != ready.brigade_phase_row_id
         or phase_row.version.watch_period_id != period.pk
-        or phase_row.version.work_schedule_id != member.resident.employee.work_schedule_id
-        or phase_row.brigade_number != member.resident.employee.brigade_number
+        or phase_row.version.work_schedule_id
+        != ready.watch_profile_work_schedule_id
+        or phase_row.brigade_number != ready.watch_profile_brigade_number
         or phase_row.phase != ready.work_shift
         or member.work_shift != ready.work_shift
+        or member.watch_profile_source_kind != ready.watch_profile_source_kind
+        or member.employee_watch_profile_change_id
+        != ready.employee_watch_profile_change_id
+        or member.watch_profile_work_schedule_id
+        != ready.watch_profile_work_schedule_id
+        or member.watch_profile_brigade_number
+        != ready.watch_profile_brigade_number
+        or member.watch_profile_watch_composition_id
+        != ready.watch_profile_watch_composition_id
+        or member.watch_profile_fingerprint != ready.watch_profile_fingerprint
         or member.participation_status != _participation_status(row)
         or member.arrival_at != _aware_day(_snapshot_date(row.dates_snapshot, 'arrival_on'))
         or member.departure_at != _aware_day(
@@ -371,6 +383,8 @@ def revalidate_routing_cohort_members(*, cohort, members=None):
                 'cohort__routing_batch__arrival_roster_version',
                 'cohort__watch_period',
                 'resident__employee__work_schedule',
+                'watch_profile_work_schedule',
+                'employee_watch_profile_change',
                 'routing_row',
                 'routing_event__crew_plan_slot__plan__role',
                 'official_equipment_assignment__source_crew_plan_slot__plan__role',
@@ -786,6 +800,7 @@ class _RoutingCohortLockPlan:
     resident_ids: tuple[int, ...]
     employee_ids: tuple[int, ...]
     work_schedule_ids: tuple[int, ...]
+    watch_profile_change_ids: tuple[int, ...]
     crew_plan_ids: tuple[int, ...]
     crew_plan_slot_ids: tuple[int, ...]
     equipment_assignment_ids: tuple[int, ...]
@@ -793,10 +808,63 @@ class _RoutingCohortLockPlan:
     phase_row_ids: tuple[int, ...]
     cohort_ids: tuple[int, ...]
     cohort_member_ids: tuple[int, ...]
+    readiness_signature: tuple | None
 
 
 def _ordered_ids(queryset):
     return tuple(queryset.order_by('pk').values_list('pk', flat=True))
+
+
+def _readiness_signature(readiness):
+    return (
+        readiness.batch_id,
+        readiness.watch_period_id,
+        tuple(
+            (
+                item.routing_row_id,
+                item.routing_event_id,
+                item.brigade_phase_row_id,
+                item.resident_id,
+                item.employee_id,
+                item.work_shift,
+                item.equipment_assignment_id,
+                item.crew_plan_slot_id,
+                item.watch_profile_source_kind,
+                item.employee_watch_profile_change_id,
+                item.watch_profile_work_schedule_id,
+                item.watch_profile_brigade_number,
+                item.watch_profile_watch_composition_id,
+                item.watch_profile_fingerprint,
+            )
+            for item in sorted(
+                readiness.ready_members,
+                key=lambda member: member.routing_row_id,
+            )
+        ),
+        tuple(sorted(readiness.excluded_not_arriving_row_ids)),
+    )
+
+
+def _ready_readiness(*, batch_id):
+    try:
+        readiness = build_arrival_roster_cohort_readiness(batch_id=batch_id)
+    except SettlementCohortReadinessError as error:
+        if getattr(error, 'code', None) == ERROR_BATCH_NOT_FOUND:
+            code = ERROR_BATCH_NOT_FOUND
+        else:
+            code = ERROR_PROVENANCE_INCONSISTENT
+        raise _creation_error(code, str(error)) from error
+    if not readiness.is_ready:
+        blocker_codes = tuple(blocker.code for blocker in readiness.blockers)
+        code = ERROR_ROUTING_STALE if any(
+            blocker in {'batch_stale', 'routing_stale'} for blocker in blocker_codes
+        ) else ERROR_COHORT_NOT_READY
+        raise _creation_error(
+            code,
+            'Состав нельзя сформировать: не все строки передачи готовы.',
+            blocker_codes=blocker_codes,
+        )
+    return readiness
 
 
 def _routing_cohort_lock_plan(*, batch_id, actor_access_id):
@@ -841,20 +909,50 @@ def _routing_cohort_lock_plan(*, batch_id, actor_access_id):
         for row in routing_rows
         if row['employee_id'] is not None
     }))
-    work_schedule_ids = tuple(sorted(set(
-        Employee.objects.filter(pk__in=employee_ids)
-        .exclude(work_schedule_id__isnull=True)
-        .values_list('work_schedule_id', flat=True)
-    )))
+    cohort_ids = _ordered_ids(
+        SettlementCohort._base_manager.filter(
+            watch_period_id=batch_plan['watch_period_id'],
+        )
+    )
+    existing_cohort = SettlementCohort._base_manager.filter(
+        routing_batch_id=batch_plan['pk'],
+    ).exists()
+    readiness = None if existing_cohort else _ready_readiness(batch_id=batch_plan['pk'])
+    work_schedule_ids = tuple(sorted({
+        item.watch_profile_work_schedule_id
+        for item in (() if readiness is None else readiness.ready_members)
+        if item.watch_profile_work_schedule_id is not None
+    }))
+    watch_profile_change_ids = tuple(sorted({
+        item.employee_watch_profile_change_id
+        for item in (() if readiness is None else readiness.ready_members)
+        if item.employee_watch_profile_change_id is not None
+    }))
+    if existing_cohort:
+        work_schedule_ids = tuple(sorted(set(
+            SettlementCohortMember._base_manager.filter(
+                cohort__routing_batch_id=batch_plan['pk'],
+            ).values_list(
+                'brigade_phase_row__version__work_schedule_id',
+                flat=True,
+            )
+        ) | set(
+            SettlementCohortMember._base_manager.filter(
+                cohort__routing_batch_id=batch_plan['pk'],
+                watch_profile_work_schedule_id__isnull=False,
+            ).values_list('watch_profile_work_schedule_id', flat=True)
+        )))
+        watch_profile_change_ids = _ordered_ids(
+            EmployeeWatchProfileChange._base_manager.filter(
+                settlement_cohort_members_by_watch_profile_change__cohort__routing_batch_id=(
+                    batch_plan['pk']
+                ),
+            ).distinct()
+        )
     phase_version_ids = _ordered_ids(
         WatchPeriodBrigadePhaseVersion._base_manager.filter(
             watch_period_id=batch_plan['watch_period_id'],
             work_schedule_id__in=work_schedule_ids,
-        )
-    )
-    cohort_ids = _ordered_ids(
-        SettlementCohort._base_manager.filter(
-            watch_period_id=batch_plan['watch_period_id'],
         )
     )
     return _RoutingCohortLockPlan(
@@ -869,6 +967,7 @@ def _routing_cohort_lock_plan(*, batch_id, actor_access_id):
         resident_ids=tuple(sorted({row['resident_id'] for row in routing_rows})),
         employee_ids=employee_ids,
         work_schedule_ids=work_schedule_ids,
+        watch_profile_change_ids=watch_profile_change_ids,
         crew_plan_ids=crew_plan_ids,
         crew_plan_slot_ids=crew_plan_slot_ids,
         equipment_assignment_ids=tuple(sorted({
@@ -885,6 +984,9 @@ def _routing_cohort_lock_plan(*, batch_id, actor_access_id):
         cohort_ids=cohort_ids,
         cohort_member_ids=_ordered_ids(
             SettlementCohortMember._base_manager.filter(cohort_id__in=cohort_ids)
+        ),
+        readiness_signature=(
+            None if readiness is None else _readiness_signature(readiness)
         ),
     )
 
@@ -954,6 +1056,10 @@ def _lock_routing_cohort_graph(plan):
     )
     residents = _lock_exact(SettlementResident._base_manager.all(), plan.resident_ids)
     schedules = _lock_exact(WorkSchedule.objects.all(), plan.work_schedule_ids)
+    watch_profile_changes = _lock_exact(
+        EmployeeWatchProfileChange._base_manager.all(),
+        plan.watch_profile_change_ids,
+    )
     phase_versions = _lock_exact(
         WatchPeriodBrigadePhaseVersion._base_manager.all(),
         plan.phase_version_ids,
@@ -975,15 +1081,10 @@ def _lock_routing_cohort_graph(plan):
             routing_row_id__in=current_row_ids,
         )
     )
-    current_schedule_ids = tuple(sorted({
-        employee.work_schedule_id
-        for employee in employees
-        if employee.work_schedule_id is not None
-    }))
     current_phase_version_ids = _ordered_ids(
         WatchPeriodBrigadePhaseVersion._base_manager.filter(
             watch_period_id=plan.watch_period_id,
-            work_schedule_id__in=current_schedule_ids,
+            work_schedule_id__in=plan.work_schedule_ids,
         )
     )
     current_phase_row_ids = _ordered_ids(
@@ -1004,7 +1105,6 @@ def _lock_routing_cohort_graph(plan):
         or tuple(sorted({
             row.employee_id for row in routing_rows if row.employee_id is not None
         })) != plan.employee_ids
-        or current_schedule_ids != plan.work_schedule_ids
         or current_phase_version_ids != plan.phase_version_ids
         or current_phase_row_ids != plan.phase_row_ids
         or current_cohort_ids != plan.cohort_ids
@@ -1037,6 +1137,7 @@ def _lock_routing_cohort_graph(plan):
         'routing_events': routing_events,
         'residents': residents,
         'schedules': schedules,
+        'watch_profile_changes': watch_profile_changes,
         'phase_versions': phase_versions,
         'phase_rows': phase_rows,
         'cohorts': cohorts,
@@ -1061,6 +1162,28 @@ def _canonical_fingerprint_or_none(snapshot):
         return None
 
 
+def _ready_watch_profile_snapshot(ready):
+    return {
+        'source_kind': ready.watch_profile_source_kind,
+        'employee_watch_profile_change_id': ready.employee_watch_profile_change_id,
+        'work_schedule_id': ready.watch_profile_work_schedule_id,
+        'brigade_number': ready.watch_profile_brigade_number,
+        'watch_composition_id': ready.watch_profile_watch_composition_id,
+        'profile_fingerprint': ready.watch_profile_fingerprint,
+    }
+
+
+def _member_watch_profile_snapshot(member):
+    return {
+        'source_kind': member.watch_profile_source_kind,
+        'employee_watch_profile_change_id': member.employee_watch_profile_change_id,
+        'work_schedule_id': member.watch_profile_work_schedule_id,
+        'brigade_number': member.watch_profile_brigade_number,
+        'watch_composition_id': member.watch_profile_watch_composition_id,
+        'profile_fingerprint': member.watch_profile_fingerprint,
+    }
+
+
 def _cohort_member_source_row(member):
     return {
         'routing_row_id': member.routing_row_id,
@@ -1083,14 +1206,31 @@ def _validate_existing_routing_cohort(*, cohort, graph):
             snapshot['members'],
             key=lambda item: item['routing_row_id'],
         ))
+        expected_watch_profiles = tuple(sorted(
+            snapshot.get('watch_profiles', ()),
+            key=lambda item: item['routing_row_id'],
+        ))
         excluded = tuple(snapshot['excluded_not_arriving_row_ids'])
         _snapshot, fingerprint = _canonical_snapshot(snapshot)
     except (KeyError, TypeError, ValueError):
         fingerprint = None
         expected_members = ()
+        expected_watch_profiles = ()
         excluded = ()
     actual_members = tuple(sorted(
         (_cohort_member_source_row(member) for member in members),
+        key=lambda item: item['routing_row_id'],
+    ))
+    actual_watch_profiles = tuple(sorted(
+        (
+            {
+                'routing_row_id': member.routing_row_id,
+                **_member_watch_profile_snapshot(member),
+            }
+            for member in members
+            if member.watch_profile_source_kind
+            != SettlementCohortMember.WatchProfileSourceKind.UNVERIFIED_LEGACY
+        ),
         key=lambda item: item['routing_row_id'],
     ))
     expected_member_row_ids = {
@@ -1114,6 +1254,7 @@ def _validate_existing_routing_cohort(*, cohort, graph):
         and list(excluded) == sorted(set(excluded))
         and fingerprint == cohort.input_fingerprint
         and actual_members == expected_members
+        and actual_watch_profiles == expected_watch_profiles
         and len(members) == len(expected_members)
         and cohort.created_by_id == cohort.approved_by_id
         and cohort.approved_at is not None
@@ -1138,6 +1279,27 @@ def _validate_existing_routing_cohort(*, cohort, graph):
             and member.routing_event.routing_row_id == member.routing_row_id
             and member.basis_type == _ROUTING_BASIS_TYPE
             and member.basis_id == str(member.routing_row_id)
+            and (
+                (
+                    member.watch_profile_source_kind
+                    == SettlementCohortMember.WatchProfileSourceKind.UNVERIFIED_LEGACY
+                    and member.employee_watch_profile_change_id is None
+                    and member.watch_profile_work_schedule_id is None
+                    and member.watch_profile_brigade_number is None
+                    and member.watch_profile_watch_composition_id is None
+                    and member.watch_profile_fingerprint == ''
+                    and 'watch_profile' not in (member.basis_snapshot or {})
+                )
+                or (
+                    member.watch_profile_source_kind
+                    in {
+                        SettlementCohortMember.WatchProfileSourceKind.LEGACY_BASELINE,
+                        SettlementCohortMember.WatchProfileSourceKind.APPLIED_CHANGE,
+                    }
+                    and (member.basis_snapshot or {}).get('watch_profile')
+                    == _member_watch_profile_snapshot(member)
+                )
+            )
             and member.shift_source_fingerprint
             == _canonical_fingerprint_or_none(member.shift_source_snapshot)
             and (
@@ -1209,6 +1371,7 @@ def _routing_member_snapshots(*, ready, row, event, phase_row, assignment):
         'dates': row.dates_snapshot,
         'role': row.role_snapshot,
         'role_basis': row.role_basis_snapshot,
+        'watch_profile': _ready_watch_profile_snapshot(ready),
     }
     if assignment is None:
         shift_snapshot = {
@@ -1248,6 +1411,49 @@ def _trusted_save_routing_member(member):
     return member
 
 
+def _validated_ready_watch_profile(*, ready, employee, graph):
+    schedules = {schedule.pk: schedule for schedule in graph['schedules']}
+    changes = {change.pk: change for change in graph['watch_profile_changes']}
+    source_kind = ready.watch_profile_source_kind
+    change = changes.get(ready.employee_watch_profile_change_id)
+    schedule = schedules.get(ready.watch_profile_work_schedule_id)
+    if (
+        employee is None
+        or source_kind
+        not in {
+            SettlementCohortMember.WatchProfileSourceKind.LEGACY_BASELINE,
+            SettlementCohortMember.WatchProfileSourceKind.APPLIED_CHANGE,
+        }
+        or schedule is None
+        or ready.watch_profile_watch_composition_id
+        != graph['period'].watch_composition_id
+        or not isinstance(ready.watch_profile_fingerprint, str)
+        or len(ready.watch_profile_fingerprint) != 64
+        or any(character not in '0123456789abcdef' for character in ready.watch_profile_fingerprint)
+    ):
+        raise _creation_error(
+            ERROR_PROVENANCE_INCONSISTENT,
+            'Effective-профиль готовой строки повреждён или неполон.',
+        )
+    if source_kind == SettlementCohortMember.WatchProfileSourceKind.LEGACY_BASELINE:
+        if ready.employee_watch_profile_change_id is not None:
+            raise _creation_error(
+                ERROR_PROVENANCE_INCONSISTENT,
+                'Baseline-профиль содержит ссылку на изменение.',
+            )
+    elif (
+        change is None
+        or change.employee_id != employee.pk
+        or change.status != EmployeeWatchProfileChange.Status.APPLIED
+        or change.effective_on > graph['period'].starts_on
+    ):
+        raise _creation_error(
+            ERROR_PROVENANCE_INCONSISTENT,
+            'Exact применённое изменение профиля больше не действует.',
+        )
+    return schedule, change
+
+
 def _new_routing_member(*, cohort, ready, graph):
     rows = {row.pk: row for row in graph['routing_rows']}
     events = {event.pk: event for event in graph['routing_events']}
@@ -1261,6 +1467,11 @@ def _new_routing_member(*, cohort, ready, graph):
     employee = employees.get(ready.employee_id)
     phase_row = phases.get(ready.brigade_phase_row_id)
     assignment = assignments.get(ready.equipment_assignment_id)
+    schedule, change = _validated_ready_watch_profile(
+        ready=ready,
+        employee=employee,
+        graph=graph,
+    )
     if (
         row is None
         or event is None
@@ -1272,8 +1483,8 @@ def _new_routing_member(*, cohort, ready, graph):
         or row.employee_id != employee.pk
         or event.routing_row_id != row.pk
         or phase_row.version.watch_period_id != graph['period'].pk
-        or phase_row.version.work_schedule_id != employee.work_schedule_id
-        or phase_row.brigade_number != employee.brigade_number
+        or phase_row.version.work_schedule_id != ready.watch_profile_work_schedule_id
+        or phase_row.brigade_number != ready.watch_profile_brigade_number
         or phase_row.phase != ready.work_shift
         or ready.crew_plan_slot_id != event.crew_plan_slot_id
         or ready.equipment_assignment_id != event.equipment_assignment_id
@@ -1308,7 +1519,15 @@ def _new_routing_member(*, cohort, ready, graph):
             if participation == SettlementCohortMember.ParticipationStatus.PARTICIPATING
             else 'Статус перенесён из утверждённой передачи реестра.'
         ),
-        expected_schedule_regime=employee.work_schedule.code,
+        expected_schedule_regime=schedule.code,
+        watch_profile_source_kind=ready.watch_profile_source_kind,
+        employee_watch_profile_change=change,
+        watch_profile_work_schedule=schedule,
+        watch_profile_brigade_number=ready.watch_profile_brigade_number,
+        watch_profile_watch_composition_id=(
+            ready.watch_profile_watch_composition_id
+        ),
+        watch_profile_fingerprint=ready.watch_profile_fingerprint,
         work_shift=ready.work_shift,
         shift_source_kind=shift_source_kind,
         official_equipment_assignment=assignment,
@@ -1350,6 +1569,16 @@ def _source_snapshot(*, graph, readiness):
         'arrival_roster_version_id': graph['version'].pk,
         'watch_period_id': graph['period'].pk,
         'members': members,
+        'watch_profiles': [
+            {
+                'routing_row_id': item.routing_row_id,
+                **_ready_watch_profile_snapshot(item),
+            }
+            for item in sorted(
+                readiness.ready_members,
+                key=lambda member: member.routing_row_id,
+            )
+        ],
         'excluded_not_arriving_row_ids': sorted(readiness.excluded_not_arriving_row_ids),
     }
     return _canonical_snapshot(snapshot)
@@ -1367,6 +1596,12 @@ def _assert_complete_new_graph(*, cohort, readiness):
             item.routing_event_id,
             item.brigade_phase_row_id,
             item.equipment_assignment_id,
+            item.watch_profile_source_kind,
+            item.employee_watch_profile_change_id,
+            item.watch_profile_work_schedule_id,
+            item.watch_profile_brigade_number,
+            item.watch_profile_watch_composition_id,
+            item.watch_profile_fingerprint,
         )
         for item in readiness.ready_members
     ))
@@ -1376,6 +1611,12 @@ def _assert_complete_new_graph(*, cohort, readiness):
             member.routing_event_id,
             member.brigade_phase_row_id,
             member.official_equipment_assignment_id,
+            member.watch_profile_source_kind,
+            member.employee_watch_profile_change_id,
+            member.watch_profile_work_schedule_id,
+            member.watch_profile_brigade_number,
+            member.watch_profile_watch_composition_id,
+            member.watch_profile_fingerprint,
         )
         for member in members
     )
@@ -1405,23 +1646,14 @@ def _create_approved_arrival_roster_cohort_once(*, plan):
     if existing is not None:
         return _validate_existing_routing_cohort(cohort=existing, graph=graph)
 
-    try:
-        readiness = build_arrival_roster_cohort_readiness(batch_id=graph['batch'].pk)
-    except SettlementCohortReadinessError as error:
-        if getattr(error, 'code', None) == ERROR_BATCH_NOT_FOUND:
-            code = ERROR_BATCH_NOT_FOUND
-        else:
-            code = ERROR_PROVENANCE_INCONSISTENT
-        raise _creation_error(code, str(error)) from error
-    if not readiness.is_ready:
-        blocker_codes = tuple(blocker.code for blocker in readiness.blockers)
-        code = ERROR_ROUTING_STALE if any(
-            blocker in {'batch_stale', 'routing_stale'} for blocker in blocker_codes
-        ) else ERROR_COHORT_NOT_READY
+    readiness = _ready_readiness(batch_id=graph['batch'].pk)
+    if (
+        plan.readiness_signature is None
+        or _readiness_signature(readiness) != plan.readiness_signature
+    ):
         raise _creation_error(
-            code,
-            'Состав нельзя сформировать: не все строки передачи готовы.',
-            blocker_codes=blocker_codes,
+            ERROR_PROVENANCE_INCONSISTENT,
+            'Readiness и effective-профиль изменились после построения lock plan.',
         )
     if readiness.batch_id != graph['batch'].pk or readiness.watch_period_id != graph['period'].pk:
         raise _creation_error(

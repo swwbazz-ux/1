@@ -1,5 +1,6 @@
 import hashlib
 import json
+from dataclasses import replace
 from unittest import mock
 
 from django.core.exceptions import ValidationError
@@ -14,6 +15,7 @@ from rotations.models import (
     ArrivalRosterRoutingEvent,
     ArrivalRosterRoutingRow,
     ArrivalRosterVersion,
+    EmployeeWatchProfileChange,
 )
 from shifts.models import (
     WatchPeriodBrigadePhaseRow,
@@ -71,6 +73,12 @@ class ArrivalRosterCohortCreationTests(TestCase):
     )
     _event = readiness_fixtures.ArrivalRosterCohortReadinessTests._event
     _direct_row = readiness_fixtures.ArrivalRosterCohortReadinessTests._direct_row
+    _create_profile_draft = (
+        readiness_fixtures.ArrivalRosterCohortReadinessTests._create_profile_draft
+    )
+    _apply_profile_change = (
+        readiness_fixtures.ArrivalRosterCohortReadinessTests._apply_profile_change
+    )
 
     def _internal_employee(self, name, *, brigade=2, production=False):
         employee = readiness_fixtures.ArrivalRosterCohortReadinessTests._internal_employee(
@@ -185,6 +193,29 @@ class ArrivalRosterCohortCreationTests(TestCase):
                 member.shift_source_fingerprint,
                 self._canonical_sha(member.shift_source_snapshot),
             )
+            self.assertEqual(
+                member.watch_profile_source_kind,
+                SettlementCohortMember.WatchProfileSourceKind.LEGACY_BASELINE,
+            )
+            self.assertIsNone(member.employee_watch_profile_change_id)
+            self.assertEqual(member.watch_profile_work_schedule_id, self.schedule.pk)
+            self.assertEqual(member.watch_profile_brigade_number, 2)
+            self.assertEqual(
+                member.watch_profile_watch_composition_id,
+                self.period.watch_composition_id,
+            )
+            self.assertRegex(member.watch_profile_fingerprint, r'^[0-9a-f]{64}$')
+            self.assertEqual(
+                member.basis_snapshot['watch_profile'],
+                {
+                    'source_kind': member.watch_profile_source_kind,
+                    'employee_watch_profile_change_id': None,
+                    'work_schedule_id': member.watch_profile_work_schedule_id,
+                    'brigade_number': member.watch_profile_brigade_number,
+                    'watch_composition_id': member.watch_profile_watch_composition_id,
+                    'profile_fingerprint': member.watch_profile_fingerprint,
+                },
+            )
         snapshot = cohort.source_snapshot
         self.assertEqual(snapshot['source_kind'], 'arrival_roster_routing')
         self.assertEqual(snapshot['routing_batch_id'], self.batch.pk)
@@ -195,6 +226,15 @@ class ArrivalRosterCohortCreationTests(TestCase):
             [direct.pk, production.pk],
         )
         self.assertEqual(snapshot['excluded_not_arriving_row_ids'], [not_arriving.pk])
+        self.assertEqual(
+            [item['routing_row_id'] for item in snapshot['watch_profiles']],
+            [direct.pk, production.pk],
+        )
+        self.assertTrue(all(
+            item['source_kind'] == 'legacy_baseline'
+            and item['employee_watch_profile_change_id'] is None
+            for item in snapshot['watch_profiles']
+        ))
         self.assertEqual(cohort.input_fingerprint, self._canonical_sha(snapshot))
         serialized = json.dumps({
             'cohort': snapshot,
@@ -238,6 +278,112 @@ class ArrivalRosterCohortCreationTests(TestCase):
                 status=WatchPeriodBrigadePhaseVersion.Status.CONFIRMED,
             ).confirmed_at,
         })
+
+    def test_applied_profile_is_locked_and_saved_as_exact_private_provenance(self):
+        self._confirm_calendar()
+        employee = self._internal_employee('Applied profile T3 writer', brigade=1)
+        applied = self._apply_profile_change(employee, brigade=2)
+        row = self._direct_row(employee=employee)
+        locked_change_ids = []
+        original_lock_exact = cohort_service._lock_exact
+
+        def record_exact_lock(queryset, expected_ids, **kwargs):
+            if queryset.model is EmployeeWatchProfileChange:
+                locked_change_ids.extend(expected_ids)
+            return original_lock_exact(queryset, expected_ids, **kwargs)
+
+        with mock.patch.object(
+            cohort_service,
+            '_lock_exact',
+            side_effect=record_exact_lock,
+        ):
+            cohort = self._create()
+
+        member = cohort.members.get(routing_row=row)
+        self.assertEqual(locked_change_ids, [applied.pk])
+        self.assertEqual(
+            member.watch_profile_source_kind,
+            SettlementCohortMember.WatchProfileSourceKind.APPLIED_CHANGE,
+        )
+        self.assertEqual(member.employee_watch_profile_change_id, applied.pk)
+        self.assertEqual(member.watch_profile_work_schedule_id, self.schedule.pk)
+        self.assertEqual(member.watch_profile_brigade_number, 2)
+        self.assertEqual(
+            member.watch_profile_watch_composition_id,
+            self.period.watch_composition_id,
+        )
+        expected_profile = {
+            'source_kind': 'applied_change',
+            'employee_watch_profile_change_id': applied.pk,
+            'work_schedule_id': self.schedule.pk,
+            'brigade_number': 2,
+            'watch_composition_id': self.period.watch_composition_id,
+            'profile_fingerprint': member.watch_profile_fingerprint,
+        }
+        self.assertEqual(member.basis_snapshot['watch_profile'], expected_profile)
+        self.assertEqual(
+            cohort.source_snapshot['watch_profiles'],
+            [{'routing_row_id': row.pk, **expected_profile}],
+        )
+        self.assertEqual(
+            cohort.input_fingerprint,
+            self._canonical_sha(cohort.source_snapshot),
+        )
+        serialized = json.dumps(
+            {
+                'basis': member.basis_snapshot,
+                'cohort': cohort.source_snapshot,
+            },
+            ensure_ascii=False,
+        )
+        self.assertNotIn(applied.basis, serialized)
+        self.assertNotIn(applied.basis_number, serialized)
+        self.assertNotIn(employee.full_name, serialized)
+        self.assertNotIn('access', serialized.lower())
+
+    def test_profile_drift_between_preflight_and_locked_readiness_rolls_back(self):
+        self._confirm_calendar()
+        self._direct_row(employee=self._internal_employee('Profile drift T3 writer'))
+        preliminary = cohort_service.build_arrival_roster_cohort_readiness(
+            batch_id=self.batch.pk,
+        )
+        drifted_member = replace(
+            preliminary.ready_members[0],
+            watch_profile_fingerprint='f' * 64,
+        )
+        drifted = replace(preliminary, ready_members=(drifted_member,))
+
+        with mock.patch.object(
+            cohort_service,
+            'build_arrival_roster_cohort_readiness',
+            side_effect=(preliminary, drifted),
+        ):
+            with self.assertRaises(ArrivalRosterCohortCreationError) as caught:
+                self._create()
+
+        self.assertEqual(caught.exception.code, ERROR_PROVENANCE_INCONSISTENT)
+        self.assertEqual(SettlementCohort.objects.count(), 0)
+        self.assertEqual(SettlementCohortMember.objects.count(), 0)
+
+    def test_tampered_applied_profile_change_blocks_before_any_cohort_write(self):
+        self._confirm_calendar()
+        employee = self._internal_employee('Tampered profile T3 writer', brigade=1)
+        applied = self._apply_profile_change(employee, brigade=2)
+        self._direct_row(employee=employee)
+        EmployeeWatchProfileChange._base_manager.filter(pk=applied.pk).update(
+            source_fingerprint='0' * 64,
+        )
+
+        with self.assertRaises(ArrivalRosterCohortCreationError) as caught:
+            self._create()
+
+        self.assertEqual(caught.exception.code, ERROR_COHORT_NOT_READY)
+        self.assertIn(
+            'employee_watch_profile_inconsistent',
+            caught.exception.blocker_codes,
+        )
+        self.assertEqual(SettlementCohort.objects.count(), 0)
+        self.assertEqual(SettlementCohortMember.objects.count(), 0)
 
     def test_exact_clerk_access_is_fail_closed_without_role_fallback(self):
         self._confirm_calendar()
@@ -384,6 +530,46 @@ class ArrivalRosterCohortCreationTests(TestCase):
             'created_by_id': second.created_by_id,
             'fingerprint': second.input_fingerprint,
         })
+
+    def test_historical_unverified_member_is_returned_without_backfill(self):
+        self._confirm_calendar()
+        row = self._direct_row(employee=self._internal_employee(
+            'Historical unverified T3 writer',
+        ))
+        cohort = self._create()
+        member = cohort.members.get(routing_row=row)
+        historical_source = json.loads(json.dumps(cohort.source_snapshot))
+        historical_source.pop('watch_profiles')
+        historical_basis = dict(member.basis_snapshot)
+        historical_basis.pop('watch_profile')
+        SettlementCohort._base_manager.filter(pk=cohort.pk).update(
+            source_snapshot=historical_source,
+            input_fingerprint=self._canonical_sha(historical_source),
+        )
+        SettlementCohortMember._base_manager.filter(pk=member.pk).update(
+            watch_profile_source_kind=(
+                SettlementCohortMember.WatchProfileSourceKind.UNVERIFIED_LEGACY
+            ),
+            employee_watch_profile_change_id=None,
+            watch_profile_work_schedule_id=None,
+            watch_profile_brigade_number=None,
+            watch_profile_watch_composition_id=None,
+            watch_profile_fingerprint='',
+            basis_snapshot=historical_basis,
+        )
+
+        returned = self._create()
+
+        member.refresh_from_db()
+        returned.refresh_from_db()
+        self.assertEqual(returned.pk, cohort.pk)
+        self.assertEqual(
+            member.watch_profile_source_kind,
+            SettlementCohortMember.WatchProfileSourceKind.UNVERIFIED_LEGACY,
+        )
+        self.assertIsNone(member.watch_profile_work_schedule_id)
+        self.assertNotIn('watch_profiles', returned.source_snapshot)
+        self.assertNotIn('watch_profile', member.basis_snapshot)
 
     def test_corrupted_existing_cohort_is_not_returned_or_repaired(self):
         self._confirm_calendar()
