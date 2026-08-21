@@ -58,7 +58,16 @@ class ArrivalRosterCohortProvenanceSchemaTests(TestCase):
             code='cohort-provenance-driver',
             name='Водитель provenance cohort',
         )
-        self.employee = self._employee('Основной', 1)
+        self.composition = WatchComposition.objects.create(
+            code='cohort-provenance-composition',
+            name='Состав provenance cohort',
+            is_active=True,
+        )
+        self.employee = self._employee(
+            'Основной',
+            1,
+            watch_composition=self.composition,
+        )
         self.access = EmployeeAccess.objects.create(
             employee=self.employee,
             role=self.timekeeper_role,
@@ -66,13 +75,6 @@ class ArrivalRosterCohortProvenanceSchemaTests(TestCase):
             status=EmployeeAccess.Status.ACTIVATED,
             is_active=True,
         )
-        self.composition = WatchComposition.objects.create(
-            code='cohort-provenance-composition',
-            name='Состав provenance cohort',
-            is_active=True,
-        )
-        self.employee.watch_composition = self.composition
-        self.employee.save(update_fields=['watch_composition'])
         self.work_schedule = WorkSchedule.objects.create(
             code='cohort-provenance-schedule',
             name='График provenance cohort',
@@ -105,11 +107,12 @@ class ArrivalRosterCohortProvenanceSchemaTests(TestCase):
             phase=WatchPeriodBrigadePhaseRow.Phase.DAY,
         ))
 
-    def _employee(self, label, index):
+    def _employee(self, label, index, *, watch_composition=None):
         return Employee.objects.create(
             full_name=f'Provenance {label} {index}',
             status=Employee.Status.ACTIVE,
             is_active=True,
+            watch_composition=watch_composition,
         )
 
     @staticmethod
@@ -123,10 +126,11 @@ class ArrivalRosterCohortProvenanceSchemaTests(TestCase):
                 self._insert(instance)
 
     def _routing_graph(self, index, *, employee=None):
-        employee = employee or self._employee('Routing', index)
-        if employee.watch_composition_id != self.composition.pk:
-            employee.watch_composition = self.composition
-            employee.save(update_fields=['watch_composition'])
+        employee = employee or self._employee(
+            'Routing',
+            index,
+            watch_composition=self.composition,
+        )
         period = WatchPeriod.objects.create(
             name=f'Routing provenance period {index}',
             watch_composition=self.composition,

@@ -61,20 +61,27 @@ class DriverRatingAssignmentGroupTests(
         )
         self._equipment_ordinal = 0
 
-    def _employee(self, name, *, schedule=None, brigade=1, active=True):
-        employee = self.employee(name)
-        employee.work_schedule = schedule or self.schedule_a
-        employee.brigade_number = brigade
-        if not active:
-            employee.status = Employee.Status.DEACTIVATED
-            employee.is_active = False
-        employee.save(update_fields=[
-            'work_schedule',
-            'brigade_number',
-            'status',
-            'is_active',
-        ])
-        return employee
+    def _employee(
+        self,
+        name,
+        *,
+        schedule=None,
+        brigade=1,
+        active=True,
+        watch_composition=...,
+    ):
+        return self.employee(
+            name,
+            work_schedule=schedule or self.schedule_a,
+            brigade_number=brigade,
+            watch_composition=watch_composition,
+            status=(
+                Employee.Status.ACTIVE
+                if active
+                else Employee.Status.DEACTIVATED
+            ),
+            is_active=active,
+        )
 
     def _equipment(self):
         self._equipment_ordinal += 1
@@ -740,9 +747,10 @@ class DriverRatingAssignmentGroupTests(
             )
 
     def test_new_materialization_does_not_read_watch_membership(self):
-        driver = self._employee('Водитель без вахтового состава')
-        driver.watch_composition = None
-        driver.save(update_fields=['watch_composition'])
+        driver = self._employee(
+            'Водитель без вахтового состава',
+            watch_composition=None,
+        )
         self._assignment(driver)
         passport = self.snapshot(driver, ordinal=1, trip_count=20)
         type(passport.shift).objects.filter(pk=passport.shift_id).update(

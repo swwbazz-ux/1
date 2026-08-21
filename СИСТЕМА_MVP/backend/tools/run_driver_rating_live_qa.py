@@ -92,7 +92,7 @@ from tools.rating_live_qa_contract import (  # noqa: E402
     validate_live_run_id,
 )
 from trips.models import OPEN_TRIP_STATUSES, Trip  # noqa: E402
-from users.models import Employee, WatchComposition  # noqa: E402
+from users.models import WatchComposition  # noqa: E402
 
 
 TARGET_DB_ENGINE = "django.db.backends.postgresql"
@@ -589,11 +589,7 @@ def create_live_scope(
     config: Rating30dConfig,
     onboarding: Rating30dOnboarding,
 ) -> Rating30dScope:
-    composition = WatchComposition.objects.create(
-        code="qa-rating-live-20260730",
-        name="ТЕСТОВЫЙ СОСТАВ LIVE-РЕЙТИНГА 20260730",
-        is_active=True,
-    )
+    composition = onboarding.driver_watch_composition
     day_employee_ids = tuple(sorted(
         member.employee_id
         for member in onboarding.drivers_by_brigade[DAY_BRIGADE].values()
@@ -610,17 +606,6 @@ def create_live_scope(
         raise RatingLiveQAError(
             "Live-QA ожидает две непересекающиеся группы по 53 водителя."
         )
-    driver_ids = (*day_employee_ids, *night_employee_ids)
-    if (
-        Employee.objects.filter(pk__in=driver_ids).update(
-            watch_composition=composition
-        )
-        != EXPECTED_DRIVER_COUNT * 2
-    ):
-        raise RatingLiveQAError(
-            "Не удалось привязать к тестовому составу ровно 106 водителей."
-        )
-
     watch_period = WatchPeriod.objects.create(
         name=(
             "ТЕСТОВАЯ LIVE-ВАХТА РЕЙТИНГА "
@@ -1823,7 +1808,16 @@ def main(argv: list[str] | None = None) -> int:
             day_count=simulation_days,
         )
         catalog = ReferenceCatalog(config)
-        onboarding = Rating30dOnboarding(config, catalog).run()
+        composition = WatchComposition.objects.create(
+            code="qa-rating-live-20260730",
+            name="ТЕСТОВЫЙ СОСТАВ LIVE-РЕЙТИНГА 20260730",
+            is_active=True,
+        )
+        onboarding = Rating30dOnboarding(
+            config,
+            catalog,
+            driver_watch_composition=composition,
+        ).run()
         scope = create_live_scope(config, onboarding)
         runner = RatingLiveRunner(
             config,

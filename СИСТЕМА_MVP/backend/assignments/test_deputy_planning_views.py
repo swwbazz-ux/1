@@ -60,6 +60,9 @@ class DeputyPlanningViewTests(TestCase):
             self.driver_role,
             phone='+79000000001',
             access_code='210001',
+            personnel_number='Т-001',
+            position='Водитель самосвала',
+            rotation='Бригада 1',
         )
 
         self.truck_type = EquipmentType.objects.create(name='Самосвал')
@@ -96,12 +99,21 @@ class DeputyPlanningViewTests(TestCase):
 
         self.authenticate(self.client, self.deputy_access)
 
-    def create_employee_with_access(self, full_name, role, *, phone, access_code):
+    def create_employee_with_access(
+        self,
+        full_name,
+        role,
+        *,
+        phone,
+        access_code,
+        **employee_fields,
+    ):
         employee = Employee.objects.create(
             full_name=full_name,
             phone=phone,
             status=Employee.Status.ACTIVE,
             is_active=True,
+            **employee_fields,
         )
         access = EmployeeAccess.objects.create(
             employee=employee,
@@ -552,9 +564,6 @@ class DeputyPlanningViewTests(TestCase):
         )
 
     def test_excel_export_contains_current_draft_and_is_ready_for_print(self):
-        self.driver.personnel_number = 'Т-001'
-        self.driver.rotation = 'Бригада 1'
-        self.driver.save(update_fields=['personnel_number', 'rotation'])
         plan = self.create_draft()
         _response, plan = self.autosave_slot(
             plan,
@@ -640,46 +649,38 @@ class DeputyPlanningViewTests(TestCase):
         self.assertEqual(missing_response.status_code, 404)
 
     def test_board_payload_exposes_brigade_and_record_details_without_new_schema(self):
-        self.driver.rotation = 'Бригада № 1'
-        self.driver.position = 'Водитель самосвала'
-        self.driver.personnel_number = 'Т-001'
-        self.driver.save(update_fields=['rotation', 'position', 'personnel_number'])
         second_driver, _second_access = self.create_employee_with_access(
             'Петров Алексей Иванович',
             self.driver_role,
             phone='+79000000002',
             access_code='210002',
+            rotation='Вахта 2',
         )
-        second_driver.rotation = 'Вахта 2'
-        second_driver.save(update_fields=['rotation'])
         unclassified_driver, _unclassified_access = self.create_employee_with_access(
             'Сидоров Николай Петрович',
             self.driver_role,
             phone='+79000000003',
             access_code='210003',
+            rotation='Вахта 15/15',
         )
-        unclassified_driver.rotation = 'Вахта 15/15'
-        unclassified_driver.save(update_fields=['rotation'])
         schedule = WorkSchedule.objects.get(code='schedule_12')
         third_brigade_driver, _third_access = self.create_employee_with_access(
             'Кузнецов Андрей Сергеевич',
             self.driver_role,
             phone='+79000000004',
             access_code='210004',
+            work_schedule=schedule,
+            brigade_number=3,
+            rotation='устаревшее значение',
         )
-        third_brigade_driver.work_schedule = schedule
-        third_brigade_driver.brigade_number = 3
-        third_brigade_driver.rotation = 'устаревшее значение'
-        third_brigade_driver.save(update_fields=['work_schedule', 'brigade_number', 'rotation'])
         fourth_brigade_driver, _fourth_access = self.create_employee_with_access(
             'Орлов Михаил Андреевич',
             self.driver_role,
             phone='+79000000005',
             access_code='210005',
+            work_schedule=schedule,
+            brigade_number=4,
         )
-        fourth_brigade_driver.work_schedule = schedule
-        fourth_brigade_driver.brigade_number = 4
-        fourth_brigade_driver.save(update_fields=['work_schedule', 'brigade_number'])
 
         response = self.client.get(
             reverse('deputy_mining_manager_placement'),

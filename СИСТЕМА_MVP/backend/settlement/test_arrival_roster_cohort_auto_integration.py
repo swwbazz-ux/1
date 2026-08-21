@@ -127,6 +127,9 @@ class ArrivalRosterCohortAutoIntegrationTests(TestCase):
     _apply_profile_change = (
         cohort_fixtures.ArrivalRosterCohortCreationTests._apply_profile_change
     )
+    _force_legacy_watch_profile_drift_for_test = (
+        cohort_fixtures.ArrivalRosterCohortCreationTests._force_legacy_watch_profile_drift_for_test
+    )
 
     def _anchor(self, *, bed, equipment=None, position=None, suffix='anchor'):
         anchor = AccommodationAnchor.objects.create(
@@ -316,7 +319,9 @@ class ArrivalRosterCohortAutoIntegrationTests(TestCase):
             cohort_id=cohort.pk,
             control_context=self.control_context,
         )
-        Employee.objects.filter(pk=member.resident.employee_id).update(
+        employee = Employee.objects.get(pk=member.resident.employee_id)
+        self._force_legacy_watch_profile_drift_for_test(
+            employee,
             brigade_number=1,
         )
 

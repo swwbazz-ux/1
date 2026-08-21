@@ -68,6 +68,12 @@ EMPLOYEE_CARD_UNDO_FIELDS = (
     'comment',
     'photo',
 )
+EMPLOYEE_WATCH_PROFILE_UNDO_FIELDS = (
+    'rotation',
+    'work_schedule_id',
+    'brigade_number',
+    'watch_composition_id',
+)
 EMPLOYEE_STATUS_UNDO_FIELDS = ('status', 'is_active', 'dismissed_at')
 ACCESS_UNDO_FIELDS = (
     'access_code',
@@ -193,6 +199,18 @@ def _apply_state(instance, state, *, include_updated_at=False):
         update_fields.append('updated_at')
     if update_fields:
         instance.save(update_fields=list(dict.fromkeys(update_fields)))
+
+
+def _validate_employee_watch_profile_undo(employee, state):
+    for field_name in EMPLOYEE_WATCH_PROFILE_UNDO_FIELDS:
+        if field_name not in state:
+            continue
+        restored_value = _decode_value(employee, field_name, state[field_name])
+        if getattr(employee, field_name) != restored_value:
+            raise ValidationError(
+                'Нельзя отменить действие: оно изменит график, бригаду или состав '
+                'вахты действующего сотрудника. Такие изменения выполняет Табельщик.'
+            )
 
 
 def _later_effective_actions(log):
@@ -419,6 +437,7 @@ def _undo_employee_change(log, action_code):
     if 'photo' in before and previous_photo and not default_storage.exists(previous_photo):
         raise ValidationError('Исходный файл фотографии больше не найден в хранилище.')
 
+    _validate_employee_watch_profile_undo(employee, before)
     _apply_state(employee, before, include_updated_at=True)
     if specialization_changed:
         from .work_profiles import sync_employee_production_access

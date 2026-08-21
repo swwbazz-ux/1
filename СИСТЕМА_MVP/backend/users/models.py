@@ -1,3 +1,4 @@
+from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
@@ -61,6 +62,44 @@ class WatchComposition(models.Model):
         return self.name
 
 
+class EmployeeWatchProfileQuerySet(models.QuerySet):
+    PROTECTED_FIELDS = frozenset({
+        'work_schedule',
+        'work_schedule_id',
+        'brigade_number',
+        'watch_composition',
+        'watch_composition_id',
+        'rotation',
+    })
+    WRITE_FORBIDDEN_MESSAGE = (
+        'График, бригаду и состав вахты действующего сотрудника '
+        'может изменить только Табельщик.'
+    )
+    WRITE_FORBIDDEN_CODE = 'users.employee.watch_profile_immutable'
+
+    @classmethod
+    def _raise_if_protected(cls, field_names):
+        if cls.PROTECTED_FIELDS.intersection(field_names):
+            raise ValidationError(
+                cls.WRITE_FORBIDDEN_MESSAGE,
+                code=cls.WRITE_FORBIDDEN_CODE,
+            )
+
+    def update(self, **kwargs):
+        self._raise_if_protected(kwargs)
+        return super().update(**kwargs)
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        self._raise_if_protected(fields)
+        return super().bulk_update(objs, fields, batch_size=batch_size)
+
+
+class EmployeeWatchProfileManager(
+    models.Manager.from_queryset(EmployeeWatchProfileQuerySet)
+):
+    pass
+
+
 class Employee(models.Model):
     class BrigadeNumber(models.IntegerChoices):
         BRIGADE_1 = 1, 'Бригада №1'
@@ -85,6 +124,8 @@ class Employee(models.Model):
         ARCHIVED = 'archived', 'В архиве'
         DISMISSED = 'dismissed', 'Уволен'
         DELETED = 'deleted', 'Удален'
+
+    objects = EmployeeWatchProfileManager()
 
     full_name = models.CharField('ФИО', max_length=255)
     birth_date = models.DateField('Дата рождения', null=True, blank=True)
@@ -166,6 +207,7 @@ class Employee(models.Model):
         verbose_name = 'Сотрудник'
         verbose_name_plural = 'Сотрудники'
         ordering = ['full_name']
+        base_manager_name = 'objects'
         constraints = [
             models.CheckConstraint(
                 condition=(
@@ -179,6 +221,61 @@ class Employee(models.Model):
                 name='employee_sex_valid',
             ),
         ]
+
+    def save(self, *args, **kwargs):
+        using = kwargs.get('using')
+        force_insert = kwargs.get('force_insert', False)
+        update_fields = kwargs.get('update_fields')
+        persisted = None
+        if self.pk is not None:
+            persisted = (
+                type(self)._base_manager
+                .using(using)
+                .filter(pk=self.pk)
+                .values(
+                    'work_schedule_id',
+                    'brigade_number',
+                    'watch_composition_id',
+                    'rotation',
+                )
+                .first()
+            )
+
+        if force_insert or persisted is None:
+            return super().save(*args, **kwargs)
+
+        protected_values = {
+            'work_schedule_id': self.work_schedule_id,
+            'brigade_number': self.brigade_number,
+            'watch_composition_id': self.watch_composition_id,
+            'rotation': self.rotation,
+        }
+        dirty_protected_fields = {
+            field_name
+            for field_name, value in protected_values.items()
+            if value != persisted[field_name]
+        }
+        if update_fields is None:
+            attempted_protected_fields = dirty_protected_fields
+        else:
+            normalized_update_fields = set(update_fields)
+            if {'work_schedule', 'work_schedule_id'} & normalized_update_fields:
+                normalized_update_fields.add('work_schedule_id')
+            if {'watch_composition', 'watch_composition_id'} & normalized_update_fields:
+                normalized_update_fields.add('watch_composition_id')
+            attempted_protected_fields = dirty_protected_fields & normalized_update_fields
+
+        if attempted_protected_fields:
+            raise ValidationError(
+                EmployeeWatchProfileQuerySet.WRITE_FORBIDDEN_MESSAGE,
+                code=EmployeeWatchProfileQuerySet.WRITE_FORBIDDEN_CODE,
+            )
+
+        if update_fields is not None:
+            for field_name in dirty_protected_fields:
+                setattr(self, field_name, persisted[field_name])
+
+        return super().save(*args, **kwargs)
 
     def __str__(self):
         return self.full_name

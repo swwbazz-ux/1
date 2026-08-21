@@ -1968,6 +1968,15 @@ class ArrivalRosterT14aApprovalTests(TestCase):
             actor_access_id=self.access.pk,
         )
 
+    def _force_legacy_watch_composition_drift_for_test(self, *, composition_id):
+        # Имитирует historical/pre-guard либо внешнее повреждение baseline в БД.
+        with connection.cursor() as cursor:
+            cursor.execute(
+                'UPDATE users_employee SET watch_composition_id = %s WHERE id = %s',
+                [composition_id, self.employee.pk],
+            )
+        self.employee.refresh_from_db()
+
     def test_t14a_confirmation_is_sha_guarded_idempotent_and_contains_no_pii(self):
         version = self._ready_version()
         proposal = build_arrival_roster_confirmation_proposal(
@@ -2068,7 +2077,12 @@ class ArrivalRosterT14aApprovalTests(TestCase):
             version = self._ready_version()
             proposal = self._proposal(version)
             before = Employee.objects.filter(pk=self.employee.pk).values().get()
-            Employee.objects.filter(pk=self.employee.pk).update(**mutation)
+            if 'watch_composition_id' in mutation:
+                self._force_legacy_watch_composition_drift_for_test(
+                    composition_id=mutation['watch_composition_id'],
+                )
+            else:
+                Employee.objects.filter(pk=self.employee.pk).update(**mutation)
             with self.assertRaises(ValidationError) as caught:
                 confirm_arrival_roster_version(
                     version_id=version.pk, expected_sha256=proposal['confirmation_sha256'],
@@ -2078,9 +2092,14 @@ class ArrivalRosterT14aApprovalTests(TestCase):
             Employee.objects.filter(pk=self.employee.pk).update(
                 status=before['status'], is_active=before['is_active'],
                 hired_at=before['hired_at'], dismissed_at=before['dismissed_at'],
-                watch_composition_id=before['watch_composition_id'],
                 updated_at=before['updated_at'],
             )
+            if 'watch_composition_id' in mutation:
+                self._force_legacy_watch_composition_drift_for_test(
+                    composition_id=before['watch_composition_id'],
+                )
+            else:
+                self.employee.refresh_from_db()
 
         version = self._ready_version()
         proposal = self._proposal(version)

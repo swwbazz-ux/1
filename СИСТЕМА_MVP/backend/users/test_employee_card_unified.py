@@ -259,14 +259,18 @@ class UnifiedEmployeeCardTests(TestCase):
                 self.assertEqual(employee.sex, Employee.Sex.FEMALE)
 
     def test_legacy_edit_without_sex_preserves_explicit_value(self):
-        self.employee.sex = Employee.Sex.MALE
-        self.employee.save(update_fields=['sex', 'updated_at'])
+        employee = Employee.objects.create(
+            full_name='Сотрудник с явно заданным полом',
+            phone='+79001112234',
+            sex=Employee.Sex.MALE,
+            status=Employee.Status.ACTIVE,
+        )
         form = EmployeeCardForm(
             data={
-                'full_name': self.employee.full_name,
-                'phone': self.employee.phone,
+                'full_name': employee.full_name,
+                'phone': employee.phone,
             },
-            instance=self.employee,
+            instance=employee,
         )
 
         self.assertTrue(form.is_valid(), form.errors)
@@ -556,11 +560,15 @@ class UnifiedEmployeeCardTests(TestCase):
             name='ТЕСТ_Текущий неактивный состав вахты',
             is_active=False,
         )
-        self.employee.watch_composition = inactive_composition
-        self.employee.save(update_fields=['watch_composition'])
+        employee = Employee.objects.create(
+            full_name='Сотрудник с неактивным составом вахты',
+            phone='+79001112235',
+            status=Employee.Status.ACTIVE,
+            watch_composition=inactive_composition,
+        )
 
-        admin_form = AdminEmployeeForm(instance=self.employee)
-        oup_form = OupEmployeeForm(instance=self.employee)
+        admin_form = AdminEmployeeForm(instance=employee)
+        oup_form = OupEmployeeForm(instance=employee)
 
         self.assertTrue(
             admin_form.fields['watch_composition'].queryset.filter(

@@ -502,24 +502,13 @@ class OupActionUndoTests(TestCase):
 
     def test_admin_can_undo_latest_employee_card_edit(self):
         actor = self.create_oup_actor()
-        previous_composition = WatchComposition.objects.create(
-            code='test-undo-watch-composition-previous',
-            name='ТЕСТ_ОТМЕНА_Предыдущий состав',
-        )
-        next_composition = WatchComposition.objects.create(
-            code='test-undo-watch-composition-next',
-            name='ТЕСТ_ОТМЕНА_Новый состав',
-        )
-        self.employee.watch_composition = previous_composition
         self.employee.sex = Employee.Sex.MALE
-        self.employee.save(update_fields=['watch_composition', 'sex', 'updated_at'])
+        self.employee.save(update_fields=['sex', 'updated_at'])
         before = employee_card_undo_state(self.employee)
         self.employee.full_name = 'Измененное Имя ОУП'
-        self.employee.watch_composition = next_composition
         self.employee.sex = Employee.Sex.FEMALE
         self.employee.save(update_fields=[
             'full_name',
-            'watch_composition',
             'sex',
             'updated_at',
         ])
@@ -540,10 +529,97 @@ class OupActionUndoTests(TestCase):
         self.employee.refresh_from_db()
         self.assertEqual(self.employee.full_name, 'Новый Водитель')
         self.assertEqual(self.employee.sex, Employee.Sex.MALE)
-        self.assertEqual(
-            self.employee.watch_composition,
-            previous_composition,
+
+    def test_historical_profile_change_undo_is_rejected_without_partial_write(self):
+        actor = self.create_oup_actor()
+        previous_composition = WatchComposition.objects.create(
+            code='test-undo-watch-composition-previous',
+            name='ТЕСТ_ОТМЕНА_Предыдущий состав',
         )
+        current_composition = WatchComposition.objects.create(
+            code='test-undo-watch-composition-current',
+            name='ТЕСТ_ОТМЕНА_Текущий состав',
+        )
+        employee = Employee.objects.create(
+            full_name='Измененное Историческое Имя',
+            personnel_number='UNDO-PROFILE-BLOCKED',
+            watch_composition=current_composition,
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        log = log_oup_action(
+            actor,
+            'изменена карточка сотрудника',
+            employee,
+            action_code=OUP_ACTION_EMPLOYEE_UPDATED,
+            undo_payload={
+                'version': 1,
+                'before': {
+                    'full_name': 'Исходное Историческое Имя',
+                    'watch_composition_id': previous_composition.pk,
+                },
+                'after': {
+                    'full_name': employee.full_name,
+                    'watch_composition_id': current_composition.pk,
+                },
+            },
+        )
+
+        with self.assertRaisesMessage(
+            ValidationError,
+            'Такие изменения выполняет Табельщик',
+        ):
+            undo_oup_action(
+                log_id=log.pk,
+                actor_access_id=self.admin_access.pk,
+            )
+
+        employee.refresh_from_db()
+        self.assertEqual(employee.full_name, 'Измененное Историческое Имя')
+        self.assertEqual(employee.watch_composition_id, current_composition.pk)
+        self.assertFalse(AdminActionLog.objects.filter(reversal_of=log).exists())
+
+    def test_matching_historical_profile_allows_other_fields_to_be_undone(self):
+        actor = self.create_oup_actor()
+        composition = WatchComposition.objects.create(
+            code='test-undo-watch-composition-matching',
+            name='ТЕСТ_ОТМЕНА_Совпадающий состав',
+        )
+        employee = Employee.objects.create(
+            full_name='Измененное Разрешенное Имя',
+            personnel_number='UNDO-PROFILE-MATCHING',
+            watch_composition=composition,
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        log = log_oup_action(
+            actor,
+            'изменена карточка сотрудника',
+            employee,
+            action_code=OUP_ACTION_EMPLOYEE_UPDATED,
+            undo_payload={
+                'version': 1,
+                'before': {
+                    'full_name': 'Исходное Разрешенное Имя',
+                    'watch_composition_id': composition.pk,
+                },
+                'after': {
+                    'full_name': employee.full_name,
+                    'watch_composition_id': composition.pk,
+                },
+            },
+        )
+
+        result, reversal = undo_oup_action(
+            log_id=log.pk,
+            actor_access_id=self.admin_access.pk,
+        )
+
+        employee.refresh_from_db()
+        self.assertEqual(employee.full_name, 'Исходное Разрешенное Имя')
+        self.assertEqual(employee.watch_composition_id, composition.pk)
+        self.assertIn('возвращены', result)
+        self.assertEqual(reversal.reversal_of_id, log.pk)
 
     def test_older_employee_edit_waits_for_later_action(self):
         actor = self.create_oup_actor()

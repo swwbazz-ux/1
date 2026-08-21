@@ -5,7 +5,7 @@ from datetime import timedelta
 from unittest.mock import patch
 
 from django.core.exceptions import ValidationError
-from django.db import models
+from django.db import connection, models
 from django.db.models.query import QuerySet
 from django.test import TestCase
 from django.utils import timezone
@@ -119,6 +119,39 @@ class EmployeeWatchProfileChangeServiceTests(TestCase):
             ends_on=today + timedelta(days=59),
             is_active=True,
         )
+
+    def _force_legacy_watch_profile_drift_for_test(
+        self,
+        employee,
+        *,
+        work_schedule_id=...,
+        brigade_number=...,
+        watch_composition_id=...,
+        rotation=...,
+    ):
+        # Test-only corruption: imitates historical/pre-guard or external DB drift.
+        with connection.cursor() as cursor:
+            if work_schedule_id is not ...:
+                cursor.execute(
+                    'UPDATE users_employee SET work_schedule_id = %s WHERE id = %s',
+                    [work_schedule_id, employee.pk],
+                )
+            if brigade_number is not ...:
+                cursor.execute(
+                    'UPDATE users_employee SET brigade_number = %s WHERE id = %s',
+                    [brigade_number, employee.pk],
+                )
+            if watch_composition_id is not ...:
+                cursor.execute(
+                    'UPDATE users_employee SET watch_composition_id = %s WHERE id = %s',
+                    [watch_composition_id, employee.pk],
+                )
+            if rotation is not ...:
+                cursor.execute(
+                    'UPDATE users_employee SET rotation = %s WHERE id = %s',
+                    [rotation, employee.pk],
+                )
+        employee.refresh_from_db()
 
     def _kwargs(self, **overrides):
         values = {
@@ -740,10 +773,20 @@ class EmployeeWatchProfileChangeServiceTests(TestCase):
         )
 
     def test_same_actor_and_target_employee_is_locked_only_once(self):
-        Employee.objects.filter(pk=self.actor.pk).update(
+        actor = Employee.objects.create(
+            full_name='Табельщик с исходным профилем',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
             work_schedule=self.old_schedule,
             brigade_number=1,
             watch_composition=self.old_composition,
+        )
+        access = EmployeeAccess.objects.create(
+            employee=actor,
+            role=self.timekeeper_role,
+            access_code='profile-service-same-actor-target',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
         )
         lock_order = []
         original = QuerySet.select_for_update
@@ -754,7 +797,8 @@ class EmployeeWatchProfileChangeServiceTests(TestCase):
 
         with patch.object(QuerySet, 'select_for_update', new=traced):
             create_employee_watch_profile_change_draft(**self._kwargs(
-                employee_id=self.actor.pk,
+                employee_id=actor.pk,
+                actor_access_id=access.pk,
             ))
 
         self.assertEqual(lock_order.count('Employee'), 1)
@@ -969,8 +1013,9 @@ class EmployeeWatchProfileChangeServiceTests(TestCase):
 
     def test_changed_legacy_baseline_makes_draft_stale(self):
         change = create_employee_watch_profile_change_draft(**self._kwargs())
-        Employee.objects.filter(pk=self.employee.pk).update(
-            work_schedule=self.no_brigade_schedule,
+        self._force_legacy_watch_profile_drift_for_test(
+            self.employee,
+            work_schedule_id=self.no_brigade_schedule.pk,
             brigade_number=None,
         )
 
@@ -988,8 +1033,9 @@ class EmployeeWatchProfileChangeServiceTests(TestCase):
             new_brigade_number=3,
             basis_number='Исправление после исходного решения',
         ))
-        Employee.objects.filter(pk=self.employee.pk).update(
-            work_schedule=self.no_brigade_schedule,
+        self._force_legacy_watch_profile_drift_for_test(
+            self.employee,
+            work_schedule_id=self.no_brigade_schedule.pk,
             brigade_number=None,
         )
 
@@ -1453,14 +1499,23 @@ class EmployeeWatchProfileChangeServiceTests(TestCase):
         self._assert_resolve_error(service.ERROR_WATCH_COMPOSITION_INACTIVE)
 
     def test_resolver_revalidates_brigade_policy_with_specific_codes(self):
-        Employee.objects.filter(pk=self.employee.pk).update(brigade_number=None)
+        self._force_legacy_watch_profile_drift_for_test(
+            self.employee,
+            brigade_number=None,
+        )
         self._assert_resolve_error(service.ERROR_BRIGADE_REQUIRED)
 
-        Employee.objects.filter(pk=self.employee.pk).update(brigade_number=3)
+        self._force_legacy_watch_profile_drift_for_test(
+            self.employee,
+            brigade_number=3,
+        )
         self._assert_resolve_error(service.ERROR_BRIGADE_OUT_OF_RANGE)
 
         WorkSchedule.objects.filter(pk=self.old_schedule.pk).update(brigade_count=0)
-        Employee.objects.filter(pk=self.employee.pk).update(brigade_number=1)
+        self._force_legacy_watch_profile_drift_for_test(
+            self.employee,
+            brigade_number=1,
+        )
         self._assert_resolve_error(service.ERROR_BRIGADE_NOT_ALLOWED)
 
     def test_resolver_allows_composition_different_from_target_period(self):

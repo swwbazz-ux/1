@@ -57,7 +57,16 @@ class DriverRatingMaterializationTests(
             ends_before=self.watch.ends_on + timedelta(days=1),
             comment='Изолированная техническая проверка материализации.',
         )
-        self.driver = self.employee('Водитель общего снимка рейтинга')
+        self.driver_schedule = WorkSchedule.objects.create(
+            code='rating-materialized-primary',
+            name='График materialized primary',
+            brigade_count=4,
+        )
+        self.driver = self.employee(
+            'Водитель общего снимка рейтинга',
+            work_schedule=self.driver_schedule,
+            brigade_number=2,
+        )
 
     def _refresh(self, **overrides):
         kwargs = {'shift_type': ShiftType.DAY}
@@ -108,14 +117,9 @@ class DriverRatingMaterializationTests(
         *,
         shift_type=ShiftType.DAY,
     ):
-        work_schedule = WorkSchedule.objects.create(
-            code=f'rating-materialized-{employee.id}',
-            name=f'График materialized {employee.id}',
-            brigade_count=4,
-        )
-        employee.work_schedule = work_schedule
-        employee.brigade_number = 2
-        employee.save(update_fields=['work_schedule', 'brigade_number'])
+        work_schedule = employee.work_schedule
+        self.assertIsNotNone(work_schedule)
+        self.assertEqual(employee.brigade_number, 2)
         assignment = EquipmentAssignment.objects.create(
             employee=employee,
             role=self.driver_role,
@@ -192,9 +196,11 @@ class DriverRatingMaterializationTests(
             name='Другой график materialized',
             brigade_count=4,
         )
-        self.driver.work_schedule = replacement_schedule
-        self.driver.brigade_number = 4
-        self.driver.save(update_fields=['work_schedule', 'brigade_number'])
+        self._force_employee_watch_profile_drift_for_test(
+            self.driver,
+            work_schedule_id=replacement_schedule.pk,
+            brigade_number=4,
+        )
         assignment.ended_at = self.now
         assignment.save(update_fields=['ended_at'])
         replacement_truck = Equipment.objects.create(
@@ -249,9 +255,11 @@ class DriverRatingMaterializationTests(
             name='Новый график для старого снимка',
             brigade_count=4,
         )
-        self.driver.work_schedule = replacement_schedule
-        self.driver.brigade_number = 4
-        self.driver.save(update_fields=['work_schedule', 'brigade_number'])
+        self._force_employee_watch_profile_drift_for_test(
+            self.driver,
+            work_schedule_id=replacement_schedule.pk,
+            brigade_number=4,
+        )
         self.snapshot(self.driver, ordinal=2, trip_count=23)
 
         second = self._refresh()
@@ -445,8 +453,10 @@ class DriverRatingMaterializationTests(
             code='current-composition-after-linked-shift',
             name='Текущий состав после перевода',
         )
-        driver.watch_composition = current_composition
-        driver.save(update_fields=['watch_composition'])
+        self._force_employee_watch_profile_drift_for_test(
+            driver,
+            watch_composition_id=current_composition.pk,
+        )
 
         historical_scope = discover_driver_rating_current_scope(
             self.rating_period,
@@ -489,8 +499,10 @@ class DriverRatingMaterializationTests(
             code='pending-command-current-composition',
             name='Новый состав переведённого водителя',
         )
-        driver.watch_composition = current_composition
-        driver.save(update_fields=['watch_composition'])
+        self._force_employee_watch_profile_drift_for_test(
+            driver,
+            watch_composition_id=current_composition.pk,
+        )
 
         call_command(
             'refresh_driver_rating_snapshots',
@@ -775,7 +787,16 @@ class DriverRatingMaterializationTests(
         day_schedule, _day_assignment = self._participant_group_context(
             self.driver,
         )
-        night_driver = self.employee('Водитель ночного общего снимка')
+        night_schedule = WorkSchedule.objects.create(
+            code='rating-materialized-night',
+            name='График materialized night',
+            brigade_count=4,
+        )
+        night_driver = self.employee(
+            'Водитель ночного общего снимка',
+            work_schedule=night_schedule,
+            brigade_number=2,
+        )
         night_schedule, _night_assignment = (
             self._participant_group_context(
                 night_driver,

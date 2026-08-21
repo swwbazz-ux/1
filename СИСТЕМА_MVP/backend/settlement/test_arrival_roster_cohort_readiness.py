@@ -1,6 +1,7 @@
 from dataclasses import FrozenInstanceError
 from unittest import mock
 
+from django.db import connection
 from django.test import TestCase
 from django.utils import timezone
 
@@ -103,25 +104,67 @@ class ArrivalRosterCohortReadinessTests(TestCase):
             actor_access_id=self.timekeeper_access.pk,
         )
 
-    def _internal_employee(self, name, *, brigade=2, schedule=True, production=False):
+    def _internal_employee(
+        self,
+        name,
+        *,
+        brigade=2,
+        schedule=True,
+        production=False,
+        composition=...,
+    ):
+        composition = (
+            self.period.watch_composition
+            if composition is ...
+            else composition
+        )
         values = {
             'work_schedule': self.schedule if schedule else None,
             'brigade_number': brigade,
-            'watch_composition': self.period.watch_composition,
+            'watch_composition': composition,
         }
         if production:
-            employee = self._production_employee(name)
-            Employee.objects.filter(pk=employee.pk).update(**{
-                f'{key}_id' if key in {'work_schedule', 'watch_composition'} else key: (
-                    value.pk
-                    if key in {'work_schedule', 'watch_composition'} and value
-                    else value
-                )
-                for key, value in values.items()
-            })
-            employee.refresh_from_db()
-            return employee
+            return self._employee(
+                name,
+                phone='+79995550124',
+                personnel_position=self.position,
+                base_specialization=self.driver_specialization,
+                **values,
+            )
         return self._employee(name, **values)
+
+    def _force_legacy_watch_profile_drift_for_test(
+        self,
+        employee,
+        *,
+        work_schedule_id=...,
+        brigade_number=...,
+        watch_composition_id=...,
+        rotation=...,
+    ):
+        # Test-only corruption: imitates historical/pre-guard or external DB drift.
+        with connection.cursor() as cursor:
+            if work_schedule_id is not ...:
+                cursor.execute(
+                    'UPDATE users_employee SET work_schedule_id = %s WHERE id = %s',
+                    [work_schedule_id, employee.pk],
+                )
+            if brigade_number is not ...:
+                cursor.execute(
+                    'UPDATE users_employee SET brigade_number = %s WHERE id = %s',
+                    [brigade_number, employee.pk],
+                )
+            if watch_composition_id is not ...:
+                cursor.execute(
+                    'UPDATE users_employee SET watch_composition_id = %s WHERE id = %s',
+                    [watch_composition_id, employee.pk],
+                )
+            if rotation is not ...:
+                cursor.execute(
+                    'UPDATE users_employee SET rotation = %s WHERE id = %s',
+                    [rotation, employee.pk],
+                )
+        employee.refresh_from_db()
 
     def _event(self, row, event_type):
         return self._insert(ArrivalRosterRoutingEvent(
@@ -337,9 +380,7 @@ class ArrivalRosterCohortReadinessTests(TestCase):
         employee = self._internal_employee(
             'Composition mismatch T3 readiness',
             brigade=2,
-        )
-        Employee.objects.filter(pk=employee.pk).update(
-            watch_composition=other_composition,
+            composition=other_composition,
         )
         row = self._direct_row(employee=employee)
 
@@ -458,10 +499,9 @@ class ArrivalRosterCohortReadinessTests(TestCase):
         )
         no_brigade_row = self._direct_row(employee=no_brigade)
         no_composition = self._internal_employee(
-            'Без состава вахты T3 readiness', brigade=2,
-        )
-        Employee.objects.filter(pk=no_composition.pk).update(
-            watch_composition=None,
+            'Без состава вахты T3 readiness',
+            brigade=2,
+            composition=None,
         )
         no_composition_row = self._direct_row(employee=no_composition)
 

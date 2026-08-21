@@ -9348,6 +9348,15 @@ class M5CohortTests(TestCase):
         )
         return arrival, departure
 
+    def _force_legacy_watch_composition_drift_for_test(self, employee, *, composition_id):
+        # Имитирует historical/pre-guard либо внешнее повреждение baseline в БД.
+        with connection.cursor() as cursor:
+            cursor.execute(
+                'UPDATE users_employee SET watch_composition_id = %s WHERE id = %s',
+                [composition_id, employee.pk],
+            )
+        employee.refresh_from_db()
+
     def create_cohort(self, *, period=None, supersedes=None, revision=None, fingerprint_char='1'):
         period = period or self.period
         return create_settlement_cohort(
@@ -9701,8 +9710,10 @@ class M5CohortTests(TestCase):
     def test_approval_revalidates_employee_composition_and_source_revision(self):
         cohort = self.create_cohort()
         self.add_member(cohort)
-        self.employee.watch_composition = self.other_composition
-        self.employee.save(update_fields=['watch_composition'])
+        self._force_legacy_watch_composition_drift_for_test(
+            self.employee,
+            composition_id=self.other_composition.pk,
+        )
 
         with self.assertRaises(ValidationError):
             self.approve(cohort)

@@ -79,6 +79,9 @@ class ArrivalRosterCohortCreationTests(TestCase):
     _apply_profile_change = (
         readiness_fixtures.ArrivalRosterCohortReadinessTests._apply_profile_change
     )
+    _force_legacy_watch_profile_drift_for_test = (
+        readiness_fixtures.ArrivalRosterCohortReadinessTests._force_legacy_watch_profile_drift_for_test
+    )
 
     def _internal_employee(self, name, *, brigade=2, production=False):
         employee = readiness_fixtures.ArrivalRosterCohortReadinessTests._internal_employee(
@@ -87,10 +90,6 @@ class ArrivalRosterCohortCreationTests(TestCase):
             brigade=brigade,
             production=production,
         )
-        Employee.objects.filter(pk=employee.pk).update(
-            watch_composition_id=self.composition.pk,
-        )
-        employee.refresh_from_db()
         return employee
 
     def _create(self, *, batch=None, access=None):

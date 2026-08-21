@@ -76,6 +76,39 @@ def force_snapshot_payload_update(snapshot, payload):
         )
 
 
+def force_employee_watch_profile_drift_for_test(
+    employee,
+    *,
+    work_schedule_id=...,
+    brigade_number=...,
+    watch_composition_id=...,
+    rotation=...,
+):
+    # Test-only corruption: imitates historical/pre-guard or external DB drift.
+    with connection.cursor() as cursor:
+        if work_schedule_id is not ...:
+            cursor.execute(
+                'UPDATE users_employee SET work_schedule_id = %s WHERE id = %s',
+                [work_schedule_id, employee.pk],
+            )
+        if brigade_number is not ...:
+            cursor.execute(
+                'UPDATE users_employee SET brigade_number = %s WHERE id = %s',
+                [brigade_number, employee.pk],
+            )
+        if watch_composition_id is not ...:
+            cursor.execute(
+                'UPDATE users_employee SET watch_composition_id = %s WHERE id = %s',
+                [watch_composition_id, employee.pk],
+            )
+        if rotation is not ...:
+            cursor.execute(
+                'UPDATE users_employee SET rotation = %s WHERE id = %s',
+                [rotation, employee.pk],
+            )
+    employee.refresh_from_db()
+
+
 def refresh_test_rating_materialization(rating_period):
     call_command(
         'refresh_driver_rating_snapshots',
@@ -131,13 +164,40 @@ class DriverRatingFixtureMixin:
             name='Водитель тест рейтинга',
         )
 
-    def employee(self, name):
+    def _force_employee_watch_profile_drift_for_test(
+        self,
+        employee,
+        **profile_fields,
+    ):
+        force_employee_watch_profile_drift_for_test(
+            employee,
+            **profile_fields,
+        )
+
+    def employee(
+        self,
+        name,
+        *,
+        work_schedule=None,
+        brigade_number=None,
+        watch_composition=...,
+        rotation='',
+        status=Employee.Status.ACTIVE,
+        is_active=True,
+    ):
         employee = Employee.objects.create(
             full_name=name,
-            status=Employee.Status.ACTIVE,
-            is_active=True,
+            status=status,
+            is_active=is_active,
             work_category=Employee.WorkCategory.DRIVER,
-            watch_composition=self.composition,
+            work_schedule=work_schedule,
+            brigade_number=brigade_number,
+            watch_composition=(
+                self.composition
+                if watch_composition is ...
+                else watch_composition
+            ),
+            rotation=rotation,
         )
         EmployeeAccess.objects.create(
             employee=employee,
@@ -1872,8 +1932,10 @@ class DriverRatingApiScopeTests(
             code='rating-api-current-after-transfer',
             name='Текущий пустой состав после перевода API',
         )
-        visible.watch_composition = current_composition
-        visible.save(update_fields=['watch_composition'])
+        force_employee_watch_profile_drift_for_test(
+            visible,
+            watch_composition_id=current_composition.pk,
+        )
         historical_composition.is_active = False
         historical_composition.save(update_fields=['is_active'])
         refresh_test_rating_materialization(self.rating_period)
@@ -1940,10 +2002,11 @@ class DriverRatingPortalProviderTests(
         work_schedule=None,
         shift_type=ShiftType.DAY,
     ):
-        employee = super().employee(name)
-        employee.work_schedule = work_schedule or self.work_schedule
-        employee.brigade_number = brigade_number
-        employee.save(update_fields=['work_schedule', 'brigade_number'])
+        employee = super().employee(
+            name,
+            work_schedule=work_schedule or self.work_schedule,
+            brigade_number=brigade_number,
+        )
         self._portal_equipment_ordinal += 1
         equipment = Equipment.objects.create(
             equipment_type=self.truck.equipment_type,
@@ -1969,11 +2032,11 @@ class DriverRatingPortalProviderTests(
         brigade_number=1,
         work_schedule=None,
     ):
-        employee = super().employee(name)
-        employee.work_schedule = work_schedule or self.work_schedule
-        employee.brigade_number = brigade_number
-        employee.save(update_fields=['work_schedule', 'brigade_number'])
-        return employee
+        return super().employee(
+            name,
+            work_schedule=work_schedule or self.work_schedule,
+            brigade_number=brigade_number,
+        )
 
     def refresh_group(
         self,
@@ -2272,8 +2335,10 @@ class DriverRatingPortalProviderTests(
             code='rating-provider-current-watch',
             name='Новый текущий состав водителя',
         )
-        employee.watch_composition = current_composition
-        employee.save(update_fields=['watch_composition'])
+        force_employee_watch_profile_drift_for_test(
+            employee,
+            watch_composition_id=current_composition.pk,
+        )
         ranking = DriverRatingProductionDataProvider().ranking(employee)
 
         self.assertTrue(ranking.available)

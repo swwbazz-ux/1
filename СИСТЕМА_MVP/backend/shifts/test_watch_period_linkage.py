@@ -112,6 +112,50 @@ class DriverWatchPeriodLinkageTests(TestCase):
             accepted_at=timezone.now(),
         )
 
+    def _use_driver_with_initial_watch_profile_for_test(
+        self,
+        *,
+        suffix,
+        work_schedule=None,
+        brigade_number=None,
+        watch_composition=None,
+        rotation='',
+    ):
+        driver = Employee.objects.create(
+            full_name=f'ТЕСТ_ВАХТА_Водитель_{suffix}',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+            work_schedule=work_schedule,
+            brigade_number=brigade_number,
+            watch_composition=watch_composition,
+            rotation=rotation,
+        )
+        EmployeeAccess.objects.create(
+            employee=driver,
+            role=self.driver_role,
+            access_code=f'29{driver.pk:04d}',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+        truck = Equipment.objects.create(
+            equipment_type=self.truck.equipment_type,
+            model=self.truck.model,
+            garage_number=f'ТЕСТ_ВАХТА_{suffix}',
+            is_active=True,
+        )
+        assignment = EquipmentAssignment.objects.create(
+            employee=driver,
+            role=self.driver_role,
+            equipment=truck,
+            shift_type=production_shift_type(),
+            assigned_by=self.deputy,
+            status=AssignmentStatus.ACCEPTED,
+            accepted_at=timezone.now(),
+        )
+        self.driver = driver
+        self.truck = truck
+        self.assignment = assignment
+
     def publish_current_deputy_plan(self):
         plan, _created = get_or_create_crew_draft(
             role=self.driver_role,
@@ -200,10 +244,11 @@ class DriverWatchPeriodLinkageTests(TestCase):
         self.assertIsNone(shift.watch_period)
 
     def test_employee_without_approved_watch_composition_is_unlinked(self):
+        self._use_driver_with_initial_watch_profile_for_test(
+            suffix='БЕЗ_СОСТАВА',
+        )
         self.create_current_watch_period()
         self.publish_current_deputy_plan()
-        self.driver.watch_composition = None
-        self.driver.save(update_fields=['watch_composition'])
 
         shift = self.open_shift(action='employee-without-watch-composition')
 
@@ -279,14 +324,13 @@ class DriverWatchPeriodLinkageTests(TestCase):
             name='ТЕСТ_ВАХТА_График не является составом',
             brigade_count=4,
         )
-        self.driver.work_schedule = schedule
-        self.driver.brigade_number = 4
-        self.driver.rotation = other_composition.name
-        self.driver.save(update_fields=[
-            'work_schedule',
-            'brigade_number',
-            'rotation',
-        ])
+        self._use_driver_with_initial_watch_profile_for_test(
+            suffix='НЕЗАВИСИМЫЙ_ГРАФИК',
+            work_schedule=schedule,
+            brigade_number=4,
+            watch_composition=self.watch_composition,
+            rotation=other_composition.name,
+        )
         self.publish_current_deputy_plan()
 
         shift = self.open_shift(action='schedule-brigade-independent')

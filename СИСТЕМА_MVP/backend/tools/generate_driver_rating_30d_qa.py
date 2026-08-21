@@ -26,6 +26,7 @@ from dataclasses import asdict, dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
@@ -70,11 +71,16 @@ from tools.full_week_qa import (  # noqa: E402
     FullWeekRunner,
     QAError,
     ReferenceCatalog,
+    RoleHttpClient,
     ShiftResult,
+    StaffMember,
     WeekOnboarding,
     at_time,
+    base_employee_payload,
     json_default,
     local_dt,
+    permanent_pin_for,
+    phone_for,
 )
 from trips.models import OPEN_TRIP_STATUSES, Trip  # noqa: E402
 from users.models import Employee, EmployeeAccess, WatchComposition  # noqa: E402
@@ -283,6 +289,16 @@ class Rating30dOnboarding(WeekOnboarding):
 
     BRIGADES = (DAY_BRIGADE, NIGHT_BRIGADE)
 
+    def __init__(
+        self,
+        config: Rating30dConfig,
+        catalog: ReferenceCatalog,
+        *,
+        driver_watch_composition: WatchComposition,
+    ):
+        super().__init__(config, catalog)
+        self.driver_watch_composition = driver_watch_composition
+
     def _personnel_number(
         self,
         role_code: str,
@@ -301,6 +317,112 @@ class Rating30dOnboarding(WeekOnboarding):
         }[role_code]
         brigade_token = f"B{brigade}" if brigade is not None else "BI"
         return f"QAR30D-20260730-{role_token}-{brigade_token}-{ordinal:03d}"
+
+    def create_employee(
+        self,
+        *,
+        role_code: str,
+        when: datetime,
+        brigade: int | None = None,
+        equipment: Any | None = None,
+        watch_composition: WatchComposition | None = None,
+    ) -> StaffMember:
+        if not self.oup or not self.oup.client:
+            raise QAError("Сотрудников должен создавать авторизованный ОУП.")
+        ordinal = self._new_ordinal()
+        phone = phone_for(ordinal)
+        payload = base_employee_payload(
+            self.catalog,
+            role_code=role_code,
+            full_name=self._full_name(
+                role_code,
+                brigade=brigade,
+                equipment=equipment,
+                ordinal=ordinal,
+            ),
+            phone=phone,
+            personnel_number=self._personnel_number(
+                role_code,
+                brigade=brigade,
+                ordinal=ordinal,
+            ),
+            hired_at=self.config.start_date,
+            brigade=brigade,
+        )
+        if watch_composition is not None:
+            payload["watch_composition"] = str(watch_composition.pk)
+        payload.update(
+            {
+                "issue_access": "on",
+                "access_role": str(self.catalog.roles[role_code].id),
+            }
+        )
+        with at_time(when):
+            response = self.oup.client.post_form(
+                "/oup/employees/new/",
+                payload,
+                label=f"ОУП создаёт {role_code} N{ordinal}",
+            )
+            location = urlparse(response["Location"]).path
+            if not location.startswith("/oup/employees/"):
+                raise QAError(
+                    f"Неожиданный redirect создания {role_code}: {location!r}."
+                )
+            self.oup.client.get(
+                location,
+                label=f"Карточка {role_code} N{ordinal}",
+            )
+            employee = Employee.objects.get(phone=phone)
+            access = self._created_access(employee, role_code)
+            if (
+                access.status != EmployeeAccess.Status.NOT_ACTIVATED
+                or not access.primary_code_issued_at
+                or len(access.access_code) != 6
+            ):
+                raise QAError(
+                    f"ОУП не выдал корректный первичный PIN {role_code} N{ordinal}."
+                )
+            permanent_pin = permanent_pin_for(ordinal, access.access_code)
+            client = RoleHttpClient(role_code)
+            client.activate(
+                phone,
+                access.access_code,
+                permanent_pin,
+                device_kind=(
+                    "shared"
+                    if role_code in {"dispatcher", "mining_master"}
+                    else "personal"
+                ),
+            )
+            access.refresh_from_db()
+            if access.status != EmployeeAccess.Status.ACTIVATED:
+                raise QAError(f"Доступ {role_code} N{ordinal} не активирован.")
+            if role_code == "driver":
+                section = self.catalog.dormitory_sections[
+                    ordinal % len(self.catalog.dormitory_sections)
+                ]
+                registration_response = client.post_form(
+                    "/driver/registration/",
+                    {"dormitory_section": str(section.id)},
+                    label=f"Регистрация водителя N{ordinal}",
+                )
+                if urlparse(registration_response["Location"]).path != "/home/":
+                    raise QAError(
+                        f"Водитель N{ordinal}: неожиданный redirect регистрации."
+                    )
+        return self._register_member(
+            StaffMember(
+                employee_id=employee.id,
+                access_id=access.id,
+                role_code=role_code,
+                phone=phone,
+                permanent_pin=permanent_pin,
+                brigade=brigade,
+                ordinal=ordinal,
+                equipment_id=equipment.id if equipment else None,
+                client=client,
+            )
+        )
 
     def run(self) -> "Rating30dOnboarding":
         onboarding_time = local_dt(self.config.start_date, 6, 0)
@@ -352,6 +474,7 @@ class Rating30dOnboarding(WeekOnboarding):
                     role_code="driver",
                     brigade=brigade,
                     equipment=truck,
+                    watch_composition=self.driver_watch_composition,
                     when=onboarding_time
                     + timedelta(minutes=creation_minute, seconds=index),
                 )
@@ -411,11 +534,7 @@ def create_rating_scope(
     """Создать структурный состав и оба календарных окна до первой смены."""
 
     calendar = period_calendar(config)
-    composition = WatchComposition.objects.create(
-        code="qa-rating-30d-20260730",
-        name="ТЕСТОВЫЙ СОСТАВ РЕЙТИНГА 30 ДНЕЙ 20260730",
-        is_active=True,
-    )
+    composition = onboarding.driver_watch_composition
     day_employee_ids = tuple(sorted(
         member.employee_id
         for member in onboarding.drivers_by_brigade[DAY_BRIGADE].values()
@@ -432,15 +551,6 @@ def create_rating_scope(
         raise Rating30dQAError(
             "Дневная и ночная когорты должны содержать по 53 разных Водителя."
         )
-    driver_ids = (*day_employee_ids, *night_employee_ids)
-    updated = Employee.objects.filter(pk__in=driver_ids).update(
-        watch_composition=composition
-    )
-    if updated != EXPECTED_DRIVER_COUNT * 2:
-        raise Rating30dQAError(
-            f"К составу привязано {updated} Водителей вместо 106."
-        )
-
     watch_period = WatchPeriod.objects.create(
         name=(
             "ТЕСТОВАЯ ВАХТА РЕЙТИНГА "
@@ -1016,7 +1126,16 @@ def main(argv: list[str] | None = None) -> int:
         database_identity = verify_rating_30d_database(require_empty=True)
         period_calendar(config)
         catalog = ReferenceCatalog(config)
-        onboarding = Rating30dOnboarding(config, catalog).run()
+        composition = WatchComposition.objects.create(
+            code="qa-rating-30d-20260730",
+            name="ТЕСТОВЫЙ СОСТАВ РЕЙТИНГА 30 ДНЕЙ 20260730",
+            is_active=True,
+        )
+        onboarding = Rating30dOnboarding(
+            config,
+            catalog,
+            driver_watch_composition=composition,
+        ).run()
         scope = create_rating_scope(config, onboarding)
         runner = Rating30dRunner(
             config,
