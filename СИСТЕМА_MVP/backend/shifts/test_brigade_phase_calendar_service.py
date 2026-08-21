@@ -60,6 +60,10 @@ class BrigadePhaseCalendarDraftServiceTests(TestCase):
 
     def setUp(self):
         self.timekeeper_role = Role.objects.get(code='timekeeper')
+        self.admin_role, _created = Role.objects.get_or_create(
+            code='admin',
+            defaults={'name': 'Системный администратор', 'is_active': True},
+        )
         self.other_role = Role.objects.create(
             code='brigade-phase-other-role',
             name='Другая роль теста календаря фаз',
@@ -73,6 +77,18 @@ class BrigadePhaseCalendarDraftServiceTests(TestCase):
             employee=self.employee,
             role=self.timekeeper_role,
             access_code='BPC-SERVICE-ACCESS',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+        self.admin_employee = Employee.objects.create(
+            full_name='Администратор теста календаря фаз',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        self.admin_access = EmployeeAccess.objects.create(
+            employee=self.admin_employee,
+            role=self.admin_role,
+            access_code='BPC-SERVICE-ADMIN',
             status=EmployeeAccess.Status.ACTIVATED,
             is_active=True,
         )
@@ -171,6 +187,15 @@ class BrigadePhaseCalendarDraftServiceTests(TestCase):
             [(1, 'night'), (2, 'day'), (3, 'off'), (4, 'day')],
         )
 
+    def test_exact_admin_access_creates_draft_with_actual_audit_actor(self):
+        version = create_watch_period_brigade_phase_draft(**self._kwargs(
+            actor_access_id=self.admin_access.pk,
+        ))
+
+        version.refresh_from_db()
+        self.assertEqual(version.created_by_access_id, self.admin_access.pk)
+        self.assertEqual(version.created_by_access.role.code, 'admin')
+
     def test_command_does_not_accept_server_derived_fields(self):
         forbidden = {
             'status',
@@ -223,7 +248,7 @@ class BrigadePhaseCalendarDraftServiceTests(TestCase):
         self.employee.save(update_fields=['status'])
         self._assert_error(ERROR_EMPLOYEE_INACTIVE)
 
-    def test_inactive_role_is_wrong_role_and_no_admin_fallback_exists(self):
+    def test_inactive_role_and_non_exact_admin_alias_are_wrong_role(self):
         self.timekeeper_role.is_active = False
         self.timekeeper_role.save(update_fields=['is_active'])
         self._assert_error(ERROR_ACCESS_WRONG_ROLE)
@@ -235,6 +260,41 @@ class BrigadePhaseCalendarDraftServiceTests(TestCase):
         self.access.role = admin_role
         self.access.save(update_fields=['role'])
         self._assert_error(ERROR_ACCESS_WRONG_ROLE)
+
+    def test_manager_oup_dispatcher_clerk_and_arbitrary_roles_are_rejected(self):
+        role_codes = (
+            'manager',
+            'oup',
+            'dispatcher',
+            'settlement_clerk',
+            'brigade-phase-arbitrary-role',
+        )
+        for index, role_code in enumerate(role_codes, start=1):
+            with self.subTest(role_code=role_code):
+                role, _created = Role.objects.get_or_create(
+                    code=role_code,
+                    defaults={
+                        'name': f'Запрещённая роль календаря {index}',
+                        'is_active': True,
+                    },
+                )
+                employee = Employee.objects.create(
+                    full_name=f'Запрещённый actor календаря {index}',
+                    status=Employee.Status.ACTIVE,
+                    is_active=True,
+                )
+                access = EmployeeAccess.objects.create(
+                    employee=employee,
+                    role=role,
+                    access_code=f'BPC-DENIED-{index}',
+                    status=EmployeeAccess.Status.ACTIVATED,
+                    is_active=True,
+                )
+                self._assert_error(
+                    ERROR_ACCESS_WRONG_ROLE,
+                    actor_access_id=access.pk,
+                )
+        self.assertFalse(WatchPeriodBrigadePhaseVersion._base_manager.exists())
 
     def test_period_and_schedule_failures_are_controlled(self):
         self._assert_error(
@@ -516,6 +576,10 @@ class BrigadePhaseCalendarConfirmationServiceTests(TestCase):
 
     def setUp(self):
         self.timekeeper_role = Role.objects.get(code='timekeeper')
+        self.admin_role, _created = Role.objects.get_or_create(
+            code='admin',
+            defaults={'name': 'Системный администратор', 'is_active': True},
+        )
         self.employee = Employee.objects.create(
             full_name='Табельщик подтверждения календаря фаз',
             status=Employee.Status.ACTIVE,
@@ -525,6 +589,18 @@ class BrigadePhaseCalendarConfirmationServiceTests(TestCase):
             employee=self.employee,
             role=self.timekeeper_role,
             access_code='BPC-CONFIRM-ACCESS',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+        self.admin_employee = Employee.objects.create(
+            full_name='Администратор подтверждения календаря фаз',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        self.admin_access = EmployeeAccess.objects.create(
+            employee=self.admin_employee,
+            role=self.admin_role,
+            access_code='BPC-CONFIRM-ADMIN',
             status=EmployeeAccess.Status.ACTIVATED,
             is_active=True,
         )
@@ -640,6 +716,27 @@ class BrigadePhaseCalendarConfirmationServiceTests(TestCase):
         confirmed.refresh_from_db()
         self.assertEqual(confirmed.status, WatchPeriodBrigadePhaseVersion.Status.CONFIRMED)
         self.assertEqual(confirmed.confirmed_by_access_id, self.access.pk)
+
+    def test_exact_admin_confirms_and_supersedes_with_actual_audit_actor(self):
+        first = self._draft(actor_access=self.admin_access)
+        self.assertEqual(first.created_by_access_id, self.admin_access.pk)
+        first = self._confirm(first, actor_access=self.admin_access)
+        self.assertEqual(first.confirmed_by_access_id, self.admin_access.pk)
+
+        replacement = self._draft(
+            actor_access=self.admin_access,
+            order_number='Приказ подтверждения admin № 2',
+        )
+        replacement = self._confirm(
+            replacement,
+            actor_access=self.admin_access,
+        )
+        first.refresh_from_db()
+        replacement.refresh_from_db()
+
+        self.assertEqual(first.superseded_by_access_id, self.admin_access.pk)
+        self.assertEqual(replacement.created_by_access_id, self.admin_access.pk)
+        self.assertEqual(replacement.confirmed_by_access_id, self.admin_access.pk)
 
     def test_official_phase_distribution_is_enforced(self):
         invalid_12 = self._draft(

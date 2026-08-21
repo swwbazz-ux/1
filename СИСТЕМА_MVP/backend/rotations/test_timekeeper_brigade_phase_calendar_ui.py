@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 from django.test import Client, TestCase
 from django.urls import reverse
+from django.utils import timezone
 
 from shifts.brigade_phase_calendar import (
     BrigadePhaseCalendarError,
@@ -14,7 +15,18 @@ from shifts.models import (
     WatchPeriodBrigadePhaseRow,
     WatchPeriodBrigadePhaseVersion,
 )
+from users.active_role import (
+    ACTIVE_ROLE_CODE_SESSION_KEY,
+    ACTIVE_ROLE_GENERATION_SESSION_KEY,
+    ACTIVE_ROLE_SESSION_KEY,
+)
 from users.models import Employee, EmployeeAccess, Role, WorkSchedule
+
+from .timekeeper_auth import (
+    TIMEKEEPER_APP_ACCESS_SESSION_KEY,
+    TIMEKEEPER_APP_CREDENTIAL_REVISION_SESSION_KEY,
+    timekeeper_app_credential_revision,
+)
 
 
 class TimekeeperBrigadePhaseCalendarUiTests(TestCase):
@@ -45,6 +57,7 @@ class TimekeeperBrigadePhaseCalendarUiTests(TestCase):
         )
         self.other_employee = Employee.objects.create(
             full_name='Сотрудник другой роли',
+            phone='+7 900 730-00-01',
             status=Employee.Status.ACTIVE,
             is_active=True,
         )
@@ -58,9 +71,10 @@ class TimekeeperBrigadePhaseCalendarUiTests(TestCase):
         self.admin_access = EmployeeAccess.objects.create(
             employee=self.other_employee,
             role=self.admin_role,
-            access_code='PHASE-CALENDAR-ADMIN',
+            access_code='730001',
             status=EmployeeAccess.Status.ACTIVATED,
             is_active=True,
+            last_login_at=timezone.now(),
         )
         self.schedule_11, _created = WorkSchedule.objects.update_or_create(
             code='schedule_11',
@@ -100,10 +114,38 @@ class TimekeeperBrigadePhaseCalendarUiTests(TestCase):
 
     def _login(self, access=None, client=None):
         client = client or self.client
+        access = access or self.access
         session = client.session
-        session['employee_access_id'] = (access or self.access).pk
+        session[TIMEKEEPER_APP_ACCESS_SESSION_KEY] = access.pk
+        session[TIMEKEEPER_APP_CREDENTIAL_REVISION_SESSION_KEY] = (
+            timekeeper_app_credential_revision(access)
+        )
         session.save()
         return client
+
+    def _login_admin_through_app(self):
+        client = Client()
+        generation = self.admin_access.last_login_at.isoformat()
+        session = client.session
+        session['employee_access_id'] = self.admin_access.pk
+        session[ACTIVE_ROLE_SESSION_KEY] = self.admin_access.pk
+        session[ACTIVE_ROLE_GENERATION_SESSION_KEY] = generation
+        session[ACTIVE_ROLE_CODE_SESSION_KEY] = 'admin'
+        session.save()
+        response = client.post(
+            reverse('timekeeper_login'),
+            {
+                'phone': self.admin_access.employee.phone,
+                'access_code': self.admin_access.access_code,
+                'device_kind': 'personal',
+            },
+        )
+        self.assertRedirects(
+            response,
+            reverse('rotation_timekeeper_dashboard'),
+            fetch_redirect_response=False,
+        )
+        return client, generation
 
     def _selection_url(self, schedule=None, period=None):
         schedule = schedule or self.schedule_12
@@ -173,11 +215,10 @@ class TimekeeperBrigadePhaseCalendarUiTests(TestCase):
             WatchPeriodBrigadePhaseRow._base_manager.count(),
         ))
 
-    def test_missing_wrong_inactive_blocked_and_admin_access_are_closed(self):
+    def test_missing_wrong_inactive_and_blocked_access_are_closed(self):
         cases = []
         cases.append(Client())
         cases.append(self._login(self.other_access, Client()))
-        cases.append(self._login(self.admin_access, Client()))
         inactive_access = EmployeeAccess.objects.create(
             employee=self.employee,
             role=self.timekeeper_role,
@@ -199,6 +240,73 @@ class TimekeeperBrigadePhaseCalendarUiTests(TestCase):
                 response = client.get(self.page_url)
                 self.assertEqual(response.status_code, 302)
         self.assertEqual(WatchPeriodBrigadePhaseVersion._base_manager.count(), 0)
+
+    def test_admin_access_opens_calendar_with_actual_identity(self):
+        response = self._login(self.admin_access, Client()).get(
+            self._selection_url(),
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, self.admin_access.employee.full_name)
+        self.assertContains(response, 'Системный администратор')
+
+    def test_admin_app_session_creates_confirms_and_supersedes_exactly(self):
+        client, generation = self._login_admin_through_app()
+        original_last_login_at = self.admin_access.last_login_at
+
+        response = client.post(
+            self.create_url,
+            self._payload(),
+        )
+        self.assertEqual(response.status_code, 302)
+        first = WatchPeriodBrigadePhaseVersion._base_manager.get()
+        self.assertEqual(first.created_by_access_id, self.admin_access.pk)
+
+        response = client.post(reverse(
+            'timekeeper_brigade_phase_calendar_confirm',
+            args=[first.pk],
+        ))
+        self.assertEqual(response.status_code, 302)
+        first.refresh_from_db()
+        self.assertEqual(first.confirmed_by_access_id, self.admin_access.pk)
+
+        response = client.post(
+            self.create_url,
+            self._payload(order_number='Приказ № 18'),
+        )
+        self.assertEqual(response.status_code, 302)
+        replacement = (
+            WatchPeriodBrigadePhaseVersion._base_manager
+            .exclude(pk=first.pk)
+            .get()
+        )
+        self.assertEqual(replacement.created_by_access_id, self.admin_access.pk)
+        response = client.post(reverse(
+            'timekeeper_brigade_phase_calendar_confirm',
+            args=[replacement.pk],
+        ))
+        self.assertEqual(response.status_code, 302)
+        first.refresh_from_db()
+        replacement.refresh_from_db()
+        self.assertEqual(first.superseded_by_access_id, self.admin_access.pk)
+        self.assertEqual(
+            replacement.confirmed_by_access_id,
+            self.admin_access.pk,
+        )
+
+        session = client.session
+        self.assertEqual(session['employee_access_id'], self.admin_access.pk)
+        self.assertEqual(session[ACTIVE_ROLE_SESSION_KEY], self.admin_access.pk)
+        self.assertEqual(
+            session[ACTIVE_ROLE_GENERATION_SESSION_KEY],
+            generation,
+        )
+        self.assertEqual(session[ACTIVE_ROLE_CODE_SESSION_KEY], 'admin')
+        self.admin_access.refresh_from_db()
+        self.assertEqual(self.admin_access.last_login_at, original_last_login_at)
+        self.assertEqual(
+            client.get(reverse('system_admin_dashboard')).status_code,
+            200,
+        )
 
     def test_schedule_12_renders_four_brigades_and_all_phases(self):
         response = self.client.get(self._selection_url(self.schedule_12))
@@ -442,6 +550,9 @@ class TimekeeperBrigadePhaseCalendarUiTests(TestCase):
         self.assertNotContains(response, self.unsupported_schedule.name)
 
     def test_existing_arrival_roster_page_remains_available(self):
+        session = self.client.session
+        session['employee_access_id'] = self.access.pk
+        session.save()
         response = self.client.get(reverse('arrival_roster_index'))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'Перевахта и состав заезда')

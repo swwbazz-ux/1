@@ -7,6 +7,11 @@ from django.urls import reverse
 from django.utils import timezone
 
 from shifts.models import WatchPeriod
+from users.active_role import (
+    ACTIVE_ROLE_CODE_SESSION_KEY,
+    ACTIVE_ROLE_GENERATION_SESSION_KEY,
+    ACTIVE_ROLE_SESSION_KEY,
+)
 from users.models import Employee, EmployeeAccess, Role, WatchComposition, WorkSchedule
 
 from .employee_watch_profile_changes import (
@@ -16,6 +21,11 @@ from .employee_watch_profile_changes import (
     resolve_employee_watch_profile,
 )
 from .models import EmployeeWatchProfileChange
+from .timekeeper_auth import (
+    TIMEKEEPER_APP_ACCESS_SESSION_KEY,
+    TIMEKEEPER_APP_CREDENTIAL_REVISION_SESSION_KEY,
+    timekeeper_app_credential_revision,
+)
 
 
 class TimekeeperEmployeeWatchProfileUiTests(TestCase):
@@ -45,6 +55,7 @@ class TimekeeperEmployeeWatchProfileUiTests(TestCase):
         )
         self.other_employee = Employee.objects.create(
             full_name='Сотрудник другой роли профиля',
+            phone='+7 900 740-00-01',
             status=Employee.Status.ACTIVE,
             is_active=True,
         )
@@ -58,9 +69,10 @@ class TimekeeperEmployeeWatchProfileUiTests(TestCase):
         self.admin_access = EmployeeAccess.objects.create(
             employee=self.other_employee,
             role=self.admin_role,
-            access_code='WATCH-PROFILE-UI-ADMIN',
+            access_code='740001',
             status=EmployeeAccess.Status.ACTIVATED,
             is_active=True,
+            last_login_at=timezone.now(),
         )
         self.old_schedule = WorkSchedule.objects.create(
             code='watch-profile-ui-old',
@@ -138,10 +150,38 @@ class TimekeeperEmployeeWatchProfileUiTests(TestCase):
 
     def _login(self, access=None, client=None):
         client = client or self.client
+        access = access or self.access
         session = client.session
-        session['employee_access_id'] = (access or self.access).pk
+        session[TIMEKEEPER_APP_ACCESS_SESSION_KEY] = access.pk
+        session[TIMEKEEPER_APP_CREDENTIAL_REVISION_SESSION_KEY] = (
+            timekeeper_app_credential_revision(access)
+        )
         session.save()
         return client
+
+    def _login_admin_through_app(self):
+        client = Client()
+        generation = self.admin_access.last_login_at.isoformat()
+        session = client.session
+        session['employee_access_id'] = self.admin_access.pk
+        session[ACTIVE_ROLE_SESSION_KEY] = self.admin_access.pk
+        session[ACTIVE_ROLE_GENERATION_SESSION_KEY] = generation
+        session[ACTIVE_ROLE_CODE_SESSION_KEY] = 'admin'
+        session.save()
+        response = client.post(
+            reverse('timekeeper_login'),
+            {
+                'phone': self.admin_access.employee.phone,
+                'access_code': self.admin_access.access_code,
+                'device_kind': 'personal',
+            },
+        )
+        self.assertRedirects(
+            response,
+            reverse('rotation_timekeeper_dashboard'),
+            fetch_redirect_response=False,
+        )
+        return client, generation
 
     def _selection_url(self, *, employee=None, period=None):
         employee = employee or self.employee
@@ -198,8 +238,8 @@ class TimekeeperEmployeeWatchProfileUiTests(TestCase):
         self.client.get(self._selection_url())
         self.assertEqual(EmployeeWatchProfileChange._base_manager.count(), before)
 
-    def test_missing_inactive_blocked_wrong_role_admin_and_inactive_employee_are_closed(self):
-        cases = [Client(), self._login(self.other_access, Client()), self._login(self.admin_access, Client())]
+    def test_missing_inactive_blocked_wrong_role_and_inactive_employee_are_closed(self):
+        cases = [Client(), self._login(self.other_access, Client())]
         inactive_access = EmployeeAccess.objects.create(
             employee=self.actor,
             role=self.timekeeper_role,
@@ -234,6 +274,73 @@ class TimekeeperEmployeeWatchProfileUiTests(TestCase):
         for client in cases:
             with self.subTest(session=client.session.session_key):
                 self.assertEqual(client.get(self.page_url).status_code, 302)
+
+    def test_admin_access_opens_profiles_with_actual_identity(self):
+        response = self._login(self.admin_access, Client()).get(
+            self._selection_url(),
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, self.admin_access.employee.full_name)
+        self.assertContains(response, 'Системный администратор')
+
+    def test_admin_app_session_creates_applies_and_supersedes_exactly(self):
+        client, generation = self._login_admin_through_app()
+        original_last_login_at = self.admin_access.last_login_at
+
+        response = client.post(
+            self.create_url,
+            self._payload(),
+        )
+        self.assertEqual(response.status_code, 302)
+        first = EmployeeWatchProfileChange._base_manager.get()
+        self.assertEqual(first.created_by_access_id, self.admin_access.pk)
+
+        response = client.post(reverse(
+            'timekeeper_employee_watch_profile_apply',
+            args=[first.pk],
+        ))
+        self.assertEqual(response.status_code, 302)
+        first.refresh_from_db()
+        self.assertEqual(first.applied_by_access_id, self.admin_access.pk)
+
+        response = client.post(
+            self.create_url,
+            self._payload(
+                new_brigade_number=3,
+                basis_number='Исправление администратора № 2',
+            ),
+        )
+        self.assertEqual(response.status_code, 302)
+        correction = (
+            EmployeeWatchProfileChange._base_manager
+            .exclude(pk=first.pk)
+            .get()
+        )
+        self.assertEqual(correction.created_by_access_id, self.admin_access.pk)
+        response = client.post(reverse(
+            'timekeeper_employee_watch_profile_apply',
+            args=[correction.pk],
+        ))
+        self.assertEqual(response.status_code, 302)
+        first.refresh_from_db()
+        correction.refresh_from_db()
+        self.assertEqual(first.superseded_by_access_id, self.admin_access.pk)
+        self.assertEqual(correction.applied_by_access_id, self.admin_access.pk)
+
+        session = client.session
+        self.assertEqual(session['employee_access_id'], self.admin_access.pk)
+        self.assertEqual(session[ACTIVE_ROLE_SESSION_KEY], self.admin_access.pk)
+        self.assertEqual(
+            session[ACTIVE_ROLE_GENERATION_SESSION_KEY],
+            generation,
+        )
+        self.assertEqual(session[ACTIVE_ROLE_CODE_SESSION_KEY], 'admin')
+        self.admin_access.refresh_from_db()
+        self.assertEqual(self.admin_access.last_login_at, original_last_login_at)
+        self.assertEqual(
+            client.get(reverse('system_admin_dashboard')).status_code,
+            200,
+        )
 
     def test_only_future_periods_and_active_employees_are_rendered(self):
         inactive_employee = Employee.objects.create(

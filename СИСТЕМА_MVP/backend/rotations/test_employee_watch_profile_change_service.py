@@ -74,6 +74,22 @@ class EmployeeWatchProfileChangeServiceTests(TestCase):
             status=EmployeeAccess.Status.ACTIVATED,
             is_active=True,
         )
+        cls.admin_role, _ = Role.objects.get_or_create(
+            code='admin',
+            defaults={'name': 'Системный администратор', 'is_active': True},
+        )
+        cls.admin_actor = Employee.objects.create(
+            full_name='Администратор проверки профиля',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        cls.admin_access = EmployeeAccess.objects.create(
+            employee=cls.admin_actor,
+            role=cls.admin_role,
+            access_code='profile-service-admin',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
         cls.old_schedule = WorkSchedule.objects.create(
             code='profile-service-old',
             name='Прежний график сервиса профиля',
@@ -389,6 +405,35 @@ class EmployeeWatchProfileChangeServiceTests(TestCase):
         self.assertIsNone(change.applied_by_access_id)
         self.assertIsNone(change.cancelled_by_access_id)
 
+    def test_exact_admin_creates_applies_and_supersedes_with_actual_audit_actor(self):
+        first = create_employee_watch_profile_change_draft(**self._kwargs(
+            actor_access_id=self.admin_access.pk,
+        ))
+        self.assertEqual(first.created_by_access_id, self.admin_access.pk)
+
+        first = apply_employee_watch_profile_change(
+            change_id=first.pk,
+            actor_access_id=self.admin_access.pk,
+        )
+        self.assertEqual(first.applied_by_access_id, self.admin_access.pk)
+
+        correction = create_employee_watch_profile_change_draft(**self._kwargs(
+            actor_access_id=self.admin_access.pk,
+            new_brigade_number=3,
+            basis_number='Исправление администратора № 2',
+        ))
+        self.assertEqual(correction.created_by_access_id, self.admin_access.pk)
+        correction = apply_employee_watch_profile_change(
+            change_id=correction.pk,
+            actor_access_id=self.admin_access.pk,
+        )
+        first.refresh_from_db()
+        correction.refresh_from_db()
+
+        self.assertEqual(first.superseded_by_access_id, self.admin_access.pk)
+        self.assertEqual(correction.applied_by_access_id, self.admin_access.pk)
+        self.assertEqual(correction.supersedes_id, first.pk)
+
     def test_access_must_be_exact_active_unblocked_timekeeper(self):
         self._assert_error(
             service.ERROR_ACCESS_NOT_FOUND,
@@ -430,6 +475,36 @@ class EmployeeWatchProfileChangeServiceTests(TestCase):
             service.ERROR_ACCESS_WRONG_ROLE,
             actor_access_id=wrong.pk,
         )
+        self.assertFalse(EmployeeWatchProfileChange._base_manager.exists())
+
+    def test_manager_oup_dispatcher_clerk_and_arbitrary_roles_are_rejected(self):
+        role_codes = (
+            'manager',
+            'oup',
+            'dispatcher',
+            'settlement_clerk',
+            'profile-service-arbitrary-role',
+        )
+        for index, role_code in enumerate(role_codes, start=1):
+            with self.subTest(role_code=role_code):
+                role, _created = Role.objects.get_or_create(
+                    code=role_code,
+                    defaults={
+                        'name': f'Запрещённая роль профиля {index}',
+                        'is_active': True,
+                    },
+                )
+                access = EmployeeAccess.objects.create(
+                    employee=self.actor,
+                    role=role,
+                    access_code=f'profile-service-denied-{index}',
+                    status=EmployeeAccess.Status.ACTIVATED,
+                    is_active=True,
+                )
+                self._assert_error(
+                    service.ERROR_ACCESS_WRONG_ROLE,
+                    actor_access_id=access.pk,
+                )
         self.assertFalse(EmployeeWatchProfileChange._base_manager.exists())
 
     def test_inactive_actor_and_target_are_rejected(self):

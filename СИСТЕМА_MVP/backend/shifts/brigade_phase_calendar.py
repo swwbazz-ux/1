@@ -56,6 +56,7 @@ ERROR_CONFIRMED_VERSION_INCONSISTENT = (
 )
 ERROR_BRIGADE_NOT_FOUND = 'shifts.brigade_phase.brigade_not_found'
 
+_ACTOR_ROLE_CODES = frozenset({'timekeeper', 'admin'})
 WORK_SCHEDULE_CODE_11 = 'schedule_11'
 WORK_SCHEDULE_CODE_12 = 'schedule_12'
 
@@ -268,8 +269,11 @@ def _lock_timekeeper_access(plan):
         raise _error(ERROR_ACCESS_INACTIVE, 'Доступ табельщика неактивен.')
     if employee.status != Employee.Status.ACTIVE or not employee.is_active:
         raise _error(ERROR_EMPLOYEE_INACTIVE, 'Сотрудник табельщика неактивен.')
-    if not access.role.is_active or access.role.code != 'timekeeper':
-        raise _error(ERROR_ACCESS_WRONG_ROLE, 'Доступ не принадлежит активной роли табельщика.')
+    if not access.role.is_active or access.role.code not in _ACTOR_ROLE_CODES:
+        raise _error(
+            ERROR_ACCESS_WRONG_ROLE,
+            'Доступ не принадлежит активной роли табельщика или администратора.',
+        )
     return access
 
 

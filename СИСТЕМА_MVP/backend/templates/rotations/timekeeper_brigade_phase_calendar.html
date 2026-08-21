@@ -13,7 +13,7 @@
     <header class="admin-console-header rotation-console-header">
         <section class="admin-console-identity">
             <span class="admin-console-avatar" aria-hidden="true">{{ access.employee.full_name|default:"Т"|first }}</span>
-            <span><strong>{{ access.employee.full_name }}</strong><em>Табельщик</em></span>
+            <span><strong>{{ access.employee.full_name }}</strong><em>{% if access.role.code == 'admin' %}Системный администратор{% else %}Табельщик{% endif %}</em></span>
         </section>
         <section class="admin-console-main">
             <div class="admin-console-title">
@@ -29,7 +29,10 @@
             </nav>
         </section>
         <section class="admin-console-actions rotation-console-actions">
-            <a class="admin-utility-link" href="{% url 'logout' %}">Выйти</a>
+            <form method="post" action="{% url 'timekeeper_logout' %}">
+                {% csrf_token %}
+                <button class="admin-utility-link" type="submit">Выйти</button>
+            </form>
         </section>
     </header>
 

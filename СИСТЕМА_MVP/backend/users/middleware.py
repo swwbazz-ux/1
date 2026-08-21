@@ -60,6 +60,8 @@ class ActiveRoleSessionMiddleware:
         '/logout/',
         '/clerk/login/',
         '/settlement/login/',
+        '/timekeeper/login/',
+        '/timekeeper/logout/',
     }
 
     def __init__(self, get_response):

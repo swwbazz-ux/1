@@ -39,6 +39,8 @@ from .views import (
     timekeeper_employee_watch_profile_create_view,
     timekeeper_employee_watch_profiles_view,
     timekeeper_dashboard_view,
+    timekeeper_login_view,
+    timekeeper_logout_view,
     timekeeper_manifest_view,
     timekeeper_response_edit_view,
     timekeeper_service_worker_view,
@@ -46,6 +48,8 @@ from .views import (
 
 
 urlpatterns = [
+    path('timekeeper/login/', timekeeper_login_view, name='timekeeper_login'),
+    path('timekeeper/logout/', timekeeper_logout_view, name='timekeeper_logout'),
     path('timekeeper/', timekeeper_dashboard_view, name='rotation_timekeeper_dashboard'),
     path(
         'timekeeper/brigade-phase-calendar/',

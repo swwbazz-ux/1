@@ -58,7 +58,7 @@ _SNAPSHOT_SCHEMA = 'rotations.employee_watch_profile_change'
 _SNAPSHOT_VERSION = 1
 _PROFILE_SNAPSHOT_SCHEMA = 'rotations.resolved_employee_watch_profile'
 _PROFILE_SNAPSHOT_VERSION = 1
-_TIMEKEEPER_ROLE_CODE = 'timekeeper'
+_ACTOR_ROLE_CODES = frozenset({'timekeeper', 'admin'})
 
 SOURCE_KIND_LEGACY_BASELINE = 'legacy_baseline'
 SOURCE_KIND_APPLIED_CHANGE = 'applied_change'
@@ -193,10 +193,10 @@ def _lock_timekeeper_access(plan, *, actor_employee):
             ERROR_ACTOR_EMPLOYEE_INACTIVE,
             'Сотрудник табельщика неактивен.',
         )
-    if not access.role.is_active or access.role.code != _TIMEKEEPER_ROLE_CODE:
+    if not access.role.is_active or access.role.code not in _ACTOR_ROLE_CODES:
         raise _error(
             ERROR_ACCESS_WRONG_ROLE,
-            'Доступ не принадлежит активной роли табельщика.',
+            'Доступ не принадлежит активной роли табельщика или администратора.',
         )
     return access
 

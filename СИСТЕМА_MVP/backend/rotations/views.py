@@ -8,7 +8,7 @@ from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_http_methods, require_POST
 
 from settlement.models import SettlementResident
 from shifts.brigade_phase_calendar import (
@@ -24,10 +24,12 @@ from shifts.models import (
 from users.models import Employee, WatchComposition, WorkSchedule
 
 from users.role_apps import (
+    get_role_app,
     get_role_app_for_request,
     role_app_manifest_response,
     role_app_service_worker_response,
 )
+from users.session_device import detect_session_device_kind
 from users.views import get_current_access
 
 from .documents import build_extension_data_packet, document_bytes
@@ -115,6 +117,12 @@ from .services import (
     seed_cycle_participants,
     submit_response,
 )
+from .timekeeper_auth import (
+    authenticate_timekeeper_app_access,
+    end_timekeeper_app_session,
+    start_timekeeper_app_session,
+    timekeeper_app_access_from_request,
+)
 
 
 def _login_redirect(request):
@@ -128,6 +136,13 @@ def _role_access(request, role_code):
     if access.role.code != role_code:
         messages.error(request, 'У текущего доступа нет прав на этот рабочий раздел.')
         return None, redirect('role_home')
+    return access, None
+
+
+def _timekeeper_app_access(request):
+    access = timekeeper_app_access_from_request(request)
+    if not access:
+        return None, redirect('timekeeper_login')
     return access, None
 
 
@@ -145,6 +160,51 @@ def _validation_message(error):
 def _private_no_store(response):
     response['Cache-Control'] = 'private, no-store'
     return response
+
+
+@require_http_methods(['GET', 'POST'])
+def timekeeper_login_view(request):
+    if timekeeper_app_access_from_request(request):
+        return redirect('rotation_timekeeper_dashboard')
+
+    selected_device_kind = (
+        request.POST.get('device_kind')
+        if request.method == 'POST'
+        else detect_session_device_kind(request)
+    )
+    if selected_device_kind not in {'personal', 'shared'}:
+        selected_device_kind = detect_session_device_kind(request)
+    if request.method == 'POST':
+        access = authenticate_timekeeper_app_access(
+            phone=request.POST.get('phone', ''),
+            access_code=request.POST.get('access_code', ''),
+        )
+        if access:
+            start_timekeeper_app_session(
+                request,
+                access,
+                device_kind=selected_device_kind,
+            )
+            return redirect('rotation_timekeeper_dashboard')
+        messages.error(
+            request,
+            'Телефон или пинкод указаны неверно для приложения «Табельщик».',
+        )
+    return _private_no_store(render(
+        request,
+        'users/login.html',
+        {
+            'selected_device_kind': selected_device_kind,
+            'next_url': '',
+            'login_role_app': get_role_app('timekeeper'),
+        },
+    ))
+
+
+@require_POST
+def timekeeper_logout_view(request):
+    end_timekeeper_app_session(request)
+    return redirect('timekeeper_login')
 
 
 _BRIGADE_PHASE_UI_POLICIES = {
@@ -443,7 +503,7 @@ def _brigade_phase_calendar_context(request):
 
 
 def timekeeper_brigade_phase_calendar_view(request):
-    access, response = _role_access(request, 'timekeeper')
+    access, response = _timekeeper_app_access(request)
     if response:
         return response
     context = _brigade_phase_calendar_context(request)
@@ -457,7 +517,7 @@ def timekeeper_brigade_phase_calendar_view(request):
 
 @require_POST
 def timekeeper_brigade_phase_calendar_create_view(request):
-    access, response = _role_access(request, 'timekeeper')
+    access, response = _timekeeper_app_access(request)
     if response:
         return response
 
@@ -532,7 +592,7 @@ def timekeeper_brigade_phase_calendar_create_view(request):
 
 @require_POST
 def timekeeper_brigade_phase_calendar_confirm_view(request, version_id):
-    access, response = _role_access(request, 'timekeeper')
+    access, response = _timekeeper_app_access(request)
     if response:
         return response
     try:
@@ -554,7 +614,7 @@ def timekeeper_brigade_phase_calendar_confirm_view(request, version_id):
 
 
 def timekeeper_employee_watch_profiles_view(request):
-    access, response = _role_access(request, 'timekeeper')
+    access, response = _timekeeper_app_access(request)
     if response:
         return response
     context = _employee_watch_profile_context(request)
@@ -568,7 +628,7 @@ def timekeeper_employee_watch_profiles_view(request):
 
 @require_POST
 def timekeeper_employee_watch_profile_create_view(request):
-    access, response = _role_access(request, 'timekeeper')
+    access, response = _timekeeper_app_access(request)
     if response:
         return response
     form = EmployeeWatchProfileChangeDraftForm(
@@ -618,7 +678,7 @@ def timekeeper_employee_watch_profile_create_view(request):
 
 @require_POST
 def timekeeper_employee_watch_profile_apply_view(request, change_id):
-    access, response = _role_access(request, 'timekeeper')
+    access, response = _timekeeper_app_access(request)
     if response:
         return response
     try:
@@ -1500,7 +1560,7 @@ def _cycle_metrics(cycle):
 
 
 def timekeeper_dashboard_view(request):
-    access, response = _role_access(request, 'timekeeper')
+    access, response = _timekeeper_app_access(request)
     if response:
         return response
     cycles = (
