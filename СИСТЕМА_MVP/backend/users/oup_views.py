@@ -375,6 +375,7 @@ def oup_employee_detail_view(request, employee_id):
                             'Карточка уволенного сотрудника доступна только для просмотра.',
                             code='employee_read_only',
                         )
+                    form.validate_protected_profile(locked_employee)
                     specialization_changed = (
                         locked_employee.base_specialization_id
                         != getattr(new_specialization, 'id', None)
@@ -397,11 +398,13 @@ def oup_employee_detail_view(request, employee_id):
                         )
                     before = employee_audit_snapshot(locked_employee)
                     before_state = employee_card_undo_state(locked_employee)
+                    excluded_fields = set(form._meta.exclude or ())
+                    excluded_fields.update(OupEmployeeForm.PROTECTED_EXISTING_PROFILE_FIELDS)
                     form.instance = construct_instance(
                         form,
                         locked_employee,
                         form._meta.fields,
-                        form._meta.exclude,
+                        tuple(excluded_fields),
                     )
                     saved_employee = form.save()
                     if specialization_changed:

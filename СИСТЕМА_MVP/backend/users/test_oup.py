@@ -30,6 +30,7 @@ from assignments.models import (
 )
 from assignments.services import publish_crew_plan
 from references.models import Equipment, EquipmentModel, EquipmentType
+from rotations.models import EmployeeWatchProfileChange
 from shifts.models import EmployeeShift, ShiftType
 
 from .admin import AdminActionLogAdmin
@@ -44,6 +45,7 @@ from .models import (
     EmployeeAccess,
     Role,
     WatchComposition,
+    WorkSchedule,
 )
 from .oup_services import lock_oup_write_context, open_oup_shift
 
@@ -1246,8 +1248,13 @@ class OupWorkplaceTests(TestCase):
         detail = self.client.get(reverse('oup_employee_detail', args=[employee.id]))
         self.assertContains(detail, 'изменена карточка сотрудника')
 
-    def test_oup_saves_and_audits_structural_watch_composition(self):
+    def test_oup_rejects_structural_watch_composition_change(self):
         self.start_shift()
+        work_schedule = WorkSchedule.objects.create(
+            code='test-oup-watch-profile-schedule',
+            name='ТЕСТ_ОУП_Исходный график',
+            brigade_count=2,
+        )
         previous_composition = WatchComposition.objects.create(
             code='test-oup-watch-composition-previous',
             name='ТЕСТ_ОУП_Предыдущий состав вахты',
@@ -1265,33 +1272,59 @@ class OupWorkplaceTests(TestCase):
             work_category=Employee.WorkCategory.DRIVER,
             hired_at=timezone.localdate(),
             rotation='Legacy подпись не определяет состав',
+            work_schedule=work_schedule,
+            brigade_number=1,
             watch_composition=previous_composition,
             status=Employee.Status.ACTIVE,
         )
+        original_values = {
+            'full_name': employee.full_name,
+            'comment': employee.comment,
+            'work_schedule_id': employee.work_schedule_id,
+            'brigade_number': employee.brigade_number,
+            'watch_composition_id': employee.watch_composition_id,
+            'rotation': employee.rotation,
+        }
 
         response = self.client.post(
             reverse('oup_employee_detail', args=[employee.id]),
             self.employee_payload(
-                full_name=employee.full_name,
+                full_name='Подложно Изменённое Имя',
                 personnel_number=employee.personnel_number,
                 phone=employee.phone,
+                rotation=employee.rotation,
+                comment='Это поле тоже не должно сохраниться частично',
                 watch_composition=str(next_composition.id),
             ),
         )
 
-        self.assertRedirects(
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
             response,
-            reverse('oup_employee_detail', args=[employee.id]),
-            fetch_redirect_response=False,
+            'Изменение графика, бригады и состава вахты действующего сотрудника '
+            'выполняет Табельщик.',
         )
         employee.refresh_from_db()
-        self.assertEqual(employee.watch_composition, next_composition)
-        log = AdminActionLog.objects.get(
-            action='ОУП: изменена карточка сотрудника',
-            object_id=str(employee.id),
+        self.assertEqual(
+            {
+                'full_name': employee.full_name,
+                'comment': employee.comment,
+                'work_schedule_id': employee.work_schedule_id,
+                'brigade_number': employee.brigade_number,
+                'watch_composition_id': employee.watch_composition_id,
+                'rotation': employee.rotation,
+            },
+            original_values,
         )
-        self.assertIn(previous_composition.name, log.old_value)
-        self.assertIn(next_composition.name, log.old_value)
+        self.assertFalse(
+            AdminActionLog.objects.filter(
+                action='ОУП: изменена карточка сотрудника',
+                object_id=str(employee.id),
+            ).exists()
+        )
+        self.assertFalse(
+            EmployeeWatchProfileChange.objects.filter(employee=employee).exists()
+        )
 
     def test_edit_rechecks_shift_inside_write_transaction(self):
         self.start_shift()
