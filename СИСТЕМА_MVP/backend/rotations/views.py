@@ -75,8 +75,25 @@ from .forms import (
     ArrivalRosterResidentSearchForm,
     ArrivalRosterResidentSelectionForm,
     ArrivalRosterUploadForm,
+    EmployeeWatchProfileChangeDraftForm,
     RotationCycleCreateForm,
     RotationResponseForm,
+)
+from .employee_watch_profile_changes import (
+    ERROR_BASIS_DATE_IN_FUTURE,
+    ERROR_BRIGADE_NOT_ALLOWED,
+    ERROR_BRIGADE_OUT_OF_RANGE,
+    ERROR_BRIGADE_REQUIRED,
+    ERROR_CHANGE_NOT_DRAFT,
+    ERROR_CHANGE_STALE,
+    ERROR_INVALID_BASIS,
+    ERROR_NO_CHANGE,
+    ERROR_WATCH_PERIOD_ALREADY_SETTLED,
+    ERROR_WATCH_PERIOD_NOT_FUTURE,
+    EmployeeWatchProfileChangeError,
+    apply_employee_watch_profile_change,
+    create_employee_watch_profile_change_draft,
+    resolve_employee_watch_profile,
 )
 from .models import (
     ArrivalRosterIssue,
@@ -85,6 +102,7 @@ from .models import (
     ArrivalRosterPoolRow,
     ArrivalRosterRowReview,
     ArrivalRosterVersion,
+    EmployeeWatchProfileChange,
     RotationCollectionCycle,
     RotationResponse,
     WatchExtensionCase,
@@ -166,6 +184,155 @@ def _brigade_phase_calendar_url(*, watch_period_id=None, work_schedule_id=None):
         query['work_schedule'] = work_schedule_id
     url = reverse('timekeeper_brigade_phase_calendar')
     return f'{url}?{urlencode(query)}' if query else url
+
+
+def _employee_watch_profiles_url(*, employee_id=None, watch_period_id=None):
+    query = {}
+    if employee_id:
+        query['employee'] = employee_id
+    if watch_period_id:
+        query['watch_period'] = watch_period_id
+    url = reverse('timekeeper_employee_watch_profiles')
+    return f'{url}?{urlencode(query)}' if query else url
+
+
+_WATCH_PROFILE_CREATE_ERROR_MESSAGES = {
+    ERROR_WATCH_PERIOD_NOT_FUTURE: 'Изменение можно подготовить только для будущего периода вахты.',
+    ERROR_BRIGADE_REQUIRED: 'Для выбранного графика необходимо указать номер бригады.',
+    ERROR_BRIGADE_NOT_ALLOWED: 'Для выбранного графика номер бригады не указывается.',
+    ERROR_BRIGADE_OUT_OF_RANGE: 'Номер бригады не соответствует выбранному графику.',
+    ERROR_INVALID_BASIS: 'Заполните все реквизиты официального основания.',
+    ERROR_BASIS_DATE_IN_FUTURE: 'Дата официального основания не может быть будущей.',
+    ERROR_NO_CHANGE: 'Указанный профиль уже действует для выбранного периода.',
+}
+
+_WATCH_PROFILE_APPLY_ERROR_MESSAGES = {
+    ERROR_WATCH_PERIOD_NOT_FUTURE: 'Изменение можно применить только к будущему периоду вахты.',
+    ERROR_WATCH_PERIOD_ALREADY_SETTLED: 'Для выбранного периода расселение уже применено.',
+    ERROR_CHANGE_NOT_DRAFT: 'Эту версию изменения больше нельзя применить.',
+    ERROR_CHANGE_STALE: 'Черновик устарел. Создайте новое изменение на основании актуальных данных.',
+}
+
+
+def _watch_profile_error_message(error, *, action):
+    messages_by_code = (
+        _WATCH_PROFILE_CREATE_ERROR_MESSAGES
+        if action == 'create'
+        else _WATCH_PROFILE_APPLY_ERROR_MESSAGES
+    )
+    return messages_by_code.get(
+        getattr(error, 'code', None),
+        (
+            'Не удалось создать черновик изменения. Проверьте выбранные данные.'
+            if action == 'create'
+            else 'Не удалось применить изменение. Проверьте его состояние и данные.'
+        ),
+    )
+
+
+def _employee_watch_profile_context(request):
+    today = timezone.localdate()
+    employees = list(
+        Employee.objects.filter(
+            is_active=True,
+            status=Employee.Status.ACTIVE,
+        ).select_related('work_schedule', 'watch_composition').order_by(
+            'full_name',
+            'pk',
+        )
+    )
+    periods = list(
+        WatchPeriod.objects.filter(
+            is_active=True,
+            starts_on__gt=today,
+        ).select_related('watch_composition').order_by('starts_on', 'pk')
+    )
+    schedules = list(
+        WorkSchedule.objects.filter(is_active=True).order_by('name', 'pk')
+    )
+    employee_by_id = {employee.pk: employee for employee in employees}
+    period_by_id = {period.pk: period for period in periods}
+    schedule_by_id = {schedule.pk: schedule for schedule in schedules}
+    selected_employee = employee_by_id.get(_positive_int(request.GET.get('employee')))
+    selected_period = period_by_id.get(_positive_int(request.GET.get('watch_period')))
+    if selected_employee is None and employees:
+        selected_employee = employees[0]
+    if selected_period is None and periods:
+        selected_period = periods[0]
+
+    resolved_profile = None
+    profile_error = None
+    if selected_employee is not None and selected_period is not None:
+        try:
+            profile = resolve_employee_watch_profile(
+                employee_id=selected_employee.pk,
+                watch_period_id=selected_period.pk,
+            )
+        except EmployeeWatchProfileChangeError:
+            profile_error = 'Действующий профиль сотрудника требует проверки.'
+        else:
+            resolved_profile = {
+                'work_schedule': schedule_by_id.get(profile.work_schedule_id),
+                'brigade_number': profile.brigade_number,
+                'watch_composition': (
+                    WatchComposition.objects.filter(
+                        pk=profile.watch_composition_id,
+                    ).first()
+                    if profile.watch_composition_id
+                    else None
+                ),
+                'source_label': (
+                    'Применённое решение табельщика'
+                    if profile.source_kind == 'applied_change'
+                    else 'Текущая карточка сотрудника'
+                ),
+            }
+
+    history_rows = []
+    if selected_employee is not None:
+        history = (
+            EmployeeWatchProfileChange._base_manager.filter(
+                employee=selected_employee,
+            ).select_related(
+                'effective_watch_period',
+                'old_work_schedule',
+                'old_watch_composition',
+                'new_work_schedule',
+                'new_watch_composition',
+            ).order_by('-effective_on', '-version_number', '-pk')
+        )
+        history_rows = [
+            {
+                'change': change,
+                'status_label': change.get_status_display(),
+                'basis_kind_label': change.get_basis_kind_display(),
+                'can_apply': (
+                    change.status == EmployeeWatchProfileChange.Status.DRAFT
+                    and change.effective_watch_period.starts_on > today
+                ),
+            }
+            for change in history
+        ]
+
+    initial = {}
+    if selected_employee is not None:
+        initial['employee_id'] = selected_employee.pk
+    if selected_period is not None:
+        initial['watch_period_id'] = selected_period.pk
+    if resolved_profile is not None:
+        if resolved_profile['work_schedule'] is not None:
+            initial['new_work_schedule_id'] = resolved_profile['work_schedule'].pk
+        initial['new_brigade_number'] = resolved_profile['brigade_number']
+    return {
+        'employees': employees,
+        'periods': periods,
+        'selected_employee': selected_employee,
+        'selected_period': selected_period,
+        'resolved_profile': resolved_profile,
+        'profile_error': profile_error,
+        'draft_form': EmployeeWatchProfileChangeDraftForm(initial=initial),
+        'history_rows': history_rows,
+    }
 
 
 def _safe_brigade_phase_source(version):
@@ -383,6 +550,92 @@ def timekeeper_brigade_phase_calendar_confirm_view(request, version_id):
     return redirect(_brigade_phase_calendar_url(
         watch_period_id=version.watch_period_id,
         work_schedule_id=version.work_schedule_id,
+    ))
+
+
+def timekeeper_employee_watch_profiles_view(request):
+    access, response = _role_access(request, 'timekeeper')
+    if response:
+        return response
+    context = _employee_watch_profile_context(request)
+    context['access'] = access
+    return _private_no_store(render(
+        request,
+        'rotations/timekeeper_employee_watch_profiles.html',
+        context,
+    ))
+
+
+@require_POST
+def timekeeper_employee_watch_profile_create_view(request):
+    access, response = _role_access(request, 'timekeeper')
+    if response:
+        return response
+    form = EmployeeWatchProfileChangeDraftForm(
+        request.POST,
+        future_periods_only=False,
+    )
+    employee_id = _positive_int(request.POST.get('employee_id'))
+    watch_period_id = _positive_int(request.POST.get('watch_period_id'))
+    redirect_url = _employee_watch_profiles_url(
+        employee_id=employee_id,
+        watch_period_id=watch_period_id,
+    )
+    if not form.is_valid():
+        messages.error(
+            request,
+            'Заполните сотрудника, период, новый график и реквизиты официального основания.',
+        )
+        return redirect(redirect_url)
+    employee = form.cleaned_data['employee_id']
+    watch_period = form.cleaned_data['watch_period_id']
+    schedule = form.cleaned_data['new_work_schedule_id']
+    try:
+        create_employee_watch_profile_change_draft(
+            employee_id=employee.pk,
+            effective_watch_period_id=watch_period.pk,
+            new_work_schedule_id=schedule.pk,
+            new_brigade_number=form.cleaned_data['new_brigade_number'],
+            new_watch_composition_id=watch_period.watch_composition_id,
+            basis_kind=form.cleaned_data['basis_kind'],
+            basis_number=form.cleaned_data['basis_number'],
+            basis_date=form.cleaned_data['basis_date'],
+            basis=form.cleaned_data['basis'],
+            actor_access_id=access.pk,
+        )
+    except EmployeeWatchProfileChangeError as error:
+        messages.error(
+            request,
+            _watch_profile_error_message(error, action='create'),
+        )
+    else:
+        messages.success(request, 'Черновик изменения графика сотрудника создан.')
+    return redirect(_employee_watch_profiles_url(
+        employee_id=employee.pk,
+        watch_period_id=watch_period.pk,
+    ))
+
+
+@require_POST
+def timekeeper_employee_watch_profile_apply_view(request, change_id):
+    access, response = _role_access(request, 'timekeeper')
+    if response:
+        return response
+    try:
+        change = apply_employee_watch_profile_change(
+            change_id=change_id,
+            actor_access_id=access.pk,
+        )
+    except EmployeeWatchProfileChangeError as error:
+        messages.error(
+            request,
+            _watch_profile_error_message(error, action='apply'),
+        )
+        return redirect('timekeeper_employee_watch_profiles')
+    messages.success(request, 'Изменение графика сотрудника применено.')
+    return redirect(_employee_watch_profiles_url(
+        employee_id=change.employee_id,
+        watch_period_id=change.effective_watch_period_id,
     ))
 
 

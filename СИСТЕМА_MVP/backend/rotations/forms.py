@@ -3,9 +3,73 @@ from django.core.exceptions import ObjectDoesNotExist
 from django.utils import timezone
 
 from shifts.models import WatchPeriod
+from users.models import Employee, WorkSchedule
 
 from .arrival_roster_parser import MAX_FILE_SIZE
-from .models import ArrivalRosterRowReview, RotationCollectionCycle, RotationResponse
+from .models import (
+    ArrivalRosterRowReview,
+    EmployeeWatchProfileChange,
+    RotationCollectionCycle,
+    RotationResponse,
+)
+
+
+class EmployeeWatchProfileChangeDraftForm(forms.Form):
+    employee_id = forms.ModelChoiceField(
+        label='Сотрудник',
+        queryset=Employee.objects.none(),
+    )
+    watch_period_id = forms.ModelChoiceField(
+        label='Период действия',
+        queryset=WatchPeriod.objects.none(),
+    )
+    new_work_schedule_id = forms.ModelChoiceField(
+        label='Новый график работы',
+        queryset=WorkSchedule.objects.none(),
+    )
+    new_brigade_number = forms.IntegerField(
+        label='Номер бригады',
+        required=False,
+        min_value=1,
+    )
+    basis_kind = forms.ChoiceField(
+        label='Вид официального основания',
+        choices=EmployeeWatchProfileChange.BasisKind.choices,
+    )
+    basis_number = forms.CharField(
+        label='Номер основания',
+        max_length=128,
+    )
+    basis_date = forms.DateField(
+        label='Дата основания',
+        widget=forms.DateInput(attrs={'type': 'date'}),
+    )
+    basis = forms.CharField(
+        label='Содержание основания',
+        widget=forms.Textarea(attrs={'rows': 3}),
+    )
+
+    def __init__(self, *args, future_periods_only=True, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['employee_id'].queryset = (
+            Employee.objects.filter(
+                is_active=True,
+                status=Employee.Status.ACTIVE,
+            ).order_by('full_name', 'pk')
+        )
+        periods = WatchPeriod.objects.select_related('watch_composition').order_by(
+            'starts_on',
+            'pk',
+        )
+        if future_periods_only:
+            periods = periods.filter(
+                is_active=True,
+                starts_on__gt=timezone.localdate(),
+            )
+        self.fields['watch_period_id'].queryset = periods
+        self.fields['new_work_schedule_id'].queryset = (
+            WorkSchedule.objects.filter(is_active=True).order_by('name', 'pk')
+        )
 
 
 class ArrivalRosterUploadForm(forms.Form):

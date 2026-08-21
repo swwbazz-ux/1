@@ -1,0 +1,174 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Графики и вахты сотрудников — табельщик{% endblock %}
+{% block body_class %}rotation-workplace-screen{% endblock %}
+{% block extra_head %}
+{% include "includes/role_app_pwa_head.html" with role_code="timekeeper" manifest_url="/timekeeper.webmanifest" service_worker_url="/timekeeper-sw.js" legacy_scope="/timekeeper/" theme_color="#176B73" apple_title="Табельщик" icon_180="img/pwa/timekeeper-180.png" %}
+<link rel="stylesheet" href="{% static 'css/rotation-workplace-v2.css' %}?v=3">
+{% endblock %}
+
+{% block body %}
+<div class="admin-shell admin-exports-shell admin-day rotation-shell" data-admin-theme>
+    <header class="admin-console-header rotation-console-header">
+        <section class="admin-console-identity">
+            <span class="admin-console-avatar" aria-hidden="true">{{ access.employee.full_name|default:"Т"|first }}</span>
+            <span><strong>{{ access.employee.full_name }}</strong><em>Табельщик</em></span>
+        </section>
+        <section class="admin-console-main">
+            <div class="admin-console-title">
+                <span>Рабочее место табельщика</span>
+                <h1>Графики и вахты сотрудников</h1>
+                <p>Подготовьте официальное изменение графика, бригады и состава вахты с будущего периода.</p>
+            </div>
+            <nav class="admin-console-nav" aria-label="Разделы перевахты">
+                <a href="{% url 'rotation_timekeeper_dashboard' %}">Сбор данных</a>
+                <a href="{% url 'arrival_roster_index' %}">Перевахта и состав заезда</a>
+                <a href="{% url 'timekeeper_brigade_phase_calendar' %}">Календарь фаз бригад</a>
+                <a class="is-active" href="{% url 'timekeeper_employee_watch_profiles' %}" aria-current="page">Графики сотрудников</a>
+            </nav>
+        </section>
+        <section class="admin-console-actions rotation-console-actions">
+            <a class="admin-utility-link" href="{% url 'logout' %}">Выйти</a>
+        </section>
+    </header>
+
+    <main class="admin-console-page rotation-page">
+        {% for message in messages %}<div class="message {{ message.tags }}" role="status">{{ message }}</div>{% endfor %}
+
+        <section class="rotation-page-heading">
+            <div>
+                <span class="rotation-eyebrow">Будущее изменение</span>
+                <h2>Сотрудник и период действия</h2>
+                <p>Выберите карточку сотрудника и будущий период. Состав вахты определяется выбранным периодом.</p>
+            </div>
+        </section>
+
+        <section class="rotation-form-card">
+            <form method="get" action="{% url 'timekeeper_employee_watch_profiles' %}">
+                <div class="rotation-form-field">
+                    <label for="watch-profile-employee">Сотрудник</label>
+                    <select id="watch-profile-employee" name="employee" required>
+                        {% for employee in employees %}
+                            <option value="{{ employee.pk }}"{% if selected_employee.pk == employee.pk %} selected{% endif %}>{{ employee.full_name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="rotation-form-field">
+                    <label for="watch-profile-period">Будущий период вахты</label>
+                    <select id="watch-profile-period" name="watch_period" required>
+                        {% for period in periods %}
+                            <option value="{{ period.pk }}"{% if selected_period.pk == period.pk %} selected{% endif %}>{{ period.name }} · {{ period.starts_on|date:"d.m.Y" }}–{{ period.ends_on|date:"d.m.Y" }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <button class="admin-button admin-button-secondary" type="submit">Показать профиль</button>
+            </form>
+        </section>
+
+        {% if selected_employee and selected_period %}
+            <section class="rotation-table-card" aria-labelledby="effective-profile-title">
+                <div class="rotation-page-heading">
+                    <div>
+                        <span class="rotation-eyebrow">{{ selected_employee.full_name }}</span>
+                        <h2 id="effective-profile-title">Профиль на {{ selected_period.starts_on|date:"d.m.Y" }}</h2>
+                    </div>
+                </div>
+                {% if resolved_profile %}
+                    <div class="table-wrap">
+                        <table>
+                            <thead><tr><th>График</th><th>Бригада</th><th>Состав вахты</th><th>Источник</th></tr></thead>
+                            <tbody><tr>
+                                <td>{{ resolved_profile.work_schedule.name|default:"Не указан" }}</td>
+                                <td>{{ resolved_profile.brigade_number|default_if_none:"Не указана" }}</td>
+                                <td>{{ resolved_profile.watch_composition.name|default:"Не указан" }}</td>
+                                <td>{{ resolved_profile.source_label }}</td>
+                            </tr></tbody>
+                        </table>
+                    </div>
+                {% else %}
+                    <div class="message error" role="alert">{{ profile_error }}</div>
+                {% endif %}
+            </section>
+
+            <section class="rotation-form-card" aria-labelledby="watch-profile-create-title">
+                <h2 id="watch-profile-create-title">Новый черновик изменения</h2>
+                <p>Новый состав вахты: <strong>{{ selected_period.watch_composition.name|default:"Требуется проверка" }}</strong></p>
+                <form method="post" action="{% url 'timekeeper_employee_watch_profile_create' %}">
+                    {% csrf_token %}
+                    <input type="hidden" name="employee_id" value="{{ selected_employee.pk }}">
+                    <input type="hidden" name="watch_period_id" value="{{ selected_period.pk }}">
+                    <div class="rotation-form-field">
+                        <label for="{{ draft_form.new_work_schedule_id.id_for_label }}">{{ draft_form.new_work_schedule_id.label }}</label>
+                        {{ draft_form.new_work_schedule_id }}
+                    </div>
+                    <div class="rotation-form-field">
+                        <label for="{{ draft_form.new_brigade_number.id_for_label }}">{{ draft_form.new_brigade_number.label }}</label>
+                        {{ draft_form.new_brigade_number }}
+                        <small>Для графика без бригад оставьте поле пустым.</small>
+                    </div>
+                    <div class="rotation-form-field">
+                        <label for="{{ draft_form.basis_kind.id_for_label }}">{{ draft_form.basis_kind.label }}</label>
+                        {{ draft_form.basis_kind }}
+                    </div>
+                    <div class="rotation-form-field">
+                        <label for="{{ draft_form.basis_number.id_for_label }}">{{ draft_form.basis_number.label }}</label>
+                        {{ draft_form.basis_number }}
+                    </div>
+                    <div class="rotation-form-field">
+                        <label for="{{ draft_form.basis_date.id_for_label }}">{{ draft_form.basis_date.label }}</label>
+                        {{ draft_form.basis_date }}
+                    </div>
+                    <div class="rotation-form-field">
+                        <label for="{{ draft_form.basis.id_for_label }}">{{ draft_form.basis.label }}</label>
+                        {{ draft_form.basis }}
+                    </div>
+                    <button class="admin-button admin-button-primary" type="submit">Создать черновик</button>
+                </form>
+            </section>
+
+            <section class="rotation-table-card" aria-labelledby="watch-profile-history-title">
+                <div class="rotation-page-heading"><div><h2 id="watch-profile-history-title">История изменений</h2></div></div>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr><th>Период</th><th>Новый профиль</th><th>Основание</th><th>Состояние</th><th></th></tr>
+                        </thead>
+                        <tbody>
+                            {% for item in history_rows %}
+                                <tr>
+                                    <td>{{ item.change.effective_watch_period.name }}<br><small>с {{ item.change.effective_on|date:"d.m.Y" }}</small></td>
+                                    <td>
+                                        {{ item.change.new_work_schedule.name }} · бригада {{ item.change.new_brigade_number|default_if_none:"не указана" }}<br>
+                                        <small>{{ item.change.new_watch_composition.name }}</small>
+                                    </td>
+                                    <td>{{ item.basis_kind_label }} № {{ item.change.basis_number }} от {{ item.change.basis_date|date:"d.m.Y" }}<br><small>{{ item.change.basis }}</small></td>
+                                    <td>
+                                        <span class="rotation-status-chip status-{{ item.change.status }}">{{ item.status_label }}</span>
+                                        {% if item.change.applied_at %}<br><small>Применено {{ item.change.applied_at|date:"d.m.Y H:i" }}</small>{% endif %}
+                                    </td>
+                                    <td>
+                                        {% if item.can_apply %}
+                                            <form method="post" action="{% url 'timekeeper_employee_watch_profile_apply' item.change.pk %}">
+                                                {% csrf_token %}
+                                                <button class="admin-button admin-button-primary" type="submit">Применить</button>
+                                            </form>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                            {% empty %}
+                                <tr><td colspan="5">Для сотрудника изменений пока нет.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        {% else %}
+            <div class="rotation-empty-state">
+                <strong>Нет доступных сотрудников или будущих периодов</strong>
+                <p>Проверьте действующие карточки сотрудников и календарь периодов вахты.</p>
+            </div>
+        {% endif %}
+    </main>
+</div>
+{% endblock %}
