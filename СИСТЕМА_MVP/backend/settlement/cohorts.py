@@ -25,6 +25,14 @@ from rotations.arrival_roster_routing import (
     ERROR_OFFICIAL_ASSIGNMENT_INCONSISTENT,
     ERROR_OFFICIAL_ASSIGNMENT_MISSING,
 )
+from rotations.employee_watch_profile_changes import (
+    EmployeeWatchProfileChangeError,
+    resolve_employee_watch_profile,
+)
+from shifts.brigade_phase_calendar import (
+    BrigadePhaseCalendarError,
+    resolve_confirmed_brigade_phase,
+)
 from shifts.models import (
     WatchPeriod,
     WatchPeriodBrigadePhaseRow,
@@ -226,7 +234,131 @@ def _routing_source_error(message):
     return _shift_review_required(f'источник передачи реестра изменился: {message}')
 
 
-def _routing_member_context(*, cohort, member, ready, period):
+def _resolved_watch_profile_snapshot(profile):
+    return {
+        'source_kind': profile.source_kind,
+        'employee_watch_profile_change_id': profile.change_id,
+        'work_schedule_id': profile.work_schedule_id,
+        'brigade_number': profile.brigade_number,
+        'watch_composition_id': profile.watch_composition_id,
+        'profile_fingerprint': profile.profile_fingerprint,
+    }
+
+
+def _routing_watch_profile_sources(*, cohort, members):
+    member_by_row = {member.routing_row_id: member for member in members}
+    if None in member_by_row or len(member_by_row) != len(members):
+        raise _routing_source_error('routing member не имеет уникальной exact строки.')
+    raw_profiles = (cohort.source_snapshot or {}).get('watch_profiles')
+    if raw_profiles is None and all(
+        member.watch_profile_source_kind
+        == SettlementCohortMember.WatchProfileSourceKind.UNVERIFIED_LEGACY
+        for member in members
+    ):
+        return {}
+    if not isinstance(raw_profiles, list):
+        raise _routing_source_error('снимок effective-профилей отсутствует.')
+    required_keys = {
+        'routing_row_id',
+        'source_kind',
+        'employee_watch_profile_change_id',
+        'work_schedule_id',
+        'brigade_number',
+        'watch_composition_id',
+        'profile_fingerprint',
+    }
+    profiles_by_row = {}
+    for item in raw_profiles:
+        if not isinstance(item, dict) or set(item) != required_keys:
+            raise _routing_source_error('снимок effective-профиля имеет лишние или пропущенные поля.')
+        row_id = item.get('routing_row_id')
+        if row_id in profiles_by_row:
+            raise _routing_source_error('снимок effective-профиля содержит повтор строки.')
+        profiles_by_row[row_id] = item
+    if set(profiles_by_row) != set(member_by_row):
+        raise _routing_source_error('снимок effective-профилей не покрывает exact состав.')
+    for row_id, member in member_by_row.items():
+        expected = {
+            'routing_row_id': row_id,
+            **_member_watch_profile_snapshot(member),
+        }
+        if profiles_by_row[row_id] != expected:
+            raise _routing_source_error('снимок effective-профиля не совпадает с member.')
+    return profiles_by_row
+
+
+def _routing_watch_profile_context(
+    *, cohort, member, period, source_profile, allow_unverified_watch_profile,
+):
+    if member.resident.employee_id is None:
+        raise _routing_source_error('routing member не связан с exact Employee.')
+    try:
+        profile = resolve_employee_watch_profile(
+            employee_id=member.resident.employee_id,
+            watch_period_id=cohort.watch_period_id,
+        )
+    except EmployeeWatchProfileChangeError as error:
+        raise _routing_source_error('effective-профиль Employee не воспроизводится.') from error
+    resolved = _resolved_watch_profile_snapshot(profile)
+    if (
+        member.watch_profile_source_kind
+        == SettlementCohortMember.WatchProfileSourceKind.UNVERIFIED_LEGACY
+    ):
+        validation_error = _routing_source_error(
+            'исторический routing member не содержит проверенного effective-профиля.',
+        )
+        if not allow_unverified_watch_profile:
+            raise validation_error
+        return {
+            'validation_error': validation_error,
+            'watch_profile': _member_watch_profile_snapshot(member),
+            'official_equipment_assignment': None,
+        }
+    if (
+        member.watch_profile_source_kind
+        not in {
+            SettlementCohortMember.WatchProfileSourceKind.LEGACY_BASELINE,
+            SettlementCohortMember.WatchProfileSourceKind.APPLIED_CHANGE,
+        }
+        or _member_watch_profile_snapshot(member) != resolved
+        or (member.basis_snapshot or {}).get('watch_profile') != resolved
+        or source_profile != {'routing_row_id': member.routing_row_id, **resolved}
+        or (
+            profile.source_kind
+            == SettlementCohortMember.WatchProfileSourceKind.LEGACY_BASELINE
+            and profile.change_id is not None
+        )
+        or (
+            profile.source_kind
+            == SettlementCohortMember.WatchProfileSourceKind.APPLIED_CHANGE
+            and profile.change_id is None
+        )
+    ):
+        raise _routing_source_error('effective-профиль не совпадает с immutable provenance.')
+    try:
+        calendar_phase = resolve_confirmed_brigade_phase(
+            watch_period_id=period.pk,
+            work_schedule_id=profile.work_schedule_id,
+            brigade_number=profile.brigade_number,
+        )
+    except BrigadePhaseCalendarError as error:
+        raise _routing_source_error('подтверждённая фаза профиля не воспроизводится.') from error
+    if (
+        member.brigade_phase_row_id != calendar_phase.row_id
+        or member.brigade_phase_row.version_id != calendar_phase.version_id
+        or member.brigade_phase_row.phase != calendar_phase.phase
+        or member.work_shift != calendar_phase.phase
+    ):
+        raise _routing_source_error('exact календарная фаза effective-профиля изменилась.')
+    return {
+        'watch_profile': resolved,
+        'calendar_phase': calendar_phase,
+    }
+
+
+def _routing_member_context(
+    *, cohort, member, ready, period, watch_profile_context,
+):
     row = member.routing_row
     event = member.routing_event
     phase_row = member.brigade_phase_row
@@ -357,10 +489,14 @@ def _routing_member_context(*, cohort, member, ready, period):
         'shift_selected_by_access': None,
         'shift_selected_at': None,
         'shift_selection_basis': '',
+        'watch_profile': watch_profile_context['watch_profile'],
+        'calendar_phase': watch_profile_context['calendar_phase'],
     }
 
 
-def revalidate_routing_cohort_members(*, cohort, members=None):
+def revalidate_routing_cohort_members(
+    *, cohort, members=None, allow_unverified_watch_profile=False,
+):
     """Revalidate one structurally linked routing cohort without selecting fallbacks."""
 
     if cohort.routing_batch_id is None:
@@ -405,6 +541,10 @@ def revalidate_routing_cohort_members(*, cohort, members=None):
         routing_rows=routing_rows,
     ):
         raise _routing_source_error('snapshot состава больше не воспроизводится.')
+    watch_profile_sources = _routing_watch_profile_sources(
+        cohort=cohort,
+        members=members,
+    )
     try:
         readiness = build_arrival_roster_cohort_readiness(batch_id=batch.pk)
     except SettlementCohortReadinessError as error:
@@ -447,6 +587,16 @@ def revalidate_routing_cohort_members(*, cohort, members=None):
         raise _routing_source_error('состав participants больше не совпадает с передачей.')
     contexts = {}
     for member in members:
+        watch_profile_context = _routing_watch_profile_context(
+            cohort=cohort,
+            member=member,
+            period=period,
+            source_profile=watch_profile_sources.get(member.routing_row_id),
+            allow_unverified_watch_profile=allow_unverified_watch_profile,
+        )
+        if 'validation_error' in watch_profile_context:
+            contexts[member.pk] = watch_profile_context
+            continue
         blocker_code = assignment_blockers.get(member.routing_row_id)
         if blocker_code is not None:
             contexts[member.pk] = {
@@ -454,6 +604,8 @@ def revalidate_routing_cohort_members(*, cohort, members=None):
                     'официальное назначение участника изменилось.',
                 ),
                 'official_equipment_assignment': None,
+                'watch_profile': watch_profile_context['watch_profile'],
+                'calendar_phase': watch_profile_context['calendar_phase'],
             }
             continue
         contexts[member.pk] = _routing_member_context(
@@ -461,6 +613,7 @@ def revalidate_routing_cohort_members(*, cohort, members=None):
             member=member,
             ready=ready_by_row[member.routing_row_id],
             period=period,
+            watch_profile_context=watch_profile_context,
         )
     return contexts
 

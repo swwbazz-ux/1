@@ -459,6 +459,9 @@ def resolve_settlement_cohort(
         .select_related(
             'cohort__routing_batch__arrival_roster_version',
             'resident__employee__work_schedule', 'source_revision',
+            'watch_profile_work_schedule',
+            'watch_profile_watch_composition',
+            'employee_watch_profile_change',
             'routing_row',
             'routing_event__crew_plan_slot__plan__role',
             'brigade_phase_row__version',
@@ -474,6 +477,7 @@ def resolve_settlement_cohort(
         routing_context = revalidate_routing_cohort_members(
             cohort=cohort,
             members=members,
+            allow_unverified_watch_profile=True,
         )
     candidates, slot_snapshot = _slot_candidates(cohort)
     starts_at, ends_at = _period_datetimes(cohort)
@@ -663,6 +667,7 @@ def resolve_settlement_cohort(
                     item.official_equipment_assignment.source_crew_plan_slot_id
                     if item.official_equipment_assignment_id else None
                 ),
+                'watch_profile': routing_context[item.pk]['watch_profile'],
             }
             for item in members
         }
@@ -720,8 +725,12 @@ def resolve_settlement_cohort(
                     if item.resident.employee_id else None
                 ),
                 'employee_composition_id': (
-                    item.resident.employee.watch_composition_id
-                    if item.resident.employee_id else None
+                    routing_context[item.pk]['watch_profile']['watch_composition_id']
+                    if routing_context is not None and item.resident.employee_id
+                    else (
+                        item.resident.employee.watch_composition_id
+                        if item.resident.employee_id else None
+                    )
                 ),
                 'arrival_at': item.arrival_at.isoformat(),
                 'departure_at': item.departure_at.isoformat(),
@@ -881,23 +890,27 @@ def resolve_settlement_cohort(
         ],
     }
     fingerprint = _canonical_hash(snapshot)
-    routing_source_identifiers = ()
+    routing_source_identifiers = []
     if routing_context is not None:
-        routing_source_identifiers = (
+        routing_source_identifiers.extend((
             f'routing-batch:{cohort.routing_batch_id}',
             'arrival-roster-version:'
             f'{cohort.routing_batch.arrival_roster_version_id}',
-            *(
-                identifier
-                for item in members
-                for identifier in (
-                    f'routing-row:{item.routing_row_id}',
-                    f'routing-event:{item.routing_event_id}',
-                    f'brigade-phase-row:{item.brigade_phase_row_id}',
-                    f'brigade-phase-version:{item.brigade_phase_row.version_id}',
+        ))
+        for item in members:
+            profile = routing_context[item.pk]['watch_profile']
+            routing_source_identifiers.extend((
+                f'routing-row:{item.routing_row_id}',
+                f'routing-event:{item.routing_event_id}',
+                f'brigade-phase-row:{item.brigade_phase_row_id}',
+                f'brigade-phase-version:{item.brigade_phase_row.version_id}',
+                f"watch-profile:{profile['profile_fingerprint']}",
+            ))
+            if profile['employee_watch_profile_change_id'] is not None:
+                routing_source_identifiers.append(
+                    'employee-watch-profile-change:'
+                    f"{profile['employee_watch_profile_change_id']}",
                 )
-            ),
-        )
     source_identifiers = tuple(sorted({
         'resolver:m6-equipment-routing-v1',
         f'cohort:{cohort.stable_id}',
@@ -994,7 +1007,12 @@ def resolve_settlement_cohort(
             ):
                 reject(member, REASON_RESIDENT_INACTIVE)
                 continue
-            if employee.watch_composition_id != cohort.watch_composition_id:
+            resolved_composition_id = (
+                routing_context[member.pk]['watch_profile']['watch_composition_id']
+                if routing_context is not None
+                else employee.watch_composition_id
+            )
+            if resolved_composition_id != cohort.watch_composition_id:
                 reject(member, REASON_INCOMPLETE_CONTEXT)
                 continue
 
