@@ -25,6 +25,8 @@ from .oup_views import (
 )
 from .views import (
     activate_access_view,
+    app_catalog_qr_view,
+    app_catalog_view,
     driver_accept_assignment_view,
     driver_downtime_action_view,
     driver_close_shift_view,
@@ -62,6 +64,8 @@ from .views import (
 urlpatterns = [
     path('', login_view, name='login'),
     path('activate-access/', activate_access_view, name='activate_access'),
+    path('apps/', app_catalog_view, name='app_catalog'),
+    path('apps/qr/<slug:role_code>/', app_catalog_qr_view, name='app_catalog_qr'),
     path('interfaces/', interface_map_view, name='interface_map'),
     path('home/', role_home_view, name='role_home'),
     path('oup/', oup_home_view, name='oup_home'),

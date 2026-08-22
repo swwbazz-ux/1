@@ -1,0 +1,72 @@
+.role-app-install {
+    display: grid;
+    gap: 7px;
+    margin-top: 3px;
+    padding-top: 13px;
+    border-top: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.role-app-install__button {
+    min-height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 9px;
+    width: 100%;
+    padding: 10px 14px;
+    border: 1px solid rgba(74, 198, 162, 0.7);
+    border-radius: 8px;
+    color: #d9fff2;
+    background: rgba(18, 105, 82, 0.34);
+    font: inherit;
+    font-size: 14px;
+    font-weight: 850;
+    cursor: pointer;
+    transition: border-color 150ms ease, background-color 150ms ease, transform 150ms ease;
+}
+
+.role-app-install__button:hover,
+.role-app-install__button:focus-visible {
+    border-color: #6fe4bd;
+    background: rgba(24, 132, 101, 0.52);
+}
+
+.role-app-install__button:focus-visible {
+    outline: 3px solid rgba(153, 246, 228, 0.78);
+    outline-offset: 2px;
+}
+
+.role-app-install__button:active {
+    transform: scale(0.985);
+}
+
+.role-app-install__button:disabled {
+    border-color: rgba(148, 163, 184, 0.28);
+    color: #aebec9;
+    background: rgba(71, 85, 105, 0.26);
+    cursor: default;
+    transform: none;
+}
+
+.role-app-install__status {
+    min-height: 2.7em;
+    margin: 0;
+    color: #aabdc9;
+    font-size: 11px;
+    line-height: 1.35;
+    text-align: center;
+}
+
+.role-app-install.is-ready .role-app-install__status {
+    color: #b8f7df;
+}
+
+.role-app-install.is-installed .role-app-install__status {
+    color: #84e1bc;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .role-app-install__button {
+        transition: none;
+    }
+}

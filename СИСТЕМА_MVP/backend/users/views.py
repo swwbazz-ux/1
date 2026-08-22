@@ -11,13 +11,13 @@ from django.forms import modelform_factory
 from django.forms.models import construct_instance
 from django.db import transaction
 from django.db.models import Count, Q
-from django.http import HttpResponse, JsonResponse
+from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_GET, require_POST
 from openpyxl import Workbook
 
 from assignments.models import AssignmentStatus, ExcavatorPlacement, HaulAssignment, HaulAssignmentAction
@@ -61,6 +61,13 @@ from shifts.services import (
 from trips.models import DispatcherActionLog, OPEN_TRIP_STATUSES, Trip, TripClientAction, TripStatus
 
 from .access_auth import find_employee_access_by_credentials
+from .app_catalog import (
+    APP_CATALOG_ROLE_CODES,
+    app_catalog_public_url,
+    app_catalog_items,
+    render_role_app_qr_svg,
+    role_app_public_url,
+)
 from .active_role import (
     ACTIVE_ROLE_CODE_SESSION_KEY,
     ACTIVE_ROLE_GENERATION_SESSION_KEY,
@@ -489,6 +496,33 @@ def interface_map_view(request):
             'demo_access_codes': DEMO_ACCESS_CODES,
         },
     )
+
+
+@require_GET
+def app_catalog_view(request):
+    if get_role_app_for_request(request):
+        return redirect(app_catalog_public_url(request))
+    return render(
+        request,
+        'users/app_catalog.html',
+        {'catalog_apps': app_catalog_items(request)},
+    )
+
+
+@require_GET
+def app_catalog_qr_view(request, role_code):
+    if role_code not in APP_CATALOG_ROLE_CODES:
+        raise Http404
+    target_url = role_app_public_url(request, role_code)
+    response = HttpResponse(
+        render_role_app_qr_svg(target_url),
+        content_type='image/svg+xml; charset=utf-8',
+    )
+    response['Cache-Control'] = 'public, max-age=86400'
+    response['Content-Disposition'] = f'inline; filename="{role_code}-qr.svg"'
+    response['Vary'] = 'Host'
+    response['X-Content-Type-Options'] = 'nosniff'
+    return response
 
 
 def _masked_activation_phone(value):

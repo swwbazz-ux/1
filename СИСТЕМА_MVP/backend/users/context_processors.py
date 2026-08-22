@@ -1,4 +1,5 @@
 from .active_role import role_session_state
+from .app_catalog import app_catalog_public_url
 from .role_apps import (
     APP_CONTRACT_VERSION,
     STATIC_ASSET_RELEASE,
@@ -47,4 +48,5 @@ def role_app(request):
             metadata_app.service_worker_url if metadata_app else ''
         ),
         'app_service_worker_scope': metadata_scope,
+        'app_catalog_url': app_catalog_public_url(request),
     }
