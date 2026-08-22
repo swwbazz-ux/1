@@ -40,6 +40,11 @@ from .models import (
 )
 from .arrival_roster_routing import route_confirmed_arrival_roster_version
 from .arrival_rosters import _canonical_sha256
+from .timekeeper_auth import (
+    TIMEKEEPER_APP_ACCESS_SESSION_KEY,
+    TIMEKEEPER_APP_CREDENTIAL_REVISION_SESSION_KEY,
+    timekeeper_app_credential_revision,
+)
 
 
 class ArrivalRosterRoutingModelTests(TestCase):
@@ -821,8 +826,12 @@ class ArrivalRosterRoutingHttpTests(TestCase):
 
     def _login(self, client=None, access=None):
         client = client or self.client
+        access = access or self.access
         session = client.session
-        session['employee_access_id'] = (access or self.access).pk
+        session[TIMEKEEPER_APP_ACCESS_SESSION_KEY] = access.pk
+        session[TIMEKEEPER_APP_CREDENTIAL_REVISION_SESSION_KEY] = (
+            timekeeper_app_credential_revision(access)
+        )
         session.save()
         return client
 

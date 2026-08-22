@@ -27,7 +27,10 @@
             </nav>
         </section>
         <section class="admin-console-actions rotation-console-actions">
-            <a class="admin-utility-link" href="{% url 'logout' %}">Выйти</a>
+            <form method="post" action="{% url 'timekeeper_logout' %}">
+                {% csrf_token %}
+                <button class="admin-utility-link" type="submit">Выйти</button>
+            </form>
         </section>
     </header>
 

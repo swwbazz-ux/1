@@ -42,7 +42,14 @@
                     data-theme-icon="sun"
                     aria-label="Переключить дневной и ночной режим"
                     title="Переключить дневной и ночной режим"></button>
-            <a class="admin-utility-link" href="{% url 'logout' %}">Выйти</a>
+            {% if is_timekeeper %}
+                <form method="post" action="{{ logout_url }}">
+                    {% csrf_token %}
+                    <button class="admin-utility-link" type="submit">Выйти</button>
+                </form>
+            {% else %}
+                <a class="admin-utility-link" href="{{ logout_url }}">Выйти</a>
+            {% endif %}
         </section>
     </header>
 

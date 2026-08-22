@@ -751,7 +751,7 @@ def _arrival_roster_index_context(*, pool_form=None):
 
 
 def arrival_roster_index_view(request):
-    access, response = _role_access(request, 'timekeeper')
+    access, response = _timekeeper_app_access(request)
     if response:
         return response
     context = _arrival_roster_index_context()
@@ -765,7 +765,7 @@ def arrival_roster_index_view(request):
 
 @require_POST
 def arrival_roster_pool_create_view(request):
-    access, response = _role_access(request, 'timekeeper')
+    access, response = _timekeeper_app_access(request)
     if response:
         return response
     form = ArrivalRosterPoolCreateForm(request.POST)
@@ -798,7 +798,7 @@ def arrival_roster_pool_create_view(request):
 
 
 def arrival_roster_upload_form_view(request):
-    access, response = _role_access(request, 'timekeeper')
+    access, response = _timekeeper_app_access(request)
     if response:
         return response
     return _private_no_store(render(
@@ -810,7 +810,7 @@ def arrival_roster_upload_form_view(request):
 
 @require_POST
 def arrival_roster_upload_view(request):
-    access, response = _role_access(request, 'timekeeper')
+    access, response = _timekeeper_app_access(request)
     if response:
         return response
     form = ArrivalRosterUploadForm(request.POST, request.FILES)
@@ -843,7 +843,7 @@ def arrival_roster_upload_view(request):
 
 
 def arrival_roster_review_view(request, version_id):
-    access, response = _role_access(request, 'timekeeper')
+    access, response = _timekeeper_app_access(request)
     if response:
         return response
     version = get_object_or_404(
@@ -1220,7 +1220,7 @@ def _arrival_roster_error(request, error):
 
 @require_POST
 def arrival_roster_approval_confirm_view(request, version_id):
-    access, response = _role_access(request, 'timekeeper')
+    access, response = _timekeeper_app_access(request)
     if response:
         return response
     form = ArrivalRosterConfirmationForm(request.POST)
@@ -1249,7 +1249,7 @@ def arrival_roster_approval_confirm_view(request, version_id):
 
 @require_POST
 def arrival_roster_routing_view(request, version_id):
-    access, response = _role_access(request, 'timekeeper')
+    access, response = _timekeeper_app_access(request)
     if response:
         return response
     already_routed = ArrivalRosterVersion.objects.filter(
@@ -1273,7 +1273,7 @@ def arrival_roster_routing_view(request, version_id):
 
 @require_POST
 def arrival_roster_create_revision_view(request, version_id):
-    access, response = _role_access(request, 'timekeeper')
+    access, response = _timekeeper_app_access(request)
     if response:
         return response
     try:
@@ -1290,7 +1290,7 @@ def arrival_roster_create_revision_view(request, version_id):
 
 @require_POST
 def arrival_roster_employee_add_view(request, version_id):
-    access, response = _role_access(request, 'timekeeper')
+    access, response = _timekeeper_app_access(request)
     if response:
         return response
     form = ArrivalRosterEmployeeAddForm(request.POST)
@@ -1312,7 +1312,7 @@ def arrival_roster_employee_add_view(request, version_id):
 
 @require_POST
 def arrival_roster_external_add_view(request, version_id):
-    access, response = _role_access(request, 'timekeeper')
+    access, response = _timekeeper_app_access(request)
     if response:
         return response
     form = ArrivalRosterExternalAddForm(request.POST)
@@ -1334,7 +1334,7 @@ def arrival_roster_external_add_view(request, version_id):
 
 @require_POST
 def arrival_roster_confirm_unambiguous_view(request, version_id):
-    access, response = _role_access(request, 'timekeeper')
+    access, response = _timekeeper_app_access(request)
     if response:
         return response
     try:
@@ -1362,7 +1362,7 @@ def _issue_for_version(version_id, issue_id):
 
 @require_POST
 def arrival_roster_resident_search_view(request, version_id, match_id):
-    access, response = _role_access(request, 'timekeeper')
+    access, response = _timekeeper_app_access(request)
     if response:
         return response
     _match_for_version(version_id, match_id)
@@ -1387,7 +1387,7 @@ def arrival_roster_resident_search_view(request, version_id, match_id):
 
 @require_POST
 def arrival_roster_resident_select_view(request, version_id, match_id):
-    access, response = _role_access(request, 'timekeeper')
+    access, response = _timekeeper_app_access(request)
     if response:
         return response
     _match_for_version(version_id, match_id)
@@ -1410,7 +1410,7 @@ def arrival_roster_resident_select_view(request, version_id, match_id):
 
 @require_POST
 def arrival_roster_resident_clear_view(request, version_id, match_id):
-    access, response = _role_access(request, 'timekeeper')
+    access, response = _timekeeper_app_access(request)
     if response:
         return response
     _match_for_version(version_id, match_id)
@@ -1430,7 +1430,7 @@ def arrival_roster_resident_clear_view(request, version_id, match_id):
 
 @require_POST
 def arrival_roster_participation_view(request, version_id, match_id):
-    access, response = _role_access(request, 'timekeeper')
+    access, response = _timekeeper_app_access(request)
     if response:
         return response
     _match_for_version(version_id, match_id)
@@ -1454,7 +1454,7 @@ def arrival_roster_participation_view(request, version_id, match_id):
 
 @require_POST
 def arrival_roster_dates_view(request, version_id, match_id):
-    access, response = _role_access(request, 'timekeeper')
+    access, response = _timekeeper_app_access(request)
     if response:
         return response
     _match_for_version(version_id, match_id)
@@ -1478,7 +1478,7 @@ def arrival_roster_dates_view(request, version_id, match_id):
 
 @require_POST
 def arrival_roster_notes_view(request, version_id, match_id):
-    access, response = _role_access(request, 'timekeeper')
+    access, response = _timekeeper_app_access(request)
     if response:
         return response
     _match_for_version(version_id, match_id)
@@ -1499,7 +1499,7 @@ def arrival_roster_notes_view(request, version_id, match_id):
 
 
 def _arrival_roster_issue_command(request, version_id, issue_id, command):
-    access, response = _role_access(request, 'timekeeper')
+    access, response = _timekeeper_app_access(request)
     if response:
         return response
     _issue_for_version(version_id, issue_id)
@@ -1579,7 +1579,7 @@ def timekeeper_dashboard_view(request):
 
 
 def cycle_create_view(request):
-    access, response = _role_access(request, 'timekeeper')
+    access, response = _timekeeper_app_access(request)
     if response:
         return response
     form = RotationCycleCreateForm(request.POST or None)
@@ -1598,7 +1598,7 @@ def cycle_create_view(request):
 
 
 def timekeeper_cycle_view(request, cycle_id):
-    access, response = _role_access(request, 'timekeeper')
+    access, response = _timekeeper_app_access(request)
     if response:
         return response
     cycle = get_object_or_404(
@@ -1643,7 +1643,7 @@ def timekeeper_cycle_view(request, cycle_id):
 
 @require_POST
 def cycle_action_view(request, cycle_id, action):
-    access, response = _role_access(request, 'timekeeper')
+    access, response = _timekeeper_app_access(request)
     if response:
         return response
     cycle = get_object_or_404(RotationCollectionCycle, pk=cycle_id)
@@ -1686,12 +1686,15 @@ def _response_form_view(request, *, response, access, is_timekeeper):
             'response': response,
             'form': form,
             'is_timekeeper': is_timekeeper,
+            'logout_url': reverse(
+                'timekeeper_logout' if is_timekeeper else 'logout',
+            ),
         },
     )
 
 
 def timekeeper_response_edit_view(request, cycle_id, response_id):
-    access, denied = _role_access(request, 'timekeeper')
+    access, denied = _timekeeper_app_access(request)
     if denied:
         return denied
     response = get_object_or_404(
@@ -1799,7 +1802,7 @@ def site_manager_decision_view(request, case_id, decision):
 
 @require_POST
 def documentation_complete_view(request, case_id):
-    access, response = _role_access(request, 'timekeeper')
+    access, response = _timekeeper_app_access(request)
     if response:
         return response
     extension_case = get_object_or_404(
@@ -1829,7 +1832,7 @@ def _download_response(content, *, content_type, ascii_name, unicode_name):
 
 
 def cycle_export_view(request, cycle_id):
-    access, response = _role_access(request, 'timekeeper')
+    access, response = _timekeeper_app_access(request)
     if response:
         return response
     cycle = get_object_or_404(
@@ -1846,7 +1849,7 @@ def cycle_export_view(request, cycle_id):
 
 
 def cycle_document_packet_view(request, cycle_id):
-    access, response = _role_access(request, 'timekeeper')
+    access, response = _timekeeper_app_access(request)
     if response:
         return response
     cycle = get_object_or_404(

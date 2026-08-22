@@ -79,6 +79,11 @@ from .models import (
     ArrivalRosterSourceRow,
     ArrivalRosterVersion,
 )
+from .timekeeper_auth import (
+    TIMEKEEPER_APP_ACCESS_SESSION_KEY,
+    TIMEKEEPER_APP_CREDENTIAL_REVISION_SESSION_KEY,
+    timekeeper_app_credential_revision,
+)
 
 
 def _workbook_bytes(*, full_name='Иванов Иван Иванович', position='Водитель',
@@ -166,6 +171,10 @@ class ArrivalRosterT11Tests(TestCase):
     @classmethod
     def setUpTestData(cls):
         cls.timekeeper_role = Role.objects.get(code='timekeeper')
+        cls.admin_role, _created = Role.objects.get_or_create(
+            code='admin',
+            defaults={'name': 'Системный администратор', 'is_active': True},
+        )
         cls.other_role = Role.objects.create(
             code='driver-test-t11', name='Водитель тест', is_active=True,
         )
@@ -186,6 +195,19 @@ class ArrivalRosterT11Tests(TestCase):
             employee=cls.actor,
             role=cls.other_role,
             access_code='710002',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+        cls.admin_actor = Employee.objects.create(
+            full_name='Администратор приложения Табельщика T1.1',
+            phone='+79990000003',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        cls.admin_access = EmployeeAccess.objects.create(
+            employee=cls.admin_actor,
+            role=cls.admin_role,
+            access_code='710003',
             status=EmployeeAccess.Status.ACTIVATED,
             is_active=True,
         )
@@ -236,9 +258,23 @@ class ArrivalRosterT11Tests(TestCase):
         return _lock_timekeeper_access(_access_snapshot(access.pk))
 
     def _login(self, client, access=None):
+        access = access or self.access
         session = client.session
-        session['employee_access_id'] = (access or self.access).pk
+        session[TIMEKEEPER_APP_ACCESS_SESSION_KEY] = access.pk
+        session[TIMEKEEPER_APP_CREDENTIAL_REVISION_SESSION_KEY] = (
+            timekeeper_app_credential_revision(access)
+        )
         session.save()
+
+    def _assert_timekeeper_logout_form(self, response):
+        logout_url = reverse('timekeeper_logout')
+        self.assertContains(
+            response,
+            f'<form method="post" action="{logout_url}">',
+        )
+        self.assertContains(response, 'name="csrfmiddlewaretoken"')
+        self.assertNotContains(response, 'href="/logout/"')
+        self.assertNotContains(response, 'action="/logout/"')
 
     def _source_file_kwargs(self, marker):
         payload = f'публичная подмена {marker}'.encode('utf-8')
@@ -690,6 +726,77 @@ class ArrivalRosterT11Tests(TestCase):
         self.assertNotContains(review, '+7 999 123-45-67')
         self.assertContains(review, 'Результат проверки')
         self.assertContains(form_response, 'Загрузка реестра заезда')
+
+    def test_admin_app_session_opens_arrival_pages_and_logout_is_namespaced(self):
+        version, _created = self._upload()
+        pages = (
+            reverse('arrival_roster_index'),
+            reverse('arrival_roster_upload_form'),
+            reverse('arrival_roster_review', args=[version.pk]),
+        )
+        for access in (self.admin_access, self.access):
+            client = Client()
+            self._login(client, access)
+            session = client.session
+            self.assertNotIn('employee_access_id', session)
+            self.assertNotIn('active_role_access_id', session)
+            self.assertNotIn('active_role_login_at', session)
+            self.assertNotIn('active_role_code', session)
+            for url in pages:
+                with self.subTest(role=access.role.code, url=url):
+                    response = client.get(url)
+                    self.assertEqual(response.status_code, 200)
+                    self._assert_timekeeper_logout_form(response)
+
+    def test_admin_upload_command_preserves_exact_admin_access_in_audit(self):
+        client = Client()
+        self._login(client, self.admin_access)
+        response = client.post(
+            reverse('arrival_roster_upload'),
+            {
+                'watch_period': self.period.pk,
+                'workbook': SimpleUploadedFile(
+                    'admin-app-roster.xlsx',
+                    _workbook_bytes(),
+                    content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                ),
+                'actor_access_id': self.other_access.pk,
+                'employee_access_id': self.other_access.pk,
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        version = ArrivalRosterVersion.objects.get()
+        self.assertEqual(version.created_by_access_id, self.admin_access.pk)
+        self.assertEqual(
+            version.source_file.uploaded_by_access_id,
+            self.admin_access.pk,
+        )
+        self.assertEqual(
+            set(version.events.values_list('actor_access_id', flat=True)),
+            {self.admin_access.pk},
+        )
+        match = version.matches.get()
+        command_response = client.post(
+            reverse(
+                'arrival_roster_resident_select',
+                args=[version.pk, match.pk],
+            ),
+            {
+                'expected_revision': 0,
+                'resident_id': self.resident.pk,
+                'actor_access_id': self.other_access.pk,
+            },
+        )
+        self.assertEqual(command_response.status_code, 302)
+        match.refresh_from_db()
+        self.assertEqual(
+            match.row_review.updated_by_access_id,
+            self.admin_access.pk,
+        )
+        self.assertEqual(
+            set(version.events.values_list('actor_access_id', flat=True)),
+            {self.admin_access.pk},
+        )
 
     def test_missing_required_sheet_becomes_review_issue(self):
         version, _created = self._upload(_workbook_bytes(omit_sheet='Числ'))
@@ -1166,11 +1273,32 @@ class ArrivalRosterT11Tests(TestCase):
     def test_t12_verified_context_rejects_inactive_access_employee_role_and_no_fallback(self):
         event_count = ArrivalRosterEvent.objects.count()
 
+        admin_context = _lock_timekeeper_access(
+            _access_snapshot(self.admin_access.pk),
+        )
+        self.assertEqual(admin_context.actor_access.pk, self.admin_access.pk)
+        self.assertEqual(admin_context.role_code, 'admin')
+
         EmployeeAccess.objects.filter(pk=self.access.pk).update(is_active=False)
         with self.assertRaises(ValidationError) as inactive_access:
             _lock_timekeeper_access(_access_snapshot(self.access.pk))
         self.assertEqual(inactive_access.exception.code, 'arrival_roster.access_denied')
         EmployeeAccess.objects.filter(pk=self.access.pk).update(is_active=True)
+
+        for field_name in ('blocked_at', 'deactivated_at'):
+            EmployeeAccess.objects.filter(pk=self.access.pk).update(
+                **{field_name: timezone.now()},
+            )
+            with self.subTest(field_name=field_name):
+                with self.assertRaises(ValidationError) as inactive_timestamp:
+                    _lock_timekeeper_access(_access_snapshot(self.access.pk))
+                self.assertEqual(
+                    inactive_timestamp.exception.code,
+                    'arrival_roster.access_denied',
+                )
+            EmployeeAccess.objects.filter(pk=self.access.pk).update(
+                **{field_name: None},
+            )
 
         Employee.objects.filter(pk=self.actor.pk).update(is_active=False)
         with self.assertRaises(ValidationError) as inactive_employee:
@@ -1881,8 +2009,12 @@ class ArrivalRosterT14aApprovalTests(TestCase):
 
     def _login(self, client=None, access=None):
         client = client or self.client
+        access = access or self.access
         session = client.session
-        session['employee_access_id'] = (access or self.access).pk
+        session[TIMEKEEPER_APP_ACCESS_SESSION_KEY] = access.pk
+        session[TIMEKEEPER_APP_CREDENTIAL_REVISION_SESSION_KEY] = (
+            timekeeper_app_credential_revision(access)
+        )
         session.save()
         return client
 
@@ -3061,8 +3193,12 @@ class ArrivalRosterT13bTests(TestCase):
 
     def _login(self, client=None, access=None):
         client = client or self.client
+        access = access or self.access
         session = client.session
-        session['employee_access_id'] = (access or self.access).pk
+        session[TIMEKEEPER_APP_ACCESS_SESSION_KEY] = access.pk
+        session[TIMEKEEPER_APP_CREDENTIAL_REVISION_SESSION_KEY] = (
+            timekeeper_app_credential_revision(access)
+        )
         session.save()
         return client
 

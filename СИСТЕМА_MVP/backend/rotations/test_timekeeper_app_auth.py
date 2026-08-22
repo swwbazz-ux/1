@@ -13,8 +13,10 @@ from users.active_role import (
     ACTIVE_ROLE_GENERATION_SESSION_KEY,
     ACTIVE_ROLE_SESSION_KEY,
 )
-from users.models import Employee, EmployeeAccess, Role
+from shifts.models import WatchPeriod
+from users.models import Employee, EmployeeAccess, Role, WatchComposition
 
+from .models import RotationCollectionCycle, RotationResponse
 from .timekeeper_auth import (
     TIMEKEEPER_APP_ACCESS_SESSION_KEY,
     TIMEKEEPER_APP_CREDENTIAL_REVISION_SESSION_KEY,
@@ -57,6 +59,29 @@ class TimekeeperAppAuthTests(TestCase):
         self.login_url = reverse('timekeeper_login')
         self.logout_url = reverse('timekeeper_logout')
         self.dashboard_url = reverse('rotation_timekeeper_dashboard')
+        self.composition = WatchComposition.objects.create(
+            code='timekeeper-app-auth',
+            name='Тестовая вахта приложения Табельщика',
+        )
+        starts_on = timezone.localdate() + timedelta(days=30)
+        self.period = WatchPeriod.objects.create(
+            name='Период независимой сессии Табельщика',
+            watch_composition=self.composition,
+            starts_on=starts_on,
+            ends_on=starts_on + timedelta(days=29),
+            is_active=True,
+        )
+        self.cycle = RotationCollectionCycle.objects.create(
+            name='Сбор независимой сессии Табельщика',
+            target_watch_period=self.period,
+            response_deadline=timezone.now() + timedelta(days=5),
+            created_by=self.timekeeper_access.employee,
+        )
+        self.rotation_response = RotationResponse.objects.create(
+            cycle=self.cycle,
+            employee=self.admin_access.employee,
+            snapshot_full_name=self.admin_access.employee.full_name,
+        )
 
     def _access(
         self,
@@ -107,6 +132,27 @@ class TimekeeperAppAuthTests(TestCase):
             self._credentials(access),
             **extra,
         )
+
+    def _assert_namespaced_session(self, client, access):
+        session = client.session
+        self.assertEqual(session[TIMEKEEPER_APP_ACCESS_SESSION_KEY], access.pk)
+        self.assertTrue(session[TIMEKEEPER_APP_CREDENTIAL_REVISION_SESSION_KEY])
+        for forbidden_key in (
+            'employee_access_id',
+            ACTIVE_ROLE_SESSION_KEY,
+            ACTIVE_ROLE_GENERATION_SESSION_KEY,
+            ACTIVE_ROLE_CODE_SESSION_KEY,
+        ):
+            self.assertNotIn(forbidden_key, session)
+
+    def _assert_timekeeper_logout_form(self, response):
+        self.assertContains(
+            response,
+            f'<form method="post" action="{self.logout_url}">',
+        )
+        self.assertContains(response, 'name="csrfmiddlewaretoken"')
+        self.assertNotContains(response, 'href="/logout/"')
+        self.assertNotContains(response, 'action="/logout/"')
 
     def test_exact_timekeeper_login_uses_only_namespaced_session(self):
         initial_session_key = self.client.session.session_key
@@ -458,20 +504,101 @@ class TimekeeperAppAuthTests(TestCase):
         self.assertEqual(self._login(self.admin_access).status_code, 302)
         self.assertEqual(self.client.post(self.logout_url).status_code, 302)
 
-    def test_admin_gets_dashboard_calendar_and_profiles(self):
+    def test_admin_and_timekeeper_open_every_workplace_page_from_app_session(self):
+        pages = (
+            self.dashboard_url,
+            reverse('rotation_cycle_create'),
+            reverse('rotation_timekeeper_cycle', args=[self.cycle.pk]),
+            reverse(
+                'rotation_timekeeper_response_edit',
+                args=[self.cycle.pk, self.rotation_response.pk],
+            ),
+            reverse('arrival_roster_index'),
+            reverse('arrival_roster_upload_form'),
+            reverse('timekeeper_brigade_phase_calendar'),
+            reverse('timekeeper_employee_watch_profiles'),
+        )
+        for access in (self.admin_access, self.timekeeper_access):
+            client = Client()
+            original_last_login_at = access.last_login_at
+            self.assertEqual(self._login(access, client=client).status_code, 302)
+            self._assert_namespaced_session(client, access)
+            for url in pages:
+                with self.subTest(role=access.role.code, url=url):
+                    response = client.get(url)
+                    self.assertEqual(response.status_code, 200)
+                    self._assert_timekeeper_logout_form(response)
+            access.refresh_from_db()
+            self.assertEqual(access.last_login_at, original_last_login_at)
+
+    def test_all_timekeeper_endpoints_redirect_only_to_app_login(self):
+        get_urls = (
+            self.dashboard_url,
+            reverse('timekeeper_brigade_phase_calendar'),
+            reverse('timekeeper_employee_watch_profiles'),
+            reverse('arrival_roster_index'),
+            reverse('arrival_roster_upload_form'),
+            reverse('arrival_roster_review', args=[999]),
+            reverse('rotation_cycle_create'),
+            reverse('rotation_timekeeper_cycle', args=[999]),
+            reverse('rotation_cycle_export', args=[999]),
+            reverse('rotation_cycle_document_packet', args=[999]),
+            reverse('rotation_timekeeper_response_edit', args=[999, 999]),
+        )
+        post_urls = (
+            reverse('timekeeper_brigade_phase_calendar_create'),
+            reverse('timekeeper_brigade_phase_calendar_confirm', args=[999]),
+            reverse('timekeeper_employee_watch_profile_create'),
+            reverse('timekeeper_employee_watch_profile_apply', args=[999]),
+            reverse('arrival_roster_pool_create'),
+            reverse('arrival_roster_upload'),
+            reverse('arrival_roster_employee_add', args=[999]),
+            reverse('arrival_roster_external_add', args=[999]),
+            reverse('arrival_roster_confirm_unambiguous', args=[999]),
+            reverse('arrival_roster_approval_confirm', args=[999]),
+            reverse('arrival_roster_routing', args=[999]),
+            reverse('arrival_roster_create_revision', args=[999]),
+            reverse('arrival_roster_resident_search', args=[999, 999]),
+            reverse('arrival_roster_resident_select', args=[999, 999]),
+            reverse('arrival_roster_resident_clear', args=[999, 999]),
+            reverse('arrival_roster_participation', args=[999, 999]),
+            reverse('arrival_roster_dates', args=[999, 999]),
+            reverse('arrival_roster_notes', args=[999, 999]),
+            reverse('arrival_roster_issue_resolve', args=[999, 999]),
+            reverse('arrival_roster_issue_reopen', args=[999, 999]),
+            reverse('rotation_cycle_create'),
+            reverse('rotation_cycle_action', args=[999, 'open']),
+            reverse('rotation_timekeeper_response_edit', args=[999, 999]),
+            reverse('rotation_documentation_complete', args=[999]),
+        )
+        for method, urls in (('get', get_urls), ('post', post_urls)):
+            for url in urls:
+                with self.subTest(method=method, url=url):
+                    response = getattr(self.client, method)(url)
+                    self.assertRedirects(
+                        response,
+                        self.login_url,
+                        fetch_redirect_response=False,
+                    )
+
+    def test_primary_navigation_never_points_to_global_login_or_logout(self):
         self._login(self.admin_access)
-        for url in (
+        navigation_urls = (
+            self.dashboard_url,
+            reverse('arrival_roster_index'),
+            reverse('timekeeper_brigade_phase_calendar'),
+            reverse('timekeeper_employee_watch_profiles'),
+        )
+        for page_url in (
             self.dashboard_url,
             reverse('timekeeper_brigade_phase_calendar'),
             reverse('timekeeper_employee_watch_profiles'),
         ):
-            with self.subTest(url=url):
-                response = self.client.get(url)
-                self.assertEqual(response.status_code, 200)
-                self.assertContains(
-                    response,
-                    f'action="{self.logout_url}"',
-                )
+            response = self.client.get(page_url)
+            self.assertEqual(response.status_code, 200)
+            for navigation_url in navigation_urls:
+                self.assertContains(response, f'href="{navigation_url}"')
+            self._assert_timekeeper_logout_form(response)
 
     def test_manifest_keeps_existing_start_url_and_scope(self):
         response = self.client.get(

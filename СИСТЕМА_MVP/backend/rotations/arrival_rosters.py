@@ -22,6 +22,7 @@ from .arrival_roster_parser import (
     parse_arrival_workbook,
     parser_profile_snapshot,
 )
+from .timekeeper_auth import TIMEKEEPER_APP_ROLE_CODES
 from .models import (
     ArrivalRosterEvent,
     ArrivalRosterIssue,
@@ -329,9 +330,11 @@ def _verified_timekeeper_access(context):
         or role.is_active != context.role_is_active
         or access.status != EmployeeAccess.Status.ACTIVATED
         or not access.is_active
+        or access.blocked_at is not None
+        or access.deactivated_at is not None
         or employee.status != Employee.Status.ACTIVE
         or not employee.is_active
-        or role.code != 'timekeeper'
+        or role.code not in TIMEKEEPER_APP_ROLE_CODES
         or not role.is_active
     ):
         raise _validation_error(
@@ -626,10 +629,12 @@ def _lock_timekeeper_access(snapshot, *, locked_employees=None):
     if (
         access.status != EmployeeAccess.Status.ACTIVATED
         or not access.is_active
+        or access.blocked_at is not None
+        or access.deactivated_at is not None
         or not access.employee.is_active
         or access.employee.status != Employee.Status.ACTIVE
         or not access.role.is_active
-        or access.role.code != 'timekeeper'
+        or access.role.code not in TIMEKEEPER_APP_ROLE_CODES
     ):
         raise _validation_error(
             'arrival_roster.access_denied',
