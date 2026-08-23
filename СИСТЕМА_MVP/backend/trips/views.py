@@ -640,7 +640,7 @@ EXCAVATOR_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "excavator_operator";
 const CACHE_PREFIX = "excavator-mobile-shell-";
-const CACHE_NAME = "excavator-mobile-shell-v130";
+const CACHE_NAME = "excavator-mobile-shell-v131";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const CORE_ASSETS = [
@@ -3525,10 +3525,10 @@ def work_assignment_error_message(state):
     if state in {'employee_inactive', 'access_inactive'}:
         return 'Рабочий доступ неактивен. Обратитесь к администратору.'
     if state == 'equipment_inactive':
-        return 'Назначенная техника неактивна. Обратитесь к руководителю.'
+        return 'Техника неактивна. Обратитесь к руководителю.'
     if state == 'assignment_conflict':
-        return 'Назначенная техника уже занята в открытой смене. Обратитесь к руководителю.'
-    return 'Смена и техника не назначены. Обратитесь к руководителю.'
+        return 'Техника занята в другой смене.'
+    return 'Смена и техника не назначены.'
 
 
 def get_previous_closed_equipment_shift(equipment):
