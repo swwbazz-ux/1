@@ -7,8 +7,11 @@
 ## Git checkpoint
 
 - ветка: `codex/unified-employee-card-2026-08-23`;
-- commit: `b17a77f534281d238d94bc41500043daf6f0eaf4`;
-- commit message: `fix(users): unify employee cards and filters`;
+- основной commit: `b17a77f534281d238d94bc41500043daf6f0eaf4`;
+- cache-safe follow-up:
+  `92cdc37b0816e65925fa5ce4bc88365a3bb68290`;
+- commit messages: `fix(users): unify employee cards and filters` и
+  `fix(users): version employee filters stylesheet`;
 - локальный и удалённый SHA ветки совпали;
 - в commit вошли 13 проверенных файлов, без баз, `.env`, секретов, дампов,
   миграций и временных Browser QA-артефактов.
@@ -55,6 +58,13 @@ versioned `static/css/admin-employee-filters-v1.css?v=20260823-1`. Поэтом�
 - `SHA256SUMS`, проверенный через `sha256sum -c`;
 - исполняемый root-only `rollback.sh`.
 
+Для cache-safe follow-up создан отдельный rollback-каталог:
+
+`/srv/accounting-mvp/backups/deploy-20260823T092251Z-employee-filter-cache-before-92cdc37b`
+
+Он восстанавливает прежние `app.css` и шаблон списка, удаляет новый
+страничный CSS из source/staticfiles и перезапускает приложение.
+
 Обычный откат восстанавливает код и собранный CSS, выполняет `manage.py check`
 и перезапускает приложение. PostgreSQL dump автоматически не восстанавливается,
 чтобы откат интерфейса не удалил новые рабочие действия сотрудников.
@@ -77,8 +87,14 @@ versioned `static/css/admin-employee-filters-v1.css?v=20260823-1`. Поэтом�
 - `collectstatic`: скопирован один изменённый CSS, 278 файлов не изменились;
 - ошибок уровня `err` в журналах приложения и nginx после deploy: 0;
 - SHA источника `static/css/app.css`, собранного `staticfiles/css/app.css` и
-  публичного HTTPS-ответа совпадает:
-  `1c31b0606cc369985c8845dfe46d10ab8aa6e44a7f10e691047f8c40cbdc072c`.
+  публичного HTTPS-ответа после основного deploy совпадал. После cache-safe
+  follow-up общий `app.css` возвращён к исходному production SHA
+  `a3e6a2cad7ee13bd44f4d7728179d07935e268b1649f755d93bc6273ee2aad6d`;
+- новый source/staticfiles/HTTPS
+  `admin-employee-filters-v1.css?v=20260823-1` совпал по SHA
+  `54b4efcf4db69170d5d015786751286e9ea52c832eb19faf1850f5bc7bbeb542`;
+- повторный production render подтвердил versioned CSS и 4 строки
+  диспетчеров без очистки общего кэша.
 
 ## Проверка реальной production-базы без изменений
 
