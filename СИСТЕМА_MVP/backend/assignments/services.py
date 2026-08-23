@@ -492,6 +492,14 @@ def _publish_crew_plan_once(*, plan, expected_version, actor=None, actor_access=
         for slot in slots
         if slot.employee_id
     }
+    current_semantic_triples = {
+        (assignment.equipment_id, assignment.shift_type, assignment.employee_id)
+        for assignment in current_scope_assignments
+        if assignment.employee_id
+    }
+    changed_semantic_triples = current_semantic_triples.symmetric_difference(
+        desired_slots.keys()
+    )
     unchanged_triples = set()
     for assignment in current_scope_assignments:
         assignment_key = (
@@ -543,15 +551,18 @@ def _publish_crew_plan_once(*, plan, expected_version, actor=None, actor_access=
         if slot.employee_id
         and (slot.equipment_id, slot.shift_type, slot.employee_id) not in unchanged_triples
     ]
+    # Replacing a legacy/manual row with an equivalent published-plan row changes
+    # provenance, not the employee's visible assignment. Keep realtime scope tied
+    # to the semantic before/after difference so unchanged workers do not refresh.
     changed_employee_ids = {
-        assignment.employee_id
-        for assignment in [*assignments_to_close, *new_assignments]
-        if assignment.employee_id
+        employee_id
+        for _equipment_id, _shift_type, employee_id in changed_semantic_triples
+        if employee_id
     }
     changed_equipment_ids = {
-        assignment.equipment_id
-        for assignment in [*assignments_to_close, *new_assignments]
-        if assignment.equipment_id
+        equipment_id
+        for equipment_id, _shift_type, _employee_id in changed_semantic_triples
+        if equipment_id
     }
     (
         CrewPlan.objects.select_for_update()
