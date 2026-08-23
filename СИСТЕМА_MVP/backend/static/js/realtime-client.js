@@ -587,6 +587,12 @@
                 url.searchParams.set("after", String(afterVersion));
             }
             url.searchParams.set("include_events", "1");
+            var roleAppCode = document.body
+                ? String(document.body.dataset.appRoleCode || "")
+                : "";
+            if (roleAppCode) {
+                url.searchParams.set("role_app_code", roleAppCode);
+            }
             return url.toString();
         }
 

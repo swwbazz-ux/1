@@ -52,9 +52,15 @@ def operational_state_version_view(request):
     if not access:
         return JsonResponse({'authenticated': False}, status=401)
     role_state = role_session_state(request, access)
-    role_app = get_role_app_for_request(request) or get_role_app(access.role.code)
+    host_role_app = get_role_app_for_request(request)
+    requested_role_app = get_role_app(request.GET.get('role_app_code', ''))
+    role_app = host_role_app or requested_role_app or get_role_app(access.role.code)
+    session_role_code = role_state.get('session_role_code', access.role.code)
+    role_is_active_for_app = role_state['is_active'] and (
+        role_app is None or session_role_code == role_app.role_code
+    )
 
-    if role_state['is_active']:
+    if role_is_active_for_app:
         from assignments.services import reconcile_due_haul_assignments_throttled
 
         reconcile_due_haul_assignments_throttled()
@@ -81,14 +87,14 @@ def operational_state_version_view(request):
     relevant = bool(events) or events_truncated
     payload = {
         'authenticated': True,
-        'role_active': role_state['is_active'],
+        'role_active': role_is_active_for_app,
         'active_role_code': role_state.get('active_role_code', ''),
         'active_role_changed_at': (
             role_state['active_role_changed_at'].isoformat()
             if role_state.get('active_role_changed_at')
             else ''
         ),
-        'session_role_code': role_state.get('session_role_code', access.role.code),
+        'session_role_code': session_role_code,
         'session_revision': role_state.get('session_revision', ''),
         'app_contract_version': APP_CONTRACT_VERSION,
         'role_shell_version': role_app.shell_version if role_app else '',
