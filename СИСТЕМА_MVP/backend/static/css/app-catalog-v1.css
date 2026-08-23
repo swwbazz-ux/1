@@ -121,8 +121,7 @@ input {
     line-height: 1.45;
 }
 
-.app-catalog-instruction--mobile,
-.app-catalog-card__mobile-action {
+.app-catalog-instruction--mobile {
     display: none;
 }
 
@@ -365,6 +364,7 @@ input {
 }
 
 .app-catalog-dialog__copy,
+.app-catalog-dialog__share,
 .app-catalog-dialog__open {
     min-height: 48px;
     display: flex;
@@ -384,6 +384,12 @@ input {
     background: rgba(255, 255, 255, 0.055);
 }
 
+.app-catalog-dialog__share {
+    border: 1px solid #58d6aa;
+    color: #09261d;
+    background: linear-gradient(145deg, #7ce8c1, #43bc91);
+}
+
 .app-catalog-dialog__open {
     border: 1px solid #e9b35f;
     color: #15202a;
@@ -391,6 +397,7 @@ input {
 }
 
 .app-catalog-dialog__copy:focus-visible,
+.app-catalog-dialog__share:focus-visible,
 .app-catalog-dialog__open:focus-visible {
     outline: 3px solid #cbeafb;
     outline-offset: 3px;
@@ -440,14 +447,45 @@ input {
         font-size: 30px;
     }
 
-    .app-catalog-instruction--desktop,
-    .app-catalog-card__desktop-action {
+    .app-catalog-instruction--desktop {
         display: none;
     }
 
-    .app-catalog-instruction--mobile,
-    .app-catalog-card__mobile-action {
+    .app-catalog-instruction--mobile {
         display: inline;
+    }
+
+    .app-catalog-dialog {
+        width: min(540px, calc(100vw - 16px));
+        max-width: calc(100vw - 16px);
+        max-height: calc(100dvh - 16px);
+        overflow: auto;
+        border-radius: 18px;
+    }
+
+    .app-catalog-dialog__content {
+        grid-template-columns: 1fr;
+        justify-items: center;
+        gap: 18px;
+        padding: 18px 16px 20px;
+    }
+
+    .app-catalog-dialog__details {
+        width: 100%;
+    }
+
+    .app-catalog-dialog__details h2,
+    .app-catalog-dialog__details > p,
+    .app-catalog-dialog__qr-target {
+        text-align: center;
+    }
+
+    .app-catalog-dialog__actions {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .app-catalog-dialog__share {
+        grid-column: 1 / -1;
     }
 
     .app-catalog-grid {
@@ -484,6 +522,24 @@ input {
 @media (max-width: 350px) {
     .app-catalog-grid {
         grid-template-columns: 1fr;
+    }
+
+    .app-catalog-dialog__qr-wrap,
+    .app-catalog-dialog__qr-wrap img {
+        width: 259px;
+        height: 259px;
+    }
+
+    .app-catalog-dialog__content {
+        padding-inline: 8px;
+    }
+
+    .app-catalog-dialog__actions {
+        grid-template-columns: 1fr;
+    }
+
+    .app-catalog-dialog__share {
+        grid-column: auto;
     }
 }
 

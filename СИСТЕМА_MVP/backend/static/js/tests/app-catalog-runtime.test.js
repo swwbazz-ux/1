@@ -8,13 +8,55 @@ const catalog = require("../app-catalog-v1.js");
 const installer = require("../role-app-install-v1.js");
 
 
-test("catalog switches to direct navigation only at the mobile breakpoint", () => {
-    assert.equal(catalog.usesDirectMobileNavigation({
-        matchMedia: () => ({ matches: true })
-    }), true);
-    assert.equal(catalog.usesDirectMobileNavigation({
-        matchMedia: () => ({ matches: false })
-    }), false);
+test("catalog card always opens connection dialog on mobile", () => {
+    const cardListeners = {};
+    const dialogListeners = {};
+    const elements = {
+        "[data-dialog-title]": { textContent: "" },
+        "[data-dialog-url]": { value: "" },
+        "[data-dialog-qr]": { alt: "", src: "" },
+        "[data-dialog-qr-target]": { textContent: "" },
+        "[data-dialog-open]": { href: "" },
+        "[data-copy-status]": { textContent: "" },
+        "[data-dialog-close]": null,
+        "[data-copy-link]": null,
+        "[data-share-link]": null
+    };
+    const dialog = {
+        dataset: {},
+        opened: false,
+        querySelector: (selector) => elements[selector] || null,
+        addEventListener: (name, handler) => { dialogListeners[name] = handler; },
+        showModal() { this.opened = true; }
+    };
+    const card = {
+        href: "https://driver.driverform.ru/",
+        dataset: {
+            appName: "Водитель самосвала",
+            appUrl: "https://driver.driverform.ru/",
+            appQr: "/static/img/pwa/qr/driver.png",
+            appQrTarget: "https://driver.driverform.ru/"
+        },
+        addEventListener: (name, handler) => { cardListeners[name] = handler; }
+    };
+    const doc = {
+        querySelector: () => dialog,
+        querySelectorAll: () => [card]
+    };
+    const win = {
+        navigator: {},
+        matchMedia: () => ({ matches: true }),
+        document: {}
+    };
+    let prevented = false;
+
+    catalog.init(win, doc);
+    cardListeners.click({ preventDefault: () => { prevented = true; } });
+
+    assert.equal(prevented, true);
+    assert.equal(dialog.opened, true);
+    assert.equal(dialog.dataset.appName, "Водитель самосвала");
+    assert.equal(elements["[data-dialog-open]"].href, "https://driver.driverform.ru/");
 });
 
 
@@ -28,7 +70,10 @@ test("dialog receives the exact server URL and local QR endpoint", () => {
         "[data-dialog-open]": { href: "" },
         "[data-copy-status]": { textContent: "old" }
     };
-    const dialog = { querySelector: (selector) => elements[selector] || null };
+    const dialog = {
+        dataset: {},
+        querySelector: (selector) => elements[selector] || null
+    };
     const card = {
         href: "https://driver.driverform.ru/",
         dataset: {
@@ -42,6 +87,8 @@ test("dialog receives the exact server URL and local QR endpoint", () => {
     catalog.setDialogDetails(dialog, card);
 
     assert.equal(elements["[data-dialog-title]"].textContent, "Водитель самосвала");
+    assert.equal(dialog.dataset.appName, "Водитель самосвала");
+    assert.equal(dialog.dataset.appUrl, "https://driver.driverform.ru/");
     assert.equal(elements["[data-dialog-url]"].value, "https://driver.driverform.ru/");
     assert.equal(elements["[data-dialog-open]"].href, "https://driver.driverform.ru/");
     assert.equal(elements["[data-dialog-qr]"].src, "/static/img/pwa/qr/driver.png");
@@ -51,6 +98,28 @@ test("dialog receives the exact server URL and local QR endpoint", () => {
     );
     assert.match(elements["[data-dialog-qr]"].alt, /Водитель самосвала/);
     assert.equal(values.status, undefined);
+});
+
+
+test("share uses Android share sheet and falls back to copying the link", async () => {
+    const shared = [];
+    const nativeResult = await catalog.shareValue({
+        navigator: { share: (payload) => { shared.push(payload); return Promise.resolve(); } }
+    }, "Горный мастер", "https://mining-master.driverform.ru/", null);
+
+    assert.equal(nativeResult, "shared");
+    assert.equal(shared.length, 1);
+    assert.equal(shared[0].url, "https://mining-master.driverform.ru/");
+    assert.match(shared[0].text, /установите приложение/);
+
+    const copied = [];
+    const input = { value: "https://driver.driverform.ru/" };
+    const fallbackResult = await catalog.shareValue({
+        navigator: { clipboard: { writeText: (value) => { copied.push(value); return Promise.resolve(); } } }
+    }, "Водитель", input.value, input);
+
+    assert.equal(fallbackResult, "copied");
+    assert.deepEqual(copied, ["https://driver.driverform.ru/"]);
 });
 
 

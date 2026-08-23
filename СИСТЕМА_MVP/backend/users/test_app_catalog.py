@@ -51,6 +51,11 @@ class AppCatalogTests(SimpleTestCase):
         self.assertNotContains(response, 'демо-код')
         self.assertNotContains(response, 'rel="manifest"')
         self.assertNotContains(response, 'serviceWorker.register')
+        self.assertContains(response, '/static/css/app-catalog-v1.css?v=3')
+        self.assertContains(response, '/static/js/app-catalog-v1.js?v=3')
+        self.assertContains(response, 'data-share-link')
+        self.assertContains(response, 'Отправить ссылку')
+        self.assertContains(response, 'Подключить', count=8)
 
     def test_catalog_production_links_use_exact_role_subdomains(self):
         response = Client().get('/apps/', HTTP_HOST='driverform.ru', secure=True)

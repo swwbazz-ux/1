@@ -11,10 +11,6 @@
 }(typeof window !== "undefined" ? window : null, function () {
     "use strict";
 
-    function usesDirectMobileNavigation(win) {
-        return Boolean(win.matchMedia && win.matchMedia("(max-width: 700px)").matches);
-    }
-
     function setDialogDetails(dialog, card) {
         var name = String(card.dataset.appName || "");
         var targetUrl = String(card.dataset.appUrl || card.href || "");
@@ -27,6 +23,8 @@
         var openLink = dialog.querySelector("[data-dialog-open]");
         var status = dialog.querySelector("[data-copy-status]");
 
+        dialog.dataset.appName = name;
+        dialog.dataset.appUrl = targetUrl;
         if (title) title.textContent = name;
         if (input) input.value = targetUrl;
         if (openLink) openLink.href = targetUrl;
@@ -66,13 +64,27 @@
         return copied ? Promise.resolve() : Promise.reject(new Error("copy-failed"));
     }
 
+    function shareValue(win, name, url, input) {
+        if (win.navigator && typeof win.navigator.share === "function") {
+            return Promise.resolve(win.navigator.share({
+                title: "Рабочее приложение «" + name + "»",
+                text: "Откройте ссылку, установите приложение и войдите в свою учётную запись.",
+                url: url
+            })).then(function () {
+                return "shared";
+            });
+        }
+        return copyValue(win, input).then(function () {
+            return "copied";
+        });
+    }
+
     function init(win, doc) {
         var dialog = doc.querySelector("[data-app-dialog]");
         if (!dialog) return;
 
         doc.querySelectorAll("[data-app-card]").forEach(function (card) {
             card.addEventListener("click", function (event) {
-                if (usesDirectMobileNavigation(win)) return;
                 event.preventDefault();
                 setDialogDetails(dialog, card);
                 openDialog(dialog);
@@ -91,8 +103,29 @@
         });
 
         var copyButton = dialog.querySelector("[data-copy-link]");
+        var shareButton = dialog.querySelector("[data-share-link]");
         var input = dialog.querySelector("[data-dialog-url]");
         var status = dialog.querySelector("[data-copy-status]");
+        if (shareButton) {
+            shareButton.addEventListener("click", function () {
+                shareValue(
+                    win,
+                    String(dialog.dataset.appName || ""),
+                    String(dialog.dataset.appUrl || (input && input.value) || ""),
+                    input
+                ).then(function (result) {
+                    if (!status) return;
+                    status.textContent = result === "shared"
+                        ? "Ссылка передана в выбранное приложение."
+                        : "Меню отправки недоступно — ссылка скопирована.";
+                }).catch(function (error) {
+                    if (!status) return;
+                    status.textContent = error && error.name === "AbortError"
+                        ? "Отправка отменена."
+                        : "Не удалось отправить ссылку. Скопируйте её кнопкой ниже.";
+                });
+            });
+        }
         if (copyButton) {
             copyButton.addEventListener("click", function () {
                 copyValue(win, input).then(function () {
@@ -106,8 +139,8 @@
 
     return {
         init: init,
-        usesDirectMobileNavigation: usesDirectMobileNavigation,
         setDialogDetails: setDialogDetails,
-        copyValue: copyValue
+        copyValue: copyValue,
+        shareValue: shareValue
     };
 }));

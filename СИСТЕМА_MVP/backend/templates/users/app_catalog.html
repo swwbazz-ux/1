@@ -7,8 +7,8 @@
     <meta name="theme-color" content="#0b1722">
     <title>Рабочие приложения · Коппер Рисорсез</title>
     <link rel="icon" href="{% static 'favicon.ico' %}">
-    <link rel="stylesheet" href="{% static 'css/app-catalog-v1.css' %}?v=2">
-    <script src="{% static 'js/app-catalog-v1.js' %}?v=2" defer></script>
+    <link rel="stylesheet" href="{% static 'css/app-catalog-v1.css' %}?v=3">
+    <script src="{% static 'js/app-catalog-v1.js' %}?v=3" defer></script>
 </head>
 <body class="app-catalog-page">
 <main class="app-catalog-shell">
@@ -24,10 +24,10 @@
             <p class="app-catalog-eyebrow">Выберите своё приложение</p>
             <h1>Приложения для работы</h1>
             <p class="app-catalog-instruction app-catalog-instruction--desktop">
-                Нажмите на иконку — появится QR-код. Отсканируйте его камерой телефона.
+                Нажмите на приложение — появятся QR-код и ссылка для отправки сотруднику.
             </p>
             <p class="app-catalog-instruction app-catalog-instruction--mobile">
-                Нажмите на иконку — откроется страница установки и входа.
+                Нажмите на приложение — покажите QR-код или отправьте ссылку сотруднику.
             </p>
         </div>
     </header>
@@ -44,15 +44,14 @@
             data-app-qr="{{ app.qr_asset_url }}"
             data-app-qr-target="{{ app.qr_target_url }}"
             style="--app-accent: {{ app.theme_color }}"
-            aria-label="Открыть приложение {{ app.label }}"
+            aria-label="Показать способы подключения к приложению {{ app.label }}"
         >
             <span class="app-catalog-card__icon-wrap" aria-hidden="true">
                 <img class="app-catalog-card__icon" src="{{ app.icon_url }}" width="112" height="112" alt="">
             </span>
             <span class="app-catalog-card__name">{{ app.label }}</span>
             <span class="app-catalog-card__action">
-                <span class="app-catalog-card__desktop-action">Показать QR</span>
-                <span class="app-catalog-card__mobile-action">Открыть</span>
+                <span>Подключить</span>
                 <span aria-hidden="true">→</span>
             </span>
         </a>
@@ -74,12 +73,13 @@
         <div class="app-catalog-dialog__details">
             <p class="app-catalog-dialog__eyebrow">Установка на телефон</p>
             <h2 id="app-dialog-title" data-dialog-title></h2>
-            <p>Наведите камеру телефона на QR-код. Откроется страница приложения, где можно войти или установить его.</p>
+            <p>Покажите QR-код сотруднику или отправьте ему ссылку. Ссылка откроет страницу установки и входа в приложение.</p>
             <p class="app-catalog-dialog__qr-target" data-dialog-qr-target></p>
             <label class="app-catalog-dialog__url-label" for="app-dialog-url">Прямая ссылка</label>
             <input id="app-dialog-url" data-dialog-url type="text" readonly>
             <p class="app-catalog-dialog__status" data-copy-status aria-live="polite"></p>
             <div class="app-catalog-dialog__actions">
+                <button class="app-catalog-dialog__share" type="button" data-share-link>Отправить ссылку</button>
                 <button class="app-catalog-dialog__copy" type="button" data-copy-link>Копировать ссылку</button>
                 <a class="app-catalog-dialog__open" data-dialog-open href="/">Открыть приложение</a>
             </div>
