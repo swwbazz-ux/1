@@ -22,6 +22,18 @@ EXPECTED_RELEASE = 'ready-core-traffic-v7'
 
 @override_settings(ALLOWED_HOSTS=['localhost', '.localhost'])
 class StableStaticReleaseTrafficRegressionTests(SimpleTestCase):
+    def test_dispatcher_blocking_recovery_keeps_hidden_label_out_of_layout(self):
+        css = (
+            Path(settings.BASE_DIR) / 'static' / 'css' / 'dispatcher-control-v1.css'
+        ).read_text(encoding='utf-8')
+
+        self.assertIn(
+            '.dispatcher-blocking-shift-recovery .visually-hidden',
+            css,
+        )
+        self.assertIn('position: absolute !important;', css)
+        self.assertIn('clip: rect(0, 0, 0, 0) !important;', css)
+
     def test_base_uses_one_stable_release_url_across_repeated_rendering(self):
         first = Client().get('/', HTTP_HOST='driver.localhost')
         second = Client().get('/', HTTP_HOST='driver.localhost')
