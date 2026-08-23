@@ -14913,7 +14913,7 @@ body.employees-admin-screen {
 
 .admin-employees-shell .employees-filter-bar {
     display: grid;
-    grid-template-columns: minmax(300px, 1.35fr) minmax(180px, .68fr) minmax(190px, .72fr) minmax(190px, .72fr) minmax(122px, .22fr);
+    grid-template-columns: minmax(260px, 1.2fr) repeat(4, minmax(170px, .7fr)) minmax(122px, .22fr);
     gap: 10px;
     align-items: end;
     padding: 10px;

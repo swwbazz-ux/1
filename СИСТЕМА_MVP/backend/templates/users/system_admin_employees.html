@@ -60,9 +60,18 @@
                 <input id="employee-search" name="q" value="{{ query }}" placeholder="Введите ФИО" autocomplete="off" data-auto-filter-search>
             </div>
             <div class="field select-field">
-                <label for="employee-role">Роль</label>
+                <label for="employee-personnel-position">Кадровая должность</label>
+                <select id="employee-personnel-position" name="personnel_position">
+                    <option value="">Все должности</option>
+                    {% for position in personnel_positions %}
+                        <option value="{{ position.id }}" {% if selected_personnel_position == position.id|stringformat:"s" %}selected{% endif %}>{{ position.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="field select-field">
+                <label for="employee-role">Доступ в приложение</label>
                 <select id="employee-role" name="role">
-                    <option value="">Все роли</option>
+                    <option value="">Все доступы</option>
                     {% for role in roles %}
                         <option value="{{ role.id }}" {% if selected_role == role.id|stringformat:"s" %}selected{% endif %}>{{ role.name }}</option>
                     {% endfor %}

@@ -446,7 +446,20 @@ def oup_employee_detail_view(request, employee_id):
 
     active_equipment_assignment = get_active_equipment_assignment(employee)
     effective_employee_specialization = effective_specialization(employee)
-    employee_accesses = employee.accesses.select_related('role').exclude(role__code='admin')
+    employee_accesses = (
+        employee.accesses
+        .select_related('role')
+        .exclude(role__code='admin')
+        .order_by('role__name')
+    )
+    employee_card_access = (
+        employee_accesses
+        .filter(is_active=True)
+        .exclude(status=EmployeeAccess.Status.DEACTIVATED)
+        .order_by('status', 'role__name')
+        .first()
+        or employee_accesses.first()
+    )
     work_assignment_role = (
         active_equipment_assignment.role
         if active_equipment_assignment
@@ -462,6 +475,7 @@ def oup_employee_detail_view(request, employee_id):
         'employee_logs': _employee_history(employee)[:20],
         'access_form': OupAccessRoleForm(),
         'employee_accesses': employee_accesses,
+        'employee_card_access': employee_card_access,
         'has_protected_admin_access': employee.accesses.filter(role__code='admin').exists(),
         'employee_card_context': 'oup',
         'can_submit_employee_card': bool(open_oup_shift and not is_dismissed),

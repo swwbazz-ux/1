@@ -1902,6 +1902,7 @@ def system_admin_employees_view(request):
     status = request.GET.get('status', '').strip()
     access_status = request.GET.get('access_status', '').strip()
     role_id = request.GET.get('role', '').strip()
+    personnel_position_id = request.GET.get('personnel_position', '').strip()
     query = request.GET.get('q', '').strip()
     if status:
         employees = employees.filter(status=status)
@@ -1909,6 +1910,8 @@ def system_admin_employees_view(request):
         employees = employees.filter(accesses__status=access_status).distinct()
     if role_id.isdigit():
         employees = employees.filter(accesses__role_id=int(role_id)).distinct()
+    if personnel_position_id.isdigit():
+        employees = employees.filter(personnel_position_id=int(personnel_position_id))
     if query:
         employees = employees.filter(full_name__icontains=query)
 
@@ -1921,9 +1924,11 @@ def system_admin_employees_view(request):
             'statuses': Employee.Status.choices,
             'access_statuses': EmployeeAccess.Status.choices,
             'roles': Role.objects.filter(is_active=True).order_by('name'),
+            'personnel_positions': PersonnelPosition.objects.filter(is_active=True).order_by('name'),
             'selected_status': status,
             'selected_access_status': access_status,
             'selected_role': role_id,
+            'selected_personnel_position': personnel_position_id,
             'query': query,
         },
     )
@@ -2121,6 +2126,7 @@ def system_admin_employee_detail_view(request, employee_id):
             'block_form': AdminAccessBlockForm(),
             'employee_accesses': employee_accesses,
             'current_role_access': current_role_access,
+            'employee_card_access': current_role_access,
             'active_equipment_assignment': active_equipment_assignment,
             'work_assignment_role': work_assignment_role,
             'work_assignment_supports_equipment': bool(

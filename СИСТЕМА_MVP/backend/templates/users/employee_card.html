@@ -9,7 +9,7 @@
 <link rel="stylesheet" href="{% static 'css/oup-workplace-v1.css' %}?v=20260718-4">
 <link rel="stylesheet" href="{% static 'css/oup-work-period-v1.css' %}?v=20260718-3">
 {% endif %}
-<link rel="stylesheet" href="{% static 'css/employee-card-unified.css' %}?v=20260717-8">
+<link rel="stylesheet" href="{% static 'css/employee-card-unified.css' %}?v=20260823-1">
 {% endblock %}
 
 {% block body %}
@@ -80,7 +80,12 @@
         {% endif %}
 
         <section class="employee-card-workspace">
-            <form id="employee-card-form" class="employee-card-main" method="post" enctype="multipart/form-data">
+            <form id="employee-card-form"
+                  class="employee-card-main"
+                  method="post"
+                  enctype="multipart/form-data"
+                  data-canonical-employee-card
+                  data-card-schema="employee-card-v1">
                 {% csrf_token %}
                 {{ form.personnel_number }}
                 {{ form.position }}
@@ -250,63 +255,43 @@
                     </div>
                 </section>
 
-                <section class="employee-card-section" aria-labelledby="employee-assignment-title">
+                <section class="employee-card-section" aria-labelledby="employee-assignment-title" data-canonical-assignment-summary>
                     <div class="employee-card-section-heading"><h3 id="employee-assignment-title">Смена и техника</h3></div>
                     <div class="employee-card-assignment-grid">
-                        {% if employee_card_context == "admin" and page_mode == "create" %}
+                        {% if page_mode == "create" and employee_card_context == "admin" %}
                             <div class="employee-card-field" data-card-field data-copy-label="Доступ в приложение" data-employee-assignment-role>
                                 <div class="employee-card-label-row"><label for="{{ form.role.id_for_label }}">{{ form.role.label }}</label><button type="button" class="employee-copy-icon" data-copy-target="#{{ form.role.id_for_label }}" aria-label="Скопировать роль" title="Скопировать роль"></button></div>
                                 {{ form.role }}{{ form.role.errors }}
                             </div>
-                        {% elif employee_card_context == "admin" %}
+                        {% elif page_mode == "create" %}
                             <div class="employee-card-field" data-card-field data-copy-label="Доступ в приложение" data-employee-assignment-role>
-                                <div class="employee-card-label-row"><label for="{{ form.assignment_role.id_for_label }}">{{ form.assignment_role.label }}</label><button type="button" class="employee-copy-icon" data-copy-target="#{{ form.assignment_role.id_for_label }}" aria-label="Скопировать роль" title="Скопировать роль"></button></div>
-                                {{ form.assignment_role }}{{ form.assignment_role.errors }}
+                                <div class="employee-card-label-row"><label for="{{ form.access_role.id_for_label }}">{{ form.access_role.label }}</label><button type="button" class="employee-copy-icon" data-copy-target="#{{ form.access_role.id_for_label }}" aria-label="Скопировать доступ в приложение" title="Скопировать доступ в приложение"></button></div>
+                                {{ form.access_role }}{{ form.access_role.errors }}
                             </div>
                         {% else %}
-                            <div class="employee-card-field" data-card-field data-copy-label="Доступ в приложение" data-employee-assignment-role>
-                                {% if page_mode == "create" %}
-                                    <div class="employee-card-label-row"><label for="{{ form.access_role.id_for_label }}">{{ form.access_role.label }}</label><button type="button" class="employee-copy-icon" data-copy-target="#{{ form.access_role.id_for_label }}" aria-label="Скопировать доступ в приложение" title="Скопировать доступ в приложение"></button></div>
-                                    {{ form.access_role }}{{ form.access_role.errors }}
-                                {% else %}
-                                    {% with current_access=employee_accesses|first %}
-                                        <div class="employee-card-label-row"><label for="employee-assignment-role-readonly">Доступ в приложение</label><button type="button" class="employee-copy-icon" data-copy-target="#employee-assignment-role-readonly" aria-label="Скопировать доступ в приложение" title="Скопировать доступ в приложение"></button></div>
-                                        <input id="employee-assignment-role-readonly" value="{% if current_access %}{{ current_access.role.name }}{% else %}Доступ не выдан{% endif %}" readonly>
-                                    {% endwith %}
-                                {% endif %}
+                            <div class="employee-card-field" data-card-field data-copy-label="Доступ в приложение">
+                                <div class="employee-card-label-row"><label for="employee-assignment-role-readonly">Доступ в приложение</label><button type="button" class="employee-copy-icon" data-copy-target="#employee-assignment-role-readonly" aria-label="Скопировать доступ в приложение" title="Скопировать доступ в приложение"></button></div>
+                                <input id="employee-assignment-role-readonly" value="{% if employee_card_access %}{{ employee_card_access.role.name }}{% else %}Доступ не выдан{% endif %}" readonly>
                             </div>
                         {% endif %}
 
-                        {% if employee_card_context == "admin" %}
-                            <div class="employee-card-field" data-card-field data-copy-label="Назначенная смена">
-                                <div class="employee-card-label-row"><label for="{{ form.assignment_shift_type.id_for_label }}">{{ form.assignment_shift_type.label }}</label><button type="button" class="employee-copy-icon" data-copy-target="#{{ form.assignment_shift_type.id_for_label }}" aria-label="Скопировать смену" title="Скопировать смену"></button></div>
-                                {{ form.assignment_shift_type }}{{ form.assignment_shift_type.errors }}
-                            </div>
-                            <div class="employee-card-field" data-card-field data-copy-label="Назначенная техника" data-employee-assignment-equipment>
-                                <div class="employee-card-label-row"><label for="{{ form.assignment_equipment.id_for_label }}">{{ form.assignment_equipment.label }}</label><button type="button" class="employee-copy-icon" data-copy-target="#{{ form.assignment_equipment.id_for_label }}" aria-label="Скопировать технику" title="Скопировать технику"></button></div>
-                                {{ form.assignment_equipment }}{{ form.assignment_equipment.errors }}
-                            </div>
-                        {% else %}
-                            <div class="employee-card-field" data-card-field data-copy-label="Назначенная смена">
-                                <div class="employee-card-label-row"><label for="employee-assignment-shift-readonly">Назначенная смена</label><button type="button" class="employee-copy-icon" data-copy-target="#employee-assignment-shift-readonly" aria-label="Скопировать смену" title="Скопировать смену"></button></div>
-                                <select id="employee-assignment-shift-readonly" disabled aria-label="Назначенная смена"><option>{{ active_equipment_assignment.work_shift_label|default:'Нет назначения' }}</option></select>
-                            </div>
-                            <div class="employee-card-field" data-card-field data-copy-label="Назначенная техника">
-                                <div class="employee-card-label-row"><label for="employee-assignment-equipment-readonly">Назначенная техника</label><button type="button" class="employee-copy-icon" data-copy-target="#employee-assignment-equipment-readonly" aria-label="Скопировать технику" title="Скопировать технику"></button></div>
-                                <select id="employee-assignment-equipment-readonly" disabled aria-label="Назначенная техника"><option>{{ active_equipment_assignment.equipment|default:'Нет назначения' }}</option></select>
-                            </div>
-                        {% endif %}
+                        <div class="employee-card-field" data-card-field data-copy-label="Назначенная смена">
+                            <div class="employee-card-label-row"><label for="employee-assignment-shift-readonly">Назначенная смена</label><button type="button" class="employee-copy-icon" data-copy-target="#employee-assignment-shift-readonly" aria-label="Скопировать смену" title="Скопировать смену"></button></div>
+                            <select id="employee-assignment-shift-readonly" disabled aria-label="Назначенная смена"><option>{{ active_equipment_assignment.work_shift_label|default:'Нет назначения' }}</option></select>
+                        </div>
+                        <div class="employee-card-field" data-card-field data-copy-label="Назначенная техника">
+                            <div class="employee-card-label-row"><label for="employee-assignment-equipment-readonly">Назначенная техника</label><button type="button" class="employee-copy-icon" data-copy-target="#employee-assignment-equipment-readonly" aria-label="Скопировать технику" title="Скопировать технику"></button></div>
+                            <select id="employee-assignment-equipment-readonly" disabled aria-label="Назначенная техника"><option>{{ active_equipment_assignment.equipment|default:'Нет назначения' }}</option></select>
+                        </div>
                     </div>
                     <div class="employee-work-assignment-meta{% if form.assignment_role.errors or form.role.errors or form.assignment_shift_type.errors or form.assignment_equipment.errors %} is-warning{% endif %}" data-employee-assignment-status>
-                        {% if form.assignment_role.errors or form.role.errors or form.assignment_shift_type.errors or form.assignment_equipment.errors %}
-                            <strong>Назначение не сохранено</strong><span>Исправьте отмеченные поля.</span>
-                        {% elif active_equipment_assignment %}
+                        {% if active_equipment_assignment %}
                             <strong>{{ active_equipment_assignment.work_shift_label }} · {{ active_equipment_assignment.equipment }}</strong>
                             <span>Текущее постоянное назначение сотрудника.</span>
                         {% elif work_assignment_role and not work_assignment_supports_equipment %}
                             <strong>{{ work_assignment_role.name }}</strong>
                             <span>Для этой роли постоянное назначение на смену и технику не требуется. Рабочая смена открывается в профильном приложении.</span>
-                        {% elif employee_card_context == "oup" %}
+                        {% elif page_mode == "detail" %}
                             <strong>Рабочее назначение выполняет заместитель начальника участка</strong>
                             <span>Смена и техника появятся здесь после расстановки.</span>
                         {% else %}
@@ -332,8 +317,32 @@
 
             </form>
 
-            <aside class="employee-card-side">
+            <aside class="employee-card-side" data-role-tools data-card-context="{{ employee_card_context }}">
                 {% if page_mode == "create" %}
+                    {% if employee_card_context == "admin" %}
+                        <section class="employee-card-side-panel employee-card-assignment-editor" data-admin-assignment-editor>
+                            <div class="employee-card-side-heading"><span>Системное действие</span><h2>Первичное назначение</h2></div>
+                            <p class="employee-card-side-note">Кадровая карточка остаётся такой же, как у ОУП. Смена и техника сохраняются отдельным рабочим назначением.</p>
+                            <div class="employee-card-inline-form">
+                                <div class="employee-card-field">
+                                    <label for="{{ form.assignment_shift_type.id_for_label }}">{{ form.assignment_shift_type.label }}</label>
+                                    {{ form.assignment_shift_type }}{{ form.assignment_shift_type.errors }}
+                                </div>
+                                <div class="employee-card-field" data-employee-assignment-equipment>
+                                    <label for="{{ form.assignment_equipment.id_for_label }}">{{ form.assignment_equipment.label }}</label>
+                                    {{ form.assignment_equipment }}{{ form.assignment_equipment.errors }}
+                                </div>
+                            </div>
+                            <div class="employee-work-assignment-meta{% if form.role.errors or form.assignment_shift_type.errors or form.assignment_equipment.errors %} is-warning{% endif %}" data-employee-assignment-status>
+                                {% if form.role.errors or form.assignment_shift_type.errors or form.assignment_equipment.errors %}
+                                    <strong>Назначение не сохранено</strong><span>Исправьте отмеченные поля.</span>
+                                {% else %}
+                                    <strong data-employee-assignment-status-title>Рабочее назначение не задано</strong>
+                                    <span data-employee-assignment-status-text>Смена и техника могут быть назначены позднее.</span>
+                                {% endif %}
+                            </div>
+                        </section>
+                    {% endif %}
                     <section class="employee-card-side-panel">
                         <div class="employee-card-side-heading"><span>Доступ</span><h2>Первичный вход</h2></div>
                         {% if employee_card_context == "admin" %}
@@ -358,6 +367,38 @@
                     </section>
                     <button class="employee-card-button is-primary side-submit" type="submit" form="employee-card-form">Создать сотрудника</button>
                 {% else %}
+                    {% if employee_card_context == "admin" %}
+                        <section class="employee-card-side-panel employee-card-assignment-editor" data-admin-assignment-editor>
+                            <div class="employee-card-side-heading"><span>Системное действие</span><h2>Рабочее назначение</h2></div>
+                            <p class="employee-card-side-note">Не изменяет кадровую карточку ОУП. Здесь администратор управляет только ролью расстановки, сменой и техникой.</p>
+                            <div class="employee-card-inline-form">
+                                <div class="employee-card-field" data-employee-assignment-role>
+                                    <label for="{{ form.assignment_role.id_for_label }}">{{ form.assignment_role.label }}</label>
+                                    {{ form.assignment_role }}{{ form.assignment_role.errors }}
+                                </div>
+                                <div class="employee-card-field">
+                                    <label for="{{ form.assignment_shift_type.id_for_label }}">{{ form.assignment_shift_type.label }}</label>
+                                    {{ form.assignment_shift_type }}{{ form.assignment_shift_type.errors }}
+                                </div>
+                                <div class="employee-card-field" data-employee-assignment-equipment>
+                                    <label for="{{ form.assignment_equipment.id_for_label }}">{{ form.assignment_equipment.label }}</label>
+                                    {{ form.assignment_equipment }}{{ form.assignment_equipment.errors }}
+                                </div>
+                            </div>
+                            <div class="employee-work-assignment-meta{% if form.assignment_role.errors or form.assignment_shift_type.errors or form.assignment_equipment.errors %} is-warning{% endif %}" data-employee-assignment-status>
+                                {% if form.assignment_role.errors or form.assignment_shift_type.errors or form.assignment_equipment.errors %}
+                                    <strong>Назначение не сохранено</strong><span>Исправьте отмеченные поля.</span>
+                                {% elif active_equipment_assignment %}
+                                    <strong data-employee-assignment-status-title>{{ active_equipment_assignment.work_shift_label }} · {{ active_equipment_assignment.equipment }}</strong>
+                                    <span data-employee-assignment-status-text>Текущее постоянное назначение сотрудника.</span>
+                                {% else %}
+                                    <strong data-employee-assignment-status-title>Рабочее назначение не задано</strong>
+                                    <span data-employee-assignment-status-text>Смена и техника могут быть назначены позднее.</span>
+                                {% endif %}
+                            </div>
+                        </section>
+                    {% endif %}
+
                     <section class="employee-card-side-panel employee-card-access-panel">
                         <div class="employee-card-side-heading"><span>Доступ</span><h2>Приложение и вход</h2></div>
 
@@ -422,6 +463,10 @@
                         </div>
                         {% if has_protected_admin_access %}<p class="employee-card-side-note">Административный доступ управляется только администратором.</p>{% endif %}
                     </section>
+
+                    {% if can_submit_employee_card %}
+                        <button class="employee-card-button is-primary side-submit" type="submit" form="employee-card-form">Сохранить карточку</button>
+                    {% endif %}
 
                     <section class="employee-card-side-panel employee-card-transfer-panel">
                         <div class="employee-card-side-heading"><span>Расстановка</span><h2>Временные переводы</h2></div>
@@ -500,5 +545,5 @@
 </div>
 {% endif %}
 
-<script src="{% static 'js/employee-card-unified.js' %}?v=20260718-4"></script>
+<script src="{% static 'js/employee-card-unified.js' %}?v=20260823-1"></script>
 {% endblock %}

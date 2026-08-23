@@ -35,7 +35,15 @@ from shifts.models import AchievementPrize, EmployeeShift, EquipmentPlanGroup, E
 from trips.models import DispatcherActionLog, DispatcherActionType, Trip, TripClientAction, TripStatus
 
 from .forms import AdminEmployeeEditForm
-from .models import AdminActionLog, AdminConflict, DriverPrimaryRegistration, Employee, EmployeeAccess, Role
+from .models import (
+    AdminActionLog,
+    AdminConflict,
+    DriverPrimaryRegistration,
+    Employee,
+    EmployeeAccess,
+    PersonnelPosition,
+    Role,
+)
 
 
 class AccessLoginTests(TestCase):
@@ -513,6 +521,63 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, 'Ожидает активации')
         self.assertNotContains(response, 'Активный водитель')
         self.assertContains(response, 'name="access_status"')
+
+    def test_admin_employee_list_separates_personnel_position_from_app_access(self):
+        admin_role = Role.objects.create(code='admin', name='Администратор')
+        dispatcher_role = Role.objects.create(code='dispatcher_filter', name='Диспетчер')
+        dispatcher_position, _created = PersonnelPosition.objects.get_or_create(
+            name='Горный диспетчер',
+            defaults={'code': 'mining-dispatcher-filter'},
+        )
+        manager_position, _created = PersonnelPosition.objects.get_or_create(
+            name='Начальник участка',
+            defaults={'code': 'site-manager-filter'},
+        )
+        admin_employee = Employee.objects.create(
+            full_name='Администратор MVP',
+            status=Employee.Status.ACTIVE,
+        )
+        dispatcher_without_access = Employee.objects.create(
+            full_name='Диспетчер без доступа',
+            personnel_position=dispatcher_position,
+            status=Employee.Status.ACTIVE,
+        )
+        employee_with_dispatcher_access = Employee.objects.create(
+            full_name='Руководитель с доступом диспетчера',
+            personnel_position=manager_position,
+            status=Employee.Status.ACTIVE,
+        )
+        EmployeeAccess.objects.create(
+            employee=admin_employee,
+            role=admin_role,
+            access_code='1000',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+        EmployeeAccess.objects.create(
+            employee=employee_with_dispatcher_access,
+            role=dispatcher_role,
+            access_code='2000',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+
+        self.client.post('/', {'access_code': '1000'}, follow=True, HTTP_HOST='localhost')
+        position_response = self.client.get(
+            f'/system-admin/employees/?personnel_position={dispatcher_position.id}',
+            HTTP_HOST='localhost',
+        )
+        access_response = self.client.get(
+            f'/system-admin/employees/?role={dispatcher_role.id}',
+            HTTP_HOST='localhost',
+        )
+
+        self.assertContains(position_response, 'Диспетчер без доступа')
+        self.assertNotContains(position_response, 'Руководитель с доступом диспетчера')
+        self.assertContains(access_response, 'Руководитель с доступом диспетчера')
+        self.assertNotContains(access_response, 'Диспетчер без доступа')
+        self.assertContains(position_response, 'Кадровая должность')
+        self.assertContains(position_response, 'Доступ в приложение')
 
     def test_admin_cannot_block_own_access(self):
         admin_role = Role.objects.create(code='admin', name='Администратор')
@@ -1531,13 +1596,17 @@ class AccessLoginTests(TestCase):
             'name="brigade_number"',
             'name="residence_text"',
             'name="role"',
-            'name="assignment_shift_type"',
-            'name="assignment_equipment"',
             'name="comment"',
             'name="hr_data"',
         ]
         positions = [html.index(marker) for marker in expected_order]
         self.assertEqual(positions, sorted(positions))
+        canonical_end = html.index('</form>', html.index('data-canonical-employee-card'))
+        role_tools_start = html.index('data-role-tools', canonical_end)
+        assignment_start = html.index('data-admin-assignment-editor', role_tools_start)
+        self.assertLess(role_tools_start, assignment_start)
+        self.assertGreater(html.index('name="assignment_shift_type"'), assignment_start)
+        self.assertGreater(html.index('name="assignment_equipment"'), assignment_start)
 
     def test_admin_creates_employee_with_work_shift_and_equipment_assignment(self):
         admin_role = Role.objects.create(code='admin', name='Администратор')
