@@ -1,844 +1,14 @@
-{% extends "base.html" %}
-{% load static %}
-
-{% block title %}{% if dispatcher_page_title %}{{ dispatcher_page_title }}{% else %}Горный диспетчер{% endif %}{% endblock %}
-{% block app_stylesheets %}
-    {% if mining_master_mobile_enabled %}
-        {{ block.super }}
-    {% else %}
-        <link rel="stylesheet" href="{% static 'css/dispatcher-control-v1.css' %}">
-    {% endif %}
-{% endblock %}
-{% block extra_head %}
-    {% if mining_master_mobile_enabled %}
-        <link rel="manifest" href="{% url 'mining_master_manifest' %}">
-        <meta name="theme-color" content="#2366A8">
-        <meta name="mobile-web-app-capable" content="yes">
-        <meta name="apple-mobile-web-app-capable" content="yes">
-        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-        <meta name="apple-mobile-web-app-title" content="Горный мастер">
-        <link rel="apple-touch-icon" href="{% static 'img/pwa/mining-master-180.png' %}">
-    {% else %}
-        <link rel="manifest" href="{% url 'dispatcher_manifest' %}">
-        <meta name="theme-color" content="#B33A4C">
-        <meta name="mobile-web-app-capable" content="yes">
-        <meta name="apple-mobile-web-app-capable" content="yes">
-        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-        <meta name="apple-mobile-web-app-title" content="Горный диспетчер">
-        <link rel="apple-touch-icon" href="{% static 'img/pwa/dispatcher-180.png' %}">
-    {% endif %}
-{% endblock %}
-{% block body_class %}dispatcher-control-screen{% if mining_master_mobile_enabled %} mining-master-mobile-screen{% endif %}{% endblock %}
-
-{% block body %}
-{% spaceless %}
-<main
-    class="dispatcher-shell"
-    data-dispatcher-theme
-    data-static-prefix="{% static '' %}"
-    data-dispatcher-move-url="{{ dispatcher_move_excavator_url }}"
-    data-dispatcher-assign-url="{{ dispatcher_assign_truck_url }}"
-    data-dispatcher-detail-url-template="{% url 'dispatcher_equipment_detail' category='equipment' equipment_id=0 %}"
-    data-dispatcher-service-worker-scope="{% if role_app.role_code == 'dispatcher' %}/{% else %}/dispatcher/{% endif %}"
->
-    <h1 class="dispatcher-compat-title">{% if dispatcher_compat_title %}{{ dispatcher_compat_title }}{% else %}Диспетчерский пульт{% endif %}</h1>
-    {% if messages %}
-        <div class="dispatcher-messages">
-            {% for message in messages %}
-                <div class="message {% if message.tags %}{{ message.tags }}{% else %}success{% endif %}">{{ message }}</div>
-            {% endfor %}
-        </div>
-    {% endif %}
-
-    <section class="dispatcher-board{% if not dispatcher_header.active_shift %} is-readonly{% endif %}" data-dispatcher-shift-open="{% if dispatcher_header.active_shift %}true{% else %}false{% endif %}" data-dispatcher-own-shift-open="{% if dispatcher_header.shift_is_open %}true{% else %}false{% endif %}" data-operational-state-version="{{ operational_state_version|default:0 }}" aria-label="{% if dispatcher_board_label %}{{ dispatcher_board_label }}{% else %}Горный диспетчер{% endif %}">
-        <header class="dispatcher-topbar dispatcher-unified-topbar">
-            {% include "includes/dispatcher_header.html" with dispatcher_nav_active="control" %}
-        </header>
-
-        <aside class="dispatcher-left" data-dispatcher-excavator-garage>
-            <section class="dispatcher-garage-panel dispatcher-excavator-garage" data-dispatcher-drop="excavator-garage">
-                <div class="dispatcher-panel-head">
-                    <h2>Экскаваторы</h2>
-                    <span>гараж / резерв</span>
-            </div>
-            <div class="dispatcher-excavators" aria-label="Экскаваторы">
-                {% for tile in dispatcher_dashboard.excavator_garage_tiles %}
-                    <article class="dispatcher-equipment-tile dispatcher-excavator-garage-tile status-{{ tile.status }}{% if tile.is_placeholder %} is-placeholder{% endif %}{% if tile.plan_visual.is_overrun %} is-plan-overrun{% endif %}" style="--tile-progress: {% if tile.plan_has_plan %}{{ tile.plan_visual.loop_progress }}{% else %}0{% endif %}%; --tile-total-progress: {{ tile.percent|default:0 }}%;" {% if not tile.is_placeholder %}role="button" tabindex="0" draggable="true" data-dispatcher-drag="excavator" data-equipment-card-id="{{ tile.card_id }}" data-equipment-id="{{ tile.card_id }}" data-equipment-name="{{ tile.name }}" data-equipment-state="{{ tile.equipment_state_code }}" data-excavator-slot="{{ tile.display_name }}" data-garage-item="excavator" data-plan-status="{{ tile.plan_status|default:'plan_not_assigned' }}" data-plan-percent="{{ tile.percent|default:0 }}" data-plan-loop-percent="{% if tile.plan_has_plan %}{{ tile.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ tile.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if tile.plan_has_plan %}{{ tile.plan_visual.phase }}{% endif %}" data-plan-mode="{{ tile.plan_calculation_mode|default:'' }}" data-plan-value="{{ tile.plan_value|default:'' }}" data-plan-fact="{{ tile.plan_fact_value|default:'' }}" data-plan-unit="{{ tile.plan_unit|default:'' }}" data-plan-group="{{ tile.plan_group_name|default:'' }}"{% endif %}>
-                        {% if tile.display_name %}<strong>{{ tile.display_name }}</strong>{% endif %}
-                        {% if mining_master_mobile_enabled %}
-                            <img src="{% static tile.icon %}" alt="">
-                        {% else %}
-                            <img src="{% static 'img/equipment/excavator-gray.png' %}" alt="">
-                        {% endif %}
-                        {% if not tile.is_placeholder %}<span>{{ tile.label }}</span>{% endif %}
-                        {% if not tile.is_placeholder %}
-                            <em class="dispatcher-tile-plan-percent">{{ tile.plan_percent_label|default:"Не назначен" }}</em>
-                            <small class="dispatcher-tile-plan-label{% if not tile.plan_has_plan %} is-plan-missing{% endif %}">{% if tile.plan_has_plan %}{{ tile.plan_fact_label }}{% else %}{{ tile.plan_status_label|default:"План не назначен" }}{% endif %}</small>
-                            {% if tile.plan_visual.has_completed_loops %}<b class="dispatcher-plan-loop-badge" aria-label="Завершено циклов: {{ tile.plan_visual.completed_loops }}">×{{ tile.plan_visual.completed_loops }}</b>{% endif %}
-                        {% endif %}
-                    </article>
-                {% endfor %}
-            </div>
-            </section>
-        </aside>
-
-        <section class="dispatcher-complexes" aria-label="Производственные комплексы">
-            <div class="dispatcher-zone-head">
-                <div>
-                    <h2>Активная смена</h2>
-                    <span>зоны комплексов</span>
-                </div>
-                <strong>приоритет: красные / желтые / рабочие</strong>
-            </div>
-            <div class="dispatcher-zone-grid">
-            {% for complex in dispatcher_dashboard.complex_zones %}
-                <article class="dispatcher-complex-card {% if complex.is_empty %}status-empty{% else %}status-{{ complex.status_key }}{% endif %}{% if complex.plan_visual.is_overrun %} is-plan-overrun{% endif %}" style="--complex-progress: {% if complex.plan_has_plan %}{{ complex.plan_visual.loop_progress }}{% else %}0{% endif %}%; --complex-total-progress: {{ complex.percent|default:0 }}%;" data-dispatcher-drop="complex" data-zone-id="{{ complex.id }}"{% if not complex.is_empty %} role="button" tabindex="0" draggable="true" data-dispatcher-drag="complex" data-equipment-card-id="{{ complex.card_id }}" data-source-equipment-card-id="{{ complex.equipment_card_id }}" data-equipment-id="{{ complex.equipment_card_id }}" data-equipment-name="{{ complex.excavator_name }}" data-equipment-state="{{ complex.equipment_state_code }}" data-excavator-slot="{{ complex.excavator_slot }}" data-plan-status="{{ complex.plan_status|default:'plan_not_assigned' }}" data-plan-percent="{{ complex.percent|default:0 }}" data-plan-loop-percent="{% if complex.plan_has_plan %}{{ complex.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ complex.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if complex.plan_has_plan %}{{ complex.plan_visual.phase }}{% endif %}" data-plan-mode="{{ complex.plan_calculation_mode|default:'' }}" data-plan-value="{{ complex.plan_value|default:'' }}" data-plan-fact="{{ complex.plan_fact_value|default:'' }}" data-plan-unit="{{ complex.plan_unit|default:'' }}" data-plan-group="{{ complex.plan_group_name|default:'' }}"{% endif %}>
-                    {% if complex.is_empty %}
-                        <div class="complex-empty" aria-hidden="true"></div>
-                    {% else %}
-                        <div class="complex-work-head">
-                            <div class="complex-title-state">
-                                <h2>{{ complex.id }}</h2>
-                                <span class="complex-state-chip">{{ complex.status_label }}</span>
-                            </div>
-                            <div class="complex-context">
-                                <span class="complex-info-chip chip-horizon">{{ complex.current_horizon|default:"Гор. -" }}</span>
-                                <span class="complex-info-chip chip-block">{{ complex.current_block|default:"Блок -" }}</span>
-                                <span class="complex-info-chip chip-rock">{{ complex.current_rock|default:"порода не указана" }}</span>
-                                {% if complex.unload_points %}
-                                    <div class="complex-unload-points">
-                                    {% for point in complex.unload_points %}
-                                        <span class="complex-info-chip chip-unload">{{ point.name }} {{ point.percent }}%</span>
-                                    {% endfor %}
-                                    </div>
-                                {% endif %}
-                                <div class="dispatcher-plan-strip{% if not complex.plan_has_plan %} is-plan-missing{% endif %}" data-plan-status="{{ complex.plan_status|default:'plan_not_assigned' }}">
-                                    <strong>{{ complex.plan_percent_label|default:"Не назначен" }}</strong>
-                                    <span>{{ complex.plan_fact_label|default:"План не назначен" }}</span>
-                                    {% if complex.plan_group_name %}<em>{{ complex.plan_group_name }}</em>{% endif %}
-                                    {% if complex.plan_visual.has_completed_loops %}<b class="dispatcher-plan-loop-badge" aria-label="Завершено циклов: {{ complex.plan_visual.completed_loops }}">×{{ complex.plan_visual.completed_loops }}</b>{% endif %}
-                                </div>
-                            </div>
-                        </div>
-                        <div class="complex-assigned-trucks {{ complex.truck_scale_class }}" style="--complex-truck-cols: {{ complex.truck_column_count|default:1 }};" aria-label="Активные самосвалы комплекса">
-                            {% for truck in complex.active_truck_tiles %}
-                                <article class="dispatcher-truck-tile complex-truck-tile status-{{ truck.status }}{% if truck.plan_visual.is_overrun %} is-plan-overrun{% endif %}" style="--tile-progress: {% if truck.plan_has_plan %}{{ truck.plan_visual.loop_progress }}{% else %}0{% endif %}%; --tile-total-progress: {{ truck.percent|default:0 }}%;" role="button" tabindex="0" draggable="true" data-dispatcher-drag="truck" data-equipment-card-id="{{ truck.card_id }}" data-equipment-id="{{ truck.card_id }}" data-equipment-name="{{ truck.name }}" data-equipment-state="{{ truck.equipment_state_code }}" data-complex-truck="true" data-assigned-zone="{{ complex.id }}" data-plan-status="{{ truck.plan_status|default:'plan_not_assigned' }}" data-plan-percent="{{ truck.percent|default:0 }}" data-plan-loop-percent="{% if truck.plan_has_plan %}{{ truck.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ truck.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if truck.plan_has_plan %}{{ truck.plan_visual.phase }}{% endif %}" data-plan-mode="{{ truck.plan_calculation_mode|default:'' }}" data-plan-value="{{ truck.plan_value|default:'' }}" data-plan-fact="{{ truck.plan_fact_value|default:'' }}" data-plan-unit="{{ truck.plan_unit|default:'' }}" data-plan-group="{{ truck.plan_group_name|default:'' }}">
-                                    <strong>{{ truck.name }}</strong>
-                                    {% if mining_master_mobile_enabled %}
-                                        <img src="{% static truck.icon %}" alt="">
-                                    {% else %}
-                                        <img src="{% static 'img/equipment/truck-gray.png' %}" alt="">
-                                    {% endif %}
-                                    <span>{{ truck.label }}</span>
-                                    {% if truck.plan_visual.has_completed_loops %}<b class="dispatcher-plan-loop-badge" aria-label="Завершено циклов: {{ truck.plan_visual.completed_loops }}">×{{ truck.plan_visual.completed_loops }}</b>{% endif %}
-                                </article>
-                            {% empty %}
-                                <em class="complex-truck-empty">самосвалы не назначены</em>
-                            {% endfor %}
-                        </div>
-                    {% endif %}
-                </article>
-            {% endfor %}
-            </div>
-        </section>
-
-        <aside class="dispatcher-right">
-            <section class="dispatcher-garage-panel dispatcher-truck-garage" data-dispatcher-drop="truck-garage">
-                <div class="dispatcher-panel-head">
-                    <h2>Самосвалы</h2>
-                    <span>свободные / резерв</span>
-                </div>
-                <div class="dispatcher-trucks" aria-label="Самосвалы">
-                {% for tile in dispatcher_dashboard.truck_garage_tiles %}
-                    <article class="dispatcher-truck-tile status-{{ tile.status }}{% if tile.plan_visual.is_overrun %} is-plan-overrun{% endif %}" style="--tile-progress: {% if tile.plan_has_plan %}{{ tile.plan_visual.loop_progress }}{% else %}0{% endif %}%; --tile-total-progress: {{ tile.percent|default:0 }}%;" role="button" tabindex="0" draggable="true" data-dispatcher-drag="truck" data-equipment-card-id="{{ tile.card_id }}" data-equipment-id="{{ tile.card_id }}" data-equipment-name="{{ tile.name }}" data-equipment-state="{{ tile.equipment_state_code }}" data-garage-item="truck" data-plan-status="{{ tile.plan_status|default:'plan_not_assigned' }}" data-plan-percent="{{ tile.percent|default:0 }}" data-plan-loop-percent="{% if tile.plan_has_plan %}{{ tile.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ tile.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if tile.plan_has_plan %}{{ tile.plan_visual.phase }}{% endif %}" data-plan-mode="{{ tile.plan_calculation_mode|default:'' }}" data-plan-value="{{ tile.plan_value|default:'' }}" data-plan-fact="{{ tile.plan_fact_value|default:'' }}" data-plan-unit="{{ tile.plan_unit|default:'' }}" data-plan-group="{{ tile.plan_group_name|default:'' }}">
-                        <strong>{{ tile.name }}</strong>
-                        {% if mining_master_mobile_enabled %}
-                            <img src="{% static tile.icon %}" alt="">
-                        {% else %}
-                            <img src="{% static 'img/equipment/truck-gray.png' %}" alt="">
-                        {% endif %}
-                        <span>{{ tile.label }}</span>
-                        {% if tile.plan_visual.has_completed_loops %}<b class="dispatcher-plan-loop-badge" aria-label="Завершено циклов: {{ tile.plan_visual.completed_loops }}">×{{ tile.plan_visual.completed_loops }}</b>{% endif %}
-                    </article>
-                {% endfor %}
-                </div>
-            </section>
-        </aside>
-    </section>
-
-    {% if mining_master_mobile_enabled %}
-    <section class="mm-mobile-shell {% if dispatcher_header.shift_status_variant == 'open' %}is-shift-open{% elif dispatcher_header.shift_status_variant == 'blocked' %}is-shift-blocked{% else %}is-shift-closed{% endif %} {% if not dispatcher_header.shift_is_open %}is-readonly{% endif %}" data-mm-mobile-readonly="{% if dispatcher_header.shift_is_open %}false{% else %}true{% endif %}" aria-label="Мобильный пульт Горного мастера">
-        <div class="mm-mobile-home" data-mm-mobile-view="home">
-        <header class="mm-mobile-header">
-            <div class="mm-mobile-title">
-                <span>Горный мастер</span>
-                <h1>{{ dispatcher_header.active_dispatcher_short_name|default:"Смена не открыта" }}</h1>
-            </div>
-            <div class="mm-mobile-header-actions">
-                <div class="mm-mobile-plan-ring" style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" role="img" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%">
-                    {{ dispatcher_dashboard.completion_percent|default:0 }}%
-                </div>
-                <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v118</span>
-            </div>
-        </header>
-
-        <div class="mm-mobile-section-title">
-            <span>Активная смена</span>
-        </div>
-
-        <div class="mm-mobile-create-complex-target" aria-hidden="true">
-            <span>+</span>
-            <strong>Добавить комплекс</strong>
-        </div>
-
-        <div class="mm-mobile-complex-grid">
-            {% for complex in dispatcher_dashboard.mobile_complex_zones %}
-                {% if not complex.is_empty %}
-                    <article class="mm-mobile-complex-card status-{{ complex.status_key }}{% if complex.plan_has_plan %} has-plan-progress{% endif %}{% if complex.plan_visual.is_overrun %} is-plan-overrun{% endif %}"{% if complex.plan_has_plan %} style="--mm-mobile-plan-progress: {{ complex.plan_visual.loop_progress }}%;"{% endif %} role="button" tabindex="0" data-mm-mobile-open-complex="{{ complex.card_id }}" data-mm-mobile-excavator-id="{{ complex.equipment_card_id }}" data-plan-percent="{% if complex.plan_has_plan %}{{ complex.percent }}{% endif %}" data-plan-loop-percent="{% if complex.plan_has_plan %}{{ complex.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ complex.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if complex.plan_has_plan %}{{ complex.plan_visual.phase }}{% endif %}">
-                        <div class="mm-mobile-complex-card-head">
-                            <h2>{{ complex.id }}</h2>
-                            <div class="mm-mobile-complex-head-meta">
-                                <span class="mm-mobile-status-chip">
-                                    {{ complex.status_label|default:"состояние" }}
-                                </span>
-                                {% if complex.plan_has_plan %}
-                                    <span class="mm-mobile-complex-plan-ring" role="img" aria-label="Выполнение плана {{ complex.percent }}%, завершено циклов: {{ complex.plan_visual.completed_loops }}">
-                                        <span>{{ complex.plan_visual.loop_progress }}%</span>
-                                        {% if complex.plan_visual.has_completed_loops %}<b class="mm-mobile-plan-loop-badge">×{{ complex.plan_visual.completed_loops }}</b>{% endif %}
-                                    </span>
-                                {% endif %}
-                            </div>
-                        </div>
-                        <div class="mm-mobile-complex-visual" aria-hidden="true" data-mm-mobile-release-trucks>
-                            <img src="{% static complex.excavator_icon %}" alt="">
-                        </div>
-                        <div class="mm-mobile-truck-preview" aria-label="Самосвалы комплекса" data-mm-mobile-truck-count="{% if complex.mobile_truck_overflow %}17{% else %}{{ complex.active_truck_tiles|length }}{% endif %}">
-                            {% for truck in complex.active_truck_tiles|slice:":16" %}
-                                <span class="mm-mobile-truck-mini status-{{ truck.status }}{% if truck.plan_has_plan %} has-plan-progress{% endif %}{% if truck.plan_visual.is_overrun %} is-plan-overrun{% endif %}"{% if truck.plan_has_plan %} style="--mm-mobile-plan-progress: {{ truck.plan_visual.loop_progress }}%;"{% endif %} data-mm-mobile-home-truck-id="{{ truck.card_id }}" data-mm-mobile-home-truck-number="{{ truck.name }}" data-mm-mobile-home-source-excavator-id="{{ complex.equipment_card_id }}" data-mm-mobile-equipment-state="{{ truck.equipment_state_code }}" data-plan-percent="{% if truck.plan_has_plan %}{{ truck.percent }}{% endif %}" data-plan-loop-percent="{% if truck.plan_has_plan %}{{ truck.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ truck.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if truck.plan_has_plan %}{{ truck.plan_visual.phase }}{% endif %}">{{ truck.name }}{% if truck.plan_has_plan %}<i class="mm-mobile-plan-ring-layer" aria-hidden="true"></i>{% endif %}{% if truck.plan_visual.has_completed_loops %}<b class="mm-mobile-plan-loop-badge">×{{ truck.plan_visual.completed_loops }}</b>{% endif %}</span>
-                            {% endfor %}
-                            {% if complex.mobile_truck_overflow %}
-                                <span class="mm-mobile-truck-mini is-more">+{{ complex.mobile_truck_overflow }}</span>
-                            {% endif %}
-                            {% if not complex.active_truck_tiles %}
-                                <span class="mm-mobile-truck-empty">нет</span>
-                            {% endif %}
-                        </div>
-                    </article>
-                {% else %}
-                    <article class="mm-mobile-complex-card status-empty" aria-disabled="true"></article>
-                {% endif %}
-            {% endfor %}
-        </div>
-
-        <nav class="mm-mobile-bottom-nav" aria-label="Навигация Горного мастера">
-            <a class="mm-mobile-nav-item is-active" href="#" data-mm-mobile-nav="home">
-                <span class="mm-mobile-nav-icon mm-mobile-nav-icon-pult" aria-hidden="true"></span>
-                <span>Пульт</span>
-            </a>
-            <a class="mm-mobile-nav-item" href="#" data-mm-mobile-nav="excavators">
-                <img src="{% static 'img/equipment/excavator-gray.png' %}" alt="">
-                <span>Экс</span>
-            </a>
-            <a class="mm-mobile-nav-item" href="#" data-mm-mobile-nav="trucks">
-                <img src="{% static 'img/equipment/truck-gray.png' %}" alt="">
-                <span>Самосвалы</span>
-            </a>
-            <a class="mm-mobile-nav-item" href="#" data-mm-mobile-nav="reports" data-mm-pwa-update-nav-target>
-                <span class="mm-mobile-nav-icon mm-mobile-nav-icon-reports" aria-hidden="true"></span>
-                <span class="mm-mobile-update-badge" data-mm-pwa-update-badge hidden aria-hidden="true"></span>
-                <span>Отчеты</span>
-            </a>
-        </nav>
-        </div>
-
-        <section class="mm-mobile-tab-panel" data-mm-mobile-panel="excavators" hidden>
-            <header class="mm-mobile-detail-header">
-                <button type="button" class="mm-mobile-back-button" data-mm-mobile-nav="home" aria-label="Назад">←</button>
-                <div class="mm-mobile-detail-title">
-                    <h1>Экскаваторы</h1>
-                </div>
-                <div class="mm-mobile-header-actions">
-                    <div class="mm-mobile-plan-ring" style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" role="img" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%">
-                        {{ dispatcher_dashboard.completion_percent|default:0 }}%
-                    </div>
-                    <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v118</span>
-                </div>
-            </header>
-
-            <div class="mm-mobile-excavator-work-up-target" aria-hidden="true">На пульт</div>
-
-            <div class="mm-mobile-section-title">
-                <span>Гараж экскаваторов</span>
-            </div>
-
-            <div class="mm-mobile-detail-trucks mm-mobile-excavator-garage-grid" style="--mm-mobile-garage-rows: {{ dispatcher_dashboard.mobile_excavator_garage_row_count|default:3 }};" aria-label="Гараж экскаваторов">
-                {% for excavator in dispatcher_dashboard.mobile_excavator_garage_tiles %}
-                    {% if not excavator.is_placeholder %}
-                        <button type="button" class="mm-mobile-garage-excavator status-{{ excavator.status }}" data-mm-mobile-activate-excavator="{{ excavator.card_id }}" data-equipment-card-id="{{ excavator.card_id }}" data-mm-mobile-excavator-sort="{{ excavator.board_number|default:9999 }}" data-mm-mobile-equipment-state="{{ excavator.equipment_state_code }}" title="{{ excavator.label }}" aria-label="Вернуть экскаватор {{ excavator.display_name }} в активную смену">
-                            <span>Экс {{ excavator.display_name }}</span>
-                            <img src="{% static excavator.icon %}" alt="">
-                        </button>
-                    {% else %}
-                        <article class="mm-mobile-garage-slot status-empty" aria-disabled="true"></article>
-                    {% endif %}
-                {% endfor %}
-            </div>
-
-            <nav class="mm-mobile-bottom-nav" aria-label="Навигация Горного мастера">
-                <a class="mm-mobile-nav-item" href="#" data-mm-mobile-nav="home">
-                    <span class="mm-mobile-nav-icon mm-mobile-nav-icon-pult" aria-hidden="true"></span>
-                    <span>Пульт</span>
-                </a>
-                <a class="mm-mobile-nav-item is-active" href="#" data-mm-mobile-nav="excavators">
-                    <img src="{% static 'img/equipment/excavator-gray.png' %}" alt="">
-                    <span>Экс</span>
-                </a>
-                <a class="mm-mobile-nav-item" href="#" data-mm-mobile-nav="trucks">
-                    <img src="{% static 'img/equipment/truck-gray.png' %}" alt="">
-                    <span>Самосвалы</span>
-                </a>
-                <a class="mm-mobile-nav-item" href="#" data-mm-mobile-nav="reports" data-mm-pwa-update-nav-target>
-                    <span class="mm-mobile-nav-icon mm-mobile-nav-icon-reports" aria-hidden="true"></span>
-                    <span class="mm-mobile-update-badge" data-mm-pwa-update-badge hidden aria-hidden="true"></span>
-                    <span>Отчеты</span>
-                </a>
-            </nav>
-        </section>
-
-        <section class="mm-mobile-tab-panel" data-mm-mobile-panel="trucks" hidden>
-            <header class="mm-mobile-detail-header">
-                <button type="button" class="mm-mobile-back-button" data-mm-mobile-nav="home" aria-label="Назад">←</button>
-                <div class="mm-mobile-detail-title">
-                    <h1>Самосвалы</h1>
-                </div>
-                <div class="mm-mobile-header-actions">
-                    <div class="mm-mobile-plan-ring" style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" role="img" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%">
-                        {{ dispatcher_dashboard.completion_percent|default:0 }}%
-                    </div>
-                    <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v118</span>
-                </div>
-            </header>
-
-            <div class="mm-mobile-section-title">
-                <span>Гараж самосвалов</span>
-            </div>
-
-            <div class="mm-mobile-detail-trucks" aria-label="Гараж самосвалов">
-                {% for truck in dispatcher_dashboard.mobile_truck_garage_tiles %}
-                    <article class="mm-mobile-truck-card status-{{ truck.status }}{% if truck.plan_has_plan %} has-plan-progress{% endif %}{% if truck.plan_visual.is_overrun %} is-plan-overrun{% endif %}"{% if truck.plan_has_plan %} style="--mm-mobile-plan-progress: {{ truck.plan_visual.loop_progress }}%;"{% endif %} role="button" tabindex="0" data-equipment-card-id="{{ truck.card_id }}" data-mm-mobile-truck-sort="{{ truck.name }}" data-mm-mobile-truck-state="{{ truck.status }}" data-mm-mobile-equipment-state="{{ truck.equipment_state_code }}" data-plan-percent="{% if truck.plan_has_plan %}{{ truck.percent }}{% endif %}" data-plan-loop-percent="{% if truck.plan_has_plan %}{{ truck.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ truck.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if truck.plan_has_plan %}{{ truck.plan_visual.phase }}{% endif %}" title="{{ truck.label }}" aria-label="Самосвал {{ truck.name }}: {{ truck.label }}">
-                        <img src="{% static truck.icon %}" alt="">
-                        <strong>{{ truck.name }}</strong>
-                        <span></span>
-                        {% if truck.plan_has_plan %}<i class="mm-mobile-plan-ring-layer" aria-hidden="true"></i>{% endif %}
-                        {% if truck.plan_visual.has_completed_loops %}<b class="mm-mobile-plan-loop-badge">×{{ truck.plan_visual.completed_loops }}</b>{% endif %}
-                    </article>
-                {% empty %}
-                    <div class="mm-mobile-detail-empty">самосвалов в гараже нет</div>
-                {% endfor %}
-            </div>
-
-            <nav class="mm-mobile-bottom-nav" aria-label="Навигация Горного мастера">
-                <a class="mm-mobile-nav-item" href="#" data-mm-mobile-nav="home">
-                    <span class="mm-mobile-nav-icon mm-mobile-nav-icon-pult" aria-hidden="true"></span>
-                    <span>Пульт</span>
-                </a>
-                <a class="mm-mobile-nav-item" href="#" data-mm-mobile-nav="excavators">
-                    <img src="{% static 'img/equipment/excavator-gray.png' %}" alt="">
-                    <span>Экс</span>
-                </a>
-                <a class="mm-mobile-nav-item is-active" href="#" data-mm-mobile-nav="trucks">
-                    <img src="{% static 'img/equipment/truck-gray.png' %}" alt="">
-                    <span>Самосвалы</span>
-                </a>
-                <a class="mm-mobile-nav-item" href="#" data-mm-mobile-nav="reports" data-mm-pwa-update-nav-target>
-                    <span class="mm-mobile-nav-icon mm-mobile-nav-icon-reports" aria-hidden="true"></span>
-                    <span class="mm-mobile-update-badge" data-mm-pwa-update-badge hidden aria-hidden="true"></span>
-                    <span>Отчеты</span>
-                </a>
-            </nav>
-        </section>
-
-        <section class="mm-mobile-tab-panel" data-mm-mobile-panel="reports" hidden>
-            <header class="mm-mobile-detail-header">
-                <button type="button" class="mm-mobile-back-button" data-mm-mobile-nav="home" aria-label="Назад">←</button>
-                <div class="mm-mobile-detail-title">
-                    <h1>Отчеты</h1>
-                </div>
-                <div class="mm-mobile-header-actions">
-                    <div class="mm-mobile-plan-ring" style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" role="img" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%">
-                        {{ dispatcher_dashboard.completion_percent|default:0 }}%
-                    </div>
-                    <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v118</span>
-                </div>
-            </header>
-
-            <div class="mm-mobile-section-title">
-                <span>Итоги смены</span>
-            </div>
-
-            <div class="mm-mobile-report-grid">
-                <article>
-                    <span>Рейсы</span>
-                    <strong>{{ total_trips|default:"0" }}</strong>
-                </article>
-                <article>
-                    <span>Объем</span>
-                    <strong>{{ total_volume|default:"0" }}</strong>
-                </article>
-                <article>
-                    <span>В работе</span>
-                    <strong>{{ active_assignments_count|default:"0" }}</strong>
-                </article>
-                <article>
-                    <span>Свободно</span>
-                    <strong>{{ free_trucks_count|default:"0" }}</strong>
-                </article>
-            </div>
-
-            <form class="mm-mobile-shift-form" method="post" action="{% if dispatcher_header.shift_form_action %}{{ dispatcher_header.shift_form_action }}{% else %}{% url 'dispatcher_toggle_shift' %}{% endif %}">
-                {% csrf_token %}
-                {% if not dispatcher_header.shift_is_open %}
-                    <input type="hidden" name="device_kind" value="personal">
-                {% endif %}
-                {% if dispatcher_header.shift_is_open %}
-                    <button
-                        type="submit"
-                        name="{{ dispatcher_header.shift_action_field_name|default:'shift_action' }}"
-                        value="{{ dispatcher_header.shift_end_value|default:'end' }}"
-                        class="mm-mobile-shift-button is-danger"
-                        data-confirm="{{ dispatcher_header.shift_end_confirm|default:'Завершить смену горного мастера?' }}"
-                        data-confirm-variant="shift-end"
-                        data-confirm-title="{{ dispatcher_header.shift_end_confirm_title|default:'Завершение смены' }}"
-                        data-confirm-description="{{ dispatcher_header.shift_end_confirm_description|default:'Вы уверены, что хотите завершить текущую смену? После завершения смены будут сохранены результаты работы.' }}"
-                        data-confirm-date="{{ dispatcher_header.active_shift_date }}"
-                        data-confirm-time="{{ dispatcher_header.active_shift_opened_at }}"
-                        data-confirm-person-label="{{ dispatcher_header.shift_end_confirm_role|default:'Горный мастер' }}"
-                        data-confirm-person="{{ dispatcher_header.active_dispatcher_name }}"
-                        data-confirm-delay="10"
-                    >Завершить смену</button>
-                {% else %}
-                    <button
-                        type="submit"
-                        name="{{ dispatcher_header.shift_action_field_name|default:'shift_action' }}"
-                        value="{{ dispatcher_header.shift_start_value|default:'start' }}"
-                        class="mm-mobile-shift-button"
-                        {% if not dispatcher_header.can_toggle_shift %}disabled{% endif %}
-                        data-confirm="{{ dispatcher_header.shift_start_confirm|default:'Начать смену горного мастера?' }}"
-                        data-confirm-delay="10"
-                    >Начать смену</button>
-                {% endif %}
-            </form>
-
-            <div class="mm-mobile-version-strip" aria-label="Версия приложения">
-                <span>Версия приложения</span>
-                <strong data-mm-pwa-current-shell-version>v118</strong>
-                <button type="button" data-mm-pwa-check-update>Проверить обновления</button>
-            </div>
-
-            <nav class="mm-mobile-bottom-nav" aria-label="Навигация Горного мастера">
-                <a class="mm-mobile-nav-item" href="#" data-mm-mobile-nav="home">
-                    <span class="mm-mobile-nav-icon mm-mobile-nav-icon-pult" aria-hidden="true"></span>
-                    <span>Пульт</span>
-                </a>
-                <a class="mm-mobile-nav-item" href="#" data-mm-mobile-nav="excavators">
-                    <img src="{% static 'img/equipment/excavator-gray.png' %}" alt="">
-                    <span>Экс</span>
-                </a>
-                <a class="mm-mobile-nav-item" href="#" data-mm-mobile-nav="trucks">
-                    <img src="{% static 'img/equipment/truck-gray.png' %}" alt="">
-                    <span>Самосвалы</span>
-                </a>
-                <a class="mm-mobile-nav-item is-active" href="#" data-mm-mobile-nav="reports" data-mm-pwa-update-nav-target>
-                    <span class="mm-mobile-nav-icon mm-mobile-nav-icon-reports" aria-hidden="true"></span>
-                    <span class="mm-mobile-update-badge" data-mm-pwa-update-badge hidden aria-hidden="true"></span>
-                    <span>Отчеты</span>
-                </a>
-            </nav>
-        </section>
-
-        {% for complex in dispatcher_dashboard.complex_zones %}
-            {% if not complex.is_empty %}
-                <section class="mm-mobile-fill-screen status-{{ complex.status_key }}" data-mm-mobile-fill="{{ complex.card_id }}" hidden>
-                    <header class="mm-mobile-detail-header">
-                        <button type="button" class="mm-mobile-back-button" data-mm-mobile-fill-back aria-label="Назад">←</button>
-                        <div class="mm-mobile-detail-title mm-mobile-fill-title">
-                            <h1>Набор самосвалов</h1>
-                        </div>
-                        <div class="mm-mobile-header-actions">
-                            <div class="mm-mobile-plan-ring" style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" role="img" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%">
-                                {{ dispatcher_dashboard.completion_percent|default:0 }}%
-                            </div>
-                            <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v118</span>
-                        </div>
-                    </header>
-
-                    <div class="mm-mobile-fill-save-overlay" aria-hidden="true">Сохранить</div>
-                    <div class="mm-mobile-fill-shake-overlay" aria-hidden="true">Стряхнуть</div>
-
-                    <div class="mm-mobile-fill-zone status-{{ complex.status_key }}" data-mm-mobile-fill-drop data-mm-mobile-fill-excavator-id="{{ complex.equipment_card_id }}">
-                        <div class="mm-mobile-fill-zone-head">
-                            <strong>Комплекс - {{ complex.id|cut:"K-"|cut:"К-" }}</strong>
-                        </div>
-                        <div class="mm-mobile-fill-assigned" data-mm-mobile-fill-assigned aria-label="Самосвалы комплекса">
-                            {% for truck in complex.active_truck_tiles|slice:":16" %}
-                                <span class="mm-mobile-truck-mini status-{{ truck.status }}{% if truck.plan_has_plan %} has-plan-progress{% endif %}{% if truck.plan_visual.is_overrun %} is-plan-overrun{% endif %}"{% if truck.plan_has_plan %} style="--mm-mobile-plan-progress: {{ truck.plan_visual.loop_progress }}%;"{% endif %} data-mm-mobile-assigned-truck-id="{{ truck.card_id }}" data-mm-mobile-assigned-truck-number="{{ truck.name }}" data-mm-mobile-equipment-state="{{ truck.equipment_state_code }}" data-plan-percent="{% if truck.plan_has_plan %}{{ truck.percent }}{% endif %}" data-plan-loop-percent="{% if truck.plan_has_plan %}{{ truck.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ truck.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if truck.plan_has_plan %}{{ truck.plan_visual.phase }}{% endif %}">{{ truck.name }}{% if truck.plan_has_plan %}<i class="mm-mobile-plan-ring-layer" aria-hidden="true"></i>{% endif %}{% if truck.plan_visual.has_completed_loops %}<b class="mm-mobile-plan-loop-badge">×{{ truck.plan_visual.completed_loops }}</b>{% endif %}</span>
-                            {% endfor %}
-                        </div>
-                    </div>
-
-                    <div class="mm-mobile-fill-garage-zone">
-                        <div class="mm-mobile-fill-garage-rail">
-                            <strong>Гараж - самосвалов</strong>
-                        </div>
-                        <div class="mm-mobile-fill-truck-garage" aria-label="Гараж самосвалов">
-                            {% for truck in dispatcher_dashboard.mobile_truck_garage_tiles %}
-                                <button type="button" class="mm-mobile-truck-card mm-mobile-fill-truck status-{{ truck.status }}{% if truck.plan_has_plan %} has-plan-progress{% endif %}{% if truck.plan_visual.is_overrun %} is-plan-overrun{% endif %}"{% if truck.plan_has_plan %} style="--mm-mobile-plan-progress: {{ truck.plan_visual.loop_progress }}%;"{% endif %} data-equipment-card-id="{{ truck.card_id }}" data-mm-mobile-fill-truck-id="{{ truck.card_id }}" data-mm-mobile-fill-truck-number="{{ truck.name }}" data-mm-mobile-truck-sort="{{ truck.name }}" data-mm-mobile-truck-state="{{ truck.status }}" data-mm-mobile-equipment-state="{{ truck.equipment_state_code }}" data-plan-percent="{% if truck.plan_has_plan %}{{ truck.percent }}{% endif %}" data-plan-loop-percent="{% if truck.plan_has_plan %}{{ truck.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ truck.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if truck.plan_has_plan %}{{ truck.plan_visual.phase }}{% endif %}" title="{{ truck.label }}" aria-label="Самосвал {{ truck.name }}: {{ truck.label }}">
-                                    <img src="{% static truck.icon %}" alt="">
-                                    <strong>{{ truck.name }}</strong>
-                                    <span></span>
-                                    {% if truck.plan_has_plan %}<i class="mm-mobile-plan-ring-layer" aria-hidden="true"></i>{% endif %}
-                                    {% if truck.plan_visual.has_completed_loops %}<b class="mm-mobile-plan-loop-badge">×{{ truck.plan_visual.completed_loops }}</b>{% endif %}
-                                </button>
-                            {% empty %}
-                                <div class="mm-mobile-detail-empty">самосвалов в гараже нет</div>
-                            {% endfor %}
-                        </div>
-                    </div>
-                </section>
-            {% endif %}
-        {% endfor %}
-    </section>
-    {% endif %}
-
-    <div class="dispatcher-notice-modal" data-dispatcher-notice hidden>
-        <div class="dispatcher-notice-dialog" role="alertdialog" aria-modal="true" aria-labelledby="dispatcher-notice-title" aria-describedby="dispatcher-notice-message">
-            <div class="dispatcher-notice-mark">!</div>
-            <div class="dispatcher-notice-copy">
-                <h2 id="dispatcher-notice-title">Действие недоступно</h2>
-                <p id="dispatcher-notice-message" data-dispatcher-notice-message>Действие не выполнено.</p>
-            </div>
-            <button type="button" data-dispatcher-notice-close>ОК</button>
-        </div>
-    </div>
-
-    {% if mining_master_mobile_enabled %}
-    <div class="mm-mobile-update-modal" data-mm-pwa-update-modal hidden>
-        <section class="mm-mobile-update-dialog" role="alertdialog" aria-modal="true" aria-labelledby="mm-pwa-update-title" aria-describedby="mm-pwa-update-text">
-            <div class="mm-mobile-update-pulse" aria-hidden="true"></div>
-            <div class="mm-mobile-update-copy">
-                <span>Обновление приложения</span>
-                <h2 id="mm-pwa-update-title">Доступна новая версия</h2>
-                <p id="mm-pwa-update-text" data-mm-pwa-update-text>Можно установить новую оболочку Горного мастера.</p>
-                <div class="mm-mobile-update-versions" aria-label="Версии приложения">
-                    <div><small>Текущая</small><strong data-mm-pwa-current-version>неизвестно</strong></div>
-                    <div><small>Новая</small><strong data-mm-pwa-new-version>неизвестно</strong></div>
-                </div>
-                <div class="mm-mobile-update-status" data-mm-pwa-update-status>Обновление займет несколько секунд.</div>
-            </div>
-            <div class="mm-mobile-update-actions">
-                <button type="button" class="secondary" data-mm-pwa-update-later>Позже</button>
-                <button type="button" class="primary" data-mm-pwa-update-apply>Обновить</button>
-            </div>
-        </section>
-    </div>
-    {% endif %}
-
-    <section class="dispatcher-tools" aria-label="Фильтры и служебные списки" hidden>
-        <div class="dispatcher-tool-head">
-            <div>
-                <h2>Оперативные списки</h2>
-                <p>Фильтры пульта, служебные действия, активные рейсы и отчеты.</p>
-            </div>
-            <div class="dispatcher-tool-actions">
-                <button type="button" class="button-link" data-dispatcher-theme-toggle>День / Ночь</button>
-                <a class="button-link" href="{% url 'volume_report' %}">Открыть отчет по объемам</a>
-                <a class="button-link button-secondary" href="{% url 'customer_daily_report' %}">Суточный отчет заказчику</a>
-                <a class="button-link button-secondary" href="{% url 'mechanic_dashboard' %}">Открыть экран механиков</a>
-                <a class="button-link button-secondary" href="{% url 'downtime_report' %}">Отчет по простоям</a>
-                <a class="button-link button-secondary" href="{% url 'role_home' %}">Назад</a>
-            </div>
-        </div>
-
-        <details class="dispatcher-details" open>
-            <summary>Фильтры пульта</summary>
-            <form method="get" class="dispatcher-filters">
-                <label for="truck">Самосвал
-                    <select id="truck" name="truck">
-                        <option value="">Все</option>
-                        {% for truck in trucks %}
-                            <option value="{{ truck.id }}" {% if filters.truck == truck.id|stringformat:"s" %}selected{% endif %}>{{ truck }}</option>
-                        {% endfor %}
-                    </select>
-                </label>
-                <label for="excavator">Экскаватор
-                    <select id="excavator" name="excavator">
-                        <option value="">Все</option>
-                        {% for excavator in excavators %}
-                            <option value="{{ excavator.id }}" {% if filters.excavator == excavator.id|stringformat:"s" %}selected{% endif %}>{{ excavator }}</option>
-                        {% endfor %}
-                    </select>
-                </label>
-                <label class="checkline">
-                    <input type="hidden" name="show_active_trips" value="0">
-                    <input type="checkbox" name="show_active_trips" value="1" {% if filters.show_active_trips %}checked{% endif %}>
-                    Активные рейсы
-                </label>
-                <label class="checkline">
-                    <input type="hidden" name="show_pending_assignments" value="0">
-                    <input type="checkbox" name="show_pending_assignments" value="1" {% if filters.show_pending_assignments %}checked{% endif %}>
-                    Назначения ждут подтверждения
-                </label>
-                <label class="checkline">
-                    <input type="hidden" name="show_accepted_assignments" value="0">
-                    <input type="checkbox" name="show_accepted_assignments" value="1" {% if filters.show_accepted_assignments %}checked{% endif %}>
-                    Принятые назначения в работе
-                </label>
-                <button type="submit">Обновить пульт</button>
-            </form>
-        </details>
-
-        <div class="dispatcher-lists-grid">
-            <section class="dispatcher-list-card">
-                <h2>Активные рейсы</h2>
-                <div class="dispatcher-table-wrap">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Создан</th><th>Самосвал</th><th>Экскаватор</th><th>Порода</th><th>Объем</th><th>Действия</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for trip in active_trips %}
-                                <tr>
-                                    <td>{{ trip.created_at|date:"d.m.Y H:i" }}</td>
-                                    <td>{{ trip.truck }}</td>
-                                    <td>{{ trip.excavator }}</td>
-                                    <td>{{ trip.rock_type }}</td>
-                                    <td>{{ trip.volume_m3|default:"-" }}</td>
-                                    <td>
-                                        {% if access.role.code == 'dispatcher' or access.role.code == 'admin' %}
-                                            <form method="post" action="{% url 'dispatcher_complete_trip' trip.id %}" class="dispatcher-inline-form">
-                                                {% csrf_token %}
-                                                {% for filter_name, filter_value in dispatcher_filter_items %}<input type="hidden" name="{{ filter_name }}" value="{{ filter_value }}">{% endfor %}
-                                                <input type="text" name="reason" required aria-required="true" maxlength="255" placeholder="Причина служебного завершения">
-                                                <button type="submit">Завершить служебно</button>
-                                            </form>
-                                            <form method="post" action="{% url 'dispatcher_cancel_trip' trip.id %}" class="dispatcher-inline-form">
-                                                {% csrf_token %}
-                                                {% for filter_name, filter_value in dispatcher_filter_items %}<input type="hidden" name="{{ filter_name }}" value="{{ filter_value }}">{% endfor %}
-                                                <input type="text" name="reason" required aria-required="true" maxlength="255" placeholder="Причина отмены рейса">
-                                                <button type="submit">Отменить</button>
-                                            </form>
-                                        {% else %}-{% endif %}
-                                    </td>
-                                </tr>
-                            {% empty %}
-                                <tr><td colspan="6">Активных рейсов сейчас нет.</td></tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-            </section>
-
-            <section class="dispatcher-list-card">
-                <h2>Назначения ждут подтверждения</h2>
-                <div class="dispatcher-table-wrap">
-                    <table>
-                        <thead><tr><th>Назначено</th><th>Самосвал</th><th>Экскаватор</th><th>Действие</th></tr></thead>
-                        <tbody>
-                            {% for assignment in pending_assignments %}
-                                <tr>
-                                    <td>{{ assignment.assigned_at|date:"d.m.Y H:i" }}</td>
-                                    <td>{{ assignment.truck }}</td>
-                                    <td>{{ assignment.excavator }}</td>
-                                    <td>
-                                        {% if access.role.code == 'dispatcher' or access.role.code == 'admin' %}
-                                            <form method="post" action="{% url 'dispatcher_cancel_assignment' assignment.id %}" class="dispatcher-inline-form">
-                                                {% csrf_token %}
-                                                {% for filter_name, filter_value in dispatcher_filter_items %}<input type="hidden" name="{{ filter_name }}" value="{{ filter_value }}">{% endfor %}
-                                                <input type="text" name="reason" placeholder="Причина">
-                                                <button type="submit">Снять</button>
-                                            </form>
-                                        {% else %}-{% endif %}
-                                    </td>
-                                </tr>
-                            {% empty %}
-                                <tr><td colspan="4">Ожидающих подтверждения назначений нет.</td></tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-            </section>
-
-            <section class="dispatcher-list-card">
-                <h2>Принятые назначения в работе</h2>
-                <div class="dispatcher-table-wrap">
-                    <table>
-                        <thead><tr><th>Принято</th><th>Самосвал</th><th>Экскаватор</th><th>Действие</th></tr></thead>
-                        <tbody>
-                            {% for assignment in accepted_assignments %}
-                                <tr>
-                                    <td>{{ assignment.accepted_at|date:"d.m.Y H:i" }}</td>
-                                    <td>{{ assignment.truck }}</td>
-                                    <td>{{ assignment.excavator }}</td>
-                                    <td>
-                                        {% if access.role.code == 'dispatcher' or access.role.code == 'admin' %}
-                                            <form method="post" action="{% url 'dispatcher_cancel_assignment' assignment.id %}" class="dispatcher-inline-form">
-                                                {% csrf_token %}
-                                                {% for filter_name, filter_value in dispatcher_filter_items %}<input type="hidden" name="{{ filter_name }}" value="{{ filter_value }}">{% endfor %}
-                                                <input type="text" name="reason" placeholder="Причина">
-                                                <button type="submit">Снять</button>
-                                            </form>
-                                        {% else %}-{% endif %}
-                                    </td>
-                                </tr>
-                            {% empty %}
-                                <tr><td colspan="4">Принятых назначений в работе сейчас нет.</td></tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-            </section>
-
-            <section class="dispatcher-list-card">
-                <h2>Незакрытые смены</h2>
-                <div class="dispatcher-table-wrap">
-                    <table>
-                        <thead><tr><th>Открыта</th><th>Сотрудник</th><th>Роль</th><th>Техника</th><th>Действие</th></tr></thead>
-                        <tbody>
-                            {% for shift in open_shifts %}
-                                <tr>
-                                    <td>{{ shift.opened_at|date:"d.m.Y H:i" }}</td>
-                                    <td>{{ shift.employee }}</td>
-                                    <td>{{ shift.role_name }}</td>
-                                    <td>{{ shift.equipment|default:"-" }}</td>
-                                    <td>
-                                        {% if access.role.code == 'dispatcher' or access.role.code == 'admin' %}
-                                            <form method="post" action="{% url 'dispatcher_service_close_shift' shift.id %}" class="dispatcher-inline-form">
-                                                {% csrf_token %}
-                                                {% for filter_name, filter_value in dispatcher_filter_items %}<input type="hidden" name="{{ filter_name }}" value="{{ filter_value }}">{% endfor %}
-                                                <input type="text" name="reason" placeholder="Причина">
-                                                {% if shift.equipment %}
-                                                    <input type="number" name="end_fuel" min="0" step="0.01" required placeholder="Топливо на конец">
-                                                    {% if shift.workplace_code == "driver" %}
-                                                        <input type="number" name="end_mileage" min="0" step="0.01" required placeholder="Одометр на конец">
-                                                    {% endif %}
-                                                    <input type="number" name="end_engine_hours" min="0" step="0.01" required placeholder="Моточасы на конец">
-                                                {% endif %}
-                                                <button type="submit">Закрыть служебно</button>
-                                            </form>
-                                        {% else %}-{% endif %}
-                                    </td>
-                                </tr>
-                            {% empty %}
-                                <tr><td colspan="5">Открытых смен сейчас нет.</td></tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-            </section>
-
-            <section class="dispatcher-list-card">
-                <h2>Открытые механические простои</h2>
-                <div class="dispatcher-table-wrap">
-                    <table>
-                        <thead><tr><th>Начало</th><th>Техника</th><th>Причина</th><th>Комментарий</th></tr></thead>
-                        <tbody>
-                            {% for downtime in open_mechanic_downtimes %}
-                                <tr>
-                                    <td>{{ downtime.started_at|date:"d.m.Y H:i" }}</td>
-                                    <td>{{ downtime.equipment }}</td>
-                                    <td>{{ downtime.reason }}</td>
-                                    <td>{{ downtime.comment|default:"-" }}</td>
-                                </tr>
-                            {% empty %}
-                                <tr><td colspan="4">Открытых механических простоев сейчас нет.</td></tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-            </section>
-
-            <section class="dispatcher-list-card">
-                <h2>Последние выполненные рейсы</h2>
-                <div class="dispatcher-table-wrap">
-                    <table>
-                        <thead><tr><th>Выполнен</th><th>Самосвал</th><th>Экскаватор</th><th>Порода</th><th>Объем</th></tr></thead>
-                        <tbody>
-                            {% for trip in recent_completed_trips %}
-                                <tr>
-                                    <td>{{ trip.completed_at|date:"d.m.Y H:i" }}</td>
-                                    <td>{{ trip.truck }}</td>
-                                    <td>{{ trip.excavator }}</td>
-                                    <td>{{ trip.rock_type }}</td>
-                                    <td>{{ trip.volume_m3|default:"-" }}</td>
-                                </tr>
-                            {% empty %}
-                                <tr><td colspan="5">Выполненных рейсов пока нет.</td></tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-            </section>
-        </div>
-    </section>
-
-    <div class="gd-equipment-detail mm-equipment-detail" data-gd-equipment-detail hidden>
-        <div class="mm-equipment-detail-backdrop" data-gd-detail-close></div>
-        <section class="mm-equipment-detail-panel" role="dialog" aria-modal="true" aria-labelledby="gd-detail-title">
-            <button type="button" class="mm-detail-close" data-gd-detail-close aria-label="Закрыть карточку">×</button>
-            <div class="mm-detail-head">
-                <div class="gd-detail-garage-slot" data-gd-detail-icon-slot></div>
-                <div>
-                    <span data-gd-detail-type></span>
-                    <h2 id="gd-detail-title" data-gd-detail-title></h2>
-                    <div class="mm-detail-tags">
-                        <mark data-gd-detail-status></mark>
-                        <small data-gd-detail-zone></small>
-                    </div>
-                </div>
-            </div>
-            <div class="mm-detail-employee" data-gd-detail-employee hidden>
-                <div class="mm-detail-employee-photo">
-                    <img data-gd-detail-employee-img src="" alt="">
-                    <span data-gd-detail-employee-initials></span>
-                </div>
-                <div class="mm-detail-employee-info">
-                    <span>В смене</span>
-                    <strong data-gd-detail-employee-name></strong>
-                    <a data-gd-detail-employee-phone href=""></a>
-                </div>
-            </div>
-            <dl class="mm-detail-list" data-gd-detail-list></dl>
-            <div class="gd-detail-load-state" data-gd-detail-load-state hidden>
-                <span data-gd-detail-load-message>Загружаю свежие данные…</span>
-                <button type="button" data-gd-detail-retry hidden>Повторить</button>
-            </div>
-            <div class="gd-detail-shift-report" data-gd-detail-shift-report hidden>
-                <div class="gd-detail-section-title">Смена на текущий момент</div>
-                <div class="gd-detail-metrics" data-gd-detail-metrics></div>
-                <div class="gd-detail-tabs" data-gd-detail-tabs></div>
-                <div class="gd-detail-dashboard" data-gd-detail-dashboard></div>
-            </div>
-        </section>
-    </div>
-</main>
-{% endspaceless %}
-
-{{ dispatcher_dashboard.equipment_cards|json_script:"gd-equipment-cards-data" }}
-{{ dispatcher_dashboard.equipment_state_ui|json_script:"gd-equipment-states-data" }}
-{% get_static_prefix as static_prefix %}
-
-{% if mining_master_mobile_enabled %}
-<script>
+/* Dispatcher desktop PWA runtime. Generated from the shared dispatcher template; no Django syntax is allowed here. */
 document.addEventListener("DOMContentLoaded", function () {
     var shell = document.querySelector("[data-dispatcher-theme]");
     var themeToggles = document.querySelectorAll("[data-dispatcher-theme-toggle]");
     var saved = localStorage.getItem("dispatcher-theme") || "night";
-    var staticPrefix = "{{ static_prefix }}";
-    var dispatcherMoveExcavatorUrl = "{{ dispatcher_move_excavator_url }}";
-    var dispatcherAssignTruckUrl = "{{ dispatcher_assign_truck_url }}";
-    var dispatcherShiftOpen = {{ dispatcher_header.active_shift|yesno:"true,false" }};
+    var runtimeConfig = shell ? shell.dataset : {};
+    var staticPrefix = runtimeConfig.staticPrefix || "/static/";
+    var dispatcherMoveExcavatorUrl = runtimeConfig.dispatcherMoveUrl || "";
+    var dispatcherAssignTruckUrl = runtimeConfig.dispatcherAssignUrl || "";
+    var initialDispatcherBoard = document.querySelector(".dispatcher-board");
+    var dispatcherShiftOpen = Boolean(initialDispatcherBoard && initialDispatcherBoard.dataset.dispatcherShiftOpen === "true");
     function syncDispatcherShiftRuntime(freshBoard) {
         if (!freshBoard) return dispatcherShiftOpen;
         var fragmentShiftOpen = freshBoard.dataset
@@ -873,6 +43,12 @@ document.addEventListener("DOMContentLoaded", function () {
     var detailMetrics = document.querySelector("[data-gd-detail-metrics]");
     var detailTabs = document.querySelector("[data-gd-detail-tabs]");
     var detailDashboard = document.querySelector("[data-gd-detail-dashboard]");
+    var detailLoadState = document.querySelector("[data-gd-detail-load-state]");
+    var detailLoadMessage = document.querySelector("[data-gd-detail-load-message]");
+    var detailRetry = document.querySelector("[data-gd-detail-retry]");
+    var detailRequestController = null;
+    var detailRequestToken = 0;
+    var detailRetryAction = null;
     function getCookie(name) {
         var value = "; " + document.cookie;
         var parts = value.split("; " + name + "=");
@@ -908,6 +84,10 @@ document.addEventListener("DOMContentLoaded", function () {
         var color = dispatcherEquipmentStateColor(code);
         return color === "orange" ? "yellow" : color;
     }
+    function dispatcherNeutralEquipmentIcon(equipmentType) {
+        var prefix = equipmentType === "excavator" ? "excavator" : "truck";
+        return staticPrefix + "img/equipment/" + prefix + "-gray.png";
+    }
     function setDispatcherNodeEquipmentState(node, code, equipmentType) {
         if (!node) return;
         var state = dispatcherEquipmentState(code);
@@ -921,7 +101,7 @@ document.addEventListener("DOMContentLoaded", function () {
         if (label && state.label) label.textContent = state.label;
         var img = node.querySelector("img");
         if (img && equipmentType) {
-            img.src = staticPrefix + "img/equipment/" + equipmentType + "-" + dispatcherEquipmentStateIconColor(state.code) + ".png";
+            img.src = dispatcherNeutralEquipmentIcon(equipmentType);
         }
     }
     var dispatcherSyncPendingCount = 0;
@@ -1897,7 +1077,7 @@ document.addEventListener("DOMContentLoaded", function () {
         }
         var registrationPromise = miningMasterServiceWorkerRegistration
             ? Promise.resolve(miningMasterServiceWorkerRegistration)
-            : navigator.serviceWorker.getRegistration("{% if role_app.role_code == 'mining_master' %}/{% else %}/mining-master/{% endif %}");
+            : navigator.serviceWorker.getRegistration("/mining-master/");
         return registrationPromise.then(function (registration) {
             if (registration) {
                 miningMasterServiceWorkerRegistration = registration;
@@ -1979,7 +1159,7 @@ document.addEventListener("DOMContentLoaded", function () {
             ? Promise.resolve(miningMasterServiceWorkerRegistration)
             : guard && typeof guard.getRegistration === "function"
                 ? guard.getRegistration()
-                : navigator.serviceWorker.getRegistration("{% if role_app.role_code == 'mining_master' %}/{% else %}/mining-master/{% endif %}");
+                : navigator.serviceWorker.getRegistration("/mining-master/");
         var currentVersion = "";
         miningMasterManualUpdatePromise = Promise.resolve(registrationSource).then(function (registration) {
             if (!registration) throw new Error("Service worker недоступен.");
@@ -2162,7 +1342,7 @@ document.addEventListener("DOMContentLoaded", function () {
         if (plan.progress_phase) tile.dataset.planProgressPhase = plan.progress_phase;
         tile.innerHTML =
             "<strong>" + escapeHtml(data.number || "") + "</strong>" +
-            '<img src="' + escapeHtml(staticPrefix + (data.icon || "")) + '" alt="">' +
+            '<img src="' + escapeHtml(dispatcherNeutralEquipmentIcon(isTruck ? "truck" : "excavator")) + '" alt="">' +
             "<span>" + escapeHtml(data.status_label || "") + "</span>" +
             (completedLoops > 0 ? '<b class="dispatcher-plan-loop-badge" aria-label="Завершено циклов: ' + completedLoops + '">×' + completedLoops + '</b>' : "");
         return tile;
@@ -2417,10 +1597,31 @@ document.addEventListener("DOMContentLoaded", function () {
         detailShiftReport.hidden = metrics.length === 0 && charts.length === 0;
     }
 
-    function openEquipmentCard(cardId) {
-        var data = equipmentCards[String(cardId || "")];
+    function currentDispatcherBoardVersion() {
+        var currentBoard = document.querySelector(".dispatcher-board");
+        var parsed = Number(currentBoard && currentBoard.dataset
+            ? currentBoard.dataset.operationalStateVersion
+            : 0);
+        return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+    }
+
+    function setDetailLoadState(message, canRetry) {
+        if (detailLoadMessage) detailLoadMessage.textContent = message || "";
+        if (detailRetry) detailRetry.hidden = !canRetry;
+        if (detailLoadState) detailLoadState.hidden = !message;
+    }
+
+    function resetDetailContent() {
+        if (detailEmployee) detailEmployee.hidden = true;
+        if (detailList) detailList.innerHTML = "";
+        if (detailShiftReport) detailShiftReport.hidden = true;
+    }
+
+    function renderEquipmentCard(cardId, data) {
         if (!data || !detailLayer) return false;
         detailLayer.dataset.gdActiveCardId = String(cardId || "");
+        detailLayer.removeAttribute("aria-busy");
+        setDetailLoadState("", false);
         renderDetailGarageIcon(cardId, data);
         if (detailType) detailType.textContent = data.type || "";
         if (detailTitle) detailTitle.textContent = data.label || "";
@@ -2474,11 +1675,124 @@ document.addEventListener("DOMContentLoaded", function () {
         return true;
     }
 
+    function dispatcherDetailUrl(trigger, boardVersion) {
+        if (!trigger || !runtimeConfig.dispatcherDetailUrlTemplate) return "";
+        var equipmentId = String(trigger.dataset.equipmentId || "");
+        if (!/^\d+$/.test(equipmentId)) return "";
+        var category = trigger.dataset.dispatcherDrag === "complex" ? "complex" : "equipment";
+        var template = String(runtimeConfig.dispatcherDetailUrlTemplate || "");
+        var path = template.replace(/equipment\/0\/$/, category + "/" + equipmentId + "/");
+        if (path === template) return "";
+        return path + "?state_version=" + encodeURIComponent(String(boardVersion));
+    }
+
+    function detailErrorMessage(status) {
+        if (status === 401) return "Сессия завершена. Войдите в систему снова.";
+        if (status === 403 || status === 404) return "Карточка недоступна.";
+        if (status === 409) return "Данные изменились — закройте карточку и откройте её снова.";
+        return "Нет связи с сервером.";
+    }
+
+    function openEquipmentCard(cardId, trigger) {
+        if (!detailLayer) return false;
+        var cardKey = String(cardId || "");
+        trigger = trigger || document.querySelector(
+            "[data-equipment-card-id='" + CSS.escape(cardKey) + "'][data-equipment-id]"
+        );
+        var boardVersion = currentDispatcherBoardVersion();
+        var url = dispatcherDetailUrl(trigger, boardVersion);
+        if (!url) return false;
+
+        detailRequestToken += 1;
+        var requestToken = detailRequestToken;
+        if (detailRequestController) detailRequestController.abort();
+        detailRequestController = new AbortController();
+        delete equipmentCards[cardKey];
+        detailLayer.dataset.gdActiveCardId = cardKey;
+        detailLayer.dataset.gdRequestedVersion = String(boardVersion);
+        detailLayer.setAttribute("aria-busy", "true");
+        resetDetailContent();
+        if (detailType) detailType.textContent = trigger.dataset.dispatcherDrag === "complex" ? "Комплекс" : "Техника";
+        if (detailTitle) detailTitle.textContent = trigger.dataset.equipmentName || "Карточка";
+        if (detailStatus) detailStatus.textContent = "";
+        if (detailZone) detailZone.textContent = "";
+        renderDetailGarageIcon(cardKey, {
+            type: trigger.dataset.dispatcherDrag === "truck" ? "Самосвал" : "Экскаватор",
+            status_key: "gray"
+        });
+        setDetailLoadState("Загружаю свежие данные…", false);
+        detailLayer.hidden = false;
+        detailRetryAction = function () {
+            openEquipmentCard(cardKey, trigger);
+        };
+
+        fetch(url, {
+            method: "GET",
+            credentials: "same-origin",
+            cache: "no-store",
+            signal: detailRequestController.signal,
+            headers: {
+                "Accept": "application/json",
+                "X-Requested-With": "XMLHttpRequest"
+            }
+        }).then(function (response) {
+            if (!response.ok) {
+                var requestError = new Error("detail_request_failed");
+                requestError.status = response.status;
+                throw requestError;
+            }
+            return response.json();
+        }).then(function (payload) {
+            var debugState = window.AppRealtime && typeof window.AppRealtime.getDebugState === "function"
+                ? window.AppRealtime.getDebugState()
+                : null;
+            var pendingVersion = Number(debugState && debugState.pendingVersion ? debugState.pendingVersion : 0);
+            if (
+                requestToken !== detailRequestToken
+                || !payload
+                || payload.contract !== "dispatcher-equipment-detail-v1"
+                || String(payload.card_key || "") !== cardKey
+                || Number(payload.operational_state_version || 0) !== boardVersion
+                || currentDispatcherBoardVersion() !== boardVersion
+                || pendingVersion > boardVersion
+            ) {
+                var staleError = new Error("stale_detail");
+                staleError.status = 409;
+                throw staleError;
+            }
+            equipmentCards[cardKey] = payload.card;
+            renderEquipmentCard(cardKey, payload.card);
+        }).catch(function (error) {
+            if (error && error.name === "AbortError") return;
+            if (requestToken !== detailRequestToken || detailLayer.hidden) return;
+            resetDetailContent();
+            detailLayer.removeAttribute("aria-busy");
+            var status = Number(error && error.status ? error.status : 0);
+            setDetailLoadState(detailErrorMessage(status), status === 0 || status >= 500);
+        });
+        return true;
+    }
+
     function closeEquipmentCard() {
+        detailRequestToken += 1;
+        if (detailRequestController) detailRequestController.abort();
+        detailRequestController = null;
+        detailRetryAction = null;
         if (detailLayer) {
             detailLayer.hidden = true;
+            detailLayer.removeAttribute("aria-busy");
             delete detailLayer.dataset.gdActiveCardId;
+            delete detailLayer.dataset.gdRequestedVersion;
         }
+        if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
+            window.AppRealtime.wake("dispatcher_detail_closed");
+        }
+    }
+
+    if (detailRetry) {
+        detailRetry.addEventListener("click", function () {
+            if (typeof detailRetryAction === "function") detailRetryAction();
+        });
     }
 
     document.querySelectorAll("[data-gd-detail-close]").forEach(function (node) {
@@ -5101,45 +4415,12 @@ document.addEventListener("DOMContentLoaded", function () {
         } catch (error) {}
     }
     bindMiningMasterMobileScreens();
-    {% if mining_master_mobile_enabled %}
-    refreshMiningMasterUpdateIndicatorFromStorage();
-    {% endif %}
+
     if ("serviceWorker" in navigator) {
-        {% if mining_master_mobile_enabled %}
-        function watchMiningMasterRegistration(registration) {
-            if (!registration) return;
-            function inspectWaitingWorker(worker) {
-                inspectMiningMasterWaitingWorker(registration, worker);
-            }
-            if (registration.waiting) {
-                inspectWaitingWorker(registration.waiting);
-            }
-            registration.addEventListener("updatefound", function () {
-                var installing = registration.installing;
-                if (!installing) return;
-                installing.addEventListener("statechange", function () {
-                    if (installing.state === "installed" && navigator.serviceWorker.controller) {
-                        inspectWaitingWorker(registration.waiting || installing);
-                    }
-                });
-            });
-        }
-        var miningMasterGuard = window.AppPwaContractGuard;
-        var miningMasterRegistrationSource = miningMasterGuard
-            && typeof miningMasterGuard.getRegistration === "function"
-            ? miningMasterGuard.getRegistration()
-            : navigator.serviceWorker.getRegistration("{% if role_app.role_code == 'mining_master' %}/{% else %}/mining-master/{% endif %}");
-        Promise.resolve(miningMasterRegistrationSource).then(function (registration) {
-            if (!registration) return;
-            miningMasterServiceWorkerRegistration = registration;
-            watchMiningMasterRegistration(registration);
-            requestMiningMasterWorkerVersion(registration.active || navigator.serviceWorker.controller).then(setMiningMasterVisibleVersion);
-            syncMiningMasterPwaContractState();
-        }).catch(function () {});
-        window.addEventListener("app-pwa-contract-state", syncMiningMasterPwaContractState);
-        navigator.serviceWorker.addEventListener("controllerchange", syncMiningMasterPwaContractState);
-        {% else %}
-        navigator.serviceWorker.register("/dispatcher-sw.js", { scope: "{% if role_app.role_code == 'dispatcher' %}/{% else %}/dispatcher/{% endif %}" }).then(function (registration) {
+
+        navigator.serviceWorker.register("/dispatcher-sw.js", {
+            scope: runtimeConfig.dispatcherServiceWorkerScope || "/dispatcher/"
+        }).then(function (registration) {
             registration.update().catch(function () {});
             if (registration.waiting) {
                 registration.waiting.postMessage({type: "SKIP_WAITING"});
@@ -5159,7 +4440,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 }
             });
         }).catch(function () {});
-        {% endif %}
+
     }
     updateDispatcherSyncIndicator();
     window.addEventListener("online", scheduleDispatcherSyncFlush);
@@ -5508,7 +4789,7 @@ document.addEventListener("DOMContentLoaded", function () {
         tile.dataset.garageItem = "excavator";
         tile.innerHTML =
             (slot ? "<strong>" + escapeHtml(slot) + "</strong>" : "") +
-            '<img src="/static/img/equipment/excavator-' + dispatcherEquipmentStateIconColor(stateCode) + '.png" alt="">' +
+            '<img src="' + escapeHtml(dispatcherNeutralEquipmentIcon("excavator")) + '" alt="">' +
             "<span>" + escapeHtml(dispatcherEquipmentStateLabel(stateCode)) + "</span>";
         return tile;
     }
@@ -5710,7 +4991,7 @@ document.addEventListener("DOMContentLoaded", function () {
             }, 260);
         }
         function openMobileEquipmentCard(event) {
-            if (!openEquipmentCard(node.dataset.equipmentCardId)) return false;
+            if (!openEquipmentCard(node.dataset.equipmentCardId, node)) return false;
             if (event) {
                 event.preventDefault();
                 event.stopPropagation();
@@ -5769,7 +5050,7 @@ document.addEventListener("DOMContentLoaded", function () {
         });
         node.addEventListener("keydown", function (event) {
             if (event.key !== "Enter" && event.key !== " ") return;
-            if (openEquipmentCard(node.dataset.equipmentCardId)) {
+            if (openEquipmentCard(node.dataset.equipmentCardId, node)) {
                 event.preventDefault();
             }
         });
@@ -5910,8 +5191,3 @@ document.addEventListener("DOMContentLoaded", function () {
     bindDispatcherDesktopInteractions();
     window.addEventListener("resize", refreshAllComplexTruckRacks);
 });
-</script>
-{% else %}
-<script src="{% static 'js/dispatcher-control-v1.js' %}" defer></script>
-{% endif %}
-{% endblock %}

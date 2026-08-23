@@ -72,8 +72,33 @@ class StableStaticReleaseTrafficRegressionTests(SimpleTestCase):
                 )
                 self.assertIsNotNone(core_assets)
                 self.assertNotIn('/static/css/app.css', core_assets.group(1))
-                self.assertNotIn('/static/js/realtime-client.js', core_assets.group(1))
-                self.assertIn('cache.delete(path)', script)
+                if role_code == 'dispatcher':
+                    self.assertEqual(
+                        script.count('self.addEventListener("install"'),
+                        1,
+                    )
+                    self.assertNotIn('Promise.allSettled', script)
+                    self.assertIn(
+                        f'/static/js/realtime-client.js?v={EXPECTED_RELEASE}',
+                        core_assets.group(1),
+                    )
+                    self.assertIn(
+                        'const RELEASE_STATIC_PATHS = new Set(["/static/js/realtime-client.js"]);',
+                        script,
+                    )
+                    self.assertIn('/static/css/dispatcher-control-v1.css', core_assets.group(1))
+                    self.assertIn('/static/js/dispatcher-control-v1.js', core_assets.group(1))
+                else:
+                    self.assertEqual(
+                        script.count('self.addEventListener("install"'),
+                        2,
+                    )
+                    self.assertNotIn('/static/js/realtime-client.js', core_assets.group(1))
+                    self.assertIn(
+                        'const RELEASE_STATIC_PATHS = new Set(["/static/css/app.css", "/static/js/realtime-client.js"]);',
+                        script,
+                    )
+                    self.assertIn('cache.delete(path)', script)
                 self.assertIn('request.mode === "navigate"', script)
                 self.assertIn('networkFirstStatic(request)', script)
 

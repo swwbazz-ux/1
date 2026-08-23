@@ -47,6 +47,31 @@ def main() -> int:
 
     write_log(log_file, "supervisor started")
 
+    if env.get("PWA_TRAFFIC_QA_PREFLIGHT_ENABLED", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }:
+        run_id = env.get("PWA_TRAFFIC_QA_RUN_ID", "").strip()
+        preflight = subprocess.run(
+            [
+                sys.executable,
+                "tools/verify_pwa_performance_qa_database.py",
+                "--run-id",
+                run_id,
+            ],
+            cwd=backend,
+            env=env,
+        )
+        if preflight.returncode != 0:
+            write_log(
+                log_file,
+                f"QA preflight failed with exit code {preflight.returncode}",
+            )
+            print("QA database preflight failed. Server was not started.")
+            return preflight.returncode
+
     migrate = subprocess.run(
         [sys.executable, "manage.py", "migrate"],
         cwd=backend,

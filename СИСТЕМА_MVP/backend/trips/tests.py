@@ -1,10 +1,15 @@
 ﻿import json
+import gzip
 from datetime import datetime, timedelta
+from decimal import Decimal
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.test import Client, TestCase
+from django.db import connection
+from django.test import Client, SimpleTestCase, TestCase
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone
 
@@ -33,11 +38,67 @@ from shifts.models import (
     ShiftClientAction,
     ShiftReadingCorrection,
 )
-from shifts.services import assign_shift_plan_snapshot, progress_cycle_visual_context
+from shifts.services import (
+    aggregate_completed_trip_facts_by_shift,
+    assign_shift_plan_snapshot,
+    calculate_progress_from_snapshot,
+    calculate_progress_from_snapshot_facts,
+    progress_cycle_visual_context,
+)
 from trips.dispatcher_header import open_dispatcher_shift
 from trips.models import DispatcherActionLog, DispatcherActionType, Trip, TripClientAction, TripStatus
-from trips.views import build_dispatcher_dashboard_context, dispatcher_empty_snapshot_progress, finalize_trip_unloaded
+from trips.views import (
+    build_dispatcher_dashboard_context,
+    dispatcher_empty_snapshot_progress,
+    finalize_trip_unloaded,
+    get_operational_state_version,
+)
 from users.models import DriverPrimaryRegistration, Employee, EmployeeAccess, Role
+
+
+class DispatcherPerformanceAssetContractTests(SimpleTestCase):
+    def test_dispatcher_css_is_role_scoped_and_within_cold_load_budget(self):
+        css_path = Path(settings.BASE_DIR) / 'static' / 'css' / 'dispatcher-control-v1.css'
+        css_bytes = css_path.read_bytes()
+        css = css_bytes.decode('utf-8')
+
+        self.assertLessEqual(len(css_bytes), 300_000)
+        self.assertLessEqual(len(gzip.compress(css_bytes)), 40_000)
+        for required_selector in (
+            '.dispatcher-shell',
+            '.dispatcher-board',
+            '.dispatcher-complex-card',
+            '.gd-equipment-detail',
+            '.gd-detail-load-state',
+            '.app-confirm-modal',
+            '[data-shared-shift-login-modal]',
+            '.truck-fill-4',
+        ):
+            with self.subTest(selector=required_selector):
+                self.assertIn(required_selector, css)
+        for foreign_role_prefix in ('.driver-', '.admin-', '.eo-'):
+            with self.subTest(prefix=foreign_role_prefix):
+                self.assertNotIn(foreign_role_prefix, css)
+
+    def test_dispatcher_runtime_is_external_and_has_fail_closed_detail_contract(self):
+        runtime_path = Path(settings.BASE_DIR) / 'static' / 'js' / 'dispatcher-control-v1.js'
+        runtime = runtime_path.read_text(encoding='utf-8')
+
+        self.assertNotIn('{%', runtime)
+        self.assertNotIn('{{', runtime)
+        self.assertIn('new AbortController()', runtime)
+        self.assertIn('credentials: "same-origin"', runtime)
+        self.assertIn('cache: "no-store"', runtime)
+        self.assertIn('dispatcher-equipment-detail-v1', runtime)
+        self.assertIn('pendingVersion > boardVersion', runtime)
+        self.assertIn('detailRequestController.abort()', runtime)
+        self.assertIn('dispatcherNeutralEquipmentIcon(equipmentType)', runtime)
+        self.assertIn('dispatcherNeutralEquipmentIcon(isTruck ? "truck" : "excavator")', runtime)
+        self.assertIn('dispatcherNeutralEquipmentIcon("excavator")', runtime)
+        self.assertNotIn(
+            'equipmentType + "-" + dispatcherEquipmentStateIconColor',
+            runtime,
+        )
 
 
 class DispatcherSharedShiftStartTests(TestCase):
@@ -98,8 +159,54 @@ class DispatcherSharedShiftStartTests(TestCase):
         self.assertContains(response, 'data-shared-shift-login-open')
         self.assertNotContains(response, 'data-confirm="Начать смену горного диспетчера?"')
 
+    def test_dispatcher_control_marks_only_own_open_shift(self):
+        other_dispatcher = Employee.objects.create(
+            full_name='Сменный диспетчер',
+            phone='79000000501',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        EmployeeShift.objects.create(
+            employee=other_dispatcher,
+            shift_type='day',
+            workplace_code='dispatcher',
+            opened_at=timezone.now(),
+        )
+
+        other_shift_response = self.client.get(reverse('dispatcher_control'))
+
+        self.assertContains(
+            other_shift_response,
+            'data-dispatcher-shift-open="true"',
+        )
+        self.assertContains(
+            other_shift_response,
+            'data-dispatcher-own-shift-open="false"',
+        )
+
+        EmployeeShift.objects.create(
+            employee=self.current_dispatcher,
+            shift_type='day',
+            workplace_code='dispatcher',
+            opened_at=timezone.now(),
+        )
+
+        own_shift_response = self.client.get(reverse('dispatcher_control'))
+
+        self.assertContains(
+            own_shift_response,
+            'data-dispatcher-own-shift-open="true"',
+        )
+
     def test_dispatcher_truck_actions_use_local_dom_update_hook(self):
         response = self.client.get(reverse('dispatcher_control'))
+        runtime = (
+            Path(__file__).resolve().parents[1]
+            / 'static'
+            / 'js'
+            / 'dispatcher-control-v1.js'
+        ).read_bytes()
+        response.content = response.content + runtime
 
         self.assertContains(response, 'function applyDesktopTruckAction')
         self.assertContains(response, 'function sortDesktopEquipmentList')
@@ -132,11 +239,19 @@ class DispatcherSharedShiftStartTests(TestCase):
 
     def test_dispatcher_screen_has_own_pwa_and_sync_overlay(self):
         response = self.client.get(reverse('dispatcher_control'))
+        runtime = (
+            Path(__file__).resolve().parents[1]
+            / 'static'
+            / 'js'
+            / 'dispatcher-control-v1.js'
+        ).read_bytes()
+        response.content = response.content + runtime
 
         self.assertContains(response, reverse('dispatcher_manifest'))
         self.assertContains(response, 'rel="manifest"')
         self.assertContains(response, '/dispatcher-sw.js')
-        self.assertContains(response, 'scope: "/dispatcher/"')
+        self.assertContains(response, 'data-dispatcher-service-worker-scope="/dispatcher/"')
+        self.assertContains(response, 'runtimeConfig.dispatcherServiceWorkerScope')
         self.assertContains(response, 'registration.update()')
         self.assertContains(response, 'SKIP_WAITING')
         self.assertContains(response, 'data-app-sync-overlay')
@@ -209,11 +324,33 @@ class DispatcherSharedShiftStartTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/dispatcher/')
-        self.assertIn('dispatcher-desktop-shell-v41', script)
+        self.assertIn('dispatcher-desktop-shell-v44', script)
         self.assertIn(reverse('dispatcher_control'), script)
         self.assertIn(reverse('dispatcher_manifest'), script)
-        self.assertIn('/static/js/realtime-client.js', script)
+        self.assertIn(
+            '/static/js/realtime-client.js?v=ready-core-traffic-v7',
+            script,
+        )
+        self.assertNotIn('__STATIC_ASSET_RELEASE__', script)
+        self.assertEqual(script.count('self.addEventListener("install"'), 1)
+        self.assertNotIn('Promise.allSettled', script)
         self.assertIn('/static/js/role-readonly.js', script)
+        self.assertIn('/static/js/dispatcher-control-v1.js', script)
+        self.assertIn('/static/css/dispatcher-control-v1.css', script)
+        self.assertIn('/static/img/equipment/excavator-gray.png', script)
+        self.assertIn('/static/img/equipment/truck-gray.png', script)
+        for colored_icon in (
+            'excavator-green.png',
+            'excavator-yellow.png',
+            'excavator-blue.png',
+            'excavator-red.png',
+            'truck-green.png',
+            'truck-yellow.png',
+            'truck-blue.png',
+            'truck-red.png',
+        ):
+            self.assertNotIn(colored_icon, script)
+        self.assertNotIn('/static/css/app.css', script)
         self.assertNotIn('ignoreSearch: true', script)
         self.assertIn('networkFirstStatic(request)', script)
         self.assertIn('request.headers.get("X-Requested-With") === "XMLHttpRequest"', script)
@@ -221,6 +358,16 @@ class DispatcherSharedShiftStartTests(TestCase):
         self.assertIn('self.addEventListener("fetch"', script)
         self.assertIn('SKIP_WAITING', script)
         self.assertIn('GET_VERSION', script)
+        install_block = script.split(
+            'self.addEventListener("install"',
+            1,
+        )[1].split(
+            'self.addEventListener("activate"',
+            1,
+        )[0]
+        self.assertIn('cache.addAll(CORE_ASSETS', install_block)
+        self.assertIn('.then(() => self.skipWaiting())', install_block)
+        self.assertNotIn('.catch(', install_block)
 
     def test_shared_desktop_blocks_direct_start_without_reauth(self):
         response = self.client.post(reverse('dispatcher_toggle_shift'), {'shift_action': 'start'})
@@ -714,6 +861,441 @@ class DispatcherGarageCurrentStateTests(TestCase):
         self.assertEqual(trucks_by_name['10']['plan_status'], 'plan_not_assigned')
         self.assertIsNone(trucks_by_name['10']['plan']['percent'])
         self.assertEqual(trucks_by_name['10']['plan_fact_label'], 'План не назначен')
+
+    def test_bulk_shift_facts_match_reference_snapshot_calculation(self):
+        self.create_plan_group(
+            equipment=self.free_truck,
+            mode=PlanCalculationMode.TONNAGE,
+            value='500.00',
+            name='Самосвалы bulk',
+        )
+        self.create_plan_group(
+            equipment=self.excavator,
+            mode=PlanCalculationMode.VOLUME,
+            value='200.00',
+            name='Экскаваторы bulk',
+        )
+        truck_shift = self.open_equipment_shift(self.free_truck, employee_name='Водитель bulk')
+        excavator_shift = self.open_equipment_shift(self.excavator, employee_name='Машинист bulk')
+        first_trip = self.create_completed_trip(
+            truck=self.free_truck,
+            excavator=self.excavator,
+            unloading_shift=truck_shift,
+            loading_shift=excavator_shift,
+            volume='80.00',
+        )
+        second_trip = self.create_completed_trip(
+            truck=self.free_truck,
+            excavator=self.excavator,
+            unloading_shift=truck_shift,
+            loading_shift=excavator_shift,
+            volume='70.00',
+        )
+        Trip.objects.filter(pk=first_trip.pk).update(tonnage='210.00')
+        Trip.objects.filter(pk=second_trip.pk).update(tonnage='190.00')
+        Trip.objects.create(
+            truck=self.free_truck,
+            excavator=self.excavator,
+            rock_type=self.rock,
+            dump_point=self.dump_point,
+            unloading_shift=truck_shift,
+            loading_shift=excavator_shift,
+            volume_m3='999.00',
+            tonnage='999.00',
+            status=TripStatus.LOADED_WAITING_UNLOAD,
+        )
+
+        bulk_facts = aggregate_completed_trip_facts_by_shift(
+            unloading_shift_ids=[truck_shift.id],
+            loading_shift_ids=[excavator_shift.id],
+        )
+        truck_bulk = calculate_progress_from_snapshot_facts(
+            truck_shift,
+            bulk_facts['unloading'][truck_shift.id],
+        )
+        excavator_bulk = calculate_progress_from_snapshot_facts(
+            excavator_shift,
+            bulk_facts['loading'][excavator_shift.id],
+        )
+        truck_reference = calculate_progress_from_snapshot(
+            truck_shift,
+            Trip.objects.filter(status=TripStatus.COMPLETED, unloading_shift=truck_shift),
+        )
+        excavator_reference = calculate_progress_from_snapshot(
+            excavator_shift,
+            Trip.objects.filter(status=TripStatus.COMPLETED, loading_shift=excavator_shift),
+        )
+
+        comparable_fields = (
+            'trip_count',
+            'volume_m3',
+            'tonnage',
+            'plan_status',
+            'calculation_mode',
+            'plan_value',
+            'progress_percent',
+        )
+        for field in comparable_fields:
+            self.assertEqual(truck_bulk[field], truck_reference[field], field)
+            self.assertEqual(excavator_bulk[field], excavator_reference[field], field)
+        self.assertEqual(truck_bulk['trip_count'], 2)
+        self.assertEqual(truck_bulk['volume_m3'], Decimal('150.00'))
+        self.assertEqual(truck_bulk['tonnage'], Decimal('400.00'))
+        self.assertEqual(excavator_bulk['trip_count'], 2)
+        self.assertEqual(excavator_bulk['volume_m3'], Decimal('150.00'))
+
+
+class DispatcherControlQueryBudgetTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        now = timezone.now()
+        opened_at = now - timedelta(hours=2)
+        cls.dispatcher_role = Role.objects.create(code='dispatcher', name='Диспетчер')
+        cls.dispatcher = Employee.objects.create(
+            full_name='Диспетчер performance',
+            phone='79000000991',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        cls.dispatcher_access = EmployeeAccess.objects.create(
+            employee=cls.dispatcher,
+            role=cls.dispatcher_role,
+            access_code='991991',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+        EmployeeShift.objects.create(
+            employee=cls.dispatcher,
+            shift_type='day',
+            workplace_code='dispatcher',
+            opened_at=opened_at,
+            opened_by=cls.dispatcher,
+        )
+
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        truck_model = EquipmentModel.objects.create(
+            equipment_type=truck_type,
+            name='Самосвал performance',
+            payload_tons='220.00',
+            body_volume_m3='90.00',
+        )
+        excavator_model = EquipmentModel.objects.create(
+            equipment_type=excavator_type,
+            name='Экскаватор performance',
+            body_volume_m3='20.00',
+        )
+        Equipment.objects.bulk_create([
+            Equipment(
+                equipment_type=truck_type,
+                model=truck_model,
+                garage_number=f'{index + 1}',
+                is_active=True,
+            )
+            for index in range(53)
+        ])
+        Equipment.objects.bulk_create([
+            Equipment(
+                equipment_type=excavator_type,
+                model=excavator_model,
+                garage_number=f'Экс {index + 1}',
+                is_active=True,
+            )
+            for index in range(8)
+        ])
+        cls.trucks = list(
+            Equipment.objects.filter(equipment_type=truck_type).order_by('garage_number')
+        )
+        cls.excavators = list(
+            Equipment.objects.filter(equipment_type=excavator_type).order_by('garage_number')
+        )
+
+        Employee.objects.bulk_create([
+            Employee(
+                full_name=f'Сотрудник performance {index + 1}',
+                status=Employee.Status.ACTIVE,
+                is_active=True,
+            )
+            for index in range(61)
+        ])
+        workers = list(
+            Employee.objects
+            .filter(full_name__startswith='Сотрудник performance ')
+            .order_by('id')
+        )
+        EmployeeShift.objects.bulk_create([
+            EmployeeShift(
+                employee=workers[index],
+                shift_type='day',
+                workplace_code='driver',
+                equipment=truck,
+                opened_at=opened_at,
+                opened_by=workers[index],
+                plan_group_name='Самосвалы performance',
+                plan_calculation_mode=PlanCalculationMode.TRIPS,
+                plan_value='20.00',
+                plan_status=PlanAssignmentStatus.ASSIGNED,
+            )
+            for index, truck in enumerate(cls.trucks)
+        ])
+        EmployeeShift.objects.bulk_create([
+            EmployeeShift(
+                employee=workers[53 + index],
+                shift_type='day',
+                workplace_code='excavator_operator',
+                equipment=excavator,
+                opened_at=opened_at,
+                opened_by=workers[53 + index],
+                plan_group_name='Экскаваторы performance',
+                plan_calculation_mode=PlanCalculationMode.VOLUME,
+                plan_value='3000.00',
+                plan_status=PlanAssignmentStatus.ASSIGNED,
+            )
+            for index, excavator in enumerate(cls.excavators)
+        ])
+        shifts_by_equipment_id = {
+            shift.equipment_id: shift
+            for shift in EmployeeShift.objects.filter(equipment__isnull=False)
+        }
+        ExcavatorPlacement.objects.bulk_create([
+            ExcavatorPlacement(excavator=excavator, zone=ExcavatorPlacement.Zone.ACTIVE)
+            for excavator in cls.excavators
+        ])
+        HaulAssignment.objects.bulk_create([
+            HaulAssignment(
+                truck=truck,
+                excavator=cls.excavators[index % len(cls.excavators)],
+                assigned_by=cls.dispatcher,
+                status=AssignmentStatus.ACCEPTED,
+                accepted_at=now,
+            )
+            for index, truck in enumerate(cls.trucks)
+        ])
+        rock = RockType.objects.create(name='Руда performance')
+        dump_point = DumpPoint.objects.create(name='ККД performance')
+        completed_trips = []
+        for index in range(1054):
+            truck = cls.trucks[index % len(cls.trucks)]
+            excavator = cls.excavators[index % len(cls.excavators)]
+            completed_trips.append(Trip(
+                truck=truck,
+                excavator=excavator,
+                rock_type=rock,
+                dump_point=dump_point,
+                loading_shift=shifts_by_equipment_id[excavator.id],
+                unloading_shift=shifts_by_equipment_id[truck.id],
+                volume_m3='50.00',
+                tonnage='135.00',
+                status=TripStatus.COMPLETED,
+                completed_at=now,
+            ))
+        Trip.objects.bulk_create(completed_trips, batch_size=250)
+        active_truck = cls.trucks[0]
+        active_excavator = cls.excavators[0]
+        Trip.objects.create(
+            truck=active_truck,
+            excavator=active_excavator,
+            rock_type=rock,
+            dump_point=dump_point,
+            loading_shift=shifts_by_equipment_id[active_excavator.id],
+            unloading_shift=shifts_by_equipment_id[active_truck.id],
+            volume_m3='50.00',
+            tonnage='135.00',
+            status=TripStatus.LOADED_WAITING_UNLOAD,
+        )
+
+    def setUp(self):
+        session = self.client.session
+        session['employee_access_id'] = self.dispatcher_access.id
+        session['device_kind'] = 'shared'
+        session.save()
+
+    def assert_dispatcher_query_budget(self, url):
+        with CaptureQueriesContext(connection) as captured:
+            response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertLessEqual(
+            len(captured),
+            40,
+            f'Превышен бюджет SQL: {len(captured)}',
+        )
+        sql_statements = [query['sql'] for query in captured.captured_queries]
+        standalone_type_queries = [
+            sql for sql in sql_statements
+            if 'FROM "references_equipmenttype"' in sql
+            and 'WHERE "references_equipmenttype"."id" =' in sql
+        ]
+        standalone_model_queries = [
+            sql for sql in sql_statements
+            if 'FROM "references_equipmentmodel"' in sql
+            and 'WHERE "references_equipmentmodel"."id" =' in sql
+        ]
+        unloading_grouped = [
+            sql for sql in sql_statements
+            if 'FROM "trips_trip"' in sql
+            and 'GROUP BY' in sql
+            and '"trips_trip"."unloading_shift_id"' in sql
+        ]
+        loading_grouped = [
+            sql for sql in sql_statements
+            if 'FROM "trips_trip"' in sql
+            and 'GROUP BY' in sql
+            and '"trips_trip"."loading_shift_id"' in sql
+        ]
+        self.assertEqual(standalone_type_queries, [])
+        self.assertEqual(standalone_model_queries, [])
+        self.assertEqual(len(unloading_grouped), 1)
+        self.assertEqual(len(loading_grouped), 1)
+        return response
+
+    def test_full_page_and_fragment_stay_within_query_budget_at_53_plus_8(self):
+        control_url = reverse('dispatcher_control')
+        self.client.get(control_url)
+
+        full_response = self.assert_dispatcher_query_budget(control_url)
+        fragment_response = self.assert_dispatcher_query_budget(
+            f'{control_url}?_operational_fragment=dispatcher&_operational_version=0'
+        )
+        self.assertLessEqual(len(full_response.content), 350_000)
+        self.assertLessEqual(len(gzip.compress(full_response.content)), 35_000)
+        self.assertLessEqual(len(fragment_response.content), 150_000)
+        self.assertLessEqual(len(gzip.compress(fragment_response.content)), 35_000)
+
+    def test_dispatcher_page_omits_bulk_details_and_fetches_one_versioned_card(self):
+        control_response = self.client.get(reverse('dispatcher_control'))
+        self.assertEqual(control_response.status_code, 200)
+        self.assertEqual(
+            control_response.context['dispatcher_dashboard']['equipment_cards'],
+            {},
+        )
+        self.assertContains(control_response, 'js/dispatcher-control-v1.js')
+        self.assertContains(control_response, 'css/dispatcher-control-v1.css')
+        self.assertNotContains(control_response, '/static/css/app.css')
+        self.assertNotContains(control_response, 'function openEquipmentCard')
+        self.assertContains(
+            control_response,
+            '/static/img/equipment/excavator-gray.png',
+        )
+        self.assertContains(
+            control_response,
+            '/static/img/equipment/truck-gray.png',
+        )
+        for colored_icon in (
+            'excavator-green.png',
+            'excavator-yellow.png',
+            'excavator-blue.png',
+            'excavator-red.png',
+            'truck-green.png',
+            'truck-yellow.png',
+            'truck-blue.png',
+            'truck-red.png',
+        ):
+            self.assertNotContains(control_response, colored_icon)
+
+        state_version = control_response.context['operational_state_version']
+        detail_url = reverse(
+            'dispatcher_equipment_detail',
+            kwargs={
+                'category': 'equipment',
+                'equipment_id': self.trucks[0].id,
+            },
+        )
+        with CaptureQueriesContext(connection) as captured:
+            detail_response = self.client.get(
+                detail_url,
+                {'state_version': state_version},
+                HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+            )
+
+        self.assertEqual(detail_response.status_code, 200)
+        self.assertLessEqual(len(captured), 40)
+        payload = detail_response.json()
+        self.assertEqual(payload['contract'], 'dispatcher-equipment-detail-v1')
+        self.assertEqual(payload['card_key'], str(self.trucks[0].id))
+        self.assertEqual(payload['operational_state_version'], state_version)
+        self.assertIn('metrics', payload['card']['shift_report'])
+        self.assertEqual(
+            detail_response['Cache-Control'],
+            'private, no-store, max-age=0',
+        )
+        self.assertEqual(detail_response['Pragma'], 'no-cache')
+        self.assertEqual(detail_response['X-Content-Type-Options'], 'nosniff')
+        self.assertEqual(detail_response['Vary'], 'Cookie')
+
+    def test_dispatcher_detail_fails_closed_for_stale_anonymous_and_wrong_role(self):
+        control_response = self.client.get(reverse('dispatcher_control'))
+        state_version = control_response.context['operational_state_version']
+        detail_url = reverse(
+            'dispatcher_equipment_detail',
+            kwargs={
+                'category': 'equipment',
+                'equipment_id': self.trucks[0].id,
+            },
+        )
+
+        stale_response = self.client.get(
+            detail_url,
+            {'state_version': state_version + 1},
+            HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+        )
+        self.assertEqual(stale_response.status_code, 409)
+        self.assertEqual(stale_response.json()['error'], 'stale_board')
+        self.assertNotIn('card', stale_response.json())
+
+        anonymous_response = Client().get(
+            detail_url,
+            {'state_version': state_version},
+            HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+        )
+        self.assertEqual(anonymous_response.status_code, 401)
+        self.assertNotIn('card', anonymous_response.json())
+
+        driver_role = Role.objects.create(code='driver', name='Водитель')
+        driver = Employee.objects.create(full_name='Чужая роль performance')
+        driver_access = EmployeeAccess.objects.create(
+            employee=driver,
+            role=driver_role,
+            access_code='999999',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+        foreign_client = Client()
+        session = foreign_client.session
+        session['employee_access_id'] = driver_access.id
+        session.save()
+        forbidden_response = foreign_client.get(
+            detail_url,
+            {'state_version': state_version},
+            HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+        )
+        self.assertEqual(forbidden_response.status_code, 403)
+        self.assertNotIn('card', forbidden_response.json())
+
+    def test_dispatcher_complex_detail_requires_current_active_complex(self):
+        control_response = self.client.get(reverse('dispatcher_control'))
+        state_version = control_response.context['operational_state_version']
+        excavator = self.excavators[0]
+        detail_url = reverse(
+            'dispatcher_equipment_detail',
+            kwargs={'category': 'complex', 'equipment_id': excavator.id},
+        )
+
+        response = self.client.get(detail_url, {'state_version': state_version})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['card']['category'], 'complex')
+        self.assertEqual(response.json()['card_key'], 'complex-K-1')
+
+        ExcavatorPlacement.objects.filter(excavator=excavator).delete()
+        HaulAssignment.objects.filter(excavator=excavator).delete()
+        Trip.objects.filter(excavator=excavator).delete()
+        current_state_version = get_operational_state_version()
+        missing_response = self.client.get(
+            detail_url,
+            {'state_version': current_state_version},
+        )
+        self.assertEqual(missing_response.status_code, 404)
+        self.assertNotIn('card', missing_response.json())
 
 
 class ExcavatorWorkServerIntegrationTests(TestCase):

@@ -13,7 +13,10 @@ import gzip
 import hashlib
 import http.cookiejar
 import json
+import os
 import re
+import sys
+import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -25,11 +28,27 @@ from pathlib import Path
 from typing import Any
 
 
-ALLOWED_PORT = 8000
-DEFAULT_ARTIFACT_DIR = Path(
-    r"C:\Users\swwba\AppData\Local\Temp"
-    r"\copper-pwa-traffic-audit-20260727"
+BACKEND_DIR = Path(__file__).resolve().parents[1]
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
+
+import django  # noqa: E402
+
+django.setup()
+
+from core.pwa_performance_qa import (
+    PWA_PERFORMANCE_QA_SCHEMA,
+    PWA_PERFORMANCE_QA_SCHEMA_VERSION,
+    validate_pwa_performance_qa_run_id,
+    verify_pwa_performance_qa_database,
 )
+from shifts.models import EmployeeShift
+from users.models import EmployeeAccess
+
+
+ALLOWED_PORT = 8000
+ARTIFACT_ROOT_NAME = 'copper-pwa-performance-qa-20260823'
 CSRF_RE = re.compile(
     r'name=["\']csrfmiddlewaretoken["\']\s+value=["\']([^"\']+)["\']',
     re.IGNORECASE,
@@ -199,14 +218,74 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--timeout-seconds", type=float, default=12.0)
     parser.add_argument("--realtime-polls", type=int, default=12)
     parser.add_argument(
-        "--artifact-dir",
-        type=Path,
-        default=DEFAULT_ARTIFACT_DIR,
+        '--role',
+        required=True,
+        choices=tuple(role.role for role in READY_ROLES),
     )
+    parser.add_argument('--run-id', required=True)
     return parser.parse_args()
 
 
+def _has_reparse_boundary(path: Path) -> bool:
+    if path.is_symlink():
+        return True
+    try:
+        attributes = int(getattr(path.lstat(), 'st_file_attributes', 0))
+    except FileNotFoundError:
+        return False
+    return bool(attributes & 0x400)
+
+
+def artifact_directory_for(run_id: str, role: str) -> Path:
+    normalized_run_id = validate_pwa_performance_qa_run_id(run_id)
+    if role not in {item.role for item in READY_ROLES}:
+        raise RuntimeError(f'Unknown ready role: {role!r}.')
+    temp_root = Path(tempfile.gettempdir()).resolve()
+    audit_root = temp_root / ARTIFACT_ROOT_NAME
+    artifact_dir = audit_root / normalized_run_id / role
+    current = temp_root
+    for part in artifact_dir.relative_to(temp_root).parts:
+        current = current / part
+        if current.exists() and _has_reparse_boundary(current):
+            raise RuntimeError(
+                f'Artifact path contains a reparse boundary: {current}'
+            )
+    if artifact_dir.exists() and any(artifact_dir.iterdir()):
+        raise RuntimeError(f'Artifact directory is not empty: {artifact_dir}')
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    validate_artifact_output_path(artifact_dir / 'probe.json')
+    return artifact_dir
+
+
+def validate_artifact_output_path(path: Path) -> None:
+    temp_root = Path(tempfile.gettempdir()).resolve()
+    audit_root = temp_root / ARTIFACT_ROOT_NAME
+    absolute = path.absolute()
+    try:
+        relative = absolute.relative_to(audit_root)
+    except ValueError as error:
+        raise RuntimeError('Artifact output is outside the allowlisted root.') from error
+    if not relative.parts or absolute.name in {'', '.', '..'}:
+        raise RuntimeError('Artifact output path is invalid.')
+    current = temp_root
+    for part in (Path(ARTIFACT_ROOT_NAME) / relative.parent).parts:
+        current = current / part
+        if not current.exists() or not current.is_dir():
+            raise RuntimeError(
+                f'Artifact parent is absent or not a directory: {current}'
+            )
+        if _has_reparse_boundary(current):
+            raise RuntimeError(
+                f'Artifact path contains a reparse boundary: {current}'
+            )
+
+
 def ensure_safe_args(args: argparse.Namespace) -> Path:
+    validate_safe_args(args)
+    return artifact_directory_for(args.run_id, args.role)
+
+
+def validate_safe_args(args: argparse.Namespace) -> None:
     if args.port != ALLOWED_PORT:
         raise RuntimeError(
             f"Only local port {ALLOWED_PORT} is allowed, got {args.port}."
@@ -215,11 +294,9 @@ def ensure_safe_args(args: argparse.Namespace) -> Path:
         raise RuntimeError("Timeout must be between 2 and 30 seconds.")
     if not 3 <= args.realtime_polls <= 60:
         raise RuntimeError("Realtime poll count must be between 3 and 60.")
-    artifact_dir = args.artifact_dir.resolve()
-    if artifact_dir.exists() and any(artifact_dir.iterdir()):
-        raise RuntimeError(f"Artifact directory is not empty: {artifact_dir}")
-    artifact_dir.mkdir(parents=True, exist_ok=True)
-    return artifact_dir
+    validate_pwa_performance_qa_run_id(args.run_id)
+    if args.role not in {role.role for role in READY_ROLES}:
+        raise RuntimeError('Unknown ready role.')
 
 
 def base_url(port: int) -> str:
@@ -297,10 +374,126 @@ def new_session() -> tuple[
 ]:
     cookie_jar = http.cookiejar.CookieJar()
     opener = urllib.request.build_opener(
+        urllib.request.ProxyHandler({}),
         urllib.request.HTTPCookieProcessor(cookie_jar),
         NoRedirectHandler(),
     )
     return opener, cookie_jar
+
+
+def verify_server_preflight(
+    *,
+    port: int,
+    timeout: float,
+    run_id: str,
+    expected_fingerprint: str,
+) -> dict[str, Any]:
+    opener, _ = new_session()
+    request = urllib.request.Request(
+        f'{base_url(port)}/qa/pwa-traffic/preflight/',
+        headers={
+            'Host': f'dispatcher.localhost:{port}',
+            'Accept': 'application/json',
+            'User-Agent': 'Copper-PWA-Traffic-Audit/2.0',
+            'X-Copper-QA-Run-ID': run_id,
+        },
+    )
+    try:
+        with opener.open(request, timeout=timeout) as response:
+            status = int(response.status)
+            headers = response.headers
+            body = response.read()
+    except Exception as error:
+        raise RuntimeError(
+            'Actual Django server did not pass the QA DB preflight.'
+        ) from error
+    try:
+        payload = json.loads(body.decode('utf-8'))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise RuntimeError('Server preflight returned invalid JSON.') from error
+    expected_keys = {
+        'status',
+        'schema',
+        'schema_version',
+        'fingerprint',
+    }
+    if (
+        status != 200
+        or set(payload) != expected_keys
+        or payload.get('status') != 'ok'
+        or payload.get('schema') != PWA_PERFORMANCE_QA_SCHEMA
+        or payload.get('schema_version')
+        != PWA_PERFORMANCE_QA_SCHEMA_VERSION
+        or payload.get('fingerprint') != expected_fingerprint
+        or 'no-store' not in str(headers.get('Cache-Control', '')).lower()
+    ):
+        raise RuntimeError(
+            'Configured process and actual Django server DB fingerprints differ.'
+        )
+    return payload
+
+
+def canonical_json_bytes(payload: Any) -> bytes:
+    return (
+        json.dumps(
+            payload,
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+            allow_nan=False,
+        )
+        + '\n'
+    ).encode('utf-8')
+
+
+def write_canonical_new_json(path: Path, payload: Any) -> str:
+    encoded = canonical_json_bytes(payload)
+    validate_artifact_output_path(path)
+    temporary = path.with_name(f'.{path.name}.{os.getpid()}.tmp')
+    try:
+        with temporary.open('xb') as stream:
+            stream.write(encoded)
+            stream.flush()
+            os.fsync(stream.fileno())
+        validate_artifact_output_path(path)
+        try:
+            os.link(temporary, path)
+        except FileExistsError as error:
+            raise RuntimeError(
+                f'Artifact overwrite is forbidden: {path}'
+            ) from error
+        except OSError as error:
+            raise RuntimeError(
+                'Atomic no-overwrite artifact publication failed.'
+            ) from error
+    finally:
+        temporary.unlink(missing_ok=True)
+    return hashlib.sha256(encoded).hexdigest().upper()
+
+
+def ensure_artifacts_contain_no_credentials(
+    artifact_dir: Path,
+    role: RoleTarget,
+    credentials: tuple[str, str],
+) -> None:
+    phone, pin = credentials
+    forbidden = (
+        role.phone.encode('utf-8'),
+        role.pin.encode('ascii'),
+        phone.encode('utf-8'),
+        pin.encode('ascii'),
+        b'POSTGRES_PASSWORD',
+        b'sessionid=',
+        b'csrftoken=',
+    )
+    for path in artifact_dir.rglob('*'):
+        if not path.is_file():
+            continue
+        content = path.read_bytes()
+        if any(token and token in content for token in forbidden):
+            raise RuntimeError(
+                f'Credential-like value found in artifact: {path.name}'
+            )
 
 
 def login(
@@ -308,6 +501,7 @@ def login(
     *,
     port: int,
     timeout: float,
+    credentials: tuple[str, str] | None = None,
 ) -> tuple[
     urllib.request.OpenerDirector,
     http.cookiejar.CookieJar,
@@ -332,11 +526,12 @@ def login(
         raise RuntimeError(
             f"{role.role}: login form unavailable ({get_result.status})."
         )
+    phone, pin = credentials or (role.phone, role.pin)
     form = urllib.parse.urlencode(
         {
             "csrfmiddlewaretoken": token.group(1),
-            "phone": role.phone,
-            "access_code": role.pin,
+            "phone": phone,
+            "access_code": pin,
             "device_kind": (
                 "shared"
                 if role.role in {"dispatcher", "mining_master"}
@@ -365,6 +560,114 @@ def login(
             f"{role.role}: login rejected ({post_result.status})."
         )
     return opener, cookie_jar, [get_result, post_result]
+
+
+def _load_dispatcher_scenario_binding(
+    run_id: str,
+    expected_database_fingerprint: str,
+) -> dict[str, Any]:
+    scenario_path = (
+        Path(tempfile.gettempdir()).resolve()
+        / ARTIFACT_ROOT_NAME
+        / validate_pwa_performance_qa_run_id(run_id)
+        / 'scenario'
+        / 'scenario_manifest.json'
+    )
+    validate_artifact_output_path(scenario_path)
+    if (
+        not scenario_path.is_file()
+        or _has_reparse_boundary(scenario_path)
+        or scenario_path.stat().st_size > 256 * 1024
+    ):
+        raise RuntimeError('Dispatcher scenario manifest is unavailable or unsafe.')
+    try:
+        manifest = json.loads(scenario_path.read_text(encoding='utf-8'))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise RuntimeError('Dispatcher scenario manifest is invalid.') from error
+    required = {
+        'schema': 'copper-dispatcher-performance-qa-scenario',
+        'schema_version': 1,
+        'synthetic': True,
+        'official': False,
+        'run_id': run_id,
+        'database_fingerprint': expected_database_fingerprint,
+    }
+    if any(manifest.get(key) != value for key, value in required.items()):
+        raise RuntimeError('Dispatcher scenario manifest does not match this run.')
+    for key in (
+        'marker',
+        'shift_type',
+        'dispatcher_shift_id',
+        'dispatcher_employee_id',
+        'dispatcher_access_id',
+    ):
+        if key not in manifest:
+            raise RuntimeError('Dispatcher scenario binding is incomplete.')
+    return manifest
+
+
+def selected_role_credentials(
+    role: RoleTarget,
+    *,
+    run_id: str,
+    expected_database_fingerprint: str,
+) -> tuple[str, str]:
+    if role.role != 'dispatcher':
+        return role.phone, role.pin
+    manifest = _load_dispatcher_scenario_binding(
+        run_id,
+        expected_database_fingerprint,
+    )
+    try:
+        open_shift = (
+            EmployeeShift.objects.filter(
+                pk=manifest['dispatcher_shift_id'],
+                employee_id=manifest['dispatcher_employee_id'],
+                workplace_code='dispatcher',
+                closed_at__isnull=True,
+                employee__full_name__startswith=manifest['marker'],
+                shift_type=manifest['shift_type'],
+            )
+            .select_related('employee')
+            .get()
+        )
+    except (EmployeeShift.DoesNotExist, EmployeeShift.MultipleObjectsReturned) as error:
+        raise RuntimeError(
+            'Dispatcher scenario shift binding is stale or ambiguous.'
+        ) from error
+    open_shift_count = EmployeeShift.objects.filter(
+        workplace_code='dispatcher',
+        closed_at__isnull=True,
+        employee__full_name__startswith=manifest['marker'],
+    ).count()
+    if open_shift_count != 1:
+        raise RuntimeError(
+            'Expected exactly one active synthetic Dispatcher shift.'
+        )
+    try:
+        access = EmployeeAccess.objects.get(
+            pk=manifest['dispatcher_access_id'],
+            employee=open_shift.employee,
+            role__code='dispatcher',
+            is_active=True,
+            status=EmployeeAccess.Status.ACTIVATED,
+        )
+    except (EmployeeAccess.DoesNotExist, EmployeeAccess.MultipleObjectsReturned) as error:
+        raise RuntimeError(
+            'Dispatcher scenario access binding is stale or ambiguous.'
+        ) from error
+    return access.employee.phone, access.access_code
+
+
+def require_response_status(
+    response: MeasuredResponse,
+    expected: set[int],
+) -> None:
+    if response.error or response.status not in expected:
+        raise RuntimeError(
+            f'{response.role}:{response.category}:{response.path} '
+            f'returned {response.status} ({response.error or "unexpected"}).'
+        )
 
 
 def normalize_asset_urls(html: bytes, role: RoleTarget) -> list[str]:
@@ -415,8 +718,14 @@ def audit_role(
     port: int,
     timeout: float,
     realtime_polls: int,
+    credentials: tuple[str, str] | None = None,
 ) -> dict[str, Any]:
-    opener, cookie_jar, rows = login(role, port=port, timeout=timeout)
+    opener, cookie_jar, rows = login(
+        role,
+        port=port,
+        timeout=timeout,
+        credentials=credentials,
+    )
     cold_page, cold_html, _ = measure_request(
         opener,
         build_get(
@@ -431,9 +740,13 @@ def audit_role(
         timeout=timeout,
     )
     rows.append(cold_page)
-    if cold_page.status != 200:
+    require_response_status(cold_page, {200})
+    if (
+        role.role == 'dispatcher'
+        and b'data-dispatcher-own-shift-open="true"' not in cold_html
+    ):
         raise RuntimeError(
-            f"{role.role}: start page returned {cold_page.status}."
+            'Dispatcher HTTP session is not bound to its selected active shift.'
         )
 
     cold_assets: dict[str, tuple[MeasuredResponse, Any]] = {}
@@ -447,6 +760,7 @@ def audit_role(
             timeout=timeout,
         )
         rows.append(result)
+        require_response_status(result, {200})
         cold_assets[path] = (result, headers)
 
     # Cross a second boundary to catch any regression back to unstable
@@ -466,6 +780,7 @@ def audit_role(
         timeout=timeout,
     )
     rows.append(warm_page)
+    require_response_status(warm_page, {200})
     warm_urls = normalize_asset_urls(warm_html, role)
     for path in warm_urls:
         result, _, _ = measure_request(
@@ -477,6 +792,7 @@ def audit_role(
             timeout=timeout,
         )
         rows.append(result)
+        require_response_status(result, {200})
 
     for path, (_, headers) in cold_assets.items():
         conditional: dict[str, str] = {}
@@ -503,6 +819,7 @@ def audit_role(
             timeout=timeout,
         )
         rows.append(result)
+        require_response_status(result, {200, 304})
 
     realtime_rows: list[MeasuredResponse] = []
     if role.realtime:
@@ -528,9 +845,9 @@ def audit_role(
             )
             rows.append(result)
             realtime_rows.append(result)
-            if result.status == 200:
-                payload = json.loads(body.decode("utf-8"))
-                version = max(version, int(payload.get("version") or 0))
+            require_response_status(result, {200})
+            payload = json.loads(body.decode("utf-8"))
+            version = max(version, int(payload.get("version") or 0))
 
     cold_urls = set(cold_assets)
     warm_url_set = set(warm_urls)
@@ -661,42 +978,101 @@ def build_summary(role_results: list[dict[str, Any]]) -> dict[str, Any]:
 
 def main() -> int:
     args = parse_args()
-    artifact_dir = ensure_safe_args(args)
+    validate_safe_args(args)
+    normalized_run_id = validate_pwa_performance_qa_run_id(args.run_id)
+    selected_role = next(
+        role for role in READY_ROLES if role.role == args.role
+    )
+    direct_preflight = verify_pwa_performance_qa_database(normalized_run_id)
+    server_preflight = verify_server_preflight(
+        port=args.port,
+        timeout=args.timeout_seconds,
+        run_id=normalized_run_id,
+        expected_fingerprint=direct_preflight['fingerprint'],
+    )
+    artifact_dir = artifact_directory_for(args.run_id, args.role)
+    credentials = selected_role_credentials(
+        selected_role,
+        run_id=args.run_id,
+        expected_database_fingerprint=direct_preflight['fingerprint'],
+    )
     started_at = datetime.now(UTC)
     role_results = []
     errors = []
-    for role in READY_ROLES:
-        try:
-            role_results.append(
-                audit_role(
-                    role,
-                    port=args.port,
-                    timeout=args.timeout_seconds,
-                    realtime_polls=args.realtime_polls,
-                )
+    try:
+        role_results.append(
+            audit_role(
+                selected_role,
+                port=args.port,
+                timeout=args.timeout_seconds,
+                realtime_polls=args.realtime_polls,
+                credentials=credentials,
             )
-        except Exception as exc:  # noqa: BLE001 - keep complete audit evidence.
-            errors.append({"role": role.role, "error": f"{type(exc).__name__}:{exc}"})
+        )
+    except Exception as exc:  # noqa: BLE001 - keep complete audit evidence.
+        errors.append(
+            {
+                'role': selected_role.role,
+                'error': f'{type(exc).__name__}:{exc}',
+            }
+        )
 
     summary = build_summary(role_results)
     summary.update(
         {
-            "status": "PASS" if not errors and len(role_results) == len(READY_ROLES) else "FAIL",
+            'status': (
+                'PASS'
+                if not errors and len(role_results) == 1
+                else 'FAIL'
+            ),
             "started_at": started_at.isoformat(),
             "finished_at": datetime.now(UTC).isoformat(),
             "target": "http://*.localhost:8000",
             "production_mutated": False,
-            "ready_roles_expected": len(READY_ROLES),
+            'run_id': normalized_run_id,
+            'selected_role': selected_role.role,
+            'selected_role_count': 1,
+            'catalog_role_count': len(READY_ROLES),
             "errors": errors,
         }
     )
-    (artifact_dir / "traffic_detail.json").write_text(
-        json.dumps(role_results, ensure_ascii=False, indent=2),
-        encoding="utf-8",
+    artifact_hashes = {}
+    artifact_hashes['preflight.json'] = write_canonical_new_json(
+        artifact_dir / 'preflight.json',
+        server_preflight,
     )
-    (artifact_dir / "summary.json").write_text(
-        json.dumps(summary, ensure_ascii=False, indent=2),
-        encoding="utf-8",
+    artifact_hashes['traffic_detail.json'] = write_canonical_new_json(
+        artifact_dir / 'traffic_detail.json',
+        role_results,
+    )
+    artifact_hashes['summary.json'] = write_canonical_new_json(
+        artifact_dir / 'summary.json',
+        summary,
+    )
+    source_paths = {
+        'tools/full_pwa_traffic_audit.py': Path(__file__).resolve(),
+        'core/pwa_performance_qa.py': (
+            Path(__file__).resolve().parents[1]
+            / 'core'
+            / 'pwa_performance_qa.py'
+        ),
+    }
+    manifest = {
+        'schema': 'copper-pwa-performance-artifact-manifest',
+        'schema_version': 1,
+        'run_id': normalized_run_id,
+        'role': selected_role.role,
+        'artifacts': artifact_hashes,
+        'sources': {
+            label: hashlib.sha256(path.read_bytes()).hexdigest().upper()
+            for label, path in source_paths.items()
+        },
+    }
+    write_canonical_new_json(artifact_dir / 'manifest.json', manifest)
+    ensure_artifacts_contain_no_credentials(
+        artifact_dir,
+        selected_role,
+        credentials,
     )
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0 if summary["status"] == "PASS" else 1

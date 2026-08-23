@@ -7,16 +7,16 @@ const test = require("node:test");
 const vm = require("node:vm");
 
 
-const TEMPLATE_SOURCE = fs.readFileSync(
+const RUNTIME_SOURCE = fs.readFileSync(
     path.resolve(
         __dirname,
         "..",
-        "..",
-        "..",
-        "templates",
-        "trips",
-        "dispatcher_control.html"
+        "dispatcher-control-v1.js"
     ),
+    "utf8"
+);
+const TEMPLATE_SOURCE = fs.readFileSync(
+    path.resolve(__dirname, "..", "..", "..", "templates", "trips", "dispatcher_control.html"),
     "utf8"
 );
 
@@ -177,22 +177,22 @@ function createRuntime(initialShiftOpen, freshShiftOpen) {
         fetchCount: 0,
     };
     const syncSource = extractBraceBlock(
-        TEMPLATE_SOURCE,
+        RUNTIME_SOURCE,
         "function syncDispatcherShiftRuntime(freshBoard)",
         "Dispatcher shift runtime sync"
     );
     const bindDragSource = extractBraceBlock(
-        TEMPLATE_SOURCE,
+        RUNTIME_SOURCE,
         "function bindDragTile(tile)",
         "Dispatcher drag source bind"
     );
     const bindDropSource = extractBraceBlock(
-        TEMPLATE_SOURCE,
+        RUNTIME_SOURCE,
         "function bindDispatcherComplexDrop(zone)",
         "Dispatcher complex drop bind"
     );
     const bindAllSource = extractBraceBlock(
-        TEMPLATE_SOURCE,
+        RUNTIME_SOURCE,
         "function bindDispatcherDesktopInteractions()",
         "Dispatcher desktop interactions bind"
     );
@@ -271,7 +271,7 @@ test("open to closed fragment blocks dispatcher drag-and-drop with fetch count z
 
 test("fragment refresh synchronizes shift runtime before replacement and rebind", () => {
     const refreshSource = extractBraceBlock(
-        TEMPLATE_SOURCE,
+        RUNTIME_SOURCE,
         "function refreshDispatcherDesktopBoardFromServer(options)",
         "Dispatcher fragment refresh"
     );

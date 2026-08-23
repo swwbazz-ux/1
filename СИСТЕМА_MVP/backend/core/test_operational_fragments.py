@@ -224,7 +224,7 @@ class OperationalFragmentViewTests(TestCase):
                 'url': reverse('dispatcher_control'),
                 'screen': 'dispatcher',
                 'root': 'class="dispatcher-board',
-                'equipment_cards': True,
+                'equipment_cards': False,
             },
             {
                 'role': 'mining_master',
@@ -280,13 +280,23 @@ class OperationalFragmentViewTests(TestCase):
                 ):
                     self.assertNotIn(full_page_marker, fragment_html)
 
-                raw_ratio = len(fragment_response.content) / len(full_response.content)
-                gzip_ratio = (
-                    len(gzip.compress(fragment_response.content))
-                    / len(gzip.compress(full_response.content))
-                )
-                self.assertLess(raw_ratio, 0.20)
-                self.assertLess(gzip_ratio, 0.20)
+                if case['screen'] == 'dispatcher':
+                    # The Dispatcher now loads its large runtime from a static
+                    # file, so comparing the fragment with the smaller HTML
+                    # shell would make the historical ratio misleading.
+                    self.assertLess(len(fragment_response.content), 150_000)
+                    self.assertLess(
+                        len(gzip.compress(fragment_response.content)),
+                        35_000,
+                    )
+                else:
+                    raw_ratio = len(fragment_response.content) / len(full_response.content)
+                    gzip_ratio = (
+                        len(gzip.compress(fragment_response.content))
+                        / len(gzip.compress(full_response.content))
+                    )
+                    self.assertLess(raw_ratio, 0.20)
+                    self.assertLess(gzip_ratio, 0.20)
 
     def test_one_hundred_personal_driver_fragment_gets_do_not_write_session(self):
         client = self._authorized_client(self.accesses['driver'])

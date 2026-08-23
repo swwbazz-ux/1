@@ -121,6 +121,8 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertNotContains(response, 'mining-master-clean-slate')
         self.assertNotContains(response, 'data-mm-tab')
         self.assertNotContains(response, 'data-mm-panel')
+        self.assertContains(response, '/static/css/app.css')
+        self.assertNotContains(response, '/static/css/dispatcher-control-v1.css')
         self.assertEqual(len(response.context['dispatcher_dashboard']['complex_zones']), 9)
 
     def test_mining_master_truck_plan_overrun_uses_progress_cycle_contract(self):

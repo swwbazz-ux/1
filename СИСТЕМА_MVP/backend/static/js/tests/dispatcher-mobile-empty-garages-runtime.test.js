@@ -8,7 +8,7 @@ const APP_CSS_PATH = path.resolve(
     "..",
     "..",
     "css",
-    "app.css"
+    "dispatcher-control-v1.css"
 );
 const APP_CSS = fs.readFileSync(APP_CSS_PATH, "utf8");
 
