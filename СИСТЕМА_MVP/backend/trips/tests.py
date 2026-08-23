@@ -854,12 +854,12 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/excavator-sw.js')
         self.assertContains(response, 'data-app-service-worker-scope="/excavator/"')
         self.assertNotContains(response, 'navigator.serviceWorker.register("/excavator-sw.js"')
-        self.assertContains(response, 'excavator-mobile-shell-v129')
-        self.assertEqual(response.context['app_shell_version'], 'excavator-mobile-shell-v129')
+        self.assertContains(response, 'excavator-mobile-shell-v130')
+        self.assertEqual(response.context['app_shell_version'], 'excavator-mobile-shell-v130')
         self.assertContains(response, 'function requestShiftCloseConfirmation()')
         self.assertContains(response, 'event.type === "pointerup" || event.type === "touchend"')
         self.assertContains(response, 'shiftTapConfirmationOpened = true')
-        self.assertContains(response, 'class="eo-current-app-version" aria-label="Текущая версия приложения">Версия 129</span>')
+        self.assertContains(response, 'class="eo-current-app-version" aria-label="Текущая версия приложения">Версия 130</span>')
         self.assertContains(response, 'card.dataset.eoLoadActionId')
         self.assertContains(response, 'item.dataset.eoCancelActionId')
         self.assertContains(response, 'shiftPendingActionId')
@@ -960,7 +960,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, 'data-eo-logout-url')
         self.assertContains(response, 'data-eo-shift-label')
         self.assertContains(response, '--eo-shift-hold: 0%')
-        self.assertContains(response, 'Показатели техники')
+        self.assertContains(response, 'Показатели')
         self.assertContains(response, 'Итог смены')
         self.assertNotContains(response, 'eo-shift-face-panel')
         self.assertNotContains(response, 'eo-shift-dump-panel')
@@ -2039,7 +2039,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
 
         self.assertContains(response, 'class="mm-mobile-shift-button"')
         self.assertNotContains(response, 'class="mm-mobile-shift-button is-danger"')
-        self.assertContains(response, 'Подтвердить показания и начать смену')
+        self.assertContains(response, 'Подтвердить и начать')
 
 
     def test_excavator_manifest_is_installable_pwa_manifest(self):
@@ -2064,7 +2064,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/excavator/')
-        self.assertIn('excavator-mobile-shell-v129', script)
+        self.assertIn('excavator-mobile-shell-v130', script)
         self.assertIn('.then(() => self.skipWaiting())', script)
         self.assertIn(reverse('excavator_work'), script)
         self.assertIn(reverse('excavator_manifest'), script)
