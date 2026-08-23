@@ -355,7 +355,7 @@
 
     function loginMessage(container) {
         return [
-            container.dataset.loginUrl || "https://driverform.ru",
+            container.dataset.loginUrl || "https://driverform.ru/apps/",
             "Телефон: " + (container.dataset.loginPhone || "—"),
             "Пин код: " + (container.dataset.loginCode || "—")
         ].join("\n");

@@ -439,8 +439,8 @@
                                     <p>{% if item.status == "not_activated" and item.primary_code_issued_at %}ожидает первого входа{% elif item.status == "activated" %}Пинкод активирован{% elif item.status == "blocked" %}Доступ заблокирован{% else %}Доступ отключен{% endif %}</p>
                                     <small>Последний вход: {{ item.last_login_at|date:"d.m.Y H:i"|default:"—" }}</small>
                                     {% if item.status == "not_activated" and item.primary_code_issued_at %}
-                                        <div class="employee-card-login-share employee-login-share" data-login-share data-login-url="https://driverform.ru" data-login-phone="{{ employee.phone|default:'—' }}" data-login-code="{{ item.access_code }}">
-                                            <div data-login-share-text><span>https://driverform.ru</span><span>Телефон: {{ employee.phone|default:"—" }}</span><span>Пин код: {{ item.access_code }}</span></div>
+                                        <div class="employee-card-login-share employee-login-share" data-login-share data-login-url="https://driverform.ru/apps/" data-login-phone="{{ employee.phone|default:'—' }}" data-login-code="{{ item.access_code }}">
+                                            <div data-login-share-text><span>https://driverform.ru/apps/</span><span>Телефон: {{ employee.phone|default:"—" }}</span><span>Пин код: {{ item.access_code }}</span></div>
                                             <div><button type="button" data-login-copy>Скопировать</button><button type="button" data-login-share-button>Отправить</button></div>
                                         </div>
                                     {% endif %}
@@ -545,5 +545,5 @@
 </div>
 {% endif %}
 
-<script src="{% static 'js/employee-card-unified.js' %}?v=20260823-1"></script>
+<script src="{% static 'js/employee-card-unified.js' %}?v=20260824-1"></script>
 {% endblock %}
