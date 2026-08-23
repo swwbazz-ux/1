@@ -529,6 +529,10 @@ class AccessLoginTests(TestCase):
             name='Горный диспетчер',
             defaults={'code': 'mining-dispatcher-filter'},
         )
+        transport_dispatcher_position, _created = PersonnelPosition.objects.get_or_create(
+            name='Диспетчер по горно-транспортному оборудованию',
+            defaults={'code': 'transport-dispatcher-filter'},
+        )
         manager_position, _created = PersonnelPosition.objects.get_or_create(
             name='Начальник участка',
             defaults={'code': 'site-manager-filter'},
@@ -540,6 +544,13 @@ class AccessLoginTests(TestCase):
         dispatcher_without_access = Employee.objects.create(
             full_name='Диспетчер без доступа',
             personnel_position=dispatcher_position,
+            position=dispatcher_position.name,
+            status=Employee.Status.ACTIVE,
+        )
+        transport_dispatcher_without_access = Employee.objects.create(
+            full_name='Диспетчер ГТО без доступа',
+            personnel_position=transport_dispatcher_position,
+            position=transport_dispatcher_position.name,
             status=Employee.Status.ACTIVE,
         )
         employee_with_dispatcher_access = Employee.objects.create(
@@ -571,14 +582,30 @@ class AccessLoginTests(TestCase):
             f'/system-admin/employees/?role={dispatcher_role.id}',
             HTTP_HOST='localhost',
         )
+        dispatcher_group_response = self.client.get(
+            '/system-admin/employees/?personnel_position=group%3Adispatchers',
+            HTTP_HOST='localhost',
+        )
 
         self.assertContains(position_response, 'Диспетчер без доступа')
+        self.assertNotContains(position_response, 'Диспетчер ГТО без доступа')
         self.assertNotContains(position_response, 'Руководитель с доступом диспетчера')
         self.assertContains(access_response, 'Руководитель с доступом диспетчера')
         self.assertNotContains(access_response, 'Диспетчер без доступа')
+        self.assertContains(dispatcher_group_response, 'Диспетчер без доступа')
+        self.assertContains(dispatcher_group_response, 'Диспетчер ГТО без доступа')
+        self.assertNotContains(
+            dispatcher_group_response,
+            'Руководитель с доступом диспетчера',
+        )
         self.assertContains(position_response, 'Кадровая должность')
         self.assertContains(position_response, 'Доступ в приложение')
-        self.assertContains(position_response, 'css/admin-employee-filters-v1.css?v=20260823-1')
+        self.assertContains(position_response, 'Все диспетчеры')
+        self.assertContains(position_response, 'css/oup-workplace-v1.css?v=20260718-4')
+        self.assertContains(position_response, 'css/admin-employee-filters-v1.css?v=20260823-2')
+        self.assertContains(position_response, 'class="oup-employee-row admin-oup-employee-row status-active"')
+        self.assertContains(position_response, 'Горный диспетчер')
+        self.assertNotContains(position_response, 'Роль не назначена')
 
     def test_admin_cannot_block_own_access(self):
         admin_role = Role.objects.create(code='admin', name='Администратор')

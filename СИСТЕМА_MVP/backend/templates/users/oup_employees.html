@@ -110,34 +110,7 @@
             </div>
             <div class="oup-register-list">
                 {% for employee in employees %}
-                    <a class="oup-employee-row status-{{ employee.status }}" href="{% url 'oup_employee_detail' employee.id %}" data-oup-employee-row data-employee-search="{{ employee.full_name }} {{ employee.phone }} {{ employee.position }} {{ employee.department_label }}">
-                        <span class="oup-person-cell">
-                            <span class="oup-person-avatar" aria-hidden="true">
-                                {% if employee.photo %}
-                                    <img src="{{ employee.photo.url }}" alt="">
-                                {% else %}
-                                    {{ employee.full_name|first }}
-                                {% endif %}
-                            </span>
-                            <span>
-                                <strong>{{ employee.full_name }}</strong>
-                                <small>{{ employee.get_work_category_display }}</small>
-                            </span>
-                        </span>
-                        <span class="oup-work-cell">
-                            <strong>{{ employee.position|default:"Должность не указана" }}</strong>
-                            <small>{{ employee.department_label|default:"Подразделение не указано" }} · {{ employee.work_schedule_label|default:"График не указан" }}{% if employee.brigade_number %} · {{ employee.get_brigade_number_display }}{% endif %} · {{ employee.watch_composition|default:"Состав вахты не указан" }}</small>
-                        </span>
-                        <span class="oup-contact-cell">
-                            <strong>{{ employee.phone|default:"Телефон не указан" }}</strong>
-                            <small>Принят {{ employee.hired_at|date:"d.m.Y"|default:"—" }}</small>
-                        </span>
-                        <span class="oup-state-cell">
-                            <span class="oup-status-chip status-{{ employee.status }}">{{ employee.get_status_display }}</span>
-                            <small>{{ employee.get_work_category_display }}</small>
-                        </span>
-                        <span class="oup-row-arrow" aria-hidden="true">›</span>
-                    </a>
+                    {% include "users/includes/employee_register_row.html" with detail_url_name="oup_employee_detail" %}
                 {% empty %}
                     <div class="oup-empty-state">
                         {% if scope == 'dismissed' %}
