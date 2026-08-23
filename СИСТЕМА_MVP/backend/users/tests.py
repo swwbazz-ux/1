@@ -717,7 +717,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, '<span>https://driverform.ru/apps/</span>', html=False)
         self.assertNotContains(response, 'data-login-url="https://driverform.ru"')
         self.assertContains(response, 'js/employee-card-unified.js?v=20260824-1')
-        self.assertContains(response, 'css/employee-card-unified.css?v=20260824-2')
+        self.assertContains(response, 'css/employee-card-unified.css?v=20260824-3')
         self.assertContains(response, 'Телефон: +79990000000')
         self.assertContains(response, 'Пин код: 246824')
         self.assertContains(response, 'Скопировать')
