@@ -697,6 +697,92 @@ document.addEventListener("DOMContentLoaded", function () {
             if (panel) panel.scrollTop = state.detailScrollTop || 0;
         }
     }
+    function dispatcherNodeMarkup(node) {
+        return node && typeof node.outerHTML === "string" ? node.outerHTML : "";
+    }
+    function syncDispatcherNodeAttributes(currentNode, freshNode) {
+        if (!currentNode || !freshNode) return false;
+        Array.prototype.slice.call(currentNode.attributes || []).forEach(function (attribute) {
+            if (!freshNode.hasAttribute(attribute.name)) {
+                currentNode.removeAttribute(attribute.name);
+            }
+        });
+        Array.prototype.slice.call(freshNode.attributes || []).forEach(function (attribute) {
+            currentNode.setAttribute(attribute.name, attribute.value);
+        });
+        return true;
+    }
+    function dispatcherItemKey(node, keyName) {
+        if (!node || !node.dataset) return "";
+        return String(node.dataset[keyName] || "");
+    }
+    function reconcileDispatcherKeyedRegion(currentBoard, freshBoard, definition) {
+        var currentRegion = currentBoard.querySelector(definition.region);
+        var freshRegion = freshBoard.querySelector(definition.region);
+        if (!currentRegion || !freshRegion) return false;
+        if (dispatcherNodeMarkup(currentRegion) === dispatcherNodeMarkup(freshRegion)) return true;
+
+        var currentItems = Array.prototype.slice.call(currentRegion.querySelectorAll(definition.items));
+        var freshItems = Array.prototype.slice.call(freshRegion.querySelectorAll(definition.items));
+        var currentKeys = currentItems.map(function (node) {
+            return dispatcherItemKey(node, definition.key);
+        });
+        var freshKeys = freshItems.map(function (node) {
+            return dispatcherItemKey(node, definition.key);
+        });
+        var keysMatch = currentKeys.length === freshKeys.length
+            && currentKeys.every(function (key, index) {
+                return !!key && key === freshKeys[index];
+            });
+        if (!keysMatch) {
+            currentRegion.replaceWith(freshRegion);
+            return true;
+        }
+        currentItems.forEach(function (currentItem, index) {
+            var freshItem = freshItems[index];
+            if (dispatcherNodeMarkup(currentItem) !== dispatcherNodeMarkup(freshItem)) {
+                currentItem.replaceWith(freshItem);
+            }
+        });
+        syncDispatcherNodeAttributes(currentRegion, freshRegion);
+        return true;
+    }
+    function reconcileDispatcherDesktopBoard(currentBoard, freshBoard) {
+        if (!currentBoard || !freshBoard) return null;
+        var regions = [
+            {
+                region: ".dispatcher-excavators",
+                items: ".dispatcher-equipment-tile[data-equipment-id]",
+                key: "equipmentId"
+            },
+            {
+                region: ".dispatcher-zone-grid",
+                items: ".dispatcher-complex-card[data-zone-id]",
+                key: "zoneId"
+            },
+            {
+                region: ".dispatcher-trucks",
+                items: ".dispatcher-truck-tile[data-equipment-id]",
+                key: "equipmentId"
+            }
+        ];
+        var currentTopbar = currentBoard.querySelector(".dispatcher-topbar");
+        var freshTopbar = freshBoard.querySelector(".dispatcher-topbar");
+        var completeContract = currentTopbar && freshTopbar && regions.every(function (definition) {
+            return currentBoard.querySelector(definition.region)
+                && freshBoard.querySelector(definition.region);
+        });
+        if (!completeContract) return null;
+        if (dispatcherNodeMarkup(currentTopbar) !== dispatcherNodeMarkup(freshTopbar)) {
+            currentTopbar.replaceWith(freshTopbar);
+        }
+        var reconciled = regions.every(function (definition) {
+            return reconcileDispatcherKeyedRegion(currentBoard, freshBoard, definition);
+        });
+        if (!reconciled) return null;
+        syncDispatcherNodeAttributes(currentBoard, freshBoard);
+        return currentBoard;
+    }
     function refreshDispatcherDesktopBoardFromServer(options) {
         options = options || {};
         if (!isDispatcherDesktopPage()) return Promise.resolve(false);
@@ -723,7 +809,11 @@ document.addEventListener("DOMContentLoaded", function () {
                     equipmentCards = {};
                 }
             }
-            currentBoard.replaceWith(freshBoard);
+            var refreshedBoard = reconcileDispatcherDesktopBoard(currentBoard, freshBoard);
+            if (!refreshedBoard) {
+                currentBoard.replaceWith(freshBoard);
+                refreshedBoard = freshBoard;
+            }
             bindDispatcherDesktopInteractions();
             if (typeof window.initAppConfirmForms === "function") {
                 window.initAppConfirmForms();
@@ -734,7 +824,7 @@ document.addEventListener("DOMContentLoaded", function () {
             if (typeof window.initDispatcherRadialClocks === "function") {
                 window.initDispatcherRadialClocks();
             }
-            restoreDispatcherDesktopState(freshBoard, desktopState);
+            restoreDispatcherDesktopState(refreshedBoard, desktopState);
             refreshDesktopBoardIntegrity();
             updateDispatcherSyncIndicator();
             return true;
