@@ -4000,3 +4000,210 @@ body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-logout-button
         grid-template-rows: minmax(0, 1fr) !important;
     }
 }
+
+/* v131: compact shift typography and native in-app feedback. */
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-titlebar h1 {
+    font-size: clamp(26px, 4.8cqh, 32px) !important;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-current-app-version {
+    font-size: clamp(11px, 2cqh, 13px) !important;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-section-head span {
+    font-size: clamp(10px, 2cqh, 13px) !important;
+    line-height: 1 !important;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-empty-state strong {
+    font-size: clamp(17px, 3.5cqh, 22px) !important;
+    line-height: 1.04 !important;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-empty-state span {
+    font-size: clamp(10px, 1.95cqh, 13px) !important;
+    line-height: 1.12 !important;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-metrics input {
+    font-size: clamp(18px, 3.6cqh, 24px) !important;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-grid > div {
+    align-content: center !important;
+    align-items: start !important;
+    justify-items: start !important;
+    text-align: left !important;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-grid > div > span,
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-grid > div > strong,
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-grid > div > em {
+    width: 100% !important;
+    max-width: 100% !important;
+    text-align: left !important;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-grid > div > strong,
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-review-grid strong {
+    font-size: clamp(15px, 3.1cqh, 20px) !important;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .mm-mobile-shift-button,
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-logout-button {
+    font-size: clamp(13px, 2.3cqh, 15px) !important;
+}
+
+body.excavator-operator-screen.eo-notice-open {
+    overflow: hidden !important;
+}
+
+body.excavator-operator-screen .eo-notice-modal[hidden] {
+    display: none !important;
+}
+
+body.excavator-operator-screen .eo-notice-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 25000;
+    display: grid;
+    place-items: center;
+    box-sizing: border-box;
+    padding: 18px;
+    background: rgba(1, 8, 12, .78);
+    backdrop-filter: blur(4px);
+}
+
+body.excavator-operator-screen .eo-notice-dialog {
+    position: relative;
+    display: grid;
+    grid-template-columns: 40px minmax(0, 1fr);
+    align-items: center;
+    gap: 12px 14px;
+    box-sizing: border-box;
+    width: min(380px, 100%);
+    padding: 20px;
+    border: 1px solid rgba(255, 210, 52, .6);
+    border-radius: 8px;
+    background: #0c171c;
+    color: #f3f7f8;
+    box-shadow: 0 18px 48px rgba(0, 0, 0, .58), 0 0 24px rgba(255, 210, 52, .12);
+}
+
+body.excavator-operator-screen .eo-notice-close {
+    position: absolute;
+    top: 7px;
+    right: 7px;
+    display: grid;
+    place-items: center;
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    border: 1px solid #3a4a51;
+    border-radius: 6px;
+    background: #101d23;
+    color: #dfe8eb;
+    font: 700 22px/1 sans-serif;
+}
+
+body.excavator-operator-screen .eo-notice-icon {
+    display: grid;
+    place-items: center;
+    width: 40px;
+    height: 40px;
+    border: 1px solid #ffd234;
+    border-radius: 50%;
+    background: rgba(255, 210, 52, .12);
+    color: #ffd234;
+    font-size: 24px;
+    font-weight: 900;
+}
+
+body.excavator-operator-screen .eo-notice-copy {
+    min-width: 0;
+    padding-right: 24px;
+}
+
+body.excavator-operator-screen .eo-notice-copy h2 {
+    margin: 0 0 5px;
+    color: #f7fafb;
+    font-size: 22px;
+    line-height: 1.05;
+    letter-spacing: 0;
+}
+
+body.excavator-operator-screen .eo-notice-copy p {
+    margin: 0;
+    color: #cbd8dc;
+    font-size: 16px;
+    line-height: 1.3;
+    letter-spacing: 0;
+    overflow-wrap: anywhere;
+}
+
+body.excavator-operator-screen .eo-notice-accept {
+    grid-column: 1 / -1;
+    min-height: 48px;
+    border: 1px solid #35e75c;
+    border-radius: 6px;
+    background: #0b2b18;
+    color: #5cff78;
+    font-size: 16px;
+    font-weight: 800;
+}
+
+body.excavator-operator-screen #app-confirm-modal {
+    background: rgba(1, 8, 12, .82) !important;
+    backdrop-filter: blur(4px) !important;
+}
+
+body.excavator-operator-screen #app-confirm-modal .app-confirm-dialog {
+    width: min(390px, calc(100vw - 32px)) !important;
+    padding: 20px !important;
+    border: 1px solid rgba(255, 210, 52, .62) !important;
+    border-radius: 8px !important;
+    background: #0c171c !important;
+    color: #f4f8f9 !important;
+    box-shadow: 0 18px 52px rgba(0, 0, 0, .62), 0 0 24px rgba(255, 210, 52, .12) !important;
+}
+
+body.excavator-operator-screen #app-confirm-modal .app-confirm-accent {
+    background: #ffd234 !important;
+}
+
+body.excavator-operator-screen #app-confirm-modal .app-confirm-icon {
+    border-color: #ffd234 !important;
+    background: rgba(255, 210, 52, .12) !important;
+    color: #ffd234 !important;
+}
+
+body.excavator-operator-screen #app-confirm-modal .app-confirm-content h2 {
+    color: #f7fafb !important;
+    font-size: 23px !important;
+    line-height: 1.08 !important;
+    text-shadow: none !important;
+}
+
+body.excavator-operator-screen #app-confirm-modal .app-confirm-content p {
+    color: #cbd8dc !important;
+    font-size: 16px !important;
+    line-height: 1.3 !important;
+}
+
+body.excavator-operator-screen #app-confirm-modal .app-confirm-actions .secondary {
+    border-color: #42545c !important;
+    background: #132229 !important;
+    color: #e5ecef !important;
+}
+
+body.excavator-operator-screen #app-confirm-modal .app-confirm-actions .danger {
+    border-color: #35e75c !important;
+    background: #0b2b18 !important;
+    color: #5cff78 !important;
+}
+
+body.excavator-operator-screen #app-confirm-modal.is-shift-end-confirm .app-confirm-actions .danger {
+    border-color: #ff5a62 !important;
+    background: #321216 !important;
+    color: #ff737a !important;
+}

@@ -5,9 +5,9 @@
 {% block body_class %}excavator-operator-screen{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v130">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v130">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v130">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v131">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v131">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v131">
 <meta name="theme-color" content="#D58B14">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Погрузка">
@@ -72,7 +72,7 @@
             <div class="eo-shift-titlebar">
                 <h1>Смена</h1>
                 <div class="eo-shift-update-group">
-                    <span class="eo-current-app-version" aria-label="Текущая версия приложения">Версия 130</span>
+                    <span class="eo-current-app-version" aria-label="Текущая версия приложения">Версия 131</span>
                     <button class="eo-shift-update-button" type="button" data-eo-pwa-update-check aria-label="Проверить обновление приложения">
                         <span aria-hidden="true"></span>
                         <b data-eo-pwa-update-check-label>Обновить</b>
@@ -95,13 +95,13 @@
                     <div class="eo-shift-result-cell"><span>Экскаватор</span><strong>{{ shift_start_excavator.garage_number }}</strong></div>
                 </div>
                 {% else %}
-                <div class="eo-empty-state"><strong>Нет рабочего назначения</strong><span>{{ work_assignment_error }}</span></div>
+                <div class="eo-empty-state"><strong>Нет назначения</strong><span>{{ work_assignment_error }}</span></div>
                 {% endif %}
             </div>
             {% endif %}
             <div class="eo-shift-section eo-shift-check-panel" data-eo-shift-inputs>
                 <div class="eo-shift-section-head">
-                    <span>Показатели · {% if open_shift %}конец смены{% else %}начало смены{% endif %}</span>
+                    <span>Показания · {% if open_shift %}конец{% else %}начало{% endif %}</span>
                 </div>
                 {% if open_shift %}
                 <div class="eo-shift-start-readings">
@@ -154,7 +154,7 @@
                     <b>Сейчас</b>
                 </div>
                 <div class="eo-shift-result-grid">
-                    <div class="eo-shift-result-cell eo-shift-result-plan" data-plan-status="{{ shift_plan_status|default:'no_plan_group' }}"><span>План</span><strong>{% if shift_plan_has_plan %}{{ shift_plan_percent }}%{% else %}{{ shift_plan_short_label }}{% endif %}</strong></div>
+                    <div class="eo-shift-result-cell eo-shift-result-plan" data-plan-status="{{ shift_plan_status|default:'no_plan_group' }}"><span>План</span><strong>{% if shift_plan_has_plan %}{{ shift_plan_percent }}%{% else %}Нет плана{% endif %}</strong></div>
                     <div class="eo-shift-result-cell eo-shift-result-fact">
                         <span>{{ shift_fact_label }}</span>
                         <strong>{{ shift_fact_value }}</strong>
@@ -173,7 +173,7 @@
                 </button>
                 {% endif %}
                 <button class="mm-mobile-shift-button{% if open_shift %} is-danger{% endif %}" type="button" data-eo-shift-button data-eo-shift-action="{% if open_shift %}close{% else %}open{% endif %}" style="--eo-shift-hold: 0%" {% if open_shift %}hidden aria-label="Удерживайте 2 секунды, чтобы закрыть смену"{% elif work_assignment_state != 'assigned' or equipment_open_shift or not shift_fuel_limit %}disabled aria-disabled="true"{% endif %}>
-                    <span data-eo-shift-label>{% if open_shift %}Закрыть смену{% else %}Подтвердить и начать{% endif %}</span>
+                    <span data-eo-shift-label>{% if open_shift %}Закрыть смену{% else %}Начать смену{% endif %}</span>
                 </button>
                 <button class="eo-logout-button" type="button" data-eo-logout-button data-eo-logout-url="{% url 'logout' %}" style="--eo-logout-hold: 0%" aria-label="Удерживайте 2 секунды, чтобы выйти">
                     <span data-eo-logout-label>Выйти</span>
@@ -455,15 +455,87 @@
     </section>
 </div>
 
+<div class="eo-notice-modal" data-eo-notice-modal hidden aria-hidden="true">
+    <section class="eo-notice-dialog" role="alertdialog" aria-modal="true" aria-labelledby="eo-notice-title" aria-describedby="eo-notice-message">
+        <button class="eo-notice-close" type="button" data-eo-notice-close aria-label="Закрыть">×</button>
+        <div class="eo-notice-icon" aria-hidden="true">!</div>
+        <div class="eo-notice-copy">
+            <h2 id="eo-notice-title">Сообщение</h2>
+            <p id="eo-notice-message" data-eo-notice-message></p>
+        </div>
+        <button class="eo-notice-accept" type="button" data-eo-notice-close>Понятно</button>
+    </section>
+</div>
+
 {{ truck_detail_cards|json_script:"eo-truck-detail-cards-data" }}
 {% get_static_prefix as static_prefix %}
 {% include "includes/achievement_prize.html" %}
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v130";
+var excavatorShellVersion = "excavator-mobile-shell-v131";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var viewportSyncFrame = null;
+var excavatorNoticeModal = document.querySelector("[data-eo-notice-modal]");
+var excavatorNoticeMessage = excavatorNoticeModal ? excavatorNoticeModal.querySelector("[data-eo-notice-message]") : null;
+var excavatorNoticeLastKey = "";
+var excavatorNoticeLastShownAt = 0;
+var excavatorNoticeReturnFocus = null;
+
+function compactExcavatorNotice(message) {
+    var text = String(message || "Действие не выполнено").trim();
+    var replacements = {
+        "Сначала нужно открыть смену на экскаваторе.": "Сначала откройте смену.",
+        "Смена и техника не назначены. Обратитесь к руководителю.": "Смена и техника не назначены.",
+        "Техника неактивна. Обратитесь к руководителю.": "Техника неактивна.",
+        "Назначенная техника неактивна. Обратитесь к руководителю.": "Назначенная техника неактивна.",
+        "Назначенная техника уже занята в открытой смене. Обратитесь к руководителю.": "Техника занята в другой смене.",
+        "Выберите породу и хотя бы одну точку разгрузки": "Выберите породу и точку разгрузки."
+    };
+    return replacements[text] || text;
+}
+
+function closeExcavatorNotice() {
+    if (!excavatorNoticeModal || excavatorNoticeModal.hidden) return;
+    excavatorNoticeModal.hidden = true;
+    excavatorNoticeModal.setAttribute("aria-hidden", "true");
+    document.body.classList.remove("eo-notice-open");
+    if (excavatorNoticeReturnFocus && excavatorNoticeReturnFocus.isConnected && typeof excavatorNoticeReturnFocus.focus === "function") {
+        excavatorNoticeReturnFocus.focus();
+    }
+    excavatorNoticeReturnFocus = null;
+}
+
+function showExcavatorNotice(message) {
+    if (!excavatorNoticeModal || !excavatorNoticeMessage) return;
+    var text = compactExcavatorNotice(message);
+    var now = Date.now();
+    if ((!excavatorNoticeModal.hidden && excavatorNoticeMessage.textContent === text) || (excavatorNoticeLastKey === text && now - excavatorNoticeLastShownAt < 2200)) {
+        return;
+    }
+    excavatorNoticeLastKey = text;
+    excavatorNoticeLastShownAt = now;
+    excavatorNoticeReturnFocus = document.activeElement;
+    excavatorNoticeMessage.textContent = text;
+    excavatorNoticeModal.hidden = false;
+    excavatorNoticeModal.setAttribute("aria-hidden", "false");
+    document.body.classList.add("eo-notice-open");
+    var accept = excavatorNoticeModal.querySelector(".eo-notice-accept");
+    if (accept) accept.focus();
+}
+
+window.showExcavatorNotice = showExcavatorNotice;
+if (excavatorNoticeModal) {
+    excavatorNoticeModal.querySelectorAll("[data-eo-notice-close]").forEach(function (button) {
+        button.addEventListener("click", closeExcavatorNotice);
+    });
+    excavatorNoticeModal.addEventListener("click", function (event) {
+        if (event.target === excavatorNoticeModal) closeExcavatorNotice();
+    });
+    document.addEventListener("keydown", function (event) {
+        if (event.key === "Escape" && !excavatorNoticeModal.hidden) closeExcavatorNotice();
+    });
+}
 
 if (typeof window.bindAchievementPrizeUnlock === "function") {
     window.bindAchievementPrizeUnlock();
@@ -521,7 +593,7 @@ function isExcavatorRefreshUnsafe() {
     )) {
         return true;
     }
-    return !!document.querySelector(".eo-truck-card.is-pending, .eo-truck-card.is-dragging, .mm-mobile-shift-button.is-holding, .eo-hold-action.is-holding, .eo-logout-button.is-holding, .eo-shift-update-button.is-checking, .eo-truck-detail-modal:not([hidden]), .eo-mobile-update-modal:not([hidden]), .app-confirm-modal:not([hidden])");
+    return !!document.querySelector(".eo-truck-card.is-pending, .eo-truck-card.is-dragging, .mm-mobile-shift-button.is-holding, .eo-hold-action.is-holding, .eo-logout-button.is-holding, .eo-shift-update-button.is-checking, .eo-truck-detail-modal:not([hidden]), .eo-mobile-update-modal:not([hidden]), .eo-notice-modal:not([hidden]), .app-confirm-modal:not([hidden])");
 }
 
 function storeExcavatorRealtimeVersion(version) {
@@ -1715,7 +1787,7 @@ window.initExcavatorWorkShell = function () {
         }
         if (!card || !dumpTarget || !truckLoadedUrl) return;
         if (!canTruckLoad(card)) {
-            window.alert(truckLoadBlockReason(card));
+            showExcavatorNotice(truckLoadBlockReason(card));
             return;
         }
         var snapshot = snapshotTruckCard(card);
@@ -1797,7 +1869,7 @@ window.initExcavatorWorkShell = function () {
             restoreTruckCard(card, snapshot);
             if (optimisticBadge) optimisticBadge.remove();
             ensureMutedPendingBadge(pendingBadgeList(dumpTarget));
-            window.alert(error.message || "Самосвал не отправлен");
+            showExcavatorNotice(error.message || "Самосвал не отправлен");
             if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
                 window.AppRealtime.wake("truck_loaded_error");
             }
@@ -2189,7 +2261,7 @@ window.initExcavatorWorkShell = function () {
                         window.AppRealtime.wake("excavator_downtime_saved");
                     }
                 }).catch(function (error) {
-                    window.alert(error.message || "Простой не сохранен");
+                    showExcavatorNotice(error.message || "Простой не сохранен");
                 }).finally(function () {
                     button.disabled = false;
                     button.classList.remove("is-pending");
@@ -2216,7 +2288,7 @@ window.initExcavatorWorkShell = function () {
             var horizonInput = shell.querySelector("[data-eo-face-horizon]");
             var blockInput = shell.querySelector("[data-eo-face-block]");
             if (!settingsUrl || !rockSelect || !ids.length) {
-                window.alert("Выберите породу и хотя бы одну точку разгрузки");
+                showExcavatorNotice("Выберите породу и хотя бы одну точку разгрузки");
                 applySettings.textContent = hold.defaultLabel;
                 return;
             }
@@ -2269,7 +2341,7 @@ window.initExcavatorWorkShell = function () {
                     }
                 });
             }).catch(function (error) {
-                window.alert(error.message || "Настройки не сохранены");
+                showExcavatorNotice(error.message || "Настройки не сохранены");
             }).finally(function () {
                 applySettings.classList.remove("is-pending");
                 applySettings.textContent = hold.defaultLabel;
@@ -2499,7 +2571,7 @@ window.initExcavatorWorkShell = function () {
             shiftButton.disabled = false;
             shiftButton.classList.remove("is-pending");
             if (shiftLabel) {
-                shiftLabel.textContent = action === "close" ? "Закрыть смену" : "Подтвердить показания и начать смену";
+                shiftLabel.textContent = action === "close" ? "Закрыть смену" : "Начать смену";
             }
         });
     }
@@ -2623,7 +2695,7 @@ window.initExcavatorWorkShell = function () {
                     window.AppRealtime.wake("excavator_downtime_closed");
                 }
             }).catch(function (error) {
-                window.alert(error.message || "Простой не завершен");
+                showExcavatorNotice(error.message || "Простой не завершен");
                 closeEvent.disabled = false;
                 closeEvent.classList.remove("is-pending");
                 closeEvent.textContent = hold.defaultLabel;
