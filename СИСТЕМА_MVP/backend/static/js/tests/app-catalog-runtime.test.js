@@ -24,6 +24,7 @@ test("dialog receives the exact server URL and local QR endpoint", () => {
         "[data-dialog-title]": { textContent: "" },
         "[data-dialog-url]": { value: "" },
         "[data-dialog-qr]": { alt: "", src: "" },
+        "[data-dialog-qr-target]": { textContent: "" },
         "[data-dialog-open]": { href: "" },
         "[data-copy-status]": { textContent: "old" }
     };
@@ -33,7 +34,8 @@ test("dialog receives the exact server URL and local QR endpoint", () => {
         dataset: {
             appName: "Водитель самосвала",
             appUrl: "https://driver.driverform.ru/",
-            appQr: "/apps/qr/driver/"
+            appQr: "/static/img/pwa/qr/driver.png",
+            appQrTarget: "https://driver.driverform.ru/"
         }
     };
 
@@ -42,7 +44,11 @@ test("dialog receives the exact server URL and local QR endpoint", () => {
     assert.equal(elements["[data-dialog-title]"].textContent, "Водитель самосвала");
     assert.equal(elements["[data-dialog-url]"].value, "https://driver.driverform.ru/");
     assert.equal(elements["[data-dialog-open]"].href, "https://driver.driverform.ru/");
-    assert.equal(elements["[data-dialog-qr]"].src, "/apps/qr/driver/");
+    assert.equal(elements["[data-dialog-qr]"].src, "/static/img/pwa/qr/driver.png");
+    assert.equal(
+        elements["[data-dialog-qr-target]"].textContent,
+        "QR откроет: https://driver.driverform.ru/"
+    );
     assert.match(elements["[data-dialog-qr]"].alt, /Водитель самосвала/);
     assert.equal(values.status, undefined);
 });

@@ -19,15 +19,18 @@
         var name = String(card.dataset.appName || "");
         var targetUrl = String(card.dataset.appUrl || card.href || "");
         var qrUrl = String(card.dataset.appQr || "");
+        var qrTargetUrl = String(card.dataset.appQrTarget || targetUrl);
         var title = dialog.querySelector("[data-dialog-title]");
         var input = dialog.querySelector("[data-dialog-url]");
         var qrImage = dialog.querySelector("[data-dialog-qr]");
+        var qrTarget = dialog.querySelector("[data-dialog-qr-target]");
         var openLink = dialog.querySelector("[data-dialog-open]");
         var status = dialog.querySelector("[data-copy-status]");
 
         if (title) title.textContent = name;
         if (input) input.value = targetUrl;
         if (openLink) openLink.href = targetUrl;
+        if (qrTarget) qrTarget.textContent = "QR откроет: " + qrTargetUrl;
         if (status) status.textContent = "";
         if (qrImage) {
             qrImage.alt = "QR-код для приложения «" + name + "»";

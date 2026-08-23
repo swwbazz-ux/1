@@ -1,6 +1,17 @@
-from django.test import Client, SimpleTestCase, override_settings
+from pathlib import Path
 
-from .app_catalog import APP_CATALOG_ROLE_CODES, role_app_public_url
+from django.conf import settings
+from django.test import Client, SimpleTestCase, override_settings
+from PIL import Image
+
+from .app_catalog import (
+    APP_CATALOG_QR_SIZE,
+    APP_CATALOG_ROLE_CODES,
+    render_role_app_qr_png,
+    role_app_public_url,
+    role_app_qr_asset_path,
+    role_app_qr_target_url,
+)
 
 
 CATALOG_HOST_SETTINGS = override_settings(
@@ -62,6 +73,14 @@ class AppCatalogTests(SimpleTestCase):
                     items[role_code]['target_url'],
                     f'https://{subdomain}.driverform.ru/',
                 )
+                self.assertEqual(
+                    items[role_code]['qr_target_url'],
+                    f'https://{subdomain}.driverform.ru/',
+                )
+                self.assertEqual(
+                    items[role_code]['qr_asset_url'],
+                    f'/static/img/pwa/qr/{role_code}.png',
+                )
 
     def test_local_catalog_preserves_port_and_uses_local_role_origins(self):
         response = Client().get('/apps/', HTTP_HOST='localhost:8000')
@@ -83,8 +102,12 @@ class AppCatalogTests(SimpleTestCase):
                     items[role_code]['target_url'],
                     f'http://{subdomain}.localhost:8000/',
                 )
+                self.assertEqual(
+                    items[role_code]['qr_target_url'],
+                    f'https://{subdomain}.driverform.ru/',
+                )
 
-    def test_qr_is_generated_locally_only_for_approved_apps(self):
+    def test_qr_compatibility_endpoint_redirects_to_static_asset(self):
         client = Client()
         for role_code in APP_CATALOG_ROLE_CODES:
             with self.subTest(role=role_code):
@@ -93,11 +116,12 @@ class AppCatalogTests(SimpleTestCase):
                     HTTP_HOST='driverform.ru',
                     secure=True,
                 )
-                self.assertEqual(response.status_code, 200)
-                self.assertTrue(response['Content-Type'].startswith('image/svg+xml'))
+                self.assertEqual(response.status_code, 302)
+                self.assertEqual(
+                    response.url,
+                    f'/static/img/pwa/qr/{role_code}.png',
+                )
                 self.assertEqual(response['X-Content-Type-Options'], 'nosniff')
-                self.assertIn('Host', response['Vary'])
-                self.assertIn(b'<svg', response.content)
 
         for role_code in ('settlement_clerk', 'timekeeper', 'site_manager', 'mechanic'):
             with self.subTest(excluded_role=role_code):
@@ -108,6 +132,28 @@ class AppCatalogTests(SimpleTestCase):
                     ).status_code,
                     404,
                 )
+
+    def test_committed_qr_assets_are_exact_integer_grid_pngs(self):
+        static_root = Path(settings.BASE_DIR) / 'static'
+        for role_code in APP_CATALOG_ROLE_CODES:
+            with self.subTest(role=role_code):
+                target_url = role_app_qr_target_url(role_code)
+                asset_path = static_root / role_app_qr_asset_path(role_code)
+                asset_bytes = asset_path.read_bytes()
+                self.assertEqual(asset_bytes, render_role_app_qr_png(target_url))
+
+                with Image.open(asset_path) as image:
+                    self.assertEqual(image.format, 'PNG')
+                    self.assertEqual(image.mode, 'RGB')
+                    self.assertEqual(image.size, (APP_CATALOG_QR_SIZE, APP_CATALOG_QR_SIZE))
+                    self.assertLessEqual(
+                        set(image.getdata()),
+                        {(0, 0, 0), (255, 255, 255)},
+                    )
+                    black_bounds = image.point(lambda value: 255 - value).getbbox()
+                    self.assertIsNotNone(black_bounds)
+                    self.assertGreaterEqual(min(black_bounds[:2]), 32)
+                    self.assertLessEqual(max(black_bounds[2:]), APP_CATALOG_QR_SIZE - 32)
 
     def test_role_login_exposes_install_control_but_shared_login_does_not(self):
         role_response = Client().get('/', HTTP_HOST='driver.localhost')

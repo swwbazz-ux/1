@@ -14,6 +14,7 @@ from django.db.models import Count, Q
 from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.shortcuts import redirect, render
+from django.templatetags.static import static
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
@@ -65,8 +66,7 @@ from .app_catalog import (
     APP_CATALOG_ROLE_CODES,
     app_catalog_public_url,
     app_catalog_items,
-    render_role_app_qr_svg,
-    role_app_public_url,
+    role_app_qr_asset_path,
 )
 from .active_role import (
     ACTIVE_ROLE_CODE_SESSION_KEY,
@@ -513,14 +513,8 @@ def app_catalog_view(request):
 def app_catalog_qr_view(request, role_code):
     if role_code not in APP_CATALOG_ROLE_CODES:
         raise Http404
-    target_url = role_app_public_url(request, role_code)
-    response = HttpResponse(
-        render_role_app_qr_svg(target_url),
-        content_type='image/svg+xml; charset=utf-8',
-    )
+    response = redirect(static(role_app_qr_asset_path(role_code)))
     response['Cache-Control'] = 'public, max-age=86400'
-    response['Content-Disposition'] = f'inline; filename="{role_code}-qr.svg"'
-    response['Vary'] = 'Host'
     response['X-Content-Type-Options'] = 'nosniff'
     return response
 

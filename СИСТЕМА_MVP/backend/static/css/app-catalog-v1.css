@@ -238,7 +238,7 @@ input {
 }
 
 .app-catalog-dialog {
-    width: min(680px, calc(100vw - 32px));
+    width: min(720px, calc(100vw - 32px));
     margin: auto;
     padding: 0;
     overflow: visible;
@@ -282,15 +282,15 @@ input {
 
 .app-catalog-dialog__content {
     display: grid;
-    grid-template-columns: 280px minmax(0, 1fr);
-    gap: 28px;
+    grid-template-columns: 296px minmax(0, 1fr);
+    gap: 26px;
     align-items: center;
     padding: 32px;
 }
 
 .app-catalog-dialog__qr-wrap {
-    width: 280px;
-    height: 280px;
+    width: 296px;
+    height: 296px;
     display: grid;
     place-items: center;
     border-radius: 18px;
@@ -300,8 +300,11 @@ input {
 
 .app-catalog-dialog__qr-wrap img {
     display: block;
-    width: 256px;
-    height: 256px;
+    width: 296px;
+    height: 296px;
+    border-radius: 14px;
+    background: #fff;
+    image-rendering: pixelated;
 }
 
 .app-catalog-dialog__details {
@@ -314,11 +317,19 @@ input {
     line-height: 1.12;
 }
 
-.app-catalog-dialog__details > p:not(.app-catalog-dialog__eyebrow):not(.app-catalog-dialog__status) {
+.app-catalog-dialog__details > p:not(.app-catalog-dialog__eyebrow):not(.app-catalog-dialog__status):not(.app-catalog-dialog__qr-target) {
     margin: 12px 0 18px;
     color: var(--catalog-muted);
     font-size: 14px;
     line-height: 1.5;
+}
+
+.app-catalog-dialog__details > .app-catalog-dialog__qr-target {
+    margin: -9px 0 16px;
+    color: #f0c57c;
+    font-size: 12px;
+    font-weight: 800;
+    overflow-wrap: anywhere;
 }
 
 .app-catalog-dialog__url-label {

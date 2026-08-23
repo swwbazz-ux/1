@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from io import BytesIO
+
+from django.templatetags.static import static
+
 from .role_apps import READY_TRAFFIC_ROLE_CODES, get_role_app
 
 
@@ -14,6 +18,9 @@ APP_CATALOG_ROLES = (
     ('admin', 'Системный администратор'),
 )
 APP_CATALOG_ROLE_CODES = tuple(role_code for role_code, _ in APP_CATALOG_ROLES)
+APP_CATALOG_QR_MODULE_PIXELS = 8
+APP_CATALOG_QR_CANVAS_MODULES = 37
+APP_CATALOG_QR_SIZE = APP_CATALOG_QR_MODULE_PIXELS * APP_CATALOG_QR_CANVAS_MODULES
 
 
 def _split_host_port(raw_host):
@@ -39,6 +46,19 @@ def role_app_public_url(request, role_code):
     return f'https://{app.subdomain}.{production_domain}/'
 
 
+def role_app_qr_target_url(role_code):
+    app = get_role_app(role_code)
+    if app is None or role_code not in APP_CATALOG_ROLE_CODES:
+        raise KeyError(role_code)
+    return f'https://{app.subdomain}.driverform.ru/'
+
+
+def role_app_qr_asset_path(role_code):
+    if role_code not in APP_CATALOG_ROLE_CODES:
+        raise KeyError(role_code)
+    return f'img/pwa/qr/{role_code}.png'
+
+
 def app_catalog_public_url(request):
     host, port_suffix = _split_host_port(request.get_host())
     if host == '127.0.0.1' or host == 'localhost' or host.endswith('.localhost'):
@@ -62,25 +82,42 @@ def app_catalog_items(request):
                 'icon_url': app.icon_192_url,
                 'theme_color': app.theme_color,
                 'target_url': role_app_public_url(request, role_code),
+                'qr_target_url': role_app_qr_target_url(role_code),
+                'qr_asset_url': static(role_app_qr_asset_path(role_code)),
             }
         )
     return items
 
 
-def render_role_app_qr_svg(target_url, size=256):
-    from reportlab.graphics import renderSVG
+def render_role_app_qr_png(target_url):
+    from PIL import Image, ImageDraw
     from reportlab.graphics.barcode.qr import QrCodeWidget
-    from reportlab.graphics.shapes import Drawing
 
-    qr_code = QrCodeWidget(target_url)
-    left, bottom, right, top = qr_code.getBounds()
-    width = right - left
-    height = top - bottom
-    scale = min(size / width, size / height)
-    drawing = Drawing(
-        size,
-        size,
-        transform=[scale, 0, 0, scale, -left * scale, -bottom * scale],
-    )
-    drawing.add(qr_code)
-    return renderSVG.drawToString(drawing)
+    qr_code = QrCodeWidget(target_url, barLevel='M')
+    qr_code.qr.make()
+    module_count = qr_code.qr.getModuleCount()
+    margin_modules = (APP_CATALOG_QR_CANVAS_MODULES - module_count) // 2
+    if margin_modules < 4 or module_count + (margin_modules * 2) != APP_CATALOG_QR_CANVAS_MODULES:
+        raise ValueError('QR matrix does not fit the fixed integer-pixel canvas')
+
+    image = Image.new('RGB', (APP_CATALOG_QR_SIZE, APP_CATALOG_QR_SIZE), 'white')
+    draw = ImageDraw.Draw(image)
+    for row in range(module_count):
+        for column in range(module_count):
+            if not qr_code.qr.isDark(row, column):
+                continue
+            left = (margin_modules + column) * APP_CATALOG_QR_MODULE_PIXELS
+            top = (margin_modules + row) * APP_CATALOG_QR_MODULE_PIXELS
+            draw.rectangle(
+                (
+                    left,
+                    top,
+                    left + APP_CATALOG_QR_MODULE_PIXELS - 1,
+                    top + APP_CATALOG_QR_MODULE_PIXELS - 1,
+                ),
+                fill='black',
+            )
+
+    output = BytesIO()
+    image.save(output, format='PNG', optimize=False, compress_level=9)
+    return output.getvalue()
