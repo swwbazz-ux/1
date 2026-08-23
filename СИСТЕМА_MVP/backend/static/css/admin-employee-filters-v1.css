@@ -1,0 +1,9 @@
+.admin-employees-shell .employees-filter-bar {
+    grid-template-columns: minmax(260px, 1.2fr) repeat(4, minmax(170px, .7fr)) minmax(122px, .22fr);
+}
+
+@media (max-width: 720px) {
+    .admin-employees-shell .employees-filter-bar {
+        grid-template-columns: 1fr;
+    }
+}

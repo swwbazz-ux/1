@@ -578,6 +578,7 @@ class AccessLoginTests(TestCase):
         self.assertNotContains(access_response, 'Диспетчер без доступа')
         self.assertContains(position_response, 'Кадровая должность')
         self.assertContains(position_response, 'Доступ в приложение')
+        self.assertContains(position_response, 'css/admin-employee-filters-v1.css?v=20260823-1')
 
     def test_admin_cannot_block_own_access(self):
         admin_role = Role.objects.create(code='admin', name='Администратор')
