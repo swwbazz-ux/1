@@ -7,8 +7,8 @@
     <meta name="theme-color" content="#0b1722">
     <title>Рабочие приложения · Коппер Рисорсез</title>
     <link rel="icon" href="{% static 'favicon.ico' %}">
-    <link rel="stylesheet" href="{% static 'css/app-catalog-v1.css' %}?v=3">
-    <script src="{% static 'js/app-catalog-v1.js' %}?v=3" defer></script>
+    <link rel="stylesheet" href="{% static 'css/app-catalog-v1.css' %}?v=4">
+    <script src="{% static 'js/app-catalog-v1.js' %}?v=4" defer></script>
 </head>
 <body class="app-catalog-page">
 <main class="app-catalog-shell">
@@ -34,9 +34,9 @@
 
     <section class="app-catalog-grid" aria-label="Доступные рабочие приложения">
         {% for app in catalog_apps %}
-        <a
+        <button
+            type="button"
             class="app-catalog-card"
-            href="{{ app.target_url }}"
             data-app-card
             data-role-code="{{ app.role_code }}"
             data-app-name="{{ app.label }}"
@@ -54,7 +54,7 @@
                 <span>Подключить</span>
                 <span aria-hidden="true">→</span>
             </span>
-        </a>
+        </button>
         {% endfor %}
     </section>
 

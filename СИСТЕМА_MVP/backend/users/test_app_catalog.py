@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 from django.conf import settings
@@ -38,6 +39,9 @@ class AppCatalogTests(SimpleTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.context['catalog_apps']), 8)
         self.assertEqual(response.content.count(b'data-app-card'), 8)
+        html = response.content.decode('utf-8')
+        self.assertEqual(len(re.findall(r'<button\b[^>]*\bdata-app-card\b', html, re.S)), 8)
+        self.assertEqual(len(re.findall(r'<a\b[^>]*\bdata-app-card\b', html, re.S)), 0)
         for label in self.expected_labels:
             self.assertContains(response, label)
         for excluded in (
@@ -51,8 +55,8 @@ class AppCatalogTests(SimpleTestCase):
         self.assertNotContains(response, 'демо-код')
         self.assertNotContains(response, 'rel="manifest"')
         self.assertNotContains(response, 'serviceWorker.register')
-        self.assertContains(response, '/static/css/app-catalog-v1.css?v=3')
-        self.assertContains(response, '/static/js/app-catalog-v1.js?v=3')
+        self.assertContains(response, '/static/css/app-catalog-v1.css?v=4')
+        self.assertContains(response, '/static/js/app-catalog-v1.js?v=4')
         self.assertContains(response, 'data-share-link')
         self.assertContains(response, 'Отправить ссылку')
         self.assertContains(response, 'Подключить', count=8)
