@@ -1743,7 +1743,7 @@ test(
             {
                 detail: {
                     ready: false,
-                    server: {shellVersion: "driver-mobile-shell-v114"},
+                    server: {shellVersion: "driver-mobile-shell-v115"},
                 },
             }
         ));
@@ -1760,9 +1760,9 @@ test(
     async () => {
         const runtime = createRolePwaRuntime({
             roleCode: "driver",
-            shellVersion: "driver-mobile-shell-v114",
+            shellVersion: "driver-mobile-shell-v115",
             activeShellVersion: "driver-mobile-shell-v112",
-            nextShellVersion: "driver-mobile-shell-v114",
+            nextShellVersion: "driver-mobile-shell-v115",
             hasWaitingWorker: true,
         });
         const updateBadge = runtime.addNode(
@@ -1800,7 +1800,7 @@ test(
             new ElementStub("button")
         );
 
-        executeDriverPwaBinding(runtime, "driver-mobile-shell-v114");
+        executeDriverPwaBinding(runtime, "driver-mobile-shell-v115");
         await flushPromises(24);
         assert.equal(
             updateBadge.hidden,
@@ -1827,7 +1827,7 @@ test(
     async () => {
         const runtime = createRolePwaRuntime({
             roleCode: "driver",
-            shellVersion: "driver-mobile-shell-v114",
+            shellVersion: "driver-mobile-shell-v115",
             activeShellVersion: "driver-mobile-shell-v111",
             nextShellVersion: "driver-mobile-shell-v112",
             hasWaitingWorker: true,
@@ -1867,7 +1867,7 @@ test(
             new ElementStub("button")
         );
 
-        executeDriverPwaBinding(runtime, "driver-mobile-shell-v114");
+        executeDriverPwaBinding(runtime, "driver-mobile-shell-v115");
         await flushPromises(24);
         assert.equal(
             updateBadge.hidden,
@@ -1882,9 +1882,9 @@ test(
     async () => {
         const runtime = createRolePwaRuntime({
             roleCode: "driver",
-            shellVersion: "driver-mobile-shell-v114",
+            shellVersion: "driver-mobile-shell-v115",
             activeShellVersion: "driver-mobile-shell-v112",
-            nextShellVersion: "driver-mobile-shell-v114",
+            nextShellVersion: "driver-mobile-shell-v115",
             hasWaitingWorker: true,
             deferWaitingVersion: true,
         });
@@ -1923,10 +1923,10 @@ test(
             new ElementStub("button")
         );
 
-        executeDriverPwaBinding(runtime, "driver-mobile-shell-v114");
+        executeDriverPwaBinding(runtime, "driver-mobile-shell-v115");
         await flushPromises(12);
         runtime.promoteWaitingWorker();
-        executeDriverPwaBinding(runtime, "driver-mobile-shell-v114");
+        executeDriverPwaBinding(runtime, "driver-mobile-shell-v115");
         runtime.resolveWaitingVersion();
         await flushPromises(24);
 

@@ -185,7 +185,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, reverse('driver_manifest'))
         self.assertContains(response, 'rel="manifest"')
         self.assertContains(response, '/driver-sw.js')
-        self.assertContains(response, 'driver-mobile-shell-v114')
+        self.assertContains(response, 'driver-mobile-shell-v115')
         self.assertContains(response, 'data-driver-pwa-update-modal')
         self.assertContains(response, 'data-driver-pwa-update-badge')
         self.assertContains(
@@ -334,12 +334,14 @@ class AccessLoginTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Service-Worker-Allowed'], '/driver/')
-        self.assertIn('driver-mobile-shell-v114', script)
+        self.assertIn('driver-mobile-shell-v115', script)
         self.assertIn('/driver/', script)
         self.assertIn('/driver/shift/', script)
         self.assertIn('/driver.webmanifest', script)
         self.assertIn('/static/css/app.css', script)
         self.assertIn('/static/js/role-readonly.js', script)
+        self.assertNotIn('/static/img/equipment/truck-green.png', script)
+        self.assertNotIn('/static/img/equipment/excavator-green.png', script)
         self.assertNotIn('ignoreSearch: true', script)
         self.assertIn('networkFirstStatic(request)', script)
         self.assertIn('GET_VERSION', script)
@@ -2620,7 +2622,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(driver_shift_response, 'ККД')
         self.assertContains(driver_shift_response, 'window.applyOperationalStateRefresh')
         self.assertContains(driver_shift_response, 'data-realtime-mode="custom"')
-        self.assertContains(driver_shift_response, 'driver-mobile-shell-v114')
+        self.assertContains(driver_shift_response, 'driver-mobile-shell-v115')
 
     def test_driver_downtime_buttons_are_rendered_from_server_reference(self):
         truck = self.create_registered_driver_shift()

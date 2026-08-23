@@ -214,7 +214,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v114'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v115'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -270,8 +270,6 @@ const CORE_ASSETS = [
   "/static/js/realtime-client.js",
   "/static/js/role-readonly.js",
     "/static/favicon.ico",
-    "/static/img/equipment/truck-green.png",
-    "/static/img/equipment/excavator-green.png",
     "/static/img/pwa/driver-180.png",
     "/static/img/pwa/driver-192.png",
     "/static/img/pwa/driver-512.png",

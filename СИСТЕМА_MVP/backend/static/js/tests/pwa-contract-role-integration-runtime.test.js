@@ -357,7 +357,7 @@ function createIntegratedRuntime(options = {}) {
     window.AppPwaContractGuard.registerJavaScript("contract-v2");
     window.AppPwaContractGuard.acceptServerContract({
         app_contract_version: "contract-v2",
-        role_shell_version: "driver-mobile-shell-v114",
+        role_shell_version: "driver-mobile-shell-v115",
         role_app_code: "driver",
     });
 

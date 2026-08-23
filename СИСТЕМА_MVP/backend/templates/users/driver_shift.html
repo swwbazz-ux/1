@@ -2918,7 +2918,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
 {% endblock %}
 
 {% block body %}
-<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-current-truck-id="{% if current_truck %}{{ current_truck.id }}{% endif %}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v114' }}">
+<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-current-truck-id="{% if current_truck %}{{ current_truck.id }}{% endif %}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v115' }}">
     {% if messages %}
         <div class="driver-messages">
             {% for message in messages %}
@@ -4708,7 +4708,7 @@ window.bindDriverMobileShell = function () {
         var runtime = window.__driverPwaUpdateRuntime;
         var currentShellVersion = runtime && runtime.currentShellVersion
             ? runtime.currentShellVersion
-            : shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v114' }}";
+            : shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v115' }}";
         var updateModal = document.querySelector("[data-driver-pwa-update-modal]");
         var updateBadge = document.querySelector("[data-driver-pwa-update-badge]");
         var updateTarget = document.querySelector("[data-driver-pwa-update-nav-target]");
