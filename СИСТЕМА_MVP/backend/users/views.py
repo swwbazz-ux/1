@@ -139,7 +139,7 @@ ROLE_INTERFACE_NAMES = {
 
 ADMIN_PERSONNEL_POSITION_GROUPS = {
     'group:dispatchers': {
-        'label': 'Все диспетчеры',
+        'label': 'Диспетчеры',
         'position_codes': ('position_012', 'position_014'),
     },
 }

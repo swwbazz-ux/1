@@ -6,7 +6,7 @@
 {% block extra_head %}
 <link rel="stylesheet" href="{% static 'css/oup-workplace-v1.css' %}?v=20260718-4">
 <link rel="stylesheet" href="{% static 'css/oup-responsive-layout-v2.css' %}?v=20260718-2">
-<link rel="stylesheet" href="{% static 'css/admin-employee-filters-v1.css' %}?v=20260823-2">
+<link rel="stylesheet" href="{% static 'css/admin-employee-filters-v1.css' %}?v=20260823-3">
 {% endblock %}
 
 {% block body %}
@@ -48,38 +48,33 @@
         <div class="message success">{{ message }}</div>
     {% endfor %}
 
-    <section class="oup-register-card admin-employees-register" data-admin-employee-register>
-        <div class="admin-section-title employee-list-toolbar oup-register-toolbar">
+    <section class="employees-control-card">
+        <div class="admin-section-title employee-list-toolbar">
             <div>
-                <h2>Справочник сотрудников</h2>
-                <p>Одна строка — один сотрудник. Нажмите строку, чтобы открыть ту же кадровую карточку, что используется в ОУП.</p>
+                <h2>Поиск и управление</h2>
+                <p>Фильтры применяются сразу. Создание и выгрузка вынесены в рабочие действия.</p>
             </div>
             <div class="employee-list-actions">
-                <span class="admin-chip" data-employee-count>{{ employees|length }} найдено</span>
                 <a class="admin-button admin-button-primary" href="{% url 'system_admin_employee_create' %}">Создать сотрудника</a>
                 <a class="admin-button admin-button-secondary" href="{% url 'system_admin_employee_export' %}">Excel</a>
             </div>
         </div>
 
-        <form method="get" class="employee-list-filters oup-filter-bar employees-filter-bar" data-employee-filter-form>
+        <form method="get" class="employee-list-filters employees-filter-bar" data-employee-filter-form>
             <div class="field admin-search-field">
-                <label for="employee-search">Поиск</label>
-                <input id="employee-search" name="q" value="{{ query }}" placeholder="ФИО, табельный номер, телефон" autocomplete="off" data-auto-filter-search>
+                <label for="employee-search">Поиск по ФИО</label>
+                <input id="employee-search" name="q" value="{{ query }}" placeholder="Введите ФИО" autocomplete="off" data-auto-filter-search>
             </div>
-            <div class="field select-field employee-position-filter">
+            <div class="field select-field">
                 <label for="employee-personnel-position">Кадровая должность</label>
                 <select id="employee-personnel-position" name="personnel_position">
                     <option value="">Все должности</option>
-                    <optgroup label="Группы должностей">
-                        {% for value, label in personnel_position_groups %}
-                            <option value="{{ value }}" {% if selected_personnel_position == value %}selected{% endif %}>{{ label }}</option>
-                        {% endfor %}
-                    </optgroup>
-                    <optgroup label="Точные должности">
-                        {% for position in personnel_positions %}
-                            <option value="{{ position.id }}" {% if selected_personnel_position == position.id|stringformat:"s" %}selected{% endif %}>{{ position.name }}</option>
-                        {% endfor %}
-                    </optgroup>
+                    {% for value, label in personnel_position_groups %}
+                        <option value="{{ value }}" {% if selected_personnel_position == value %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                    {% for position in personnel_positions %}
+                        <option value="{{ position.id }}" {% if selected_personnel_position == position.id|stringformat:"s" %}selected{% endif %}>{{ position.name }}</option>
+                    {% endfor %}
                 </select>
             </div>
             <div class="field select-field">
@@ -109,10 +104,20 @@
                     {% endfor %}
                 </select>
             </div>
-            <div class="field field-submit oup-filter-actions">
+            <div class="field field-submit">
                 <a class="admin-button admin-button-secondary filter-reset-link" href="{% url 'system_admin_employees' %}" title="Сбросить все фильтры" aria-label="Сбросить все фильтры">Сбросить</a>
             </div>
         </form>
+    </section>
+
+    <section class="oup-register-card admin-employees-register" data-admin-employee-register>
+        <div class="admin-section-title section-title-row">
+            <div>
+                <h2>Список сотрудников</h2>
+                <p class="muted">Нажмите строку, чтобы открыть кадровую карточку сотрудника.</p>
+            </div>
+            <span class="admin-chip admin-chip-info" data-employee-count>{{ employees|length }} найдено</span>
+        </div>
 
         <div class="oup-register-head" aria-hidden="true">
             <span>Сотрудник</span>

@@ -1,10 +1,9 @@
 .admin-employees-shell .employees-filter-bar {
-    grid-template-columns: minmax(260px, 1.25fr) minmax(300px, 1.2fr) repeat(3, minmax(170px, .7fr)) minmax(122px, .24fr);
-    margin-bottom: 14px;
+    grid-template-columns: minmax(260px, 1.2fr) repeat(4, minmax(170px, .7fr)) minmax(122px, .22fr);
 }
 
 .admin-employees-shell .employees-page {
-    grid-template-rows: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
 }
 
 .admin-employees-shell .admin-employees-register {
@@ -56,20 +55,9 @@
     box-shadow: inset 0 -1px 0 var(--admin-yellow);
 }
 
-@media (max-width: 1500px) {
-    .admin-employees-shell .employees-filter-bar {
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-    }
-
-    .admin-employees-shell .employees-filter-bar .admin-search-field,
-    .admin-employees-shell .employees-filter-bar .employee-position-filter {
-        grid-column: span 1;
-    }
-}
-
 @media (max-width: 1023px) {
     .admin-employees-shell .employees-page {
-        grid-template-rows: auto;
+        grid-template-rows: auto auto;
     }
 
     .admin-employees-shell .admin-employees-register {
@@ -78,10 +66,6 @@
 
     .admin-employees-shell .admin-employees-register .oup-register-list {
         overflow: visible;
-    }
-
-    .admin-employees-shell .employees-filter-bar {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
     .admin-employees-shell.is-dnd-active .admin-dnd-overlay {
