@@ -4,7 +4,7 @@ from pathlib import Path
 from django.conf import settings
 from django.test import Client, SimpleTestCase, override_settings
 
-from .role_apps import READY_TRAFFIC_ROLE_CODES, ROLE_APPS_BY_CODE
+from .role_apps import READY_TRAFFIC_ROLE_CODES, ROLE_APPS_BY_CODE, STATIC_ASSET_RELEASE
 
 
 READY_ROLE_CODES = (
@@ -17,7 +17,7 @@ READY_ROLE_CODES = (
     'driver',
     'manager',
 )
-EXPECTED_RELEASE = 'ready-core-traffic-v7'
+EXPECTED_RELEASE = STATIC_ASSET_RELEASE
 
 
 @override_settings(ALLOWED_HOSTS=['localhost', '.localhost'])

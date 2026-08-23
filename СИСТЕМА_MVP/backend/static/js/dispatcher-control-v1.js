@@ -700,6 +700,34 @@ document.addEventListener("DOMContentLoaded", function () {
     function dispatcherNodeMarkup(node) {
         return node && typeof node.outerHTML === "string" ? node.outerHTML : "";
     }
+    function dispatcherMarkupFingerprint(markup) {
+        var value = String(markup || "");
+        var hash = 2166136261;
+        for (var index = 0; index < value.length; index += 1) {
+            hash ^= value.charCodeAt(index);
+            hash = Math.imul(hash, 16777619);
+        }
+        return (hash >>> 0).toString(16) + ":" + value.length;
+    }
+    function seedDispatcherServerFingerprint(node) {
+        if (!node) return "";
+        if (!node.__dispatcherServerFingerprint) {
+            node.__dispatcherServerFingerprint = dispatcherMarkupFingerprint(dispatcherNodeMarkup(node));
+        }
+        return node.__dispatcherServerFingerprint;
+    }
+    function seedDispatcherBoardFingerprints(boardNode) {
+        if (!boardNode) return;
+        boardNode.querySelectorAll(
+            ".dispatcher-equipment-tile, .dispatcher-complex-card[data-zone-id], .dispatcher-truck-tile[data-equipment-id]"
+        ).forEach(seedDispatcherServerFingerprint);
+    }
+    function dispatcherServerMarkupMatches(currentNode, freshNode) {
+        var currentFingerprint = seedDispatcherServerFingerprint(currentNode);
+        var freshFingerprint = dispatcherMarkupFingerprint(dispatcherNodeMarkup(freshNode));
+        freshNode.__dispatcherServerFingerprint = freshFingerprint;
+        return currentFingerprint === freshFingerprint;
+    }
     function syncDispatcherNodeAttributes(currentNode, freshNode) {
         if (!currentNode || !freshNode) return false;
         Array.prototype.slice.call(currentNode.attributes || []).forEach(function (attribute) {
@@ -712,35 +740,34 @@ document.addEventListener("DOMContentLoaded", function () {
         });
         return true;
     }
-    function dispatcherItemKey(node, keyName) {
-        if (!node || !node.dataset) return "";
-        return String(node.dataset[keyName] || "");
+    function dispatcherItemKey(node, keyName, index) {
+        if (!node || !node.dataset) return "__position:" + index;
+        return String(node.dataset[keyName] || "__position:" + index);
     }
     function reconcileDispatcherKeyedRegion(currentBoard, freshBoard, definition) {
         var currentRegion = currentBoard.querySelector(definition.region);
         var freshRegion = freshBoard.querySelector(definition.region);
         if (!currentRegion || !freshRegion) return false;
-        if (dispatcherNodeMarkup(currentRegion) === dispatcherNodeMarkup(freshRegion)) return true;
-
         var currentItems = Array.prototype.slice.call(currentRegion.querySelectorAll(definition.items));
         var freshItems = Array.prototype.slice.call(freshRegion.querySelectorAll(definition.items));
-        var currentKeys = currentItems.map(function (node) {
-            return dispatcherItemKey(node, definition.key);
+        var currentKeys = currentItems.map(function (node, index) {
+            return dispatcherItemKey(node, definition.key, index);
         });
-        var freshKeys = freshItems.map(function (node) {
-            return dispatcherItemKey(node, definition.key);
+        var freshKeys = freshItems.map(function (node, index) {
+            return dispatcherItemKey(node, definition.key, index);
         });
         var keysMatch = currentKeys.length === freshKeys.length
             && currentKeys.every(function (key, index) {
-                return !!key && key === freshKeys[index];
+                return key === freshKeys[index];
             });
         if (!keysMatch) {
+            seedDispatcherBoardFingerprints(freshRegion);
             currentRegion.replaceWith(freshRegion);
             return true;
         }
         currentItems.forEach(function (currentItem, index) {
             var freshItem = freshItems[index];
-            if (dispatcherNodeMarkup(currentItem) !== dispatcherNodeMarkup(freshItem)) {
+            if (!dispatcherServerMarkupMatches(currentItem, freshItem)) {
                 currentItem.replaceWith(freshItem);
             }
         });
@@ -752,7 +779,7 @@ document.addEventListener("DOMContentLoaded", function () {
         var regions = [
             {
                 region: ".dispatcher-excavators",
-                items: ".dispatcher-equipment-tile[data-equipment-id]",
+                items: ".dispatcher-equipment-tile",
                 key: "equipmentId"
             },
             {
@@ -773,9 +800,6 @@ document.addEventListener("DOMContentLoaded", function () {
                 && freshBoard.querySelector(definition.region);
         });
         if (!completeContract) return null;
-        if (dispatcherNodeMarkup(currentTopbar) !== dispatcherNodeMarkup(freshTopbar)) {
-            currentTopbar.replaceWith(freshTopbar);
-        }
         var reconciled = regions.every(function (definition) {
             return reconcileDispatcherKeyedRegion(currentBoard, freshBoard, definition);
         });
@@ -809,8 +833,11 @@ document.addEventListener("DOMContentLoaded", function () {
                     equipmentCards = {};
                 }
             }
-            var refreshedBoard = reconcileDispatcherDesktopBoard(currentBoard, freshBoard);
+            var refreshedBoard = options.forceFullBoard
+                ? null
+                : reconcileDispatcherDesktopBoard(currentBoard, freshBoard);
             if (!refreshedBoard) {
+                seedDispatcherBoardFingerprints(freshBoard);
                 currentBoard.replaceWith(freshBoard);
                 refreshedBoard = freshBoard;
             }
@@ -839,7 +866,7 @@ document.addEventListener("DOMContentLoaded", function () {
         var currentStoredVersion = miningMasterRealtimeLastVersion || readMiningMasterRealtimeVersion();
         var versionGap = targetVersion && currentStoredVersion ? targetVersion - currentStoredVersion : 0;
         if (context && context.eventsTruncated || versionGap > dispatcherRealtimeHardLagLimit) {
-            return refreshDispatcherDesktopBoardFromServer({ version: targetVersion }).then(function (applied) {
+            return refreshDispatcherDesktopBoardFromServer({ version: targetVersion, forceFullBoard: true }).then(function (applied) {
                 if (!applied) return { deferred: true, reason: "dispatcher_refresh_failed" };
                 storeMiningMasterRealtimeVersion(targetVersion);
                 return { applied: true };
@@ -5278,6 +5305,7 @@ document.addEventListener("DOMContentLoaded", function () {
         document.querySelectorAll("[data-dispatcher-drop='excavator-garage']").forEach(bindDispatcherExcavatorGarageDrop);
         document.querySelectorAll("[data-dispatcher-drop='truck-garage']").forEach(bindDispatcherTruckGarageDrop);
     }
+    seedDispatcherBoardFingerprints(document.querySelector(".dispatcher-board"));
     bindDispatcherDesktopInteractions();
     window.addEventListener("resize", refreshAllComplexTruckRacks);
 });

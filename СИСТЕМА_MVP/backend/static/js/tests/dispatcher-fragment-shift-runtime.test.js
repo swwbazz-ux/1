@@ -310,8 +310,12 @@ test("dispatcher fragment reconciliation is keyed by equipment and complex ident
 test("one changed truck replaces only that keyed tile", () => {
     const helperNames = [
         "function dispatcherNodeMarkup(node)",
+        "function dispatcherMarkupFingerprint(markup)",
+        "function seedDispatcherServerFingerprint(node)",
+        "function seedDispatcherBoardFingerprints(boardNode)",
+        "function dispatcherServerMarkupMatches(currentNode, freshNode)",
         "function syncDispatcherNodeAttributes(currentNode, freshNode)",
-        "function dispatcherItemKey(node, keyName)",
+        "function dispatcherItemKey(node, keyName, index)",
         "function reconcileDispatcherKeyedRegion(currentBoard, freshBoard, definition)",
         "function reconcileDispatcherDesktopBoard(currentBoard, freshBoard)",
     ];
@@ -335,7 +339,7 @@ test("one changed truck replaces only that keyed tile", () => {
         };
     }
     const definitions = [
-        [".dispatcher-excavators", ".dispatcher-equipment-tile[data-equipment-id]", "equipmentId", "7"],
+        [".dispatcher-excavators", ".dispatcher-equipment-tile", "equipmentId", "7"],
         [".dispatcher-zone-grid", ".dispatcher-complex-card[data-zone-id]", "zoneId", "2"],
         [".dispatcher-trucks", ".dispatcher-truck-tile[data-equipment-id]", "equipmentId", "15"],
     ];
@@ -361,8 +365,14 @@ test("one changed truck replaces only that keyed tile", () => {
         freshBoard.children[regionSelector] = freshRegion;
         if (regionSelector === ".dispatcher-trucks") changedTruck = currentItem;
     });
-    const context = {Array};
+    const context = {Array, Math};
     vm.runInNewContext(helpers, context);
+
+    definitions.forEach(([regionSelector, itemSelector]) => {
+        const currentItem = currentBoard.children[regionSelector].lists[itemSelector][0];
+        context.seedDispatcherServerFingerprint(currentItem);
+        currentItem.outerHTML += "-runtime-mutated";
+    });
 
     const result = context.reconcileDispatcherDesktopBoard(currentBoard, freshBoard);
 
@@ -370,4 +380,9 @@ test("one changed truck replaces only that keyed tile", () => {
     assert.equal(changedTruck.replacements.length, 1);
     assert.equal(currentBoard.replacements.length, 0);
     assert.equal(currentBoard.children[".dispatcher-topbar"].replacements.length, 0);
+    assert.equal(
+        currentBoard.children[".dispatcher-excavators"].lists[".dispatcher-equipment-tile"][0].replacements.length,
+        0,
+        "runtime-only DOM mutations must not replace an unchanged excavator tile"
+    );
 });
