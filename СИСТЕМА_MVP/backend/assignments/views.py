@@ -76,7 +76,7 @@ MINING_MASTER_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "mining_master";
 const CACHE_PREFIX = "mining-master-mobile-shell-";
-const CACHE_NAME = "mining-master-mobile-shell-v120";
+const CACHE_NAME = "mining-master-mobile-shell-v121";
 const APP_SHELL_URL = "/mining-master/assignments/";
 const LOGIN_URL = "/";
 const MANIFEST_URL = "/mining-master-manifest.webmanifest";
@@ -88,6 +88,7 @@ const CORE_ASSETS = [
   MANIFEST_URL,
   "/static/js/realtime-client.js",
   "/static/js/role-readonly.js",
+  "/static/js/role-app-install-v1.js",
   "/static/css/app.css",
   "/static/favicon.ico",
   "/static/img/pwa/mining-master-180.png",

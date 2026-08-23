@@ -160,7 +160,8 @@ class AppCatalogTests(SimpleTestCase):
         shared_response = Client().get('/', HTTP_HOST='localhost')
 
         self.assertContains(role_response, 'data-role-app-install')
-        self.assertContains(role_response, '/static/js/role-app-install-v1.js')
+        self.assertContains(role_response, '/static/css/role-app-install-v1.css?v=2')
+        self.assertContains(role_response, '/static/js/role-app-install-v1.js?v=2')
         self.assertContains(role_response, 'Установить приложение')
         self.assertNotContains(shared_response, 'data-role-app-install')
         self.assertContains(role_response, 'href="http://localhost/apps/"')

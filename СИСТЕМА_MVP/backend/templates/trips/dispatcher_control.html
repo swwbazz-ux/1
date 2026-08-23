@@ -18,6 +18,7 @@
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
         <meta name="apple-mobile-web-app-title" content="Горный мастер">
         <link rel="apple-touch-icon" href="{% static 'img/pwa/mining-master-180.png' %}">
+        <script src="{% static 'js/role-app-install-v1.js' %}?v=2" defer></script>
     {% else %}
         <link rel="manifest" href="{% url 'dispatcher_manifest' %}">
         <meta name="theme-color" content="#B33A4C">
@@ -178,7 +179,7 @@
                 <div class="mm-mobile-plan-ring" style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" role="img" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%">
                     {{ dispatcher_dashboard.completion_percent|default:0 }}%
                 </div>
-                <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v118</span>
+                <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v121</span>
             </div>
         </header>
 
@@ -261,7 +262,7 @@
                     <div class="mm-mobile-plan-ring" style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" role="img" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%">
                         {{ dispatcher_dashboard.completion_percent|default:0 }}%
                     </div>
-                    <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v118</span>
+                    <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v121</span>
                 </div>
             </header>
 
@@ -315,7 +316,7 @@
                     <div class="mm-mobile-plan-ring" style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" role="img" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%">
                         {{ dispatcher_dashboard.completion_percent|default:0 }}%
                     </div>
-                    <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v118</span>
+                    <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v121</span>
                 </div>
             </header>
 
@@ -368,7 +369,7 @@
                     <div class="mm-mobile-plan-ring" style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" role="img" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%">
                         {{ dispatcher_dashboard.completion_percent|default:0 }}%
                     </div>
-                    <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v118</span>
+                    <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v121</span>
                 </div>
             </header>
 
@@ -431,7 +432,7 @@
 
             <div class="mm-mobile-version-strip" aria-label="Версия приложения">
                 <span>Версия приложения</span>
-                <strong data-mm-pwa-current-shell-version>v118</strong>
+                <strong data-mm-pwa-current-shell-version>v121</strong>
                 <button type="button" data-mm-pwa-check-update>Проверить обновления</button>
             </div>
 
@@ -468,7 +469,7 @@
                             <div class="mm-mobile-plan-ring" style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" role="img" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%">
                                 {{ dispatcher_dashboard.completion_percent|default:0 }}%
                             </div>
-                            <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v118</span>
+                            <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v121</span>
                         </div>
                     </header>
 
@@ -522,6 +523,22 @@
     </div>
 
     {% if mining_master_mobile_enabled %}
+    <div class="mm-mobile-update-modal" data-pwa-browser-mode-warning hidden>
+        <section class="mm-mobile-update-dialog" role="alertdialog" aria-modal="true" aria-labelledby="mm-yandex-pwa-title" aria-describedby="mm-yandex-pwa-text">
+            <div class="mm-mobile-update-pulse" aria-hidden="true"></div>
+            <div class="mm-mobile-update-copy">
+                <span>Режим браузера</span>
+                <h2 id="mm-yandex-pwa-title">Открыто не как приложение</h2>
+                <p id="mm-yandex-pwa-text">Яндекс Браузер запустил обычную страницу. Удалите этот ярлык, откройте адрес в Google Chrome и выберите «Установить приложение».</p>
+                <div class="mm-mobile-update-status" data-pwa-browser-warning-copy-status>После правильной установки нижней строки браузера не будет.</div>
+            </div>
+            <div class="mm-mobile-update-actions">
+                <button type="button" class="secondary" data-pwa-browser-warning-close>Пока продолжить</button>
+                <button type="button" class="primary" data-pwa-browser-warning-copy>Скопировать адрес</button>
+            </div>
+        </section>
+    </div>
+
     <div class="mm-mobile-update-modal" data-mm-pwa-update-modal hidden>
         <section class="mm-mobile-update-dialog" role="alertdialog" aria-modal="true" aria-labelledby="mm-pwa-update-title" aria-describedby="mm-pwa-update-text">
             <div class="mm-mobile-update-pulse" aria-hidden="true"></div>
@@ -934,7 +951,7 @@ document.addEventListener("DOMContentLoaded", function () {
     var dispatcherRealtimeConnected = true;
     var dispatcherRealtimeLastSuccessAt = 0;
     var dispatcherRealtimeLastReason = "";
-    var miningMasterShellVersion = "mining-master-mobile-shell-v120";
+    var miningMasterShellVersion = "mining-master-mobile-shell-v121";
     function readDispatcherSyncQueue() {
         try {
             return JSON.parse(window.localStorage.getItem(dispatcherSyncQueueKey) || "[]");

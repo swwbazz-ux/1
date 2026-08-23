@@ -65,6 +65,11 @@
     color: #84e1bc;
 }
 
+.login-page.unified-login-screen .role-app-install.is-browser-limited .role-app-install__status {
+    display: block;
+    color: #ffd998;
+}
+
 @media (prefers-reduced-motion: reduce) {
     .role-app-install__button {
         transition: none;

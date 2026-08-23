@@ -67,6 +67,66 @@ test("installer identifies standalone mode and gives platform instructions", () 
         installer.manualInstruction({ navigator: { userAgent: "Android Chrome" } }),
         /Установить приложение/
     );
+    assert.equal(installer.isAndroidYandex({
+        navigator: { userAgent: "Mozilla/5.0 (Linux; Android 14) YaBrowser/25.8.2.100 Mobile" }
+    }), true);
+    assert.match(
+        installer.manualInstruction({
+            navigator: { userAgent: "Mozilla/5.0 (Linux; Android 14) YaBrowser/25.8.2.100 Mobile" }
+        }),
+        /Google Chrome/
+    );
+});
+
+
+test("Yandex Android browser mode warning is visible only outside standalone", async () => {
+    const closeListeners = {};
+    const copyListeners = {};
+    const copyStatus = { textContent: "" };
+    const closeButton = {
+        addEventListener: (name, handler) => { closeListeners[name] = handler; }
+    };
+    const copyButton = {
+        textContent: "Скопировать адрес",
+        addEventListener: (name, handler) => { copyListeners[name] = handler; }
+    };
+    const warning = {
+        hidden: true,
+        querySelector: (selector) => ({
+            "[data-pwa-browser-warning-close]": closeButton,
+            "[data-pwa-browser-warning-copy]": copyButton,
+            "[data-pwa-browser-warning-copy-status]": copyStatus
+        }[selector] || null)
+    };
+    const copied = [];
+    const win = {
+        location: { origin: "https://mining-master.driverform.ru" },
+        navigator: {
+            userAgent: "Mozilla/5.0 (Linux; Android 14) YaBrowser/25.8.2.100 Mobile",
+            clipboard: { writeText: (value) => { copied.push(value); return Promise.resolve(); } }
+        },
+        matchMedia: () => ({ matches: false })
+    };
+    const doc = {
+        querySelector: (selector) => selector === "[data-pwa-browser-mode-warning]" ? warning : null
+    };
+
+    assert.equal(installer.initBrowserModeWarning(win, doc), true);
+    assert.equal(warning.hidden, false);
+    copyListeners.click();
+    await Promise.resolve();
+    assert.deepEqual(copied, ["https://mining-master.driverform.ru/"]);
+    assert.equal(copyButton.textContent, "Адрес скопирован");
+    assert.match(copyStatus.textContent, /Google Chrome/);
+    closeListeners.click();
+    assert.equal(warning.hidden, true);
+
+    const standaloneWin = Object.assign({}, win, {
+        matchMedia: () => ({ matches: true })
+    });
+    warning.hidden = true;
+    assert.equal(installer.initBrowserModeWarning(standaloneWin, doc), false);
+    assert.equal(warning.hidden, true);
 });
 
 
