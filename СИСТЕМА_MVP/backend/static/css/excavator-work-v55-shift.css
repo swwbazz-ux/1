@@ -3581,3 +3581,56 @@ body.excavator-operator-screen .eo-dashboard-truck-grid {
         grid-template-rows: repeat(3, minmax(0, 1fr)) !important;
     }
 }
+
+/* v129: contract recovery is visible without covering controls or bottom navigation. */
+body.excavator-operator-screen[data-app-contract-locked="true"] {
+    --eo-contract-banner-reserve: 80px;
+    --eo-fixed-nav-reserve: calc(
+        var(--eo-fixed-nav-h)
+        + var(--eo-fixed-nav-safe)
+        + var(--eo-contract-banner-reserve)
+    );
+}
+
+body.excavator-operator-screen[data-app-contract-locked="true"] .mm-mobile-bottom-nav {
+    height: calc(var(--eo-fixed-nav-h) + var(--eo-fixed-nav-safe)) !important;
+    min-height: calc(var(--eo-fixed-nav-h) + var(--eo-fixed-nav-safe)) !important;
+}
+
+body.excavator-operator-screen .app-contract-banner {
+    inset: auto 8px calc(var(--eo-fixed-nav-h) + var(--eo-fixed-nav-safe) + 4px) !important;
+    z-index: 10070 !important;
+    width: auto !important;
+    max-width: none !important;
+    min-height: 42px !important;
+    max-height: 48px !important;
+    margin: 0 !important;
+    padding: 7px 10px !important;
+    overflow: hidden !important;
+    border-radius: 6px !important;
+    display: grid !important;
+    place-items: center !important;
+    font-size: 0 !important;
+    line-height: 1 !important;
+    pointer-events: none !important;
+}
+
+body.excavator-operator-screen .app-contract-banner::before {
+    content: "Обновление приложения. Подождите несколько секунд.";
+    display: block;
+    color: inherit;
+    text-align: center;
+    font: 800 clamp(11px, 2.8vw, 13px)/1.18 system-ui, sans-serif;
+}
+
+@media (orientation: landscape) and (max-height: 500px) {
+    body.excavator-operator-screen[data-app-contract-locked="true"] {
+        --eo-contract-banner-reserve: 56px;
+    }
+
+    body.excavator-operator-screen .app-contract-banner {
+        min-height: 30px !important;
+        max-height: 34px !important;
+        padding-block: 4px !important;
+    }
+}
