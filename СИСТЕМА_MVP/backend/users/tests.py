@@ -605,7 +605,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(position_response, '>Диспетчеры<', html=False)
         self.assertNotContains(position_response, '<optgroup', html=False)
         self.assertContains(position_response, 'css/oup-workplace-v1.css?v=20260718-4')
-        self.assertContains(position_response, 'css/admin-employee-filters-v1.css?v=20260823-3')
+        self.assertContains(position_response, 'css/admin-employee-filters-v1.css?v=20260824-1')
         self.assertContains(position_response, 'class="oup-employee-row admin-oup-employee-row status-active"')
         self.assertContains(position_response, 'Горный диспетчер')
         self.assertNotContains(position_response, 'Роль не назначена')

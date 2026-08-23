@@ -1,9 +1,12 @@
 .admin-employees-shell .employees-filter-bar {
-    grid-template-columns: minmax(260px, 1.2fr) repeat(4, minmax(170px, .7fr)) minmax(122px, .22fr);
+    grid-template-columns: minmax(0, 1.25fr) repeat(4, minmax(0, .72fr)) minmax(0, .52fr);
+    gap: clamp(8px, .7vw, 12px);
 }
 
 .admin-employees-shell .employees-page {
     grid-template-rows: auto minmax(0, 1fr);
+    width: calc(100% - clamp(16px, 2vw, 32px));
+    gap: clamp(8px, 1vw, 12px);
 }
 
 .admin-employees-shell .admin-employees-register {
@@ -20,6 +23,7 @@
 }
 
 .admin-employees-shell .admin-oup-employee-row {
+    min-width: 0;
     cursor: pointer;
 }
 
@@ -55,7 +59,38 @@
     box-shadow: inset 0 -1px 0 var(--admin-yellow);
 }
 
+@media (max-width: 1180px) {
+    .admin-employees-shell .employees-filter-bar {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .admin-employees-shell .employee-list-toolbar {
+        gap: clamp(10px, 2vw, 16px);
+    }
+
+    .admin-employees-shell .employee-list-toolbar > div,
+    .admin-employees-shell .employee-list-actions,
+    .admin-employees-shell .employee-list-actions .admin-button {
+        min-width: 0;
+    }
+}
+
 @media (max-width: 1023px) {
+    .admin-employees-shell {
+        --admin-interface-scale: 1;
+        width: 100%;
+        min-height: 100dvh;
+        overflow-x: hidden;
+        zoom: 1;
+    }
+
+    @supports not (zoom: 1) {
+        .admin-employees-shell {
+            width: 100%;
+            transform: none;
+        }
+    }
+
     .admin-employees-shell .employees-page {
         grid-template-rows: auto auto;
     }
@@ -66,6 +101,11 @@
 
     .admin-employees-shell .admin-employees-register .oup-register-list {
         overflow: visible;
+    }
+
+    .admin-employees-shell .oup-register-card {
+        max-width: 100%;
+        overflow-x: hidden;
     }
 
     .admin-employees-shell.is-dnd-active .admin-dnd-overlay {
@@ -80,12 +120,157 @@
 }
 
 @media (max-width: 720px) {
+    body.system-admin-employees-screen {
+        overflow-x: hidden;
+    }
+
+    .admin-employees-shell .admin-console-header {
+        width: 100%;
+    }
+
+    .admin-employees-shell .admin-console-identity,
+    .admin-employees-shell .admin-console-main,
+    .admin-employees-shell .admin-console-actions {
+        padding: clamp(10px, 3vw, 14px);
+    }
+
+    .admin-employees-shell .admin-console-identity {
+        grid-template-columns: clamp(44px, 13vw, 52px) minmax(0, 1fr);
+        gap: clamp(10px, 3vw, 14px);
+    }
+
+    .admin-employees-shell .admin-console-avatar {
+        width: 100%;
+        height: auto;
+        aspect-ratio: 1;
+    }
+
+    .admin-employees-shell .admin-console-identity strong,
+    .admin-employees-shell .admin-console-identity em {
+        white-space: normal;
+    }
+
+    .admin-employees-shell .admin-console-identity strong {
+        font-size: clamp(16px, 5vw, 20px);
+        line-height: 1.1;
+    }
+
+    .admin-employees-shell .admin-console-main {
+        gap: clamp(10px, 3vw, 14px);
+    }
+
+    .admin-employees-shell .admin-console-title h1 {
+        font-size: clamp(30px, 10vw, 42px);
+        line-height: 1;
+        overflow-wrap: normal;
+        word-break: normal;
+    }
+
+    .admin-employees-shell .admin-console-title p {
+        max-width: none;
+        font-size: clamp(12px, 3.5vw, 14px);
+    }
+
+    .admin-employees-shell .admin-console-nav {
+        display: flex;
+        flex-wrap: nowrap;
+        gap: clamp(6px, 2vw, 10px);
+        max-width: 100%;
+        padding-bottom: 4px;
+        overflow-x: auto;
+        overscroll-behavior-inline: contain;
+        scrollbar-width: thin;
+    }
+
+    .admin-employees-shell .admin-console-nav a {
+        flex: 0 0 auto;
+        width: auto;
+        min-width: max-content;
+        padding-inline: clamp(12px, 4vw, 18px);
+    }
+
+    .admin-employees-shell .admin-console-actions {
+        grid-template-columns: minmax(44px, .22fr) repeat(2, minmax(0, 1fr));
+        gap: clamp(8px, 2.5vw, 12px);
+    }
+
+    .admin-employees-shell .admin-console-actions .admin-theme-button {
+        width: 100%;
+        min-width: 44px;
+    }
+
+    .admin-employees-shell .employees-page {
+        width: calc(100% - clamp(12px, 4vw, 20px));
+        padding-block: clamp(8px, 2.5vw, 12px);
+    }
+
+    .admin-employees-shell .employees-control-card,
+    .admin-employees-shell .admin-employees-register {
+        max-width: 100%;
+        padding: clamp(10px, 3.5vw, 14px);
+    }
+
+    .admin-employees-shell .employee-list-toolbar {
+        grid-template-columns: minmax(0, 1fr);
+        gap: clamp(10px, 3vw, 14px);
+    }
+
+    .admin-employees-shell .employee-list-toolbar h2,
+    .admin-employees-shell .employee-list-toolbar p {
+        max-width: 100%;
+        overflow-wrap: normal;
+        word-break: normal;
+    }
+
+    .admin-employees-shell .employee-list-actions {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        width: 100%;
+        gap: clamp(8px, 2.5vw, 12px);
+    }
+
+    .admin-employees-shell .employee-list-actions .admin-button {
+        width: 100%;
+        min-width: 0;
+        padding-inline: clamp(8px, 3vw, 14px);
+        white-space: normal;
+    }
+
     .admin-employees-shell .employees-filter-bar {
         grid-template-columns: 1fr;
+        width: 100%;
+        padding: clamp(10px, 3vw, 14px);
     }
 
     .admin-employees-shell .employees-filter-bar .admin-search-field,
     .admin-employees-shell .employees-filter-bar .employee-position-filter {
         grid-column: 1;
+    }
+
+    .admin-employees-shell .oup-register-head {
+        display: none;
+    }
+
+    .admin-employees-shell .oup-register-list {
+        min-width: 0;
+    }
+
+    .admin-employees-shell .oup-employee-row {
+        grid-template-columns: minmax(0, 1fr) auto;
+        min-width: 0;
+        max-width: 100%;
+    }
+
+    .admin-employees-shell .oup-person-cell,
+    .admin-employees-shell .oup-work-cell,
+    .admin-employees-shell .oup-contact-cell,
+    .admin-employees-shell .oup-state-cell {
+        min-width: 0;
+    }
+
+    .admin-employees-shell .oup-work-cell,
+    .admin-employees-shell .oup-contact-cell,
+    .admin-employees-shell .oup-state-cell {
+        padding-left: clamp(48px, 15vw, 60px);
     }
 }
