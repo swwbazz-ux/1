@@ -7,8 +7,8 @@
     <meta name="theme-color" content="#0b1722">
     <title>Рабочие приложения · Коппер Рисорсез</title>
     <link rel="icon" href="{% static 'favicon.ico' %}">
-    <link rel="stylesheet" href="{% static 'css/app-catalog-v1.css' %}?v=5">
-    <script src="{% static 'js/app-catalog-v1.js' %}?v=5" defer></script>
+    <link rel="stylesheet" href="{% static 'css/app-catalog-v1.css' %}?v=6">
+    <script src="{% static 'js/app-catalog-v1.js' %}?v=6" defer></script>
 </head>
 <body class="app-catalog-page">
 <main class="app-catalog-shell">
@@ -64,7 +64,7 @@
     </footer>
 </main>
 
-<dialog id="connect" class="app-catalog-dialog" data-app-dialog aria-labelledby="app-dialog-title"{% if selected_app %} open{% endif %}>
+<dialog id="connect" class="app-catalog-dialog{% if selected_app %} app-catalog-dialog--server-open{% endif %}" data-app-dialog aria-labelledby="app-dialog-title"{% if selected_app %} open{% endif %}>
     <a class="app-catalog-dialog__close" href="{% url 'app_catalog' %}" data-dialog-close aria-label="Закрыть">×</a>
     <div class="app-catalog-dialog__content">
         <div class="app-catalog-dialog__qr-wrap">

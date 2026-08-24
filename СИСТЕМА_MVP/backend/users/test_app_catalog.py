@@ -56,8 +56,8 @@ class AppCatalogTests(SimpleTestCase):
         self.assertNotContains(response, 'демо-код')
         self.assertNotContains(response, 'rel="manifest"')
         self.assertNotContains(response, 'serviceWorker.register')
-        self.assertContains(response, '/static/css/app-catalog-v1.css?v=5')
-        self.assertContains(response, '/static/js/app-catalog-v1.js?v=5')
+        self.assertContains(response, '/static/css/app-catalog-v1.css?v=6')
+        self.assertContains(response, '/static/js/app-catalog-v1.js?v=6')
         self.assertContains(response, 'data-share-link')
         self.assertContains(response, 'Отправить ссылку')
         self.assertContains(response, 'Подключить', count=8)
@@ -72,6 +72,7 @@ class AppCatalogTests(SimpleTestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.context['selected_app']['role_code'], 'mining_master')
+        self.assertContains(response, 'app-catalog-dialog--server-open')
         self.assertContains(response, 'data-app-dialog aria-labelledby="app-dialog-title" open')
         self.assertContains(response, 'QR-код для приложения «Горный мастер»')
         self.assertContains(response, 'value="https://mining-master.driverform.ru/"')
