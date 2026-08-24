@@ -407,6 +407,7 @@ class AccessLoginTests(TestCase):
         response_with_photo = self.client.get('/system-admin/', HTTP_HOST='localhost')
 
         self.assertContains(response_with_photo, 'src="/media/employee_photos/admin-avatar.jpg"')
+        self.assertContains(response_with_photo, '-admin-header-avatar-v1')
 
         admin_employee.photo = ''
         admin_employee.save(update_fields=['photo'])
