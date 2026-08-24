@@ -360,7 +360,7 @@ class UnifiedEmployeeCardTests(TestCase):
     def test_shared_employee_card_shells_use_new_cache_versions(self):
         expected_versions = {
             'system_admin_service_worker': 'system-admin-shell-v19',
-            'oup_service_worker': 'oup-shell-v21',
+            'oup_service_worker': 'oup-shell-v22',
         }
 
         for view_name, expected_version in expected_versions.items():

@@ -555,6 +555,24 @@ class OupWorkplaceTests(TestCase):
         self.assertNotContains(response, 'Дневная смена')
         self.assertNotContains(response, 'Начать дневную смену')
 
+    def test_employee_register_defers_photo_loading_until_scroll(self):
+        Employee.objects.create(
+            full_name='Сотрудник с фотографией',
+            photo='employees/photo-for-lazy-load.jpg',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+
+        response = self.client.get(reverse('oup_employees'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            'src="/media/employees/photo-for-lazy-load.jpg" alt="" '
+            'loading="lazy" decoding="async"',
+            html=False,
+        )
+
     def test_owned_oup_period_has_one_finish_editing_action(self):
         self.start_shift()
 
