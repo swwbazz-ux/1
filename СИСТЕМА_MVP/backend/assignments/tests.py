@@ -123,6 +123,22 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertNotContains(response, 'data-mm-panel')
         self.assertContains(response, '/static/css/app.css')
         self.assertNotContains(response, '/static/css/dispatcher-control-v1.css')
+        self.assertContains(response, '/static/img/equipment/excavator-gray.png')
+        self.assertContains(response, '/static/img/equipment/truck-gray.png')
+        for colored_icon in (
+            'excavator-green.png',
+            'excavator-yellow.png',
+            'excavator-blue.png',
+            'excavator-red.png',
+            'truck-green.png',
+            'truck-yellow.png',
+            'truck-blue.png',
+            'truck-red.png',
+        ):
+            self.assertNotContains(
+                response,
+                f'src="/static/img/equipment/{colored_icon}"',
+            )
         self.assertEqual(len(response.context['dispatcher_dashboard']['complex_zones']), 9)
 
     def test_mining_master_truck_plan_overrun_uses_progress_cycle_contract(self):
@@ -363,7 +379,7 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertContains(response, 'syncMiningMasterPwaContractState')
         self.assertContains(response, 'requestManualUpdate')
         self.assertContains(response, 'Установлена последняя версия приложения')
-        self.assertContains(response, 'mining-master-mobile-shell-v121')
+        self.assertContains(response, 'mining-master-mobile-shell-v122')
         self.assertNotContains(response, '>v116<')
         self.assertContains(response, 'function hasMiningMasterRelevantEvents')
         self.assertContains(response, 'return Array.isArray(events) && events.length > 0;')
@@ -407,7 +423,7 @@ class MiningMasterAssignmentsViewTests(TestCase):
         script = response.content.decode('utf-8')
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn('mining-master-mobile-shell-v121', script)
+        self.assertIn('mining-master-mobile-shell-v122', script)
         self.assertEqual(response['Service-Worker-Allowed'], '/mining-master/')
         self.assertIn('const CACHE_PREFIX = "mining-master-mobile-shell-";', script)
         self.assertIn('key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME', script)
@@ -423,6 +439,19 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertIn('networkOnly(request)', script)
         self.assertIn('/static/img/pwa/mining-master-192.png', script)
         self.assertIn('/static/img/pwa/mining-master-maskable-512.png', script)
+        self.assertIn('/static/img/equipment/excavator-gray.png', script)
+        self.assertIn('/static/img/equipment/truck-gray.png', script)
+        for colored_icon in (
+            'excavator-green.png',
+            'excavator-yellow.png',
+            'excavator-blue.png',
+            'excavator-red.png',
+            'truck-green.png',
+            'truck-yellow.png',
+            'truck-blue.png',
+            'truck-red.png',
+        ):
+            self.assertNotIn(colored_icon, script)
         self.assertIn('SKIP_WAITING', script)
         self.assertIn('GET_VERSION', script)
 

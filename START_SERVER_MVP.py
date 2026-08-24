@@ -7,7 +7,14 @@ from pathlib import Path
 
 
 HOST = "127.0.0.1"
-PORT = "8000"
+ALLOWED_PORTS = {"8000", "8002"}
+
+
+def selected_port() -> str:
+    port = os.getenv("DJANGO_RUNSERVER_PORT", "8000").strip()
+    if port not in ALLOWED_PORTS:
+        raise RuntimeError("Only the standard port 8000 or isolated QA port 8002 is allowed.")
+    return port
 
 
 def write_log(path: Path, message: str) -> None:
@@ -24,6 +31,7 @@ def find_mvp_dir(project_root: Path) -> Path:
 
 
 def main() -> int:
+    port = selected_port()
     project_root = Path(__file__).resolve().parent
     mvp_dir = find_mvp_dir(project_root)
     backend = mvp_dir / "backend"
@@ -40,7 +48,7 @@ def main() -> int:
 
     print("")
     print("Starting MVP local server supervisor.")
-    print(f"URL: http://{HOST}:{PORT}/")
+    print(f"URL: http://{HOST}:{port}/")
     print("Keep this window open while using the site.")
     print("Stop with STOP_SERVER_MVP.bat or Ctrl+C.")
     print("")
@@ -89,7 +97,7 @@ def main() -> int:
 
         write_log(log_file, "starting django runserver")
         process = subprocess.Popen(
-            [sys.executable, "manage.py", "runserver", f"{HOST}:{PORT}", "--noreload"],
+            [sys.executable, "manage.py", "runserver", f"{HOST}:{port}", "--noreload"],
             cwd=backend,
             env=env,
         )

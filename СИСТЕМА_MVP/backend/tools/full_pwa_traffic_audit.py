@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 """Read-only traffic measurement for the ready-core role PWA applications.
 
-The script targets only a local Django server on port 8000 and uses the
+The script targets only a local Django server on the standard port 8000 or
+the isolated QA fallback port 8002 and uses the
 isolated weekly QA accounts created by ``full_week_load_qa.py``. It never
 prints or stores access codes.
 """
@@ -47,7 +48,8 @@ from shifts.models import EmployeeShift
 from users.models import EmployeeAccess
 
 
-ALLOWED_PORT = 8000
+DEFAULT_PORT = 8000
+ALLOWED_PORTS = frozenset({8000, 8002})
 ARTIFACT_ROOT_NAME = 'copper-pwa-performance-qa-20260823'
 CSRF_RE = re.compile(
     r'name=["\']csrfmiddlewaretoken["\']\s+value=["\']([^"\']+)["\']',
@@ -214,7 +216,7 @@ class MeasuredResponse:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--port", type=int, default=ALLOWED_PORT)
+    parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument("--timeout-seconds", type=float, default=12.0)
     parser.add_argument("--realtime-polls", type=int, default=12)
     parser.add_argument(
@@ -286,9 +288,9 @@ def ensure_safe_args(args: argparse.Namespace) -> Path:
 
 
 def validate_safe_args(args: argparse.Namespace) -> None:
-    if args.port != ALLOWED_PORT:
+    if args.port not in ALLOWED_PORTS:
         raise RuntimeError(
-            f"Only local port {ALLOWED_PORT} is allowed, got {args.port}."
+            f"Only local ports {sorted(ALLOWED_PORTS)} are allowed, got {args.port}."
         )
     if not 2 <= args.timeout_seconds <= 30:
         raise RuntimeError("Timeout must be between 2 and 30 seconds.")
@@ -1027,7 +1029,7 @@ def main() -> int:
             ),
             "started_at": started_at.isoformat(),
             "finished_at": datetime.now(UTC).isoformat(),
-            "target": "http://*.localhost:8000",
+            "target": f"http://*.localhost:{args.port}",
             "production_mutated": False,
             'run_id': normalized_run_id,
             'selected_role': selected_role.role,

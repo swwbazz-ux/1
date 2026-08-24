@@ -15,12 +15,26 @@ from tools.full_pwa_traffic_audit import (
     main,
     new_session,
     selected_role_credentials,
+    validate_safe_args,
     write_canonical_new_json,
 )
 from users.models import Employee, EmployeeAccess, Role
 
 
 class FullPwaTrafficProjectionRegressionTests(SimpleTestCase):
+    def test_only_standard_and_isolated_qa_ports_are_allowed(self):
+        base_args = {
+            'timeout_seconds': 12.0,
+            'realtime_polls': 12,
+            'role': 'excavator_operator',
+            'run_id': 'PWA-PERF-20260824-PORT-01',
+        }
+
+        validate_safe_args(Namespace(port=8000, **base_args))
+        validate_safe_args(Namespace(port=8002, **base_args))
+        with self.assertRaisesRegex(RuntimeError, 'Only local ports'):
+            validate_safe_args(Namespace(port=8001, **base_args))
+
     def test_projection_uses_contractual_five_and_fifteen_second_intervals(self):
         intervals = {
             role.role: role.poll_interval_seconds
