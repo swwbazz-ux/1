@@ -1,4 +1,5 @@
-from django.http import HttpResponse, JsonResponse
+from django.core.exceptions import ValidationError
+from django.http import HttpResponse, HttpResponseForbidden, JsonResponse
 from django.utils import timezone
 
 from .active_role import SAFE_ROLE_SWITCH_METHODS, role_session_state
@@ -6,6 +7,33 @@ from .session_device import (
     personal_session_expiry,
     personal_session_renew_interval_seconds,
 )
+from .live_monitor import apply_observer_mode
+
+
+class ObserverModeMiddleware:
+    unsafe_methods = {'POST', 'PUT', 'PATCH', 'DELETE'}
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        token = (
+            request.GET.get('observe', '').strip()
+            or request.headers.get('X-Observer-Token', '').strip()
+        )
+        if not token:
+            request.observer_mode = False
+            return self.get_response(request)
+        if request.method in self.unsafe_methods:
+            return HttpResponseForbidden('Режим наблюдения не разрешает изменяющие действия.')
+        try:
+            apply_observer_mode(request, token)
+        except ValidationError as error:
+            return HttpResponseForbidden('; '.join(error.messages))
+        response = self.get_response(request)
+        response['Cache-Control'] = 'private, no-store'
+        response['X-Robots-Tag'] = 'noindex, nofollow'
+        return response
 
 
 class PersonalSessionRenewalMiddleware:

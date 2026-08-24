@@ -17,7 +17,7 @@ READY_ROLE_CODES = (
     'driver',
     'manager',
 )
-EXPECTED_RELEASE = 'ready-core-traffic-v7'
+EXPECTED_RELEASE = 'ready-core-traffic-v8'
 
 
 @override_settings(ALLOWED_HOSTS=['localhost', '.localhost'])

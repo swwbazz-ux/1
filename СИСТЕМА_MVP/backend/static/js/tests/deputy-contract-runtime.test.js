@@ -623,7 +623,7 @@ function extractReleaseStaticWorkerHelper() {
         /RELEASE_STATIC_SERVICE_WORKER_JS = r"""([\s\S]*?)"""/
     );
     assert.ok(match, "RELEASE_STATIC_SERVICE_WORKER_JS was not found");
-    return match[1].replaceAll("__STATIC_ASSET_RELEASE__", "ready-core-traffic-v7");
+    return match[1].replaceAll("__STATIC_ASSET_RELEASE__", "ready-core-traffic-v8");
 }
 
 test("same release static request is fetched once and then served cache-first", async () => {
@@ -660,7 +660,7 @@ test("same release static request is fetched once and then served cache-first", 
     });
     const request = new Request(
         "https://driver.localhost/static/js/realtime-client.js"
-        + "?v=ready-core-traffic-v7"
+        + "?v=ready-core-traffic-v8"
     );
 
     const first = await context.cacheFirstReleaseStatic(request);

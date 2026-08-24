@@ -3,6 +3,7 @@ from django.contrib import admin
 from django.core.exceptions import ValidationError
 
 from .models import (
+    ActiveApplicationSession,
     AdminActionLog,
     AdminConflict,
     DriverPrimaryRegistration,
@@ -160,6 +161,26 @@ class EmployeeAccessAdmin(admin.ModelAdmin):
     list_display = ('employee', 'role', 'status', 'is_active', 'last_login_at', 'created_at', 'deactivated_at')
     search_fields = ('employee__full_name', 'role__name', 'access_code')
     list_filter = ('role', 'status', 'is_active')
+
+
+@admin.register(ActiveApplicationSession)
+class ActiveApplicationSessionAdmin(admin.ModelAdmin):
+    list_display = ('last_seen_at', 'access', 'app_code', 'path', 'device_kind')
+    search_fields = ('access__employee__full_name', 'role_code', 'app_code', 'path')
+    list_filter = ('app_code', 'role_code', 'device_kind')
+    readonly_fields = (
+        'session_key', 'access', 'role_code', 'app_code', 'path',
+        'device_kind', 'first_seen_at', 'last_seen_at',
+    )
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(DriverPrimaryRegistration)

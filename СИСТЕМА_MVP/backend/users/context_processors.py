@@ -1,4 +1,5 @@
 from .active_role import role_session_state
+from .live_monitor import observer_context
 from .role_apps import (
     APP_CONTRACT_VERSION,
     STATIC_ASSET_RELEASE,
@@ -37,6 +38,7 @@ def role_app(request):
         'role_app_isolated': app is not None,
         'role_app_pwa_scope': metadata_scope if app else '',
         'role_access_is_active': state['is_active'],
+        'role_session_authenticated': state.get('authenticated', False),
         'active_role_code': state.get('active_role_code', ''),
         'active_role_changed_at': state.get('active_role_changed_at'),
         'app_contract_version': APP_CONTRACT_VERSION,
@@ -47,4 +49,5 @@ def role_app(request):
             metadata_app.service_worker_url if metadata_app else ''
         ),
         'app_service_worker_scope': metadata_scope,
+        **observer_context(request),
     }

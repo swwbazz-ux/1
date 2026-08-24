@@ -4,9 +4,10 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    {% if role_session_authenticated and not observer_mode %}<meta name="csrf-token" content="{{ csrf_token }}">{% endif %}
     <title>{% block title %}MVP учетной системы{% endblock %}</title>
     <link rel="icon" href="{% static 'favicon.ico' %}">
-    <link rel="stylesheet" href="{% static 'css/app.css' %}?v={{ static_asset_release }}-admin-header-avatar-v2">
+    <link rel="stylesheet" href="{% static 'css/app.css' %}?v={{ static_asset_release }}">
     <style>
         .app-sync-overlay {
             position: fixed;
@@ -778,9 +779,18 @@
     /* APP_PWA_CONTRACT_GUARD_END */
     </script>
     <script src="{% static 'js/role-readonly.js' %}?v=role-readonly-v3"></script>
+    {% if observer_mode %}<script src="{% static 'js/observer-mode.js' %}?v=observer-mode-v1" defer></script>{% endif %}
+    {% if role_session_authenticated and not observer_mode %}<script src="{% static 'js/application-session-heartbeat.js' %}?v={{ static_asset_release }}" defer></script>{% endif %}
     {% block extra_head %}{% endblock %}
 </head>
-<body class="{% block body_class %}{% endblock %}" data-realtime-screen="{% block realtime_screen %}{% endblock %}" data-realtime-mode="{% block realtime_mode %}{% endblock %}" data-realtime-role="{% block realtime_role %}{% endblock %}" data-operational-state-version="{{ operational_state_version|default:0 }}" data-role-access-active="{{ role_access_is_active|yesno:'true,false' }}" data-app-contract-version="{{ app_contract_version }}" data-app-shell-version="{{ app_shell_version }}" data-app-role-code="{{ app_role_code }}" data-app-service-worker-url="{{ app_service_worker_url }}" data-app-service-worker-scope="{{ app_service_worker_scope }}" data-app-contract-ready="false">
+<body class="{% block body_class %}{% endblock %}" data-realtime-screen="{% block realtime_screen %}{% endblock %}" data-realtime-mode="{% block realtime_mode %}{% endblock %}" data-realtime-role="{% block realtime_role %}{% endblock %}" data-operational-state-version="{{ operational_state_version|default:0 }}" data-role-access-active="{{ role_access_is_active|yesno:'true,false' }}" data-app-contract-version="{{ app_contract_version }}" data-app-shell-version="{{ app_shell_version }}" data-app-role-code="{{ app_role_code }}" data-app-service-worker-url="{{ app_service_worker_url }}" data-app-service-worker-scope="{{ app_service_worker_scope }}" data-app-contract-ready="false" data-observer-mode="{{ observer_mode|yesno:'true,false' }}" data-observer-token="{{ observer_token }}">
+{% if observer_mode %}
+<div class="app-observer-banner" data-observer-banner role="status" aria-live="polite">
+    <strong>РЕЖИМ НАБЛЮДЕНИЯ</strong>
+    <span>{{ observer_employee.full_name }} · {{ observer_access.role.name|default:app_role_code }}</span>
+    <em>Действия заблокированы</em>
+</div>
+{% endif %}
 {% if role_access_is_active == False %}
 <div class="app-inactive-role-banner" data-inactive-role-banner role="status" aria-live="polite">
     Роль неактивна — доступен только просмотр
@@ -862,6 +872,7 @@ document.addEventListener("DOMContentLoaded", function () {
         {pattern: /^\/system-admin\/employees\/create\/?$/, target: "{% url 'system_admin_employees' %}"},
         {pattern: /^\/system-admin\/employees\/\d+\/?$/, target: "{% url 'system_admin_employees' %}"},
         {pattern: /^\/system-admin\/employees\/?$/, target: "{% url 'system_admin_dashboard' %}"},
+        {pattern: /^\/system-admin\/live\/?$/, target: "{% url 'system_admin_dashboard' %}"},
         {pattern: /^\/system-admin\/references\/?$/, target: "{% url 'system_admin_dashboard' %}"},
         {pattern: /^\/system-admin\/conflicts\/?$/, target: "{% url 'system_admin_dashboard' %}"},
         {pattern: /^\/system-admin\/logs\/?$/, target: "{% url 'system_admin_dashboard' %}"},

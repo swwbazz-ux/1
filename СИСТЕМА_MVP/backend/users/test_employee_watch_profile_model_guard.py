@@ -287,7 +287,11 @@ class EmployeeWatchProfileModelGuardTests(TestCase):
 
 
 class EmployeeWatchProfileGuardMigrationTests(TransactionTestCase):
-    serialized_rollback = True
+    # The test explicitly drives the migration executor forward and backward.
+    # A serialized data restore is neither needed for that schema assertion nor
+    # safe after adding new content types: Django would deserialize the initial
+    # content-type rows over rows recreated by the migration cycle.
+    serialized_rollback = False
 
     def test_migration_is_schema_only_and_cycles_forward_reverse_forward(self):
         migration_path = (
@@ -315,3 +319,9 @@ class EmployeeWatchProfileGuardMigrationTests(TransactionTestCase):
         ]).apps
         HistoricalEmployee = apps.get_model('users', 'Employee')
         self.assertEqual(HistoricalEmployee._meta.base_manager_name, 'objects')
+
+        # Leave the shared test schema at the current graph leaf. The assertion
+        # above deliberately targets 0018, but newer tests require migrations
+        # added after that historical checkpoint.
+        executor = MigrationExecutor(connection)
+        executor.migrate(executor.loader.graph.leaf_nodes())

@@ -1,0 +1,128 @@
+<section class="admin-live-monitor-metrics" aria-label="Сводка активной работы">
+    <article>
+        <span>Приложений</span>
+        <strong>{{ application_total }}</strong>
+        <small>готовых контуров</small>
+    </article>
+    <article>
+        <span>Сотрудников онлайн</span>
+        <strong>{{ online_employee_total }}</strong>
+        <small>активность до 90 секунд</small>
+    </article>
+    <article>
+        <span>Открытых смен</span>
+        <strong>{{ open_shift_total }}</strong>
+        <small>серверные смены</small>
+    </article>
+</section>
+
+<section class="admin-live-app-grid" aria-label="Карта приложений">
+    {% for card in app_cards %}
+        <article class="admin-live-app-card{% if card.online_count %} has-online{% endif %}{% if card.open_shift_count %} has-shift{% endif %}" data-app-code="{{ card.app.role_code }}">
+            <header class="admin-live-app-header">
+                <span class="admin-live-app-icon" aria-hidden="true">{{ card.app.short_name|first }}</span>
+                <div>
+                    <h3>{{ card.app.short_name }}</h3>
+                    <p>{{ card.app.name }}</p>
+                </div>
+                <div class="admin-live-app-counts">
+                    <span class="admin-live-status online">{{ card.online_count }} онлайн</span>
+                    {% if card.tracks_shifts %}<span class="admin-live-status shift">{{ card.open_shift_count }} в смене</span>{% endif %}
+                </div>
+            </header>
+
+            <div class="admin-live-app-people">
+                {% for row in card.rows %}
+                    <section class="admin-live-person-row">
+                        <div class="admin-live-person-main">
+                            <span class="admin-live-person-avatar" aria-hidden="true">
+                                {% if row.employee.photo %}<img src="{{ row.employee.photo.url }}" alt="">{% else %}{{ row.employee.full_name|first }}{% endif %}
+                            </span>
+                            <div>
+                                <strong>{{ row.employee.full_name }}</strong>
+                                <span>
+                                    {% if row.is_online %}<b class="is-online">Онлайн</b>
+                                    {% elif row.is_recent %}<b class="is-recent">Недавно</b>
+                                    {% else %}<b>Нет активной связи</b>{% endif %}
+                                    {% if row.last_seen_at %} · {{ row.last_seen_at|date:"H:i:s" }}{% endif %}
+                                </span>
+                            </div>
+                        </div>
+
+                        <dl class="admin-live-person-facts">
+                            <div>
+                                <dt>Смена</dt>
+                                <dd>{% if row.shift %}{{ row.shift.get_shift_type_display }} · с {{ row.shift.opened_at|date:"H:i" }}{% else %}не открыта{% endif %}</dd>
+                            </div>
+                            <div>
+                                <dt>Техника</dt>
+                                <dd>{% if row.shift and row.shift.equipment %}{{ row.shift.equipment }}{% else %}—{% endif %}</dd>
+                            </div>
+                            <div>
+                                <dt>Экран</dt>
+                                <dd>{{ row.current_path|default:card.app.start_url }}</dd>
+                            </div>
+                        </dl>
+
+                        <div class="admin-live-person-actions">
+                            {% if row.observe_url %}
+                                <a class="admin-live-action observe" href="{{ row.observe_url }}" target="_blank" rel="noopener">Наблюдать</a>
+                            {% endif %}
+                            {% if row.shift %}
+                                <details class="admin-live-action-menu">
+                                    <summary>Завершить смену</summary>
+                                    <form method="post" action="{% url 'system_admin_force_close_shift' row.shift.id %}" class="admin-live-danger-form">
+                                        {% csrf_token %}
+                                        <strong>Служебное завершение смены</strong>
+                                        {% if row.needs_readings %}
+                                            <label>Топливо на конец
+                                                <input name="end_fuel" inputmode="decimal" required placeholder="На начало: {{ row.shift.start_fuel|default_if_none:'не указано' }}">
+                                            </label>
+                                            {% if row.is_truck %}
+                                                <label>Одометр на конец
+                                                    <input name="end_mileage" inputmode="decimal" required placeholder="На начало: {{ row.shift.start_mileage|default_if_none:'не указано' }}">
+                                                </label>
+                                            {% endif %}
+                                            <label>Моточасы на конец
+                                                <input name="end_engine_hours" inputmode="decimal" required placeholder="На начало: {{ row.shift.start_engine_hours|default_if_none:'не указано' }}">
+                                            </label>
+                                        {% endif %}
+                                        <label>Причина
+                                            <textarea name="reason" required rows="2" placeholder="Почему смена завершается администратором"></textarea>
+                                        </label>
+                                        {% if row.can_eject %}
+                                            <label class="admin-live-checkbox">
+                                                <input type="checkbox" name="eject_after_close" value="1" checked>
+                                                После закрытия отключить сотрудника
+                                            </label>
+                                        {% endif %}
+                                        <button type="submit" class="admin-live-danger-button">Подтвердить завершение</button>
+                                    </form>
+                                </details>
+                            {% endif %}
+                            {% if row.can_eject %}
+                                <details class="admin-live-action-menu">
+                                    <summary>Выбросить</summary>
+                                    <form method="post" action="{% url 'system_admin_force_end_sessions' row.access.id %}" class="admin-live-danger-form">
+                                        {% csrf_token %}
+                                        <strong>Завершить все сеансы</strong>
+                                        <p>Открытая смена при этом не закрывается.</p>
+                                        <label>Причина
+                                            <textarea name="reason" required rows="2" placeholder="Почему сотрудник отключается"></textarea>
+                                        </label>
+                                        <button type="submit" class="admin-live-danger-button">Отключить сотрудника</button>
+                                    </form>
+                                </details>
+                            {% endif %}
+                        </div>
+                    </section>
+                {% empty %}
+                    <div class="admin-live-empty">
+                        <strong>Сейчас никого нет</strong>
+                        <span>{% if card.tracks_shifts %}Нет открытых смен и активных подключений.{% else %}В этом приложении сменный учёт не используется; активных подключений нет.{% endif %}</span>
+                    </div>
+                {% endfor %}
+            </div>
+        </article>
+    {% endfor %}
+</section>

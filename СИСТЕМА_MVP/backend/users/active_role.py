@@ -81,6 +81,24 @@ def role_session_state(request, access=None):
             'active_role_changed_at': None,
         }
 
+    observer_access = getattr(request, 'observer_access', None)
+    if getattr(request, 'observer_mode', False) and observer_access and observer_access.pk == access.pk:
+        return {
+            'authenticated': True,
+            'is_active': True,
+            'access': access,
+            'active_access': access,
+            'active_role_code': access.role.code,
+            'active_role_changed_at': access.last_login_at,
+            'session_role_code': access.role.code,
+            'session_revision': (
+                access.last_login_at.isoformat()
+                if access.last_login_at
+                else ''
+            ),
+            'observer_mode': True,
+        }
+
     active_access = latest_active_role_access(access.employee)
     is_active = active_access is None or active_access.id == access.id
     session_generation = request.session.get(ACTIVE_ROLE_GENERATION_SESSION_KEY)

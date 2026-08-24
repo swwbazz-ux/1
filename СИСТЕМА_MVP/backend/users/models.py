@@ -522,6 +522,34 @@ class EmployeeAccess(models.Model):
         return f'{self.employee} - {self.role}'
 
 
+class ActiveApplicationSession(models.Model):
+    session_key = models.CharField('Ключ сессии', max_length=40, unique=True)
+    access = models.ForeignKey(
+        EmployeeAccess,
+        verbose_name='Доступ сотрудника',
+        on_delete=models.CASCADE,
+        related_name='application_sessions',
+    )
+    role_code = models.CharField('Роль', max_length=64, db_index=True)
+    app_code = models.CharField('Приложение', max_length=64, db_index=True)
+    path = models.CharField('Текущий экран', max_length=255, blank=True)
+    device_kind = models.CharField('Тип устройства', max_length=16, blank=True)
+    first_seen_at = models.DateTimeField('Первое обращение', auto_now_add=True)
+    last_seen_at = models.DateTimeField('Последняя активность', db_index=True)
+
+    class Meta:
+        verbose_name = 'Активная сессия приложения'
+        verbose_name_plural = 'Активные сессии приложений'
+        ordering = ['-last_seen_at']
+        indexes = [
+            models.Index(fields=['app_code', 'last_seen_at'], name='app_session_app_seen_idx'),
+            models.Index(fields=['access', 'last_seen_at'], name='app_session_access_seen_idx'),
+        ]
+
+    def __str__(self):
+        return f'{self.access} / {self.app_code}'
+
+
 class AdminActionLog(models.Model):
     created_at = models.DateTimeField('Дата и время', auto_now_add=True)
     actor = models.ForeignKey(Employee, verbose_name='Кто выполнил', on_delete=models.SET_NULL, null=True, blank=True, related_name='admin_actions')
