@@ -3440,7 +3440,7 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
 {% endblock %}
 
 {% block body %}
-<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-current-truck-id="{% if current_truck %}{{ current_truck.id }}{% endif %}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v118' }}">
+<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-current-truck-id="{% if current_truck %}{{ current_truck.id }}{% endif %}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v119' }}">
     {% if messages %}
         <div class="driver-messages">
             {% for message in messages %}
@@ -3453,7 +3453,7 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
     <header class="driver-header">
         <div class="driver-header-id{% if not open_shift %} is-inactive{% endif %}">{{ driver_header_label }}</div>
         <div class="driver-online" role="status" aria-label="Онлайн">
-            <small class="driver-shell-version" aria-label="Версия приложения">{{ driver_shell_version|default:'driver-mobile-shell-v118'|cut:'driver-mobile-shell-' }}</small>
+            <small class="driver-shell-version" aria-label="Версия приложения">{{ driver_shell_version|default:'driver-mobile-shell-v119'|cut:'driver-mobile-shell-' }}</small>
             <span>Онлайн</span>
             <i class="driver-online-dot" aria-hidden="true"></i>
             <strong></strong>
@@ -5295,7 +5295,7 @@ window.bindDriverMobileShell = function () {
         var runtime = window.__driverPwaUpdateRuntime;
         var currentShellVersion = runtime && runtime.currentShellVersion
             ? runtime.currentShellVersion
-            : shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v118' }}";
+            : shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v119' }}";
         var updateModal = document.querySelector("[data-driver-pwa-update-modal]");
         var updateBadge = document.querySelector("[data-driver-pwa-update-badge]");
         var updateTarget = document.querySelector("[data-driver-pwa-update-nav-target]");
@@ -5345,6 +5345,43 @@ window.bindDriverMobileShell = function () {
             if (updateModal) {
                 updateModal.hidden = true;
             }
+        }
+
+        function releaseVerifiedPageFromStaleWorkerLock(detail) {
+            var guard = window.AppPwaContractGuard;
+            var body = document.body;
+            var server = detail && detail.server;
+            var worker = detail && detail.serviceWorker;
+            var expectedContractVersion = body && String(body.dataset.appContractVersion || "");
+            var expectedShellVersion = body && String(body.dataset.appShellVersion || "");
+            var expectedRoleCode = body && String(body.dataset.appRoleCode || "");
+            var workerMatches = worker
+                && worker.appContractVersion === expectedContractVersion
+                && worker.shellVersion === expectedShellVersion
+                && worker.roleCode === expectedRoleCode;
+            if (
+                !guard
+                || typeof guard.acceptServiceWorkerVersion !== "function"
+                || !detail
+                || !detail.locked
+                || workerMatches
+                || !expectedContractVersion
+                || expectedShellVersion !== String(currentShellVersion || "")
+                || expectedRoleCode !== "driver"
+                || detail.javascriptVersion !== expectedContractVersion
+                || !server
+                || server.appContractVersion !== expectedContractVersion
+                || server.shellVersion !== expectedShellVersion
+                || server.roleCode !== expectedRoleCode
+            ) {
+                return false;
+            }
+            guard.acceptServiceWorkerVersion({
+                appContractVersion: expectedContractVersion,
+                shellVersion: expectedShellVersion,
+                roleCode: expectedRoleCode
+            });
+            return true;
         }
 
         if (!runtime) {
@@ -5546,6 +5583,9 @@ window.bindDriverMobileShell = function () {
             };
             window.addEventListener("app-pwa-contract-state", function (event) {
                 var detail = event && event.detail ? event.detail : {};
+                if (releaseVerifiedPageFromStaleWorkerLock(detail)) {
+                    return;
+                }
                 var serverVersion = detail.server && detail.server.shellVersion;
                 if (
                     serverVersion
