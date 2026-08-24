@@ -389,6 +389,22 @@ class AccessLoginTests(TestCase):
         self.assertContains(dashboard_response, 'href="/system-admin/employees/?access_status=deactivated"')
         self.assertContains(dashboard_response, 'Журнал действий')
 
+        for route_name in (
+            'system_admin_dashboard',
+            'system_admin_employees',
+            'system_admin_references',
+            'system_admin_live_monitor',
+            'system_admin_conflicts',
+            'system_admin_logs',
+            'system_admin_exports',
+        ):
+            with self.subTest(route_name=route_name):
+                response = self.client.get(reverse(route_name), HTTP_HOST='localhost')
+                self.assertContains(
+                    response,
+                    'css/system-admin-workspace-v1.css?v=20260824-1',
+                )
+
     def test_system_admin_header_uses_employee_photo_with_initial_fallback(self):
         admin_role = Role.objects.create(code='admin', name='Администратор')
         admin_employee = Employee.objects.create(

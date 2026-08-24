@@ -4,6 +4,7 @@
 {% block title %}Смена онлайн{% endblock %}
 {% block body_class %}system-admin-live-monitor-screen{% endblock %}
 {% block extra_head %}
+{% include "users/includes/system_admin_workspace_styles.html" %}
 {% include "includes/role_app_pwa_head.html" with role_code="admin" manifest_url="/system-admin.webmanifest" service_worker_url="/system-admin-sw.js" legacy_scope="/system-admin/" theme_color="#53616F" apple_title="Админка" icon_180="img/pwa/admin-180.png" %}
 {% endblock %}
 

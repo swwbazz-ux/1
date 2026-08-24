@@ -1,0 +1,12 @@
+@media (min-width: 1181px) {
+    .admin-dashboard-shell .admin-console-page,
+    .admin-employees-shell .admin-console-page,
+    .admin-references-shell .admin-console-page,
+    .admin-live-monitor-shell .admin-console-page,
+    .admin-conflicts-shell .admin-console-page,
+    .admin-logs-shell .admin-console-page,
+    body.system-admin-exports-screen .admin-console-page {
+        height: calc((100dvh / var(--admin-interface-scale)) - var(--admin-console-header-height));
+        max-height: calc((100dvh / var(--admin-interface-scale)) - var(--admin-console-header-height));
+    }
+}
