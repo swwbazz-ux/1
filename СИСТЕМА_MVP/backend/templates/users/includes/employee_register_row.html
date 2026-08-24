@@ -30,7 +30,7 @@
         </span>
         <span>
             <strong>{{ employee.full_name }}</strong>
-            <small>{{ employee.get_work_category_display }}</small>
+            <small>{% if admin_employee_row and employee.personnel_number %}Таб. №{{ employee.personnel_number }} · {% endif %}{{ employee.get_work_category_display }}</small>
         </span>
     </span>
     <span class="oup-work-cell">

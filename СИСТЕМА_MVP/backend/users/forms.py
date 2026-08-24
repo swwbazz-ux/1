@@ -185,7 +185,11 @@ class EmployeeCardForm(forms.ModelForm):
         }
         widgets = {
             'birth_date': forms.DateInput(format='%Y-%m-%d', attrs={'type': 'date'}),
-            'personnel_number': forms.HiddenInput(),
+            'personnel_number': forms.TextInput(attrs={
+                'autocomplete': 'off',
+                'maxlength': '64',
+                'placeholder': 'Например, 573',
+            }),
             'position': forms.HiddenInput(),
             'work_category': forms.HiddenInput(),
             'base_specialization': ProductionSpecializationSelect,
