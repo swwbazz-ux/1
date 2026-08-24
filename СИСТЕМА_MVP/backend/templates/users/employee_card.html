@@ -9,7 +9,7 @@
 <link rel="stylesheet" href="{% static 'css/oup-workplace-v1.css' %}?v=20260718-4">
 <link rel="stylesheet" href="{% static 'css/oup-work-period-v1.css' %}?v=20260718-3">
 {% endif %}
-<link rel="stylesheet" href="{% static 'css/employee-card-unified.css' %}?v=20260824-3">
+<link rel="stylesheet" href="{% static 'css/employee-card-unified.css' %}?v=20260824-6">
 {% endblock %}
 
 {% block body %}
@@ -161,6 +161,14 @@
                             </div>
                             {{ form.sex }}{{ form.sex.errors }}
                         </div>
+                        <div class="employee-card-field" data-card-field data-copy-label="Подразделение">
+                            <div class="employee-card-label-row">
+                                <label for="{{ form.personnel_department.id_for_label }}">{{ form.personnel_department.label }}</label>
+                                <button type="button" class="employee-copy-icon" data-copy-target="#{{ form.personnel_department.id_for_label }}" aria-label="Скопировать подразделение" title="Скопировать подразделение"></button>
+                            </div>
+                            {{ form.personnel_department }}{{ form.personnel_department.errors }}
+                            {% if form.personnel_department.help_text %}<small class="employee-card-field-help">{{ form.personnel_department.help_text }}</small>{% endif %}
+                        </div>
                         <div class="employee-card-field span-2" data-card-field data-copy-label="Телефон">
                             <div class="employee-card-label-row">
                                 <label for="{{ form.phone.id_for_label }}">{{ form.phone.label }}{% if form.phone.field.required %}<b>*</b>{% endif %}</label>
@@ -174,14 +182,6 @@
                                 <button type="button" class="employee-copy-icon" data-copy-target="#{{ form.personnel_position.id_for_label }}" aria-label="Скопировать кадровую должность" title="Скопировать кадровую должность"></button>
                             </div>
                             {{ form.personnel_position }}{{ form.personnel_position.errors }}
-                        </div>
-                        <div class="employee-card-field" data-card-field data-copy-label="Подразделение">
-                            <div class="employee-card-label-row">
-                                <label for="{{ form.personnel_department.id_for_label }}">{{ form.personnel_department.label }}</label>
-                                <button type="button" class="employee-copy-icon" data-copy-target="#{{ form.personnel_department.id_for_label }}" aria-label="Скопировать подразделение" title="Скопировать подразделение"></button>
-                            </div>
-                            {{ form.personnel_department }}{{ form.personnel_department.errors }}
-                            {% if form.personnel_department.help_text %}<small class="employee-card-field-help">{{ form.personnel_department.help_text }}</small>{% endif %}
                         </div>
                     </div>
                 </div>
@@ -228,7 +228,7 @@
                             </div>
                             {{ form.dismissed_at }}{{ form.dismissed_at.errors }}
                         </div>
-                        <div class="employee-card-field" data-card-field data-copy-label="График работы">
+                        <div class="employee-card-field span-2 employee-card-work-profile-field" data-card-field data-copy-label="График работы">
                             <div class="employee-card-label-row">
                                 <label for="{{ form.work_schedule.id_for_label }}">{{ form.work_schedule.label }}</label>
                                 <button type="button" class="employee-copy-icon" data-copy-target="#{{ form.work_schedule.id_for_label }}" aria-label="Скопировать график работы" title="Скопировать график работы"></button>
@@ -236,7 +236,7 @@
                             {{ form.work_schedule }}{{ form.work_schedule.errors }}
                             {% if form.work_schedule.help_text %}<small class="employee-card-field-help">{{ form.work_schedule.help_text }}</small>{% endif %}
                         </div>
-                        <div class="employee-card-field" data-card-field data-copy-label="Бригада">
+                        <div class="employee-card-field span-2 employee-card-work-profile-field" data-card-field data-copy-label="Бригада">
                             <div class="employee-card-label-row">
                                 <label for="{{ form.brigade_number.id_for_label }}">{{ form.brigade_number.label }}</label>
                                 <button type="button" class="employee-copy-icon" data-copy-target="#{{ form.brigade_number.id_for_label }}" aria-label="Скопировать бригаду" title="Скопировать бригаду"></button>
