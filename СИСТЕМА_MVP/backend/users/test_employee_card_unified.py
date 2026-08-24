@@ -258,6 +258,13 @@ class UnifiedEmployeeCardTests(TestCase):
                 employee = form.save()
                 self.assertEqual(employee.sex, Employee.Sex.FEMALE)
 
+    def test_employee_photo_picker_allows_mobile_camera_or_gallery(self):
+        for form_class in (EmployeeCardForm, OupEmployeeForm, AdminEmployeeForm, AdminEmployeeEditForm):
+            with self.subTest(form=form_class.__name__):
+                widget = form_class().fields['photo'].widget
+                self.assertEqual(widget.attrs.get('accept'), 'image/*')
+                self.assertNotIn('capture', widget.attrs)
+
     def test_legacy_edit_without_sex_preserves_explicit_value(self):
         employee = Employee.objects.create(
             full_name='Сотрудник с явно заданным полом',

@@ -206,7 +206,9 @@ class EmployeeCardForm(forms.ModelForm):
             'comment': forms.Textarea(attrs={'rows': 3}),
             'hr_data': forms.Textarea(attrs={'rows': 3}),
             'photo': forms.FileInput(attrs={
-                'accept': 'image/jpeg,image/png,image/webp',
+                # Keep capture unset: on mobile this asks the operating system
+                # for a source and lets the user choose camera or gallery.
+                'accept': 'image/*',
                 'class': 'employee-photo-input',
                 'data-employee-photo-input': '1',
                 'aria-label': 'Выбрать фото сотрудника',
