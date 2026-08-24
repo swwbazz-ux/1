@@ -500,11 +500,22 @@ def interface_map_view(request):
 def app_catalog_view(request):
     if get_role_app_for_request(request):
         return redirect(app_catalog_public_url(request))
-    return render(
+    catalog_apps = app_catalog_items(request)
+    selected_role_code = (request.GET.get('app') or '').strip()
+    selected_app = next(
+        (item for item in catalog_apps if item['role_code'] == selected_role_code),
+        None,
+    )
+    response = render(
         request,
         'users/app_catalog.html',
-        {'catalog_apps': app_catalog_items(request)},
+        {
+            'catalog_apps': catalog_apps,
+            'selected_app': selected_app,
+        },
     )
+    response['Cache-Control'] = 'no-cache'
+    return response
 
 
 @require_GET

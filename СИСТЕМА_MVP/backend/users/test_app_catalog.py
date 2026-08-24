@@ -40,8 +40,9 @@ class AppCatalogTests(SimpleTestCase):
         self.assertEqual(len(response.context['catalog_apps']), 8)
         self.assertEqual(response.content.count(b'data-app-card'), 8)
         html = response.content.decode('utf-8')
-        self.assertEqual(len(re.findall(r'<button\b[^>]*\bdata-app-card\b', html, re.S)), 8)
-        self.assertEqual(len(re.findall(r'<a\b[^>]*\bdata-app-card\b', html, re.S)), 0)
+        self.assertEqual(len(re.findall(r'<a\b[^>]*\bdata-app-card\b', html, re.S)), 8)
+        for role_code in APP_CATALOG_ROLE_CODES:
+            self.assertContains(response, f'href="?app={role_code}#connect"')
         for label in self.expected_labels:
             self.assertContains(response, label)
         for excluded in (
@@ -55,11 +56,37 @@ class AppCatalogTests(SimpleTestCase):
         self.assertNotContains(response, 'демо-код')
         self.assertNotContains(response, 'rel="manifest"')
         self.assertNotContains(response, 'serviceWorker.register')
-        self.assertContains(response, '/static/css/app-catalog-v1.css?v=4')
-        self.assertContains(response, '/static/js/app-catalog-v1.js?v=4')
+        self.assertContains(response, '/static/css/app-catalog-v1.css?v=5')
+        self.assertContains(response, '/static/js/app-catalog-v1.js?v=5')
         self.assertContains(response, 'data-share-link')
         self.assertContains(response, 'Отправить ссылку')
         self.assertContains(response, 'Подключить', count=8)
+        self.assertEqual(response['Cache-Control'], 'no-cache')
+
+    def test_server_fallback_opens_connection_dialog_without_javascript(self):
+        response = Client().get(
+            '/apps/?app=mining_master',
+            HTTP_HOST='driverform.ru',
+            secure=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context['selected_app']['role_code'], 'mining_master')
+        self.assertContains(response, 'data-app-dialog aria-labelledby="app-dialog-title" open')
+        self.assertContains(response, 'QR-код для приложения «Горный мастер»')
+        self.assertContains(response, 'value="https://mining-master.driverform.ru/"')
+        self.assertContains(response, 'QR откроет: https://mining-master.driverform.ru/')
+
+        invalid_response = Client().get(
+            '/apps/?app=mechanic',
+            HTTP_HOST='driverform.ru',
+            secure=True,
+        )
+        self.assertIsNone(invalid_response.context['selected_app'])
+        self.assertNotContains(
+            invalid_response,
+            'data-app-dialog aria-labelledby="app-dialog-title" open',
+        )
 
     def test_catalog_production_links_use_exact_role_subdomains(self):
         response = Client().get('/apps/', HTTP_HOST='driverform.ru', secure=True)

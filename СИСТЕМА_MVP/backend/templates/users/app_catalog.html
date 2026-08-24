@@ -7,8 +7,8 @@
     <meta name="theme-color" content="#0b1722">
     <title>Рабочие приложения · Коппер Рисорсез</title>
     <link rel="icon" href="{% static 'favicon.ico' %}">
-    <link rel="stylesheet" href="{% static 'css/app-catalog-v1.css' %}?v=4">
-    <script src="{% static 'js/app-catalog-v1.js' %}?v=4" defer></script>
+    <link rel="stylesheet" href="{% static 'css/app-catalog-v1.css' %}?v=5">
+    <script src="{% static 'js/app-catalog-v1.js' %}?v=5" defer></script>
 </head>
 <body class="app-catalog-page">
 <main class="app-catalog-shell">
@@ -34,9 +34,9 @@
 
     <section class="app-catalog-grid" aria-label="Доступные рабочие приложения">
         {% for app in catalog_apps %}
-        <button
-            type="button"
+        <a
             class="app-catalog-card"
+            href="?app={{ app.role_code }}#connect"
             data-app-card
             data-role-code="{{ app.role_code }}"
             data-app-name="{{ app.label }}"
@@ -54,7 +54,7 @@
                 <span>Подключить</span>
                 <span aria-hidden="true">→</span>
             </span>
-        </button>
+        </a>
         {% endfor %}
     </section>
 
@@ -64,24 +64,24 @@
     </footer>
 </main>
 
-<dialog class="app-catalog-dialog" data-app-dialog aria-labelledby="app-dialog-title">
-    <button class="app-catalog-dialog__close" type="button" data-dialog-close aria-label="Закрыть">×</button>
+<dialog id="connect" class="app-catalog-dialog" data-app-dialog aria-labelledby="app-dialog-title"{% if selected_app %} open{% endif %}>
+    <a class="app-catalog-dialog__close" href="{% url 'app_catalog' %}" data-dialog-close aria-label="Закрыть">×</a>
     <div class="app-catalog-dialog__content">
         <div class="app-catalog-dialog__qr-wrap">
-            <img data-dialog-qr width="296" height="296" alt="">
+            <img data-dialog-qr width="296" height="296"{% if selected_app %} src="{{ selected_app.qr_asset_url }}" alt="QR-код для приложения «{{ selected_app.label }}»"{% else %} alt=""{% endif %}>
         </div>
         <div class="app-catalog-dialog__details">
             <p class="app-catalog-dialog__eyebrow">Установка на телефон</p>
-            <h2 id="app-dialog-title" data-dialog-title></h2>
+            <h2 id="app-dialog-title" data-dialog-title>{% if selected_app %}{{ selected_app.label }}{% endif %}</h2>
             <p>Покажите QR-код сотруднику или отправьте ему ссылку. Ссылка откроет страницу установки и входа в приложение.</p>
-            <p class="app-catalog-dialog__qr-target" data-dialog-qr-target></p>
+            <p class="app-catalog-dialog__qr-target" data-dialog-qr-target>{% if selected_app %}QR откроет: {{ selected_app.qr_target_url }}{% endif %}</p>
             <label class="app-catalog-dialog__url-label" for="app-dialog-url">Прямая ссылка</label>
-            <input id="app-dialog-url" data-dialog-url type="text" readonly>
+            <input id="app-dialog-url" data-dialog-url type="text" value="{% if selected_app %}{{ selected_app.target_url }}{% endif %}" readonly>
             <p class="app-catalog-dialog__status" data-copy-status aria-live="polite"></p>
             <div class="app-catalog-dialog__actions">
                 <button class="app-catalog-dialog__share" type="button" data-share-link>Отправить ссылку</button>
                 <button class="app-catalog-dialog__copy" type="button" data-copy-link>Копировать ссылку</button>
-                <a class="app-catalog-dialog__open" data-dialog-open href="/">Открыть приложение</a>
+                <a class="app-catalog-dialog__open" data-dialog-open href="{% if selected_app %}{{ selected_app.target_url }}{% else %}/{% endif %}">Открыть приложение</a>
             </div>
         </div>
     </div>

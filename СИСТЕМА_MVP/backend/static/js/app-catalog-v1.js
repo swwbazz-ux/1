@@ -37,6 +37,7 @@
     }
 
     function openDialog(dialog) {
+        if (dialog.open) return;
         if (typeof dialog.showModal === "function") {
             dialog.showModal();
         } else {
@@ -93,7 +94,8 @@
 
         var closeButton = dialog.querySelector("[data-dialog-close]");
         if (closeButton) {
-            closeButton.addEventListener("click", function () {
+            closeButton.addEventListener("click", function (event) {
+                event.preventDefault();
                 closeDialog(dialog);
             });
         }
