@@ -80,6 +80,26 @@ class DispatcherPerformanceAssetContractTests(SimpleTestCase):
             with self.subTest(prefix=foreign_role_prefix):
                 self.assertNotIn(foreign_role_prefix, css)
 
+    def test_dispatcher_css_has_readable_touch_workboard_without_dom_replacement(self):
+        css_path = Path(settings.BASE_DIR) / 'static' / 'css' / 'dispatcher-control-v1.css'
+        css = css_path.read_text(encoding='utf-8')
+
+        self.assertIn(
+            'Dispatcher control: readable touch layout without changing the board DOM.',
+            css,
+        )
+        self.assertIn(
+            'body.dispatcher-control-screen:not(.mining-master-mobile-screen)',
+            css,
+        )
+        self.assertIn('.dispatcher-board {', css)
+        self.assertIn('grid-auto-flow: column;', css)
+        self.assertIn('scroll-snap-type: inline proximity;', css)
+        self.assertIn(
+            '.dispatcher-zone-grid',
+            css,
+        )
+
     def test_dispatcher_runtime_is_external_and_has_fail_closed_detail_contract(self):
         runtime_path = Path(settings.BASE_DIR) / 'static' / 'js' / 'dispatcher-control-v1.js'
         runtime = runtime_path.read_text(encoding='utf-8')
@@ -324,11 +344,11 @@ class DispatcherSharedShiftStartTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/dispatcher/')
-        self.assertIn('dispatcher-desktop-shell-v45', script)
+        self.assertIn('dispatcher-desktop-shell-v46', script)
         self.assertIn(reverse('dispatcher_control'), script)
         self.assertIn(reverse('dispatcher_manifest'), script)
         self.assertIn(
-            '/static/js/realtime-client.js?v=ready-core-traffic-v7',
+            '/static/js/realtime-client.js?v=ready-core-traffic-v10',
             script,
         )
         self.assertNotIn('__STATIC_ASSET_RELEASE__', script)

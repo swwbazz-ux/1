@@ -11440,6 +11440,505 @@ body.mining-master-screen .dispatcher-complex-card .complex-truck-tile {
     }
 }
 
+/* Dispatcher control: readable touch layout without changing the board DOM. */
+@media (max-width: 1180px) {
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) {
+        overflow-x: hidden;
+        overflow-y: auto;
+        overscroll-behavior-y: contain;
+    }
+
+    .dispatcher-shell {
+        height: auto;
+        min-height: 100vh;
+        min-height: 100dvh;
+        padding: 8px;
+        overflow: visible;
+    }
+
+    .dispatcher-board {
+        --gd-equipment-slot-w: 112px;
+        --gd-equipment-slot-h: 88px;
+        --gd-truck-slot-w: 104px;
+        --gd-truck-slot-h: 82px;
+        --gd-header-scrollbar-comp: 0px;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-rows: auto;
+        gap: 10px;
+        width: 100%;
+        height: auto;
+        min-height: calc(100vh - 16px);
+        min-height: calc(100dvh - 16px);
+        overflow: visible;
+    }
+
+    .dispatcher-board.is-excavator-garage-empty,
+    .dispatcher-board.is-excavator-garage-empty.is-complex-dragging,
+    .dispatcher-board.is-truck-garage-empty {
+        grid-template-columns: minmax(0, 1fr);
+        column-gap: 10px;
+    }
+
+    .dispatcher-board.is-excavator-garage-empty .dispatcher-complexes,
+    .dispatcher-board.is-excavator-garage-empty.is-complex-dragging .dispatcher-complexes {
+        margin-left: 0;
+    }
+
+    .dispatcher-topbar.dispatcher-unified-topbar {
+        height: auto;
+        min-height: 0;
+        max-height: none;
+        overflow: visible;
+    }
+
+    .dispatcher-board > .dispatcher-topbar.dispatcher-unified-topbar .dispatcher-header-row {
+        grid-template-columns: minmax(260px, 1fr) minmax(280px, 420px) 116px;
+        grid-template-rows: 86px minmax(76px, auto);
+        grid-template-areas:
+            "identity actions clock"
+            "main main main";
+        width: 100%;
+        min-width: 0;
+        height: auto;
+        overflow: visible;
+    }
+
+    .dispatcher-command-identity {
+        grid-area: identity;
+        padding: 9px 14px;
+    }
+
+    .dispatcher-command-identity .dispatcher-active-badge {
+        grid-template-columns: 52px minmax(0, 1fr);
+        gap: 12px;
+    }
+
+    .dispatcher-command-identity .dispatcher-active-avatar {
+        width: 52px;
+        height: 52px;
+    }
+
+    .dispatcher-command-identity .dispatcher-active-text strong {
+        font-size: 19px;
+    }
+
+    .dispatcher-command-main {
+        grid-area: main;
+        grid-template-rows: minmax(32px, auto) 38px;
+        padding: 7px 14px 6px;
+        border-top: 1px solid var(--gd-line-soft);
+        border-right: 0;
+    }
+
+    .dispatcher-command-context {
+        gap: 0 16px;
+        padding-bottom: 6px;
+    }
+
+    .dispatcher-command-context strong {
+        font-size: 20px;
+    }
+
+    .dispatcher-header-row .dispatcher-nav {
+        gap: 12px;
+        padding-top: 5px;
+    }
+
+    .dispatcher-header-row .dispatcher-nav a {
+        min-height: 32px;
+        padding-bottom: 6px;
+        font-size: 13px;
+    }
+
+    .dispatcher-command-actions {
+        grid-area: actions;
+        grid-template-rows: 34px 34px;
+        gap: 4px;
+        padding: 7px 12px;
+    }
+
+    .dispatcher-command-actions .dispatcher-shift-slot,
+    .dispatcher-command-actions .dispatcher-shift-form,
+    .dispatcher-command-actions .dispatcher-shift-button {
+        width: 100%;
+        max-width: none;
+    }
+
+    .dispatcher-command-actions .dispatcher-shift-button {
+        min-height: 34px;
+        font-size: 12px;
+    }
+
+    .dispatcher-command-utility {
+        grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+        column-gap: 6px !important;
+        width: 100% !important;
+        max-width: none !important;
+    }
+
+    .dispatcher-command-utility .dispatcher-theme-button,
+    .dispatcher-utility-link {
+        width: 100%;
+        min-width: 0;
+        height: 34px;
+        min-height: 34px;
+    }
+
+    .dispatcher-header-row .dispatcher-clock {
+        grid-area: clock;
+        grid-column: auto;
+        grid-row: auto;
+        min-height: 86px;
+        border-left: 1px solid var(--gd-line-soft);
+        padding: 0;
+        text-align: center;
+    }
+
+    .dispatcher-radial-clock-ring {
+        width: 82px;
+    }
+
+    .dispatcher-radial-clock-face {
+        gap: 4px;
+        width: 76px;
+        height: 76px;
+    }
+
+    .dispatcher-radial-clock strong,
+    .dispatcher-header-row .dispatcher-clock strong {
+        font-size: 23px;
+    }
+
+    .dispatcher-left,
+    .dispatcher-right,
+    .dispatcher-complexes {
+        grid-column: 1;
+        grid-row: auto;
+        min-width: 0;
+    }
+
+    .dispatcher-garage-panel {
+        height: auto;
+        padding: 8px;
+        overflow: visible;
+    }
+
+    .dispatcher-panel-head,
+    .dispatcher-truck-garage .dispatcher-panel-head,
+    .dispatcher-excavator-garage .dispatcher-panel-head,
+    .dispatcher-zone-head {
+        display: flex;
+        min-height: 30px;
+        margin-bottom: 7px;
+    }
+
+    .dispatcher-panel-head h2,
+    .dispatcher-zone-head h2 {
+        font-size: 18px;
+    }
+
+    .dispatcher-excavators {
+        display: grid;
+        grid-template-columns: none;
+        grid-template-rows: var(--gd-equipment-slot-h);
+        grid-auto-flow: column;
+        grid-auto-columns: var(--gd-equipment-slot-w);
+        grid-auto-rows: var(--gd-equipment-slot-h);
+        align-content: start;
+        justify-content: start;
+        gap: 8px;
+        width: 100%;
+        height: auto;
+        padding: 1px 1px 7px;
+        overflow-x: auto;
+        overflow-y: hidden;
+        overscroll-behavior-inline: contain;
+        scroll-snap-type: inline proximity;
+        scrollbar-color: var(--gd-line) transparent;
+        scrollbar-width: thin;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .dispatcher-excavator-garage-tile {
+        width: var(--gd-equipment-slot-w);
+        height: var(--gd-equipment-slot-h);
+        scroll-snap-align: start;
+    }
+
+    .dispatcher-excavator-garage-tile.is-placeholder,
+    .dispatcher-excavator-garage-tile.is-assigned {
+        display: none;
+    }
+
+    .dispatcher-excavator-garage-tile strong {
+        left: 7px;
+        top: 6px;
+        font-size: 16px;
+    }
+
+    .dispatcher-excavator-garage-tile img {
+        width: 55px;
+        height: 42px;
+    }
+
+    .dispatcher-excavator-garage-tile span,
+    .dispatcher-excavator-garage-tile .dispatcher-tile-plan-label {
+        font-size: 10px;
+    }
+
+    .dispatcher-excavator-garage-tile .dispatcher-tile-plan-percent {
+        max-width: 70%;
+        min-height: 16px;
+        padding: 2px 5px;
+        font-size: 9px;
+    }
+
+    .dispatcher-complexes {
+        display: block;
+        overflow: visible;
+    }
+
+    .dispatcher-zone-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-auto-rows: auto;
+        gap: 10px;
+        overflow: visible;
+        padding-right: 0;
+    }
+
+    .dispatcher-complex-card {
+        min-height: 250px;
+        padding: 14px;
+    }
+
+    .dispatcher-complex-card.status-empty {
+        min-height: 120px;
+    }
+
+    .complex-work-head h2 {
+        font-size: 36px;
+    }
+
+    .complex-state-chip,
+    .complex-info-chip,
+    .complex-info-chip.chip-horizon,
+    .complex-info-chip.chip-block {
+        font-size: 11px;
+    }
+
+    .dispatcher-plan-strip strong {
+        font-size: 15px;
+    }
+
+    .dispatcher-plan-strip span {
+        font-size: 12px;
+    }
+
+    .dispatcher-trucks {
+        display: grid;
+        grid-template-columns: none;
+        grid-template-rows: repeat(3, var(--gd-truck-slot-h));
+        grid-auto-flow: column;
+        grid-auto-columns: var(--gd-truck-slot-w);
+        grid-auto-rows: var(--gd-truck-slot-h);
+        align-content: start;
+        justify-content: start;
+        gap: 8px;
+        width: 100%;
+        height: calc(var(--gd-truck-slot-h) + var(--gd-truck-slot-h) + var(--gd-truck-slot-h) + 24px);
+        padding: 1px 1px 8px;
+        overflow-x: auto;
+        overflow-y: hidden;
+        overscroll-behavior-inline: contain;
+        scroll-snap-type: inline proximity;
+        scrollbar-color: var(--gd-line) transparent;
+        scrollbar-width: thin;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .dispatcher-truck-garage .dispatcher-truck-tile {
+        width: var(--gd-truck-slot-w);
+        height: var(--gd-truck-slot-h);
+        scroll-snap-align: start;
+    }
+
+    .dispatcher-truck-garage .dispatcher-truck-tile.is-placeholder,
+    .dispatcher-truck-garage .dispatcher-truck-tile.is-assigned {
+        display: none;
+    }
+
+    .dispatcher-truck-garage .dispatcher-truck-tile strong {
+        font-size: 15px;
+    }
+
+    .dispatcher-truck-garage .dispatcher-truck-tile img {
+        width: 56px;
+        height: 42px;
+    }
+
+    .dispatcher-truck-garage .dispatcher-truck-tile span {
+        bottom: 5px;
+        font-size: 10px;
+    }
+}
+
+@media (max-width: 760px) {
+    .dispatcher-shell {
+        padding: 6px;
+    }
+
+    .dispatcher-board {
+        --gd-equipment-slot-w: 118px;
+        --gd-equipment-slot-h: 92px;
+        --gd-truck-slot-w: 112px;
+        --gd-truck-slot-h: 84px;
+        min-height: calc(100vh - 12px);
+        min-height: calc(100dvh - 12px);
+    }
+
+    .dispatcher-board > .dispatcher-topbar.dispatcher-unified-topbar .dispatcher-header-row {
+        grid-template-columns: minmax(0, 1fr) 92px;
+        grid-template-rows: 78px auto auto;
+        grid-template-areas:
+            "identity clock"
+            "main main"
+            "actions actions";
+    }
+
+    .dispatcher-command-identity {
+        padding: 8px 10px;
+    }
+
+    .dispatcher-command-identity .dispatcher-active-badge {
+        grid-template-columns: 48px minmax(0, 1fr);
+        gap: 10px;
+    }
+
+    .dispatcher-command-identity .dispatcher-active-avatar {
+        width: 48px;
+        height: 48px;
+    }
+
+    .dispatcher-command-identity .dispatcher-active-text strong {
+        font-size: 18px;
+    }
+
+    .dispatcher-command-identity .dispatcher-active-role,
+    .dispatcher-command-identity .dispatcher-active-text em {
+        font-size: 12px;
+    }
+
+    .dispatcher-command-main {
+        grid-template-rows: auto 40px;
+        padding: 8px 10px 5px;
+    }
+
+    .dispatcher-command-context {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px 12px;
+        padding-bottom: 7px;
+    }
+
+    .dispatcher-command-context strong {
+        flex: 1 0 100%;
+        font-size: 18px;
+    }
+
+    .dispatcher-command-shift-name,
+    .dispatcher-command-date,
+    .dispatcher-command-time-range {
+        grid-row: auto;
+        font-size: 12px;
+    }
+
+    .dispatcher-header-row .dispatcher-nav {
+        display: flex;
+        gap: 8px;
+        padding: 4px 0 2px;
+        overflow-x: auto;
+        overflow-y: hidden;
+        scrollbar-width: none;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .dispatcher-header-row .dispatcher-nav::-webkit-scrollbar {
+        display: none;
+    }
+
+    .dispatcher-header-row .dispatcher-nav a {
+        flex: 0 0 92px;
+        width: 92px;
+        font-size: 12px;
+    }
+
+    .dispatcher-command-actions {
+        grid-template-rows: 38px 38px;
+        padding: 7px 10px 9px;
+        border-top: 1px solid var(--gd-line-soft);
+        border-right: 0;
+    }
+
+    .dispatcher-header-row .dispatcher-clock {
+        min-height: 78px;
+    }
+
+    .dispatcher-radial-clock-ring {
+        width: 72px;
+    }
+
+    .dispatcher-radial-clock-face {
+        gap: 3px;
+        width: 68px;
+        height: 70px;
+    }
+
+    .dispatcher-radial-clock strong,
+    .dispatcher-header-row .dispatcher-clock strong {
+        font-size: 20px;
+    }
+
+    .dispatcher-radial-clock span,
+    .dispatcher-radial-clock em {
+        font-size: 10px;
+    }
+
+    .dispatcher-zone-grid {
+        grid-template-columns: minmax(0, 1fr);
+        grid-auto-rows: auto;
+    }
+
+    .dispatcher-complex-card {
+        min-height: 260px;
+        padding: 12px;
+    }
+
+    .dispatcher-complex-card.status-empty {
+        min-height: 104px;
+    }
+
+    .complex-work-head {
+        gap: 8px;
+    }
+
+    .complex-context {
+        max-width: 54%;
+    }
+
+    .dispatcher-panel-head span,
+    .dispatcher-zone-head span,
+    .dispatcher-zone-head strong {
+        font-size: 9px;
+    }
+
+    .gd-equipment-detail .mm-equipment-detail-panel {
+        width: calc(100vw - 12px);
+        max-height: calc(100dvh - 12px);
+        padding: 12px;
+    }
+}
+
 @media print {
     body.dispatcher-control-screen {
         background: #ffffff;
