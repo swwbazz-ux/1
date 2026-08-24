@@ -59,6 +59,13 @@
     box-shadow: inset 0 -1px 0 var(--admin-yellow);
 }
 
+@media (min-width: 1181px) {
+    .admin-employees-shell .employees-page {
+        height: calc((100dvh / var(--admin-interface-scale)) - var(--admin-console-header-height));
+        max-height: calc((100dvh / var(--admin-interface-scale)) - var(--admin-console-header-height));
+    }
+}
+
 @media (max-width: 1180px) {
     .admin-employees-shell .employees-filter-bar {
         grid-template-columns: repeat(3, minmax(0, 1fr));
