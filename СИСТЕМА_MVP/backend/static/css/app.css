@@ -12573,6 +12573,7 @@ body.employees-admin-screen {
 }
 
 .admin-console-avatar {
+    position: relative;
     display: grid;
     place-items: center;
     width: 52px;
@@ -12588,6 +12589,8 @@ body.employees-admin-screen {
 }
 
 .admin-console-avatar img {
+    position: absolute;
+    inset: 0;
     display: block;
     width: 100%;
     height: 100%;
