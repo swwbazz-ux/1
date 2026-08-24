@@ -566,6 +566,8 @@ function installExcavatorFragmentHandler(runtime, nextExcavatorId = 31) {
             "function hasExcavatorRelevantEvents(events) {",
             "  return Array.isArray(events) && events.length > 0;",
             "}",
+            "function readExcavatorAssignmentSnapshot() { return {}; }",
+            "function syncExcavatorAssignmentSnapshot() {}",
             refreshSource,
             applySource
         ].join("\n"),

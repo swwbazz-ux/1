@@ -167,9 +167,10 @@
         var wakeTimeoutId = null;
         var authRedirectScheduled = false;
         var pageFocused = typeof document.hasFocus === "function" ? document.hasFocus() : true;
+        var visibilityOnlyActivity = document.body.dataset.realtimeVisibilityOnly === "true";
 
         function isPageActive() {
-            return document.hidden !== true && pageFocused;
+            return document.hidden !== true && (visibilityOnlyActivity || pageFocused);
         }
 
         function clearPollSchedule() {
@@ -799,7 +800,7 @@
                 return;
             }
             pageFocused = typeof document.hasFocus !== "function" || document.hasFocus();
-            if (pageFocused) {
+            if (visibilityOnlyActivity || pageFocused) {
                 wakeRealtimeConnection("visibilitychange");
             }
         });
@@ -809,6 +810,10 @@
         });
         window.addEventListener("blur", function () {
             pageFocused = false;
+            if (visibilityOnlyActivity && document.hidden !== true) {
+                scheduleNextPoll();
+                return;
+            }
             pauseRealtimeConnection();
         });
         window.addEventListener("pageshow", function (event) {

@@ -144,6 +144,7 @@ function createRuntime(options) {
         dataset: {
             roleAccessActive: "true",
             operationalStateVersion: "7",
+            realtimeVisibilityOnly: runtimeOptions.realtimeVisibilityOnly === true ? "true" : "false",
         },
         classList: new FakeClassList(),
     };
@@ -921,6 +922,24 @@ test("blur pauses polling and focus performs one immediate catch-up request", as
     runtime.window.dispatchEvent({type: "focus"});
     runtime.flushZeroTimers();
     await settlePromises();
+    assert.equal(runtime.fetchCalls.length, 2);
+});
+
+test("visible-only PWA keeps polling after Android-style window blur", async () => {
+    const runtime = createRuntime({
+        realtimeVisibilityOnly: true,
+        fetch() {
+            return Promise.resolve(response(200, {version: 7, role_active: true, relevant: false}));
+        },
+    });
+    await settlePromises();
+    assert.equal(runtime.fetchCalls.length, 1);
+
+    runtime.window.dispatchEvent({type: "blur"});
+    assert.equal(runtime.window.AppRealtime.getDebugState().pageActive, true);
+    runtime.runAllTimeouts();
+    await settlePromises();
+
     assert.equal(runtime.fetchCalls.length, 2);
 });
 
