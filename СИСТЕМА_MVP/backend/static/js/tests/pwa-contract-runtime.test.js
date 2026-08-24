@@ -1695,17 +1695,17 @@ test(
     async () => {
         const runtime = createRuntime({
             htmlContractVersion: "contract-v3",
-            htmlShellVersion: "driver-mobile-shell-v119",
+            htmlShellVersion: "driver-mobile-shell-v120",
             workerContractVersion: "contract-v2",
-            workerShellVersion: "driver-mobile-shell-v118",
+            workerShellVersion: "driver-mobile-shell-v119",
             hasWaitingWorker: false,
         });
 
-        executeDriverPwaBinding(runtime, "driver-mobile-shell-v119");
+        executeDriverPwaBinding(runtime, "driver-mobile-shell-v120");
         runtime.guard.registerJavaScript("contract-v3");
         runtime.guard.acceptServerContract({
             app_contract_version: "contract-v3",
-            role_shell_version: "driver-mobile-shell-v119",
+            role_shell_version: "driver-mobile-shell-v120",
             role_app_code: "driver",
         });
         await flushRuntime(runtime);
@@ -1713,7 +1713,7 @@ test(
         assertContractState(runtime, {ready: true, locked: false});
         assert.equal(
             runtime.guard.getState().serviceWorker.shellVersion,
-            "driver-mobile-shell-v119",
+            "driver-mobile-shell-v120",
             "a stale non-responsive controller must not block a verified current Driver page"
         );
     }
@@ -1725,17 +1725,17 @@ test(
     async () => {
         const runtime = createRuntime({
             htmlContractVersion: "contract-v3",
-            htmlShellVersion: "driver-mobile-shell-v119",
+            htmlShellVersion: "driver-mobile-shell-v120",
             workerContractVersion: "contract-v2",
-            workerShellVersion: "driver-mobile-shell-v118",
+            workerShellVersion: "driver-mobile-shell-v119",
             hasWaitingWorker: false,
         });
 
-        executeDriverPwaBinding(runtime, "driver-mobile-shell-v119");
+        executeDriverPwaBinding(runtime, "driver-mobile-shell-v120");
         runtime.guard.registerJavaScript("contract-v3");
         runtime.guard.acceptServerContract({
             app_contract_version: "contract-v3",
-            role_shell_version: "driver-mobile-shell-v120",
+            role_shell_version: "driver-mobile-shell-v121",
             role_app_code: "driver",
         });
         await flushRuntime(runtime);
@@ -1743,7 +1743,7 @@ test(
         assertContractState(runtime, {ready: false, locked: true});
         assert.equal(
             runtime.guard.getState().serviceWorker.shellVersion,
-            "driver-mobile-shell-v118"
+            "driver-mobile-shell-v119"
         );
     }
 );

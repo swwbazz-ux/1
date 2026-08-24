@@ -185,7 +185,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, reverse('driver_manifest'))
         self.assertContains(response, 'rel="manifest"')
         self.assertContains(response, '/driver-sw.js')
-        self.assertContains(response, 'driver-mobile-shell-v119')
+        self.assertContains(response, 'driver-mobile-shell-v120')
         self.assertContains(response, 'class="driver-shell-version"')
         self.assertContains(response, 'data-driver-pwa-update-modal')
         self.assertContains(response, 'data-driver-pwa-update-badge')
@@ -227,7 +227,8 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, '"assign"')
         self.assertContains(response, 'gap: var(--driver-work-gap)')
         self.assertContains(response, 'class="driver-work-context-card"')
-        self.assertContains(response, '--driver-work-column: min(100%, clamp(320px, 92vw, 720px))')
+        self.assertContains(response, '--driver-work-column: min(100%, 720px)')
+        self.assertNotContains(response, 'clamp(320px, 92vw, 720px)')
         self.assertContains(response, 'class="driver-work-context-heading"')
         self.assertContains(response, 'class="driver-work-context-machine"')
         self.assertContains(response, 'class="driver-work-context-geology"')
@@ -283,7 +284,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, 'width: 74%')
         self.assertContains(response, 'width: max-content')
         self.assertNotContains(response, '--driver-dial-size: clamp(260px, 76vw, 380px)')
-        self.assertContains(response, 'var holdMs = 2000')
+        self.assertContains(response, 'holdMs: 2000')
         self.assertContains(
             response,
             'holdButton.style.setProperty("--driver-hold", percent.toFixed(2))',
@@ -342,7 +343,7 @@ class AccessLoginTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Service-Worker-Allowed'], '/driver/')
-        self.assertIn('driver-mobile-shell-v119', script)
+        self.assertIn('driver-mobile-shell-v120', script)
         self.assertIn('/driver/', script)
         self.assertIn('/driver/shift/', script)
         self.assertIn('/driver.webmanifest', script)
@@ -2628,7 +2629,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(driver_shift_response, 'ККД')
         self.assertContains(driver_shift_response, 'window.applyOperationalStateRefresh')
         self.assertContains(driver_shift_response, 'data-realtime-mode="custom"')
-        self.assertContains(driver_shift_response, 'driver-mobile-shell-v119')
+        self.assertContains(driver_shift_response, 'driver-mobile-shell-v120')
 
     def test_driver_downtime_buttons_are_rendered_from_server_reference(self):
         truck = self.create_registered_driver_shift()
@@ -2668,8 +2669,11 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, 'driver-downtime-state-icon-play')
         self.assertContains(response, 'driver-downtime-state-icon-pause')
         self.assertContains(response, 'class="driver-downtime-list"')
-        self.assertContains(response, 'Удерживайте 2 секунды, чтобы начать простой')
+        self.assertContains(response, 'Удерживайте полсекунды, чтобы начать простой')
         self.assertContains(response, 'registerDriverDowntimeHold')
+        self.assertContains(response, 'var holdMs = 500;')
+        self.assertNotContains(response, 'Подтвердите действие:')
+        self.assertNotContains(response, 'Подтвердите завершение и разгрузку текущего рейса.')
         self.assertContains(response, f'data-driver-downtime-reason-id="{waiting_reason.id}"')
         self.assertContains(response, f'name="reason_id" value="{waiting_reason.id}"')
         self.assertContains(response, 'Фронт')

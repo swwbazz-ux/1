@@ -177,9 +177,11 @@ test("production Driver unload recovery keeps one action id across lost response
     assert.match(template, /data-driver-trip-id="\{\{ active_trip\.id \}\}"/);
     assert.equal(
         (template.match(/unloadRecovery\.ensureActionId\(\)/g) || []).length,
-        2,
-        "Both production unload submission paths must prepare the retained ID."
+        1,
+        "Only the two-second hold path may prepare and submit the retained unload ID."
     );
+    assert.match(template, /holdMs:\s*2000/);
+    assert.doesNotMatch(template, /Подтвердите завершение и разгрузку текущего рейса\./);
 });
 
 

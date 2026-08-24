@@ -92,7 +92,7 @@ body.driver-mobile-screen .driver-shell {
     --driver-nav-content-h: 78px;
     --driver-nav-total-h: calc(var(--driver-nav-content-h) + var(--driver-safe-bottom));
     --driver-work-gap: clamp(12px, 1.8dvh, 20px);
-    --driver-work-column: min(100%, clamp(320px, 92vw, 720px));
+    --driver-work-column: min(100%, 720px);
     --driver-dial-size: clamp(220px, min(92vw, 62dvh), 520px);
     width: 100%;
     max-width: none;
@@ -2815,16 +2815,20 @@ body.driver-mobile-screen .driver-mobile-update-modal {
     z-index: 1000;
     display: grid;
     place-items: center;
-    padding: 24px;
+    padding: max(12px, env(safe-area-inset-top, 0px)) clamp(10px, 4vw, 24px) max(12px, env(safe-area-inset-bottom, 0px));
     background: rgba(2, 8, 12, 0.78);
     backdrop-filter: blur(8px);
 }
 
 body.driver-mobile-screen .driver-mobile-update-dialog {
     width: min(100%, 390px);
+    max-height: calc(var(--driver-viewport-h, 100dvh) - max(24px, env(safe-area-inset-top, 0px)) - max(24px, env(safe-area-inset-bottom, 0px)));
+    display: grid;
+    gap: clamp(8px, 1.4dvh, 14px);
+    overflow: hidden;
     border: 1px solid rgba(140,255,46,0.28);
     border-radius: 12px;
-    padding: 18px;
+    padding: clamp(12px, min(4vw, 2.2dvh), 18px);
     background: linear-gradient(145deg, rgba(9, 31, 39, 0.98), rgba(4, 15, 20, 0.98));
     color: var(--driver-ink);
     box-shadow: 0 24px 70px rgba(0,0,0,0.55);
@@ -2833,30 +2837,122 @@ body.driver-mobile-screen .driver-mobile-update-dialog {
 body.driver-mobile-screen .driver-mobile-update-dialog strong {
     color: var(--driver-green);
     text-transform: uppercase;
-    font-size: 24px;
+    font-size: clamp(18px, min(6vw, 3.2dvh), 24px);
+    line-height: 1.05;
+    overflow-wrap: anywhere;
 }
 
 body.driver-mobile-screen .driver-mobile-update-dialog p,
 body.driver-mobile-screen .driver-mobile-update-versions {
     color: var(--driver-muted);
-    font-size: 16px;
+    font-size: clamp(13px, min(4vw, 2.2dvh), 16px);
+    line-height: 1.25;
+    overflow-wrap: anywhere;
 }
 
 body.driver-mobile-screen .driver-mobile-update-actions {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(auto-fit, minmax(min(130px, 100%), 1fr));
     gap: 10px;
-    margin-top: 16px;
+    margin-top: clamp(4px, 1dvh, 10px);
 }
 
 body.driver-mobile-screen .driver-mobile-update-actions button {
-    min-height: 52px;
+    min-width: 0;
+    min-height: clamp(44px, 6.5dvh, 52px);
     border: 1px solid rgba(137,169,180,0.28);
     border-radius: 8px;
     color: var(--driver-ink);
     background: rgba(255,255,255,0.06);
     text-transform: uppercase;
     font-weight: 900;
+    font-size: clamp(13px, min(4vw, 2.2dvh), 16px);
+    white-space: normal;
+}
+
+/* Driver confirmations remain only for destructive actions and fit the visual viewport. */
+body.driver-mobile-screen .app-confirm-modal {
+    padding: max(12px, env(safe-area-inset-top, 0px)) clamp(10px, 4vw, 24px) max(12px, env(safe-area-inset-bottom, 0px));
+}
+
+body.driver-mobile-screen .app-confirm-dialog {
+    width: min(100%, 480px);
+    max-height: calc(var(--driver-viewport-h, 100dvh) - max(24px, env(safe-area-inset-top, 0px)) - max(24px, env(safe-area-inset-bottom, 0px)));
+    grid-template-columns: clamp(38px, 11vw, 54px) minmax(0, 1fr);
+    gap: clamp(9px, 3vw, 16px);
+    padding: clamp(12px, min(4.8vw, 2.8dvh), 24px);
+    border-radius: clamp(10px, 4vw, 18px);
+    overflow: hidden;
+}
+
+body.driver-mobile-screen .app-confirm-icon {
+    width: clamp(36px, 10vw, 46px);
+    height: clamp(36px, 10vw, 46px);
+    border-radius: clamp(8px, 3vw, 14px);
+    font-size: clamp(18px, 5vw, 24px);
+}
+
+body.driver-mobile-screen .app-confirm-content {
+    min-width: 0;
+    align-self: center;
+}
+
+body.driver-mobile-screen .app-confirm-content h2 {
+    margin: 0 0 clamp(4px, .8dvh, 8px);
+    font-size: clamp(18px, min(5.5vw, 3dvh), 24px);
+    line-height: 1.05;
+    overflow-wrap: anywhere;
+}
+
+body.driver-mobile-screen .app-confirm-content p {
+    font-size: clamp(13px, min(4vw, 2.15dvh), 16px);
+    line-height: 1.25;
+    overflow-wrap: anywhere;
+}
+
+body.driver-mobile-screen .app-confirm-actions {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(130px, 100%), 1fr));
+    gap: clamp(6px, 2vw, 10px);
+    margin-top: clamp(4px, 1dvh, 8px);
+}
+
+body.driver-mobile-screen .app-confirm-actions button {
+    width: 100%;
+    min-width: 0;
+    min-height: clamp(42px, 6.2dvh, 52px);
+    padding: clamp(8px, 1.5dvh, 12px) clamp(8px, 2.5vw, 16px);
+    border-radius: clamp(8px, 2.5vw, 12px);
+    font-size: clamp(13px, min(4vw, 2.15dvh), 16px);
+    white-space: normal;
+}
+
+body.driver-mobile-screen .app-confirm-shift-summary {
+    grid-column: 1 / -1;
+    min-width: 0;
+    padding: clamp(8px, min(3vw, 1.8dvh), 14px);
+    border-radius: clamp(8px, 2.5vw, 12px);
+}
+
+body.driver-mobile-screen .app-confirm-shift-summary h3 {
+    margin: 0 0 clamp(5px, .8dvh, 8px);
+    font-size: clamp(14px, min(4.2vw, 2.3dvh), 18px);
+}
+
+body.driver-mobile-screen .app-confirm-shift-grid {
+    grid-template-columns: repeat(auto-fit, minmax(min(100px, 100%), 1fr));
+}
+
+body.driver-mobile-screen .app-confirm-shift-grid div {
+    min-width: 0;
+    padding: clamp(6px, 1dvh, 10px);
+}
+
+body.driver-mobile-screen .app-confirm-shift-grid span,
+body.driver-mobile-screen .app-confirm-shift-grid strong {
+    min-width: 0;
+    font-size: clamp(11px, min(3.4vw, 1.8dvh), 14px);
+    overflow-wrap: anywhere;
 }
 
 body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-apply] {
@@ -2864,7 +2960,7 @@ body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-
     background: linear-gradient(180deg, #a9ff46 0%, #72d729 100%);
 }
 
-/* v116: fit every driver tab to the real visual viewport, including Android text scaling. */
+/* Fit every driver tab to the real visual viewport, including Android text scaling. */
 body.driver-mobile-screen .driver-panel.is-active {
     min-width: 0;
     max-width: 100%;
@@ -3130,6 +3226,36 @@ body.driver-mobile-screen .driver-manifest-tabs button {
 
 body.driver-mobile-screen .driver-shell[data-driver-density="compact"] {
     --driver-work-gap: clamp(5px, .8dvh, 8px);
+    --driver-edge: clamp(9px, 3vw, 16px);
+}
+
+body.driver-mobile-screen .driver-shell[data-driver-density="compact"] .driver-shift-workspace,
+body.driver-mobile-screen .driver-shell[data-driver-density="compact"] .driver-shift-opening,
+body.driver-mobile-screen .driver-shell[data-driver-density="compact"] [data-driver-tab-panel="downtimes"].is-active,
+body.driver-mobile-screen .driver-shell[data-driver-density="compact"] [data-driver-tab-panel="manifest"].is-active {
+    gap: clamp(4px, .65dvh, 6px) !important;
+}
+
+body.driver-mobile-screen .driver-shell[data-driver-density="compact"] .driver-shift-section {
+    padding: clamp(6px, .85dvh, 8px) clamp(8px, 2.4vw, 11px);
+}
+
+body.driver-mobile-screen .driver-shell[data-driver-density="compact"] .driver-shift-section-head {
+    margin-bottom: clamp(3px, .5dvh, 5px);
+}
+
+body.driver-mobile-screen .driver-shell[data-driver-density="compact"] .driver-shift-field,
+body.driver-mobile-screen .driver-shell[data-driver-density="compact"] .driver-shift-result-cell {
+    padding: clamp(4px, .55dvh, 6px) clamp(7px, 2vw, 10px);
+}
+
+body.driver-mobile-screen .driver-shell[data-driver-density="compact"] .driver-downtime-list {
+    gap: clamp(4px, .55dvh, 6px);
+}
+
+body.driver-mobile-screen .driver-shell[data-driver-density="compact"] .driver-downtime-list button {
+    padding: 4px 6px;
+    font-size: clamp(12px, min(3.8vw, 2dvh), 18px);
 }
 
 body.driver-mobile-screen .driver-shell[data-driver-density="compact"] .driver-manifest-head,
@@ -3150,6 +3276,48 @@ body.driver-mobile-screen .driver-shell[data-driver-density="compact"] .driver-r
 
 body.driver-mobile-screen .driver-shell[data-driver-density="tight"] {
     --driver-work-gap: 4px;
+    --driver-edge: clamp(7px, 2.5vw, 12px);
+}
+
+body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-shift-workspace,
+body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-shift-opening,
+body.driver-mobile-screen .driver-shell[data-driver-density="tight"] [data-driver-tab-panel="downtimes"].is-active,
+body.driver-mobile-screen .driver-shell[data-driver-density="tight"] [data-driver-tab-panel="manifest"].is-active {
+    gap: 3px !important;
+}
+
+body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-shift-section {
+    padding: 4px 6px;
+}
+
+body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-shift-section-head {
+    margin-bottom: 2px;
+}
+
+body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-shift-field,
+body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-shift-result-cell {
+    padding: 3px 5px;
+}
+
+body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-shift-section-head span,
+body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-shift-field-label > span,
+body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-shift-result-cell span {
+    font-size: clamp(10px, min(3.1vw, 1.65dvh), 12px);
+}
+
+body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-shift-result-cell strong,
+body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-shift-metric-value input,
+body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-shift-metric-value strong {
+    font-size: clamp(15px, min(4.5vw, 2.35dvh), 20px);
+}
+
+body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-downtime-list {
+    gap: 3px;
+}
+
+body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-downtime-list button {
+    padding: 3px 4px;
+    font-size: clamp(11px, min(3.45vw, 1.8dvh), 16px);
 }
 
 body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-manifest-head,
@@ -3440,7 +3608,7 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
 {% endblock %}
 
 {% block body %}
-<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-current-truck-id="{% if current_truck %}{{ current_truck.id }}{% endif %}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v119' }}">
+<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-current-truck-id="{% if current_truck %}{{ current_truck.id }}{% endif %}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v120' }}">
     {% if messages %}
         <div class="driver-messages">
             {% for message in messages %}
@@ -3453,7 +3621,7 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
     <header class="driver-header">
         <div class="driver-header-id{% if not open_shift %} is-inactive{% endif %}">{{ driver_header_label }}</div>
         <div class="driver-online" role="status" aria-label="Онлайн">
-            <small class="driver-shell-version" aria-label="Версия приложения">{{ driver_shell_version|default:'driver-mobile-shell-v119'|cut:'driver-mobile-shell-' }}</small>
+            <small class="driver-shell-version" aria-label="Версия приложения">{{ driver_shell_version|default:'driver-mobile-shell-v120'|cut:'driver-mobile-shell-' }}</small>
             <span>Онлайн</span>
             <i class="driver-online-dot" aria-hidden="true"></i>
             <strong></strong>
@@ -3701,7 +3869,7 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
                 <form method="post" action="{% url 'driver_downtime_action' %}" data-driver-downtime-reason-id="{{ reason.id }}">
                     {% csrf_token %}
                     <input type="hidden" name="reason_id" value="{{ reason.id }}">
-                    <button class="driver-downtime-hold status-{{ reason.effective_color_group }}{% if active_downtime and active_downtime.reason_id == reason.id %} is-selected{% endif %}" type="button" data-driver-downtime-reason-button data-driver-downtime-reason-id="{{ reason.id }}" data-driver-reason="{{ reason }}" data-driver-status-key="{{ reason.effective_color_group }}" style="--driver-action-hold: 0%" aria-label="Удерживайте 2 секунды, чтобы начать простой: {{ reason.button_label }}">
+                    <button class="driver-downtime-hold status-{{ reason.effective_color_group }}{% if active_downtime and active_downtime.reason_id == reason.id %} is-selected{% endif %}" type="button" data-driver-downtime-reason-button data-driver-downtime-reason-id="{{ reason.id }}" data-driver-reason="{{ reason }}" data-driver-status-key="{{ reason.effective_color_group }}" style="--driver-action-hold: 0%" aria-label="Удерживайте полсекунды, чтобы начать простой: {{ reason.button_label }}">
                         {{ reason.button_label }}
                     </button>
                 </form>
@@ -3709,7 +3877,7 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
                 <div class="driver-inline-note">Активные причины простоев для самосвалов не найдены.</div>
             {% endfor %}
         </div>
-        <button class="driver-primary-action driver-downtime-close driver-downtime-hold{% if not active_downtime %} is-disabled{% endif %}" type="button" data-driver-close-downtime style="--driver-action-hold: 0%" {% if not active_downtime %}disabled aria-disabled="true"{% else %}aria-label="Удерживайте 2 секунды, чтобы завершить простой"{% endif %}>Завершить простой</button>
+        <button class="driver-primary-action driver-downtime-close driver-downtime-hold{% if not active_downtime %} is-disabled{% endif %}" type="button" data-driver-close-downtime style="--driver-action-hold: 0%" {% if not active_downtime %}disabled aria-disabled="true"{% else %}aria-label="Удерживайте полсекунды, чтобы завершить простой"{% endif %}>Завершить простой</button>
     </section>
 
     <section class="driver-panel driver-tab {% if active_tab == 'manifest' %}is-active{% endif %}" data-driver-tab-panel="manifest" data-driver-report-date="{{ driver_shift_report_date }}" data-driver-report-shift="{{ driver_shift_report_shift }}" data-driver-report-driver="{{ driver_shift_report_driver }}" data-driver-report-truck="{{ driver_shift_report_truck }}" data-driver-report-trip-total="{{ shift_trip_count }}" data-driver-report-downtime-total="{{ shift_downtime_report_total_label }}">
@@ -4225,14 +4393,23 @@ window.bindDriverMobileShell = function () {
     }
     function fitDriverViewport() {
         var height = driverVisualViewportHeight();
+        var viewport = window.visualViewport;
+        var width = Math.max(240, Math.round(
+            viewport && Number(viewport.width) > 0
+                ? Number(viewport.width)
+                : Number(window.innerWidth || document.documentElement.clientWidth || 0)
+        ));
         document.documentElement.style.setProperty("--driver-viewport-h", height + "px");
         document.body.style.setProperty("--driver-viewport-h", height + "px");
         shell.style.setProperty("--driver-viewport-h", height + "px");
-        shell.dataset.driverDensity = height < 700 ? "compact" : "normal";
+        shell.style.setProperty("--driver-viewport-w", width + "px");
+        shell.dataset.driverDensity = height < 620 || width < 340
+            ? "tight"
+            : (height < 780 || width < 390 ? "compact" : "normal");
         window.requestAnimationFrame(function () {
             var panel = shell.querySelector("[data-driver-tab-panel].is-active");
             if (driverPanelOverflows(panel)) {
-                shell.dataset.driverDensity = shell.dataset.driverDensity === "compact" ? "tight" : "compact";
+                shell.dataset.driverDensity = shell.dataset.driverDensity === "normal" ? "compact" : "tight";
                 window.requestAnimationFrame(function () {
                     if (driverPanelOverflows(panel)) shell.dataset.driverDensity = "tight";
                 });
@@ -4991,15 +5168,17 @@ window.bindDriverMobileShell = function () {
         var timer = null;
         var frame = null;
         var startedAt = 0;
-        var holdMs = 2000;
-        var completedByHold = false;
-        function reset() {
+        var holdMs = 500;
+        var pending = false;
+        function reset(force) {
+            if (pending && force !== true) return;
             window.clearTimeout(timer);
             if (frame) window.cancelAnimationFrame(frame);
             timer = null;
             frame = null;
             startedAt = 0;
             button.classList.remove("is-holding");
+            button.classList.remove("is-pending");
             button.style.setProperty("--driver-action-hold", "0%");
         }
         function draw() {
@@ -5009,32 +5188,42 @@ window.bindDriverMobileShell = function () {
             if (progress < 100) frame = window.requestAnimationFrame(draw);
         }
         function complete() {
-            reset();
-            completedByHold = true;
-            onComplete();
+            window.clearTimeout(timer);
+            if (frame) window.cancelAnimationFrame(frame);
+            timer = null;
+            frame = null;
+            startedAt = 0;
+            pending = true;
+            button.classList.remove("is-holding");
+            button.classList.add("is-pending");
+            button.style.setProperty("--driver-action-hold", "100%");
+            var actionResult;
+            try {
+                actionResult = onComplete();
+            } catch (error) {
+                actionResult = Promise.reject(error);
+            }
+            Promise.resolve(actionResult).catch(function (error) {
+                showDriverToast(error && error.message ? error.message : "Действие не выполнено");
+            }).finally(function () {
+                pending = false;
+                reset(true);
+            });
         }
         function begin(event) {
-            if (button.disabled || button.getAttribute("aria-disabled") === "true" || startedAt) return;
+            if (button.disabled || button.getAttribute("aria-disabled") === "true" || startedAt || pending || driverRoleIsReadonly()) return;
+            if (event) event.preventDefault();
             startedAt = Date.now();
             button.classList.add("is-holding");
+            button.style.setProperty("--driver-action-hold", "0%");
+            if (event && event.pointerId !== undefined) {
+                button.setPointerCapture?.(event.pointerId);
+            }
             draw();
             timer = window.setTimeout(complete, holdMs);
         }
         button.addEventListener("click", function (event) {
             event.preventDefault();
-            if (completedByHold) {
-                completedByHold = false;
-                return;
-            }
-            if (button.disabled || button.getAttribute("aria-disabled") === "true") return;
-            if (typeof window.openAppConfirmDialog === "function") {
-                window.openAppConfirmDialog(
-                    "Подтвердите действие: " + button.textContent.trim() + ".",
-                    onComplete,
-                    0,
-                    "Подтвердить"
-                );
-            }
         });
         button.addEventListener("pointerdown", begin);
         ["pointerup", "pointercancel", "pointerleave"].forEach(function (name) {
@@ -5046,6 +5235,7 @@ window.bindDriverMobileShell = function () {
         button.addEventListener("keyup", function (event) {
             if (event.key === "Enter" || event.key === " ") reset();
         });
+        button.addEventListener("blur", function () { reset(); });
     }
 
     var downtimeRefresh = shell.querySelector("[data-driver-downtime-refresh]");
@@ -5061,7 +5251,7 @@ window.bindDriverMobileShell = function () {
             });
             button.classList.add("is-selected");
             button.disabled = true;
-            postDriverDowntimeAction({
+            return postDriverDowntimeAction({
                 action: "start",
                 reason_id: button.dataset.driverDowntimeReasonId,
                 client_action_id: generateClientActionId("driver-downtime")
@@ -5090,7 +5280,7 @@ window.bindDriverMobileShell = function () {
             }
             downtimeClose.disabled = true;
             downtimeClose.classList.add("is-pending");
-            postDriverDowntimeAction({
+            return postDriverDowntimeAction({
                 action: "close",
                 client_action_id: generateClientActionId("driver-downtime-close")
             }).then(function (payload) {
@@ -5141,7 +5331,6 @@ window.bindDriverMobileShell = function () {
     });
     window.driverUnloadRecovery = unloadRecovery;
     if (holdForm && holdButton) {
-        var completedByHold = false;
         var dialLabel = holdButton.querySelector("[data-driver-dial-label]");
         var readyDialLabel = dialLabel
             ? (dialLabel.dataset.driverDialRaw || dialLabel.textContent.trim().replace(/\s+/g, " "))
@@ -5159,7 +5348,6 @@ window.bindDriverMobileShell = function () {
                 );
             },
             onReset: function () {
-                completedByHold = false;
                 delete holdForm.dataset.holdComplete;
                 holdButton.classList.remove("is-holding", "is-pending");
                 holdButton.classList.add("is-loaded");
@@ -5177,7 +5365,6 @@ window.bindDriverMobileShell = function () {
                 }
                 unloadRecovery.ensureActionId();
                 holdForm.dataset.holdComplete = "true";
-                completedByHold = true;
                 holdButton.classList.remove("is-loaded", "is-holding");
                 holdButton.classList.add("is-pending");
                 if (dialLabel) {
@@ -5205,37 +5392,6 @@ window.bindDriverMobileShell = function () {
         });
         holdButton.addEventListener("click", function (event) {
             event.preventDefault();
-            if (completedByHold) {
-                completedByHold = false;
-                return;
-            }
-            if (
-                holdButton.disabled
-                || driverRoleIsReadonly()
-                || typeof window.openAppConfirmDialog !== "function"
-            ) {
-                unloadHoldGuard.cancel();
-                return;
-            }
-            window.openAppConfirmDialog(
-                "Подтвердите завершение и разгрузку текущего рейса.",
-                function () {
-                    if (driverRoleIsReadonly()) {
-                        unloadHoldGuard.cancel();
-                        return;
-                    }
-                    unloadRecovery.ensureActionId();
-                    holdForm.dataset.holdComplete = "true";
-                    if (driverRoleIsReadonly()) {
-                        unloadHoldGuard.cancel();
-                        return;
-                    }
-                    holdButton.disabled = true;
-                    holdForm.submit();
-                },
-                0,
-                "Завершить рейс"
-            );
         });
         ["pointerup", "pointercancel", "pointerleave"].forEach(function (eventName) {
             holdButton.addEventListener(eventName, function () {
@@ -5295,7 +5451,7 @@ window.bindDriverMobileShell = function () {
         var runtime = window.__driverPwaUpdateRuntime;
         var currentShellVersion = runtime && runtime.currentShellVersion
             ? runtime.currentShellVersion
-            : shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v119' }}";
+            : shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v120' }}";
         var updateModal = document.querySelector("[data-driver-pwa-update-modal]");
         var updateBadge = document.querySelector("[data-driver-pwa-update-badge]");
         var updateTarget = document.querySelector("[data-driver-pwa-update-nav-target]");
