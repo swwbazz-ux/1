@@ -3440,7 +3440,7 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
 {% endblock %}
 
 {% block body %}
-<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-current-truck-id="{% if current_truck %}{{ current_truck.id }}{% endif %}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v116' }}">
+<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-current-truck-id="{% if current_truck %}{{ current_truck.id }}{% endif %}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v117' }}">
     {% if messages %}
         <div class="driver-messages">
             {% for message in messages %}
@@ -3453,7 +3453,7 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
     <header class="driver-header">
         <div class="driver-header-id{% if not open_shift %} is-inactive{% endif %}">{{ driver_header_label }}</div>
         <div class="driver-online" role="status" aria-label="Онлайн">
-            <small class="driver-shell-version" aria-label="Версия приложения">{{ driver_shell_version|default:'driver-mobile-shell-v116'|cut:'driver-mobile-shell-' }}</small>
+            <small class="driver-shell-version" aria-label="Версия приложения">{{ driver_shell_version|default:'driver-mobile-shell-v117'|cut:'driver-mobile-shell-' }}</small>
             <span>Онлайн</span>
             <i class="driver-online-dot" aria-hidden="true"></i>
             <strong></strong>
@@ -5295,7 +5295,7 @@ window.bindDriverMobileShell = function () {
         var runtime = window.__driverPwaUpdateRuntime;
         var currentShellVersion = runtime && runtime.currentShellVersion
             ? runtime.currentShellVersion
-            : shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v116' }}";
+            : shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v117' }}";
         var updateModal = document.querySelector("[data-driver-pwa-update-modal]");
         var updateBadge = document.querySelector("[data-driver-pwa-update-badge]");
         var updateTarget = document.querySelector("[data-driver-pwa-update-nav-target]");
@@ -5374,6 +5374,37 @@ window.bindDriverMobileShell = function () {
                     worker.postMessage({type: "GET_VERSION"}, [channel.port2]);
                 });
             };
+            runtime.activateMatchingWaitingWorker = function (registration, worker, waitingVersion) {
+                if (!worker || String(waitingVersion || "") !== String(runtime.currentShellVersion || "")) {
+                    return false;
+                }
+                if (registration && registration.waiting && registration.waiting !== worker) {
+                    return false;
+                }
+                var guard = window.AppPwaContractGuard;
+                var guardState = guard && typeof guard.getState === "function"
+                    ? guard.getState()
+                    : null;
+                if (!guardState || !guardState.locked) {
+                    return false;
+                }
+                if (
+                    guard
+                    && typeof guard.hasUnsafeWorkInProgress === "function"
+                    && guard.hasUnsafeWorkInProgress()
+                ) {
+                    return false;
+                }
+                if (runtime.activationRequestedWorker === worker) {
+                    return true;
+                }
+                runtime.activationRequestedWorker = worker;
+                runtime.waitingWorker = null;
+                setBadge(false);
+                hideModal();
+                worker.postMessage({type: "SKIP_WAITING"});
+                return true;
+            };
             runtime.renderWaitingUpdate = function (registration, worker) {
                 var waitingWorker = worker || (registration && registration.waiting);
                 if (!waitingWorker) return Promise.resolve();
@@ -5393,6 +5424,13 @@ window.bindDriverMobileShell = function () {
                         (registration && registration.waiting !== waitingWorker)
                         || runtime.activationRequestedWorker === waitingWorker
                     ) {
+                        return;
+                    }
+                    if (runtime.activateMatchingWaitingWorker(
+                        registration,
+                        waitingWorker,
+                        versions[1]
+                    )) {
                         return;
                     }
                     if (runtime.renderUpdate) {
