@@ -21,12 +21,13 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import asdict, dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
 
-MARKER = "ТЕСТ_НЕДЕЛЯ_20260727"
+DEFAULT_MARKER = "ТЕСТ_НЕДЕЛЯ_20260727"
+DEFAULT_PRODUCTION_DATE = date(2026, 7, 26)
 DEFAULT_ARTIFACT_DIR = Path(
     r"C:\Users\swwba\AppData\Local\Temp"
     r"\copper-week-http-soak-20260727"
@@ -71,26 +72,32 @@ def build_accounts(
     *,
     driver_count: int,
     operator_count: int,
+    marker: str,
+    production_date: date,
 ) -> list[Account]:
+    marker_query = urllib.parse.quote(marker)
     accounts = [
         Account(
             0,
             "admin",
             "admin.localhost",
-            "/system-admin/employees/?q=QAWEEK-20260727",
+            f"/system-admin/employees/?q={marker_query}",
         ),
         Account(1, "oup", "oup.localhost", "/oup/employees/"),
         Account(
             2,
             "deputy_mining_manager",
             "deputy.localhost",
-            "/deputy-mining-manager/?role=driver&date=2026-07-26",
+            (
+                "/deputy-mining-manager/?role=driver&date="
+                f"{production_date.isoformat()}"
+            ),
         ),
         Account(
             3,
             "manager",
             "management.localhost",
-            "/reports/management/?date=2026-07-26",
+            f"/reports/management/?date={production_date.isoformat()}",
         ),
         Account(
             4,
@@ -140,6 +147,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--startup-jitter-seconds", type=float, default=1.0)
     parser.add_argument("--driver-count", type=int, default=53)
     parser.add_argument("--operator-count", type=int, default=8)
+    parser.add_argument("--marker", default=DEFAULT_MARKER)
+    parser.add_argument(
+        "--production-date",
+        type=date.fromisoformat,
+        default=DEFAULT_PRODUCTION_DATE,
+    )
     parser.add_argument(
         "--artifact-dir",
         type=Path,
@@ -402,6 +415,8 @@ def main() -> int:
     accounts = build_accounts(
         driver_count=args.driver_count,
         operator_count=args.operator_count,
+        marker=args.marker,
+        production_date=args.production_date,
     )
     started_at = datetime.now(UTC)
     login_results: list[dict[str, Any]] = []
@@ -458,7 +473,8 @@ def main() -> int:
     marker_request = urllib.request.Request(
         (
             f"{base_url(admin_state.account, args.port)}"
-            "/system-admin/employees/?q=QAWEEK-20260727"
+            "/system-admin/employees/?q="
+            f"{urllib.parse.quote(args.marker)}"
         ),
         headers={
             "Host": host_header(admin_state.account, args.port),
@@ -470,7 +486,7 @@ def main() -> int:
         marker_request,
         timeout=args.timeout_seconds,
     )
-    marker_found = MARKER.encode("utf-8") in marker_body
+    marker_found = args.marker.encode("utf-8") in marker_body
     if marker_status != 200 or not marker_found:
         report = {
             "status": "FAILED_DATABASE_PREFLIGHT",
@@ -589,6 +605,8 @@ def main() -> int:
             "timeout_seconds": args.timeout_seconds,
             "startup_jitter_seconds": args.startup_jitter_seconds,
             "target": "http://*.localhost:8000",
+            "marker": args.marker,
+            "production_date": args.production_date.isoformat(),
             "production_facts_read_only": True,
             "creates_test_sessions": True,
         },

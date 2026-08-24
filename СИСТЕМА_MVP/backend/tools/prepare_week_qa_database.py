@@ -43,7 +43,7 @@ from references.models import (  # noqa: E402
     RockType,
     TruckCapacityRule,
 )
-from shifts.models import EmployeeShift  # noqa: E402
+from shifts.models import EmployeeShift, WatchPeriod  # noqa: E402
 from trips.models import Trip  # noqa: E402
 from users.models import (  # noqa: E402
     Employee,
@@ -51,13 +51,17 @@ from users.models import (  # noqa: E402
     PersonnelPosition,
     ProductionSpecialization,
     Role,
+    WatchComposition,
     WorkSchedule,
 )
 
 
-QA_DB_NAME = "copper_week_qa_20260727"
-QA_DB_HOST = "127.0.0.1"
-QA_DB_PORT = "55432"
+QA_DB_NAME = os.environ.get(
+    "WEEK_QA_DB_NAME",
+    "copper_week_qa_20260727",
+)
+QA_DB_HOST = os.environ.get("WEEK_QA_DB_HOST", "127.0.0.1")
+QA_DB_PORT = os.environ.get("WEEK_QA_DB_PORT", "55432")
 
 ALLOWED_LABELS = {
     "references.equipmenttype",
@@ -142,6 +146,8 @@ def verify_database_identity() -> None:
 def verify_no_business_data() -> None:
     counts = {
         "employees": Employee.objects.count(),
+        "watch_compositions": WatchComposition.objects.count(),
+        "watch_periods": WatchPeriod.objects.count(),
         "shifts": EmployeeShift.objects.count(),
         "trips": Trip.objects.count(),
         "downtime_events": DowntimeEvent.objects.count(),

@@ -17,7 +17,7 @@ import os
 import sys
 import time
 import traceback
-from collections import defaultdict
+from collections import Counter, defaultdict
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, timedelta
@@ -41,7 +41,7 @@ django.setup()
 from django.conf import settings  # noqa: E402
 from django.core.exceptions import ValidationError  # noqa: E402
 from django.db import connection  # noqa: E402
-from django.db.models import Count, Sum  # noqa: E402
+from django.db.models import Count, Max, Sum  # noqa: E402
 from django.test import Client  # noqa: E402
 from django.utils import timezone  # noqa: E402
 
@@ -68,10 +68,20 @@ from references.models import (  # noqa: E402
     RockType,
     TruckCapacityRule,
 )
+from reports.driver_watch_observation import (  # noqa: E402
+    build_driver_watch_linkage_audit,
+    build_driver_watch_observation,
+)
+from reports.models import (  # noqa: E402
+    DriverShiftPassportCaptureRequest,
+    DriverShiftPassportRequestStatus,
+    DriverShiftPassportSnapshot,
+)
 from shifts.models import (  # noqa: E402
     EmployeeShift,
     ShiftClientAction,
     ShiftReadingCorrection,
+    WatchPeriod,
 )
 from trips.models import OPEN_TRIP_STATUSES, Trip, TripClientAction, TripStatus  # noqa: E402
 from users.models import (  # noqa: E402
@@ -82,13 +92,17 @@ from users.models import (  # noqa: E402
     PersonnelPosition,
     ProductionSpecialization,
     Role,
+    WatchComposition,
     WorkSchedule,
 )
 
 
-LOCAL_QA_DB_NAME = "copper_week_qa_20260727"
-LOCAL_QA_DB_HOST = "127.0.0.1"
-LOCAL_QA_DB_PORT = "55432"
+LOCAL_QA_DB_NAME = os.environ.get(
+    "WEEK_QA_DB_NAME",
+    "copper_week_qa_20260727",
+)
+LOCAL_QA_DB_HOST = os.environ.get("WEEK_QA_DB_HOST", "127.0.0.1")
+LOCAL_QA_DB_PORT = os.environ.get("WEEK_QA_DB_PORT", "55432")
 DEFAULT_START_DATE = date(2026, 7, 20)
 DEFAULT_RUN_ID = "QA-WEEK-20260727"
 DEFAULT_MARKER = "ТЕСТ_НЕДЕЛЯ_20260727"
@@ -277,6 +291,8 @@ def verify_isolated_database(config: RunConfig, *, require_empty: bool) -> None:
         business_counts = {
             "employees": Employee.objects.count(),
             "shifts": EmployeeShift.objects.count(),
+            "watch_compositions": WatchComposition.objects.count(),
+            "watch_periods": WatchPeriod.objects.count(),
             "trips": Trip.objects.count(),
             "haul_assignments": HaulAssignment.objects.count(),
         }
@@ -707,6 +723,7 @@ def base_employee_payload(
     personnel_number: str,
     hired_at: date,
     brigade: int | None,
+    watch_composition: WatchComposition | None = None,
 ) -> dict[str, Any]:
     specialization = catalog.specializations.get(role_code)
     schedule = (
@@ -728,6 +745,11 @@ def base_employee_payload(
         "dismissed_at": "",
         "work_schedule": str(schedule.id),
         "brigade_number": str(brigade or ""),
+        "watch_composition": (
+            str(watch_composition.id)
+            if watch_composition
+            else ""
+        ),
         "residence_text": "",
         "comment": f"{catalog.config.marker}: изолированный недельный QA",
         "hr_data": "",
@@ -775,6 +797,18 @@ class WeekOnboarding:
     def __init__(self, config: RunConfig, catalog: ReferenceCatalog):
         self.config = config
         self.catalog = catalog
+        self.watch_composition = WatchComposition.objects.create(
+            code=f"qa-week-kpi-{config.start_date:%Y%m%d}",
+            name=f"{config.marker} УТВЕРЖДЁННЫЙ СОСТАВ",
+            is_active=True,
+        )
+        self.watch_period = WatchPeriod.objects.create(
+            name=f"{config.marker} КАЛЕНДАРНАЯ ВАХТА",
+            watch_composition=self.watch_composition,
+            starts_on=config.start_date,
+            ends_on=config.end_date,
+            is_active=True,
+        )
         self.staff: list[StaffMember] = []
         self.by_role: dict[str, list[StaffMember]] = defaultdict(list)
         self.drivers_by_brigade: dict[int, dict[int, StaffMember]] = {
@@ -867,6 +901,7 @@ class WeekOnboarding:
                 status=Employee.Status.ACTIVE,
                 is_active=True,
                 hired_at=self.config.start_date,
+                watch_composition=self.watch_composition,
                 comment=f"{self.config.marker}: служебный bootstrap",
             )
             access = EmployeeAccess.objects.create(
@@ -915,6 +950,7 @@ class WeekOnboarding:
             ),
             hired_at=self.config.start_date,
             brigade=None,
+            watch_composition=self.watch_composition,
         )
         payload.update(
             {
@@ -1030,6 +1066,7 @@ class WeekOnboarding:
             ),
             hired_at=self.config.start_date,
             brigade=brigade,
+            watch_composition=self.watch_composition,
         )
         payload.update(
             {
@@ -1208,6 +1245,15 @@ class WeekOnboarding:
             raise QAError(
                 f"Маркированных сотрудников {marker_count}, "
                 f"в памяти {len(self.staff)}, ожидалось {expected_total}."
+            )
+        composition_members = Employee.objects.filter(
+            full_name__startswith=self.config.marker,
+            watch_composition=self.watch_composition,
+        ).count()
+        if composition_members != expected_total:
+            raise QAError(
+                f"В утверждённом составе {composition_members} сотрудников, "
+                f"ожидалось {expected_total}."
             )
         activated = EmployeeAccess.objects.filter(
             employee__full_name__startswith=self.config.marker,
@@ -1620,6 +1666,11 @@ class FullWeekRunner:
             if not shift:
                 raise QAError(
                     f"Не открылась смена водителя {truck.garage_number}."
+                )
+            if shift.watch_period_id != self.onboarding.watch_period.id:
+                raise QAError(
+                    f"Смена водителя {truck.garage_number} не получила "
+                    "доказанный snapshot календарной вахты."
                 )
             driver_shifts[truck.id] = shift
 
@@ -3530,9 +3581,378 @@ class WeekVerifier:
             },
         )
 
+    @staticmethod
+    def _diagnostic_payload_violations(payload: Any) -> list[str]:
+        violations = []
+
+        def walk(value: Any, path: str = "$") -> None:
+            if isinstance(value, dict):
+                for key, item in value.items():
+                    normalized = str(key).strip().lower()
+                    item_path = f"{path}.{key}"
+                    if normalized in {"score", "place", "weight"}:
+                        violations.append(item_path)
+                    if normalized == "official" and item is not False:
+                        violations.append(item_path)
+                    if normalized.startswith("official_") and item is not False:
+                        violations.append(item_path)
+                    walk(item, item_path)
+            elif isinstance(value, (list, tuple)):
+                for index, item in enumerate(value):
+                    walk(item, f"{path}[{index}]")
+
+        walk(payload)
+        return violations
+
+    def verify_driver_watch_and_passports(self) -> None:
+        expected_shift_count = len(self.catalog.trucks) * 14
+        watch_period = self.onboarding.watch_period
+        driver_shifts = EmployeeShift.objects.filter(
+            employee__full_name__startswith=self.config.marker,
+            workplace_code="driver",
+            closed_at__isnull=False,
+        )
+        linked_shift_count = driver_shifts.filter(
+            watch_period=watch_period,
+        ).count()
+        self.record(
+            "KPI-DRIVER-SHIFT-WATCH-LINKAGE",
+            driver_shifts.count() == expected_shift_count
+            and linked_shift_count == expected_shift_count,
+            actual={
+                "closed_driver_shifts": driver_shifts.count(),
+                "linked_to_selected_watch": linked_shift_count,
+            },
+            expected={
+                "closed_driver_shifts": expected_shift_count,
+                "linked_to_selected_watch": expected_shift_count,
+            },
+        )
+
+        linkage_audit = build_driver_watch_linkage_audit(watch_period)
+        self.record(
+            "KPI-WATCH-LINKAGE-AUDIT",
+            linkage_audit["candidate_closed_shift_count"]
+            == expected_shift_count
+            and linkage_audit["linked_to_selected_watch_count"]
+            == expected_shift_count
+            and linkage_audit["unlinked_shift_count"] == 0
+            and linkage_audit["linked_to_other_watch_count"] == 0
+            and linkage_audit["selected_watch_outside_period_count"] == 0
+            and linkage_audit["linkage_ready"],
+            actual=linkage_audit,
+            expected={
+                "candidate_closed_shift_count": expected_shift_count,
+                "linked_to_selected_watch_count": expected_shift_count,
+                "unlinked_shift_count": 0,
+                "linked_to_other_watch_count": 0,
+                "selected_watch_outside_period_count": 0,
+                "linkage_ready": True,
+            },
+        )
+
+        requests = DriverShiftPassportCaptureRequest.objects.filter(
+            shift__in=driver_shifts,
+        )
+        request_statuses = dict(
+            requests.values_list("status")
+            .annotate(total=Count("id"))
+        )
+        completed_request_count = requests.filter(
+            status=DriverShiftPassportRequestStatus.COMPLETED,
+            snapshot__isnull=False,
+        ).count()
+        self.record(
+            "KPI-PASSPORT-OUTBOX",
+            requests.count() == expected_shift_count
+            and completed_request_count == expected_shift_count
+            and request_statuses
+            == {
+                DriverShiftPassportRequestStatus.COMPLETED:
+                    expected_shift_count,
+            },
+            actual={
+                "total": requests.count(),
+                "completed_with_snapshot": completed_request_count,
+                "statuses": request_statuses,
+            },
+            expected={
+                "total": expected_shift_count,
+                "completed_with_snapshot": expected_shift_count,
+                "statuses": {
+                    DriverShiftPassportRequestStatus.COMPLETED:
+                        expected_shift_count,
+                },
+            },
+        )
+
+        snapshots = DriverShiftPassportSnapshot.objects.filter(
+            shift__in=driver_shifts,
+        )
+        snapshot_revision_audit = list(
+            snapshots.values("shift_id")
+            .annotate(total=Count("id"), max_revision=Max("revision"))
+            .exclude(total=1, max_revision=1)[:20]
+        )
+        self.record(
+            "KPI-PASSPORT-REVISIONS",
+            snapshots.count() == expected_shift_count
+            and not snapshot_revision_audit,
+            actual={
+                "snapshot_count": snapshots.count(),
+                "invalid_shift_revisions": snapshot_revision_audit,
+            },
+            expected={
+                "snapshot_count": expected_shift_count,
+                "invalid_shift_revisions": [],
+            },
+        )
+
+        total_completed_trips = 0
+        total_volume = Decimal("0")
+        total_tonnage = Decimal("0")
+        total_m3_km_missing = 0
+        total_t_km_missing = 0
+        usable_shift_count = 0
+        official_payload_violations = []
+        source_manifest_violations = []
+        fingerprint_violations = []
+        capture_violations = []
+        quality_flag_counts: Counter[str] = Counter()
+        coverage_values = []
+
+        for row in snapshots.values(
+            "shift_id",
+            "revision",
+            "source_fingerprint",
+            "payload_fingerprint",
+            "payload",
+            "trigger",
+            "captured_late",
+            "captured_by_id",
+        ).iterator(chunk_size=50):
+            payload = row["payload"]
+            passport = payload.get("passport", {})
+            production = passport.get("production", {})
+            quality = passport.get("quality", {})
+            source_watch = (
+                payload.get("source_manifest", {})
+                .get("shift", {})
+                .get("watch_period")
+            )
+            source_composition = (
+                source_watch.get("watch_composition")
+                if source_watch
+                else None
+            )
+            if (
+                not source_watch
+                or source_watch.get("id") != watch_period.id
+                or not source_composition
+                or source_composition.get("id")
+                != self.onboarding.watch_composition.id
+            ):
+                source_manifest_violations.append(row["shift_id"])
+
+            violations = self._diagnostic_payload_violations(payload)
+            if violations:
+                official_payload_violations.append({
+                    "shift_id": row["shift_id"],
+                    "paths": violations[:10],
+                })
+            if (
+                payload.get("official") is not False
+                or quality.get("official_rating_eligible") is not False
+            ):
+                official_payload_violations.append({
+                    "shift_id": row["shift_id"],
+                    "paths": ["$.official_contract"],
+                })
+            if (
+                len(row["source_fingerprint"] or "") != 64
+                or len(row["payload_fingerprint"] or "") != 64
+            ):
+                fingerprint_violations.append(row["shift_id"])
+            if (
+                row["trigger"] != "driver_close"
+                or row["captured_late"]
+                or not row["captured_by_id"]
+            ):
+                capture_violations.append(row["shift_id"])
+
+            total_completed_trips += int(
+                production.get("completed_trip_count", 0)
+            )
+            volume = production.get("volume_m3", {})
+            tonnage = production.get("tonnage_t", {})
+            m3_km = production.get("m3_km", {})
+            t_km = production.get("t_km", {})
+            total_volume += Decimal(str(volume.get("known_value") or "0"))
+            total_tonnage += Decimal(
+                str(tonnage.get("known_value") or "0")
+            )
+            total_m3_km_missing += int(
+                m3_km.get("missing_trip_count", 0)
+            )
+            total_t_km_missing += int(
+                t_km.get("missing_trip_count", 0)
+            )
+            usable_shift_count += int(
+                bool(quality.get("data_usable_for_formula_review"))
+            )
+            quality_flag_counts.update(quality.get("flags", []))
+            coverage_values.append(
+                Decimal(str(quality.get("coverage_percent") or "0"))
+            )
+
+        trip_totals = Trip.objects.filter(
+            status=TripStatus.COMPLETED,
+        ).aggregate(
+            volume=Sum("volume_m3"),
+            tonnage=Sum("tonnage"),
+        )
+        expected_trip_total = 14840
+        expected_volume = Decimal(str(trip_totals["volume"] or "0"))
+        expected_tonnage = Decimal(str(trip_totals["tonnage"] or "0"))
+        self.record(
+            "KPI-PASSPORT-PRODUCTION-TOTALS",
+            total_completed_trips == expected_trip_total
+            and total_volume == expected_volume
+            and total_tonnage == expected_tonnage,
+            actual={
+                "completed_trips": total_completed_trips,
+                "volume_m3": total_volume,
+                "tonnage_t": total_tonnage,
+            },
+            expected={
+                "completed_trips": expected_trip_total,
+                "volume_m3": expected_volume,
+                "tonnage_t": expected_tonnage,
+            },
+        )
+        self.record(
+            "KPI-PASSPORT-DISTANCE-HONEST-HOLD",
+            total_m3_km_missing == expected_trip_total
+            and total_t_km_missing == expected_trip_total
+            and usable_shift_count == 0,
+            actual={
+                "m3_km_missing_trip_count": total_m3_km_missing,
+                "t_km_missing_trip_count": total_t_km_missing,
+                "formula_usable_shift_count": usable_shift_count,
+            },
+            expected={
+                "m3_km_missing_trip_count": expected_trip_total,
+                "t_km_missing_trip_count": expected_trip_total,
+                "formula_usable_shift_count": 0,
+            },
+            detail=(
+                "В справочниках нет подтверждённого плеча маршрута; "
+                "симулятор не должен выдумывать расстояния или объявлять "
+                "формулу готовой."
+            ),
+        )
+        self.record(
+            "KPI-PASSPORT-DIAGNOSTIC-ONLY",
+            not official_payload_violations
+            and not source_manifest_violations
+            and not fingerprint_violations
+            and not capture_violations,
+            actual={
+                "official_payload_violations":
+                    official_payload_violations[:20],
+                "source_manifest_violations":
+                    source_manifest_violations[:20],
+                "fingerprint_violations": fingerprint_violations[:20],
+                "capture_violations": capture_violations[:20],
+            },
+            expected={
+                "official_payload_violations": [],
+                "source_manifest_violations": [],
+                "fingerprint_violations": [],
+                "capture_violations": [],
+            },
+        )
+
+        observation = build_driver_watch_observation(watch_period)
+        observation_summary = observation["summary"]
+        self.record(
+            "KPI-WATCH-OBSERVATION",
+            observation.get("official_rating_eligible") is False
+            and observation_summary["closed_shift_count"]
+            == expected_shift_count
+            and observation_summary["usable_shift_count"] == 0
+            and observation_summary["withheld_shift_count"]
+            == expected_shift_count
+            and observation_summary["data_ready_for_formula_review"] is False,
+            actual={
+                "row_count": observation["row_count"],
+                **observation_summary,
+                "official_rating_eligible":
+                    observation.get("official_rating_eligible"),
+            },
+            expected={
+                "closed_shift_count": expected_shift_count,
+                "usable_shift_count": 0,
+                "withheld_shift_count": expected_shift_count,
+                "data_ready_for_formula_review": False,
+                "official_rating_eligible": False,
+            },
+        )
+
+        passport_audit = {
+            "watch_period": {
+                "id": watch_period.id,
+                "name": watch_period.name,
+                "watch_composition_id":
+                    self.onboarding.watch_composition.id,
+                "starts_on": watch_period.starts_on,
+                "ends_on": watch_period.ends_on,
+            },
+            "linkage_audit": linkage_audit,
+            "driver_shift_count": driver_shifts.count(),
+            "capture_request_statuses": request_statuses,
+            "snapshot_count": snapshots.count(),
+            "production_totals": {
+                "completed_trips": total_completed_trips,
+                "volume_m3": total_volume,
+                "tonnage_t": total_tonnage,
+            },
+            "distance_completeness": {
+                "m3_km_missing_trip_count": total_m3_km_missing,
+                "t_km_missing_trip_count": total_t_km_missing,
+                "reason":
+                    "Подтверждённое плечо маршрута отсутствует в справочниках.",
+            },
+            "quality": {
+                "usable_shift_count": usable_shift_count,
+                "withheld_shift_count":
+                    expected_shift_count - usable_shift_count,
+                "flag_counts": dict(sorted(quality_flag_counts.items())),
+                "coverage_percent": {
+                    "min": min(coverage_values, default=Decimal("0")),
+                    "average": (
+                        sum(coverage_values, Decimal("0"))
+                        / len(coverage_values)
+                        if coverage_values
+                        else Decimal("0")
+                    ).quantize(Decimal("0.01")),
+                    "max": max(coverage_values, default=Decimal("0")),
+                },
+            },
+        }
+        write_json(
+            self.config.artifact_dir / "driver_passport_audit.json",
+            passport_audit,
+        )
+        write_json(
+            self.config.artifact_dir / "driver_watch_observation.json",
+            observation,
+        )
+
     def run(self) -> dict[str, Any]:
         started_at = time.perf_counter()
         self.verify_database()
+        self.verify_driver_watch_and_passports()
         self.verify_reports_and_excel()
         failures = [check for check in self.checks if not check["passed"]]
         blocking_failures = [
