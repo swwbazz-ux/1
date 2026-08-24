@@ -16,7 +16,13 @@ from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_http_methods, require_POST
 
-from assignments.models import AssignmentStatus, EquipmentAssignment, ExcavatorPlacement, HaulAssignment
+from assignments.models import (
+    AssignmentStatus,
+    EquipmentAssignment,
+    ExcavatorPlacement,
+    HaulAssignment,
+    HaulAssignmentAction,
+)
 from assignments.services import (
     get_active_equipment_assignment,
     reconcile_due_haul_assignments,
@@ -1573,7 +1579,11 @@ def build_dispatcher_dashboard_context(
         .values_list('excavator_id', flat=True)
     )
     active_excavator_ids = set(active_placement_ids)
-    active_excavator_ids.update(assignment.excavator_id for assignment in pending_assignments_list + accepted_assignments_list if assignment.excavator_id)
+    active_excavator_ids.update(
+        assignment.excavator_id
+        for assignment in pending_assignments_list + accepted_assignments_list
+        if assignment.excavator_id and assignment.action != HaulAssignmentAction.RELEASE
+    )
     active_excavator_ids.update(trip.excavator_id for trip in active_trips_list if trip.excavator_id)
 
     def garage_number_int(equipment):

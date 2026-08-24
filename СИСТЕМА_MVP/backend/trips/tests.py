@@ -648,6 +648,30 @@ class DispatcherGarageCurrentStateTests(TestCase):
         self.assertEqual(dashboard['equipment_state_ui']['free']['color_group'], 'gray')
         self.assertEqual(dashboard['equipment_state_ui']['garage']['color_group'], 'gray')
 
+    def test_active_trip_keeps_inactive_excavator_complex_visible(self):
+        Trip.objects.create(
+            excavator=self.excavator,
+            truck=self.active_truck,
+            rock_type=self.rock,
+            dump_point=self.dump_point,
+            status=TripStatus.ACTIVE,
+        )
+        ExcavatorPlacement.objects.create(
+            excavator=self.excavator,
+            zone=ExcavatorPlacement.Zone.INACTIVE,
+        )
+
+        dashboard = self.build_dashboard()
+
+        self.assertIn(
+            self.excavator.id,
+            {
+                card['excavator'].id
+                for card in dashboard['complex_cards']
+                if card.get('excavator')
+            },
+        )
+
     def test_carryover_trip_is_visible_but_not_counted_in_new_shift_kpi(self):
         old_operator = Employee.objects.create(full_name='Машинист старой смены')
         old_loading_shift = EmployeeShift.objects.create(
@@ -3644,6 +3668,50 @@ class DispatcherAssignmentRealtimeTests(TestCase):
         ).latest('version')
         self.assertEqual(event.payload['excavator_ids'], [self.excavator.id])
         self.assertEqual(event.payload['truck_ids'], [self.truck.id])
+
+    def test_move_excavator_to_garage_hides_complex_while_truck_release_is_pending(self):
+        response = self.client.post(
+            reverse('dispatcher_move_excavator'),
+            data=json.dumps({
+                'excavator_id': self.excavator.id,
+                'zone': ExcavatorPlacement.Zone.INACTIVE,
+            }),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()['ok'])
+        self.assertTrue(
+            ExcavatorPlacement.objects
+            .filter(excavator=self.excavator, zone=ExcavatorPlacement.Zone.INACTIVE)
+            .exists()
+        )
+        self.assertTrue(
+            HaulAssignment.objects
+            .filter(
+                excavator=self.excavator,
+                action=HaulAssignmentAction.RELEASE,
+                status=AssignmentStatus.PENDING,
+                ended_at__isnull=True,
+            )
+            .exists()
+        )
+
+        screen = self.client.get(reverse('dispatcher_control'))
+        dashboard = screen.context['dispatcher_dashboard']
+        complex_excavator_ids = {
+            card['excavator'].id
+            for card in dashboard['complex_cards']
+            if card.get('excavator')
+        }
+        garage_excavator_ids = {
+            tile['equipment'].id
+            for tile in dashboard['excavator_garage_tiles']
+            if tile.get('equipment')
+        }
+
+        self.assertNotIn(self.excavator.id, complex_excavator_ids)
+        self.assertIn(self.excavator.id, garage_excavator_ids)
 
     def test_dispatcher_control_renders_duplicate_active_truck_assignment_once(self):
         HaulAssignment.objects.create(
