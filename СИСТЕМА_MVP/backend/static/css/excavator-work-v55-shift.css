@@ -4207,3 +4207,83 @@ body.excavator-operator-screen #app-confirm-modal.is-shift-end-confirm .app-conf
     background: #321216 !important;
     color: #ff737a !important;
 }
+
+/* v132: optically aligned bottom-navigation icon set. */
+body.excavator-operator-screen .mm-mobile-bottom-nav .mm-mobile-nav-item {
+    gap: 3px !important;
+    padding-block: 5px !important;
+}
+
+body.excavator-operator-screen .mm-mobile-nav-icon {
+    display: grid !important;
+    place-items: center !important;
+    flex: 0 0 30px !important;
+    width: 30px !important;
+    height: 30px !important;
+    min-width: 30px !important;
+    line-height: 0 !important;
+}
+
+body.excavator-operator-screen .mm-mobile-nav-icon svg {
+    display: block !important;
+    width: 24px !important;
+    height: 24px !important;
+    overflow: visible !important;
+    fill: none !important;
+    stroke: currentColor !important;
+    stroke-width: 1.85 !important;
+    stroke-linecap: round !important;
+    stroke-linejoin: round !important;
+    transform-origin: 50% 50% !important;
+    shape-rendering: geometricPrecision;
+}
+
+body.excavator-operator-screen .mm-mobile-nav-icon svg * {
+    vector-effect: non-scaling-stroke;
+}
+
+body.excavator-operator-screen .mm-mobile-nav-icon-work svg {
+    width: 25px !important;
+    height: 25px !important;
+    transform: translateY(-.5px) !important;
+}
+
+body.excavator-operator-screen .mm-mobile-nav-icon-shift svg {
+    width: 24px !important;
+    height: 24px !important;
+}
+
+body.excavator-operator-screen .mm-mobile-nav-icon-face svg {
+    width: 24px !important;
+    height: 24px !important;
+    transform: translateY(-.5px) !important;
+}
+
+body.excavator-operator-screen .mm-mobile-nav-icon-downtime svg {
+    width: 23px !important;
+    height: 23px !important;
+}
+
+body.excavator-operator-screen .mm-mobile-bottom-nav .mm-mobile-nav-item:not(.is-active) .mm-mobile-nav-icon {
+    color: #91a0a8 !important;
+    opacity: .9 !important;
+}
+
+body.excavator-operator-screen .mm-mobile-bottom-nav .mm-mobile-nav-item.is-active .mm-mobile-nav-icon {
+    color: var(--eo-green, #58df52) !important;
+    filter: drop-shadow(0 0 4px rgba(88, 223, 82, .28)) !important;
+}
+
+body.excavator-operator-screen .mm-mobile-bottom-nav .mm-mobile-nav-item:focus {
+    outline: 0 !important;
+}
+
+body.excavator-operator-screen .mm-mobile-bottom-nav .mm-mobile-nav-item:focus-visible {
+    outline: 1px solid rgba(99, 199, 216, .72) !important;
+    outline-offset: -2px !important;
+    box-shadow: inset 0 0 0 1px rgba(99, 199, 216, .14) !important;
+}
+
+body.excavator-operator-screen .mm-mobile-nav-label {
+    line-height: 1.1 !important;
+}
