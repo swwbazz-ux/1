@@ -19,7 +19,7 @@
     {% else %}
         <header class="admin-console-header" aria-label="Административная шапка">
             <section class="admin-console-identity">
-                <span class="admin-console-avatar" aria-hidden="true">{{ access.employee.full_name|first }}</span>
+                {% include "users/includes/system_admin_avatar.html" %}
                 <span>
                     <strong>{{ access.employee.full_name }}</strong>
                     <em>Системный администратор</em>

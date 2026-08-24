@@ -389,6 +389,33 @@ class AccessLoginTests(TestCase):
         self.assertContains(dashboard_response, 'href="/system-admin/employees/?access_status=deactivated"')
         self.assertContains(dashboard_response, 'Журнал действий')
 
+    def test_system_admin_header_uses_employee_photo_with_initial_fallback(self):
+        admin_role = Role.objects.create(code='admin', name='Администратор')
+        admin_employee = Employee.objects.create(
+            full_name='Тест Админ Я',
+            status=Employee.Status.ACTIVE,
+            photo='employee_photos/admin-avatar.jpg',
+        )
+        EmployeeAccess.objects.create(
+            employee=admin_employee,
+            role=admin_role,
+            access_code='1001',
+            status=EmployeeAccess.Status.ACTIVATED,
+        )
+        self.client.post('/', {'access_code': '1001'}, follow=True, HTTP_HOST='localhost')
+
+        response_with_photo = self.client.get('/system-admin/', HTTP_HOST='localhost')
+
+        self.assertContains(response_with_photo, 'src="/media/employee_photos/admin-avatar.jpg"')
+
+        admin_employee.photo = ''
+        admin_employee.save(update_fields=['photo'])
+        response_without_photo = self.client.get('/system-admin/', HTTP_HOST='localhost')
+
+        self.assertContains(response_without_photo, 'class="admin-console-avatar"')
+        self.assertContains(response_without_photo, 'Т')
+        self.assertNotContains(response_without_photo, '<img src="/media/employee_photos/admin-avatar.jpg"')
+
     def test_admin_can_reset_shift_test_data_without_deleting_base_data(self):
         admin_role = Role.objects.create(code='admin', name='Администратор')
         driver_role = Role.objects.create(code='driver_reset_test', name='Водитель самосвала')

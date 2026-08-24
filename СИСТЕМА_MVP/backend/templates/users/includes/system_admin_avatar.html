@@ -1,0 +1,7 @@
+<span class="admin-console-avatar" aria-hidden="true">
+    {% if access.employee.photo %}
+        <img src="{{ access.employee.photo.url }}" alt="">
+    {% else %}
+        {{ access.employee.full_name|default:"А"|first }}
+    {% endif %}
+</span>
