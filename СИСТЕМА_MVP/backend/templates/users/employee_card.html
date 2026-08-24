@@ -74,7 +74,9 @@
                         {% endif %}
                     {% endfor %}
                     {% for error in form.non_field_errors %}<li>{{ error }}</li>{% endfor %}
-                    {% for error in form.personnel_number.errors %}<li>{{ error }}</li>{% endfor %}
+                    {% if employee_card_context != "oup" %}
+                        {% for error in form.personnel_number.errors %}<li>{{ error }}</li>{% endfor %}
+                    {% endif %}
                 </ul>
             </section>
         {% endif %}
@@ -82,7 +84,7 @@
         <section class="employee-card-workspace">
             <form id="employee-card-form" class="employee-card-main" method="post" enctype="multipart/form-data">
                 {% csrf_token %}
-                {{ form.personnel_number }}
+                {% if employee_card_context != "oup" %}{{ form.personnel_number }}{% endif %}
                 {{ form.position }}
                 {{ form.work_category }}
 
@@ -150,7 +152,16 @@
                             </div>
                             {{ form.sex }}{{ form.sex.errors }}
                         </div>
-                        <div class="employee-card-field" data-card-field data-copy-label="Телефон">
+                        {% if employee_card_context == "oup" %}
+                            <div class="employee-card-field" data-card-field data-copy-label="Табельный номер">
+                                <div class="employee-card-label-row">
+                                    <label for="{{ form.personnel_number.id_for_label }}">{{ form.personnel_number.label }}{% if form.personnel_number.field.required %}<b>*</b>{% endif %}</label>
+                                    <button type="button" class="employee-copy-icon" data-copy-target="#{{ form.personnel_number.id_for_label }}" aria-label="Скопировать табельный номер" title="Скопировать табельный номер"></button>
+                                </div>
+                                {{ form.personnel_number }}{{ form.personnel_number.errors }}
+                            </div>
+                        {% endif %}
+                        <div class="employee-card-field{% if employee_card_context == 'oup' %} span-2{% endif %}" data-card-field data-copy-label="Телефон">
                             <div class="employee-card-label-row">
                                 <label for="{{ form.phone.id_for_label }}">{{ form.phone.label }}{% if form.phone.field.required %}<b>*</b>{% endif %}</label>
                                 <button type="button" class="employee-copy-icon" data-copy-target="#{{ form.phone.id_for_label }}" aria-label="Скопировать телефон" title="Скопировать телефон"></button>

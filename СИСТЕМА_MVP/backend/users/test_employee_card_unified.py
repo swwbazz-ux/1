@@ -206,6 +206,10 @@ class UnifiedEmployeeCardTests(TestCase):
         self.assertNotContains(create_response, 'id="id_status"', html=False)
         self.assertContains(create_response, 'data-copy-target="#id_access_role"', html=False)
         self.assertContains(create_response, 'name="sex"', html=False)
+        self.assertContains(create_response, 'name="personnel_number"', html=False)
+        self.assertContains(create_response, 'data-copy-target="#id_personnel_number"', html=False)
+        self.assertContains(create_response, 'Табельный номер')
+        self.assertNotContains(create_response, 'type="hidden" name="personnel_number"', html=False)
         self.assertContains(create_response, '>Выберите доступ</option>', html=False)
         self.assertNotContains(
             create_response,
