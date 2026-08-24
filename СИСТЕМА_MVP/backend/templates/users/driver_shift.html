@@ -3440,7 +3440,7 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
 {% endblock %}
 
 {% block body %}
-<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-current-truck-id="{% if current_truck %}{{ current_truck.id }}{% endif %}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v117' }}">
+<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-current-truck-id="{% if current_truck %}{{ current_truck.id }}{% endif %}" data-driver-pwa-version="{{ driver_shell_version|default:'driver-mobile-shell-v118' }}">
     {% if messages %}
         <div class="driver-messages">
             {% for message in messages %}
@@ -3453,7 +3453,7 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
     <header class="driver-header">
         <div class="driver-header-id{% if not open_shift %} is-inactive{% endif %}">{{ driver_header_label }}</div>
         <div class="driver-online" role="status" aria-label="Онлайн">
-            <small class="driver-shell-version" aria-label="Версия приложения">{{ driver_shell_version|default:'driver-mobile-shell-v117'|cut:'driver-mobile-shell-' }}</small>
+            <small class="driver-shell-version" aria-label="Версия приложения">{{ driver_shell_version|default:'driver-mobile-shell-v118'|cut:'driver-mobile-shell-' }}</small>
             <span>Онлайн</span>
             <i class="driver-online-dot" aria-hidden="true"></i>
             <strong></strong>
@@ -5295,7 +5295,7 @@ window.bindDriverMobileShell = function () {
         var runtime = window.__driverPwaUpdateRuntime;
         var currentShellVersion = runtime && runtime.currentShellVersion
             ? runtime.currentShellVersion
-            : shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v117' }}";
+            : shell.dataset.driverPwaVersion || "{{ driver_shell_version|default:'driver-mobile-shell-v118' }}";
         var updateModal = document.querySelector("[data-driver-pwa-update-modal]");
         var updateBadge = document.querySelector("[data-driver-pwa-update-badge]");
         var updateTarget = document.querySelector("[data-driver-pwa-update-nav-target]");
@@ -5356,7 +5356,8 @@ window.bindDriverMobileShell = function () {
                 currentShellVersion: currentShellVersion,
                 renderUpdate: null,
                 clearUpdate: null,
-                applyPromise: null
+                applyPromise: null,
+                controllerRecoveryTimer: 0
             };
             runtime.requestWorkerVersion = function (worker) {
                 if (!worker || !worker.postMessage || !window.MessageChannel) {
@@ -5373,6 +5374,37 @@ window.bindDriverMobileShell = function () {
                     };
                     worker.postMessage({type: "GET_VERSION"}, [channel.port2]);
                 });
+            };
+            runtime.scheduleControllerRecovery = function (targetVersion, delay) {
+                if (!targetVersion || runtime.controllerRecoveryTimer) {
+                    return;
+                }
+                runtime.controllerRecoveryTimer = window.setTimeout(function () {
+                    runtime.controllerRecoveryTimer = 0;
+                    runtime.requestWorkerVersion(navigator.serviceWorker.controller).then(function (controllerVersion) {
+                        if (String(controllerVersion || "") === String(targetVersion || "")) {
+                            return;
+                        }
+                        var guard = window.AppPwaContractGuard;
+                        if (
+                            guard
+                            && typeof guard.hasUnsafeWorkInProgress === "function"
+                            && guard.hasUnsafeWorkInProgress()
+                        ) {
+                            return;
+                        }
+                        var reloadKey = "driver-pwa-controller-reload:" + String(targetVersion || "");
+                        try {
+                            if (window.sessionStorage.getItem(reloadKey) === "1") {
+                                return;
+                            }
+                            window.sessionStorage.setItem(reloadKey, "1");
+                        } catch (error) {
+                            return;
+                        }
+                        window.location.reload();
+                    });
+                }, Number(delay) >= 0 ? Number(delay) : 1200);
             };
             runtime.activateMatchingWaitingWorker = function (registration, worker, waitingVersion) {
                 if (!worker || String(waitingVersion || "") !== String(runtime.currentShellVersion || "")) {
@@ -5403,6 +5435,7 @@ window.bindDriverMobileShell = function () {
                 setBadge(false);
                 hideModal();
                 worker.postMessage({type: "SKIP_WAITING"});
+                runtime.scheduleControllerRecovery(waitingVersion, 1200);
                 return true;
             };
             runtime.renderWaitingUpdate = function (registration, worker) {
@@ -5521,6 +5554,7 @@ window.bindDriverMobileShell = function () {
                     if (runtime.renderUpdate) runtime.renderUpdate(serverVersion);
                 } else if (detail.ready && runtime.clearUpdate) {
                     runtime.clearUpdate();
+                    runtime.scheduleControllerRecovery(runtime.currentShellVersion, 150);
                 }
             });
             window.__driverPwaUpdateRuntime = runtime;
