@@ -196,7 +196,7 @@ ROLE_APPS = (
         icon_slug='driver',
         manifest_url='/driver.webmanifest',
         service_worker_url='/driver-sw.js',
-        shell_version='driver-mobile-shell-v148',
+        shell_version='driver-mobile-shell-v149',
     ),
     RoleApp(
         role_code='excavator_operator',
@@ -645,11 +645,31 @@ def add_release_static_cache(worker_script, role_code):
     return '\n\n'.join(worker_parts)
 
 
+def add_push_support(worker_script, role_code):
+    """Дописывает обработку уведомлений в готовый фоновый модуль.
+
+    У ролей бывают собственные модули (у водителя, экскаваторщика и других),
+    поэтому обработчик добавляется здесь — в единственном месте, через которое
+    проходят все, — а не в базовом сборщике, который используют не все.
+    """
+    if 'addEventListener("push"' in worker_script:
+        return worker_script
+    app = ROLE_APPS_BY_CODE[role_code]
+    prelude = (
+        f'const ROLE_ICON_SLUG = {json.dumps(app.icon_slug)};\n'
+        f'const START_URL = {json.dumps(app.start_url)};\n'
+        if 'ROLE_ICON_SLUG' not in worker_script
+        else ''
+    )
+    return f'{worker_script}\n\n{prelude}{PUSH_SERVICE_WORKER_JS}\n'
+
+
 def role_app_service_worker_response(request, role_code, script=None):
     app = ROLE_APPS_BY_CODE[role_code]
     worker_script = script or build_basic_role_service_worker(role_code)
     if role_code in READY_TRAFFIC_ROLE_CODES:
         worker_script = add_release_static_cache(worker_script, role_code)
+    worker_script = add_push_support(worker_script, role_code)
     response = HttpResponse(
         worker_script,
         content_type='application/javascript; charset=utf-8',
