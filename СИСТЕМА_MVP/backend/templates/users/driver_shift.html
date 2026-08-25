@@ -7,7 +7,7 @@
 {% block realtime_mode %}custom{% endblock %}
 {% block realtime_role %}driver{% endblock %}
 {% block extra_head %}
-<meta name="theme-color" content="#147D7E">
+<meta name="theme-color" content="#08766C">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Самосвал">
 <link rel="manifest" href="{% url 'driver_manifest' %}">
@@ -22,6 +22,11 @@ html {
 }
 
 body.driver-mobile-screen {
+    --driver-brand: #28c7b7;
+    --driver-brand-dark: #08766c;
+    --driver-brand-bright: #46e0d1;
+    --driver-brand-soft: #ddf7f3;
+    --driver-brand-hover: #1aae9f;
     --driver-safe-top: env(safe-area-inset-top, 0px);
     --driver-safe-bottom: env(safe-area-inset-bottom, 0px);
     --driver-header-h: 54px;
@@ -38,11 +43,11 @@ body.driver-mobile-screen {
     max-height: var(--driver-viewport-h, 100dvh);
     overflow: hidden;
     background:
-        radial-gradient(circle at 66% 4%, rgba(45, 214, 125, 0.16), transparent 23%),
+        radial-gradient(circle at 66% 4%, rgba(40, 199, 183, 0.16), transparent 23%),
         radial-gradient(circle at 18% 22%, rgba(16, 79, 92, 0.16), transparent 28%),
         linear-gradient(180deg, #061015 0%, #02080b 100%);
     color: #eff7dd;
-    font-family: "Roboto Condensed", "Arial Narrow", "Segoe UI", Arial, sans-serif;
+    font-family: "Manrope Local", "Segoe UI", Arial, sans-serif;
     letter-spacing: 0;
     -webkit-font-smoothing: antialiased;
     touch-action: manipulation;
@@ -77,9 +82,9 @@ body.driver-mobile-screen svg {
 }
 
 body.driver-mobile-screen .driver-shell {
-    --driver-green: #8cff2e;
-    --driver-green-soft: #c9f1ad;
-    --driver-cyan: #20d9e6;
+    --driver-green: var(--driver-brand);
+    --driver-green-soft: var(--driver-brand-soft);
+    --driver-cyan: var(--driver-brand-bright);
     --driver-ink: #f2ffe8;
     --driver-muted: #8ca0a8;
     --driver-yellow: #ffd12a;
@@ -106,8 +111,8 @@ body.driver-mobile-screen .driver-shell {
     overflow: hidden;
     position: relative;
     background:
-        radial-gradient(circle at 78% 7%, rgba(58, 227, 127, 0.15), transparent 18%),
-        radial-gradient(circle at 58% 40%, rgba(112, 255, 48, 0.08), transparent 33%),
+        radial-gradient(circle at 78% 7%, rgba(40, 199, 183, 0.15), transparent 18%),
+        radial-gradient(circle at 58% 40%, rgba(70, 224, 209, 0.08), transparent 33%),
         linear-gradient(180deg, #061016 0%, #07151b 52%, #030c10 100%);
 }
 
@@ -198,7 +203,7 @@ body.driver-mobile-screen .driver-header-id {
     white-space: nowrap;
     text-wrap: nowrap;
     text-overflow: clip;
-    text-shadow: 0 0 14px rgba(140, 255, 46, 0.55), 0 0 30px rgba(140, 255, 46, 0.20);
+    text-shadow: 0 0 14px rgba(40, 199, 183, 0.55), 0 0 30px rgba(40, 199, 183, 0.20);
 }
 
 body.driver-mobile-screen .driver-header-id.is-inactive {
@@ -247,11 +252,11 @@ body.driver-mobile-screen .driver-header p {
     max-width: clamp(104px, 32vw, 148px);
     margin: 0;
     padding: 4px 7px 4px 11px;
-    border: 1px solid rgba(140, 255, 46, 0.26);
+    border: 1px solid rgba(40, 199, 183, 0.26);
     border-radius: 8px;
     color: var(--driver-green);
-    background: linear-gradient(100deg, rgba(140,255,46,0.12), rgba(32,217,230,0.05));
-    box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 0 18px rgba(140,255,46,0.08);
+    background: linear-gradient(100deg, rgba(40, 199, 183,0.12), rgba(70, 224, 209,0.05));
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 0 18px rgba(40, 199, 183,0.08);
     text-transform: uppercase;
     font-size: clamp(9px, 2.35vw, 11px);
     line-height: 1;
@@ -272,7 +277,7 @@ body.driver-mobile-screen .driver-header p::before {
     border-radius: 4px;
     transform: translateY(-50%);
     background: var(--driver-green);
-    box-shadow: 0 0 12px rgba(140, 255, 46, 0.5);
+    box-shadow: 0 0 12px rgba(40, 199, 183, 0.5);
 }
 
 body.driver-mobile-screen .driver-section-title span::before {
@@ -284,7 +289,7 @@ body.driver-mobile-screen .driver-section-title span::before {
     height: 1.05em;
     border-radius: 4px;
     background: var(--driver-green);
-    box-shadow: 0 0 12px rgba(140, 255, 46, 0.5);
+    box-shadow: 0 0 12px rgba(40, 199, 183, 0.5);
 }
 
 body.driver-mobile-screen .driver-online {
@@ -315,7 +320,7 @@ body.driver-mobile-screen .driver-online-dot {
     height: 14px;
     border-radius: 50%;
     background: var(--driver-cyan);
-    box-shadow: 0 0 16px rgba(32, 217, 230, 0.90);
+    box-shadow: 0 0 16px rgba(70, 224, 209, 0.90);
 }
 
 body.driver-mobile-screen .driver-online strong {
@@ -374,11 +379,11 @@ body.driver-mobile-screen .driver-work-context-card {
     display: grid;
     grid-template-rows: auto minmax(0, 1fr);
     background:
-        linear-gradient(90deg, rgba(140,255,46,0.035), transparent 34%),
+        linear-gradient(90deg, rgba(40, 199, 183,0.035), transparent 34%),
         linear-gradient(145deg, rgba(12,31,40,0.94), rgba(4,13,18,0.88));
     box-shadow:
         inset 0 1px 0 rgba(255,255,255,0.05),
-        inset 4px 0 0 rgba(140,255,46,0.18),
+        inset 4px 0 0 rgba(40, 199, 183,0.18),
         0 16px 34px rgba(0,0,0,0.22);
 }
 
@@ -445,7 +450,7 @@ body.driver-mobile-screen .driver-work-context-machine strong {
     line-height: 1;
     font-weight: 900;
     white-space: nowrap;
-    text-shadow: 0 0 16px rgba(140,255,46,0.34);
+    text-shadow: 0 0 16px rgba(40, 199, 183,0.34);
 }
 
 body.driver-mobile-screen .driver-work-context-machine small {
@@ -483,7 +488,7 @@ body.driver-mobile-screen .driver-work-context-location span {
 body.driver-mobile-screen .driver-work-context-location span + span::before {
     content: "·";
     margin: 0 0.42em;
-    color: rgba(140,255,46,0.62);
+    color: rgba(40, 199, 183,0.62);
 }
 
 body.driver-mobile-screen .driver-work-context-rock {
@@ -525,9 +530,9 @@ body.driver-mobile-screen .driver-work-card::before {
     top: 0;
     height: 3px;
     border-radius: 0 0 4px 4px;
-    background: linear-gradient(90deg, transparent, rgba(140,255,46,0.78), transparent);
+    background: linear-gradient(90deg, transparent, rgba(40, 199, 183,0.78), transparent);
     opacity: 0.55;
-    box-shadow: 0 0 14px rgba(140,255,46,0.22);
+    box-shadow: 0 0 14px rgba(40, 199, 183,0.22);
 }
 
 body.driver-mobile-screen .driver-work-card span {
@@ -561,19 +566,19 @@ body.driver-mobile-screen .driver-work-excavator {
     bottom: 7px;
     width: min(48%, 82px);
     opacity: 0.42;
-    filter: saturate(0.74) brightness(1.2) drop-shadow(0 0 12px rgba(140,255,46,0.15));
+    filter: saturate(0.74) brightness(1.2) drop-shadow(0 0 12px rgba(40, 199, 183,0.15));
 }
 
 body.driver-mobile-screen .driver-work-card-target.is-action {
-    border-color: rgba(140,255,46,0.42);
+    border-color: rgba(40, 199, 183,0.42);
     background:
-        linear-gradient(180deg, rgba(140,255,46,0.09), transparent 36%),
+        linear-gradient(180deg, rgba(40, 199, 183,0.09), transparent 36%),
         linear-gradient(140deg, rgba(16, 48, 47, 0.98), rgba(5, 23, 24, 0.90));
     box-shadow:
         inset 0 1px 0 rgba(255,255,255,0.08),
         inset 0 -18px 28px rgba(0,0,0,0.24),
         0 18px 42px rgba(0,0,0,0.24),
-        0 0 22px rgba(140,255,46,0.10);
+        0 0 22px rgba(40, 199, 183,0.10);
 }
 
 body.driver-mobile-screen .driver-work-arrow {
@@ -602,7 +607,7 @@ body.driver-mobile-screen .driver-work-dial {
     --driver-progress-capped: 0;
     --driver-over-progress: 0;
     --driver-plan-over-color: var(--driver-cyan);
-    --driver-plan-over-glow: rgba(32,217,230,0.52);
+    --driver-plan-over-glow: rgba(70, 224, 209,0.52);
     --driver-hold: 0;
     --driver-hold-angle: 0deg;
     position: relative;
@@ -654,16 +659,16 @@ body.driver-mobile-screen .driver-work-dial:has(.driver-work-dial-button.is-load
         inset 0 2px 2px rgba(240,255,231,0.11),
         inset 0 -10px 22px rgba(0,0,0,0.48),
         0 16px 36px rgba(0,0,0,0.40),
-        0 0 34px rgba(140,255,46,0.12);
+        0 0 34px rgba(40, 199, 183,0.12);
 }
 
 body.driver-mobile-screen .driver-work-dial:has(.driver-work-dial-button.is-loaded)::after {
-    border-color: rgba(140,255,46,0.30);
+    border-color: rgba(40, 199, 183,0.30);
     box-shadow:
         inset 0 2px 4px rgba(220,255,202,0.07),
         inset 0 -4px 9px rgba(0,0,0,0.42),
         0 0 0 1px rgba(0,0,0,0.42),
-        0 0 22px rgba(140,255,46,0.10);
+        0 0 22px rgba(40, 199, 183,0.10);
 }
 
 body.driver-mobile-screen .driver-work-dial:has(.driver-work-dial-button.is-holding)::before {
@@ -671,7 +676,7 @@ body.driver-mobile-screen .driver-work-dial:has(.driver-work-dial-button.is-hold
         inset 0 8px 18px rgba(0,0,0,0.46),
         inset 0 -2px 4px rgba(235,255,225,0.05),
         0 6px 18px rgba(0,0,0,0.34),
-        0 0 42px rgba(140,255,46,0.18);
+        0 0 42px rgba(40, 199, 183,0.18);
 }
 
 body.driver-mobile-screen .driver-work-dial-form {
@@ -739,7 +744,7 @@ body.driver-mobile-screen .driver-work-hold-bar.is-core {
     inset: 13%;
     -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 5px), #000 calc(100% - 4px));
     mask: radial-gradient(farthest-side, transparent calc(100% - 5px), #000 calc(100% - 4px));
-    filter: drop-shadow(0 0 9px rgba(140,255,46,0.86));
+    filter: drop-shadow(0 0 9px rgba(40, 199, 183,0.86));
 }
 
 body.driver-mobile-screen .driver-work-hold-bar.is-outer {
@@ -749,7 +754,7 @@ body.driver-mobile-screen .driver-work-hold-bar.is-outer {
     transform-origin: 50% 50%;
     -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 5px), #000 calc(100% - 4px));
     mask: radial-gradient(farthest-side, transparent calc(100% - 5px), #000 calc(100% - 4px));
-    filter: drop-shadow(0 0 10px rgba(32,217,230,0.90));
+    filter: drop-shadow(0 0 10px rgba(70, 224, 209,0.90));
 }
 
 body.driver-mobile-screen .driver-work-track,
@@ -796,7 +801,7 @@ body.driver-mobile-screen .driver-work-dial[data-plan-progress-phase="amber"] {
 
 body.driver-mobile-screen .driver-work-dial[data-plan-progress-phase="cyan"] {
     --driver-plan-over-color: var(--driver-cyan);
-    --driver-plan-over-glow: rgba(32,217,230,0.52);
+    --driver-plan-over-glow: rgba(70, 224, 209,0.52);
 }
 
 body.driver-mobile-screen .driver-work-dial[data-plan-progress-phase="orange"] {
@@ -835,8 +840,8 @@ body.driver-mobile-screen .driver-work-dial-button::before {
     inset: 12%;
     z-index: 1;
     background:
-        conic-gradient(from 210deg, rgba(140,255,46,0.00), rgba(140,255,46,0.18), rgba(32,217,230,0.10), rgba(140,255,46,0.00)),
-        radial-gradient(circle at 50% 42%, rgba(140,255,46,0.12), transparent 58%);
+        conic-gradient(from 210deg, rgba(40, 199, 183,0.00), rgba(40, 199, 183,0.18), rgba(70, 224, 209,0.10), rgba(40, 199, 183,0.00)),
+        radial-gradient(circle at 50% 42%, rgba(40, 199, 183,0.12), transparent 58%);
     opacity: 0.42;
     filter: blur(0.2px);
 }
@@ -965,16 +970,16 @@ body.driver-mobile-screen .driver-work-label {
     white-space: normal;
     overflow: hidden;
     text-align: center;
-    border-top: 1px solid rgba(140,255,46,0.16);
+    border-top: 1px solid rgba(40, 199, 183,0.16);
     border-bottom: 1px solid rgba(0,0,0,0.34);
     background:
-        linear-gradient(180deg, rgba(153,255,104,0.08), rgba(16,48,32,0.20) 48%, rgba(3,20,15,0.34)),
-        linear-gradient(90deg, transparent, rgba(20,54,35,0.34) 18%, rgba(20,54,35,0.34) 82%, transparent);
+        linear-gradient(180deg, rgba(70, 224, 209,0.08), rgba(8, 52, 49,0.20) 48%, rgba(3,20,15,0.34)),
+        linear-gradient(90deg, transparent, rgba(8, 58, 54,0.34) 18%, rgba(8, 58, 54,0.34) 82%, transparent);
     box-shadow:
         inset 0 1px 0 rgba(218,255,197,0.12),
         inset 0 -2px 3px rgba(0,0,0,0.32),
         0 5px 12px rgba(0,0,0,0.20);
-    text-shadow: 0 0 18px rgba(140,255,46,0.30);
+    text-shadow: 0 0 18px rgba(40, 199, 183,0.30);
     transition: transform 120ms ease, box-shadow 120ms ease;
 }
 
@@ -995,7 +1000,7 @@ body.driver-mobile-screen .driver-work-label.is-two-line {
     row-gap: 6px;
     line-height: 1.04;
     font-weight: 900;
-    text-shadow: 0 0 16px rgba(140,255,46,0.28);
+    text-shadow: 0 0 16px rgba(40, 199, 183,0.28);
 }
 
 body.driver-mobile-screen .driver-work-label.is-three-line {
@@ -1003,7 +1008,7 @@ body.driver-mobile-screen .driver-work-label.is-three-line {
     row-gap: 4px;
     line-height: 1.02;
     font-weight: 900;
-    text-shadow: 0 0 16px rgba(140,255,46,0.28);
+    text-shadow: 0 0 16px rgba(40, 199, 183,0.28);
 }
 
 body.driver-mobile-screen .driver-work-note {
@@ -1023,49 +1028,49 @@ body.driver-mobile-screen .driver-work-dial-button.is-loaded {
 body.driver-mobile-screen .driver-work-dial-button.is-loaded::before {
     opacity: 0.82;
     box-shadow:
-        0 0 34px rgba(140,255,46,0.24),
-        inset 0 0 34px rgba(140,255,46,0.13);
+        0 0 34px rgba(40, 199, 183,0.24),
+        inset 0 0 34px rgba(40, 199, 183,0.13);
 }
 
 body.driver-mobile-screen .driver-work-dial-button.is-loaded::after {
-    border-color: rgba(140,255,46,0.34);
+    border-color: rgba(40, 199, 183,0.34);
     box-shadow:
-        inset 0 0 28px rgba(140,255,46,0.08),
-        0 0 28px rgba(140,255,46,0.14);
+        inset 0 0 28px rgba(40, 199, 183,0.08),
+        0 0 28px rgba(40, 199, 183,0.14);
 }
 
 body.driver-mobile-screen .driver-work-dial-button.is-loaded .driver-work-progress {
     stroke: var(--driver-green);
-    filter: drop-shadow(0 0 18px rgba(140,255,46,0.88));
+    filter: drop-shadow(0 0 18px rgba(40, 199, 183,0.88));
 }
 
 body.driver-mobile-screen .driver-work-dial-button.is-loaded .driver-work-dial-core {
-    border-color: rgba(140,255,46,0.78);
+    border-color: rgba(40, 199, 183,0.78);
     box-shadow:
         inset 0 12px 22px rgba(238,255,230,0.10),
         inset 0 -26px 36px rgba(0,0,0,0.50),
-        inset 0 0 44px rgba(140,255,46,0.16),
+        inset 0 0 44px rgba(40, 199, 183,0.16),
         0 10px 28px rgba(0,0,0,0.42),
-        0 0 48px rgba(140,255,46,0.34);
+        0 0 48px rgba(40, 199, 183,0.34);
 }
 
 body.driver-mobile-screen .driver-work-dial-button.is-loaded .driver-work-label {
     color: var(--driver-green);
-    text-shadow: 0 0 18px rgba(140,255,46,0.36);
+    text-shadow: 0 0 18px rgba(40, 199, 183,0.36);
 }
 
 body.driver-mobile-screen .driver-work-dial-button.is-loaded .driver-work-label-line {
     color: transparent;
-    background: linear-gradient(180deg, #e0ffc5 0%, #a8ff5c 34%, #7dea20 66%, #54bd05 100%);
+    background: linear-gradient(180deg, #ddf7f3 0%, #46e0d1 34%, #28c7b7 66%, #08766c 100%);
     background-clip: text;
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     text-shadow:
         0 -1px 0 rgba(247,255,239,0.48),
-        0 2px 0 rgba(39,102,7,0.78);
+        0 2px 0 rgba(8, 118, 108,0.78);
     filter:
         drop-shadow(0 3px 2px rgba(0,0,0,0.46))
-        drop-shadow(0 0 10px rgba(140,255,46,0.22));
+        drop-shadow(0 0 10px rgba(40, 199, 183,0.22));
 }
 
 body.driver-mobile-screen .driver-work-dial-button.is-loaded .driver-work-percent {
@@ -1176,9 +1181,9 @@ body.driver-mobile-screen .driver-work-dial-button.is-holding .driver-work-dial-
     box-shadow:
         inset 0 14px 26px rgba(0,0,0,0.58),
         inset 0 -8px 18px rgba(255,255,255,0.05),
-        inset 0 0 58px rgba(140,255,46,0.12),
+        inset 0 0 58px rgba(40, 199, 183,0.12),
         0 3px 12px rgba(0,0,0,0.34),
-        0 0 72px rgba(140,255,46,0.40);
+        0 0 72px rgba(40, 199, 183,0.40);
 }
 
 body.driver-mobile-screen .driver-work-dial-button.is-holding .driver-work-dial-core::before {
@@ -1332,15 +1337,15 @@ body.driver-mobile-screen .driver-form-card textarea {
 body.driver-mobile-screen .driver-primary-action {
     width: 100%;
     min-height: 68px;
-    border: 1px solid rgba(140,255,46,0.30);
+    border: 1px solid rgba(40, 199, 183,0.30);
     border-radius: 8px;
     color: #061016;
-    background: linear-gradient(180deg, #a9ff46 0%, #72d729 100%);
+    background: linear-gradient(180deg, #46e0d1 0%, #1aae9f 100%);
     text-transform: uppercase;
     font-size: clamp(21px, 6vw, 28px);
     font-weight: 900;
     letter-spacing: 0;
-    box-shadow: 0 0 22px rgba(140,255,46,0.24);
+    box-shadow: 0 0 22px rgba(40, 199, 183,0.24);
 }
 
 body.driver-mobile-screen .driver-primary-action.is-disabled,
@@ -1628,7 +1633,7 @@ body.driver-mobile-screen .driver-shift-review {
     align-content: center;
     gap: clamp(9px, 1.35dvh, 13px);
     padding: clamp(14px, 2dvh, 20px) clamp(14px, 3.8vw, 18px);
-    border: 1px solid rgba(140, 255, 46, .34);
+    border: 1px solid rgba(40, 199, 183, .34);
     border-radius: 8px;
     background: rgba(5, 23, 22, .88);
     overflow: hidden;
@@ -1733,10 +1738,10 @@ body.driver-mobile-screen .driver-shift-empty-state span {
 }
 
 body.driver-mobile-screen .driver-shift-open {
-    border-color: rgba(140, 255, 46, .72);
+    border-color: rgba(40, 199, 183, .72);
     color: #071006;
-    background: linear-gradient(180deg, #a2ff43, #74df1d);
-    box-shadow: 0 0 20px rgba(140, 255, 46, .18);
+    background: linear-gradient(180deg, var(--driver-brand-bright), var(--driver-brand-hover));
+    box-shadow: 0 0 20px rgba(40, 199, 183, .18);
 }
 
 body.driver-mobile-screen .driver-shift-open:disabled {
@@ -2022,7 +2027,11 @@ body.driver-mobile-screen .driver-downtime-state-icon {
     display: block;
     width: 28px;
     height: 28px;
-    fill: currentColor;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
 }
 
 body.driver-mobile-screen .driver-downtime-state-icon-play {
@@ -2175,11 +2184,11 @@ body.driver-mobile-screen .driver-downtime-state-dot::after {
 }
 
 body.driver-mobile-screen .driver-downtime-close:not(:disabled) {
-    border: 1px solid #58df52 !important;
-    color: #58df52 !important;
+    border: 1px solid #28c7b7 !important;
+    color: #28c7b7 !important;
     background: linear-gradient(180deg, rgba(18, 55, 29, .38), rgba(7, 24, 17, .82)) !important;
     font-weight: 600 !important;
-    box-shadow: inset 0 0 14px rgba(88, 223, 82, .06) !important;
+    box-shadow: inset 0 0 14px rgba(40, 199, 183, .06) !important;
 }
 
 body.driver-mobile-screen .driver-downtime-close:disabled,
@@ -2248,8 +2257,8 @@ body.driver-mobile-screen .driver-manifest-tabs button {
 }
 
 body.driver-mobile-screen .driver-manifest-tabs button.is-active {
-    color: #58df52;
-    background: rgba(88, 223, 82, .1);
+    color: #28c7b7;
+    background: rgba(40, 199, 183, .1);
 }
 
 body.driver-mobile-screen .driver-manifest-view {
@@ -2281,7 +2290,7 @@ body.driver-mobile-screen .driver-report-scroll {
 
 body.driver-mobile-screen .driver-report-card,
 body.driver-mobile-screen .driver-report-section {
-    border: 1px solid rgba(88, 223, 82, .3);
+    border: 1px solid rgba(40, 199, 183, .3);
     border-radius: 8px;
     background: rgba(7, 18, 22, .92);
 }
@@ -2334,7 +2343,7 @@ body.driver-mobile-screen .driver-report-row:first-of-type {
 }
 
 body.driver-mobile-screen .driver-report-row strong {
-    color: #58df52;
+    color: #28c7b7;
     font-variant-numeric: tabular-nums;
 }
 
@@ -2348,9 +2357,9 @@ body.driver-mobile-screen .driver-report-actions {
 
 body.driver-mobile-screen .driver-report-actions button {
     min-height: 48px;
-    border: 1px solid #58df52;
+    border: 1px solid #28c7b7;
     border-radius: 7px;
-    color: #58df52;
+    color: #28c7b7;
     background: rgba(12, 38, 22, .84);
     font-size: 14px;
     font-weight: 700;
@@ -2374,7 +2383,7 @@ body.driver-mobile-screen .driver-timeline-row {
 }
 
 body.driver-mobile-screen .driver-timeline-row time {
-    color: #58df52;
+    color: #28c7b7;
     font-weight: 700;
 }
 
@@ -2430,7 +2439,7 @@ body.driver-mobile-screen .driver-trip-row summary small {
 
 body.driver-mobile-screen .driver-trip-row summary > * + * {
     min-width: 0;
-    border-left: 1px solid rgba(140,255,46,0.18);
+    border-left: 1px solid rgba(40, 199, 183,0.18);
     padding-left: 8px;
 }
 
@@ -2600,7 +2609,7 @@ body.driver-mobile-screen .driver-bottom-nav .mm-mobile-nav-item::after {
     inset: 0;
     z-index: 0;
     opacity: 0;
-    background: linear-gradient(180deg, rgba(140,255,46,0.11), rgba(140,255,46,0.025) 58%, transparent);
+    background: linear-gradient(180deg, rgba(40, 199, 183,0.11), rgba(40, 199, 183,0.025) 58%, transparent);
     transition: opacity 140ms ease;
 }
 
@@ -2611,7 +2620,7 @@ body.driver-mobile-screen .driver-bottom-nav .mm-mobile-nav-item.is-active {
 
 body.driver-mobile-screen .driver-bottom-nav .mm-mobile-nav-item.is-active::before {
     background: var(--driver-green);
-    box-shadow: 0 0 12px rgba(140,255,46,0.65);
+    box-shadow: 0 0 12px rgba(40, 199, 183,0.65);
 }
 
 body.driver-mobile-screen .driver-bottom-nav .mm-mobile-nav-item.is-active::after {
@@ -2634,7 +2643,7 @@ body.driver-mobile-screen .driver-nav-icon {
 body.driver-mobile-screen .mm-mobile-nav-item.is-active .driver-nav-icon {
     opacity: 1;
     transform: translateY(-1px);
-    filter: drop-shadow(0 0 8px rgba(140,255,46,0.36));
+    filter: drop-shadow(0 0 8px rgba(40, 199, 183,0.36));
 }
 
 body.driver-mobile-screen .driver-nav-truck {
@@ -2643,7 +2652,7 @@ body.driver-mobile-screen .driver-nav-truck {
 }
 
 body.driver-mobile-screen .mm-mobile-nav-item.is-active .driver-nav-truck {
-    filter: saturate(1.15) drop-shadow(0 0 8px rgba(140,255,46,0.42));
+    filter: saturate(1.15) drop-shadow(0 0 8px rgba(40, 199, 183,0.42));
 }
 
 body.driver-mobile-screen .driver-nav-clock,
@@ -2748,8 +2757,8 @@ body.driver-mobile-screen .driver-bottom-nav .mm-mobile-nav-item {
 }
 
 body.driver-mobile-screen .driver-bottom-nav .mm-mobile-nav-item.is-active {
-    color: #58df52;
-    background: rgba(88, 223, 82, .055);
+    color: var(--driver-brand);
+    background: color-mix(in srgb, var(--driver-brand) 6%, transparent);
     font-weight: 600;
 }
 
@@ -2761,7 +2770,7 @@ body.driver-mobile-screen .driver-bottom-nav .mm-mobile-nav-item.is-active::befo
     height: 2px;
     border-radius: 0 0 2px 2px;
     background: currentColor;
-    box-shadow: 0 0 6px rgba(88, 223, 82, .28);
+    box-shadow: 0 0 6px color-mix(in srgb, var(--driver-brand) 28%, transparent);
     transform: translateX(-50%);
 }
 
@@ -2788,6 +2797,136 @@ body.driver-mobile-screen .driver-nav-icon svg {
     width: 26px;
     height: 26px;
     stroke: currentColor;
+    fill: none;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+/* Unified field-PWA identity: dark instrument shell with shared turquoise accent. */
+body.driver-mobile-screen .driver-header-id:not(.is-inactive),
+body.driver-mobile-screen .driver-online,
+body.driver-mobile-screen .driver-work-context-machine strong,
+body.driver-mobile-screen .driver-work-context-location,
+body.driver-mobile-screen .driver-work-percent,
+body.driver-mobile-screen .driver-work-label,
+body.driver-mobile-screen .driver-shift-section-head b,
+body.driver-mobile-screen .driver-manifest-tabs button.is-active,
+body.driver-mobile-screen .driver-report-row strong,
+body.driver-mobile-screen .driver-report-actions button,
+body.driver-mobile-screen .driver-timeline-row time {
+    color: var(--driver-brand);
+}
+
+body.driver-mobile-screen .driver-work-context-card,
+body.driver-mobile-screen .driver-shift-submit,
+body.driver-mobile-screen .driver-shift-open,
+body.driver-mobile-screen .driver-downtime-close:not(:disabled),
+body.driver-mobile-screen .driver-report-actions button {
+    border-color: color-mix(in srgb, var(--driver-brand) 54%, transparent) !important;
+}
+
+body.driver-mobile-screen .driver-shift-submit,
+body.driver-mobile-screen .driver-shift-open {
+    background: linear-gradient(180deg, var(--driver-brand-bright), var(--driver-brand-hover));
+    color: #041513;
+    box-shadow: 0 0 22px color-mix(in srgb, var(--driver-brand) 25%, transparent);
+}
+
+body.driver-mobile-screen .driver-downtime-close:not(:disabled),
+body.driver-mobile-screen .driver-report-actions button {
+    background: color-mix(in srgb, var(--driver-brand-dark) 68%, #07181a) !important;
+    box-shadow: inset 0 0 14px color-mix(in srgb, var(--driver-brand) 9%, transparent) !important;
+}
+
+body.driver-mobile-screen .driver-manifest-tabs button.is-active {
+    background: color-mix(in srgb, var(--driver-brand) 10%, transparent);
+}
+
+body.driver-mobile-screen .driver-header-id:not(.is-inactive),
+body.driver-mobile-screen .driver-work-context-machine strong,
+body.driver-mobile-screen .driver-work-label {
+    text-shadow: 0 0 16px color-mix(in srgb, var(--driver-brand) 34%, transparent);
+}
+
+body.driver-mobile-screen .driver-online-dot,
+body.driver-mobile-screen .driver-header p::before,
+body.driver-mobile-screen .driver-section-title span::before {
+    box-shadow: 0 0 14px color-mix(in srgb, var(--driver-brand-bright) 48%, transparent);
+}
+
+body.driver-mobile-screen .driver-header p {
+    border-color: color-mix(in srgb, var(--driver-brand) 28%, transparent);
+    background: linear-gradient(100deg, color-mix(in srgb, var(--driver-brand) 12%, transparent), color-mix(in srgb, var(--driver-brand-bright) 5%, transparent));
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.05), 0 0 18px color-mix(in srgb, var(--driver-brand) 8%, transparent);
+}
+
+body.driver-mobile-screen .driver-work-card::before {
+    background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--driver-brand) 78%, transparent), transparent);
+    box-shadow: 0 0 14px color-mix(in srgb, var(--driver-brand) 22%, transparent);
+}
+
+body.driver-mobile-screen .driver-work-card-target.is-action {
+    border-color: color-mix(in srgb, var(--driver-brand) 42%, transparent);
+    background: linear-gradient(180deg, color-mix(in srgb, var(--driver-brand) 9%, transparent), transparent 36%), linear-gradient(140deg, #10302f, #051718);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.08), inset 0 -18px 28px rgba(0,0,0,.24), 0 18px 42px rgba(0,0,0,.24), 0 0 22px color-mix(in srgb, var(--driver-brand) 10%, transparent);
+}
+
+body.driver-mobile-screen .driver-work-context-location span + span::before {
+    color: color-mix(in srgb, var(--driver-brand) 62%, transparent);
+}
+
+body.driver-mobile-screen .driver-work-dial:has(.driver-work-dial-button.is-loaded)::before {
+    box-shadow: inset 0 2px 2px rgba(240,255,251,.11), inset 0 -10px 22px rgba(0,0,0,.48), 0 16px 36px rgba(0,0,0,.4), 0 0 34px color-mix(in srgb, var(--driver-brand) 12%, transparent);
+}
+
+body.driver-mobile-screen .driver-work-dial:has(.driver-work-dial-button.is-loaded)::after {
+    border-color: color-mix(in srgb, var(--driver-brand) 30%, transparent);
+    box-shadow: inset 0 2px 4px rgba(221,247,243,.07), inset 0 -4px 9px rgba(0,0,0,.42), 0 0 0 1px rgba(0,0,0,.42), 0 0 22px color-mix(in srgb, var(--driver-brand) 10%, transparent);
+}
+
+body.driver-mobile-screen .driver-work-hold-bar.is-core,
+body.driver-mobile-screen .driver-work-dial-button.is-loaded .driver-work-progress {
+    filter: drop-shadow(0 0 12px color-mix(in srgb, var(--driver-brand) 76%, transparent));
+}
+
+body.driver-mobile-screen .driver-work-hold-bar.is-outer {
+    filter: drop-shadow(0 0 10px color-mix(in srgb, var(--driver-brand-bright) 78%, transparent));
+}
+
+body.driver-mobile-screen .driver-work-dial-button.is-loaded::before {
+    box-shadow: 0 0 34px color-mix(in srgb, var(--driver-brand) 24%, transparent), inset 0 0 34px color-mix(in srgb, var(--driver-brand) 13%, transparent);
+}
+
+body.driver-mobile-screen .driver-work-dial-button.is-loaded::after,
+body.driver-mobile-screen .driver-work-dial-button.is-loaded .driver-work-dial-core {
+    border-color: color-mix(in srgb, var(--driver-brand) 52%, transparent);
+}
+
+body.driver-mobile-screen .driver-work-dial-button.is-loaded .driver-work-label-line {
+    background: linear-gradient(180deg, var(--driver-brand-soft), var(--driver-brand-bright) 40%, var(--driver-brand) 68%, var(--driver-brand-dark));
+    background-clip: text;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    text-shadow: 0 -1px 0 rgba(221,247,243,.42), 0 2px 0 rgba(8,118,108,.7);
+    filter: drop-shadow(0 3px 2px rgba(0,0,0,.46)) drop-shadow(0 0 10px color-mix(in srgb, var(--driver-brand) 22%, transparent));
+}
+
+body.driver-mobile-screen .driver-primary-action:not(:disabled):not(.is-disabled) {
+    border-color: color-mix(in srgb, var(--driver-brand) 54%, transparent);
+    background: linear-gradient(180deg, var(--driver-brand-bright), var(--driver-brand-hover));
+    box-shadow: 0 0 22px color-mix(in srgb, var(--driver-brand) 24%, transparent);
+}
+
+body.driver-mobile-screen .driver-action-icon {
+    display: block;
+    width: 24px;
+    height: 24px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
 }
 
 body.driver-mobile-screen .mm-mobile-nav-item.is-active .driver-nav-icon {
@@ -2826,7 +2965,7 @@ body.driver-mobile-screen .driver-mobile-update-dialog {
     display: grid;
     gap: clamp(8px, 1.4dvh, 14px);
     overflow: hidden;
-    border: 1px solid rgba(140,255,46,0.28);
+    border: 1px solid rgba(40, 199, 183,0.28);
     border-radius: 12px;
     padding: clamp(12px, min(4vw, 2.2dvh), 18px);
     background: linear-gradient(145deg, rgba(9, 31, 39, 0.98), rgba(4, 15, 20, 0.98));
@@ -2957,7 +3096,7 @@ body.driver-mobile-screen .app-confirm-shift-grid strong {
 
 body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-apply] {
     color: #061016;
-    background: linear-gradient(180deg, #a9ff46 0%, #72d729 100%);
+    background: linear-gradient(180deg, #46e0d1 0%, #1aae9f 100%);
 }
 
 /* Fit every driver tab to the real visual viewport, including Android text scaling. */
@@ -3855,12 +3994,12 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
     <section class="driver-panel driver-tab {% if active_tab == 'downtimes' %}is-active{% endif %}" data-driver-tab-panel="downtimes" data-driver-downtime-url="{% url 'driver_downtime_action' %}">
         <div class="driver-downtime-title-row">
             <h2>Простои</h2>
-            <button class="driver-downtime-refresh" type="button" aria-label="Обновить" data-driver-downtime-refresh>↻</button>
+            <button class="driver-downtime-refresh" type="button" aria-label="Обновить" data-driver-downtime-refresh><svg class="driver-action-icon" aria-hidden="true" focusable="false"><use href="{% static 'icons/app-actions.svg' %}#icon-refresh"></use></svg></button>
         </div>
         <div class="driver-downtime-card status-{{ active_downtime_status_key }}{% if active_downtime %} is-active{% endif %}" data-driver-active-downtime-id="{% if active_downtime %}{{ active_downtime.id }}{% endif %}" data-driver-active-started-at="{{ active_downtime_started_at }}" data-driver-active-elapsed-seconds="{{ active_downtime_elapsed_seconds }}" data-driver-shift-downtime-seconds="{{ shift_downtime_total_seconds }}" role="status" aria-label="{% if active_downtime %}Простой активен{% else %}Простои за смену: {{ shift_downtime_total_label }}{% endif %}">
             <span class="driver-downtime-state-dot" data-driver-downtime-indicator aria-hidden="true">
-                <svg class="driver-downtime-state-icon driver-downtime-state-icon-play" viewBox="0 0 24 24" focusable="false"><path d="M7 4.8v14.4L19 12 7 4.8Z"></path></svg>
-                <svg class="driver-downtime-state-icon driver-downtime-state-icon-pause" viewBox="0 0 24 24" focusable="false"><path d="M6.5 5h4v14h-4V5Zm7 0h4v14h-4V5Z"></path></svg>
+                <svg class="driver-downtime-state-icon driver-downtime-state-icon-play" aria-hidden="true" focusable="false"><use href="{% static 'icons/app-actions.svg' %}#icon-play"></use></svg>
+                <svg class="driver-downtime-state-icon driver-downtime-state-icon-pause" aria-hidden="true" focusable="false"><use href="{% static 'icons/app-actions.svg' %}#icon-pause"></use></svg>
             </span>
             <b data-driver-active-duration>{% if active_downtime %}{{ active_downtime_elapsed_label }}{% else %}{{ shift_downtime_total_label }}{% endif %}</b>
         </div>
@@ -3934,19 +4073,19 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
 
 <nav class="mm-mobile-bottom-nav driver-bottom-nav" aria-label="Навигация водителя" data-driver-bottom-nav>
     <button class="mm-mobile-nav-item {% if active_tab == 'work' %}is-active{% endif %}" type="button" data-driver-tab-open="work">
-        <span class="driver-nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 17h4V5H2v12h3"></path><path d="M14 9h4l4 4v4h-2"></path><circle cx="7.5" cy="17.5" r="2.5"></circle><circle cx="17.5" cy="17.5" r="2.5"></circle></svg></span>
+        <span class="driver-nav-icon" aria-hidden="true"><svg><use href="{% static 'icons/app-actions.svg' %}#icon-work"></use></svg></span>
         <span class="driver-nav-label">Работа</span>
     </button>
     <button class="mm-mobile-nav-item {% if active_tab == 'shift' %}is-active{% endif %}" type="button" data-driver-tab-open="shift">
-        <span class="driver-nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="8" height="4" x="8" y="2" rx="1"></rect><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><path d="m9 14 2 2 4-4"></path></svg></span>
+        <span class="driver-nav-icon" aria-hidden="true"><svg><use href="{% static 'icons/app-actions.svg' %}#icon-shift"></use></svg></span>
         <span class="driver-nav-label">Смена</span>
     </button>
     <button class="mm-mobile-nav-item {% if active_tab == 'downtimes' %}is-active{% endif %}" type="button" data-driver-tab-open="downtimes">
-        <span class="driver-nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M10 15V9"></path><path d="M14 15V9"></path></svg></span>
+        <span class="driver-nav-icon" aria-hidden="true"><svg><use href="{% static 'icons/app-actions.svg' %}#icon-downtime"></use></svg></span>
         <span class="driver-nav-label">Простои</span>
     </button>
     <button class="mm-mobile-nav-item {% if active_tab == 'manifest' %}is-active{% endif %}" type="button" data-driver-tab-open="manifest" data-driver-pwa-update-nav-target>
-        <span class="driver-nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"></path><path d="M14 2v6h6"></path><path d="M16 13H8"></path><path d="M16 17H8"></path></svg></span>
+        <span class="driver-nav-icon" aria-hidden="true"><svg><use href="{% static 'icons/app-actions.svg' %}#icon-manifest"></use></svg></span>
         <span class="driver-nav-label">Путевка</span>
         <span class="driver-mobile-update-badge" data-driver-pwa-update-badge hidden aria-hidden="true"></span>
     </button>

@@ -49,14 +49,14 @@ body.excavator-operator-screen .eo-screen.mm-mobile-shift-form {
 
 body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-check-panel {
     flex: 1.08 1 0 !important;
-    border-color: rgba(103, 231, 123, .42) !important;
-    background: linear-gradient(180deg, rgba(13, 28, 24, .72), rgba(10, 17, 21, .9)) !important;
+    border-color: rgba(40, 199, 183, .42) !important;
+    background: linear-gradient(180deg, rgba(5, 34, 32, .72), rgba(5, 34, 32, .9)) !important;
     box-shadow: inset 0 0 0 1px rgba(207, 245, 219, .05) !important;
 }
 
 body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-panel {
     flex: .94 1 0 !important;
-    border-color: rgba(80, 255, 94, .42) !important;
+    border-color: rgba(40, 199, 183, .42) !important;
     background: linear-gradient(180deg, rgba(9, 25, 16, .48), rgba(8, 14, 18, .86)) !important;
 }
 
@@ -486,11 +486,11 @@ body.excavator-operator-screen .eo-dump-queue-drag-preview {
     transform-origin: center center !important;
     transition: none !important;
     will-change: transform !important;
-    border-color: rgba(77, 255, 89, .9) !important;
+    border-color: rgba(40, 199, 183, .9) !important;
     background:
-        radial-gradient(circle at 50% 42%, rgba(77, 255, 89, .18), transparent 62%),
-        rgba(8, 24, 17, .92) !important;
-    box-shadow: 0 0 0 1px rgba(77, 255, 89, .48), 0 16px 34px rgba(0, 0, 0, .52), 0 0 22px rgba(77, 255, 89, .18) !important;
+        radial-gradient(circle at 50% 42%, rgba(40, 199, 183, .18), transparent 62%),
+        rgba(5, 34, 32, .92) !important;
+    box-shadow: 0 0 0 1px rgba(40, 199, 183, .48), 0 16px 34px rgba(0, 0, 0, .52), 0 0 22px rgba(40, 199, 183, .18) !important;
     filter: brightness(1.12) saturate(1.12) !important;
 }
 
@@ -511,8 +511,8 @@ body.excavator-operator-screen .eo-dump-queue-dialog {
 body.excavator-operator-screen .eo-dump-queue-dialog.is-return-armed {
     border-color: var(--eo-green) !important;
     box-shadow:
-        0 0 0 2px rgba(77, 255, 89, .22),
-        0 0 30px rgba(77, 255, 89, .18),
+        0 0 0 2px rgba(40, 199, 183, .22),
+        0 0 30px rgba(40, 199, 183, .18),
         0 24px 60px rgba(0, 0, 0, .58) !important;
 }
 
@@ -537,9 +537,9 @@ body.excavator-operator-screen .eo-dump-queue-gesture-hint::before {
 body.excavator-operator-screen .eo-dump-queue-drag-preview.is-return-ready {
     border-color: var(--eo-green) !important;
     box-shadow:
-        0 0 0 3px rgba(77, 255, 89, .3),
+        0 0 0 3px rgba(40, 199, 183, .3),
         0 18px 38px rgba(0, 0, 0, .58),
-        0 0 30px rgba(77, 255, 89, .42) !important;
+        0 0 30px rgba(40, 199, 183, .42) !important;
     filter: brightness(1.28) saturate(1.18) !important;
 }
 
@@ -1629,16 +1629,16 @@ body.excavator-operator-screen .eo-shell {
             linear-gradient(180deg, rgba(32, 29, 8, .9), rgba(17, 24, 20, .94)) !important;
         box-shadow:
             inset 0 0 0 1px rgba(255, 255, 255, .04),
-            0 0 0 1px rgba(77, 255, 89, .28) !important;
+            0 0 0 1px rgba(40, 199, 183, .28) !important;
         overflow: hidden !important;
     }
 
     body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-unload-card.is-selected {
-        border-color: rgba(77, 255, 89, .96) !important;
+        border-color: rgba(40, 199, 183, .96) !important;
         box-shadow:
             inset 0 0 0 1px rgba(255, 255, 255, .05),
             inset 0 0 26px rgba(234, 179, 8, .12),
-            0 0 0 1px rgba(77, 255, 89, .42) !important;
+            0 0 0 1px rgba(40, 199, 183, .42) !important;
     }
 
     body.excavator-operator-screen .eo-dashboard-unload-top {
@@ -1832,14 +1832,14 @@ body.excavator-operator-screen .eo-shell {
             linear-gradient(180deg, rgba(27, 27, 13, .91), rgba(12, 20, 19, .96)) !important;
         box-shadow:
             inset 0 0 0 1px rgba(255, 255, 255, .035),
-            0 0 0 1px rgba(77, 255, 89, .34) !important;
+            0 0 0 1px rgba(40, 199, 183, .34) !important;
     }
 
     body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-unload-card.is-selected {
         box-shadow:
             inset 0 0 0 1px rgba(255, 255, 255, .045),
             inset 0 0 20px rgba(234, 179, 8, .09),
-            0 0 0 1px rgba(77, 255, 89, .48) !important;
+            0 0 0 1px rgba(40, 199, 183, .48) !important;
     }
 
     body.excavator-operator-screen .eo-dashboard-unload-top strong {
@@ -2590,6 +2590,13 @@ body.excavator-operator-screen .eo-reason-grid .eo-hold-action {
     }
 }
 
+/* Shared sprite icons stay line-based even in semantic downtime states. */
+body.excavator-operator-screen .eo-downtime-state-icon,
+body.excavator-operator-screen .eo-downtime-card.is-active .eo-downtime-state-icon-pause {
+    fill: none !important;
+    stroke: var(--eo-downtime-accent, currentColor) !important;
+}
+
 /* v112: stable three-zone shift workspace with a single scrolling content area. */
 body.excavator-operator-screen .eo-screen.mm-mobile-shift-form {
     display: grid !important;
@@ -2982,8 +2989,8 @@ body.excavator-operator-screen .mm-mobile-bottom-nav .mm-mobile-nav-item {
 }
 
 body.excavator-operator-screen .mm-mobile-bottom-nav .mm-mobile-nav-item.is-active {
-    color: var(--eo-green, #58df52) !important;
-    background: rgba(88, 223, 82, .055) !important;
+    color: var(--eo-green, #28c7b7) !important;
+    background: rgba(40, 199, 183, .055) !important;
 }
 
 body.excavator-operator-screen .mm-mobile-bottom-nav .mm-mobile-nav-item.is-active::before {
@@ -2996,7 +3003,7 @@ body.excavator-operator-screen .mm-mobile-bottom-nav .mm-mobile-nav-item.is-acti
     height: 2px !important;
     border-radius: 0 0 2px 2px !important;
     background: currentColor !important;
-    box-shadow: 0 0 6px rgba(88, 223, 82, .28) !important;
+    box-shadow: 0 0 6px rgba(40, 199, 183, .28) !important;
     opacity: 1 !important;
     filter: none !important;
     transform: translateX(-50%) !important;
@@ -3007,7 +3014,7 @@ body.excavator-operator-screen .mm-mobile-bottom-nav .mm-mobile-nav-item::after 
 }
 
 body.excavator-operator-screen .mm-mobile-bottom-nav .mm-mobile-nav-item:focus-visible {
-    outline: 2px solid #63c7d8 !important;
+    outline: 2px solid #46e0d1 !important;
     outline-offset: -3px !important;
 }
 
@@ -3043,7 +3050,7 @@ body.excavator-operator-screen .mm-mobile-bottom-nav .mm-mobile-nav-item:not(.is
 }
 
 body.excavator-operator-screen .mm-mobile-bottom-nav .mm-mobile-nav-item.is-active.has-pwa-update {
-    color: var(--eo-green, #58df52) !important;
+    color: var(--eo-green, #28c7b7) !important;
 }
 
 body.excavator-operator-screen .mm-mobile-bottom-nav .mm-mobile-update-badge {
@@ -3118,6 +3125,86 @@ body.excavator-operator-screen .eo-downtime-state-icon-pause {
     display: none !important;
     color: #f5ba32 !important;
     filter: drop-shadow(0 0 3px rgba(245, 186, 50, .4)) !important;
+}
+
+body.excavator-operator-screen .eo-downtime-state-icon,
+body.excavator-operator-screen .eo-downtime-card.is-active .eo-downtime-state-icon-pause {
+    fill: none !important;
+    stroke: var(--eo-downtime-accent, currentColor) !important;
+}
+
+/* Unified field-PWA identity: keep the dark instrument shell, share brand and icon language. */
+body.excavator-operator-screen {
+    --eo-brand: #28c7b7;
+    --eo-brand-dark: #08766c;
+    --eo-brand-bright: #46e0d1;
+    --eo-brand-soft: #ddf7f3;
+    --eo-brand-hover: #1aae9f;
+    font-family: "Manrope Local", "Segoe UI", Arial, sans-serif !important;
+}
+
+body.excavator-operator-screen .eo-shell {
+    --eo-green: var(--eo-brand);
+    --eo-font-display: "Manrope Local", "Segoe UI", Arial, sans-serif;
+    background:
+        radial-gradient(circle at 52% 28%, rgba(40, 199, 183, .08), transparent 25%),
+        linear-gradient(180deg, #061014 0%, var(--eo-bg) 45%, #020506 100%);
+}
+
+body.excavator-operator-screen .eo-shell,
+body.excavator-operator-screen .eo-shell * {
+    font-family: "Manrope Local", "Segoe UI", Arial, sans-serif !important;
+}
+
+body.excavator-operator-screen .eo-action-icon {
+    display: block;
+    width: 24px;
+    height: 24px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+body.excavator-operator-screen .eo-shift-update-button > .eo-update-icon {
+    width: 16px;
+    height: 16px;
+}
+
+body.excavator-operator-screen .mm-mobile-nav-item.is-active {
+    color: var(--eo-brand) !important;
+    background: color-mix(in srgb, var(--eo-brand) 6%, transparent) !important;
+}
+
+body.excavator-operator-screen .mm-mobile-nav-item.is-active::before {
+    background: var(--eo-brand) !important;
+    box-shadow: 0 0 6px color-mix(in srgb, var(--eo-brand) 28%, transparent) !important;
+}
+
+body.excavator-operator-screen .eo-shift-update-button em,
+body.excavator-operator-screen .eo-shift-update-button.is-current {
+    color: var(--eo-brand) !important;
+}
+
+body.excavator-operator-screen .eo-shift-update-button.is-current {
+    border-color: color-mix(in srgb, var(--eo-brand) 50%, transparent) !important;
+}
+
+body.excavator-operator-screen .eo-primary-action:not(:disabled):not(.is-disabled),
+body.excavator-operator-screen .mm-mobile-shift-button:not(:disabled) {
+    border-color: color-mix(in srgb, var(--eo-brand) 54%, transparent) !important;
+    background: linear-gradient(180deg, var(--eo-brand-bright), var(--eo-brand-hover)) !important;
+    color: #041513 !important;
+    box-shadow: 0 0 20px color-mix(in srgb, var(--eo-brand) 22%, transparent) !important;
+}
+
+body.excavator-operator-screen .eo-downtime-state-icon {
+    fill: none !important;
+    stroke: var(--eo-downtime-accent, currentColor) !important;
+    stroke-width: 2 !important;
+    stroke-linecap: round;
+    stroke-linejoin: round;
 }
 
 body.excavator-operator-screen .eo-downtime-card.is-active .eo-downtime-state-icon-play {
