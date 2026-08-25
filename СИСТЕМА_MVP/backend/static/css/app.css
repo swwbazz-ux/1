@@ -26004,9 +26004,13 @@ body.mining-master-screen .dispatcher-complex-card .complex-truck-tile {
 }
 
 @media (max-width: 760px) {
+    /* Полосу навигации Android красит фон корня страницы, а не body: без него
+       она оставалась светлой под тёмным приложением. */
+    html:has(body.mining-master-mobile-screen),
     body.mining-master-mobile-screen {
         overflow: hidden;
         background: #041017;
+        color-scheme: dark;
     }
 
     body.mining-master-mobile-screen .dispatcher-shell {
