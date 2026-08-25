@@ -143,15 +143,92 @@
                 enable({interactive: true}).then(function (ok) {
                     button.disabled = false;
                     button.dataset.pushEnabled = ok ? "true" : "false";
-                    if (ok) refreshBadge();
+                    if (ok) {
+                        refreshBadge();
+                        hideInvite();
+                    } else {
+                        /* Человек нажал «Блокировать» — кнопка больше не поможет. */
+                        renderInvite();
+                    }
                 });
             });
         });
     }
 
+    /* Приглашение включить уведомления в начале смены.
+
+       Показываем только пока разрешение не запрошено. Отказ «Позже» прячет
+       карточку до следующей смены и НЕ тратит единственную попытку спросить:
+       системное окно всплывает лишь по нажатию «Включить». */
+    var DISMISS_KEY = "driver-push-invite-dismissed-shift";
+
+    function inviteNode() {
+        return document.querySelector("[data-driver-push-invite]");
+    }
+
+    function dismissedShift() {
+        try {
+            return window.localStorage.getItem(DISMISS_KEY) || "";
+        } catch (error) {
+            return "";
+        }
+    }
+
+    function hideInvite() {
+        var invite = inviteNode();
+        if (invite) invite.hidden = true;
+    }
+
+    function renderInvite() {
+        var invite = inviteNode();
+        if (!invite || !supported()) return;
+
+        var permission = window.Notification.permission;
+        if (permission === "granted") {
+            invite.hidden = true;
+            return;
+        }
+        if (permission === "denied") {
+            /* Кнопка бесполезна: разрешение можно вернуть только в настройках. */
+            var title = invite.querySelector("[data-driver-push-title]");
+            var text = invite.querySelector("[data-driver-push-text]");
+            var actions = invite.querySelector("[data-driver-push-actions]");
+            if (title) title.textContent = "Уведомления запрещены";
+            if (text) {
+                text.textContent = "Точку разгрузки придётся смотреть в приложении."
+                    + " Включить можно в настройках телефона: приложение «Водитель» → Уведомления.";
+            }
+            if (actions) actions.hidden = true;
+            invite.hidden = false;
+            return;
+        }
+        if (dismissedShift() && dismissedShift() === String(invite.dataset.shiftKey || "")) {
+            invite.hidden = true;
+            return;
+        }
+        invite.hidden = false;
+    }
+
+    function bindInvite() {
+        var invite = inviteNode();
+        if (!invite || invite.dataset.pushInviteBound === "true") return;
+        invite.dataset.pushInviteBound = "true";
+        var later = invite.querySelector("[data-driver-push-later]");
+        if (later) {
+            later.addEventListener("click", function () {
+                try {
+                    window.localStorage.setItem(DISMISS_KEY, String(invite.dataset.shiftKey || ""));
+                } catch (error) {}
+                invite.hidden = true;
+            });
+        }
+    }
+
     function start() {
         if (!supported()) return;
         bindEnableButtons();
+        bindInvite();
+        renderInvite();
         /* Уже разрешено — молча продлеваем подписку: она может истечь. */
         if (window.Notification.permission === "granted") {
             enable({interactive: false});
@@ -167,7 +244,13 @@
         enable: enable,
         refreshBadge: refreshBadge,
         setBadge: setBadge,
-        supported: supported
+        supported: supported,
+        /* Экран водителя перерисовывает вкладки, приглашение надо переподнять. */
+        refreshInvite: function () {
+            bindEnableButtons();
+            bindInvite();
+            renderInvite();
+        }
     };
 
     if (document.readyState === "loading") {
