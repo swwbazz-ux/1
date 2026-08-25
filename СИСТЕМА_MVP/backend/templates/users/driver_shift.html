@@ -8,7 +8,7 @@
 {% block realtime_role %}driver{% endblock %}
 {% block viewport_extra %}, viewport-fit=cover{% endblock %}
 {% block extra_head %}
-<meta name="theme-color" content="#147D7E">
+<meta name="theme-color" content="#031015">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Самосвал">
 <link rel="manifest" href="{% url 'driver_manifest' %}">
@@ -2976,6 +2976,10 @@ body.driver-mobile-screen .driver-panel[data-driver-tab-panel="work"].driver-wor
 
 body.driver-mobile-screen .driver-work-dial-zone {
     overflow: hidden;
+    /* Without an explicit track the row grows to the dial's own size and the
+       circle gets sliced off at the bottom on short screens. */
+    grid-template-rows: minmax(0, 1fr);
+    container-type: size;
 }
 
 body.driver-mobile-screen .driver-work-dial {
@@ -2983,6 +2987,15 @@ body.driver-mobile-screen .driver-work-dial {
     height: auto;
     max-width: 100%;
     max-height: 520px;
+}
+
+/* Size the dial by the smaller side of its zone so short screens shrink the
+   whole circle instead of slicing it or squashing it into an ellipse. */
+@supports (width: 1cqh) {
+    body.driver-mobile-screen .driver-work-dial {
+        width: min(var(--driver-dial-size), 100cqw, 100cqh);
+        max-height: none;
+    }
 }
 
 body.driver-mobile-screen .driver-shift-workspace,
@@ -3053,6 +3066,10 @@ body.driver-mobile-screen .driver-shift-open,
 body.driver-mobile-screen .driver-shift-logout {
     height: 100%;
     min-height: 0;
+    /* The row height is capped above, so a two-line label only fits with
+       tight leading and slim vertical padding. */
+    padding: 6px 12px;
+    line-height: 1.15;
 }
 
 body.driver-mobile-screen [data-driver-tab-panel="downtimes"].is-active {
@@ -4366,10 +4383,23 @@ window.bindDriverMobileShell = function () {
         return;
     }
     shell.dataset.driverShellBound = "true";
+    /* Banners rendered by base.html sit in normal flow above the shell and steal
+       height from it; without subtracting them the bottom actions fall off screen. */
+    function driverLeadingBannerHeight() {
+        var total = 0;
+        [".app-observer-banner", ".app-inactive-role-banner"].forEach(function (selector) {
+            document.querySelectorAll(selector).forEach(function (banner) {
+                if (window.getComputedStyle(banner).position === "fixed") return;
+                total += banner.getBoundingClientRect().height || 0;
+            });
+        });
+        return Math.round(total);
+    }
     function driverVisualViewportHeight() {
         var viewport = window.visualViewport;
         var height = viewport && Number(viewport.height) > 0 ? Number(viewport.height) : Number(window.innerHeight);
-        return Math.max(320, Math.round(height || document.documentElement.clientHeight || 0));
+        height = Math.round(height || document.documentElement.clientHeight || 0) - driverLeadingBannerHeight();
+        return Math.max(320, height);
     }
     function driverPanelOverflows(panel) {
         if (!panel) return false;
@@ -4392,21 +4422,39 @@ window.bindDriverMobileShell = function () {
             );
         });
     }
-    function fitDriverHeaderId() {
-        var headerId = shell.querySelector(".driver-header-id");
-        if (!headerId) return;
-        headerId.style.removeProperty("font-size");
-        var maxSize = parseFloat(window.getComputedStyle(headerId).fontSize);
-        if (!(maxSize > 0)) return;
-        var available = headerId.clientWidth;
-        var needed = headerId.scrollWidth;
-        if (!(available > 0) || needed <= available) return;
-        var size = Math.max(11, Math.floor(maxSize * (available / needed)));
-        headerId.style.fontSize = size + "px";
-        while (size > 11 && headerId.scrollWidth > headerId.clientWidth) {
+    /* Boxes here have capped sizes, so long Russian labels — or a phone with
+       enlarged system text — get cut off mid-word. Shrink the text to fit
+       instead of silently clipping it. */
+    function driverTextOverflows(node) {
+        return (
+            node.scrollWidth > node.clientWidth + 1
+            || node.scrollHeight > node.clientHeight + 1
+        );
+    }
+    function shrinkDriverTextToFit(node, minSize) {
+        if (!node) return;
+        node.style.removeProperty("font-size");
+        if (!driverTextOverflows(node)) return;
+        var size = parseFloat(window.getComputedStyle(node).fontSize);
+        if (!(size > 0)) return;
+        var guard = 40;
+        while (size > minSize && driverTextOverflows(node) && guard > 0) {
             size -= 1;
-            headerId.style.fontSize = size + "px";
+            guard -= 1;
+            node.style.fontSize = size + "px";
         }
+    }
+    var DRIVER_FIT_TARGETS = [
+        {selector: ".driver-header-id", min: 11},
+        {selector: ".driver-shift-open, .driver-shift-logout, .driver-shift-submit, .driver-primary-action", min: 12},
+        {selector: ".driver-shift-result-cell strong", min: 13}
+    ];
+    function fitDriverText() {
+        DRIVER_FIT_TARGETS.forEach(function (target) {
+            shell.querySelectorAll(target.selector).forEach(function (node) {
+                shrinkDriverTextToFit(node, target.min);
+            });
+        });
     }
     function fitDriverViewport() {
         var height = driverVisualViewportHeight();
@@ -4424,7 +4472,7 @@ window.bindDriverMobileShell = function () {
             ? "tight"
             : (height < 780 || width < 390 ? "compact" : "normal");
         window.requestAnimationFrame(function () {
-            fitDriverHeaderId();
+            fitDriverText();
             var panel = shell.querySelector("[data-driver-tab-panel].is-active");
             if (driverPanelOverflows(panel)) {
                 shell.dataset.driverDensity = shell.dataset.driverDensity === "normal" ? "compact" : "tight";

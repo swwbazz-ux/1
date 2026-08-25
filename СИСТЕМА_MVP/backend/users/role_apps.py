@@ -111,12 +111,12 @@ ROLE_APPS = (
         start_url='/driver/',
         legacy_scope='/driver/',
         orientation='portrait',
-        theme_color='#147D7E',
+        theme_color='#031015',
         background_color='#101820',
         icon_slug='driver',
         manifest_url='/driver.webmanifest',
         service_worker_url='/driver-sw.js',
-        shell_version='driver-mobile-shell-v121',
+        shell_version='driver-mobile-shell-v132',
     ),
     RoleApp(
         role_code='excavator_operator',
@@ -132,7 +132,7 @@ ROLE_APPS = (
         icon_slug='excavator',
         manifest_url='/excavator.webmanifest',
         service_worker_url='/excavator-sw.js',
-        shell_version='excavator-mobile-shell-v134',
+        shell_version='excavator-mobile-shell-v136',
     ),
     RoleApp(
         role_code='mining_master',
@@ -148,7 +148,7 @@ ROLE_APPS = (
         icon_slug='mining-master',
         manifest_url='/mining-master-manifest.webmanifest',
         service_worker_url='/mining-master-sw.js',
-        shell_version='mining-master-mobile-shell-v123',
+        shell_version='mining-master-mobile-shell-v125',
     ),
     RoleApp(
         role_code='deputy_mining_manager',
